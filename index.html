@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Roots & Wings Indy is a nurturing homeschool co-op in Indianapolis, IN. We grow curious, confident learners through community-centered education.">
+  <meta name="theme-color" content="#2D6A3F">
+  <title>Roots & Wings Indy — Homeschool Co-op in Indianapolis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="logo-new.png" as="image">
+  <link rel="preload" href="logo-style3.png" as="image">
+  <link rel="preload" href="logo-mark.png" as="image">
+  <link rel="preload" href="logo-mark.svg" as="image">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Favicon placeholder — replace with actual favicon -->
+  <link rel="icon" href="logo-new.png" type="image/jpeg">
+</head>
+<body>
+
+  <!-- ====== Navigation ====== -->
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="container">
+      <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
+        <img src="logo-new.png" alt="Roots & Wings Indy logo" width="60" height="60" onerror="this.style.display='none'">
+        <div class="nav-brand-text">
+          ROOTS AND WINGS
+          <span>Indianapolis</span>
+        </div>
+      </a>
+
+      <button class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <div class="nav-links" role="menubar">
+        <a href="#about" role="menuitem">About</a>
+        <a href="#programs" role="menuitem">Programs</a>
+        <a href="#pricing" role="menuitem">Pricing</a>
+        <a href="#board" role="menuitem">Board</a>
+        <a href="#support" role="menuitem">Support</a>
+        <a href="#contact" role="menuitem">Contact</a>
+        <a href="members.html" class="btn btn-primary btn-sm" role="menuitem">Members</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ====== Hero ====== -->
+  <header class="hero" id="home">
+    <!-- Decorative floating leaves -->
+    <div class="hero-bg-leaves" aria-hidden="true">
+      <svg class="leaf-float" style="top:15%;left:8%" width="40" height="40" viewBox="0 0 24 24" fill="white"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/></svg>
+      <svg class="leaf-float" style="top:60%;right:12%;animation-delay:-7s" width="50" height="50" viewBox="0 0 24 24" fill="white"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/></svg>
+      <svg class="leaf-float" style="top:30%;right:5%;animation-delay:-12s" width="35" height="35" viewBox="0 0 24 24" fill="white"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/></svg>
+      <svg class="leaf-float" style="bottom:25%;left:15%;animation-delay:-4s" width="45" height="45" viewBox="0 0 24 24" fill="white"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/></svg>
+    </div>
+
+    <!-- Large watermark logo -->
+    <div class="hero-watermark" aria-hidden="true">
+      <img src="logo-new.png" alt="">
+    </div>
+
+    <div class="hero-content">
+      <h1>ROOTS AND WINGS</h1>
+      <p class="hero-tagline">Nurturing curiosity, growing together</p>
+      <p class="hero-description">
+        A welcoming homeschool co-op in Indianapolis where families come together
+        to learn, create, and build lasting connections. We believe every child
+        deserves both strong roots and the wings to soar.
+      </p>
+      <div class="hero-buttons">
+        <a href="#" class="btn btn-primary" onclick="document.getElementById('tour-modal').classList.add('active');document.body.style.overflow='hidden';return false;">Schedule a Tour</a>
+        <a href="#about" class="btn btn-outline">Learn More</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ====== About ====== -->
+  <section class="about" id="about">
+    <div class="container">
+      <div class="about-grid">
+        <div class="about-image-stack fade-in">
+          <div class="about-image">
+            <img src="photo-outdoor.jpg" alt="Kids and teens gathered at outdoor tables during a co-op activity" class="about-photo">
+          </div>
+          <div class="about-image">
+            <img src="Image_20260311_185421_214.jpeg" alt="Tweens and teens cooking together in the kitchen with a parent volunteer" class="about-photo">
+          </div>
+          <div class="about-image">
+            <img src="photo-sewing.jpg" alt="Kids posing outdoors by the trees during a co-op day" class="about-photo">
+          </div>
+        </div>
+        <div class="about-text fade-in fade-in-delay-1">
+          <span class="section-badge">About Us</span>
+          <h2 class="section-title">Where Community Grows</h2>
+          <p>
+            Roots & Wings Homeschool, Inc. is a <strong>secular, inclusive, parent-led</strong>
+            homeschool cooperative serving families from the greater Indianapolis area.
+            For more than 20 years, we've brought families together through hands-on
+            classes, shared activities, and meaningful connections — all in a welcoming
+            environment built on mutual respect. Today about 40
+            families call Roots & Wings home.
+          </p>
+          <p>
+            This is a true co-op — <strong>every parent leads or assists throughout the
+            entire co-op day</strong>. It's not a drop-off program; it's a community we
+            build together. Our facility includes classrooms, a kitchen,
+            a large gathering space, playground, pavilion, and picnic areas that we use
+            extensively — especially for our younger kids. You'll often find classes happening outside around a
+            picnic table or under the pavilion, weather permitting.
+          </p>
+          <div class="inclusivity-statement fade-in">
+            <h4>Our Commitment to Inclusivity</h4>
+            <p>
+              We are committed to creating an environment in which everyone's dignity is
+              respected. We will not tolerate discrimination on the basis of race, color,
+              sex, sexual orientation, gender identity, class, religious affiliation or
+              non-affiliation, age, parental or marital status, veteran status, national
+              or ethnic origin, legal status, political beliefs, or physical or mental
+              status. We are dedicated to fostering an empathetic, compassionate, and
+              socially responsible community.
+            </p>
+          </div>
+
+          <div class="about-values">
+            <div class="value-item">
+              <div class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              </div>
+              <div>
+                <h4>Parent-Led</h4>
+                <p>Every parent teaches or assists — we do this together</p>
+              </div>
+            </div>
+            <div class="value-item">
+              <div class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              </div>
+              <div>
+                <h4>Secular & Inclusive</h4>
+                <p>All families welcome, no exceptions</p>
+              </div>
+            </div>
+            <div class="value-item">
+              <div class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22L6.66 19.7C7.14 19.87 7.64 20 8 20C19 20 22 3 22 3C21 5 14 5.25 9 6.25C4 7.25 2 11.5 2 13.5C2 15.5 3.75 17.25 3.75 17.25C7 8 17 8 17 8Z"></path></svg>
+              </div>
+              <div>
+                <h4>Room to Roam</h4>
+                <p>Indoor and outdoor spaces for every kind of learning</p>
+              </div>
+            </div>
+            <div class="value-item">
+              <div class="value-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+              </div>
+              <div>
+                <h4>Enrichment Focused</h4>
+                <p>Hands-on learning, not homework</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== Programs ====== -->
+  <section class="programs" id="programs">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-badge fade-in">What We Offer</span>
+        <h2 class="section-title fade-in">A Day at Roots & Wings</h2>
+        <div class="programs-intro fade-in">
+          <img src="photo-classroom.jpg" alt="Kids building and playing during a hands-on co-op class" class="programs-intro-photo" loading="lazy">
+          <p class="section-subtitle">
+            At Roots & Wings, it's all about connection. We're a secular, inclusive co-op
+            that welcomes all families — no matter your background, beliefs, or learning style.
+            We gather every Wednesday from August through May for classes that spark curiosity,
+            build friendships, and let kids learn alongside their peers. Our year is divided
+            into five-week sessions with short breaks in between and a longer rest over the
+            winter holidays.
+          </p>
+        </div>
+      </div>
+
+      <!-- Wednesday Schedule -->
+      <div class="schedule-block fade-in">
+        <h3 class="schedule-heading">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          Wednesday Routine
+        </h3>
+        <div class="schedule-timeline">
+          <div class="schedule-item">
+            <span class="schedule-time">9:40 – 9:45 am</span>
+            <span class="schedule-label">Arrive</span>
+          </div>
+          <div class="schedule-item">
+            <span class="schedule-time">9:55 am</span>
+            <span class="schedule-label">Announcements in Fellowship Hall</span>
+          </div>
+          <div class="schedule-item schedule-item-highlight">
+            <span class="schedule-time">10:00 am – 12:00 pm</span>
+            <span class="schedule-label">Morning Classes <span class="schedule-note">grouped by age</span></span>
+          </div>
+          <div class="schedule-item">
+            <span class="schedule-time">12:00 – 1:00 pm</span>
+            <span class="schedule-label">Lunch & Parent-Supervised Outdoor Play</span>
+          </div>
+          <div class="schedule-item schedule-item-highlight">
+            <span class="schedule-time">1:00 – 1:55 pm</span>
+            <span class="schedule-label">1st Afternoon Elective <span class="schedule-note">mixed ages</span></span>
+          </div>
+          <div class="schedule-item schedule-item-highlight">
+            <span class="schedule-time">2:00 – 2:55 pm</span>
+            <span class="schedule-label">2nd Afternoon Elective <span class="schedule-note">mixed ages</span></span>
+          </div>
+          <div class="schedule-item">
+            <span class="schedule-time">2:55 – 3:15 pm</span>
+            <span class="schedule-label">Clean Up</span>
+          </div>
+        </div>
+        <p class="schedule-notice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          Delays and cancellations due to weather or calendar changes are posted to chat announcements.
+        </p>
+      </div>
+
+      <!-- Age Groups -->
+      <div class="text-center" style="margin-top: 3rem;">
+        <h3 class="section-title fade-in" style="font-size: 1.6rem;">Our Age Groups</h3>
+        <p class="section-subtitle fade-in">
+          Morning classes are grouped by age with a cap of about 12 students per class.
+          Afternoon electives mix things up so kids can learn alongside different peers.
+        </p>
+        <p class="section-note fade-in">
+          Note: Families with children both inside and outside this range may attend, but
+          programming is only available for students within the co-op's age range.
+        </p>
+      </div>
+
+      <div class="age-groups-grid">
+        <div class="age-group-card fade-in" style="--accent: #8DB43E">
+          <span class="age-group-emoji" aria-hidden="true">🌱</span>
+          <h4>Greenhouse</h4>
+          <span class="age-range">Ages 0 – 2</span>
+          <span class="age-group-note">No programming</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #2D6A3F">
+          <span class="age-group-emoji" aria-hidden="true">🌿</span>
+          <h4>Saplings</h4>
+          <span class="age-range">Ages 3 – 5</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #D4712A">
+          <span class="age-group-emoji" aria-hidden="true">🍃</span>
+          <h4>Sassafras</h4>
+          <span class="age-range">Ages 5 – 6</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #5BACC8">
+          <span class="age-group-emoji" aria-hidden="true">🌳</span>
+          <h4>Oaks</h4>
+          <span class="age-range">Ages 7 – 8</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #E8A628">
+          <span class="age-group-emoji" aria-hidden="true">🍁</span>
+          <h4>Maples</h4>
+          <span class="age-range">Ages 8 – 9</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #1E4F2E">
+          <span class="age-group-emoji" aria-hidden="true">🌲</span>
+          <h4>Birch</h4>
+          <span class="age-range">Ages 9 – 10</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #8DB43E">
+          <span class="age-group-emoji" aria-hidden="true">🌾</span>
+          <h4>Willows</h4>
+          <span class="age-range">Ages 10 – 11</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #5BACC8">
+          <span class="age-group-emoji" aria-hidden="true">🌲</span>
+          <h4>Cedars</h4>
+          <span class="age-range">Ages 12 – 13</span>
+        </div>
+        <div class="age-group-card fade-in" style="--accent: #D4712A">
+          <span class="age-group-emoji" aria-hidden="true">🕊️</span>
+          <h4>Pigeons</h4>
+          <span class="age-range">Ages 14+</span>
+        </div>
+      </div>
+
+      <!-- Beyond Wednesdays -->
+      <div class="beyond-section fade-in">
+        <h3 class="schedule-heading">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          Beyond Wednesdays
+        </h3>
+        <div class="beyond-grid">
+          <div class="beyond-item">
+            <h4>Field Trips</h4>
+            <p>Frequent optional outings during the week — museums, farms, nature centers, and more around Indianapolis.</p>
+          </div>
+          <div class="beyond-item">
+            <h4>Parents Nights</h4>
+            <p>Time for the grown-ups to connect, plan, and recharge together.</p>
+          </div>
+          <div class="beyond-item">
+            <h4>Spring Camp</h4>
+            <p>A 3-day outdoor adventure camp that's a highlight of the year for kids of all ages.</p>
+          </div>
+          <div class="beyond-item">
+            <h4>Passion Fair</h4>
+            <p>Like a science fair, but for any subject! Kids get to display and present their current favorite topic — dinosaurs, crochet, robotics, ancient Egypt, you name it.</p>
+          </div>
+          <div class="beyond-item">
+            <h4>Maker's Market</h4>
+            <p>Members of all ages — kids and adults — set up shop to sell their handmade wares. Jewelry, baked goods, art, woodwork, and more.</p>
+          </div>
+          <div class="beyond-item">
+            <h4>Field Day</h4>
+            <p>Our end-of-year celebration with games, activities, and a whole lot of fun to close out the season.</p>
+          </div>
+        </div>
+        <p class="beyond-note fade-in">
+          And that's not all — we also host a school dance, ice cream social, and more! Our families are always dreaming up new ways to connect.        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ====== Photo Strip ====== -->
+  <section class="photo-strip" aria-label="Co-op life in photos">
+    <div class="photo-strip-inner">
+      <figure class="photo-strip-item fade-in">
+        <img src="photo-makersmarket2.jpg" alt="Young kids browsing colorful handmade crayon letters at the Maker's Market" loading="lazy">
+        <figcaption>Maker's Market</figcaption>
+      </figure>
+      <figure class="photo-strip-item fade-in fade-in-delay-1">
+        <img src="photo-foam.jpg" alt="Kids playing in foam and bubbles at Field Day" loading="lazy">
+        <figcaption>Field Day Fun</figcaption>
+      </figure>
+      <figure class="photo-strip-item fade-in fade-in-delay-2">
+        <img src="Image_20251022_134410_481.jpeg" alt="Kid dressed up in a top hat, bow tie, and steampunk goggles at the annual co-op school dance" loading="lazy">
+        <figcaption>Annual School Dance</figcaption>
+      </figure>
+      <figure class="photo-strip-item fade-in fade-in-delay-3">
+        <img src="photo-passionfair-monarchs.jpeg" alt="Student presenting her Passion Fair project on monarch butterflies" loading="lazy" style="object-position: top">
+        <figcaption>Passion Fair</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ====== Pricing ====== -->
+  <section class="pricing" id="pricing">
+    <div class="container text-center">
+      <span class="section-badge fade-in">Tuition</span>
+      <h2 class="section-title fade-in">Affordable, Year-Round Pricing</h2>
+      <p class="section-subtitle fade-in">
+        We ask for a yearly commitment — this is a community, not a drop-in.
+        Fees are paid twice per year at the beginning of each semester and cover
+        the full semester (generally 10 or 15 weeks).
+      </p>
+
+      <div class="pricing-grid">
+        <div class="pricing-card fade-in">
+          <div class="pricing-label">Per Family</div>
+          <h3>Member Fees</h3>
+          <div class="pricing-amount">$70–90</div>
+          <div class="pricing-per">per family / year</div>
+          <ul class="pricing-features">
+            <li>Covers rent & insurance</li>
+            <li>Website maintenance</li>
+            <li>Basic supply inventory</li>
+            <li>$35–45 per semester, paid twice per year</li>
+          </ul>
+          <p class="pricing-note">Varies by number of member families each semester</p>
+        </div>
+
+        <div class="pricing-card pricing-card-featured fade-in">
+          <div class="pricing-badge">Most Popular</div>
+          <div class="pricing-label">Per Child</div>
+          <h3>Full Day</h3>
+          <div class="pricing-amount">$100</div>
+          <div class="pricing-per">per child / year</div>
+          <ul class="pricing-features">
+            <li>$10 morning + $10 afternoon per session</li>
+            <li>5 sessions per year</li>
+            <li>Covers class-specific materials</li>
+            <li>Full day 9:40 am – 3:15 pm</li>
+          </ul>
+          <div class="pricing-yearly">$20 <span>per child / session</span></div>
+        </div>
+
+        <div class="pricing-card fade-in">
+          <div class="pricing-label">Flexible</div>
+          <h3>Half Day</h3>
+          <div class="pricing-amount">$50</div>
+          <div class="pricing-per">per child / year</div>
+          <ul class="pricing-features">
+            <li>Morning or afternoon only</li>
+            <li>$10 per child per session</li>
+            <li>5 sessions per year</li>
+            <li>Yearly commitment still applies</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="pricing-fine-print fade-in">
+        All class and member fees are nonrefundable. Fees for the entire semester are due
+        before the first day of the session, as determined by the Finance Committee.
+      </p>
+
+      <p class="pricing-assistance fade-in">
+        Financial assistance is available — cost should never be a barrier to joining our
+        community. Reach out to <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> to learn more.
+      </p>
+    </div>
+  </section>
+
+  <!-- ====== Board of Directors ====== -->
+  <section class="board" id="board">
+    <div class="container text-center">
+      <span class="section-badge fade-in">Leadership</span>
+      <h2 class="section-title fade-in">Board of Directors</h2>
+      <p class="section-subtitle fade-in">
+        Roots & Wings Indy is a registered non-profit led by a dedicated board of
+        parent volunteers.
+      </p>
+
+      <div class="board-grid">
+        <div class="board-member fade-in">
+          <img src="photo-molly.jpg" alt="Molly Bellner" class="board-avatar-photo">
+          <h4>Molly Bellner</h4>
+          <span class="board-role">President</span>
+        </div>
+        <div class="board-member fade-in">
+          <img src="photo-colleen.jpg" alt="Colleen Raymont" class="board-avatar-photo">
+          <h4>Colleen Raymont</h4>
+          <span class="board-role">Vice President</span>
+        </div>
+        <div class="board-member fade-in">
+          <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="board-avatar-photo">
+          <h4>Tiffany Smith</h4>
+          <span class="board-role">Membership Director</span>
+        </div>
+        <div class="board-member fade-in">
+          <img src="photo-jessica.jpg" alt="Jessica Shewan" class="board-avatar-photo">
+          <h4>Jessica Shewan</h4>
+          <span class="board-role">Treasurer</span>
+        </div>
+        <div class="board-member fade-in">
+          <div class="board-avatar" aria-hidden="true">AB</div>
+          <h4>Anna Billingsley</h4>
+          <span class="board-role">Sustaining Director</span>
+        </div>
+        <div class="board-member fade-in">
+          <img src="photo-leann.jpg" alt="LeAnn Newlin" class="board-avatar-photo">
+          <h4>LeAnn Newlin</h4>
+          <span class="board-role">Secretary</span>
+        </div>
+        <div class="board-member fade-in">
+          <img src="photo-erin.jpg" alt="Erin Bogan" class="board-avatar-photo">
+          <h4>Erin Bogan</h4>
+          <span class="board-role">Communications Director</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ====== Ways to Support ====== -->
+  <section class="support-section" id="support">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-badge fade-in">Give Back</span>
+        <h2 class="section-title fade-in">Ways to Support</h2>
+        <p class="section-subtitle fade-in" style="max-width: 680px; margin: 0 auto 48px;">
+          Roots & Wings Indy is a non-profit run entirely by parent volunteers.
+          Here are some easy ways you can support our co-op.
+        </p>
+      </div>
+
+      <div class="support-grid">
+        <div class="support-card fade-in">
+          <div class="support-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          </div>
+          <h3>Kroger Community Rewards</h3>
+          <p>
+            Link your Kroger Card to Roots & Wings Indy Homeschool and every time
+            you use your rewards card, donations are automatically given to our
+            account. It costs you nothing extra.
+          </p>
+          <a href="#PLACEHOLDER-kroger-link" class="btn btn-primary btn-sm">Link Your Kroger Card</a>
+        </div>
+
+        <div class="support-card fade-in">
+          <div class="support-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+          </div>
+          <h3>Box Tops for Education</h3>
+          <p>
+            Download the Box Tops app, purchase qualifying items, snap a photo of
+            your receipt, and the earnings are automatically deposited into our
+            account. It's that easy!
+          </p>
+          <a href="#PLACEHOLDER-boxtops-link" class="btn btn-primary btn-sm">Download the App</a>
+        </div>
+
+        <div class="support-card fade-in">
+          <div class="support-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+          </div>
+          <h3>Donate Directly via PayPal</h3>
+          <p>
+            Want to make a direct contribution? Every donation goes toward keeping
+            our co-op running — from supplies and materials to facility costs. Any
+            amount makes a difference!
+          </p>
+          <a href="#PLACEHOLDER-paypal-link" class="btn btn-primary btn-sm">Donate via PayPal</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== CTA ====== -->
+  <section class="cta" id="contact">
+    <div class="cta-decor cta-decor-1" aria-hidden="true"></div>
+    <div class="cta-decor cta-decor-2" aria-hidden="true"></div>
+    <div class="container">
+      <div class="cta-content fade-in">
+        <h2>Ready to Grow With Us?</h2>
+        <p>
+          We'd love to welcome your family into our community. Schedule a tour
+          to visit during a co-op day, meet our families, and see if Roots & Wings
+          is the right fit for you.
+        </p>
+        <div class="cta-buttons">
+          <a href="#" class="btn btn-primary" onclick="document.getElementById('tour-modal').classList.add('active');document.body.style.overflow='hidden';return false;">Schedule a Tour</a>
+          <a href="mailto:membership@rootsandwingsindy.com" class="btn btn-outline">Email Us</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== Footer ====== -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="nav-brand-text">
+            ROOTS AND WINGS
+            <span>Indianapolis</span>
+          </div>
+          <p>
+            A secular, parent-led homeschool cooperative nurturing curious, confident
+            learners in Indianapolis, Indiana.
+          </p>
+          <div class="footer-social">
+            <a href="https://www.facebook.com/rootsandwingsindy" aria-label="Follow us on Facebook" target="_blank" rel="noopener noreferrer">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            </a>
+          </div>
+        </div>
+
+        <div>
+          <h4>Explore</h4>
+          <ul>
+            <li><a href="#about">About Us</a></li>
+            <li><a href="#programs">Programs</a></li>
+            <li><a href="#pricing">Pricing</a></li>
+            <li><a href="#board">Board</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>Connect</h4>
+          <ul>
+            <li><a href="#contact">Contact Us</a></li>
+            <li><a href="#support">Ways to Support</a></li>
+            <li><a href="members.html">Member Portal</a></li>
+            <li><a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <p>&copy; 2026 Roots & Wings Indy. All rights reserved.</p>
+        <p>Made with care in Indianapolis</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ====== Tour Modal ====== -->
+  <div id="tour-modal" class="tour-modal-overlay" onclick="if(event.target===this){this.classList.remove('active');document.body.style.overflow='';}">
+    <div class="tour-modal">
+      <button class="tour-modal-close" aria-label="Close" onclick="document.getElementById('tour-modal').classList.remove('active');document.body.style.overflow='';">&times;</button>
+      <h2 class="tour-modal-title">Schedule a Tour</h2>
+      <p class="tour-modal-subtitle">We'd love to welcome your family! Fill this out and we'll be in touch to find a time for you to visit.</p>
+      <form name="schedule-tour" method="POST" data-netlify="true" action="/tour-thanks.html" class="tour-modal-form">
+        <input type="hidden" name="form-name" value="schedule-tour">
+        <input type="hidden" name="subject" value="New Tour Request from Roots & Wings Website">
+        <div class="tour-form-field">
+          <label for="tour-name">Your Name</label>
+          <input type="text" id="tour-name" name="name" required placeholder="First and Last Name">
+        </div>
+        <div class="tour-form-field">
+          <label for="tour-email">Email</label>
+          <input type="email" id="tour-email" name="email" required placeholder="you@example.com">
+        </div>
+        <div class="tour-form-field">
+          <label for="tour-phone">Phone Number</label>
+          <input type="tel" id="tour-phone" name="phone" required placeholder="(317) 555-1234">
+        </div>
+        <div class="tour-form-row">
+          <div class="tour-form-field">
+            <label for="tour-num-kids"># of Kids</label>
+            <input type="number" id="tour-num-kids" name="num-kids" required min="1" max="20" placeholder="2">
+          </div>
+          <div class="tour-form-field">
+            <label for="tour-ages">Ages of Kids</label>
+            <input type="text" id="tour-ages" name="ages" required placeholder="e.g. 4, 7, and 10">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary tour-form-submit">Request a Tour</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Roots & Wings Indy member portal — access your calendar, directory, handbook, and more.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#2D6A3F">
+  <!-- PWA / Add to Home Screen -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="R&W Members">
+  <link rel="apple-touch-icon" href="logo-new.png">
+  <title>Members Portal — Roots & Wings Indy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="logo-new.png" as="image">
+  <link rel="preload" href="logo-style3.png" as="image">
+  <link rel="preload" href="logo-mark.png" as="image">
+  <link rel="preload" href="logo-mark.svg" as="image">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="logo-new.png" type="image/png">
+  <!--
+    GOOGLE SIGN-IN SETUP:
+    1. Go to https://console.cloud.google.com/
+    2. Create a project (or use existing)
+    3. APIs & Services → Credentials → Create OAuth Client ID → Web application
+    4. Add your domain to Authorized JavaScript origins
+    5. Copy the Client ID and paste it into the GOOGLE_CLIENT_ID variable in script.js
+    6. Optional: restrict to your Workspace domain via the "hd" parameter
+  -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+  <!-- ====== Login Gate ====== -->
+  <section class="login-section" id="loginSection" aria-label="Member login">
+    <div class="login-card">
+      <div class="hero-logo" aria-hidden="true">
+        <img src="logo-new.png" alt="" width="90" height="90" onerror="this.style.display='none'">
+      </div>
+      <div class="login-brand-text">
+        ROOTS AND WINGS
+        <span>Indianapolis</span>
+      </div>
+      <h2>Member Portal</h2>
+      <p>Sign in to access co-op resources, schedules, and more.</p>
+
+      <!-- Google Sign-In Button (renders when client ID is configured) -->
+      <div id="googleSignInBtn" style="display:flex;justify-content:center;margin-bottom:16px;"></div>
+
+      <!-- Divider (shown when Google Sign-In is available) -->
+      <div id="loginDivider" class="login-divider" style="display:none;">
+        <span>or use the co-op password</span>
+      </div>
+
+      <!-- Password Fallback -->
+      <form id="loginForm" novalidate>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            placeholder="Enter member password"
+            autocomplete="current-password"
+            required
+          >
+        </div>
+        <div class="login-error" id="loginError" role="alert">
+          Incorrect password. Please try again or contact a co-op leader.
+        </div>
+        <div class="login-error" id="googleError" role="alert" style="display:none;">
+          This Google account isn't authorized. Please sign in with your co-op Google account, or use the password below.
+        </div>
+        <button type="submit" class="btn btn-primary">Sign In</button>
+      </form>
+
+      <a href="index.html" class="login-back">&larr; Back to main site</a>
+    </div>
+  </section>
+
+  <!-- ====== Dashboard (hidden until authenticated) ====== -->
+  <div class="dashboard" id="dashboard">
+
+    <!-- Nav -->
+    <nav class="navbar scrolled" role="navigation" aria-label="Member navigation">
+      <div class="container">
+        <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
+          <img src="logo-new.png" alt="Roots & Wings Indy logo" width="48" height="48" onerror="this.style.display='none'">
+          <div class="nav-brand-text">
+            Roots & Wings
+            <span>Indianapolis</span>
+          </div>
+        </a>
+
+        <button class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+
+        <div class="nav-links" role="menubar">
+          <a href="#quick-links" role="menuitem">Resources</a>
+          <a href="#directory" role="menuitem">Directory</a>
+          <a href="#calendar" role="menuitem">Calendar</a>
+          <a href="#coordination" role="menuitem">Schedules</a>
+          <a href="index.html" role="menuitem">Public Site</a>
+          <button class="btn btn-outline-dark btn-sm" id="logoutBtn" type="button">Log Out</button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Dashboard Header -->
+    <header class="dashboard-header">
+      <div class="hero-watermark" aria-hidden="true">
+        <img src="logo-new.png" alt="">
+      </div>
+      <div class="container" style="position: relative; z-index: 1;">
+        <h1>Welcome, Roots & Wings Family!</h1>
+        <p>Your hub for co-op resources, schedules, and communication.</p>
+      </div>
+    </header>
+
+    <!-- ====== Quick Access Bar (Chat, Drive, Calendar) ====== -->
+    <section class="portal-quick-access">
+      <div class="container">
+        <div class="quick-access-grid">
+          <a href="https://chat.google.com/room/PLACEHOLDER" class="quick-access-btn quick-access-chat" target="_blank" rel="noopener noreferrer">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Open Google Chat
+          </a>
+          <a href="https://drive.google.com/drive/folders/PLACEHOLDER" class="quick-access-btn quick-access-drive" target="_blank" rel="noopener noreferrer">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            Open Shared Drive
+          </a>
+          <a href="#calendar" class="quick-access-btn quick-access-cal">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            View Calendar
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== Quick Links ====== -->
+    <section class="quick-links" id="quick-links">
+      <div class="container">
+        <h2 class="text-center fade-in">Resources</h2>
+        <div class="links-grid">
+          <a href="https://docs.google.com/document/d/PLACEHOLDER" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            </div>
+            <h3>Member Handbook</h3>
+            <p>Policies, guidelines, and co-op expectations</p>
+          </a>
+
+          <a href="https://docs.google.com/forms/d/PLACEHOLDER-REIMBURSEMENT" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <h3>Reimbursement Form</h3>
+            <p>Submit receipts for co-op expenses</p>
+          </a>
+
+          <a href="https://docs.google.com/forms/d/PLACEHOLDER-WAIVER" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <h3>Liability Waiver</h3>
+            <p>Annual waiver form for each family</p>
+          </a>
+
+          <a href="https://drive.google.com/drive/folders/PLACEHOLDER-CURRICULA" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            </div>
+            <h3>Curricula Repository</h3>
+            <p>Shared curriculum resources and lesson plans</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== Board of Directors ====== -->
+    <section class="portal-board" id="board">
+      <div class="container">
+        <h2 class="text-center fade-in">Board of Directors</h2>
+        <p class="section-subtitle text-center fade-in">Questions? Reach out to any board member directly.</p>
+        <div class="portal-board-grid">
+          <div class="portal-board-card fade-in">
+            <img src="photo-molly.jpg" alt="Molly Bellner" class="portal-board-photo">
+            <h4>Molly Bellner</h4>
+            <span class="board-role">President</span>
+            <a href="mailto:president@rootsandwingsindy.com" class="portal-board-email">president@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <img src="photo-colleen.jpg" alt="Colleen Raymont" class="portal-board-photo">
+            <h4>Colleen Raymont</h4>
+            <span class="board-role">Vice President</span>
+            <a href="mailto:vp@rootsandwingsindy.com" class="portal-board-email">vp@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="portal-board-photo">
+            <h4>Tiffany Smith</h4>
+            <span class="board-role">Membership Director</span>
+            <a href="mailto:membership@rootsandwingsindy.com" class="portal-board-email">membership@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <img src="photo-jessica.jpg" alt="Jessica Shewan" class="portal-board-photo">
+            <h4>Jessica Shewan</h4>
+            <span class="board-role">Treasurer</span>
+            <a href="mailto:treasurer@rootsandwingsindy.com" class="portal-board-email">treasurer@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <div class="board-avatar" aria-hidden="true">AB</div>
+            <h4>Anna Billingsley</h4>
+            <span class="board-role">Sustaining Director</span>
+            <a href="mailto:sustaining@rootsandwingsindy.com" class="portal-board-email">sustaining@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <img src="photo-leann.jpg" alt="LeAnn Newlin" class="portal-board-photo">
+            <h4>LeAnn Newlin</h4>
+            <span class="board-role">Secretary</span>
+            <a href="mailto:secretary@rootsandwingsindy.com" class="portal-board-email">secretary@rootsandwingsindy.com</a>
+          </div>
+          <div class="portal-board-card fade-in">
+            <img src="photo-erin.jpg" alt="Erin Bogan" class="portal-board-photo">
+            <h4>Erin Bogan</h4>
+            <span class="board-role">Communications Director</span>
+            <a href="mailto:communications@rootsandwingsindy.com" class="portal-board-email">communications@rootsandwingsindy.com</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== Member Directory ====== -->
+    <!--
+      TO CONNECT TO LIVE GOOGLE SHEET:
+      1. Create a Google Sheet with columns: Family Name, Parents, Photo URL, Children, Email, Phone
+      2. For Photo URL: families upload a photo to a shared Drive folder, right-click → Share → "Anyone with link",
+         then use: https://drive.google.com/thumbnail?id=FILE_ID&sz=w400
+      3. File → Share → Publish to web → Select the sheet tab → CSV → Publish
+      4. Copy the published CSV URL and set it as DIRECTORY_CSV_URL in script.js
+    -->
+    <section class="portal-directory" id="directory">
+      <div class="container">
+        <h2 class="text-center fade-in">Member Directory</h2>
+        <div class="directory-controls fade-in">
+          <input type="text" id="directorySearch" class="directory-search" placeholder="Search by family name, parent, child, or age group...">
+          <div class="directory-view-toggle">
+            <button class="view-btn active" data-view="grid" aria-label="Grid view">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </button>
+            <button class="view-btn" data-view="list" aria-label="List view">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="directory-grid fade-in" id="directoryGrid">
+          <!--
+            STUB DATA — will be replaced by live Google Sheet data.
+
+            TO SET UP SELF-SERVICE EDITING:
+            1. Create a Google Form with these fields (in this order):
+               Family Name, Parent Name(s), Email, Phone,
+               Family Photo URL,
+               Child 1 Name, Child 1 Age, Child 1 Group, Child 1 Photo URL,
+               Child 2 Name, Child 2 Age, Child 2 Group, Child 2 Photo URL,
+               Child 3 Name, Child 3 Age, Child 3 Group, Child 3 Photo URL,
+               Child 4 Name, Child 4 Age, Child 4 Group, Child 4 Photo URL
+            2. In the form: click ⋮ → "Get pre-filled link" → fill dummy values → "Get link"
+            3. From that URL, extract the entry.XXXXXX IDs for each field
+            4. Set DIRECTORY_FORM_ID and DIRECTORY_FORM_FIELDS in script.js
+            5. Paste the Apps Script (see script.js comments) into the response Sheet
+          -->
+
+          <div class="family-card" data-search="adams rachel tom zoe 6 sassafras caleb 10 birch"
+               data-family="Adams" data-parents="Rachel &amp; Tom" data-email="adams@email.com" data-phone="(317) 555-0101"
+               data-child1="Zoe" data-age1="6" data-group1="Sassafras"
+               data-child2="Caleb" data-age2="10" data-group2="Birch">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">A</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Adams</h3>
+                <p class="family-parents">Rachel & Tom</p>
+                <div class="family-contact">
+                  <a href="mailto:adams@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550101" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Adams family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>Z</span></div><div class="kid-info"><strong>Zoe</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>C</span></div><div class="kid-info"><strong>Caleb</strong><span>Age 10 · Birch</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="anderson sarah mike emma 7 oaks liam 10 birch"
+               data-family="Anderson" data-parents="Sarah &amp; Mike" data-email="anderson@email.com" data-phone="(317) 555-0102"
+               data-child1="Emma" data-age1="7" data-group1="Oaks"
+               data-child2="Liam" data-age2="10" data-group2="Birch">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">A</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Anderson</h3>
+                <p class="family-parents">Sarah & Mike</p>
+                <div class="family-contact">
+                  <a href="mailto:anderson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550102" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Anderson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Emma</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Liam</strong><span>Age 10 · Birch</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="baker jen olivia 5 saplings noah 8 oaks ava 12 cedars"
+               data-family="Baker" data-parents="Jen" data-email="baker@email.com" data-phone="(317) 555-0103"
+               data-child1="Olivia" data-age1="5" data-group1="Saplings"
+               data-child2="Noah" data-age2="8" data-group2="Oaks"
+               data-child3="Ava" data-age3="12" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">B</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Baker</h3>
+                <p class="family-parents">Jen</p>
+                <div class="family-contact">
+                  <a href="mailto:baker@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550103" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Baker family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>O</span></div><div class="kid-info"><strong>Olivia</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>N</span></div><div class="kid-info"><strong>Noah</strong><span>Age 8 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Ava</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="barnes deshawn tanya jaylen 3 saplings nia 9 maples"
+               data-family="Barnes" data-parents="DeShawn &amp; Tanya" data-email="barnes@email.com" data-phone="(317) 555-0104"
+               data-child1="Jaylen" data-age1="3" data-group1="Saplings"
+               data-child2="Nia" data-age2="9" data-group2="Maples">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">B</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Barnes</h3>
+                <p class="family-parents">DeShawn & Tanya</p>
+                <div class="family-contact">
+                  <a href="mailto:barnes@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550104" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Barnes family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Jaylen</strong><span>Age 3 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>N</span></div><div class="kid-info"><strong>Nia</strong><span>Age 9 · Maples</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="bennett courtney harper 11 willows"
+               data-family="Bennett" data-parents="Courtney" data-email="bennett@email.com" data-phone="(317) 555-0105"
+               data-child1="Harper" data-age1="11" data-group1="Willows">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">B</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Bennett</h3>
+                <p class="family-parents">Courtney</p>
+                <div class="family-contact">
+                  <a href="mailto:bennett@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550105" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Bennett family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>H</span></div><div class="kid-info"><strong>Harper</strong><span>Age 11 · Willows</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="brooks marcus ashley micah 1 greenhouse trinity 5 saplings jordan 13 cedars"
+               data-family="Brooks" data-parents="Marcus &amp; Ashley" data-email="brooks@email.com" data-phone="(317) 555-0106"
+               data-child1="Micah" data-age1="1" data-group1="Greenhouse"
+               data-child2="Trinity" data-age2="5" data-group2="Saplings"
+               data-child3="Jordan" data-age3="13" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">B</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Brooks</h3>
+                <p class="family-parents">Marcus & Ashley</p>
+                <div class="family-contact">
+                  <a href="mailto:brooks@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550106" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Brooks family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Micah</strong><span>Age 1 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>T</span></div><div class="kid-info"><strong>Trinity</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Jordan</strong><span>Age 13 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="campbell laura owen 4 saplings hazel 8 oaks"
+               data-family="Campbell" data-parents="Laura" data-email="campbell@email.com" data-phone="(317) 555-0107"
+               data-child1="Owen" data-age1="4" data-group1="Saplings"
+               data-child2="Hazel" data-age2="8" data-group2="Oaks">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Campbell</h3>
+                <p class="family-parents">Laura</p>
+                <div class="family-contact">
+                  <a href="mailto:campbell@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550107" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Campbell family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>O</span></div><div class="kid-info"><strong>Owen</strong><span>Age 4 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>H</span></div><div class="kid-info"><strong>Hazel</strong><span>Age 8 · Oaks</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="carter angela brian maya 6 sassafras elijah 9 maples norah 14 pigeons"
+               data-family="Carter" data-parents="Angela &amp; Brian" data-email="carter@email.com" data-phone="(317) 555-0108"
+               data-child1="Maya" data-age1="6" data-group1="Sassafras"
+               data-child2="Elijah" data-age2="9" data-group2="Maples"
+               data-child3="Norah" data-age3="14" data-group3="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Carter</h3>
+                <p class="family-parents">Angela & Brian</p>
+                <div class="family-contact">
+                  <a href="mailto:carter@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550108" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Carter family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Maya</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Elijah</strong><span>Age 9 · Maples</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>N</span></div><div class="kid-info"><strong>Norah</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="chen lisa david sophia 9 maples"
+               data-family="Chen" data-parents="Lisa &amp; David" data-email="chen@email.com" data-phone="(317) 555-0109"
+               data-child1="Sophia" data-age1="9" data-group1="Maples">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Chen</h3>
+                <p class="family-parents">Lisa & David</p>
+                <div class="family-contact">
+                  <a href="mailto:chen@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550109" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Chen family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sophia</strong><span>Age 9 · Maples</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="coleman brittany aiden 7 oaks lily 12 cedars"
+               data-family="Coleman" data-parents="Brittany" data-email="coleman@email.com" data-phone="(317) 555-0110"
+               data-child1="Aiden" data-age1="7" data-group1="Oaks"
+               data-child2="Lily" data-age2="12" data-group2="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Coleman</h3>
+                <p class="family-parents">Brittany</p>
+                <div class="family-contact">
+                  <a href="mailto:coleman@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550110" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Coleman family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Aiden</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Lily</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="collins eric vanessa isla 2 greenhouse kai 5 saplings roman 10 birch sienna 14 pigeons"
+               data-family="Collins" data-parents="Eric &amp; Vanessa" data-email="collins@email.com" data-phone="(317) 555-0111"
+               data-child1="Isla" data-age1="2" data-group1="Greenhouse"
+               data-child2="Kai" data-age2="5" data-group2="Saplings"
+               data-child3="Roman" data-age3="10" data-group3="Birch"
+               data-child4="Sienna" data-age4="14" data-group4="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Collins</h3>
+                <p class="family-parents">Eric & Vanessa</p>
+                <div class="family-contact">
+                  <a href="mailto:collins@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550111" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Collins family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>I</span></div><div class="kid-info"><strong>Isla</strong><span>Age 2 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>K</span></div><div class="kid-info"><strong>Kai</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>R</span></div><div class="kid-info"><strong>Roman</strong><span>Age 10 · Birch</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sienna</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="crawford monica jasper 8 oaks"
+               data-family="Crawford" data-parents="Monica" data-email="crawford@email.com" data-phone="(317) 555-0112"
+               data-child1="Jasper" data-age1="8" data-group1="Oaks">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">C</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Crawford</h3>
+                <p class="family-parents">Monica</p>
+                <div class="family-contact">
+                  <a href="mailto:crawford@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550112" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Crawford family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Jasper</strong><span>Age 8 · Oaks</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="davis rachel nathan chloe 3 saplings leo 6 sassafras mila 11 willows"
+               data-family="Davis" data-parents="Rachel &amp; Nathan" data-email="davis@email.com" data-phone="(317) 555-0113"
+               data-child1="Chloe" data-age1="3" data-group1="Saplings"
+               data-child2="Leo" data-age2="6" data-group2="Sassafras"
+               data-child3="Mila" data-age3="11" data-group3="Willows">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">D</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Davis</h3>
+                <p class="family-parents">Rachel & Nathan</p>
+                <div class="family-contact">
+                  <a href="mailto:davis@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550113" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Davis family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>C</span></div><div class="kid-info"><strong>Chloe</strong><span>Age 3 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Leo</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Mila</strong><span>Age 11 · Willows</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="dixon tamara ezra 10 birch ivy 13 cedars"
+               data-family="Dixon" data-parents="Tamara" data-email="dixon@email.com" data-phone="(317) 555-0114"
+               data-child1="Ezra" data-age1="10" data-group1="Birch"
+               data-child2="Ivy" data-age2="13" data-group2="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">D</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Dixon</h3>
+                <p class="family-parents">Tamara</p>
+                <div class="family-contact">
+                  <a href="mailto:dixon@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550114" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Dixon family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Ezra</strong><span>Age 10 · Birch</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>I</span></div><div class="kid-info"><strong>Ivy</strong><span>Age 13 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="ellis kevin priya rowan 4 saplings sadie 7 oaks"
+               data-family="Ellis" data-parents="Kevin &amp; Priya" data-email="ellis@email.com" data-phone="(317) 555-0115"
+               data-child1="Rowan" data-age1="4" data-group1="Saplings"
+               data-child2="Sadie" data-age2="7" data-group2="Oaks">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">E</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Ellis</h3>
+                <p class="family-parents">Kevin & Priya</p>
+                <div class="family-contact">
+                  <a href="mailto:ellis@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550115" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Ellis family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>R</span></div><div class="kid-info"><strong>Rowan</strong><span>Age 4 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sadie</strong><span>Age 7 · Oaks</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="fisher amanda theo 1 greenhouse clara 5 saplings"
+               data-family="Fisher" data-parents="Amanda" data-email="fisher@email.com" data-phone="(317) 555-0116"
+               data-child1="Theo" data-age1="1" data-group1="Greenhouse"
+               data-child2="Clara" data-age2="5" data-group2="Saplings">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">F</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Fisher</h3>
+                <p class="family-parents">Amanda</p>
+                <div class="family-contact">
+                  <a href="mailto:fisher@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550116" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Fisher family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>T</span></div><div class="kid-info"><strong>Theo</strong><span>Age 1 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>C</span></div><div class="kid-info"><strong>Clara</strong><span>Age 5 · Saplings</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="foster amy chris ethan 4 saplings isabella 7 oaks mason 13 cedars"
+               data-family="Foster" data-parents="Amy &amp; Chris" data-email="foster@email.com" data-phone="(317) 555-0117"
+               data-child1="Ethan" data-age1="4" data-group1="Saplings"
+               data-child2="Isabella" data-age2="7" data-group2="Oaks"
+               data-child3="Mason" data-age3="13" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">F</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Foster</h3>
+                <p class="family-parents">Amy & Chris</p>
+                <div class="family-contact">
+                  <a href="mailto:foster@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550117" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Foster family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Ethan</strong><span>Age 4 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>I</span></div><div class="kid-info"><strong>Isabella</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Mason</strong><span>Age 13 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="garcia maria carlos sofia 8 oaks mateo 12 cedars"
+               data-family="Garcia" data-parents="Maria &amp; Carlos" data-email="garcia@email.com" data-phone="(317) 555-0118"
+               data-child1="Sofia" data-age1="8" data-group1="Oaks"
+               data-child2="Mateo" data-age2="12" data-group2="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">G</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Garcia</h3>
+                <p class="family-parents">Maria & Carlos</p>
+                <div class="family-contact">
+                  <a href="mailto:garcia@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550118" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Garcia family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sofia</strong><span>Age 8 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Mateo</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="graves danielle piper 6 sassafras beckett 9 maples"
+               data-family="Graves" data-parents="Danielle" data-email="graves@email.com" data-phone="(317) 555-0119"
+               data-child1="Piper" data-age1="6" data-group1="Sassafras"
+               data-child2="Beckett" data-age2="9" data-group2="Maples">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">G</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Graves</h3>
+                <p class="family-parents">Danielle</p>
+                <div class="family-contact">
+                  <a href="mailto:graves@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550119" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Graves family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>P</span></div><div class="kid-info"><strong>Piper</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>B</span></div><div class="kid-info"><strong>Beckett</strong><span>Age 9 · Maples</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="harris tonya james aaliyah 2 greenhouse xavier 7 oaks naomi 11 willows"
+               data-family="Harris" data-parents="Tonya &amp; James" data-email="harris@email.com" data-phone="(317) 555-0120"
+               data-child1="Aaliyah" data-age1="2" data-group1="Greenhouse"
+               data-child2="Xavier" data-age2="7" data-group2="Oaks"
+               data-child3="Naomi" data-age3="11" data-group3="Willows">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">H</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Harris</h3>
+                <p class="family-parents">Tonya & James</p>
+                <div class="family-contact">
+                  <a href="mailto:harris@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550120" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Harris family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Aaliyah</strong><span>Age 2 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>X</span></div><div class="kid-info"><strong>Xavier</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>N</span></div><div class="kid-info"><strong>Naomi</strong><span>Age 11 · Willows</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="henderson kristen wyatt 5 saplings ruby 8 oaks finn 14 pigeons"
+               data-family="Henderson" data-parents="Kristen" data-email="henderson@email.com" data-phone="(317) 555-0121"
+               data-child1="Wyatt" data-age1="5" data-group1="Saplings"
+               data-child2="Ruby" data-age2="8" data-group2="Oaks"
+               data-child3="Finn" data-age3="14" data-group3="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">H</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Henderson</h3>
+                <p class="family-parents">Kristen</p>
+                <div class="family-contact">
+                  <a href="mailto:henderson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550121" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Henderson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>W</span></div><div class="kid-info"><strong>Wyatt</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>R</span></div><div class="kid-info"><strong>Ruby</strong><span>Age 8 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>F</span></div><div class="kid-info"><strong>Finn</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="hughes ben stephanie archer 3 saplings violet 10 birch"
+               data-family="Hughes" data-parents="Ben &amp; Stephanie" data-email="hughes@email.com" data-phone="(317) 555-0122"
+               data-child1="Archer" data-age1="3" data-group1="Saplings"
+               data-child2="Violet" data-age2="10" data-group2="Birch">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">H</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Hughes</h3>
+                <p class="family-parents">Ben & Stephanie</p>
+                <div class="family-contact">
+                  <a href="mailto:hughes@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550122" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Hughes family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Archer</strong><span>Age 3 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>V</span></div><div class="kid-info"><strong>Violet</strong><span>Age 10 · Birch</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="jackson latasha miles 9 maples sage 13 cedars"
+               data-family="Jackson" data-parents="Latasha" data-email="jackson@email.com" data-phone="(317) 555-0123"
+               data-child1="Miles" data-age1="9" data-group1="Maples"
+               data-child2="Sage" data-age2="13" data-group2="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">J</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Jackson</h3>
+                <p class="family-parents">Latasha</p>
+                <div class="family-contact">
+                  <a href="mailto:jackson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550123" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Jackson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Miles</strong><span>Age 9 · Maples</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sage</strong><span>Age 13 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="johnson kim matt amelia 9 maples henry 14 pigeons"
+               data-family="Johnson" data-parents="Kim &amp; Matt" data-email="johnson@email.com" data-phone="(317) 555-0124"
+               data-child1="Amelia" data-age1="9" data-group1="Maples"
+               data-child2="Henry" data-age2="14" data-group2="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">J</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Johnson</h3>
+                <p class="family-parents">Kim & Matt</p>
+                <div class="family-contact">
+                  <a href="mailto:johnson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550124" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Johnson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Amelia</strong><span>Age 9 · Maples</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>H</span></div><div class="kid-info"><strong>Henry</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="keller nicole greg iris 1 greenhouse eli 6 sassafras luna 10 birch"
+               data-family="Keller" data-parents="Nicole &amp; Greg" data-email="keller@email.com" data-phone="(317) 555-0125"
+               data-child1="Iris" data-age1="1" data-group1="Greenhouse"
+               data-child2="Eli" data-age2="6" data-group2="Sassafras"
+               data-child3="Luna" data-age3="10" data-group3="Birch">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">K</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Keller</h3>
+                <p class="family-parents">Nicole & Greg</p>
+                <div class="family-contact">
+                  <a href="mailto:keller@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550125" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Keller family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>I</span></div><div class="kid-info"><strong>Iris</strong><span>Age 1 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Eli</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Luna</strong><span>Age 10 · Birch</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="kim soo-yun daniel hana 4 saplings jude 8 oaks"
+               data-family="Kim" data-parents="Soo-Yun &amp; Daniel" data-email="kim@email.com" data-phone="(317) 555-0126"
+               data-child1="Hana" data-age1="4" data-group1="Saplings"
+               data-child2="Jude" data-age2="8" data-group2="Oaks">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">K</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Kim</h3>
+                <p class="family-parents">Soo-Yun & Daniel</p>
+                <div class="family-contact">
+                  <a href="mailto:kim@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550126" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Kim family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>H</span></div><div class="kid-info"><strong>Hana</strong><span>Age 4 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Jude</strong><span>Age 8 · Oaks</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="lawson heather sawyer 11 willows daisy 14 pigeons"
+               data-family="Lawson" data-parents="Heather" data-email="lawson@email.com" data-phone="(317) 555-0127"
+               data-child1="Sawyer" data-age1="11" data-group1="Willows"
+               data-child2="Daisy" data-age2="14" data-group2="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">L</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Lawson</h3>
+                <p class="family-parents">Heather</p>
+                <div class="family-contact">
+                  <a href="mailto:lawson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550127" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Lawson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Sawyer</strong><span>Age 11 · Willows</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>D</span></div><div class="kid-info"><strong>Daisy</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="martinez gabriela jose diego 3 saplings camila 7 oaks lucia 12 cedars"
+               data-family="Martinez" data-parents="Gabriela &amp; Jose" data-email="martinez@email.com" data-phone="(317) 555-0128"
+               data-child1="Diego" data-age1="3" data-group1="Saplings"
+               data-child2="Camila" data-age2="7" data-group2="Oaks"
+               data-child3="Lucia" data-age3="12" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">M</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Martinez</h3>
+                <p class="family-parents">Gabriela & Jose</p>
+                <div class="family-contact">
+                  <a href="mailto:martinez@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550128" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Martinez family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>D</span></div><div class="kid-info"><strong>Diego</strong><span>Age 3 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>C</span></div><div class="kid-info"><strong>Camila</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Lucia</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="mitchell denise blake 5 saplings wren 9 maples"
+               data-family="Mitchell" data-parents="Denise" data-email="mitchell@email.com" data-phone="(317) 555-0129"
+               data-child1="Blake" data-age1="5" data-group1="Saplings"
+               data-child2="Wren" data-age2="9" data-group2="Maples">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">M</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Mitchell</h3>
+                <p class="family-parents">Denise</p>
+                <div class="family-contact">
+                  <a href="mailto:mitchell@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550129" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Mitchell family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>B</span></div><div class="kid-info"><strong>Blake</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>W</span></div><div class="kid-info"><strong>Wren</strong><span>Age 9 · Maples</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="morris tiffany andre zion 2 greenhouse aria 6 sassafras"
+               data-family="Morris" data-parents="Tiffany &amp; Andre" data-email="morris@email.com" data-phone="(317) 555-0130"
+               data-child1="Zion" data-age1="2" data-group1="Greenhouse"
+               data-child2="Aria" data-age2="6" data-group2="Sassafras">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">M</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Morris</h3>
+                <p class="family-parents">Tiffany & Andre</p>
+                <div class="family-contact">
+                  <a href="mailto:morris@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550130" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Morris family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>Z</span></div><div class="kid-info"><strong>Zion</strong><span>Age 2 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Aria</strong><span>Age 6 · Sassafras</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="nguyen linh tuan minh 8 oaks an 11 willows"
+               data-family="Nguyen" data-parents="Linh &amp; Tuan" data-email="nguyen@email.com" data-phone="(317) 555-0131"
+               data-child1="Minh" data-age1="8" data-group1="Oaks"
+               data-child2="An" data-age2="11" data-group2="Willows">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">N</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Nguyen</h3>
+                <p class="family-parents">Linh & Tuan</p>
+                <div class="family-contact">
+                  <a href="mailto:nguyen@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550131" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Nguyen family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Minh</strong><span>Age 8 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>An</strong><span>Age 11 · Willows</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="owens cassandra felix 7 oaks stella 10 birch gus 14 pigeons"
+               data-family="Owens" data-parents="Cassandra" data-email="owens@email.com" data-phone="(317) 555-0132"
+               data-child1="Felix" data-age1="7" data-group1="Oaks"
+               data-child2="Stella" data-age2="10" data-group2="Birch"
+               data-child3="Gus" data-age3="14" data-group3="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">O</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Owens</h3>
+                <p class="family-parents">Cassandra</p>
+                <div class="family-contact">
+                  <a href="mailto:owens@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550132" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Owens family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>F</span></div><div class="kid-info"><strong>Felix</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Stella</strong><span>Age 10 · Birch</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>G</span></div><div class="kid-info"><strong>Gus</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="palmer jessica ryan olive 1 greenhouse august 5 saplings scarlett 9 maples"
+               data-family="Palmer" data-parents="Jessica &amp; Ryan" data-email="palmer@email.com" data-phone="(317) 555-0133"
+               data-child1="Olive" data-age1="1" data-group1="Greenhouse"
+               data-child2="August" data-age2="5" data-group2="Saplings"
+               data-child3="Scarlett" data-age3="9" data-group3="Maples">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">P</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Palmer</h3>
+                <p class="family-parents">Jessica & Ryan</p>
+                <div class="family-contact">
+                  <a href="mailto:palmer@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550133" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Palmer family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>O</span></div><div class="kid-info"><strong>Olive</strong><span>Age 1 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>August</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Scarlett</strong><span>Age 9 · Maples</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="patterson erica nolan 4 saplings poppy 7 oaks"
+               data-family="Patterson" data-parents="Erica" data-email="patterson@email.com" data-phone="(317) 555-0134"
+               data-child1="Nolan" data-age1="4" data-group1="Saplings"
+               data-child2="Poppy" data-age2="7" data-group2="Oaks">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">P</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Patterson</h3>
+                <p class="family-parents">Erica</p>
+                <div class="family-contact">
+                  <a href="mailto:patterson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550134" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Patterson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>N</span></div><div class="kid-info"><strong>Nolan</strong><span>Age 4 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>P</span></div><div class="kid-info"><strong>Poppy</strong><span>Age 7 · Oaks</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="quinn shannon derek levi 6 sassafras margot 12 cedars"
+               data-family="Quinn" data-parents="Shannon &amp; Derek" data-email="quinn@email.com" data-phone="(317) 555-0135"
+               data-child1="Levi" data-age1="6" data-group1="Sassafras"
+               data-child2="Margot" data-age2="12" data-group2="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">Q</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Quinn</h3>
+                <p class="family-parents">Shannon & Derek</p>
+                <div class="family-contact">
+                  <a href="mailto:quinn@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550135" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Quinn family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>L</span></div><div class="kid-info"><strong>Levi</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Margot</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="ramirez elena dante 3 saplings valentina 8 oaks cruz 13 cedars"
+               data-family="Ramirez" data-parents="Elena" data-email="ramirez@email.com" data-phone="(317) 555-0136"
+               data-child1="Dante" data-age1="3" data-group1="Saplings"
+               data-child2="Valentina" data-age2="8" data-group2="Oaks"
+               data-child3="Cruz" data-age3="13" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">R</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Ramirez</h3>
+                <p class="family-parents">Elena</p>
+                <div class="family-contact">
+                  <a href="mailto:ramirez@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550136" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Ramirez family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>D</span></div><div class="kid-info"><strong>Dante</strong><span>Age 3 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>V</span></div><div class="kid-info"><strong>Valentina</strong><span>Age 8 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>C</span></div><div class="kid-info"><strong>Cruz</strong><span>Age 13 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="robinson kendra marcus jada 10 birch elias 14 pigeons"
+               data-family="Robinson" data-parents="Kendra &amp; Marcus" data-email="robinson@email.com" data-phone="(317) 555-0137"
+               data-child1="Jada" data-age1="10" data-group1="Birch"
+               data-child2="Elias" data-age2="14" data-group2="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">R</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Robinson</h3>
+                <p class="family-parents">Kendra & Marcus</p>
+                <div class="family-contact">
+                  <a href="mailto:robinson@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550137" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Robinson family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Jada</strong><span>Age 10 · Birch</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>E</span></div><div class="kid-info"><strong>Elias</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="sullivan megan patrick fiona 2 greenhouse declan 7 oaks maeve 11 willows"
+               data-family="Sullivan" data-parents="Megan &amp; Patrick" data-email="sullivan@email.com" data-phone="(317) 555-0138"
+               data-child1="Fiona" data-age1="2" data-group1="Greenhouse"
+               data-child2="Declan" data-age2="7" data-group2="Oaks"
+               data-child3="Maeve" data-age3="11" data-group3="Willows">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">S</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Sullivan</h3>
+                <p class="family-parents">Megan & Patrick</p>
+                <div class="family-contact">
+                  <a href="mailto:sullivan@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550138" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Sullivan family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>F</span></div><div class="kid-info"><strong>Fiona</strong><span>Age 2 · Greenhouse</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>D</span></div><div class="kid-info"><strong>Declan</strong><span>Age 7 · Oaks</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Maeve</strong><span>Age 11 · Willows</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="taylor christine asher 5 saplings juniper 9 maples silas 12 cedars"
+               data-family="Taylor" data-parents="Christine" data-email="taylor@email.com" data-phone="(317) 555-0139"
+               data-child1="Asher" data-age1="5" data-group1="Saplings"
+               data-child2="Juniper" data-age2="9" data-group2="Maples"
+               data-child3="Silas" data-age3="12" data-group3="Cedars">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">T</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Taylor</h3>
+                <p class="family-parents">Christine</p>
+                <div class="family-contact">
+                  <a href="mailto:taylor@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550139" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Taylor family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>A</span></div><div class="kid-info"><strong>Asher</strong><span>Age 5 · Saplings</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>J</span></div><div class="kid-info"><strong>Juniper</strong><span>Age 9 · Maples</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>S</span></div><div class="kid-info"><strong>Silas</strong><span>Age 12 · Cedars</span></div></div>
+            </div>
+          </div>
+
+          <div class="family-card" data-search="washington keisha robert imani 6 sassafras malcolm 10 birch zara 14 pigeons"
+               data-family="Washington" data-parents="Keisha &amp; Robert" data-email="washington@email.com" data-phone="(317) 555-0140"
+               data-child1="Imani" data-age1="6" data-group1="Sassafras"
+               data-child2="Malcolm" data-age2="10" data-group2="Birch"
+               data-child3="Zara" data-age3="14" data-group3="Pigeons">
+            <div class="family-card-header">
+              <div class="family-card-photo"><div class="family-initials">W</div></div>
+              <div class="family-header-info">
+                <h3 class="family-name">Washington</h3>
+                <p class="family-parents">Keisha & Robert</p>
+                <div class="family-contact">
+                  <a href="mailto:washington@email.com" class="family-email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> Email</a>
+                  <a href="tel:+13175550140" class="family-phone"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Call</a>
+                  <button class="family-edit-btn" data-edit aria-label="Update Washington family info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Update</button>
+                </div>
+              </div>
+            </div>
+            <div class="family-kids">
+              <div class="kid-card"><div class="kid-photo"><span>I</span></div><div class="kid-info"><strong>Imani</strong><span>Age 6 · Sassafras</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>M</span></div><div class="kid-info"><strong>Malcolm</strong><span>Age 10 · Birch</span></div></div>
+              <div class="kid-card"><div class="kid-photo"><span>Z</span></div><div class="kid-info"><strong>Zara</strong><span>Age 14 · Pigeons</span></div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </footer>
+
+  </div><!-- end .dashboard -->
+
+  <script src="script.js"></script>
+</body>
+</html>
