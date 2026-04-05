@@ -41,7 +41,7 @@ module.exports = async function handler(req, res) {
 
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+      from: 'Roots & Wings Website <onboarding@resend.dev>',
       to: 'membership@rootsandwingsindy.com',
       replyTo: email,
       subject: `New Tour Request from ${safeName}`,
