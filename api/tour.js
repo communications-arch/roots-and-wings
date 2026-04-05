@@ -40,7 +40,7 @@ module.exports = async function handler(req, res) {
   const resend = new Resend(process.env.RESEND_API_KEY);
 
   try {
-    await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
       to: 'membership@rootsandwingsindy.com',
       replyTo: email,
@@ -56,6 +56,11 @@ module.exports = async function handler(req, res) {
         </table>
       `,
     });
+
+    if (error) {
+      console.error('Tour email error:', error);
+      return res.status(500).json({ error: 'Failed to send. Please try again.' });
+    }
 
     return res.status(200).json({ success: true });
   } catch (err) {
