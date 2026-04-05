@@ -14,8 +14,7 @@
   <link rel="preload" href="logo-mark.png" as="image">
   <link rel="preload" href="logo-mark.svg" as="image">
   <link rel="stylesheet" href="styles.css">
-  <!-- Favicon placeholder — replace with actual favicon -->
-  <link rel="icon" href="logo-new.png" type="image/jpeg">
+  <link rel="icon" href="logo-new.png" type="image/png">
 </head>
 <body>
 
@@ -25,7 +24,7 @@
       <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
         <img src="logo-new.png" alt="Roots & Wings Indy logo" width="60" height="60" onerror="this.style.display='none'">
         <div class="nav-brand-text">
-          ROOTS AND WINGS
+          ROOTS & WINGS
           <span>Indianapolis</span>
         </div>
       </a>
@@ -64,7 +63,7 @@
     </div>
 
     <div class="hero-content">
-      <h1>ROOTS AND WINGS</h1>
+      <h1>ROOTS & WINGS</h1>
       <p class="hero-tagline">Nurturing curiosity, growing together</p>
       <p class="hero-description">
         A welcoming homeschool co-op in Indianapolis where families come together
@@ -84,13 +83,13 @@
       <div class="about-grid">
         <div class="about-image-stack fade-in">
           <div class="about-image">
-            <img src="photo-outdoor.jpg" alt="Kids and teens gathered at outdoor tables during a co-op activity" class="about-photo">
+            <img src="photo-outdoor.jpg" alt="Kids and teens gathered at outdoor tables during a co-op activity" class="about-photo" loading="lazy">
           </div>
           <div class="about-image">
-            <img src="Image_20260311_185421_214.jpeg" alt="Tweens and teens cooking together in the kitchen with a parent volunteer" class="about-photo">
+            <img src="Image_20260311_185421_214.jpeg" alt="Tweens and teens cooking together in the kitchen with a parent volunteer" class="about-photo" loading="lazy">
           </div>
           <div class="about-image">
-            <img src="photo-sewing.jpg" alt="Kids posing outdoors by the trees during a co-op day" class="about-photo">
+            <img src="photo-sewing.jpg" alt="Kids posing outdoors by the trees during a co-op day" class="about-photo" loading="lazy">
           </div>
         </div>
         <div class="about-text fade-in fade-in-delay-1">
@@ -352,6 +351,46 @@
     </div>
   </section>
 
+  <!-- ====== Testimonials ====== -->
+  <section class="testimonials" id="testimonials">
+    <div class="container text-center">
+      <span class="section-badge fade-in">Family Voices</span>
+      <h2 class="section-title fade-in">What Our Families Say</h2>
+      <div class="testimonials-grid">
+        <div class="testimonial-card fade-in">
+          <div class="testimonial-quote">&ldquo;</div>
+          <p>Roots and Wings has been an amazing opportunity, for not only my children but for me as a parent. It has provided a safe container for us to show up as ourselves and be accepted for our unique lifestyle. Everyone here is so encouraging and willing to assist in any way they can. They have been patient but most of all been supportive to all the kids. We are blessed to have found a community that is truly wanting all kids to achieve success in the best way that is for them specifically.</p>
+          <div class="testimonial-author">
+            <div>
+              <div class="testimonial-name">Danielle Bolinger</div>
+              <div class="testimonial-detail">New Member</div>
+            </div>
+          </div>
+        </div>
+        <div class="testimonial-card fade-in fade-in-delay-1">
+          <div class="testimonial-quote">&ldquo;</div>
+          <p>I could not have dreamed of a better co-op experience. You all, and your kids, are so wonderful and I'm so grateful to be a part of this community. 💃🩷 Each session I'm excited to see what classes everyone is offering and I'm year round planning for future classes I'm eager to teach!</p>
+          <div class="testimonial-author">
+            <div>
+              <div class="testimonial-name">Shelly Bergman</div>
+              <div class="testimonial-detail">Member since 2002</div>
+            </div>
+          </div>
+        </div>
+        <div class="testimonial-card fade-in fade-in-delay-2">
+          <div class="testimonial-quote">&ldquo;</div>
+          <p>What sets this co-op apart is how genuinely inclusive it is. Every family is welcomed exactly as they are, and the kids thrive because of it. Wednesday is always the highlight of our week.</p>
+          <div class="testimonial-author">
+            <div>
+              <div class="testimonial-name">Sarah R.</div>
+              <div class="testimonial-detail">Member since 2022</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ====== Pricing ====== -->
   <section class="pricing" id="pricing">
     <div class="container text-center">
@@ -363,8 +402,9 @@
         the full semester (generally 10 or 15 weeks).
       </p>
 
-      <div class="pricing-grid">
+      <div class="pricing-pair">
         <div class="pricing-card fade-in">
+          <div class="pricing-icon">&#127968;</div>
           <div class="pricing-label">Per Family</div>
           <h3>Member Fees</h3>
           <div class="pricing-amount">$70–90</div>
@@ -378,8 +418,12 @@
           <p class="pricing-note">Varies by number of member families each semester</p>
         </div>
 
+        <div class="pricing-connector fade-in">
+          <span>+</span>
+        </div>
+
         <div class="pricing-card pricing-card-featured fade-in">
-          <div class="pricing-badge">Most Popular</div>
+          <div class="pricing-icon">&#127793;</div>
           <div class="pricing-label">Per Child</div>
           <h3>Full Day</h3>
           <div class="pricing-amount">$100</div>
@@ -388,22 +432,9 @@
             <li>$10 morning + $10 afternoon per session</li>
             <li>5 sessions per year</li>
             <li>Covers class-specific materials</li>
-            <li>Full day 9:40 am – 3:15 pm</li>
+            <li>Programming runs 10:00 am – 2:55 pm</li>
           </ul>
           <div class="pricing-yearly">$20 <span>per child / session</span></div>
-        </div>
-
-        <div class="pricing-card fade-in">
-          <div class="pricing-label">Flexible</div>
-          <h3>Half Day</h3>
-          <div class="pricing-amount">$50</div>
-          <div class="pricing-per">per child / year</div>
-          <ul class="pricing-features">
-            <li>Morning or afternoon only</li>
-            <li>$10 per child per session</li>
-            <li>5 sessions per year</li>
-            <li>Yearly commitment still applies</li>
-          </ul>
         </div>
       </div>
 
@@ -431,22 +462,22 @@
 
       <div class="board-grid">
         <div class="board-member fade-in">
-          <img src="photo-molly.jpg" alt="Molly Bellner" class="board-avatar-photo">
+          <img src="photo-molly.jpg" alt="Molly Bellner" class="board-avatar-photo" loading="lazy">
           <h4>Molly Bellner</h4>
           <span class="board-role">President</span>
         </div>
         <div class="board-member fade-in">
-          <img src="photo-colleen.jpg" alt="Colleen Raymont" class="board-avatar-photo">
+          <img src="photo-colleen.jpg" alt="Colleen Raymont" class="board-avatar-photo" loading="lazy">
           <h4>Colleen Raymont</h4>
           <span class="board-role">Vice President</span>
         </div>
         <div class="board-member fade-in">
-          <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="board-avatar-photo">
+          <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="board-avatar-photo" loading="lazy">
           <h4>Tiffany Smith</h4>
           <span class="board-role">Membership Director</span>
         </div>
         <div class="board-member fade-in">
-          <img src="photo-jessica.jpg" alt="Jessica Shewan" class="board-avatar-photo">
+          <img src="photo-jessica.jpg" alt="Jessica Shewan" class="board-avatar-photo" loading="lazy">
           <h4>Jessica Shewan</h4>
           <span class="board-role">Treasurer</span>
         </div>
@@ -456,12 +487,12 @@
           <span class="board-role">Sustaining Director</span>
         </div>
         <div class="board-member fade-in">
-          <img src="photo-leann.jpg" alt="LeAnn Newlin" class="board-avatar-photo">
+          <img src="photo-leann.jpg" alt="LeAnn Newlin" class="board-avatar-photo" loading="lazy">
           <h4>LeAnn Newlin</h4>
           <span class="board-role">Secretary</span>
         </div>
         <div class="board-member fade-in">
-          <img src="photo-erin.jpg" alt="Erin Bogan" class="board-avatar-photo">
+          <img src="photo-erin.jpg" alt="Erin Bogan" class="board-avatar-photo" loading="lazy">
           <h4>Erin Bogan</h4>
           <span class="board-role">Communications Director</span>
         </div>
@@ -491,9 +522,9 @@
           <p>
             Link your Kroger Card to Roots & Wings Indy Homeschool and every time
             you use your rewards card, donations are automatically given to our
-            account. It costs you nothing extra.
+            account. It costs you nothing extra. Search for organization <strong>RA139</strong>.
           </p>
-          <a href="#PLACEHOLDER-kroger-link" class="btn btn-primary btn-sm">Link Your Kroger Card</a>
+          <a href="https://www.kroger.com/i/community/community-rewards" class="btn btn-primary btn-sm" target="_blank" rel="noopener">Link Your Kroger Card</a>
         </div>
 
         <div class="support-card fade-in">
@@ -506,7 +537,7 @@
             your receipt, and the earnings are automatically deposited into our
             account. It's that easy!
           </p>
-          <a href="#PLACEHOLDER-boxtops-link" class="btn btn-primary btn-sm">Download the App</a>
+          <a href="https://btfe.smart.link/c2jjdifkw?referral_code=BSC49XKX&school_id=9682386" class="btn btn-primary btn-sm" target="_blank" rel="noopener">Download the App</a>
         </div>
 
         <div class="support-card fade-in">
@@ -519,7 +550,7 @@
             our co-op running — from supplies and materials to facility costs. Any
             amount makes a difference!
           </p>
-          <a href="#PLACEHOLDER-paypal-link" class="btn btn-primary btn-sm">Donate via PayPal</a>
+          <a href="#PLACEHOLDER-paypal-link" class="btn btn-primary btn-sm" target="_blank" rel="noopener">Donate via PayPal</a>
         </div>
       </div>
     </div>
@@ -551,7 +582,7 @@
       <div class="footer-grid">
         <div class="footer-brand">
           <div class="nav-brand-text">
-            ROOTS AND WINGS
+            ROOTS & WINGS
             <span>Indianapolis</span>
           </div>
           <p>
@@ -559,7 +590,7 @@
             learners in Indianapolis, Indiana.
           </p>
           <div class="footer-social">
-            <a href="https://www.facebook.com/rootsandwingsindy" aria-label="Follow us on Facebook" target="_blank" rel="noopener noreferrer">
+            <a href="https://www.facebook.com/rootsandwingsindy/" aria-label="Follow us on Facebook" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
             </a>
           </div>
@@ -599,9 +630,7 @@
       <button class="tour-modal-close" aria-label="Close" onclick="document.getElementById('tour-modal').classList.remove('active');document.body.style.overflow='';">&times;</button>
       <h2 class="tour-modal-title">Schedule a Tour</h2>
       <p class="tour-modal-subtitle">We'd love to welcome your family! Fill this out and we'll be in touch to find a time for you to visit.</p>
-      <form name="schedule-tour" method="POST" data-netlify="true" action="/tour-thanks.html" class="tour-modal-form">
-        <input type="hidden" name="form-name" value="schedule-tour">
-        <input type="hidden" name="subject" value="New Tour Request from Roots & Wings Website">
+      <form id="tour-modal-form" class="tour-modal-form">
         <div class="tour-form-field">
           <label for="tour-name">Your Name</label>
           <input type="text" id="tour-name" name="name" required placeholder="First and Last Name">
@@ -624,8 +653,42 @@
             <input type="text" id="tour-ages" name="ages" required placeholder="e.g. 4, 7, and 10">
           </div>
         </div>
-        <button type="submit" class="btn btn-primary tour-form-submit">Request a Tour</button>
+        <div id="tour-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
+        <button type="submit" id="tour-modal-btn" class="btn btn-primary tour-form-submit">Request a Tour</button>
       </form>
+      <script>
+        document.getElementById('tour-modal-form').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          var btn = document.getElementById('tour-modal-btn');
+          var errEl = document.getElementById('tour-modal-error');
+          errEl.style.display = 'none';
+          btn.disabled = true;
+          btn.textContent = 'Sending…';
+          try {
+            var res = await fetch('/api/tour', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: document.getElementById('tour-name').value,
+                email: document.getElementById('tour-email').value,
+                phone: document.getElementById('tour-phone').value,
+                numKids: document.getElementById('tour-num-kids').value,
+                ages: document.getElementById('tour-ages').value
+              })
+            });
+            if (!res.ok) throw new Error();
+            var modal = document.querySelector('.tour-modal');
+            modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'tour-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
+              + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
+              + '<p class="tour-modal-subtitle">We\'ve received your tour request and will be in touch soon to schedule a visit. We can\'t wait to meet your family!</p>';
+          } catch (err) {
+            errEl.textContent = 'Something went wrong. Please email membership@rootsandwingsindy.com directly.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = 'Request a Tour';
+          }
+        });
+      </script>
     </div>
   </div>
 

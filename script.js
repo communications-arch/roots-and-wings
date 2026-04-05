@@ -126,15 +126,391 @@
   var passwordInput = document.getElementById('password');
   var logoutBtn = document.getElementById('logoutBtn');
 
-  // The demo password — NOT SECURE, replace with real auth
-  var DEMO_PASSWORD = 'rootsandwings2026';
-  var DEMO_EMAIL = 'bogan@email.com'; // stub: password login acts as the Bogan family
   var SESSION_KEY = 'rw_member_auth';
+
+  // ── Live Data Loading from Google Sheets ──
+  var liveDataLoaded = false;
+  var liveDataReady = false; // true once data has been applied
+
+  var CACHE_KEY = 'rw_sheets_cache';
+  var CACHE_PHOTOS_KEY = 'rw_photos_cache';
+
+  function applySheetsData(data) {
+    if (!data || data.error) return false;
+
+        // ── Map board roles from volunteer committee chairs to families ──
+        var BOARD_EMAIL_MAP = {
+          'President': 'president', 'Vice President': 'vp',
+          'Treasurer': 'treasurer', 'Secretary': 'secretary',
+          'Membership Director': 'membership',
+          'Sustaining Director': 'sustaining',
+          'Communications Director': 'communications'
+        };
+        // Normalize abbreviated titles to full titles
+        var BOARD_TITLE_MAP = {
+          'Membership Dir.': 'Membership Director',
+          'Sustaining Dir.': 'Sustaining Director',
+          'Communications Dir.': 'Communications Director'
+        };
+        var boardByLastName = {}; // familyName -> { role, email }
+        if (data.volunteerCommittees) {
+          data.volunteerCommittees.forEach(function(c) {
+            if (c.chair && c.chair.person && c.chair.title) {
+              var parts = c.chair.person.trim().split(/\s+/);
+              var lastName = parts[parts.length - 1];
+              var fullTitle = BOARD_TITLE_MAP[c.chair.title] || c.chair.title;
+              var emailPrefix = BOARD_EMAIL_MAP[fullTitle] || fullTitle.toLowerCase().replace(/[^a-z]/g, '');
+              boardByLastName[lastName.toLowerCase()] = {
+                role: fullTitle,
+                email: emailPrefix + '@rootsandwingsindy.com'
+              };
+            }
+          });
+        }
+
+        // ── Families ──
+        if (data.families && data.families.length > 0) {
+          // Assign board roles to matching families
+          data.families.forEach(function(fam) {
+            var board = boardByLastName[fam.name.toLowerCase()];
+            if (board) {
+              fam.boardRole = board.role;
+              fam.boardEmail = board.email;
+            }
+          });
+          FAMILIES = data.families;
+          // Rebuild allPeople array used by directory (match original structure)
+          allPeople = [];
+          FAMILIES.forEach(function (fam) {
+            var parentNames = (fam.parents || '').split(/\s*&\s*/);
+            var pp = fam.parentPronouns || {};
+            var diffNameKids = (fam.kids || []).filter(function(k) { return k.lastName && k.lastName !== fam.name; });
+            parentNames.forEach(function (pName) {
+              if (!pName.trim()) return;
+              allPeople.push({
+                name: pName.trim(),
+                type: 'parent',
+                family: fam.name,
+                email: fam.email || '',
+                phone: fam.phone || '',
+                group: null,
+                age: null,
+                pronouns: pp[pName.trim()] || '',
+                allergies: '',
+                schedule: 'all-day',
+                parentNames: fam.parents,
+                diffNameKids: diffNameKids,
+                kidNames: (fam.kids || []).map(function(k) { return k.name + ' ' + (k.lastName || fam.name); }),
+                boardRole: fam.boardRole || null,
+                boardEmail: fam.boardEmail || null
+              });
+            });
+            (fam.kids || []).forEach(function (kid) {
+              allPeople.push({
+                name: kid.name,
+                lastName: kid.lastName || fam.name,
+                type: 'kid',
+                family: fam.name,
+                email: fam.email || '',
+                phone: fam.phone || '',
+                group: kid.group || '',
+                age: kid.age || 0,
+                pronouns: kid.pronouns || '',
+                allergies: kid.allergies || '',
+                schedule: kid.schedule || 'all-day',
+                parentNames: fam.parents
+              });
+            });
+          });
+          allPeople.sort(function(a, b) { return a.name.localeCompare(b.name); });
+        }
+
+        // ── AM Classes ──
+        if (data.amClasses) {
+          // Map API keys to existing AM_CLASSES structure
+          for (var group in data.amClasses) {
+            AM_CLASSES[group] = data.amClasses[group];
+          }
+        }
+
+        // ── AM Support Roles ──
+        if (data.amSupportRoles) {
+          for (var s in data.amSupportRoles) {
+            AM_SUPPORT_ROLES[s] = data.amSupportRoles[s];
+          }
+        }
+
+        // ── PM Electives ──
+        if (data.pmElectives) {
+          for (var s in data.pmElectives) {
+            PM_ELECTIVES[s] = data.pmElectives[s];
+          }
+        }
+
+        // ── PM Support Roles ──
+        if (data.pmSupportRoles) {
+          for (var s in data.pmSupportRoles) {
+            PM_SUPPORT_ROLES[s] = data.pmSupportRoles[s];
+          }
+        }
+
+        // ── Cleaning Crew ──
+        if (data.cleaningCrew) {
+          CLEANING_CREW.liaison = data.cleaningCrew.liaison;
+          CLEANING_CREW.sessions = data.cleaningCrew.sessions;
+        }
+
+        // ── Volunteer Committees ──
+        if (data.volunteerCommittees) {
+          VOLUNTEER_COMMITTEES = data.volunteerCommittees;
+        }
+
+        // ── Special Events ──
+        if (data.specialEvents) {
+          SPECIAL_EVENTS = data.specialEvents;
+        }
+
+        // ── Class Ideas ──
+        if (data.classIdeas) {
+          CLASS_IDEAS = data.classIdeas;
+        }
+
+    liveDataReady = true;
+
+    // Re-render if dashboard is already visible
+    if (dashboard && dashboard.classList.contains('visible')) {
+      if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
+      if (typeof renderDirectory === 'function') renderDirectory();
+      if (typeof renderMyFamily === 'function') renderMyFamily();
+    }
+    return true;
+  }
+
+  function loadLiveData() {
+    if (liveDataLoaded) return;
+    liveDataLoaded = true;
+
+    // Apply cached data immediately for instant load
+    try {
+      var cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        var cachedData = JSON.parse(cached);
+        applySheetsData(cachedData);
+      }
+    } catch (e) { /* ignore cache errors */ }
+
+    // Fetch fresh data in the background
+    var googleCred = sessionStorage.getItem('rw_google_credential');
+    if (!googleCred) return;
+
+    fetch('/api/sheets', { headers: { 'Authorization': 'Bearer ' + googleCred } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.error) {
+          console.warn('Sheets API error, using static/cached data:', data.message);
+          return;
+        }
+        // Cache the fresh response
+        try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+        // Apply fresh data (re-renders everything)
+        applySheetsData(data);
+      })
+      .catch(function (err) {
+        console.warn('Failed to load live data, using cached/static data:', err);
+      });
+  }
+
+  // ── Profile Photos from Google Workspace ──
+  var memberPhotos = {}; // email -> photo URL
+
+  function loadPhotos() {
+    // Apply cached photos immediately
+    try {
+      var cached = localStorage.getItem(CACHE_PHOTOS_KEY);
+      if (cached) {
+        memberPhotos = JSON.parse(cached);
+        applyPhotos();
+      }
+    } catch (e) { /* ignore */ }
+
+    // Fetch fresh photos in the background
+    var googleCred = sessionStorage.getItem('rw_google_credential');
+    if (!googleCred) return;
+
+    fetch('/api/photos', { headers: { 'Authorization': 'Bearer ' + googleCred } })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.photos) {
+          memberPhotos = data.photos;
+          try { localStorage.setItem(CACHE_PHOTOS_KEY, JSON.stringify(data.photos)); } catch (e) { /* quota */ }
+          applyPhotos();
+        }
+      })
+      .catch(function(err) {
+        console.warn('Failed to load profile photos:', err);
+      });
+  }
+
+  // ── Calendar Events ──
+  var CACHE_CALENDAR_KEY = 'rw_calendar_cache';
+  var DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function renderCalendar(events) {
+    var el = document.getElementById('calendarEvents');
+    if (!el || !events) return;
+
+    if (events.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">No upcoming events.</div>';
+      return;
+    }
+
+    var html = '';
+    var currentMonth = '';
+    events.forEach(function(ev) {
+      var start = new Date(ev.start);
+      var end = new Date(ev.end);
+      var monthLabel = MONTHS[start.getMonth()] + ' ' + start.getFullYear();
+
+      if (monthLabel !== currentMonth) {
+        currentMonth = monthLabel;
+        html += '<div class="cal-month-header">' + monthLabel + '</div>';
+      }
+
+      var timeStr = '';
+      if (!ev.allDay) {
+        timeStr = start.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}).toLowerCase()
+          + ' – ' + end.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}).toLowerCase();
+      } else {
+        timeStr = 'All day';
+      }
+
+      html += '<div class="cal-event">';
+      html += '<div class="cal-date"><span class="cal-day-num">' + start.getDate() + '</span><span class="cal-day-name">' + DAYS[start.getDay()] + '</span></div>';
+      html += '<div class="cal-details"><strong class="cal-summary">' + ev.summary + '</strong><span class="cal-time">' + timeStr + '</span>';
+      if (ev.location) html += '<span class="cal-location">' + ev.location + '</span>';
+      html += '</div></div>';
+    });
+
+    el.innerHTML = html;
+  }
+
+  function loadCalendar() {
+    // Apply cached calendar immediately
+    try {
+      var cached = localStorage.getItem(CACHE_CALENDAR_KEY);
+      if (cached) renderCalendar(JSON.parse(cached));
+    } catch (e) { /* ignore */ }
+
+    var googleCred = sessionStorage.getItem('rw_google_credential');
+    if (!googleCred) return;
+
+    fetch('/api/calendar', { headers: { 'Authorization': 'Bearer ' + googleCred } })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.events) {
+          try { localStorage.setItem(CACHE_CALENDAR_KEY, JSON.stringify(data.events)); } catch (e) { /* quota */ }
+          renderCalendar(data.events);
+        }
+      })
+      .catch(function(err) {
+        console.warn('Failed to load calendar:', err);
+      });
+  }
+
+  function getPhotoUrl(personName, email, familyName) {
+    if (!email && !familyName && !personName) return null;
+    // Try matching by firstname + last initial first (e.g. "erinb" for "Erin Bogan")
+    // This prioritizes personal accounts over role accounts (e.g. president@)
+    if (personName && familyName) {
+      var first = personName.trim().split(' ')[0].toLowerCase();
+      var lastInitial = familyName.charAt(0).toLowerCase();
+      var guess = first + lastInitial + '@rootsandwingsindy.com';
+      if (memberPhotos[guess]) return memberPhotos[guess];
+    }
+    // Try direct email match
+    if (email) {
+      var url = memberPhotos[email] || memberPhotos[email.toLowerCase()];
+      if (url) return url;
+    }
+    // Try matching by family last name
+    if (familyName) {
+      var lowerName = familyName.toLowerCase();
+      for (var wsEmail in memberPhotos) {
+        var localPart = wsEmail.split('@')[0].toLowerCase();
+        if (localPart === lowerName || localPart.indexOf(lowerName) !== -1) {
+          return memberPhotos[wsEmail];
+        }
+      }
+    }
+    return null;
+  }
+
+  function photoHtml(name, personName, email, familyName, extraStyle) {
+    var url = getPhotoUrl(personName || name, email, familyName);
+    var style = extraStyle || '';
+    if (url) {
+      // Increase resolution from 96px to 256px
+      url = url.replace(/=s\d+-c/, '=s256-c');
+      return '<img src="' + url + '" alt="' + name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;' + style + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'">' +
+        '<span style="display:none">' + name.charAt(0) + '</span>';
+    }
+    return '<span>' + name.charAt(0) + '</span>';
+  }
+
+  function applyPhotos() {
+    // Find all yb-cards and update photos by matching family email
+    if (!allPeople || allPeople.length === 0) return;
+    var cards = document.querySelectorAll('.yb-card');
+    cards.forEach(function(card) {
+      var idx = parseInt(card.getAttribute('data-idx'));
+      var person = allPeople[idx];
+      if (!person) return;
+      var photoDiv = card.querySelector('.yb-photo');
+      if (!photoDiv) return;
+      if (person.type === 'kid') return; // Skip kids — they share parent's Workspace photo
+      var url = getPhotoUrl(person.name, person.email, person.family);
+      if (url && !photoDiv.querySelector('img')) {
+        var hiRes = url.replace(/=s\d+-c/, '=s256-c');
+        photoDiv.innerHTML = '<img src="' + hiRes + '" alt="' + person.name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + person.name.charAt(0) + '</span>';
+      }
+    });
+
+    // Update board cards with Workspace photos
+    document.querySelectorAll('.portal-board-card[data-board]').forEach(function(card) {
+      var fullName = card.getAttribute('data-board');
+      var familyName = card.getAttribute('data-board-family');
+      var boardEmail = card.getAttribute('data-board-email');
+      var url = getPhotoUrl(fullName, boardEmail, familyName);
+      if (!url) return;
+      var hiRes = url.replace(/=s\d+-c/, '=s256-c');
+      // Replace existing photo or initials avatar
+      var existingImg = card.querySelector('.portal-board-photo');
+      var existingAvatar = card.querySelector('.board-avatar');
+      if (existingImg) {
+        existingImg.src = hiRes;
+      } else if (existingAvatar) {
+        var img = document.createElement('img');
+        img.src = hiRes;
+        img.alt = fullName;
+        img.className = 'portal-board-photo';
+        img.onerror = function() { this.style.display = 'none'; existingAvatar.style.display = ''; };
+        existingAvatar.style.display = 'none';
+        card.insertBefore(img, existingAvatar);
+      }
+    });
+  }
+
+  // Live data is loaded after authentication (see showDashboard)
 
   function showDashboard() {
     if (loginSection) loginSection.style.display = 'none';
     if (dashboard) dashboard.classList.add('visible');
-    // Render My Family (deferred — FAMILIES may not be defined yet on initial load)
+    // Load live data, profile photos, and calendar now that user is authenticated
+    loadLiveData();
+    loadPhotos();
+    loadCalendar();
+    // Render with whatever data is available (live if preloaded, static otherwise)
     setTimeout(function () { if (typeof renderMyFamily === 'function') renderMyFamily(); }, 0);
     // Re-trigger fade-in observer for dashboard elements
     var dashFades = dashboard ? dashboard.querySelectorAll('.fade-in') : [];
@@ -172,34 +548,15 @@
       showDashboard();
     }
 
-    // Login form submission
-    if (loginForm) {
-      loginForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        var pw = passwordInput ? passwordInput.value : '';
-
-        if (pw === DEMO_PASSWORD) {
-          sessionStorage.setItem(SESSION_KEY, 'true');
-          sessionStorage.setItem('rw_user_email', DEMO_EMAIL);
-          if (loginError) loginError.classList.remove('visible');
-          if (passwordInput) passwordInput.classList.remove('error');
-          showDashboard();
-        } else {
-          if (loginError) loginError.classList.add('visible');
-          if (passwordInput) {
-            passwordInput.classList.add('error');
-            passwordInput.focus();
-            passwordInput.select();
-          }
-        }
-      });
-    }
-
     // Logout
     if (logoutBtn) {
       logoutBtn.addEventListener('click', function () {
+        // Clear cached data on logout
+        try {
+          localStorage.removeItem(CACHE_KEY);
+          localStorage.removeItem(CACHE_PHOTOS_KEY);
+        } catch (e) { /* ignore */ }
         showLogin();
-        if (passwordInput) passwordInput.value = '';
         window.scrollTo(0, 0);
       });
     }
@@ -216,7 +573,9 @@
       var target = document.querySelector(targetId);
       if (target) {
         e.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        var navHeight = document.querySelector('.members-nav') ? document.querySelector('.members-nav').offsetHeight : 60;
+        var targetPos = target.getBoundingClientRect().top + window.pageYOffset - navHeight - 16;
+        window.scrollTo({ top: targetPos, behavior: 'smooth' });
       }
     });
   });
@@ -281,7 +640,15 @@
     5: { name: 'Spring Session 5', start: '2026-04-15', end: '2026-05-13' }
   };
 
-  var currentSession = 4; // 1–5
+  // Auto-detect current session: move to next session once the end date passes
+  var currentSession = 5; // default to last session
+  var today = new Date().toISOString().slice(0, 10);
+  for (var s = 1; s <= 5; s++) {
+    if (SESSION_DATES[s] && today <= SESSION_DATES[s].end) {
+      currentSession = s;
+      break;
+    }
+  }
 
   // ── Morning classes (by group, per session) ──
   var AM_CLASSES = {
@@ -716,7 +1083,9 @@
         schedule: 'all-day',
         parentNames: fam.parents,
         diffNameKids: diffNameKids,
-        kidNames: fam.kids.map(function(k) { return k.name + ' ' + (k.lastName || fam.name); })
+        kidNames: fam.kids.map(function(k) { return k.name + ' ' + (k.lastName || fam.name); }),
+        boardRole: fam.boardRole || null,
+        boardEmail: fam.boardEmail || null
       });
     });
     fam.kids.forEach(function (kid) {
@@ -735,6 +1104,11 @@
         parentNames: fam.parents
       });
     });
+  });
+
+  // Sort everyone alphabetically by first name so board members aren't grouped separately
+  allPeople.sort(function(a, b) {
+    return a.name.localeCompare(b.name);
   });
 
   var directoryGrid = document.getElementById('directoryGrid');
@@ -767,9 +1141,10 @@
       '</' + tag + '>';
   }
 
-  // Is this a class/group filter?
+  // Is this a class/group filter? Handle "Teens" alias for "Pigeons"
   function isGroupFilter(f) {
-    return f !== 'all' && f !== 'parents' && AM_CLASSES[f];
+    if (f === 'all' || f === 'parents') return false;
+    return AM_CLASSES[f] || (f === 'Teens' && AM_CLASSES['Pigeons']);
   }
 
   function renderDirectory() {
@@ -786,7 +1161,7 @@
       var sess = staff.sessions[currentSession];
       html += '<div class="class-staff-banner">';
       html += '<div class="class-staff-header">';
-      html += '<span class="class-staff-title">' + activeFilter + '</span>';
+      html += '<span class="class-staff-title">' + groupWithAge(activeFilter) + '</span>';
       html += '<span class="class-staff-meta">Room: ' + (sess ? sess.room : '') + ' &middot; Ages ' + staff.ages;
       if (staff.note) html += ' &middot; ' + staff.note;
       if (sess && sess.topic) html += '<br><em>' + sess.topic + '</em>';
@@ -795,7 +1170,7 @@
       html += '<div class="class-staff-roles">';
       html += staffChip(staff.liaison, 'Liaison (year-long)');
       if (sess) {
-        html += staffChip(sess.teacher, 'Teacher (Session ' + currentSession + ')');
+        html += staffChip(sess.teacher, 'Leader (Session ' + currentSession + ')');
         sess.assistants.forEach(function (a) {
           html += staffChip(a, 'Assistant (Session ' + currentSession + ')');
         });
@@ -819,7 +1194,7 @@
         html += '<button class="yb-card yb-card-class" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
-          '<div class="yb-subtitle">Age ' + person.age + '</div>' +
+          '<div class="yb-subtitle">' + (person.age ? 'Age ' + person.age : '') + '</div>' +
           '<div class="yb-family">' + person.family + ' Family</div>' +
           extras +
           '</button>';
@@ -844,7 +1219,7 @@
           ? person.name + ' ' + person.lastName
           : person.name;
         var subtitle = person.type === 'kid'
-          ? 'Age ' + person.age + ' &middot; ' + person.group
+          ? (person.age ? 'Age ' + person.age + ' &middot; ' : '') + groupWithAge(person.group)
           : 'Parent';
         var bgStyle = faceColor(person.name);
 
@@ -860,10 +1235,22 @@
           parentOfTag = '<div class="yb-parent-of">Parent of ' + label + '</div>';
         }
 
-        html += '<button class="yb-card" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
+        var boardEmojis = {
+          'President': '\u{1F333}', 'Vice President': '\u{1F33F}',
+          'Treasurer': '\u{1F9EE}', 'Secretary': '\u{270F}\uFE0F',
+          'Membership Director': '\u{1F33B}',
+          'Sustaining Director': '\u{1F49A}',
+          'Communications Director': '\u{1F4AC}'
+        };
+        var boardTag = person.boardRole
+          ? '<div class="yb-board-badge"><span class="yb-board-emoji">' + (boardEmojis[person.boardRole] || '\u{1F331}') + '</span> ' + person.boardRole + '</div>'
+          : '';
+
+        html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
+          boardTag +
           pronounTag +
           '<div class="yb-family">' + person.family + ' Family</div>' +
           parentOfTag +
@@ -896,6 +1283,9 @@
         showPersonDetail(allPeople[idx]);
       });
     });
+
+    // Apply profile photos if loaded
+    applyPhotos();
   }
 
   function showPersonDetail(person, boardInfo) {
@@ -908,7 +1298,13 @@
 
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="detail-header">';
-    html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><span>' + person.name.charAt(0) + '</span></div>';
+    var detailPhotoUrl = person.type !== 'kid' ? getPhotoUrl(person.name, person.email, person.family) : null;
+    if (detailPhotoUrl) {
+      var hiResDetail = detailPhotoUrl.replace(/=s\d+-c/, '=s256-c');
+      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><img src="' + hiResDetail + '" alt="' + person.name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + person.name.charAt(0) + '</span></div>';
+    } else {
+      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><span>' + person.name.charAt(0) + '</span></div>';
+    }
     html += '<div class="detail-info">';
     var detailLast = person.lastName || fam.name;
     html += '<h3>' + person.name + ' ' + detailLast + '</h3>';
@@ -916,7 +1312,7 @@
       html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
     }
     if (person.type === 'kid') {
-      html += '<p class="detail-group">Age ' + person.age + ' &middot; ' + person.group + '</p>';
+      html += '<p class="detail-group">' + (person.age ? 'Age ' + person.age + ' &middot; ' : '') + groupWithAge(person.group) + '</p>';
       if (person.pronouns) html += '<p class="detail-pronouns">' + person.pronouns + '</p>';
       if (person.schedule && person.schedule !== 'all-day') {
         html += '<p class="detail-schedule">' + (person.schedule === 'morning' ? 'Morning only' : 'Afternoon only') + '</p>';
@@ -926,10 +1322,7 @@
     } else {
       if (!boardInfo) html += '<p class="detail-group">Parent</p>';
       if (person.pronouns) html += '<p class="detail-pronouns">' + person.pronouns + '</p>';
-      html += '<p class="detail-kids">Kids: ' + fam.kids.map(function(k){
-        var kLast = k.lastName || fam.name;
-        return k.name + (kLast !== fam.name ? ' ' + kLast : '') + ' (' + k.group + ')';
-      }).join(', ') + '</p>';
+      // Kids shown in family grid below
     }
     html += '</div></div>';
 
@@ -961,15 +1354,21 @@
     html += '<div class="detail-family-grid">';
     // Parents
     fam.parents.split(' & ').forEach(function(pName) {
+      var pPhoto = getPhotoUrl(pName.trim(), fam.email, fam.name);
       html += '<div class="detail-member' + (pName.trim() === person.name ? ' detail-member-current' : '') + '">';
-      html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><span>' + pName.trim().charAt(0) + '</span></div>';
+      if (pPhoto) {
+        var pPhotoHi = pPhoto.replace(/=s\d+-c/, '=s128-c');
+        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><img src="' + pPhotoHi + '" alt="' + pName.trim() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + pName.trim().charAt(0) + '</span></div>';
+      } else {
+        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><span>' + pName.trim().charAt(0) + '</span></div>';
+      }
       html += '<span>' + pName.trim() + '</span><small>Parent</small></div>';
     });
     // Kids
     fam.kids.forEach(function(kid) {
       html += '<div class="detail-member' + (kid.name === person.name ? ' detail-member-current' : '') + '">';
       html += '<div class="detail-member-dot" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
-      html += '<span>' + kid.name + '</span><small>' + kid.group + '</small></div>';
+      html += '<span>' + kid.name + '</span><small>' + groupWithAge(kid.group) + '</small></div>';
     });
     html += '</div></div>';
 
@@ -991,13 +1390,279 @@
     }
   }
 
+  // Responsibility detail popup
+  function showDutyDetail(duty) {
+    if (!duty.popup || !personDetail || !personDetailCard) return;
+    var p = duty.popup;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail">';
+
+    if (p.type === 'amClass') {
+      var cls = AM_CLASSES[p.group];
+      var sess = cls ? cls.sessions[p.session] : null;
+      html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">';
+      html += '<h3 style="margin:0;">' + groupWithAge(p.group) + '</h3>';
+      if (cls && cls.liaison) {
+        html += '<span style="font-size:0.85rem;color:var(--color-text-light);">Liaison: <strong style="color:var(--color-text);">' + cls.liaison + '</strong></span>';
+      }
+      html += '</div>';
+      html += '<div class="elective-meta">';
+      html += '<span>10:00 &ndash; 12:00</span>';
+      html += '<span>' + (sess ? sess.room : '') + '</span>';
+      html += '</div>';
+      if (sess && sess.topic) html += '<p class="elective-description" style="font-style:italic;">' + sess.topic + '</p>';
+      html += '<div class="elective-staff-list">';
+      if (sess && sess.teacher) {
+        html += '<div class="elective-teacher">';
+        html += '<div class="staff-dot" style="background:' + faceColor(sess.teacher) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + sess.teacher.charAt(0) + '</span></div>';
+        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + sess.teacher + '</strong><small style="color:var(--color-text-light);">Leader</small></div>';
+        html += '</div>';
+      }
+      if (sess && sess.assistants) {
+        sess.assistants.forEach(function(a) {
+          html += '<div class="elective-teacher">';
+          html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + a.charAt(0) + '</span></div>';
+          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + a + '</strong><small style="color:var(--color-text-light);">Assistant</small></div>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+      // Show kids in this group
+      var groupKids = allPeople.filter(function(person) { return person.type === 'kid' && person.group === p.group; });
+      if (groupKids.length > 0) {
+        html += '<h4 class="elective-roster-title">' + groupKids.length + ' Students</h4>';
+        html += '<div class="elective-roster">';
+        groupKids.forEach(function(kid) {
+          html += '<div class="elective-student">';
+          html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
+          html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span></div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+    }
+
+    else if (p.type === 'elective') {
+      closeDetail();
+      showElectiveDetail(p.name);
+      return;
+    }
+
+    else if (p.type === 'committee') {
+      var committee = null;
+      VOLUNTEER_COMMITTEES.forEach(function(c) { if (c.name === p.name) committee = c; });
+      if (!committee) return;
+      html += '<h3>' + committee.name + '</h3>';
+      html += '<div class="elective-staff-list">';
+      if (committee.chair && committee.chair.person) {
+        html += '<div class="elective-teacher">';
+        html += '<div class="staff-dot" style="background:' + faceColor(committee.chair.person) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + committee.chair.person.charAt(0) + '</span></div>';
+        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + committee.chair.person + '</strong><small style="color:var(--color-text-light);">' + committee.chair.title + ' (Chair)</small></div>';
+        html += '</div>';
+      }
+      committee.roles.forEach(function(r) {
+        var person = r.person || 'Open';
+        html += '<div class="elective-teacher">';
+        html += '<div class="staff-dot" style="background:' + (r.person ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
+        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + r.title + '</small></div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    else if (p.type === 'cleaning') {
+      // Cleaning task descriptions by area
+      var CLEANING_TASKS = {
+        'Classrooms & MPR': [
+          'Remove bagged trash from the rooms and place in the hall by the entranceway',
+          'Replace trash bags in the cans in each room',
+          'Sweep as needed',
+          'Wipe surfaces as needed',
+          'Reset chairs around tables as needed',
+          'Turn off lights to show rooms are cleaned'
+        ],
+        'Kitchen': [
+          'Remove bagged trash from the kitchen and place in the hall by the entranceway',
+          'Replace trash bags in the kitchen',
+          'Sweep as needed',
+          'Wipe surfaces as needed',
+          'Take home kitchen towels to launder and return the following week',
+          'Ensure the coffee pot(s) are off and unplugged',
+          'Ensure the ovens are off',
+          'Ensure the freezer & refrigerator doors are securely closed',
+          'Turn off lights to show kitchen is cleaned'
+        ],
+        'Kitchen Annex & FH': [
+          'Remove bagged trash from the kitchen annex and FH and place in the hall by the entranceway',
+          'Replace trash bags in the kitchen annex and FH',
+          'Sweep or vacuum as needed',
+          'Wipe surfaces as needed',
+          'Reset chairs, tables, and other items (in FH) as needed',
+          'Turn off lights to show rooms are cleaned'
+        ],
+        'Hallways': [
+          'Sweep or vacuum as needed',
+          'Wipe surfaces as needed',
+          'Clean entryway floors (sweep) and glass doors (glass cleaner)',
+          'Turn off lights to show halls are cleaned'
+        ],
+        'Bathrooms': [
+          'Remove trash in bags and place in the hall by the entranceway',
+          'Replace trash bags in all bathrooms',
+          'Wipe surfaces with disinfecting wipes',
+          'Turn off lights to show bathrooms are cleaned'
+        ],
+        'Classrooms': [
+          'Remove bagged trash from the rooms and place in the hall by the entranceway',
+          'Replace trash bags in the cans in each room',
+          'Sweep as needed',
+          'Wipe surfaces as needed',
+          'Reset chairs around tables as needed',
+          'Turn off lights to show rooms are cleaned'
+        ],
+        'Halls & Stairs': [
+          'Sweep/Vacuum as needed',
+          'Wipe surfaces, including handrails, as needed',
+          'Turn off lights to show areas are cleaned'
+        ],
+        'Garage & Grounds': [
+          'Remove trash from the garage/pavilion',
+          'Replace trash bag in the garage/pavilion',
+          'Spot check the playground and surrounding areas for trash and debris',
+          'Take ALL trash (inside trash should be placed by the entranceway) to the dumpster — wait until inside trash has been collected',
+          'Turn off light to show garage is cleaned',
+          'Close and lock garage doors'
+        ],
+        'Floater': [
+          'Available to cover any last-minute absences from the Cleaning Crew',
+          'Familiar with all cleaning area tasks',
+          'Not necessarily the one to cover planned/advance notice absences'
+        ]
+      };
+
+      html += '<h3>Cleaning Crew &mdash; Session ' + p.session + '</h3>';
+
+      // Show your assigned area tasks first
+      var yourTasks = CLEANING_TASKS[p.area] || CLEANING_TASKS[p.area.replace(/\s*$/, '')] || null;
+      if (yourTasks) {
+        html += '<div style="background:var(--color-primary-ghost);border-radius:12px;padding:1rem;margin-bottom:1rem;">';
+        html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;">Your Assignment: ' + p.area + '</h4>';
+        html += '<ul style="margin:0;padding-left:1.25rem;font-size:0.85rem;line-height:1.6;">';
+        yourTasks.forEach(function(task) {
+          html += '<li>' + task + '</li>';
+        });
+        html += '</ul></div>';
+      }
+
+      // Show full crew list
+      var sessClean = CLEANING_CREW.sessions[p.session];
+      if (sessClean) {
+        html += '<h4 style="margin:0.5rem 0;font-size:0.9rem;">Full Crew</h4>';
+        var floorLabels = {mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside'};
+        ['mainFloor', 'upstairs', 'outside'].forEach(function(floor) {
+          if (!sessClean[floor] || Object.keys(sessClean[floor]).length === 0) return;
+          html += '<h4 style="margin:0.75rem 0 0.4rem;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-light);">' + floorLabels[floor] + '</h4>';
+          html += '<div class="elective-staff-list">';
+          Object.keys(sessClean[floor]).forEach(function(area) {
+            sessClean[floor][area].forEach(function(person) {
+              var isYou = p.area === area && p.floor === floor;
+              html += '<div class="elective-teacher"' + (isYou ? ' style="background:var(--color-primary-ghost);border-radius:8px;padding:4px 8px;"' : '') + '>';
+              html += '<div class="staff-dot" style="background:' + faceColor(person) + ';width:32px;height:32px;"><span style="font-size:0.8rem;">' + person.charAt(0) + '</span></div>';
+              html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + area + '</small></div>';
+              html += '</div>';
+            });
+          });
+          html += '</div>';
+        });
+        if (sessClean.floater && sessClean.floater.length > 0) {
+          html += '<h4 style="margin:0.75rem 0 0.4rem;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-light);">Floater</h4>';
+          html += '<div class="elective-staff-list">';
+          sessClean.floater.forEach(function(person) {
+            var isYou = p.area === 'Floater';
+            html += '<div class="elective-teacher"' + (isYou ? ' style="background:var(--color-primary-ghost);border-radius:8px;padding:4px 8px;"' : '') + '>';
+            html += '<div class="staff-dot" style="background:' + faceColor(person) + ';width:32px;height:32px;"><span style="font-size:0.8rem;">' + person.charAt(0) + '</span></div>';
+            html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">Floater</small></div>';
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+        html += '<p style="margin-top:1rem;font-size:0.8rem;color:var(--color-text-light);">Liaison: ' + CLEANING_CREW.liaison + '</p>';
+      }
+    }
+
+    else if (p.type === 'event') {
+      var ev = null;
+      SPECIAL_EVENTS.forEach(function(e) { if (e.name === p.name) ev = e; });
+      if (!ev) return;
+      html += '<h3>' + ev.name + '</h3>';
+      html += '<div class="elective-meta">';
+      html += '<span>' + ev.date + '</span>';
+      html += '</div>';
+      html += '<div class="elective-staff-list">';
+      if (ev.coordinator) {
+        html += '<div class="elective-teacher">';
+        html += '<div class="staff-dot" style="background:' + faceColor(ev.coordinator) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + ev.coordinator.charAt(0) + '</span></div>';
+        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + ev.coordinator + '</strong><small style="color:var(--color-text-light);">Coordinator</small></div>';
+        html += '</div>';
+      }
+      if (ev.planningSupport) {
+        ev.planningSupport.forEach(function(s, i) {
+          var person = s || 'Open';
+          html += '<div class="elective-teacher">';
+          html += '<div class="staff-dot" style="background:' + (s ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
+          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">Planning Support</small></div>';
+          html += '</div>';
+        });
+      }
+      html += '</div>';
+    }
+
+    else if (p.type === 'board') {
+      // Find the committee this board member chairs
+      var committee = null;
+      VOLUNTEER_COMMITTEES.forEach(function(c) {
+        if (c.chair && nameMatch(c.chair.title, p.role)) committee = c;
+      });
+      html += '<h3>' + p.role + '</h3>';
+      html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Board of Directors &middot; 2-year term</p>';
+      if (committee) {
+        html += '<h4 style="margin-bottom:0.5rem;">' + committee.name + '</h4>';
+        html += '<div class="elective-staff-list">';
+        committee.roles.forEach(function(r) {
+          var person = r.person || 'Open';
+          html += '<div class="elective-teacher">';
+          html += '<div class="staff-dot" style="background:' + (r.person ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
+          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + r.title + '</small></div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+    }
+
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) {
+      if (e.target === personDetail) closeDetail();
+    });
+  }
+
   // Board-only detail (when person isn't in directory data yet)
   function showBoardOnlyDetail(fullName, boardInfo) {
     if (!personDetail || !personDetailCard) return;
     var emailSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="detail-header">';
-    html += '<div class="detail-photo" style="background:' + faceColor(fullName) + '"><span>' + fullName.charAt(0) + '</span></div>';
+    var boardLast = fullName.trim().split(/\s+/).pop();
+    var boardPhotoUrl = getPhotoUrl(fullName, boardInfo.email, boardLast);
+    if (boardPhotoUrl) {
+      var hiResBoardDetail = boardPhotoUrl.replace(/=s\d+-c/, '=s256-c');
+      html += '<div class="detail-photo" style="background:' + faceColor(fullName) + '"><img src="' + hiResBoardDetail + '" alt="' + fullName + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + fullName.charAt(0) + '</span></div>';
+    } else {
+      html += '<div class="detail-photo" style="background:' + faceColor(fullName) + '"><span>' + fullName.charAt(0) + '</span></div>';
+    }
     html += '<div class="detail-info">';
     html += '<h3>' + fullName + '</h3>';
     html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
@@ -1123,42 +1788,78 @@
   // ── Stub billing data (to be replaced with Google Sheets API) ──
   // Each family key is the family name (matches FAMILIES[].name)
   // amounts are per-semester; lineItems show the breakdown
-  var BILLING = {
-    _meta: {
-      paymentMethods: 'PayPal or check',
-      paypalLink: 'https://www.paypal.com/paypalme/PLACEHOLDER', // TODO: replace with real PayPal.me link
-      checkPayableTo: 'Roots and Wings Homeschool, Inc.',
-      checkDeliverTo: 'Jessica Shewan (Treasurer)',
-      note: 'All fees are nonrefundable. Contact treasurer@rootsandwingsindy.com with questions.'
-    },
-    // Stub data for demo family (Bogan, 3 kids)
-    'Bogan': {
-      spring: {
-        semester: 'Spring 2026',
-        dueDate: '2026-01-07',
-        status: 'Due',
-        lineItems: [
-          { label: 'Member fee (per family)', amount: 40 },
-          { label: 'AM class fees (3 kids × $10 × 3 sessions)', amount: 90 },
-          { label: 'PM class fees (3 kids × $10 × 3 sessions)', amount: 90 }
-        ],
-        totalDue: 220,
-        totalPaid: 0
-      },
-      fall: {
-        semester: 'Fall 2025',
-        dueDate: '2025-08-27',
-        status: 'Paid',
-        lineItems: [
-          { label: 'Member fee (per family)', amount: 40 },
-          { label: 'AM class fees (3 kids × $10 × 2 sessions)', amount: 60 },
-          { label: 'PM class fees (3 kids × $10 × 2 sessions)', amount: 60 }
-        ],
-        totalDue: 160,
-        totalPaid: 160
-      }
+  var BILLING_CONFIG = {
+    memberFeePerSemester: 40,
+    amFeePerSession: 10,
+    pmFeePerSession: 10,
+    paypalFeeRate: 0.0199,
+    paypalFeeFixed: 0.49,
+    checkPayableTo: 'Roots and Wings Homeschool, Inc.',
+    checkDeliverTo: 'Jessica Shewan (Treasurer)',
+    paypalMerchantId: 'MHDL7HTNRVQHE',
+    semesters: {
+      fall: { name: 'Fall 2025', sessions: [1, 2], dueDate: '2025-08-27', deposit: 50, depositStatus: 'Paid', status: 'Paid' },
+      spring: { name: 'Spring 2026', sessions: [3, 4, 5], dueDate: '2026-01-07', deposit: 50, depositStatus: 'Paid', status: 'Due' }
     }
   };
+
+  function calculateSessionFees(fam, sessionNum) {
+    var lineItems = [];
+    var programmingKids = fam.kids.filter(function(k) { return k.group !== 'Greenhouse'; });
+    var fullDayKids = programmingKids.filter(function(k) { return !k.schedule || k.schedule === 'all-day'; });
+    var morningOnly = programmingKids.filter(function(k) { return k.schedule === 'morning'; });
+    var afternoonOnly = programmingKids.filter(function(k) { return k.schedule === 'afternoon'; });
+
+    if (fullDayKids.length > 0) {
+      var amAmt = fullDayKids.length * BILLING_CONFIG.amFeePerSession;
+      var pmAmt = fullDayKids.length * BILLING_CONFIG.pmFeePerSession;
+      lineItems.push({ label: 'AM classes (' + fullDayKids.length + (fullDayKids.length === 1 ? ' kid' : ' kids') + ' \u00d7 $' + BILLING_CONFIG.amFeePerSession + ')', amount: amAmt });
+      lineItems.push({ label: 'PM classes (' + fullDayKids.length + (fullDayKids.length === 1 ? ' kid' : ' kids') + ' \u00d7 $' + BILLING_CONFIG.pmFeePerSession + ')', amount: pmAmt });
+    }
+    if (morningOnly.length > 0) {
+      lineItems.push({ label: 'AM only (' + morningOnly.map(function(k){return k.name;}).join(', ') + ')', amount: morningOnly.length * BILLING_CONFIG.amFeePerSession });
+    }
+    if (afternoonOnly.length > 0) {
+      lineItems.push({ label: 'PM only (' + afternoonOnly.map(function(k){return k.name;}).join(', ') + ')', amount: afternoonOnly.length * BILLING_CONFIG.pmFeePerSession });
+    }
+
+    var subtotal = 0;
+    lineItems.forEach(function(li) { subtotal += li.amount; });
+    return { lineItems: lineItems, subtotal: subtotal, sessionNum: sessionNum };
+  }
+
+  function calculateSemesterFees(fam, semesterKey) {
+    var sem = BILLING_CONFIG.semesters[semesterKey];
+    if (!sem) return null;
+    var sessionFees = [];
+    var classTotal = 0;
+    sem.sessions.forEach(function(sNum) {
+      var sf = calculateSessionFees(fam, sNum);
+      sessionFees.push(sf);
+      classTotal += sf.subtotal;
+    });
+    var memberFee = BILLING_CONFIG.memberFeePerSemester;
+    var deposit = sem.deposit || 0;
+    var subtotal = memberFee + classTotal;
+    var balanceBeforeFee = subtotal - deposit;
+    var paypalFee = Math.ceil(((balanceBeforeFee + BILLING_CONFIG.paypalFeeFixed) / (1 - BILLING_CONFIG.paypalFeeRate) - balanceBeforeFee) * 100) / 100;
+    var total = balanceBeforeFee + paypalFee;
+    return {
+      name: sem.name,
+      status: sem.status || 'Due',
+      depositStatus: sem.depositStatus || 'Due',
+      dueDate: sem.dueDate,
+      memberFee: memberFee,
+      deposit: deposit,
+      sessionFees: sessionFees,
+      classTotal: classTotal,
+      subtotal: subtotal,
+      balanceBeforeFee: balanceBeforeFee,
+      paypalFee: paypalFee,
+      total: total,
+      sessionCount: sem.sessions.length
+    };
+  }
 
   var DUTY_ICONS = {
     teach: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
@@ -1174,10 +1875,22 @@
   function getKidElectives(kidFullName) {
     var sessElectives = PM_ELECTIVES[currentSession] || [];
     var result = [];
+    var parts = kidFullName.toLowerCase().split(/\s+/);
+    var kidFirst = parts[0];
+    var kidLast = parts.slice(1).join(' ');
     sessElectives.forEach(function (elec) {
-      if (elec.students.indexOf(kidFullName) !== -1) {
-        result.push(elec);
-      }
+      var found = elec.students.some(function(st) {
+        var stLower = st.toLowerCase().trim();
+        // Exact match
+        if (stLower === kidFullName.toLowerCase()) return true;
+        // Match by last name + first name starts with (handles nicknames like Junie/Juniper)
+        var stParts = stLower.split(/\s+/);
+        var stFirst = stParts[0];
+        var stLast = stParts.slice(1).join(' ');
+        if (kidLast && stLast === kidLast && (stFirst.indexOf(kidFirst) === 0 || kidFirst.indexOf(stFirst) === 0)) return true;
+        return false;
+      });
+      if (found) result.push(elec);
     });
     // Sort by hour
     result.sort(function (a, b) {
@@ -1186,6 +1899,17 @@
       return ha - hb;
     });
     return result;
+  }
+
+  // Helper: append age range to group name, e.g., "Sassafras (3-6)"
+  // Also handles "Teens" alias for "Pigeons"
+  function groupWithAge(groupName) {
+    var displayName = groupName;
+    var lookupName = groupName;
+    if (groupName === 'Teens') lookupName = 'Pigeons';
+    var cls = AM_CLASSES[lookupName];
+    if (cls && cls.ages) return displayName + ' (' + cls.ages + ')';
+    return displayName;
   }
 
   // Helper: get time string from hour
@@ -1243,8 +1967,8 @@
 
       // Morning
       html += '<div class="mf-sched-row">';
-      html += '<span class="mf-sched-time">Morning</span>';
-      html += '<span class="mf-sched-class">' + kid.group + (topic ? ': ' + topic : '') + '</span>';
+      html += '<span class="mf-sched-time">AM</span>';
+      html += '<span class="mf-sched-class">' + groupWithAge(kid.group) + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
       html += '<span class="mf-sched-room">' + room + '</span>';
       html += '<span class="mf-sched-teacher">' + teacher + '</span>';
       html += '</div>';
@@ -1286,15 +2010,15 @@
 
       // Liaison
       parentFullNames.forEach(function (full) {
-        if (staff.liaison === full) {
-          duties.push({icon: 'star', text: groupName + ' Class Liaison', detail: 'Year-long role'});
+        if (nameMatch(staff.liaison, full)) {
+          duties.push({icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: 'Year-long role', popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
-        if (sess.teacher === full) {
-          duties.push({icon: 'teach', text: 'Teaching ' + groupName, detail: '10:00\u201312:00 \u00b7 ' + (sess.room || '')});
+        if (nameMatch(sess.teacher, full)) {
+          duties.push({icon: 'teach', text: 'Leading ' + groupWithAge(groupName), detail: '10:00\u201312:00 \u00b7 ' + (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         sess.assistants.forEach(function (a) {
-          if (a === full) {
-            duties.push({icon: 'assist', text: 'Assisting ' + groupName, detail: '10:00\u201312:00 \u00b7 ' + (sess.room || '')});
+          if (nameMatch(a, full)) {
+            duties.push({icon: 'assist', text: 'Assisting ' + groupWithAge(groupName), detail: '10:00\u201312:00 \u00b7 ' + (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
           }
         });
       });
@@ -1304,53 +2028,74 @@
     var sessElectives = PM_ELECTIVES[currentSession] || [];
     sessElectives.forEach(function (elec) {
       parentFullNames.forEach(function (full) {
-        if (elec.leader === full) {
-          duties.push({icon: 'teach', text: 'Teaching ' + elec.name, detail: electiveTime(elec.hour) + ' \u00b7 Afternoon elective'});
+        if (nameMatch(elec.leader, full)) {
+          duties.push({icon: 'teach', text: 'Leading ' + elec.name, detail: electiveTime(elec.hour) + ' \u00b7 Afternoon elective', popup: {type: 'elective', name: elec.name}});
         }
-        if (elec.assistants && elec.assistants.indexOf(full) !== -1) {
-          duties.push({icon: 'assist', text: 'Assisting ' + elec.name, detail: electiveTime(elec.hour) + ' \u00b7 Afternoon elective'});
+        if (elec.assistants) {
+          elec.assistants.forEach(function(a) {
+            if (nameMatch(a, full)) {
+              duties.push({icon: 'assist', text: 'Assisting ' + elec.name, detail: electiveTime(elec.hour) + ' \u00b7 Afternoon elective', popup: {type: 'elective', name: elec.name}});
+            }
+          });
         }
       });
     });
 
     // Board role
     if (fam.boardRole) {
-      duties.push({icon: 'board', text: fam.boardRole, detail: 'Board of Directors'});
+      duties.push({icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
     }
 
-    // Volunteer committees (year-long)
+    // Volunteer committees (year-long) — fuzzy match to handle live data name variations
+    function nameMatch(a, b) {
+      if (!a || !b) return false;
+      return a.trim().toLowerCase() === b.trim().toLowerCase();
+    }
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
       if (committee.chair && committee.chair.person) {
-        parentFullNames.forEach(function (full) {
-          if (committee.chair.person === full) {
-            duties.push({icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board &middot; Year-long'});
-          }
-        });
+        // Skip if this chair role is already listed as a board role
+        // Handle abbreviated titles (e.g., "Communications Dir." vs "Communications Director")
+        var chairTitle = committee.chair.title.replace(/\bDir\.\s*$/, 'Director');
+        if (!fam.boardRole || !nameMatch(chairTitle, fam.boardRole)) {
+          parentFullNames.forEach(function (full) {
+            if (nameMatch(committee.chair.person, full)) {
+              duties.push({icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board &middot; Year-long', popup: {type: 'committee', name: committee.name}});
+            }
+          });
+        }
       }
       committee.roles.forEach(function (r) {
         parentFullNames.forEach(function (full) {
-          if (r.person === full) {
-            duties.push({icon: 'volunteer', text: r.title, detail: committee.name + ' &middot; Year-long'});
+          if (nameMatch(r.person, full)) {
+            duties.push({icon: 'volunteer', text: r.title, detail: committee.name + ' &middot; Year-long', popup: {type: 'committee', name: committee.name}});
           }
         });
       });
     });
 
-    // Cleaning crew
+    // Cleaning crew — match by family last name or any parent full name
     var sessClean = CLEANING_CREW.sessions[currentSession];
     if (sessClean) {
       var cleanAreas = ['mainFloor', 'upstairs', 'outside'];
+      function matchesCleaning(names) {
+        return names.some(function(n) {
+          var nl = n.toLowerCase();
+          return nl === fam.name.toLowerCase() ||
+            parentFullNames.some(function(pf) { return nl.indexOf(pf.split(' ')[0].toLowerCase()) !== -1 && nl.indexOf(fam.name.toLowerCase()) !== -1; }) ||
+            parentFullNames.some(function(pf) { return nl === pf.toLowerCase(); });
+        });
+      }
       cleanAreas.forEach(function (floor) {
         if (!sessClean[floor]) return;
         var areas = Object.keys(sessClean[floor]);
         areas.forEach(function (area) {
-          if (sessClean[floor][area].indexOf(fam.name) !== -1) {
-            duties.push({icon: 'clean', text: 'Cleaning: ' + area, detail: 'Session ' + currentSession});
+          if (matchesCleaning(sessClean[floor][area])) {
+            duties.push({icon: 'clean', text: 'Cleaning: ' + area, detail: 'Session ' + currentSession, popup: {type: 'cleaning', area: area, floor: floor, session: currentSession}});
           }
         });
       });
-      if (sessClean.floater && sessClean.floater.indexOf(fam.name) !== -1) {
-        duties.push({icon: 'clean', text: 'Cleaning Floater', detail: 'Session ' + currentSession});
+      if (sessClean.floater && matchesCleaning(sessClean.floater)) {
+        duties.push({icon: 'clean', text: 'Cleaning Floater', detail: 'Session ' + currentSession, popup: {type: 'cleaning', area: 'Floater', floor: 'floater', session: currentSession}});
       }
     }
 
@@ -1361,81 +2106,165 @@
       });
       var statusClass = ev.status === 'Complete' ? 'mf-status-done' : ev.status === 'Needs Volunteers' ? 'mf-status-open' : 'mf-status-upcoming';
       if (isCoord) {
-        duties.push({icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>'});
+        duties.push({icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>', popup: {type: 'event', name: ev.name}});
       }
     });
 
     if (duties.length === 0) {
       html += '<p class="mf-empty">No assignments found for this session.</p>';
     } else {
-      duties.forEach(function (d) {
-        html += '<div class="mf-duty">';
+      duties.forEach(function (d, di) {
+        html += '<div class="mf-duty mf-duty-clickable" data-duty-idx="' + di + '" style="cursor:pointer;">';
         html += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
         html += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span></div>';
+        html += '<div class="mf-duty-arrow" style="margin-left:auto;opacity:0.4;font-size:1.1rem;">&rsaquo;</div>';
         html += '</div>';
       });
     }
     html += '</div>';
 
     // ──── Billing card ────
-    var billing = BILLING[fam.name];
     html += '<div class="mf-card mf-billing-card">';
     html += '<h3 class="mf-card-title">Billing &amp; Fees</h3>';
-    if (billing) {
-      var semesters = ['spring', 'fall'];
-      semesters.forEach(function (key) {
-        var sem = billing[key];
-        if (!sem) return;
-        var isPaid = sem.status === 'Paid';
-        var statusClass = isPaid ? 'mf-billing-paid' : (sem.status === 'Overdue' ? 'mf-billing-overdue' : 'mf-billing-due-status');
+
+    var semKeys = ['fall', 'spring'];
+
+    // ── Each semester: deposit then fees ──
+    semKeys.forEach(function (semKey) {
+      var sem = calculateSemesterFees(fam, semKey);
+      if (!sem) return;
+
+      // Deposit subsection
+      if (sem.deposit) {
+        var depPaid = sem.depositStatus === 'Paid';
+        var depStatusClass = depPaid ? 'mf-billing-paid' : 'mf-billing-due-status';
         html += '<div class="mf-billing-semester">';
         html += '<div class="mf-billing-header">';
-        html += '<strong>' + sem.semester + '</strong>';
-        html += '<span class="mf-billing-status ' + statusClass + '">' + sem.status + '</span>';
+        html += '<strong>' + sem.name + ' Deposit</strong>';
+        html += '<span class="mf-billing-status ' + depStatusClass + '">' + sem.depositStatus + '</span>';
         html += '</div>';
-        html += '<div class="mf-billing-due">Due: ' + new Date(sem.dueDate + 'T00:00:00').toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'}) + '</div>';
         html += '<div class="mf-billing-lines">';
-        sem.lineItems.forEach(function (item) {
-          html += '<div class="mf-billing-line">';
-          html += '<span>' + item.label + '</span>';
-          html += '<span>$' + item.amount.toFixed(2) + '</span>';
-          html += '</div>';
-        });
         html += '<div class="mf-billing-line mf-billing-total">';
-        html += '<span>Total</span>';
-        html += '<span>$' + sem.totalDue.toFixed(2) + '</span>';
+        html += '<span>Deposit (per family)</span>';
+        html += '<span>$' + sem.deposit.toFixed(2) + '</span>';
         html += '</div>';
-        if (!isPaid && sem.totalPaid > 0) {
-          html += '<div class="mf-billing-line mf-billing-paid-line">';
-          html += '<span>Paid</span>';
-          html += '<span>$' + sem.totalPaid.toFixed(2) + '</span>';
-          html += '</div>';
-          html += '<div class="mf-billing-line mf-billing-balance">';
-          html += '<span>Balance due</span>';
-          html += '<span>$' + (sem.totalDue - sem.totalPaid).toFixed(2) + '</span>';
-          html += '</div>';
-        }
-        if (!isPaid && BILLING._meta.paypalLink) {
-          var payAmount = sem.totalDue - sem.totalPaid;
+        html += '</div>';
+        if (!depPaid) {
+          var depBtnId = 'paypal-dep-' + semKey;
           html += '<div class="mf-billing-pay-wrap">';
-          html += '<a href="' + BILLING._meta.paypalLink + '/' + payAmount.toFixed(2) + '" target="_blank" rel="noopener noreferrer" class="mf-billing-pay-btn">';
+          html += '<button class="mf-billing-pay-btn" id="' + depBtnId + '">';
           html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
-          html += ' Pay $' + payAmount.toFixed(2) + '</a>';
+          html += ' Pay $' + sem.deposit.toFixed(2) + '</button>';
           html += '</div>';
         }
-        html += '</div></div>';
-      });
-      html += '<div class="mf-billing-footer">';
-      html += '<p><a href="' + BILLING._meta.paypalLink + '" target="_blank" rel="noopener noreferrer" class="mf-billing-contact-link">PayPal</a> or check &mdash; checks payable to <em>' + BILLING._meta.checkPayableTo + '</em></p>';
-      html += '<p class="mf-billing-contact">Questions? <a href="mailto:treasurer@rootsandwingsindy.com">treasurer@rootsandwingsindy.com</a></p>';
+        html += '</div>';
+      }
+
+      // Semester fees subsection
+      var isPaid = sem.status === 'Paid';
+      var statusClass = isPaid ? 'mf-billing-paid' : 'mf-billing-due-status';
+      var dueStr = new Date(sem.dueDate + 'T00:00:00').toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'});
+
+      html += '<div class="mf-billing-semester">';
+      html += '<div class="mf-billing-header">';
+      html += '<strong>' + sem.name + '</strong>';
+      html += '<span class="mf-billing-status ' + statusClass + '">' + sem.status + '</span>';
       html += '</div>';
-    } else {
-      html += '<p class="mf-empty">Billing information is not yet available for your family. Contact <a href="mailto:treasurer@rootsandwingsindy.com">the Treasurer</a> with questions.</p>';
-    }
+      html += '<div class="mf-billing-due">Due: ' + dueStr + '</div>';
+      html += '<div class="mf-billing-lines">';
+
+      // Consolidated line items
+      var programmingKids = fam.kids.filter(function(k) { return k.group !== 'Greenhouse'; });
+      var fullDayKids = programmingKids.filter(function(k) { return !k.schedule || k.schedule === 'all-day'; });
+      var nSessions = sem.sessionCount;
+
+      html += '<div class="mf-billing-line">';
+      html += '<span>Member fee (per family)</span>';
+      html += '<span>$' + sem.memberFee.toFixed(2) + '</span>';
+      html += '</div>';
+
+      if (fullDayKids.length > 0) {
+        var amTotal = fullDayKids.length * BILLING_CONFIG.amFeePerSession * nSessions;
+        var pmTotal = fullDayKids.length * BILLING_CONFIG.pmFeePerSession * nSessions;
+        html += '<div class="mf-billing-line">';
+        html += '<span>AM class fees (' + fullDayKids.length + (fullDayKids.length === 1 ? ' kid' : ' kids') + ' \u00d7 $' + BILLING_CONFIG.amFeePerSession + ' \u00d7 ' + nSessions + ' sessions)</span>';
+        html += '<span>$' + amTotal.toFixed(2) + '</span>';
+        html += '</div>';
+        html += '<div class="mf-billing-line">';
+        html += '<span>PM class fees (' + fullDayKids.length + (fullDayKids.length === 1 ? ' kid' : ' kids') + ' \u00d7 $' + BILLING_CONFIG.pmFeePerSession + ' \u00d7 ' + nSessions + ' sessions)</span>';
+        html += '<span>$' + pmTotal.toFixed(2) + '</span>';
+        html += '</div>';
+      }
+      var morningOnly = programmingKids.filter(function(k) { return k.schedule === 'morning'; });
+      var afternoonOnly = programmingKids.filter(function(k) { return k.schedule === 'afternoon'; });
+      if (morningOnly.length > 0) {
+        html += '<div class="mf-billing-line">';
+        html += '<span>AM only (' + morningOnly.map(function(k){return k.name;}).join(', ') + ' \u00d7 ' + nSessions + ' sessions)</span>';
+        html += '<span>$' + (morningOnly.length * BILLING_CONFIG.amFeePerSession * nSessions).toFixed(2) + '</span>';
+        html += '</div>';
+      }
+      if (afternoonOnly.length > 0) {
+        html += '<div class="mf-billing-line">';
+        html += '<span>PM only (' + afternoonOnly.map(function(k){return k.name;}).join(', ') + ' \u00d7 ' + nSessions + ' sessions)</span>';
+        html += '<span>$' + (afternoonOnly.length * BILLING_CONFIG.pmFeePerSession * nSessions).toFixed(2) + '</span>';
+        html += '</div>';
+      }
+
+      // Total
+      html += '<div class="mf-billing-line mf-billing-total">';
+      html += '<span>Total</span>';
+      html += '<span>$' + sem.subtotal.toFixed(2) + '</span>';
+      html += '</div>';
+
+      // Deposit credit
+      if (sem.deposit > 0) {
+        html += '<div class="mf-billing-line mf-billing-paid-line">';
+        html += '<span>Deposit applied</span>';
+        html += '<span>&minus;$' + sem.deposit.toFixed(2) + '</span>';
+        html += '</div>';
+      }
+
+      // Processing fee
+      html += '<div class="mf-billing-line mf-billing-fee-line">';
+      html += '<span>Processing fee</span>';
+      html += '<span>$' + sem.paypalFee.toFixed(2) + '</span>';
+      html += '</div>';
+
+      // Balance due
+      html += '<div class="mf-billing-line mf-billing-balance">';
+      html += '<span>Balance due</span>';
+      html += '<span>$' + sem.total.toFixed(2) + '</span>';
+      html += '</div>';
+      html += '</div>';
+
+      // Pay button (only if not paid)
+      if (!isPaid) {
+        var paypalContainerId = 'paypal-btn-' + semKey;
+        html += '<div class="mf-billing-pay-wrap">';
+        html += '<button class="mf-billing-pay-btn" id="' + paypalContainerId + '">';
+        html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
+        html += ' Pay $' + sem.total.toFixed(2) + '</button>';
+        html += '</div>';
+      }
+
+      html += '</div>';
+    });
+    html += '<div class="mf-billing-footer">';
+    html += '<p>Also accepted: check payable to <em>' + BILLING_CONFIG.checkPayableTo + '</em>, deliver to ' + BILLING_CONFIG.checkDeliverTo + '</p>';
+    html += '<p class="mf-billing-contact">Questions? <a href="mailto:treasurer@rootsandwingsindy.com">treasurer@rootsandwingsindy.com</a></p>';
+    html += '</div>';
     html += '</div>';
 
     grid.innerHTML = html;
     section.style.display = '';
+
+    // Wire up duty detail popups
+    grid.querySelectorAll('.mf-duty-clickable').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var idx = parseInt(this.getAttribute('data-duty-idx'), 10);
+        if (duties[idx]) showDutyDetail(duties[idx]);
+      });
+    });
 
     // Wire up "View Class" buttons
     grid.querySelectorAll('.mf-class-link').forEach(function (btn) {
@@ -1458,11 +2287,61 @@
         showElectiveDetail(elecName);
       });
     });
+
+    // Wire up PayPal pay buttons (semester fees + deposits)
+    function wirePaypalButton(btnId, amount, description, invoiceId, email) {
+      var btn = document.getElementById(btnId);
+      if (!btn || typeof paypal_sdk === 'undefined') return;
+      btn.onclick = function () {
+        paypal_sdk.Buttons({
+          fundingSource: paypal_sdk.FUNDING.PAYPAL,
+          style: { layout: 'horizontal', color: 'gold', shape: 'rect', label: 'pay', height: 40 },
+          createOrder: function (data, actions) {
+            return actions.order.create({
+              purchase_units: [{
+                amount: { value: amount, currency_code: 'USD' },
+                description: description,
+                invoice_id: invoiceId,
+                custom_id: email
+              }]
+            });
+          },
+          onApprove: function (data, actions) {
+            return actions.order.capture().then(function (details) {
+              var wrap = btn.closest('.mf-billing-pay-wrap');
+              wrap.innerHTML = '<div class="mf-billing-success">Payment complete! Transaction ID: ' + details.id + '</div>';
+            });
+          },
+          onError: function (err) {
+            var wrap = btn.closest('.mf-billing-pay-wrap');
+            wrap.innerHTML = '<div class="mf-billing-error">Payment could not be processed. Please try again or contact <a href="mailto:treasurer@rootsandwingsindy.com">the Treasurer</a>.</div>';
+          }
+        }).render(btn.closest('.mf-billing-pay-wrap')).then(function () {
+          btn.style.display = 'none';
+        });
+      };
+    }
+
+    ['fall', 'spring'].forEach(function (semKey) {
+      var sem = calculateSemesterFees(fam, semKey);
+      if (!sem) return;
+      var capKey = semKey.charAt(0).toUpperCase() + semKey.slice(1);
+      // Deposit button
+      wirePaypalButton('paypal-dep-' + semKey, sem.deposit.toFixed(2),
+        sem.name + ' deposit \u2014 ' + fam.name + ' family',
+        'RW-' + capKey + '-Dep-' + fam.name + '-' + new Date().getFullYear(), fam.email);
+      // Semester fees button
+      wirePaypalButton('paypal-btn-' + semKey, sem.total.toFixed(2),
+        sem.name + ' fees \u2014 ' + fam.name + ' family',
+        'RW-' + capKey + '-' + fam.name + '-' + new Date().getFullYear(), fam.email);
+    });
   }
 
   // Elective detail popup (enhanced)
   function showElectiveDetail(elecName) {
-    var sessElectives = PM_ELECTIVES[currentSession] || [];
+    // Check the pager's viewed session first, fall back to currentSession
+    var viewSess = (typeof sessionTabView !== 'undefined') ? sessionTabView : currentSession;
+    var sessElectives = PM_ELECTIVES[viewSess] || [];
     var elec = null;
     for (var i = 0; i < sessElectives.length; i++) {
       if (sessElectives[i].name === elecName) { elec = sessElectives[i]; break; }
@@ -1596,7 +2475,7 @@
 
     // Morning classes table
     html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
-    html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Teacher</th><th>Room</th></tr></thead><tbody>';
+    html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Room</th></tr></thead><tbody>';
     var groups = Object.keys(AM_CLASSES);
     groups.forEach(function (groupName) {
       var cls = AM_CLASSES[groupName];
@@ -1804,7 +2683,7 @@
     if (!container) return;
 
     var html = '<h3>Class Ideas Board</h3>';
-    html += '<p style="color:var(--color-text-light);margin-bottom:20px;">Have an idea for a class? Share it in the <a href="https://docs.google.com/spreadsheets/d/PLACEHOLDER-MASTER" target="_blank">master spreadsheet</a> or the Google Chat!</p>';
+    html += '<p style="color:var(--color-text-light);margin-bottom:20px;">Have an idea for a class? Share it in the <a href="https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit?gid=0#gid=0" target="_blank">master spreadsheet</a> or the Google Chat!</p>';
     html += '<div class="ideas-grid">';
 
     var groups = Object.keys(CLASS_IDEAS);
@@ -1823,13 +2702,76 @@
     container.innerHTML = html;
   }
 
+  // Class Ideas popup (from Resources card)
+  function showClassIdeasPopup() {
+    if (!personDetail || !personDetailCard) return;
+
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail">';
+    html += '<h3>Class Ideas Board</h3>';
+    html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Share it in the <a href="https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit?gid=0#gid=0" target="_blank" style="color:var(--color-primary);">master spreadsheet</a> or Google Chat!</p>';
+
+    var groups = Object.keys(CLASS_IDEAS);
+    groups.forEach(function (group) {
+      var ideas = CLASS_IDEAS[group];
+      html += '<div style="margin-bottom:1.25rem;">';
+      html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + group + '</h4>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      ideas.forEach(function (idea) {
+        html += '<span class="idea-chip">' + idea + '</span>';
+      });
+      html += '</div></div>';
+    });
+
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) {
+      if (e.target === personDetail) closeDetail();
+    });
+  }
+
+  // Wire up WiFi nav button
+  var wifiNavBtn = document.getElementById('wifiNavBtn');
+  if (wifiNavBtn) {
+    wifiNavBtn.addEventListener('click', function () {
+      if (!personDetail || !personDetailCard) return;
+      var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+      html += '<div class="elective-detail" style="text-align:center;">';
+      html += '<h3>WiFi</h3>';
+      html += '<p style="font-size:0.85rem;color:var(--color-text-light);margin-bottom:1rem;">The network is hidden \u2014 select "Find other/new network" on your device. Adults only, except for specific needs like online classes.</p>';
+      html += '<div style="display:flex;justify-content:center;gap:1.5rem;flex-wrap:wrap;margin:0.5rem 0;">';
+      html += '<div><span style="color:var(--color-text-light);font-size:0.75rem;">Network</span><br><strong>ROOTS</strong></div>';
+      html += '<div><span style="color:var(--color-text-light);font-size:0.75rem;">Password</span><br><strong style="font-family:monospace;">Educ@t3!</strong></div>';
+      html += '<div><span style="color:var(--color-text-light);font-size:0.75rem;">Security</span><br><strong>WPA2/WPA3</strong></div>';
+      html += '</div>';
+      html += '</div>';
+      personDetailCard.innerHTML = html;
+      personDetail.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+      personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+      personDetail.addEventListener('click', function (e) {
+        if (e.target === personDetail) closeDetail();
+      });
+    });
+  }
+
+  // Wire up Class Ideas button
+  var classIdeasBtn = document.getElementById('classIdeasBtn');
+  if (classIdeasBtn) {
+    classIdeasBtn.addEventListener('click', function () {
+      showClassIdeasPopup();
+    });
+  }
+
   // Render all coordination tabs
   function renderCoordinationTabs() {
     renderSessionTab();
     renderCleaningTab();
     renderVolunteersTab();
     renderEventsTab();
-    renderIdeasTab();
   }
 
   // Render tabs on load
@@ -1847,16 +2789,17 @@
   // Set this to your Google Cloud OAuth Client ID to enable Google Sign-In.
   // Leave as empty string to use password-only auth.
   //
-  var GOOGLE_CLIENT_ID = ''; // e.g., '123456789.apps.googleusercontent.com'
+  var GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
   //
   // Optional: restrict to your Google Workspace domain
-  var ALLOWED_DOMAIN = ''; // e.g., 'rootsandwingsindy.com'
+  var ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
-  if (GOOGLE_CLIENT_ID && typeof google !== 'undefined' && google.accounts) {
+  function initGoogleSignIn() {
+    if (!GOOGLE_CLIENT_ID || typeof google === 'undefined' || !google.accounts) return false;
     google.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
       callback: handleGoogleSignIn,
-      auto_select: false // Always show account picker
+      auto_select: false
     });
 
     var googleBtn = document.getElementById('googleSignInBtn');
@@ -1869,10 +2812,13 @@
         width: 280
       });
 
-      // Show the divider
-      var divider = document.getElementById('loginDivider');
-      if (divider) divider.style.display = '';
     }
+    return true;
+  }
+
+  // Try immediately if library already loaded, otherwise wait for onload callback
+  if (!initGoogleSignIn()) {
+    window.__initGSI = initGoogleSignIn;
   }
 
   function handleGoogleSignIn(response) {
@@ -1889,10 +2835,11 @@
         return;
       }
 
-      // Success — store session and show dashboard
+      // Success — store session and credential for API auth
       sessionStorage.setItem(SESSION_KEY, 'true');
       sessionStorage.setItem('rw_user_name', payload.name || '');
       sessionStorage.setItem('rw_user_email', email);
+      sessionStorage.setItem('rw_google_credential', response.credential);
       showDashboard();
     } catch (err) {
       console.error('Google Sign-In error:', err);
@@ -1944,14 +2891,16 @@
       font: 'Fraunces',
       logo: 'logo-mark.svg',
       watermark: 'logo-mark.png',
-      swatches: ['#5B8A8D', '#3D6B6E', '#D4915E', '#7A9E7E']
+      brandText: 'ROOTS & WINGS',
+      swatches: ['#6B5E7B', '#4E4360', '#D4915E', '#9B8AAE']
     },
     {
       id: 'playfair',
       label: 'Style 2',
       font: 'Playfair Display',
-      logo: 'logo-new.png',
-      watermark: 'logo-new.png',
+      logo: 'Image_20260404_230404_036.png',
+      watermark: 'Image_20260404_230404_036.png',
+      brandText: 'Roots & Wings',
       swatches: ['#2D6A3F', '#1E4F2E', '#D4712A', '#8DB43E']
     },
     {
@@ -1960,6 +2909,7 @@
       font: 'Cormorant Garamond',
       logo: 'logo-style3.png',
       watermark: 'logo-style3.png',
+      brandText: 'ROOTS & WINGS',
       swatches: ['#6B4E71', '#4E3754', '#D4915E', '#B68CB5']
     }
   ];
@@ -1995,6 +2945,39 @@
     // Update favicon
     var favicon = document.querySelector('link[rel="icon"]');
     if (favicon) favicon.setAttribute('href', theme.logo);
+
+    // Update brand text and logo display
+    if (theme.useFullLogo) {
+      // Full logo mode: hide text, use larger logo image that includes text
+      document.querySelectorAll('.nav-brand-text, .login-brand-text').forEach(function(el) {
+        el.style.display = 'none';
+      });
+      document.querySelectorAll('.nav-brand img').forEach(function(img) {
+        img.style.height = '56px';
+        img.style.width = 'auto';
+      });
+      document.querySelectorAll('.footer-brand .nav-brand-text').forEach(function(el) {
+        el.style.display = 'none';
+      });
+    } else {
+      var brandText = theme.brandText || 'ROOTS & WINGS';
+      document.querySelectorAll('.nav-brand-text, .login-brand-text').forEach(function(el) {
+        el.style.display = '';
+        var span = el.querySelector('span');
+        var spanHtml = span ? span.outerHTML : '<span>Indianapolis</span>';
+        el.innerHTML = brandText + '\n          ' + spanHtml;
+      });
+      document.querySelectorAll('.nav-brand img').forEach(function(img) {
+        img.style.height = '';
+        img.style.width = '';
+      });
+      document.querySelectorAll('.footer-brand .nav-brand-text').forEach(function(el) {
+        el.style.display = '';
+        var span = el.querySelector('span');
+        var spanHtml = span ? span.outerHTML : '<span>Indianapolis</span>';
+        el.innerHTML = brandText + '\n            ' + spanHtml;
+      });
+    }
 
     // Update active state in panel
     document.querySelectorAll('.style-option').forEach(function (btn) {

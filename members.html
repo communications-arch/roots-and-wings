@@ -22,16 +22,7 @@
   <link rel="preload" href="logo-mark.svg" as="image">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="logo-new.png" type="image/png">
-  <!--
-    GOOGLE SIGN-IN SETUP:
-    1. Go to https://console.cloud.google.com/
-    2. Create a project (or use existing)
-    3. APIs & Services → Credentials → Create OAuth Client ID → Web application
-    4. Add your domain to Authorized JavaScript origins
-    5. Copy the Client ID and paste it into the GOOGLE_CLIENT_ID variable in script.js
-    6. Optional: restrict to your Workspace domain via the "hd" parameter
-  -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="if(window.__initGSI)window.__initGSI()"></script>
 </head>
 <body>
 
@@ -42,41 +33,18 @@
         <img src="logo-new.png" alt="" width="90" onerror="this.style.display='none'">
       </div>
       <div class="login-brand-text">
-        ROOTS AND WINGS
+        ROOTS & WINGS
         <span>Indianapolis</span>
       </div>
       <h2>Member Portal</h2>
-      <p>Sign in to access co-op resources, schedules, and more.</p>
+      <p>Sign in with your @rootsandwingsindy.com Google account to access co-op resources, schedules, and more.</p>
 
-      <!-- Google Sign-In Button (renders when client ID is configured) -->
-      <div id="googleSignInBtn" style="display:flex;justify-content:center;margin-bottom:16px;"></div>
+      <!-- Google Sign-In Button -->
+      <div id="googleSignInBtn" style="display:flex;justify-content:center;margin-top:20px;"></div>
 
-      <!-- Divider (shown when Google Sign-In is available) -->
-      <div id="loginDivider" class="login-divider" style="display:none;">
-        <span>or use the co-op password</span>
+      <div class="login-error" id="googleError" role="alert" style="display:none;">
+        This Google account isn't authorized. Please sign in with your @rootsandwingsindy.com account.
       </div>
-
-      <!-- Password Fallback -->
-      <form id="loginForm" novalidate>
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input
-            type="password"
-            id="password"
-            name="password"
-            placeholder="Enter member password"
-            autocomplete="current-password"
-            required
-          >
-        </div>
-        <div class="login-error" id="loginError" role="alert">
-          Incorrect password. Please try again or contact a co-op leader.
-        </div>
-        <div class="login-error" id="googleError" role="alert" style="display:none;">
-          This Google account isn't authorized. Please sign in with your co-op Google account, or use the password below.
-        </div>
-        <button type="submit" class="btn btn-primary">Sign In</button>
-      </form>
 
       <a href="index.html" class="login-back">&larr; Back to main site</a>
     </div>
@@ -91,7 +59,7 @@
         <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
           <img src="logo-new.png" alt="Roots & Wings Indy logo" width="48" height="48" onerror="this.style.display='none'">
           <div class="nav-brand-text">
-            Roots & Wings
+            ROOTS & WINGS
             <span>Indianapolis</span>
           </div>
         </a>
@@ -103,12 +71,15 @@
         </button>
 
         <div class="nav-quick-icons">
-          <a href="https://chat.google.com/room/PLACEHOLDER" class="nav-icon-btn" target="_blank" rel="noopener noreferrer" aria-label="Google Chat" title="Google Chat">
+          <a href="https://chat.google.com" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Google Chat" title="Google Chat">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           </a>
-          <a href="https://drive.google.com/drive/folders/PLACEHOLDER" class="nav-icon-btn" target="_blank" rel="noopener noreferrer" aria-label="Shared Drive" title="Shared Drive">
+          <a href="https://drive.google.com/drive/shared-drives" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Shared Drive" title="Shared Drive">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </a>
+          <button class="nav-icon-btn" id="wifiNavBtn" aria-label="WiFi Info" title="WiFi Info" style="background:none;border:none;cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          </button>
         </div>
 
         <div class="nav-links" role="menubar">
@@ -118,6 +89,17 @@
           <a href="#coordination" role="menuitem">Schedules</a>
           <a href="index.html" role="menuitem">Public Site</a>
           <button class="btn btn-outline-dark btn-sm" id="logoutBtn" type="button">Log Out</button>
+          <div class="nav-quick-icons-mobile">
+            <a href="https://chat.google.com" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Google Chat" title="Google Chat">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </a>
+            <a href="https://drive.google.com/drive/shared-drives" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Shared Drive" title="Shared Drive">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </a>
+            <button class="nav-icon-btn" onclick="document.getElementById('wifiNavBtn').click()" aria-label="WiFi Info" title="WiFi Info" style="background:none;border:none;cursor:pointer;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </nav>
@@ -145,7 +127,7 @@
       <div class="container">
         <h2 class="text-center fade-in">Resources</h2>
         <div class="links-grid">
-          <a href="https://docs.google.com/document/d/PLACEHOLDER" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+          <a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
             <div class="link-card-icon" aria-hidden="true">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
             </div>
@@ -153,7 +135,7 @@
             <p>Policies, guidelines, and co-op expectations</p>
           </a>
 
-          <a href="https://docs.google.com/forms/d/PLACEHOLDER-REIMBURSEMENT" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+          <a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
             <div class="link-card-icon" aria-hidden="true">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
@@ -161,7 +143,7 @@
             <p>Submit receipts for co-op expenses</p>
           </a>
 
-          <a href="https://docs.google.com/forms/d/PLACEHOLDER-WAIVER" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+          <a href="https://forms.gle/oqNx4G6LiRJW17G27" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
             <div class="link-card-icon" aria-hidden="true">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             </div>
@@ -169,12 +151,28 @@
             <p>Annual waiver form for each family</p>
           </a>
 
-          <a href="https://drive.google.com/drive/folders/PLACEHOLDER-CURRICULA" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+          <a href="https://drive.google.com/drive/folders/0AEniwjRY1eYcUk9PVA?dmr=1&ec=wgc-drive-globalnav-goto" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
             <div class="link-card-icon" aria-hidden="true">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             </div>
             <h3>Curricula Repository</h3>
             <p>Shared curriculum resources and lesson plans</p>
+          </a>
+
+          <button class="link-card fade-in" id="classIdeasBtn" style="text-align:left;border:none;cursor:pointer;">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
+            </div>
+            <h3>Class Ideas</h3>
+            <p>Browse and share ideas for future classes</p>
+          </button>
+
+          <a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
+            <div class="link-card-icon" aria-hidden="true">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <h3>Google Chat Guide</h3>
+            <p>Our chat spaces and which ones to join</p>
           </a>
         </div>
       </div>
@@ -189,15 +187,15 @@
         <!-- Group filter pills -->
         <div class="directory-filters fade-in" id="directoryFilters">
           <button class="filter-pill" data-filter="all">Everyone</button>
-          <button class="filter-pill" data-filter="Greenhouse">Greenhouse</button>
-          <button class="filter-pill" data-filter="Saplings">Saplings</button>
-          <button class="filter-pill" data-filter="Sassafras">Sassafras</button>
-          <button class="filter-pill" data-filter="Oaks">Oaks</button>
-          <button class="filter-pill" data-filter="Maples">Maples</button>
-          <button class="filter-pill" data-filter="Birch">Birch</button>
-          <button class="filter-pill" data-filter="Willows">Willows</button>
-          <button class="filter-pill" data-filter="Cedars">Cedars</button>
-          <button class="filter-pill" data-filter="Pigeons">Pigeons</button>
+          <button class="filter-pill" data-filter="Greenhouse">Greenhouse (0-2)</button>
+          <button class="filter-pill" data-filter="Saplings">Saplings (3-5)</button>
+          <button class="filter-pill" data-filter="Sassafras">Sassafras (3-6)</button>
+          <button class="filter-pill" data-filter="Oaks">Oaks (7-8)</button>
+          <button class="filter-pill" data-filter="Maples">Maples (8-9)</button>
+          <button class="filter-pill" data-filter="Birch">Birch (9-10)</button>
+          <button class="filter-pill" data-filter="Willows">Willows (10-12)</button>
+          <button class="filter-pill" data-filter="Cedars">Cedars (12-13)</button>
+          <button class="filter-pill" data-filter="Pigeons">Pigeons (14+)</button>
           <button class="filter-pill active" data-filter="parents">Parents Only</button>
         </div>
 
@@ -223,12 +221,16 @@
       <div class="container">
         <h2 class="text-center fade-in">Co-op Calendar</h2>
         <p class="section-subtitle text-center fade-in">Upcoming co-op days, field trips, and events.</p>
-        <div class="calendar-embed fade-in">
-          <!-- Replace PLACEHOLDER with your Google Calendar embed URL -->
-          <iframe src="https://calendar.google.com/calendar/embed?src=PLACEHOLDER&ctz=America/Indiana/Indianapolis&mode=AGENDA&showTitle=0&showNav=1&showPrint=0&showTabs=0&showCalendars=0"
-                  style="border:0; width:100%; min-height:500px; border-radius:12px;"
-                  frameborder="0" scrolling="no" title="Co-op Calendar"></iframe>
+        <div id="calendarEvents" class="calendar-events fade-in" style="background:var(--color-white); border-radius:var(--radius-md); border:1px solid var(--color-border); padding:24px; min-height:200px;">
+          <div style="text-align:center;color:var(--color-text-light);padding:40px 0;">Loading events...</div>
         </div>
+        <div style="display:flex; justify-content:center; margin-top:20px;">
+          <a href="https://calendar.google.com/calendar/u/0?cid=Y19mZGMwYjIwY2FiYTY1MjYyYjlhYWM5NWFjMWRmNjM4YWI4OTJmY2RmMWVlMWFkNzlhMTg4MGRjYzJhOTViMjkxQGdyb3VwLmNhbGVuZGFyLmdvb2dsZS5jb20" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Add to Google Calendar
+          </a>
+        </div>
+        <p class="text-center fade-in" style="font-size:0.85rem; color:var(--color-text-light); margin-top:10px;">Subscribe to stay up to date in your Google Calendar.</p>
       </div>
     </section>
 
@@ -238,7 +240,7 @@
         <h2 class="text-center fade-in">Co-op Coordination</h2>
         <p class="section-subtitle text-center fade-in">
           Schedules, volunteer assignments, and planning — all in one place.
-          <a href="https://docs.google.com/spreadsheets/d/PLACEHOLDER-MASTER" target="_blank" rel="noopener noreferrer" class="coordination-edit-link">Open full spreadsheet &rarr;</a>
+          <a href="https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit?gid=0#gid=0" target="_blank" rel="noopener noreferrer" class="coordination-edit-link">Open full spreadsheet &rarr;</a>
         </p>
 
         <div class="portal-tabs fade-in">
@@ -247,7 +249,6 @@
             <button class="portal-tab" role="tab" data-tab="cleaning">Cleaning Crew</button>
             <button class="portal-tab" role="tab" data-tab="volunteers">Volunteers</button>
             <button class="portal-tab" role="tab" data-tab="events">Special Events</button>
-            <button class="portal-tab" role="tab" data-tab="ideas">Class Ideas</button>
           </div>
 
           <!-- Current Session (JS-rendered) -->
@@ -270,10 +271,7 @@
             <div id="eventsTabContent"></div>
           </div>
 
-          <!-- Class Ideas (JS-rendered) -->
-          <div class="portal-tab-panel" id="tab-ideas" role="tabpanel">
-            <div id="ideasTabContent"></div>
-          </div>
+          <!-- Class Ideas removed — now in Resources popup -->
         </div>
       </div>
     </section>
@@ -284,6 +282,14 @@
         <h2 class="text-center fade-in">Location &amp; Info</h2>
         <div class="location-grid fade-in">
           <div class="location-map">
+            <div class="info-card" style="margin-bottom:16px;">
+              <h4>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Address
+              </h4>
+              <p>First Mennonite Church<br>4601 Knollton Rd<br>Indianapolis, IN 46228</p>
+              <a href="https://maps.google.com/?q=4601+Knollton+Rd+Indianapolis+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
+            </div>
             <iframe
               src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3056.8!2d-86.19!3d39.83!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zFirst+Mennonite+Church+Indianapolis!5e0!3m2!1sen!2sus!4v1"
               width="100%" height="300" style="border:0;border-radius:var(--radius-md);" allowfullscreen loading="lazy"
@@ -293,27 +299,26 @@
           <div class="location-info">
             <div class="info-card">
               <h4>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                Address
-              </h4>
-              <p>First Mennonite Church<br>4601 Knollton Rd<br>Indianapolis, IN 46228</p>
-              <a href="https://maps.google.com/?q=4601+Knollton+Rd+Indianapolis+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
-            </div>
-            <div class="info-card">
-              <h4>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
                 Wifi
               </h4>
               <div class="wifi-credentials">
                 <div class="wifi-field">
                   <span class="wifi-label">Network</span>
-                  <span class="wifi-value">PLACEHOLDER_NETWORK</span>
+                  <span class="wifi-value">ROOTS</span>
                 </div>
                 <div class="wifi-field">
                   <span class="wifi-label">Password</span>
-                  <span class="wifi-value">PLACEHOLDER_PASSWORD</span>
+                  <span class="wifi-value">Educ@t3!</span>
+                </div>
+                <div class="wifi-field">
+                  <span class="wifi-label">Security</span>
+                  <span class="wifi-value">WPA2/WPA3</span>
                 </div>
               </div>
+              <p style="font-size:0.8rem; color:var(--color-text-light); margin-top:10px;">
+                <strong>Note:</strong> The network is hidden — select "Find other/new network" (or similar) on your device the first time. Adults only, except for specific needs like online classes.
+              </p>
             </div>
             <div class="info-card">
               <h4>
@@ -343,7 +348,7 @@
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <div>
             <strong>Announcements &amp; Updates</strong>
-            <p>Check the <a href="https://chat.google.com/room/PLACEHOLDER" target="_blank" rel="noopener noreferrer">Announcements thread in Google Chat</a> for the latest co-op news, schedule changes, and event info.</p>
+            <p>Check the <a href="https://chat.google.com/app/chat/AAAAAjjMfcQ" target="_blank" rel="noopener noreferrer">Announcements thread in Google Chat</a> for the latest co-op news, schedule changes, and event info.</p>
           </div>
         </div>
       </div>
@@ -358,49 +363,49 @@
           <button class="portal-board-card fade-in" data-board="Molly Bellner" data-board-role="President" data-board-email="president@rootsandwingsindy.com" data-board-family="Bellner">
             <img src="photo-molly.jpg" alt="Molly Bellner" class="portal-board-photo">
             <h4>Molly Bellner</h4>
-            <span class="board-role">President</span>
+            <span class="board-role">🌳 President</span>
             <ul class="board-bullets"><li>Building &amp; grounds oversight</li><li>FMC relationship &amp; facility coordination</li></ul>
             <span class="portal-board-email">president@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Colleen Raymont" data-board-role="Vice President" data-board-email="vp@rootsandwingsindy.com" data-board-family="Raymont">
             <img src="photo-colleen.jpg" alt="Colleen Raymont" class="portal-board-photo">
             <h4>Colleen Raymont</h4>
-            <span class="board-role">Vice President</span>
+            <span class="board-role">🌿 Vice President</span>
             <ul class="board-bullets"><li>Class planning &amp; session scheduling</li><li>Supporting class leads &amp; assistants</li></ul>
             <span class="portal-board-email">vp@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Tiffany Smith" data-board-role="Membership Director" data-board-email="membership@rootsandwingsindy.com" data-board-family="Smith">
             <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="portal-board-photo">
             <h4>Tiffany Smith</h4>
-            <span class="board-role">Membership Director</span>
+            <span class="board-role">🌻 Membership Director</span>
             <ul class="board-bullets"><li>Enrollment &amp; new family onboarding</li><li>Registration &amp; class placement</li></ul>
             <span class="portal-board-email">membership@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Jessica Shewan" data-board-role="Treasurer" data-board-email="treasurer@rootsandwingsindy.com" data-board-family="Shewan">
             <img src="photo-jessica.jpg" alt="Jessica Shewan" class="portal-board-photo">
             <h4>Jessica Shewan</h4>
-            <span class="board-role">Treasurer</span>
+            <span class="board-role">🧮 Treasurer</span>
             <ul class="board-bullets"><li>Billing, fees &amp; reimbursements</li><li>Financial assistance &amp; fundraising</li></ul>
             <span class="portal-board-email">treasurer@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Anna Billingsley" data-board-role="Sustaining Director" data-board-email="sustaining@rootsandwingsindy.com" data-board-family="Billingsley">
             <div class="board-avatar" aria-hidden="true">AB</div>
             <h4>Anna Billingsley</h4>
-            <span class="board-role">Sustaining Director</span>
+            <span class="board-role">💚 Sustaining Director</span>
             <ul class="board-bullets"><li>Member retention &amp; satisfaction</li><li>Special event support &amp; burnout monitoring</li></ul>
             <span class="portal-board-email">sustaining@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="LeAnn Newlin" data-board-role="Secretary" data-board-email="secretary@rootsandwingsindy.com" data-board-family="Newlin">
             <img src="photo-leann.jpg" alt="LeAnn Newlin" class="portal-board-photo">
             <h4>LeAnn Newlin</h4>
-            <span class="board-role">Secretary</span>
+            <span class="board-role">✏️ Secretary</span>
             <ul class="board-bullets"><li>Meeting minutes &amp; official records</li><li>Government filings &amp; archives</li></ul>
             <span class="portal-board-email">secretary@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Erin Bogan" data-board-role="Communications Director" data-board-email="communications@rootsandwingsindy.com" data-board-family="Bogan">
             <img src="photo-erin.jpg" alt="Erin Bogan" class="portal-board-photo">
             <h4>Erin Bogan</h4>
-            <span class="board-role">Communications Director</span>
+            <span class="board-role">💬 Communications Director</span>
             <ul class="board-bullets"><li>Google Workspace &amp; member comms</li><li>Surveys, yearbook &amp; newsletter</li></ul>
             <span class="portal-board-email">communications@rootsandwingsindy.com</span>
           </button>
@@ -429,6 +434,8 @@
 
   </div><!-- end .dashboard -->
 
+  <!-- PayPal SDK: uncomment when production client-id is ready -->
+  <!-- <script src="https://www.paypal.com/sdk/js?client-id=PRODUCTION_ID&merchant-id=MHDL7HTNRVQHE&currency=USD&intent=capture&disable-funding=credit,card" data-namespace="paypal_sdk"></script> -->
   <script src="script.js"></script>
 </body>
 </html>
