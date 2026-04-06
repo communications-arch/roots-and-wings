@@ -2898,11 +2898,11 @@
       id: 'playfair',
       label: 'Style 2',
       font: 'Playfair Display',
-      logo: 'Image_20260405_161019_508.png',
-      watermark: 'Image_20260404_230404_036.png',
+      logo: 'logo-style2-full.png',
+      watermark: 'logo-style2-mark.png',
       brandText: 'Roots & Wings',
       useFullLogo: true,
-      swatches: ['#2D6A3F', '#1E4F2E', '#D4712A', '#8DB43E']
+      swatches: ['#1F6B3F', '#E8624E', '#4FB5B8', '#F0C674']
     },
     {
       id: 'style3',

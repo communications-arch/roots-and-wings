@@ -5,13 +5,13 @@
 
 /* ---------- Custom Properties ---------- */
 :root {
-  --color-primary: #2D6A3F;
-  --color-primary-dark: #1E4F2E;
-  --color-primary-light: #8DB43E;
-  --color-accent: #D4712A;
-  --color-accent-dark: #B35C1E;
-  --color-accent-light: #E8A628;
-  --color-sky: #5BACC8;
+  --color-primary: #1F6B3F;
+  --color-primary-dark: #134A2A;
+  --color-primary-light: #8DB840;
+  --color-accent: #E8624E;
+  --color-accent-dark: #C44A38;
+  --color-accent-light: #F0C674;
+  --color-sky: #4FB5B8;
   --color-cream: #F5F5F0;
   --color-cream-dark: #ECECE6;
   --color-white: #FFFFFF;
@@ -23,9 +23,9 @@
   --color-error: #C4847A;
 
   /* RGB channels for semi-transparent usage */
-  --color-primary-rgb: 45, 106, 63;
-  --color-accent-light-rgb: 232, 166, 40;
-  --color-primary-light-rgb: 141, 180, 62;
+  --color-primary-rgb: 31, 107, 63;
+  --color-accent-light-rgb: 240, 198, 116;
+  --color-primary-light-rgb: 141, 184, 64;
 
   --font-heading: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-body: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
