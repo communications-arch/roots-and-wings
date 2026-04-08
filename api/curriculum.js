@@ -51,12 +51,20 @@ function normalizeLesson(raw, lessonNumber) {
     title: String(raw.title || '').trim().slice(0, 200),
     overview: String(raw.overview || '').trim().slice(0, 2000),
     room_setup: String(raw.room_setup || '').trim().slice(0, 2000),
-    activity: Array.isArray(raw.activity)
-      ? raw.activity.map(s => String(s || '').trim()).filter(Boolean).slice(0, 30)
-      : [],
-    instruction: Array.isArray(raw.instruction)
-      ? raw.instruction.map(s => String(s || '').trim()).filter(Boolean).slice(0, 30)
-      : [],
+    // activity/instruction are parallel arrays — preserve index alignment.
+    // Trim trailing rows that are empty in BOTH arrays, but keep interior
+    // empties so a note on step 6 stays on step 6.
+    ...(function () {
+      var act = Array.isArray(raw.activity) ? raw.activity.map(s => String(s || '').trim()) : [];
+      var ins = Array.isArray(raw.instruction) ? raw.instruction.map(s => String(s || '').trim()) : [];
+      var len = Math.max(act.length, ins.length);
+      while (len > 0 && !(act[len - 1] || '') && !(ins[len - 1] || '')) len--;
+      act = act.slice(0, Math.min(len, 30));
+      ins = ins.slice(0, Math.min(len, 30));
+      while (act.length < ins.length) act.push('');
+      while (ins.length < act.length) ins.push('');
+      return { activity: act, instruction: ins };
+    })(),
     links: Array.isArray(raw.links)
       ? raw.links.map(l => ({
           label: String((l && l.label) || '').trim().slice(0, 200),
