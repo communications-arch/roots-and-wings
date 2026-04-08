@@ -4115,6 +4115,181 @@
     return html;
   }
 
+  function buildPrintHtml(curr) {
+    if (!curr) return '<p>Nothing to print.</p>';
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Build aggregated supply list (same logic as renderMasterSupplyList)
+    function norm(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+    var rows = [];
+    var keyToRow = {};
+    (curr.lessons || []).forEach(function (ls) {
+      (ls.supplies || []).forEach(function (s) {
+        var name = String(s.item_name || '').trim().replace(/\s+/g, ' ');
+        if (!name) return;
+        var qty = String(s.qty || '').trim();
+        var unit = s.qty_unit || '';
+        var notes = String(s.notes || '').trim().replace(/\s+/g, ' ');
+        var sig = norm(name) + '|' + norm(qty) + '|' + unit + '|' + norm(notes);
+        if (keyToRow[sig]) {
+          if (keyToRow[sig].lessons.indexOf(ls.lesson_number) === -1) {
+            keyToRow[sig].lessons.push(ls.lesson_number);
+          }
+        } else {
+          var row = { name: name, qty: qty, unit: unit, notes: notes, lessons: [ls.lesson_number] };
+          keyToRow[sig] = row;
+          rows.push(row);
+        }
+      });
+    });
+    rows.forEach(function (r) { r.lessons.sort(function (a, b) { return a - b; }); });
+
+    var css = [
+      '@page { margin: 0.5in; }',
+      '* { box-sizing: border-box; }',
+      'body { font-family: Georgia, serif; color: #000; max-width: 7.5in; margin: 0 auto; padding: 0.25in; line-height: 1.4; }',
+      'h1 { font-size: 22pt; margin: 0 0 4pt 0; padding-bottom: 6pt; border-bottom: 2pt solid #333; }',
+      '.meta { color: #555; font-size: 10pt; margin-bottom: 8pt; }',
+      '.author { color: #555; font-size: 9pt; font-style: italic; margin-bottom: 12pt; }',
+      '.overview { background: #f5f5f5; padding: 8pt 12pt; border-left: 3pt solid #333; font-size: 11pt; margin-bottom: 14pt; }',
+      '.master { border: 1.5pt solid #333; padding: 10pt 14pt; margin-bottom: 16pt; page-break-inside: avoid; }',
+      '.master h2 { font-size: 13pt; margin: 0 0 4pt 0; }',
+      '.master .sub { font-size: 9pt; color: #555; font-style: italic; margin: 0 0 6pt 0; }',
+      '.master ul { columns: 2; column-gap: 18pt; list-style: none; padding: 0; margin: 0; }',
+      '.master li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 4pt; font-size: 10pt; line-height: 1.35; break-inside: avoid; }',
+      '.master li::before { content: "☐  "; font-size: 13pt; }',
+      '.master .lessons, .master .qty, .master .notes { color: #555; font-size: 9pt; }',
+      '.lesson { border: 1pt solid #333; padding: 12pt 14pt; margin-bottom: 14pt; page-break-inside: avoid; }',
+      '.lesson-header { display: flex; align-items: baseline; gap: 8pt; padding-bottom: 4pt; border-bottom: 1pt solid #333; margin-bottom: 8pt; }',
+      '.lesson-num { background: #333; color: #fff; padding: 2pt 8pt; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }',
+      '.lesson-title { font-size: 13pt; font-weight: 700; }',
+      '.lesson-overview { font-style: italic; color: #444; font-size: 10pt; margin: 0 0 8pt 0; }',
+      '.section { margin-bottom: 8pt; font-size: 10pt; }',
+      '.section h3 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 3pt 0; color: #000; }',
+      '.section ul { list-style: none; padding: 0; margin: 0; }',
+      '.section ul.checks li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 3pt; }',
+      '.section ul.checks li::before { content: "☐  "; font-size: 13pt; }',
+      '.steps { display: grid; grid-template-columns: 24pt 1fr 1fr; gap: 8pt; }',
+      '.steps .header { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4pt; border-bottom: 1pt solid #333; }',
+      '.steps .num { text-align: right; padding-right: 4pt; font-weight: 700; }',
+      '.steps .cell { padding: 4pt 0; border-bottom: 0.5pt solid #ccc; }',
+      '.qty { color: #555; font-size: 9pt; }',
+      '.notes { color: #555; font-size: 9pt; font-style: italic; }',
+      '@media print { .no-print { display: none; } }',
+      '.no-print { text-align: center; padding: 12pt; background: #ffe; border-bottom: 1pt solid #ccc; margin: -0.25in -0.25in 12pt -0.25in; }',
+      '.no-print button { font-size: 11pt; padding: 6pt 16pt; cursor: pointer; }'
+    ].join('\n');
+
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(curr.title) + '</title><style>' + css + '</style></head><body>';
+    html += '<div class="no-print"><button onclick="window.print()">Print</button> · <button onclick="window.close()">Close</button></div>';
+
+    html += '<h1>' + esc(curr.title) + '</h1>';
+    var metaParts = [];
+    if (curr.subject) metaParts.push(esc(curr.subject));
+    if (curr.age_range) {
+      var ageLow = curr.age_range.toLowerCase();
+      metaParts.push(esc((ageLow.indexOf('all') !== -1 || ageLow.indexOf('mixed') !== -1) ? curr.age_range : 'Ages ' + curr.age_range));
+    }
+    metaParts.push((curr.lesson_count || 0) + ' lesson' + (curr.lesson_count === 1 ? '' : 's'));
+    html += '<div class="meta">' + metaParts.join(' · ') + '</div>';
+    html += '<div class="author">by ' + esc(curr.author_name || curr.author_email) + '</div>';
+    if (curr.overview) html += '<div class="overview">' + esc(curr.overview) + '</div>';
+
+    // Master supply list
+    if (rows.length) {
+      html += '<div class="master"><h2>Master Supply List</h2><p class="sub">Everything needed across all lessons.</p><ul>';
+      rows.forEach(function (r) {
+        var bits = [];
+        if (r.qty) bits.push(esc(r.qty));
+        if (r.unit === 'student') bits.push('per student');
+        else if (r.unit === 'class') bits.push('per class');
+        var qtyStr = bits.length ? ' <span class="qty">(' + bits.join(' ') + ')</span>' : '';
+        var lessonsStr = ' <span class="lessons">· L' + r.lessons.join(',') + '</span>';
+        var notesStr = r.notes ? ' <span class="notes">— ' + esc(r.notes) + '</span>' : '';
+        html += '<li><strong>' + esc(r.name) + '</strong>' + qtyStr + lessonsStr + notesStr + '</li>';
+      });
+      html += '</ul></div>';
+    }
+
+    // Each lesson
+    (curr.lessons || []).forEach(function (ls) {
+      html += '<div class="lesson">';
+      html += '<div class="lesson-header"><span class="lesson-num">Lesson ' + ls.lesson_number + '</span>';
+      if (ls.title) html += '<span class="lesson-title">' + esc(ls.title) + '</span>';
+      html += '</div>';
+      if (ls.overview) html += '<p class="lesson-overview">' + esc(ls.overview) + '</p>';
+
+      if (ls.room_setup) {
+        html += '<div class="section"><h3>Room setup</h3><p style="margin:0;">' + esc(ls.room_setup) + '</p></div>';
+      }
+
+      if (ls.supplies && ls.supplies.length) {
+        html += '<div class="section"><h3>Supplies</h3><ul class="checks">';
+        ls.supplies.forEach(function (s) {
+          var line = '<strong>' + esc(s.item_name) + '</strong>';
+          var bits = [];
+          if (s.qty) bits.push(esc(s.qty));
+          if (s.qty_unit === 'student') bits.push('per student');
+          else if (s.qty_unit === 'class') bits.push('per class');
+          if (bits.length) line += ' <span class="qty">(' + bits.join(' ') + ')</span>';
+          if (s.notes) line += ' <span class="notes">— ' + esc(s.notes) + '</span>';
+          html += '<li>' + line + '</li>';
+        });
+        html += '</ul></div>';
+      }
+
+      var actArr = ls.activity || [];
+      var insArr = ls.instruction || [];
+      var maxSteps = Math.max(actArr.length, insArr.length);
+      if (maxSteps > 0) {
+        html += '<div class="section"><h3>Steps</h3><div class="steps">';
+        html += '<div class="header"></div><div class="header">Activity</div><div class="header">Leader notes</div>';
+        for (var i = 0; i < maxSteps; i++) {
+          var aText = actArr[i] || '';
+          var iText = insArr[i] || '';
+          if (!aText && !iText) continue;
+          html += '<div class="cell num">' + (i + 1) + '.</div>';
+          html += '<div class="cell">' + esc(aText) + '</div>';
+          html += '<div class="cell">' + esc(iText) + '</div>';
+        }
+        html += '</div></div>';
+      }
+
+      if (ls.links && ls.links.length) {
+        html += '<div class="section"><h3>References</h3><ul>';
+        ls.links.forEach(function (l) {
+          html += '<li>' + esc(l.label || l.url) + ' (' + esc(l.url) + ')</li>';
+        });
+        html += '</ul></div>';
+      }
+      html += '</div>';
+    });
+
+    html += '</body></html>';
+    return html;
+  }
+
+  function printCurriculumInNewWindow(curr) {
+    if (!curr) return;
+    var w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) {
+      alert('Could not open print window. Please allow popups for this site and try again.');
+      return;
+    }
+    w.document.open();
+    w.document.write(buildPrintHtml(curr));
+    w.document.close();
+    // Give the browser a moment to layout, then trigger print
+    setTimeout(function () {
+      try { w.focus(); w.print(); } catch (e) { /* user can use the Print button in the new window */ }
+    }, 300);
+  }
+
   function renderMasterSupplyList(curr) {
     // Aggregate supplies across all lessons. Match case-insensitively and
     // collapse extra whitespace so "Brayer" / "brayer" / "Brayer " merge.
@@ -4347,15 +4522,7 @@
     var printBtn = personDetailCard.querySelector('#cl-print-btn');
     if (printBtn) {
       printBtn.addEventListener('click', function () {
-        // Make sure the master supply list <details> is open before printing
-        var d = personDetailCard.querySelector('.cl-master-details');
-        if (d) d.open = true;
-        document.body.classList.add('printing-curriculum');
-        // Brief delay so the layout updates before the print dialog
-        setTimeout(function () {
-          window.print();
-          setTimeout(function () { document.body.classList.remove('printing-curriculum'); }, 500);
-        }, 50);
+        printCurriculumInNewWindow(curriculumState.current);
       });
     }
     var editBtn = personDetailCard.querySelector('#cl-edit-btn');
