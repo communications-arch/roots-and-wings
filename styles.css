@@ -5753,23 +5753,31 @@ button.staff-role:hover {
 .cl-steps-headers,
 .cl-steps-row {
   display: grid;
-  grid-template-columns: 1.75em 1fr 1fr 28px;
+  grid-template-columns: 32px 1fr 1fr 32px;
   gap: 0.5rem;
-  margin-bottom: 0.35rem;
-}
-.cl-steps-row {
-  align-items: flex-start;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
+  align-items: start;
 }
 .cl-steps-headers {
-  align-items: end;
-  margin-bottom: 0.4rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--color-border);
 }
 .cl-steps-headers .cl-dyn-label {
   margin-bottom: 0;
-  padding-left: 2px;
+  padding: 0;
+  text-align: left;
 }
-.cl-steps-spacer { width: 28px; }
+.cl-steps-headers .cl-dyn-bullet {
+  min-width: 0;
+  padding: 0;
+}
+.cl-steps-row .cl-dyn-bullet {
+  min-width: 0;
+  text-align: right;
+  padding-right: 4px;
+  padding-top: 10px;
+}
+.cl-steps-spacer { width: 32px; }
 .cl-step-cell {
   min-height: 3.5em;
   line-height: 1.45;
@@ -5779,18 +5787,23 @@ button.staff-role:hover {
 .cl-step-table {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0;
 }
 .cl-step-table-headers,
 .cl-step-table-row {
   display: grid;
-  grid-template-columns: 1.75em 1fr 1fr;
-  gap: 0.5rem;
+  grid-template-columns: 32px 1fr 1fr;
+  gap: 0.75rem;
+  align-items: start;
 }
 .cl-step-table-headers {
-  padding-bottom: 0.25rem;
+  padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--color-border);
-  align-items: end;
+  margin-bottom: 0.4rem;
+}
+.cl-step-table-headers .cl-dyn-bullet {
+  min-width: 0;
+  padding: 0;
 }
 .cl-step-col-label {
   font-size: 0.65rem;
@@ -5798,11 +5811,19 @@ button.staff-role:hover {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-primary-dark);
+  text-align: left;
+  display: block;
 }
 .cl-step-table-row {
-  align-items: flex-start;
-  padding: 0.35rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.06);
+}
+.cl-step-table-row:last-child { border-bottom: none; }
+.cl-step-table-row .cl-dyn-bullet {
+  min-width: 0;
+  text-align: right;
+  padding-right: 4px;
+  padding-top: 0;
 }
 .cl-step-table-row:last-child { border-bottom: none; }
 .cl-step-cell-view {
@@ -5824,17 +5845,39 @@ button.staff-role:hover {
   background: rgba(var(--color-accent-light-rgb), 0.18);
   border: 1px solid var(--color-accent-dark);
   border-radius: var(--radius-sm);
-  padding: 0.85rem 1rem;
+  padding: 0.65rem 0.9rem;
   margin-bottom: 1rem;
 }
+.cl-master-details summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+}
+.cl-master-details summary::-webkit-details-marker { display: none; }
+.cl-master-details summary::before {
+  content: '▾';
+  display: inline-block;
+  font-size: 0.7rem;
+  color: var(--color-accent-dark);
+  transition: transform 0.15s;
+}
+.cl-master-details:not([open]) summary::before { transform: rotate(-90deg); }
 .cl-master-title {
-  margin: 0 0 0.2rem 0;
   font-family: var(--font-heading);
-  font-size: 1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
   color: var(--color-accent-dark);
 }
+.cl-master-count {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-weight: 400;
+}
 .cl-master-sub {
-  margin: 0 0 0.6rem 0;
+  margin: 0.4rem 0 0.5rem 0;
   font-size: 0.72rem;
   color: var(--color-text-light);
   font-style: italic;
@@ -5843,30 +5886,41 @@ button.staff-role:hover {
   list-style: none;
   padding: 0;
   margin: 0;
+  columns: 2;
+  column-gap: 1.5rem;
 }
 .cl-master-item {
-  padding: 0.4rem 0;
-  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.08);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin-bottom: 0.2rem;
+  color: var(--color-text);
+  break-inside: avoid;
+  padding: 1px 0;
 }
-.cl-master-item:last-child { border-bottom: none; }
 .cl-master-name {
   font-weight: 600;
   color: var(--color-text);
 }
-.cl-master-detail {
-  font-size: 0.78rem;
-  color: var(--color-text);
-  margin: 0.15rem 0 0 0.75rem;
-  line-height: 1.4;
-}
 .cl-master-lessons {
+  font-size: 0.7rem;
+  color: var(--color-text-light);
+  font-weight: 600;
+}
+.cl-master-item .cl-qty {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+}
+.cl-master-item .cl-notes {
   font-size: 0.7rem;
   color: var(--color-text-light);
   font-style: italic;
 }
 .cl-supply-copy {
   font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .cl-master-list { columns: 1; }
 }
 .cl-dyn-remove {
   background: transparent;

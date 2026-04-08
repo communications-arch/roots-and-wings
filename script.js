@@ -4107,66 +4107,47 @@
 
   function renderMasterSupplyList(curr) {
     // Aggregate supplies across all lessons. Group by lowercase item_name
-    // so "Clay" and "clay" merge. Within each group, list each instance
-    // with its lesson number and qty.
+    // so "Clay" and "clay" merge. Each unique (qty, unit, notes) variant
+    // gets one compact line.
     var lessons = curr.lessons || [];
-    var groups = {}; // key: lowercase name → { displayName, instances: [{lesson, qty, unit, notes}] }
-    var order = [];
+    var rows = []; // flat list of { name, qty, unit, notes, lessons[] }
+    var keyToRow = {};
     lessons.forEach(function (ls) {
       (ls.supplies || []).forEach(function (s) {
-        var key = (s.item_name || '').toLowerCase().trim();
-        if (!key) return;
-        if (!groups[key]) {
-          groups[key] = { displayName: s.item_name, instances: [] };
-          order.push(key);
+        var name = (s.item_name || '').trim();
+        if (!name) return;
+        var qty = s.qty || '';
+        var unit = s.qty_unit || '';
+        var notes = s.notes || '';
+        var sig = name.toLowerCase() + '|' + qty + '|' + unit + '|' + notes;
+        if (keyToRow[sig]) {
+          keyToRow[sig].lessons.push(ls.lesson_number);
+        } else {
+          var row = { name: name, qty: qty, unit: unit, notes: notes, lessons: [ls.lesson_number] };
+          keyToRow[sig] = row;
+          rows.push(row);
         }
-        groups[key].instances.push({
-          lesson: ls.lesson_number,
-          qty: s.qty || '',
-          unit: s.qty_unit || '',
-          notes: s.notes || ''
-        });
       });
     });
-    if (order.length === 0) return '';
+    if (rows.length === 0) return '';
 
     var html = '<div class="cl-master-supplies">';
-    html += '<h4 class="cl-master-title">Master Supply List</h4>';
-    html += '<p class="cl-master-sub">Everything needed across all lessons. Use this when shopping or packing.</p>';
+    html += '<details class="cl-master-details" open>';
+    html += '<summary class="cl-master-summary"><span class="cl-master-title">Master Supply List</span> <span class="cl-master-count">' + rows.length + ' line' + (rows.length === 1 ? '' : 's') + '</span></summary>';
+    html += '<p class="cl-master-sub">Everything needed across all lessons — use this when shopping or packing.</p>';
     html += '<ul class="cl-master-list">';
-    order.forEach(function (key) {
-      var g = groups[key];
-      // De-dupe identical instances (same qty + unit + notes)
-      var seen = {};
-      var unique = g.instances.filter(function (inst) {
-        var sig = inst.qty + '|' + inst.unit + '|' + inst.notes;
-        if (seen[sig]) {
-          seen[sig].lessons.push(inst.lesson);
-          return false;
-        }
-        seen[sig] = { lessons: [inst.lesson], inst: inst };
-        return true;
-      }).map(function (inst) {
-        var sig = inst.qty + '|' + inst.unit + '|' + inst.notes;
-        return { inst: inst, lessons: seen[sig].lessons };
-      });
-
-      html += '<li class="cl-master-item">';
-      html += '<span class="cl-master-name">' + escapeAttr(g.displayName) + '</span>';
-      unique.forEach(function (entry) {
-        var inst = entry.inst;
-        var bits = [];
-        if (inst.qty) bits.push(escapeAttr(inst.qty));
-        if (inst.unit === 'student') bits.push('per student');
-        else if (inst.unit === 'class') bits.push('per class');
-        var qtyStr = bits.length ? '<span class="cl-qty">(' + bits.join(' ') + ')</span> ' : '';
-        var lessonsStr = '<span class="cl-master-lessons">Lesson' + (entry.lessons.length > 1 ? 's ' : ' ') + entry.lessons.join(', ') + '</span>';
-        var notesStr = inst.notes ? ' <span class="cl-notes">— ' + escapeAttr(inst.notes) + '</span>' : '';
-        html += '<div class="cl-master-detail">' + qtyStr + lessonsStr + notesStr + '</div>';
-      });
-      html += '</li>';
+    rows.forEach(function (r) {
+      var bits = [];
+      if (r.qty) bits.push(escapeAttr(r.qty));
+      if (r.unit === 'student') bits.push('per student');
+      else if (r.unit === 'class') bits.push('per class');
+      var qtyStr = bits.length ? ' <span class="cl-qty">(' + bits.join(' ') + ')</span>' : '';
+      var lessonsStr = '<span class="cl-master-lessons"> · L' + r.lessons.join(',') + '</span>';
+      var notesStr = r.notes ? ' <span class="cl-notes">— ' + escapeAttr(r.notes) + '</span>' : '';
+      html += '<li class="cl-master-item"><span class="cl-master-name">' + escapeAttr(r.name) + '</span>' + qtyStr + lessonsStr + notesStr + '</li>';
     });
     html += '</ul>';
+    html += '</details>';
     html += '</div>';
     return html;
   }
