@@ -3682,7 +3682,7 @@
     html += '<input class="cl-input cl-lesson-title-input" data-field="title" placeholder="Lesson title" value="' + escapeAttr(lesson.title) + '">';
     html += '</div>';
 
-    html += '<label class="cl-label cl-label-sm">Lesson overview<textarea class="cl-input cl-textarea" data-field="overview" rows="2" placeholder="What will students learn this lesson?">' + escapeAttr(lesson.overview) + '</textarea></label>';
+    html += '<label class="cl-label cl-label-sm">Lesson overview<textarea class="cl-input cl-textarea" data-field="overview" rows="2" placeholder="What will kids learn this lesson?">' + escapeAttr(lesson.overview) + '</textarea></label>';
 
     // ── Supplies (top — gathered first) ──
     html += '<div class="cl-dyn-section"><div class="cl-dyn-label">Supplies</div>';
@@ -3710,14 +3710,14 @@
     html += '<div class="cl-steps-headers">';
     html += '<span class="cl-dyn-bullet"></span>';
     html += '<div class="cl-dyn-label cl-steps-col">Activity</div>';
-    html += '<div class="cl-dyn-label cl-steps-col">Instruction / Talking points</div>';
+    html += '<div class="cl-dyn-label cl-steps-col">Leader notes</div>';
     html += '<span class="cl-steps-spacer"></span>';
     html += '</div>';
     lesson.activity.forEach(function (val, i) {
       html += '<div class="cl-steps-row" data-step-idx="' + i + '">';
       html += '<span class="cl-dyn-bullet">' + (i + 1) + '.</span>';
-      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="activity" data-step-idx="' + i + '" rows="3" placeholder="What students do">' + escapeAttr(val) + '</textarea>';
-      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="instruction" data-step-idx="' + i + '" rows="3" placeholder="What teacher says / does">' + escapeAttr(lesson.instruction[i] || '') + '</textarea>';
+      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="activity" data-step-idx="' + i + '" rows="3" placeholder="What kids do">' + escapeAttr(val) + '</textarea>';
+      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="instruction" data-step-idx="' + i + '" rows="3" placeholder="What leader says / does">' + escapeAttr(lesson.instruction[i] || '') + '</textarea>';
       html += '<button class="cl-dyn-remove" data-dyn-remove="step-pair" data-dyn-idx="' + i + '" type="button" title="Remove step">&times;</button>';
       html += '</div>';
     });
@@ -3981,7 +3981,7 @@
       var maxSteps = Math.max(actArr.length, insArr.length);
       if (maxSteps > 0) {
         html += '<div class="cl-lesson-section"><strong>Steps</strong><div class="cl-step-table">';
-        html += '<div class="cl-step-table-headers"><span class="cl-dyn-bullet"></span><span class="cl-step-col-label">Activity</span><span class="cl-step-col-label">Instruction / Talking points</span></div>';
+        html += '<div class="cl-step-table-headers"><span class="cl-dyn-bullet"></span><span class="cl-step-col-label">Activity</span><span class="cl-step-col-label">Leader notes</span></div>';
         for (var s = 0; s < maxSteps; s++) {
           var aText = actArr[s] || '';
           var iText = insArr[s] || '';
