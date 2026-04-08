@@ -5183,11 +5183,6 @@ button.staff-role:hover {
   font-size: 0.9rem;
   font-weight: 600;
 }
-.sc-name a {
-  color: var(--color-accent, #6a3d8a);
-  text-decoration: underline;
-}
-.sc-name a:hover { text-decoration: none; }
 .sc-loc {
   font-size: 0.75rem;
   color: var(--color-text-light);
@@ -5946,15 +5941,7 @@ button.staff-role:hover {
 }
 .cl-master-name {
   font-weight: 600;
-  color: var(--color-accent, #6a3d8a);
-  text-decoration: underline;
 }
-.cl-master-name:hover { text-decoration: none; }
-.cl-supply-list a {
-  color: var(--color-accent, #6a3d8a);
-  text-decoration: underline;
-}
-.cl-supply-list a:hover { text-decoration: none; }
 .cl-master-lessons {
   font-size: 0.7rem;
   color: var(--color-text-light);
