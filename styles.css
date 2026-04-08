@@ -5183,6 +5183,13 @@ button.staff-role:hover {
   font-size: 0.9rem;
   font-weight: 600;
 }
+.sc-notes a,
+.cl-notes a {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+.sc-notes a:hover,
+.cl-notes a:hover { text-decoration: none; }
 .sc-loc {
   font-size: 0.75rem;
   color: var(--color-text-light);
