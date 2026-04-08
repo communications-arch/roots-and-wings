@@ -2832,6 +2832,14 @@
     return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // Capitalize the first letter and leave the rest as the user typed it.
+  // Acronyms like "PVA" or "X-Acto" are preserved.
+  function capitalizeFirstLetter(s) {
+    var v = String(s || '').replace(/^\s+/, '');
+    if (!v) return v;
+    return v.charAt(0).toUpperCase() + v.slice(1);
+  }
+
   function filterAndSortSupplyItems() {
     var state = supplyClosetState;
     if (!state.items) return [];
@@ -3982,8 +3990,9 @@
       var supplyRows = lessonEl.querySelectorAll('.cl-supply-row');
       var supplies = [];
       supplyRows.forEach(function (row) {
+        var rawName = (row.querySelector('[data-sfield="item_name"]') || {}).value || '';
         supplies.push({
-          item_name: (row.querySelector('[data-sfield="item_name"]') || {}).value || '',
+          item_name: capitalizeFirstLetter(rawName),
           qty: (row.querySelector('[data-sfield="qty"]') || {}).value || '',
           qty_unit: (row.querySelector('[data-sfield="qty_unit"]') || {}).value || '',
           notes: (row.querySelector('[data-sfield="notes"]') || {}).value || '',
@@ -4372,6 +4381,13 @@
           gatherEditorDraftFromForm();
           autosaveDraft();
         }, 500);
+      });
+      // Auto-capitalize supply names on blur (but not while typing)
+      personDetailCard.addEventListener('focusout', function (e) {
+        if (e.target && e.target.matches('.cl-supply-name')) {
+          var newVal = capitalizeFirstLetter(e.target.value);
+          if (newVal !== e.target.value) e.target.value = newVal;
+        }
       });
     }
 
