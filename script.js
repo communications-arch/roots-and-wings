@@ -2832,6 +2832,14 @@
     return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // Escape HTML and turn any http(s) URLs into clickable anchors.
+  function linkify(s) {
+    var escaped = escapeAttr(s);
+    return escaped.replace(/(https?:\/\/[^\s<]+)/g, function (url) {
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+    });
+  }
+
   // Capitalize the first letter and leave the rest as the user typed it.
   // Acronyms like "PVA" or "X-Acto" are preserved.
   function capitalizeFirstLetter(s) {
@@ -2954,9 +2962,9 @@
 
     var html = '<div class="sc-row">';
     html += '<div>';
-    html += '<div class="sc-name"><a href="https://www.amazon.com/s?k=' + encodeURIComponent(item.item_name) + '" target="_blank" rel="noopener noreferrer">' + escapeAttr(item.item_name) + '</a></div>';
+    html += '<div class="sc-name">' + escapeAttr(item.item_name) + '</div>';
     if (item.location) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
-    if (item.notes) html += '<div class="sc-notes">' + escapeAttr(item.notes) + '</div>';
+    if (item.notes) html += '<div class="sc-notes">' + linkify(item.notes) + '</div>';
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
     html += '<div class="sc-actions">';
@@ -4335,9 +4343,8 @@
       else if (r.unit === 'class') bits.push('per class');
       var qtyStr = bits.length ? ' <span class="cl-qty">(' + bits.join(' ') + ')</span>' : '';
       var lessonsStr = '<span class="cl-master-lessons"> · L' + r.lessons.join(',') + '</span>';
-      var notesStr = r.notes ? ' <span class="cl-notes">— ' + escapeAttr(r.notes) + '</span>' : '';
-      var nameHtml = '<a class="cl-master-name" href="https://www.amazon.com/s?k=' + encodeURIComponent(r.name) + '" target="_blank" rel="noopener noreferrer">' + escapeAttr(r.name) + '</a>';
-      html += '<li class="cl-master-item">' + nameHtml + qtyStr + lessonsStr + notesStr + '</li>';
+      var notesStr = r.notes ? ' <span class="cl-notes">— ' + linkify(r.notes) + '</span>' : '';
+      html += '<li class="cl-master-item"><span class="cl-master-name">' + escapeAttr(r.name) + '</span>' + qtyStr + lessonsStr + notesStr + '</li>';
     });
     html += '</ul>';
     html += '</details>';
@@ -4404,13 +4411,13 @@
       if (ls.supplies && ls.supplies.length) {
         html += '<div class="cl-lesson-section"><strong>Supplies</strong><ul class="cl-supply-list">';
         ls.supplies.forEach(function (s) {
-          var line = '<a href="https://www.amazon.com/s?k=' + encodeURIComponent(s.item_name) + '" target="_blank" rel="noopener noreferrer">' + escapeAttr(s.item_name) + '</a>';
+          var line = escapeAttr(s.item_name);
           var qtyParts = [];
           if (s.qty) qtyParts.push(escapeAttr(s.qty));
           if (s.qty_unit === 'student') qtyParts.push('per student');
           else if (s.qty_unit === 'class') qtyParts.push('per class');
           if (qtyParts.length) line += ' <span class="cl-qty">(' + qtyParts.join(' ') + ')</span>';
-          if (s.notes) line += ' <span class="cl-notes">&mdash; ' + escapeAttr(s.notes) + '</span>';
+          if (s.notes) line += ' <span class="cl-notes">&mdash; ' + linkify(s.notes) + '</span>';
           html += '<li>' + line + '</li>';
         });
         html += '</ul></div>';
