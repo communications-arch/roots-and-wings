@@ -3266,6 +3266,307 @@
     supplyClosetBtn.addEventListener('click', showSupplyClosetPopup);
   }
 
+  // ──────────────────────────────────────────────
+  // Curriculum Library
+  // ──────────────────────────────────────────────
+  var curriculumState = {
+    view: 'library',      // 'library' | 'detail' | 'editor'
+    list: null,           // array of curriculum summaries
+    current: null,        // full curriculum object when in detail/editor view
+    searchQuery: '',
+    subjectFilter: '',
+    ageFilter: ''
+  };
+
+  function currentUserIsBoard() {
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email) return false;
+    for (var i = 0; i < FAMILIES.length; i++) {
+      if (FAMILIES[i].email === email && FAMILIES[i].boardRole) return true;
+    }
+    return false;
+  }
+
+  function canEditCurriculum(curr) {
+    if (!curr) return false;
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email) return false;
+    if (curr.edit_policy === 'open') return true;
+    if (curr.author_email === email) return true;
+    if (currentUserIsBoard()) return true;
+    return false;
+  }
+
+  function curriculumFetch(url, options) {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    options = options || {};
+    options.headers = Object.assign({
+      'Authorization': 'Bearer ' + cred,
+      'Content-Type': 'application/json'
+    }, options.headers || {});
+    return fetch(url, options).then(function (r) {
+      return r.json().then(function (data) {
+        return { ok: r.ok, status: r.status, data: data };
+      });
+    });
+  }
+
+  function loadCurriculumList() {
+    return curriculumFetch('/api/curriculum').then(function (res) {
+      if (!res.ok) { alert('Error loading curricula: ' + (res.data.error || 'unknown')); return; }
+      curriculumState.list = res.data.curricula || [];
+    });
+  }
+
+  function loadCurriculumDetail(id) {
+    return curriculumFetch('/api/curriculum?id=' + encodeURIComponent(id)).then(function (res) {
+      if (!res.ok) { alert('Error loading plan: ' + (res.data.error || 'unknown')); return null; }
+      return res.data.curriculum;
+    });
+  }
+
+  function showCurriculumLibrary() {
+    curriculumState.view = 'library';
+    curriculumState.current = null;
+    loadCurriculumList().then(function () { renderCurriculumModal(); });
+  }
+
+  function showCurriculumDetail(id) {
+    loadCurriculumDetail(id).then(function (curr) {
+      if (!curr) return;
+      curriculumState.current = curr;
+      curriculumState.view = 'detail';
+      renderCurriculumModal();
+    });
+  }
+
+  function renderCurriculumModal() {
+    if (!personDetail || !personDetailCard) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail cl-modal">';
+
+    if (curriculumState.view === 'library') {
+      html += renderCurriculumLibraryBody();
+    } else if (curriculumState.view === 'detail') {
+      html += renderCurriculumDetailBody();
+    }
+
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    wireCurriculumEvents();
+  }
+
+  function renderCurriculumLibraryBody() {
+    var state = curriculumState;
+    var html = '<h3>Curriculum Library</h3>';
+    html += '<p class="cl-intro">Browse shared lesson plans, or create your own. Each plan has up to 5 lessons and a supply list.</p>';
+
+    // Controls
+    html += '<div class="cl-controls">';
+    html += '<input type="text" class="cl-search" id="cl-search-input" placeholder="Search plans..." value="' + escapeAttr(state.searchQuery) + '">';
+    html += '<button class="cl-create" id="cl-create-btn">+ Create New Plan</button>';
+    html += '</div>';
+
+    // Grid of plan cards
+    var rows = (state.list || []).filter(function (c) {
+      if (!state.searchQuery) return true;
+      var q = state.searchQuery.toLowerCase();
+      return (
+        (c.title || '').toLowerCase().indexOf(q) !== -1 ||
+        (c.subject || '').toLowerCase().indexOf(q) !== -1 ||
+        (c.age_range || '').toLowerCase().indexOf(q) !== -1 ||
+        (c.overview || '').toLowerCase().indexOf(q) !== -1 ||
+        ((c.tags || []).join(' ')).toLowerCase().indexOf(q) !== -1
+      );
+    });
+
+    html += '<div class="cl-count">' + rows.length + ' plan' + (rows.length === 1 ? '' : 's') + '</div>';
+    html += '<div class="cl-grid">';
+    if (state.list === null) {
+      html += '<div class="cl-empty">Loading...</div>';
+    } else if (rows.length === 0) {
+      html += '<div class="cl-empty">No plans yet. Click "Create New Plan" to add the first one!</div>';
+    } else {
+      rows.forEach(function (c) {
+        html += '<button class="cl-card" data-id="' + c.id + '">';
+        html += '<div class="cl-card-title">' + escapeAttr(c.title) + '</div>';
+        var meta = [];
+        if (c.subject) meta.push(escapeAttr(c.subject));
+        if (c.age_range) meta.push('Ages ' + escapeAttr(c.age_range));
+        if (c.lesson_count) meta.push(c.lesson_count + ' lesson' + (c.lesson_count === 1 ? '' : 's'));
+        if (meta.length) html += '<div class="cl-card-meta">' + meta.join(' &middot; ') + '</div>';
+        if (c.overview) html += '<div class="cl-card-overview">' + escapeAttr(c.overview.slice(0, 140)) + (c.overview.length > 140 ? '...' : '') + '</div>';
+        html += '<div class="cl-card-author">by ' + escapeAttr(c.author_name || c.author_email) + '</div>';
+        html += '</button>';
+      });
+    }
+    html += '</div>';
+
+    return html;
+  }
+
+  function renderCurriculumDetailBody() {
+    var curr = curriculumState.current;
+    if (!curr) return '<p>Loading...</p>';
+    var canEdit = canEditCurriculum(curr);
+
+    var html = '<div class="cl-detail-header">';
+    html += '<button class="cl-back" id="cl-back-btn">&larr; Library</button>';
+    html += '</div>';
+
+    html += '<h3>' + escapeAttr(curr.title) + '</h3>';
+    var metaParts = [];
+    if (curr.subject) metaParts.push(escapeAttr(curr.subject));
+    if (curr.age_range) metaParts.push('Ages ' + escapeAttr(curr.age_range));
+    metaParts.push(curr.lesson_count + ' lesson' + (curr.lesson_count === 1 ? '' : 's'));
+    html += '<div class="cl-detail-meta">' + metaParts.join(' &middot; ') + '</div>';
+    html += '<div class="cl-detail-author">by ' + escapeAttr(curr.author_name || curr.author_email) + '</div>';
+
+    if (curr.overview) {
+      html += '<p class="cl-detail-overview">' + escapeAttr(curr.overview) + '</p>';
+    }
+
+    if (curr.tags && curr.tags.length) {
+      html += '<div class="cl-tags">';
+      curr.tags.forEach(function (t) { html += '<span class="cl-tag">' + escapeAttr(t) + '</span>'; });
+      html += '</div>';
+    }
+
+    // Lessons
+    html += '<div class="cl-lessons">';
+    (curr.lessons || []).forEach(function (ls) {
+      html += '<div class="cl-lesson">';
+      html += '<div class="cl-lesson-header"><span class="cl-lesson-num">Lesson ' + ls.lesson_number + '</span>';
+      if (ls.title) html += '<span class="cl-lesson-title">' + escapeAttr(ls.title) + '</span>';
+      html += '</div>';
+      if (ls.overview) html += '<p class="cl-lesson-overview">' + escapeAttr(ls.overview) + '</p>';
+
+      if (ls.activity && ls.activity.length) {
+        html += '<div class="cl-lesson-section"><strong>Activity</strong><ol>';
+        ls.activity.forEach(function (a) { html += '<li>' + escapeAttr(a) + '</li>'; });
+        html += '</ol></div>';
+      }
+      if (ls.instruction && ls.instruction.length) {
+        html += '<div class="cl-lesson-section"><strong>Instruction / Talking points</strong><ol>';
+        ls.instruction.forEach(function (i) { html += '<li>' + escapeAttr(i) + '</li>'; });
+        html += '</ol></div>';
+      }
+      if (ls.supplies && ls.supplies.length) {
+        html += '<div class="cl-lesson-section"><strong>Supplies</strong><ul>';
+        ls.supplies.forEach(function (s) {
+          var line = escapeAttr(s.item_name);
+          if (s.qty) line += ' <span class="cl-qty">(' + escapeAttr(s.qty) + ')</span>';
+          if (s.notes) line += ' <span class="cl-notes">&mdash; ' + escapeAttr(s.notes) + '</span>';
+          html += '<li>' + line + '</li>';
+        });
+        html += '</ul></div>';
+      }
+      if (ls.links && ls.links.length) {
+        html += '<div class="cl-lesson-section"><strong>References</strong><ul>';
+        ls.links.forEach(function (l) {
+          html += '<li><a href="' + escapeAttr(l.url) + '" target="_blank" rel="noopener noreferrer">' + escapeAttr(l.label || l.url) + '</a></li>';
+        });
+        html += '</ul></div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    // Actions
+    html += '<div class="cl-detail-actions">';
+    html += '<button class="cl-action-btn" id="cl-copy-btn" data-id="' + curr.id + '">Copy &amp; Modify</button>';
+    if (canEdit) {
+      html += '<button class="cl-action-btn" id="cl-edit-btn" data-id="' + curr.id + '">Edit</button>';
+      html += '<button class="cl-action-btn cl-action-del" id="cl-delete-btn" data-id="' + curr.id + '">Delete</button>';
+    }
+    html += '</div>';
+
+    return html;
+  }
+
+  function wireCurriculumEvents() {
+    var closeBtn = personDetailCard.querySelector('.detail-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeDetail);
+    personDetail.onclick = function (e) {
+      if (e.target === personDetail) closeDetail();
+    };
+
+    // Library controls
+    var searchInput = personDetailCard.querySelector('#cl-search-input');
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        curriculumState.searchQuery = searchInput.value;
+        // Surgical update of grid
+        var grid = personDetailCard.querySelector('.cl-grid');
+        var count = personDetailCard.querySelector('.cl-count');
+        if (!grid) return;
+        // Re-render just the grid portion
+        var tempContainer = document.createElement('div');
+        tempContainer.innerHTML = renderCurriculumLibraryBody();
+        var newGrid = tempContainer.querySelector('.cl-grid');
+        var newCount = tempContainer.querySelector('.cl-count');
+        if (newGrid) grid.innerHTML = newGrid.innerHTML;
+        if (newCount && count) count.innerHTML = newCount.innerHTML;
+        // Re-wire the cards (buttons) — simple full re-wire for clicks
+        wireCurriculumCardClicks();
+      });
+    }
+
+    var createBtn = personDetailCard.querySelector('#cl-create-btn');
+    if (createBtn) {
+      createBtn.addEventListener('click', function () {
+        alert('Editor coming next — this is Chunk A (browse-only).');
+      });
+    }
+
+    // Cards (library view)
+    wireCurriculumCardClicks();
+
+    // Detail view
+    var backBtn = personDetailCard.querySelector('#cl-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', showCurriculumLibrary);
+    }
+    var copyBtn = personDetailCard.querySelector('#cl-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        alert('Copy coming in Chunk B.');
+      });
+    }
+    var editBtn = personDetailCard.querySelector('#cl-edit-btn');
+    if (editBtn) {
+      editBtn.addEventListener('click', function () {
+        alert('Editor coming in Chunk B.');
+      });
+    }
+    var delBtn = personDetailCard.querySelector('#cl-delete-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', function () {
+        if (!confirm('Delete this plan? This cannot be undone.')) return;
+        var id = delBtn.getAttribute('data-id');
+        curriculumFetch('/api/curriculum?id=' + encodeURIComponent(id), { method: 'DELETE' }).then(function (res) {
+          if (!res.ok) { alert('Error: ' + (res.data.error || 'delete failed')); return; }
+          showCurriculumLibrary();
+        });
+      });
+    }
+  }
+
+  function wireCurriculumCardClicks() {
+    personDetailCard.querySelectorAll('.cl-card').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showCurriculumDetail(btn.getAttribute('data-id'));
+      });
+    });
+  }
+
+  var curriculumBtn = document.getElementById('curriculumBtn');
+  if (curriculumBtn) {
+    curriculumBtn.addEventListener('click', showCurriculumLibrary);
+  }
+
   // Render all coordination tabs
   function renderCoordinationTabs() {
     renderSessionTab();

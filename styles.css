@@ -5322,6 +5322,294 @@ button.staff-role:hover {
 }
 
 /* ==========================================================================
+   Curriculum Library modal
+   ========================================================================== */
+.cl-modal {
+  max-width: 860px;
+  width: 100%;
+}
+.cl-modal h3 {
+  margin: 0 0 0.25rem 0;
+  color: var(--color-primary-dark);
+  font-family: var(--font-heading);
+}
+.cl-modal .cl-intro {
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+  margin: 0 0 1rem 0;
+}
+.cl-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.cl-search {
+  flex: 1 1 220px;
+  padding: 9px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  background: var(--color-white);
+  color: var(--color-text);
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+.cl-search:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.cl-create {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border: none;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+.cl-create:hover {
+  background: var(--color-primary-dark);
+}
+.cl-count {
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  margin-bottom: 0.5rem;
+}
+.cl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.75rem;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+.cl-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  grid-column: 1 / -1;
+}
+.cl-card {
+  text-align: left;
+  background: var(--color-white);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.cl-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.cl-card-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+  font-family: var(--font-heading);
+  line-height: 1.25;
+}
+.cl-card-meta {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cl-card-overview {
+  font-size: 0.78rem;
+  color: var(--color-text);
+  line-height: 1.4;
+  margin-top: 0.15rem;
+}
+.cl-card-author {
+  font-size: 0.7rem;
+  color: var(--color-text-light);
+  font-style: italic;
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+/* ---------- Detail view ---------- */
+.cl-detail-header {
+  margin-bottom: 0.75rem;
+}
+.cl-back {
+  background: transparent;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-family: inherit;
+  padding: 4px 0;
+  font-weight: 500;
+}
+.cl-back:hover { color: var(--color-primary-dark); text-decoration: underline; }
+
+.cl-detail-meta {
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.15rem;
+}
+.cl-detail-author {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-style: italic;
+  margin-bottom: 0.75rem;
+}
+.cl-detail-overview {
+  font-size: 0.88rem;
+  color: var(--color-text);
+  line-height: 1.55;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--color-primary);
+  border-radius: 4px;
+  margin-bottom: 0.85rem;
+}
+.cl-tags {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.cl-tag {
+  background: rgba(var(--color-primary-rgb), 0.1);
+  color: var(--color-primary-dark);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.cl-lessons {
+  max-height: 440px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  margin-bottom: 1rem;
+}
+.cl-lesson {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+  background: var(--color-white);
+}
+.cl-lesson-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid rgba(var(--color-primary-rgb), 0.15);
+}
+.cl-lesson-num {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cl-lesson-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  font-family: var(--font-heading);
+}
+.cl-lesson-overview {
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+  margin: 0 0 0.6rem 0;
+  font-style: italic;
+  line-height: 1.4;
+}
+.cl-lesson-section {
+  margin-bottom: 0.6rem;
+  font-size: 0.82rem;
+}
+.cl-lesson-section strong {
+  display: block;
+  color: var(--color-primary-dark);
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+.cl-lesson-section ol,
+.cl-lesson-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--color-text);
+}
+.cl-lesson-section li {
+  margin-bottom: 0.25rem;
+  line-height: 1.45;
+}
+.cl-lesson-section a {
+  color: var(--color-primary);
+}
+.cl-qty {
+  color: var(--color-text-light);
+  font-size: 0.75rem;
+}
+.cl-notes {
+  color: var(--color-text-light);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+.cl-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+.cl-action-btn {
+  background: transparent;
+  border: 1.5px solid var(--color-primary);
+  color: var(--color-primary);
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+.cl-action-btn:hover {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.cl-action-del {
+  border-color: var(--color-accent);
+  color: var(--color-accent-dark);
+}
+.cl-action-del:hover {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+@media (max-width: 540px) {
+  .cl-grid { grid-template-columns: 1fr; }
+}
+
+/* ==========================================================================
    Theme Variants
    ========================================================================== */
 
