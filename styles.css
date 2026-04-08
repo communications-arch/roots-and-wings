@@ -5606,6 +5606,25 @@ button.staff-role:hover {
 }
 
 /* ---------- Editor view ---------- */
+.cl-prefill {
+  margin-bottom: 1rem;
+  padding: 0.85rem;
+  background: rgba(var(--color-accent-light-rgb), 0.18);
+  border: 1px dashed var(--color-accent-dark);
+  border-radius: var(--radius-sm);
+}
+.cl-prefill .cl-label {
+  color: var(--color-accent-dark);
+}
+.cl-prefill-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-light);
+  font-size: 0.7rem;
+  margin-left: 0.35rem;
+  font-style: italic;
+}
 .cl-editor-meta {
   display: flex;
   flex-direction: column;

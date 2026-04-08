@@ -3383,6 +3383,103 @@
     return false;
   }
 
+  // Returns an array of teaching/assisting assignments for the current user
+  // across all sessions. Used to pre-fill the curriculum editor.
+  function getMyTeachingAssignments() {
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email) return [];
+    var fam = null;
+    for (var i = 0; i < FAMILIES.length; i++) {
+      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+    }
+    if (!fam) return [];
+    var parentFullNames = (fam.parents || '').split(' & ').map(function (p) {
+      return p.trim() + ' ' + fam.name;
+    });
+    function isMe(name) {
+      if (!name) return false;
+      var n = name.trim().toLowerCase();
+      return parentFullNames.some(function (pf) { return pf.toLowerCase() === n; });
+    }
+
+    var assignments = [];
+    var seen = {};
+    function addOnce(key, obj) {
+      if (seen[key]) return;
+      seen[key] = true;
+      assignments.push(obj);
+    }
+
+    // AM classes — every session
+    Object.keys(AM_CLASSES || {}).forEach(function (groupName) {
+      var staff = AM_CLASSES[groupName];
+      if (!staff || !staff.sessions) return;
+      Object.keys(staff.sessions).forEach(function (sessKey) {
+        var sess = staff.sessions[sessKey];
+        if (!sess) return;
+        var role = null;
+        if (isMe(sess.teacher)) role = 'Leading';
+        else if ((sess.assistants || []).some(isMe)) role = 'Assisting';
+        if (!role) return;
+        addOnce('am-' + groupName + '-' + sessKey, {
+          kind: 'AM',
+          sessionNum: parseInt(sessKey, 10),
+          role: role,
+          name: groupName,
+          topic: sess.topic || '',
+          ageRange: groupName, // try to match the group label to an age range option
+          description: sess.topic || ''
+        });
+      });
+    });
+
+    // PM electives — every session
+    Object.keys(PM_ELECTIVES || {}).forEach(function (sessKey) {
+      var rows = PM_ELECTIVES[sessKey] || [];
+      rows.forEach(function (elec) {
+        var role = null;
+        if (isMe(elec.leader)) role = 'Leading';
+        else if ((elec.assistants || []).some(isMe)) role = 'Assisting';
+        if (!role) return;
+        addOnce('pm-' + sessKey + '-' + elec.name, {
+          kind: 'PM',
+          sessionNum: parseInt(sessKey, 10),
+          role: role,
+          name: elec.name,
+          topic: elec.description || '',
+          ageRange: elec.ageRange || '',
+          description: elec.description || ''
+        });
+      });
+    });
+
+    // Sort: most recent session first, then by name
+    assignments.sort(function (a, b) {
+      if (a.sessionNum !== b.sessionNum) return b.sessionNum - a.sessionNum;
+      return a.name.localeCompare(b.name);
+    });
+    return assignments;
+  }
+
+  // Best-effort mapping of free-text age strings to one of AGE_RANGE_OPTIONS.
+  function matchAgeRangeOption(raw) {
+    if (!raw) return '';
+    var s = String(raw).toLowerCase();
+    // Direct exact match
+    for (var i = 0; i < AGE_RANGE_OPTIONS.length; i++) {
+      if (AGE_RANGE_OPTIONS[i].toLowerCase() === s) return AGE_RANGE_OPTIONS[i];
+    }
+    // Substring match against the option's label (e.g. "Oaks" → "Oaks (7-8)")
+    for (var j = 0; j < AGE_RANGE_OPTIONS.length; j++) {
+      var opt = AGE_RANGE_OPTIONS[j].toLowerCase();
+      var optWord = opt.split(' (')[0]; // "saplings", "oaks", etc.
+      if (s.indexOf(optWord) !== -1) return AGE_RANGE_OPTIONS[j];
+    }
+    // Common freeform patterns
+    if (s.indexOf('all') !== -1) return 'All ages';
+    return '';
+  }
+
   function canEditCurriculum(curr) {
     if (!curr) return false;
     var email = sessionStorage.getItem('rw_user_email');
@@ -3496,6 +3593,22 @@
     html += '</div>';
 
     html += '<h3>' + (isNew ? 'New Lesson Plan' : 'Edit Lesson Plan') + '</h3>';
+
+    // Pre-fill from a class the user is teaching (only when creating new)
+    if (isNew) {
+      var assignments = getMyTeachingAssignments();
+      if (assignments.length > 0) {
+        html += '<div class="cl-prefill">';
+        html += '<label class="cl-label">Pre-fill from a class I\'m teaching <span class="cl-prefill-hint">(optional)</span>';
+        html += '<select class="cl-input" id="cl-prefill-select"><option value="">— Start from scratch —</option>';
+        assignments.forEach(function (a, idx) {
+          var label = a.role + ': ' + a.name + ' (Session ' + a.sessionNum + ')';
+          html += '<option value="' + idx + '">' + escapeAttr(label) + '</option>';
+        });
+        html += '</select></label>';
+        html += '</div>';
+      }
+    }
 
     // Metadata section
     html += '<div class="cl-editor-meta">';
@@ -3953,6 +4066,30 @@
       lcSelect.addEventListener('change', function () {
         gatherEditorDraftFromForm();
         curriculumState.draft.lesson_count = parseInt(lcSelect.value, 10) || 5;
+        renderCurriculumModal();
+      });
+    }
+
+    // Pre-fill from a class the user is teaching
+    var prefillSelect = personDetailCard.querySelector('#cl-prefill-select');
+    if (prefillSelect) {
+      prefillSelect.addEventListener('change', function () {
+        if (!prefillSelect.value) return;
+        gatherEditorDraftFromForm();
+        var assignments = getMyTeachingAssignments();
+        var pick = assignments[parseInt(prefillSelect.value, 10)];
+        if (!pick) return;
+        // Confirm before overwriting non-empty fields
+        var d = curriculumState.draft;
+        var hasContent = (d.title || d.overview || d.age_range);
+        if (hasContent && !confirm('This will overwrite the title, overview, and age range. Continue?')) {
+          prefillSelect.value = '';
+          return;
+        }
+        d.title = pick.name;
+        d.overview = pick.description || '';
+        var matched = matchAgeRangeOption(pick.ageRange);
+        if (matched) d.age_range = matched;
         renderCurriculumModal();
       });
     }
