@@ -62,10 +62,14 @@ CREATE TABLE IF NOT EXISTS curriculum_supplies (
   lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
   item_name TEXT NOT NULL,
   qty TEXT DEFAULT '',
+  qty_unit TEXT DEFAULT '',
   notes TEXT DEFAULT '',
   closet_item_id INTEGER REFERENCES supply_closet(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS curriculum_supplies_lesson_idx ON curriculum_supplies (lesson_id);
+
+-- Idempotent column add for existing deployments
+ALTER TABLE curriculum_supplies ADD COLUMN IF NOT EXISTS qty_unit TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS class_curriculum_links (
   id SERIAL PRIMARY KEY,

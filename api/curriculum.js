@@ -63,12 +63,17 @@ function normalizeLesson(raw, lessonNumber) {
         })).filter(l => l.url).slice(0, 20)
       : [],
     supplies: Array.isArray(raw.supplies)
-      ? raw.supplies.map(s => ({
-          item_name: String((s && s.item_name) || '').trim().slice(0, 200),
-          qty: String((s && s.qty) || '').trim().slice(0, 60),
-          notes: String((s && s.notes) || '').trim().slice(0, 500),
-          closet_item_id: (s && s.closet_item_id) ? parseInt(s.closet_item_id, 10) || null : null
-        })).filter(s => s.item_name).slice(0, 50)
+      ? raw.supplies.map(s => {
+          var unit = String((s && s.qty_unit) || '').trim().toLowerCase();
+          if (unit !== 'student' && unit !== 'class') unit = '';
+          return {
+            item_name: String((s && s.item_name) || '').trim().slice(0, 200),
+            qty: String((s && s.qty) || '').trim().slice(0, 60),
+            qty_unit: unit,
+            notes: String((s && s.notes) || '').trim().slice(0, 500),
+            closet_item_id: (s && s.closet_item_id) ? parseInt(s.closet_item_id, 10) || null : null
+          };
+        }).filter(s => s.item_name).slice(0, 50)
       : []
   };
 }
@@ -89,7 +94,7 @@ async function getFullCurriculum(sql, id) {
     ORDER BY lesson_number
   `;
   const supplies = await sql`
-    SELECT cs.id, cs.lesson_id, cs.item_name, cs.qty, cs.notes, cs.closet_item_id,
+    SELECT cs.id, cs.lesson_id, cs.item_name, cs.qty, cs.qty_unit, cs.notes, cs.closet_item_id,
            l.lesson_number
     FROM curriculum_supplies cs
     JOIN lessons l ON l.id = cs.lesson_id
@@ -104,6 +109,7 @@ async function getFullCurriculum(sql, id) {
       id: s.id,
       item_name: s.item_name,
       qty: s.qty,
+      qty_unit: s.qty_unit || '',
       notes: s.notes,
       closet_item_id: s.closet_item_id
     });
@@ -150,8 +156,8 @@ async function createCurriculum(sql, user, body) {
     const lessonId = lessonResult[0].id;
     for (const sp of ls.supplies) {
       await sql`
-        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.notes}, ${sp.closet_item_id})
+        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
       `;
     }
   }
@@ -172,8 +178,8 @@ async function replaceLessons(sql, curriculumId, lessonCount, lessonRows) {
     const lessonId = lessonResult[0].id;
     for (const sp of ls.supplies) {
       await sql`
-        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.notes}, ${sp.closet_item_id})
+        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
       `;
     }
   }

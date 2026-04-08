@@ -5737,11 +5737,73 @@ button.staff-role:hover {
   min-height: 2.5em;
   line-height: 1.45;
 }
-.cl-supply-row .cl-supply-name { flex: 2; }
-.cl-supply-row .cl-supply-qty  { flex: 0.5; min-width: 60px; }
+.cl-supply-row .cl-supply-name  { flex: 2; }
+.cl-supply-row .cl-supply-qty   { flex: 0.5; min-width: 50px; }
+.cl-supply-row .cl-supply-unit  { flex: 0.8; min-width: 100px; }
 .cl-supply-row .cl-supply-notes { flex: 2; }
 .cl-link-row .cl-link-label { flex: 1; }
 .cl-link-row .cl-link-url   { flex: 2; }
+
+/* Parallel Activity / Instruction step rows */
+.cl-steps-headers {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr 28px;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+}
+.cl-steps-col {
+  margin-bottom: 0;
+}
+.cl-steps-spacer { width: 28px; }
+.cl-steps-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr 28px;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+.cl-step-cell {
+  min-height: 3.5em;
+  line-height: 1.45;
+}
+
+/* Detail view step table */
+.cl-step-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.cl-step-table-headers {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.cl-step-col-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary-dark);
+}
+.cl-step-table-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.06);
+}
+.cl-step-table-row:last-child { border-bottom: none; }
+.cl-step-cell-view {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+.cl-supply-list { padding-left: 1.25rem; }
 .cl-dyn-remove {
   background: transparent;
   border: 1.5px solid var(--color-border);
@@ -5782,16 +5844,25 @@ button.staff-role:hover {
   border-style: solid;
 }
 
-@media (max-width: 540px) {
+@media (max-width: 640px) {
   .cl-grid { grid-template-columns: 1fr; }
   .cl-editor-row { grid-template-columns: 1fr; }
   .cl-supply-row,
   .cl-link-row { flex-wrap: wrap; }
   .cl-supply-row .cl-supply-name,
   .cl-supply-row .cl-supply-qty,
+  .cl-supply-row .cl-supply-unit,
   .cl-supply-row .cl-supply-notes,
   .cl-link-row .cl-link-label,
   .cl-link-row .cl-link-url { flex: 1 1 100%; }
+  .cl-steps-headers,
+  .cl-steps-row,
+  .cl-step-table-headers,
+  .cl-step-table-row {
+    grid-template-columns: 1fr;
+  }
+  .cl-steps-headers .cl-dyn-bullet,
+  .cl-steps-spacer { display: none; }
 }
 
 /* ==========================================================================

@@ -3327,6 +3327,14 @@
     };
   }
 
+  // Pad activity & instruction arrays to the same length so they can be
+  // edited as parallel numbered rows.
+  function padPair(a, b) {
+    var max = Math.max(a.length, b.length, 1);
+    while (a.length < max) a.push('');
+    while (b.length < max) b.push('');
+  }
+
   function blankDraft() {
     var lessons = [];
     for (var i = 1; i <= 5; i++) lessons.push(blankLesson(i));
@@ -3358,14 +3366,17 @@
     for (var i = 1; i <= 5; i++) {
       var src = (curr.lessons || []).find(function (l) { return l.lesson_number === i; });
       if (src) {
+        var act = (src.activity && src.activity.length ? src.activity.slice() : ['']);
+        var ins = (src.instruction && src.instruction.length ? src.instruction.slice() : ['']);
+        padPair(act, ins);
         draft.lessons.push({
           lesson_number: i,
           title: src.title || '',
           overview: src.overview || '',
-          activity: (src.activity && src.activity.length ? src.activity.slice() : ['']),
-          instruction: (src.instruction && src.instruction.length ? src.instruction.slice() : ['']),
+          activity: act,
+          instruction: ins,
           links: (src.links || []).map(function (l) { return { label: l.label || '', url: l.url || '' }; }),
-          supplies: (src.supplies || []).map(function (s) { return { item_name: s.item_name || '', qty: s.qty || '', notes: s.notes || '', closet_item_id: s.closet_item_id || null }; })
+          supplies: (src.supplies || []).map(function (s) { return { item_name: s.item_name || '', qty: s.qty || '', qty_unit: s.qty_unit || '', notes: s.notes || '', closet_item_id: s.closet_item_id || null }; })
         });
       } else {
         draft.lessons.push(blankLesson(i));
@@ -3662,6 +3673,9 @@
   }
 
   function renderLessonEditor(lesson, idx) {
+    // Make sure activity and instruction are paired before rendering.
+    padPair(lesson.activity, lesson.instruction);
+
     var html = '<div class="cl-lesson cl-lesson-edit" data-lesson-idx="' + idx + '">';
     html += '<div class="cl-lesson-header">';
     html += '<span class="cl-lesson-num">Lesson ' + lesson.lesson_number + '</span>';
@@ -3670,13 +3684,7 @@
 
     html += '<label class="cl-label cl-label-sm">Lesson overview<textarea class="cl-input cl-textarea" data-field="overview" rows="2" placeholder="What will students learn this lesson?">' + escapeAttr(lesson.overview) + '</textarea></label>';
 
-    // Activity steps
-    html += renderDynamicList('activity', 'Activity steps', lesson.activity);
-
-    // Instruction steps
-    html += renderDynamicList('instruction', 'Instruction / Talking points', lesson.instruction);
-
-    // Supplies
+    // ── Supplies (top — gathered first) ──
     html += '<div class="cl-dyn-section"><div class="cl-dyn-label">Supplies</div>';
     if (lesson.supplies.length === 0) {
       html += '<div class="cl-dyn-empty">No supplies yet.</div>';
@@ -3685,6 +3693,11 @@
       html += '<div class="cl-supply-row" data-supply-idx="' + si + '">';
       html += '<input class="cl-input cl-supply-name" data-sfield="item_name" placeholder="Item" value="' + escapeAttr(s.item_name) + '">';
       html += '<input class="cl-input cl-supply-qty" data-sfield="qty" placeholder="Qty" value="' + escapeAttr(s.qty) + '">';
+      html += '<select class="cl-input cl-supply-unit" data-sfield="qty_unit">';
+      html += '<option value=""' + ((!s.qty_unit) ? ' selected' : '') + '>—</option>';
+      html += '<option value="student"' + (s.qty_unit === 'student' ? ' selected' : '') + '>per student</option>';
+      html += '<option value="class"' + (s.qty_unit === 'class' ? ' selected' : '') + '>per class</option>';
+      html += '</select>';
       html += '<input class="cl-input cl-supply-notes" data-sfield="notes" placeholder="Notes" value="' + escapeAttr(s.notes) + '">';
       html += '<button class="cl-dyn-remove" data-dyn-remove="supplies" data-dyn-idx="' + si + '" type="button" title="Remove">&times;</button>';
       html += '</div>';
@@ -3692,7 +3705,26 @@
     html += '<button class="cl-dyn-add" data-dyn-add="supplies" type="button">+ Add supply</button>';
     html += '</div>';
 
-    // Links / references
+    // ── Activity & Instruction (parallel numbered rows) ──
+    html += '<div class="cl-dyn-section">';
+    html += '<div class="cl-steps-headers">';
+    html += '<span class="cl-dyn-bullet"></span>';
+    html += '<div class="cl-dyn-label cl-steps-col">Activity</div>';
+    html += '<div class="cl-dyn-label cl-steps-col">Instruction / Talking points</div>';
+    html += '<span class="cl-steps-spacer"></span>';
+    html += '</div>';
+    lesson.activity.forEach(function (val, i) {
+      html += '<div class="cl-steps-row" data-step-idx="' + i + '">';
+      html += '<span class="cl-dyn-bullet">' + (i + 1) + '.</span>';
+      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="activity" data-step-idx="' + i + '" rows="3" placeholder="What students do">' + escapeAttr(val) + '</textarea>';
+      html += '<textarea class="cl-input cl-textarea cl-step-cell" data-step-field="instruction" data-step-idx="' + i + '" rows="3" placeholder="What teacher says / does">' + escapeAttr(lesson.instruction[i] || '') + '</textarea>';
+      html += '<button class="cl-dyn-remove" data-dyn-remove="step-pair" data-dyn-idx="' + i + '" type="button" title="Remove step">&times;</button>';
+      html += '</div>';
+    });
+    html += '<button class="cl-dyn-add" data-dyn-add="step-pair" type="button">+ Add step</button>';
+    html += '</div>';
+
+    // ── Links / references ──
     html += '<div class="cl-dyn-section"><div class="cl-dyn-label">References (links)</div>';
     if (lesson.links.length === 0) {
       html += '<div class="cl-dyn-empty">No links yet.</div>';
@@ -3759,13 +3791,18 @@
       var overviewInput = lessonEl.querySelector('textarea[data-field="overview"]');
       if (overviewInput) lesson.overview = overviewInput.value;
 
-      // Activity / instruction lists (textareas, fall back to inputs for safety)
-      ['activity', 'instruction'].forEach(function (field) {
-        var inputs = lessonEl.querySelectorAll('[data-dyn-field="' + field + '"]');
-        var arr = [];
-        inputs.forEach(function (inp) { arr.push(inp.value); });
-        lesson[field] = arr;
+      // Activity & Instruction (parallel rows by index)
+      var stepRows = lessonEl.querySelectorAll('.cl-steps-row');
+      var act = [];
+      var ins = [];
+      stepRows.forEach(function (row) {
+        var a = row.querySelector('[data-step-field="activity"]');
+        var i = row.querySelector('[data-step-field="instruction"]');
+        act.push(a ? a.value : '');
+        ins.push(i ? i.value : '');
       });
+      lesson.activity = act;
+      lesson.instruction = ins;
 
       // Supplies
       var supplyRows = lessonEl.querySelectorAll('.cl-supply-row');
@@ -3774,6 +3811,7 @@
         supplies.push({
           item_name: (row.querySelector('[data-sfield="item_name"]') || {}).value || '',
           qty: (row.querySelector('[data-sfield="qty"]') || {}).value || '',
+          qty_unit: (row.querySelector('[data-sfield="qty_unit"]') || {}).value || '',
           notes: (row.querySelector('[data-sfield="notes"]') || {}).value || '',
           closet_item_id: null
         });
@@ -3921,26 +3959,42 @@
       html += '</div>';
       if (ls.overview) html += '<p class="cl-lesson-overview">' + escapeAttr(ls.overview) + '</p>';
 
-      if (ls.activity && ls.activity.length) {
-        html += '<div class="cl-lesson-section"><strong>Activity</strong><ol>';
-        ls.activity.forEach(function (a) { html += '<li>' + escapeAttr(a) + '</li>'; });
-        html += '</ol></div>';
-      }
-      if (ls.instruction && ls.instruction.length) {
-        html += '<div class="cl-lesson-section"><strong>Instruction / Talking points</strong><ol>';
-        ls.instruction.forEach(function (i) { html += '<li>' + escapeAttr(i) + '</li>'; });
-        html += '</ol></div>';
-      }
+      // Supplies first — they're gathered first
       if (ls.supplies && ls.supplies.length) {
-        html += '<div class="cl-lesson-section"><strong>Supplies</strong><ul>';
+        html += '<div class="cl-lesson-section"><strong>Supplies</strong><ul class="cl-supply-list">';
         ls.supplies.forEach(function (s) {
           var line = escapeAttr(s.item_name);
-          if (s.qty) line += ' <span class="cl-qty">(' + escapeAttr(s.qty) + ')</span>';
+          var qtyParts = [];
+          if (s.qty) qtyParts.push(escapeAttr(s.qty));
+          if (s.qty_unit === 'student') qtyParts.push('per student');
+          else if (s.qty_unit === 'class') qtyParts.push('per class');
+          if (qtyParts.length) line += ' <span class="cl-qty">(' + qtyParts.join(' ') + ')</span>';
           if (s.notes) line += ' <span class="cl-notes">&mdash; ' + escapeAttr(s.notes) + '</span>';
           html += '<li>' + line + '</li>';
         });
         html += '</ul></div>';
       }
+
+      // Activity & Instruction as parallel numbered steps
+      var actArr = ls.activity || [];
+      var insArr = ls.instruction || [];
+      var maxSteps = Math.max(actArr.length, insArr.length);
+      if (maxSteps > 0) {
+        html += '<div class="cl-lesson-section"><strong>Steps</strong><div class="cl-step-table">';
+        html += '<div class="cl-step-table-headers"><span class="cl-dyn-bullet"></span><span class="cl-step-col-label">Activity</span><span class="cl-step-col-label">Instruction / Talking points</span></div>';
+        for (var s = 0; s < maxSteps; s++) {
+          var aText = actArr[s] || '';
+          var iText = insArr[s] || '';
+          if (!aText && !iText) continue;
+          html += '<div class="cl-step-table-row">';
+          html += '<span class="cl-dyn-bullet">' + (s + 1) + '.</span>';
+          html += '<div class="cl-step-cell-view">' + escapeAttr(aText) + '</div>';
+          html += '<div class="cl-step-cell-view">' + escapeAttr(iText) + '</div>';
+          html += '</div>';
+        }
+        html += '</div></div>';
+      }
+
       if (ls.links && ls.links.length) {
         html += '<div class="cl-lesson-section"><strong>References</strong><ul>';
         ls.links.forEach(function (l) {
@@ -4103,12 +4157,12 @@
         var idx = parseInt(lessonEl.getAttribute('data-lesson-idx'), 10);
         var lesson = curriculumState.draft.lessons[idx];
         if (field === 'supplies') {
-          lesson.supplies.push({ item_name: '', qty: '', notes: '', closet_item_id: null });
+          lesson.supplies.push({ item_name: '', qty: '', qty_unit: '', notes: '', closet_item_id: null });
         } else if (field === 'links') {
           lesson.links.push({ label: '', url: '' });
-        } else {
-          lesson[field] = lesson[field] || [];
-          lesson[field].push('');
+        } else if (field === 'step-pair') {
+          lesson.activity.push('');
+          lesson.instruction.push('');
         }
         renderCurriculumModal();
       });
@@ -4127,9 +4181,13 @@
           lesson.supplies.splice(idx, 1);
         } else if (field === 'links') {
           lesson.links.splice(idx, 1);
-        } else {
-          lesson[field].splice(idx, 1);
-          if (lesson[field].length === 0) lesson[field] = [''];
+        } else if (field === 'step-pair') {
+          lesson.activity.splice(idx, 1);
+          lesson.instruction.splice(idx, 1);
+          if (lesson.activity.length === 0) {
+            lesson.activity.push('');
+            lesson.instruction.push('');
+          }
         }
         renderCurriculumModal();
       });
