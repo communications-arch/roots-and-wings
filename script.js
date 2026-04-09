@@ -4320,6 +4320,8 @@
       '.master .sub { font-size: 9pt; color: #555; font-style: italic; margin: 0 0 6pt 0; }',
       '.master .source-group { margin-bottom: 8pt; }',
       '.master .source-heading { font-size: 10pt; font-weight: 700; margin: 6pt 0 3pt 0; padding-bottom: 2pt; border-bottom: 0.5pt solid #999; }',
+      '.loc-group { margin-bottom: 4pt; }',
+      '.loc-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin: 4pt 0 1pt 0; }',
       '.master ul { columns: 2; column-gap: 18pt; list-style: none; padding: 0; margin: 0; }',
       '.master li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 4pt; font-size: 10pt; line-height: 1.35; break-inside: avoid; }',
       '.master li::before { content: "☐  "; font-size: 13pt; }',
@@ -4395,18 +4397,23 @@
       }
 
       if (ls.supplies && ls.supplies.length) {
-        html += '<div class="section"><h3>Supplies</h3><ul class="checks">';
-        ls.supplies.forEach(function (s) {
-          var line = '<strong>' + esc(s.item_name) + '</strong>';
-          var bits = [];
-          if (s.qty) bits.push(esc(s.qty));
-          if (s.qty_unit === 'student') bits.push('per student');
-          else if (s.qty_unit === 'class') bits.push('per class');
-          if (bits.length) line += ' <span class="qty">(' + bits.join(' ') + ')</span>';
-          if (s.notes) line += ' <span class="notes">— ' + esc(s.notes) + '</span>';
-          html += '<li>' + line + '</li>';
+        html += '<div class="section"><h3>Supplies</h3>';
+        var pGroups = groupLessonSuppliesByLocation(ls.supplies);
+        pGroups.forEach(function (g) {
+          html += '<div class="loc-group"><div class="loc-label">' + esc(g.heading) + '</div><ul class="checks">';
+          g.items.forEach(function (s) {
+            var line = '<strong>' + esc(s.item_name) + '</strong>';
+            var bits = [];
+            if (s.qty) bits.push(esc(s.qty));
+            if (s.qty_unit === 'student') bits.push('per student');
+            else if (s.qty_unit === 'class') bits.push('per class');
+            if (bits.length) line += ' <span class="qty">(' + bits.join(' ') + ')</span>';
+            if (s.notes) line += ' <span class="notes">— ' + esc(s.notes) + '</span>';
+            html += '<li>' + line + '</li>';
+          });
+          html += '</ul></div>';
         });
-        html += '</ul></div>';
+        html += '</div>';
       }
 
       var actArr = ls.activity || [];
@@ -4502,6 +4509,36 @@
     var lessonsStr = '<span class="' + (opts && opts.lessonsClass || 'cl-master-lessons') + '"> · L' + r.lessons.join(',') + '</span>';
     var notesStr = r.notes ? ' <span class="' + (opts && opts.notesClass || 'cl-notes') + '">— ' + linkifyFn(r.notes) + '</span>' : '';
     return '<span class="' + (opts && opts.nameClass || 'cl-master-name') + '">' + esc(r.name) + '</span>' + qtyStr + lessonsStr + notesStr;
+  }
+
+  function groupLessonSuppliesByLocation(supplies) {
+    // Group a single lesson's supplies by closet_location
+    var locGroups = {};
+    var locOrder = [];
+    var buyFind = [];
+
+    supplies.forEach(function (s) {
+      if (s.closet_item_id && s.closet_location) {
+        if (!locGroups[s.closet_location]) {
+          locGroups[s.closet_location] = [];
+          locOrder.push(s.closet_location);
+        }
+        locGroups[s.closet_location].push(s);
+      } else {
+        buyFind.push(s);
+      }
+    });
+
+    locOrder.sort(function (a, b) { return a.localeCompare(b); });
+
+    var result = [];
+    locOrder.forEach(function (loc) {
+      result.push({ heading: loc, items: locGroups[loc] });
+    });
+    if (buyFind.length) {
+      result.push({ heading: 'Buy / Find', items: buyFind });
+    }
+    return result;
   }
 
   function groupSupplyRowsByLocation(rows) {
@@ -4623,21 +4660,25 @@
         html += '<div class="cl-lesson-section"><strong>Room setup</strong><p class="cl-room-setup">' + escapeAttr(ls.room_setup) + '</p></div>';
       }
 
-      // Supplies
+      // Supplies — grouped by location
       if (ls.supplies && ls.supplies.length) {
-        html += '<div class="cl-lesson-section"><strong>Supplies</strong><ul class="cl-supply-list">';
-        ls.supplies.forEach(function (s) {
-          var line = escapeAttr(s.item_name);
-          var qtyParts = [];
-          if (s.qty) qtyParts.push(escapeAttr(s.qty));
-          if (s.qty_unit === 'student') qtyParts.push('per student');
-          else if (s.qty_unit === 'class') qtyParts.push('per class');
-          if (qtyParts.length) line += ' <span class="cl-qty">(' + qtyParts.join(' ') + ')</span>';
-          if (s.closet_location) line += ' <span class="cl-source-badge cl-source-closet">' + escapeAttr(s.closet_location) + '</span>';
-          if (s.notes) line += ' <span class="cl-notes">&mdash; ' + linkify(s.notes) + '</span>';
-          html += '<li>' + line + '</li>';
+        html += '<div class="cl-lesson-section"><strong>Supplies</strong>';
+        var lessonGroups = groupLessonSuppliesByLocation(ls.supplies);
+        lessonGroups.forEach(function (g) {
+          html += '<div class="cl-loc-group"><span class="cl-loc-label">' + escapeAttr(g.heading) + '</span><ul class="cl-supply-list">';
+          g.items.forEach(function (s) {
+            var line = escapeAttr(s.item_name);
+            var qtyParts = [];
+            if (s.qty) qtyParts.push(escapeAttr(s.qty));
+            if (s.qty_unit === 'student') qtyParts.push('per student');
+            else if (s.qty_unit === 'class') qtyParts.push('per class');
+            if (qtyParts.length) line += ' <span class="cl-qty">(' + qtyParts.join(' ') + ')</span>';
+            if (s.notes) line += ' <span class="cl-notes">&mdash; ' + linkify(s.notes) + '</span>';
+            html += '<li>' + line + '</li>';
+          });
+          html += '</ul></div>';
         });
-        html += '</ul></div>';
+        html += '</div>';
       }
 
       // Activity & Instruction as parallel numbered steps

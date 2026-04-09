@@ -5935,6 +5935,17 @@ button.staff-role:hover {
   white-space: pre-wrap;
 }
 .cl-supply-list { padding-left: 1.25rem; }
+.cl-loc-group { margin-bottom: 0.4rem; }
+.cl-loc-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-accent-dark);
+  margin-bottom: 0.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cl-loc-group .cl-supply-list { margin-top: 0; }
 .cl-room-setup {
   margin: 0;
   font-size: 0.82rem;
