@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS curriculum_supplies_lesson_idx ON curriculum_supplies
 
 -- Idempotent column add for existing deployments
 ALTER TABLE curriculum_supplies ADD COLUMN IF NOT EXISTS qty_unit TEXT DEFAULT '';
+ALTER TABLE curriculum_supplies ADD COLUMN IF NOT EXISTS source TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS class_curriculum_links (
   id SERIAL PRIMARY KEY,

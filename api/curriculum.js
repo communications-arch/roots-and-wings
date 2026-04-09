@@ -75,12 +75,15 @@ function normalizeLesson(raw, lessonNumber) {
       ? raw.supplies.map(s => {
           var unit = String((s && s.qty_unit) || '').trim().toLowerCase();
           if (unit !== 'student' && unit !== 'class') unit = '';
+          var source = String((s && s.source) || '').trim().toLowerCase();
+          if (['supply_closet', 'buy_find', 'teacher'].indexOf(source) === -1) source = '';
           return {
             item_name: String((s && s.item_name) || '').trim().slice(0, 200),
             qty: String((s && s.qty) || '').trim().slice(0, 60),
             qty_unit: unit,
             notes: String((s && s.notes) || '').trim().slice(0, 500),
-            closet_item_id: (s && s.closet_item_id) ? parseInt(s.closet_item_id, 10) || null : null
+            closet_item_id: (s && s.closet_item_id) ? parseInt(s.closet_item_id, 10) || null : null,
+            source: source
           };
         }).filter(s => s.item_name).slice(0, 50)
       : []
@@ -104,7 +107,7 @@ async function getFullCurriculum(sql, id) {
   `;
   const supplies = await sql`
     SELECT cs.id, cs.lesson_id, cs.item_name, cs.qty, cs.qty_unit, cs.notes, cs.closet_item_id,
-           l.lesson_number
+           cs.source, l.lesson_number
     FROM curriculum_supplies cs
     JOIN lessons l ON l.id = cs.lesson_id
     WHERE l.curriculum_id = ${id}
@@ -120,7 +123,8 @@ async function getFullCurriculum(sql, id) {
       qty: s.qty,
       qty_unit: s.qty_unit || '',
       notes: s.notes,
-      closet_item_id: s.closet_item_id
+      closet_item_id: s.closet_item_id,
+      source: s.source || ''
     });
   });
   lessons.forEach(l => { l.supplies = byLesson[l.id] || []; });
@@ -165,8 +169,8 @@ async function createCurriculum(sql, user, body) {
     const lessonId = lessonResult[0].id;
     for (const sp of ls.supplies) {
       await sql`
-        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
+        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id, source)
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id}, ${sp.source || ''})
       `;
     }
   }
@@ -187,8 +191,8 @@ async function replaceLessons(sql, curriculumId, lessonCount, lessonRows) {
     const lessonId = lessonResult[0].id;
     for (const sp of ls.supplies) {
       await sql`
-        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
+        INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id, source)
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id}, ${sp.source || ''})
       `;
     }
   }
@@ -275,6 +279,28 @@ module.exports = async function handler(req, res) {
     // ── PATCH update ──
     if (req.method === 'PATCH') {
       if (!id) return res.status(400).json({ error: 'id query param required' });
+
+      // Supply-source-only update (for supply coordinator)
+      if (action === 'update_sources') {
+        const existing = await sql`SELECT id FROM curricula WHERE id = ${id}`;
+        if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
+        const sources = Array.isArray(req.body && req.body.sources) ? req.body.sources : [];
+        const VALID_SOURCES = ['supply_closet', 'buy_find', 'teacher', ''];
+        for (const entry of sources) {
+          const supplyId = parseInt(entry.supply_id, 10);
+          const src = String(entry.source || '').trim().toLowerCase();
+          if (!supplyId || Number.isNaN(supplyId)) continue;
+          if (VALID_SOURCES.indexOf(src) === -1) continue;
+          await sql`
+            UPDATE curriculum_supplies SET source = ${src}
+            WHERE id = ${supplyId}
+            AND lesson_id IN (SELECT id FROM lessons WHERE curriculum_id = ${id})
+          `;
+        }
+        const updated = await getFullCurriculum(sql, id);
+        return res.status(200).json({ curriculum: updated });
+      }
+
       const existing = await sql`SELECT id, author_email, edit_policy FROM curricula WHERE id = ${id}`;
       if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
       if (!canEdit(user, existing[0])) {

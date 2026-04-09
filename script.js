@@ -2760,6 +2760,13 @@
   // ──────────────────────────────────────────────
   // Supply Closet Inventory
   // ──────────────────────────────────────────────
+  var SUPPLY_LOCATIONS = [
+    'Kitchen (corner cabinet)',
+    'Goodness',
+    'MPR',
+    'Hall Closet'
+  ];
+
   var SUPPLY_CATEGORIES = [
     { key: 'permanent',           label: 'Permanent',    short: 'Permanent',  sub: 'Always available' },
     { key: 'currently_available', label: 'Currently',    short: 'Currently',  sub: 'May not always be available' },
@@ -2988,7 +2995,12 @@
     var html = '<div class="sc-edit-form">';
     html += '<div class="sc-edit-grid">';
     html += '<input class="sc-in-name" data-id="' + idAttr + '" placeholder="Item name" value="' + name + '">';
-    html += '<input class="sc-in-loc" data-id="' + idAttr + '" placeholder="Location" value="' + loc + '">';
+    html += '<select class="sc-in-loc" data-id="' + idAttr + '">';
+    html += '<option value=""' + (!loc ? ' selected' : '') + '>Location…</option>';
+    SUPPLY_LOCATIONS.forEach(function (l) {
+      html += '<option value="' + escapeAttr(l) + '"' + (loc === escapeAttr(l) ? ' selected' : '') + '>' + escapeAttr(l) + '</option>';
+    });
+    html += '</select>';
     html += '<select class="sc-in-cat" data-id="' + idAttr + '">';
     SUPPLY_CATEGORIES.forEach(function (c) {
       var sel = c.key === currentCat ? ' selected' : '';
@@ -3866,6 +3878,12 @@
       html += '<option value="student"' + (s.qty_unit === 'student' ? ' selected' : '') + '>per student</option>';
       html += '<option value="class"' + (s.qty_unit === 'class' ? ' selected' : '') + '>per class</option>';
       html += '</select>';
+      html += '<select class="cl-input cl-supply-source" data-sfield="source">';
+      html += '<option value=""' + ((!s.source) ? ' selected' : '') + '>Source…</option>';
+      html += '<option value="supply_closet"' + (s.source === 'supply_closet' ? ' selected' : '') + '>Supply Closet</option>';
+      html += '<option value="buy_find"' + (s.source === 'buy_find' ? ' selected' : '') + '>Buy / Find</option>';
+      html += '<option value="teacher"' + (s.source === 'teacher' ? ' selected' : '') + '>Teacher Provides</option>';
+      html += '</select>';
       html += '<input class="cl-input cl-supply-notes" data-sfield="notes" placeholder="Notes" value="' + escapeAttr(s.notes) + '">';
       html += '<button class="cl-dyn-remove" data-dyn-remove="supplies" data-dyn-idx="' + si + '" type="button" title="Remove">&times;</button>';
       html += '</div>';
@@ -4003,6 +4021,7 @@
           item_name: capitalizeFirstLetter(rawName),
           qty: (row.querySelector('[data-sfield="qty"]') || {}).value || '',
           qty_unit: (row.querySelector('[data-sfield="qty_unit"]') || {}).value || '',
+          source: (row.querySelector('[data-sfield="source"]') || {}).value || '',
           notes: (row.querySelector('[data-sfield="notes"]') || {}).value || '',
           closet_item_id: null
         });
@@ -4132,30 +4151,8 @@
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    // Build aggregated supply list (same logic as renderMasterSupplyList)
-    function norm(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
-    var rows = [];
-    var keyToRow = {};
-    (curr.lessons || []).forEach(function (ls) {
-      (ls.supplies || []).forEach(function (s) {
-        var name = String(s.item_name || '').trim().replace(/\s+/g, ' ');
-        if (!name) return;
-        var qty = String(s.qty || '').trim();
-        var unit = s.qty_unit || '';
-        var notes = String(s.notes || '').trim().replace(/\s+/g, ' ');
-        var sig = norm(name) + '|' + norm(qty) + '|' + unit + '|' + norm(notes);
-        if (keyToRow[sig]) {
-          if (keyToRow[sig].lessons.indexOf(ls.lesson_number) === -1) {
-            keyToRow[sig].lessons.push(ls.lesson_number);
-          }
-        } else {
-          var row = { name: name, qty: qty, unit: unit, notes: notes, lessons: [ls.lesson_number] };
-          keyToRow[sig] = row;
-          rows.push(row);
-        }
-      });
-    });
-    rows.forEach(function (r) { r.lessons.sort(function (a, b) { return a - b; }); });
+    // Build aggregated supply list grouped by source
+    var rows = aggregateSupplyRows(curr);
 
     var css = [
       '@page { margin: 0.5in; }',
@@ -4168,6 +4165,8 @@
       '.master { border: 1.5pt solid #333; padding: 10pt 14pt; margin-bottom: 16pt; page-break-inside: avoid; }',
       '.master h2 { font-size: 13pt; margin: 0 0 4pt 0; }',
       '.master .sub { font-size: 9pt; color: #555; font-style: italic; margin: 0 0 6pt 0; }',
+      '.master .source-group { margin-bottom: 8pt; }',
+      '.master .source-heading { font-size: 10pt; font-weight: 700; margin: 6pt 0 3pt 0; padding-bottom: 2pt; border-bottom: 0.5pt solid #999; }',
       '.master ul { columns: 2; column-gap: 18pt; list-style: none; padding: 0; margin: 0; }',
       '.master li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 4pt; font-size: 10pt; line-height: 1.35; break-inside: avoid; }',
       '.master li::before { content: "☐  "; font-size: 13pt; }',
@@ -4208,20 +4207,34 @@
     html += '<div class="author">by ' + esc(curr.author_name || curr.author_email) + '</div>';
     if (curr.overview) html += '<div class="overview">' + esc(curr.overview) + '</div>';
 
-    // Master supply list
+    // Master supply list grouped by source
     if (rows.length) {
-      html += '<div class="master"><h2>Master Supply List</h2><p class="sub">Everything needed across all lessons.</p><ul>';
+      var grouped = {};
+      SOURCE_ORDER.forEach(function (k) { grouped[k] = []; });
       rows.forEach(function (r) {
-        var bits = [];
-        if (r.qty) bits.push(esc(r.qty));
-        if (r.unit === 'student') bits.push('per student');
-        else if (r.unit === 'class') bits.push('per class');
-        var qtyStr = bits.length ? ' <span class="qty">(' + bits.join(' ') + ')</span>' : '';
-        var lessonsStr = ' <span class="lessons">· L' + r.lessons.join(',') + '</span>';
-        var notesStr = r.notes ? ' <span class="notes">— ' + esc(r.notes) + '</span>' : '';
-        html += '<li><strong>' + esc(r.name) + '</strong>' + qtyStr + lessonsStr + notesStr + '</li>';
+        var src = r.source || '';
+        if (!grouped[src]) grouped[src] = [];
+        grouped[src].push(r);
       });
-      html += '</ul></div>';
+
+      html += '<div class="master"><h2>Master Supply List</h2><p class="sub">Everything needed across all lessons — grouped by where to get it.</p>';
+      SOURCE_ORDER.forEach(function (src) {
+        var items = grouped[src];
+        if (!items || items.length === 0) return;
+        html += '<div class="source-group"><div class="source-heading">' + esc(SOURCE_LABELS[src] || src) + '</div><ul>';
+        items.forEach(function (r) {
+          var bits = [];
+          if (r.qty) bits.push(esc(r.qty));
+          if (r.unit === 'student') bits.push('per student');
+          else if (r.unit === 'class') bits.push('per class');
+          var qtyStr = bits.length ? ' <span class="qty">(' + bits.join(' ') + ')</span>' : '';
+          var lessonsStr = ' <span class="lessons">· L' + r.lessons.join(',') + '</span>';
+          var notesStr = r.notes ? ' <span class="notes">— ' + esc(r.notes) + '</span>' : '';
+          html += '<li><strong>' + esc(r.name) + '</strong>' + qtyStr + lessonsStr + notesStr + '</li>';
+        });
+        html += '</ul></div>';
+      });
+      html += '</div>';
     }
 
     // Each lesson
@@ -4298,15 +4311,21 @@
     }, 300);
   }
 
-  function renderMasterSupplyList(curr) {
+  var SOURCE_LABELS = {
+    supply_closet: 'From Supply Closet',
+    buy_find: 'Buy / Find',
+    teacher: 'Teacher Provides',
+    '': 'Other'
+  };
+  var SOURCE_ORDER = ['supply_closet', 'buy_find', 'teacher', ''];
+
+  function aggregateSupplyRows(curr) {
     // Aggregate supplies across all lessons. Match case-insensitively and
     // collapse extra whitespace so "Brayer" / "brayer" / "Brayer " merge.
-    // Each unique (item, qty, unit, notes) signature gets one line; multiple
-    // lessons with the same signature collapse to "L1,2,3".
     function norm(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
 
     var lessons = curr.lessons || [];
-    var rows = []; // flat list of { name, qty, unit, notes, lessons[] }
+    var rows = [];
     var keyToRow = {};
     lessons.forEach(function (ls) {
       (ls.supplies || []).forEach(function (s) {
@@ -4314,6 +4333,7 @@
         if (!name) return;
         var qty = String(s.qty || '').trim();
         var unit = s.qty_unit || '';
+        var source = s.source || '';
         var notes = String(s.notes || '').trim().replace(/\s+/g, ' ');
         var sig = norm(name);
         if (keyToRow[sig]) {
@@ -4321,32 +4341,59 @@
             keyToRow[sig].lessons.push(ls.lesson_number);
           }
         } else {
-          // Use the first-seen casing as the canonical display name
-          var row = { name: name, qty: qty, unit: unit, notes: notes, lessons: [ls.lesson_number] };
+          var row = { name: name, qty: qty, unit: unit, source: source, notes: notes, lessons: [ls.lesson_number], id: s.id || null };
           keyToRow[sig] = row;
           rows.push(row);
         }
       });
     });
-    if (rows.length === 0) return '';
     rows.forEach(function (r) { r.lessons.sort(function (a, b) { return a - b; }); });
+    return rows;
+  }
+
+  function renderSupplyItem(r, opts) {
+    var esc = opts && opts.esc || escapeAttr;
+    var linkifyFn = opts && opts.linkify || linkify;
+    var bits = [];
+    if (r.qty) bits.push(esc(r.qty));
+    if (r.unit === 'student') bits.push('per student');
+    else if (r.unit === 'class') bits.push('per class');
+    var qtyStr = bits.length ? ' <span class="' + (opts && opts.qtyClass || 'cl-qty') + '">(' + bits.join(' ') + ')</span>' : '';
+    var lessonsStr = '<span class="' + (opts && opts.lessonsClass || 'cl-master-lessons') + '"> · L' + r.lessons.join(',') + '</span>';
+    var notesStr = r.notes ? ' <span class="' + (opts && opts.notesClass || 'cl-notes') + '">— ' + linkifyFn(r.notes) + '</span>' : '';
+    return '<span class="' + (opts && opts.nameClass || 'cl-master-name') + '">' + esc(r.name) + '</span>' + qtyStr + lessonsStr + notesStr;
+  }
+
+  function renderMasterSupplyList(curr) {
+    var rows = aggregateSupplyRows(curr);
+    if (rows.length === 0) return '';
+
+    // Group rows by source
+    var grouped = {};
+    SOURCE_ORDER.forEach(function (k) { grouped[k] = []; });
+    rows.forEach(function (r) {
+      var src = r.source || '';
+      if (!grouped[src]) grouped[src] = [];
+      grouped[src].push(r);
+    });
 
     var html = '<div class="cl-master-supplies">';
     html += '<details class="cl-master-details" open>';
-    html += '<summary class="cl-master-summary"><span class="cl-master-title">Master Supply List</span> <span class="cl-master-count">' + rows.length + ' line' + (rows.length === 1 ? '' : 's') + '</span></summary>';
-    html += '<p class="cl-master-sub">Everything needed across all lessons — use this when shopping or packing.</p>';
-    html += '<ul class="cl-master-list">';
-    rows.forEach(function (r) {
-      var bits = [];
-      if (r.qty) bits.push(escapeAttr(r.qty));
-      if (r.unit === 'student') bits.push('per student');
-      else if (r.unit === 'class') bits.push('per class');
-      var qtyStr = bits.length ? ' <span class="cl-qty">(' + bits.join(' ') + ')</span>' : '';
-      var lessonsStr = '<span class="cl-master-lessons"> · L' + r.lessons.join(',') + '</span>';
-      var notesStr = r.notes ? ' <span class="cl-notes">— ' + linkify(r.notes) + '</span>' : '';
-      html += '<li class="cl-master-item"><span class="cl-master-name">' + escapeAttr(r.name) + '</span>' + qtyStr + lessonsStr + notesStr + '</li>';
+    html += '<summary class="cl-master-summary"><span class="cl-master-title">Master Supply List</span> <span class="cl-master-count">' + rows.length + ' item' + (rows.length === 1 ? '' : 's') + '</span></summary>';
+    html += '<p class="cl-master-sub">Everything needed across all lessons — grouped by where to get it.</p>';
+
+    SOURCE_ORDER.forEach(function (src) {
+      var items = grouped[src];
+      if (!items || items.length === 0) return;
+      html += '<div class="cl-source-group">';
+      html += '<h4 class="cl-source-heading">' + escapeAttr(SOURCE_LABELS[src] || src) + '</h4>';
+      html += '<ul class="cl-master-list">';
+      items.forEach(function (r) {
+        html += '<li class="cl-master-item">' + renderSupplyItem(r) + '</li>';
+      });
+      html += '</ul></div>';
     });
-    html += '</ul>';
+
     html += '</details>';
     html += '</div>';
     return html;
@@ -4400,6 +4447,14 @@
     // ── Master Supply List (aggregated across all lessons) ──
     html += renderMasterSupplyList(curr);
 
+    // Supply coordinator: "Manage Sources" button
+    if (computeSupplyClosetCanEdit()) {
+      var hasSupplies = (curr.lessons || []).some(function (ls) { return ls.supplies && ls.supplies.length > 0; });
+      if (hasSupplies) {
+        html += '<button class="cl-action-btn cl-manage-sources-btn" id="cl-manage-sources-btn" data-id="' + curr.id + '">Manage Supply Sources</button>';
+      }
+    }
+
     // Lessons
     html += '<div class="cl-lessons">';
     (curr.lessons || []).forEach(function (ls) {
@@ -4424,6 +4479,7 @@
           if (s.qty_unit === 'student') qtyParts.push('per student');
           else if (s.qty_unit === 'class') qtyParts.push('per class');
           if (qtyParts.length) line += ' <span class="cl-qty">(' + qtyParts.join(' ') + ')</span>';
+          if (s.source) line += ' <span class="cl-source-badge cl-source-' + s.source + '">' + escapeAttr(SOURCE_LABELS[s.source] || s.source) + '</span>';
           if (s.notes) line += ' <span class="cl-notes">&mdash; ' + linkify(s.notes) + '</span>';
           html += '<li>' + line + '</li>';
         });
@@ -4471,6 +4527,92 @@
     html += '</div>';
 
     return html;
+  }
+
+  function showManageSourcesPanel(curr) {
+    if (!curr) return;
+
+    // Collect all supplies with their IDs
+    var allSupplies = [];
+    (curr.lessons || []).forEach(function (ls) {
+      (ls.supplies || []).forEach(function (s) {
+        if (s.item_name) {
+          allSupplies.push({
+            id: s.id,
+            item_name: s.item_name,
+            qty: s.qty,
+            qty_unit: s.qty_unit,
+            source: s.source || '',
+            lesson_number: ls.lesson_number
+          });
+        }
+      });
+    });
+    if (allSupplies.length === 0) return;
+
+    var html = '<div class="cl-detail-header">';
+    html += '<button class="cl-back" id="cl-sources-back-btn">&larr; Back to Plan</button>';
+    html += '</div>';
+    html += '<h3>Manage Supply Sources</h3>';
+    html += '<p class="cl-master-sub">Set where each supply comes from for <strong>' + escapeAttr(curr.title) + '</strong>.</p>';
+    html += '<div class="cl-sources-table">';
+    html += '<div class="cl-sources-header"><span class="cl-sources-col-name">Item</span><span class="cl-sources-col-lesson">Lesson</span><span class="cl-sources-col-source">Source</span></div>';
+    allSupplies.forEach(function (s, i) {
+      html += '<div class="cl-sources-row" data-supply-id="' + s.id + '">';
+      html += '<span class="cl-sources-col-name">' + escapeAttr(s.item_name) + '</span>';
+      html += '<span class="cl-sources-col-lesson">L' + s.lesson_number + '</span>';
+      html += '<select class="cl-input cl-sources-select" data-idx="' + i + '">';
+      html += '<option value=""' + (!s.source ? ' selected' : '') + '>—</option>';
+      html += '<option value="supply_closet"' + (s.source === 'supply_closet' ? ' selected' : '') + '>Supply Closet</option>';
+      html += '<option value="buy_find"' + (s.source === 'buy_find' ? ' selected' : '') + '>Buy / Find</option>';
+      html += '<option value="teacher"' + (s.source === 'teacher' ? ' selected' : '') + '>Teacher Provides</option>';
+      html += '</select>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="cl-detail-actions" style="margin-top:1rem;">';
+    html += '<button class="cl-action-btn cl-sources-save-btn" id="cl-sources-save-btn">Save Sources</button>';
+    html += '</div>';
+
+    var body = personDetailCard.querySelector('.detail-body');
+    body.innerHTML = html;
+
+    // Wire back button
+    body.querySelector('#cl-sources-back-btn').addEventListener('click', function () {
+      body.innerHTML = renderCurriculumDetailBody();
+      wireCurriculumEvents();
+    });
+
+    // Wire save button
+    body.querySelector('#cl-sources-save-btn').addEventListener('click', function () {
+      var sources = [];
+      body.querySelectorAll('.cl-sources-row').forEach(function (row, i) {
+        var supplyId = parseInt(row.getAttribute('data-supply-id'), 10);
+        var sel = row.querySelector('.cl-sources-select');
+        if (supplyId && sel) {
+          sources.push({ supply_id: supplyId, source: sel.value });
+        }
+      });
+
+      var saveBtn = body.querySelector('#cl-sources-save-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+
+      curriculumFetch('/api/curriculum?id=' + encodeURIComponent(curr.id) + '&action=update_sources', {
+        method: 'PATCH',
+        body: JSON.stringify({ sources: sources })
+      }).then(function (res) {
+        if (!res.ok) {
+          alert('Error: ' + (res.data.error || 'save failed'));
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Sources';
+          return;
+        }
+        curriculumState.current = res.data.curriculum;
+        body.innerHTML = renderCurriculumDetailBody();
+        wireCurriculumEvents();
+      });
+    });
   }
 
   function wireCurriculumEvents() {
@@ -4552,6 +4694,14 @@
         });
       });
     });
+
+    // Manage Sources button (supply coordinator)
+    var manageSourcesBtn = personDetailCard.querySelector('#cl-manage-sources-btn');
+    if (manageSourcesBtn) {
+      manageSourcesBtn.addEventListener('click', function () {
+        showManageSourcesPanel(curriculumState.current);
+      });
+    }
 
     // ── Editor view wiring ──
     // Debounced autosave on any input change inside the editor
@@ -4639,7 +4789,7 @@
         var idx = parseInt(lessonEl.getAttribute('data-lesson-idx'), 10);
         var lesson = curriculumState.draft.lessons[idx];
         if (field === 'supplies') {
-          lesson.supplies.push({ item_name: '', qty: '', qty_unit: '', notes: '', closet_item_id: null });
+          lesson.supplies.push({ item_name: '', qty: '', qty_unit: '', source: '', notes: '', closet_item_id: null });
         } else if (field === 'links') {
           lesson.links.push({ label: '', url: '' });
         } else if (field === 'step-pair') {
@@ -4671,6 +4821,7 @@
             item_name: s.item_name,
             qty: s.qty,
             qty_unit: s.qty_unit,
+            source: s.source || '',
             notes: s.notes,
             closet_item_id: s.closet_item_id || null
           });
