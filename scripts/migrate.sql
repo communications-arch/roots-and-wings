@@ -76,6 +76,15 @@ CREATE INDEX IF NOT EXISTS curriculum_supplies_lesson_idx ON curriculum_supplies
 ALTER TABLE curriculum_supplies ADD COLUMN IF NOT EXISTS qty_unit TEXT DEFAULT '';
 ALTER TABLE curriculum_supplies ADD COLUMN IF NOT EXISTS source TEXT DEFAULT '';
 
+-- ──────────────────────────────────────────────
+-- Supply Storage Locations (managed by coordinator)
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS supply_locations (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS class_curriculum_links (
   id SERIAL PRIMARY KEY,
   session_number INTEGER NOT NULL,

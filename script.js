@@ -2760,12 +2760,8 @@
   // ──────────────────────────────────────────────
   // Supply Closet Inventory
   // ──────────────────────────────────────────────
-  var SUPPLY_LOCATIONS = [
-    'Kitchen (corner cabinet)',
-    'Goodness',
-    'MPR',
-    'Hall Closet'
-  ];
+  // Loaded dynamically from /api/supply-locations
+  var SUPPLY_LOCATIONS = [];
 
   var SUPPLY_CATEGORIES = [
     { key: 'permanent',           label: 'Permanent',    short: 'Permanent',  sub: 'Always available' },
@@ -2783,6 +2779,7 @@
 
   var supplyClosetState = {
     items: null,           // flat array of all items
+    locations: null,       // array of { id, name, sort_order } from DB
     searchQuery: '',
     enabledCats: {         // which categories are visible
       permanent: true,
@@ -2794,7 +2791,8 @@
     editingId: null,
     addingNew: false,
     newItemCategory: 'permanent',
-    canEdit: false
+    canEdit: false,
+    showLocations: false   // true when location manager panel is open
   };
 
   function getSupplyCoordinatorName() {
@@ -2833,6 +2831,19 @@
     return fetch('/api/supply-closet', {
       headers: { 'Authorization': 'Bearer ' + cred }
     }).then(function (r) { return r.json(); });
+  }
+
+  function fetchSupplyLocations() {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    if (!cred) return Promise.reject(new Error('Not authenticated'));
+    return fetch('/api/supply-locations', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      var locs = (data && data.locations) || [];
+      supplyClosetState.locations = locs;
+      SUPPLY_LOCATIONS = locs.map(function (l) { return l.name; });
+      return locs;
+    });
   }
 
   function escapeAttr(s) {
@@ -2945,6 +2956,7 @@
     html += '<div class="sc-footer">';
     if (state.canEdit) {
       html += '<button id="sc-add-btn" class="sc-add">+ Add Item</button>';
+      html += '<button id="sc-manage-locs-btn" class="sc-add sc-manage-locs">Manage Locations</button>';
     } else {
       html += '<span></span>';
     }
@@ -3017,6 +3029,131 @@
     return html;
   }
 
+  function renderLocationManager() {
+    if (!personDetail || !personDetailCard) return;
+    var locs = supplyClosetState.locations || [];
+
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail sc-modal">';
+    html += '<h3>Manage Storage Locations</h3>';
+    html += '<p class="sc-intro">Add, rename, or remove the locations that appear in the supply closet location dropdown.</p>';
+
+    html += '<div class="sc-locs-list">';
+    if (locs.length === 0) {
+      html += '<div class="sc-empty">No locations yet. Add one below.</div>';
+    }
+    locs.forEach(function (loc) {
+      html += '<div class="sc-loc-row" data-loc-id="' + loc.id + '">';
+      html += '<input class="cl-input sc-loc-name-input" value="' + escapeAttr(loc.name) + '" data-loc-id="' + loc.id + '">';
+      html += '<button class="sc-btn sc-loc-rename" data-loc-id="' + loc.id + '" title="Save name">Rename</button>';
+      html += '<button class="sc-btn sc-loc-delete" data-loc-id="' + loc.id + '" title="Delete location">&times;</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+
+    html += '<div class="sc-loc-add-row">';
+    html += '<input class="cl-input sc-loc-new-input" placeholder="New location name…" id="sc-loc-new-input">';
+    html += '<button class="sc-btn sc-save" id="sc-loc-add-btn">Add</button>';
+    html += '</div>';
+
+    html += '<div class="sc-footer" style="margin-top:1rem;">';
+    html += '<button class="sc-add" id="sc-locs-back-btn">&larr; Back to Inventory</button>';
+    html += '</div>';
+    html += '</div>';
+
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    wireLocationManagerEvents();
+  }
+
+  function wireLocationManagerEvents() {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    var headers = { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' };
+
+    // Close
+    var closeBtn = personDetailCard.querySelector('.detail-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeDetail);
+    personDetail.onclick = function (e) {
+      if (e.target === personDetail) closeDetail();
+    };
+
+    // Back
+    var backBtn = personDetailCard.querySelector('#sc-locs-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', function () {
+        // Refresh locations then go back to inventory
+        fetchSupplyLocations().catch(function () {}).then(function () {
+          loadSupplyClosetAndRender();
+        });
+      });
+    }
+
+    // Add location
+    var addBtn = personDetailCard.querySelector('#sc-loc-add-btn');
+    var addInput = personDetailCard.querySelector('#sc-loc-new-input');
+    if (addBtn && addInput) {
+      addBtn.addEventListener('click', function () {
+        var name = addInput.value.trim();
+        if (!name) return;
+        addBtn.disabled = true;
+        addBtn.textContent = 'Adding…';
+        fetch('/api/supply-locations', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ name: name })
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (data.error) { alert('Error: ' + data.error); addBtn.disabled = false; addBtn.textContent = 'Add'; return; }
+          return fetchSupplyLocations().then(function () { renderLocationManager(); });
+        }).catch(function (err) { alert('Network error: ' + err.message); addBtn.disabled = false; addBtn.textContent = 'Add'; });
+      });
+      // Allow Enter key in the input
+      addInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+      });
+    }
+
+    // Rename buttons
+    personDetailCard.querySelectorAll('.sc-loc-rename').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-loc-id');
+        var input = personDetailCard.querySelector('.sc-loc-name-input[data-loc-id="' + id + '"]');
+        var name = input ? input.value.trim() : '';
+        if (!name) { alert('Name cannot be empty.'); return; }
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        fetch('/api/supply-locations?id=' + encodeURIComponent(id), {
+          method: 'PATCH',
+          headers: headers,
+          body: JSON.stringify({ name: name })
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (data.error) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Rename'; return; }
+          return fetchSupplyLocations().then(function () { renderLocationManager(); });
+        }).catch(function (err) { alert('Network error: ' + err.message); btn.disabled = false; btn.textContent = 'Rename'; });
+      });
+    });
+
+    // Delete buttons
+    personDetailCard.querySelectorAll('.sc-loc-delete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-loc-id');
+        var row = btn.closest('.sc-loc-row');
+        var input = row ? row.querySelector('.sc-loc-name-input') : null;
+        var locName = input ? input.value : 'this location';
+        if (!confirm('Delete "' + locName + '"? Items using this location will have their location cleared.')) return;
+        btn.disabled = true;
+        fetch('/api/supply-locations?id=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: headers
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (data.error) { alert('Error: ' + data.error); btn.disabled = false; return; }
+          return fetchSupplyLocations().then(function () { renderLocationManager(); });
+        }).catch(function (err) { alert('Network error: ' + err.message); btn.disabled = false; });
+      });
+    });
+  }
+
   function wireSupplyClosetEvents() {
     // Close button + backdrop
     var closeBtn = personDetailCard.querySelector('.detail-close');
@@ -3065,6 +3202,14 @@
         supplyClosetState.addingNew = true;
         supplyClosetState.editingId = null;
         renderSupplyClosetModal();
+      });
+    }
+
+    // Manage Locations button
+    var manageLocsBtn = personDetailCard.querySelector('#sc-manage-locs-btn');
+    if (manageLocsBtn) {
+      manageLocsBtn.addEventListener('click', function () {
+        renderLocationManager();
       });
     }
 
@@ -3286,7 +3431,10 @@
     supplyClosetState.editingId = null;
     supplyClosetState.addingNew = false;
     supplyClosetState.newItemCategory = 'permanent';
-    loadSupplyClosetAndRender();
+    supplyClosetState.showLocations = false;
+    // Load locations (if not yet loaded) alongside the items
+    var locsPromise = supplyClosetState.locations ? Promise.resolve() : fetchSupplyLocations().catch(function () { SUPPLY_LOCATIONS = []; });
+    locsPromise.then(function () { loadSupplyClosetAndRender(); });
   }
 
   var supplyClosetBtn = document.getElementById('supplyClosetBtn');
@@ -4447,14 +4595,6 @@
     // ── Master Supply List (aggregated across all lessons) ──
     html += renderMasterSupplyList(curr);
 
-    // Supply coordinator: "Manage Sources" button
-    if (computeSupplyClosetCanEdit()) {
-      var hasSupplies = (curr.lessons || []).some(function (ls) { return ls.supplies && ls.supplies.length > 0; });
-      if (hasSupplies) {
-        html += '<button class="cl-action-btn cl-manage-sources-btn" id="cl-manage-sources-btn" data-id="' + curr.id + '">Manage Supply Sources</button>';
-      }
-    }
-
     // Lessons
     html += '<div class="cl-lessons">';
     (curr.lessons || []).forEach(function (ls) {
@@ -4694,14 +4834,6 @@
         });
       });
     });
-
-    // Manage Sources button (supply coordinator)
-    var manageSourcesBtn = personDetailCard.querySelector('#cl-manage-sources-btn');
-    if (manageSourcesBtn) {
-      manageSourcesBtn.addEventListener('click', function () {
-        showManageSourcesPanel(curriculumState.current);
-      });
-    }
 
     // ── Editor view wiring ──
     // Debounced autosave on any input change inside the editor

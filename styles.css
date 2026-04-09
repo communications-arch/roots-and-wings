@@ -5304,6 +5304,53 @@ button.staff-role:hover {
 .sc-add:hover {
   background: var(--color-primary-dark);
 }
+.sc-manage-locs {
+  background: var(--color-accent-dark);
+}
+.sc-manage-locs:hover {
+  background: #a33d2e;
+}
+/* Location manager */
+.sc-locs-list {
+  margin: 0.75rem 0;
+}
+.sc-loc-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.sc-loc-row .sc-loc-name-input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+}
+.sc-loc-row .sc-btn {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.7rem;
+  white-space: nowrap;
+}
+.sc-loc-row .sc-loc-delete {
+  background: var(--color-danger, #dc3545);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+.sc-loc-add-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+.sc-loc-add-row .sc-loc-new-input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+}
 .sc-save {
   background: var(--color-primary);
   color: var(--color-text-inverse);
