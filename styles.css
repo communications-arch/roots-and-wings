@@ -5304,12 +5304,6 @@ button.staff-role:hover {
 .sc-add:hover {
   background: var(--color-primary-dark);
 }
-.sc-manage-locs {
-  background: var(--color-accent-dark);
-}
-.sc-manage-locs:hover {
-  background: #a33d2e;
-}
 /* Location manager */
 .sc-locs-list {
   margin: 0.75rem 0;
