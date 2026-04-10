@@ -4655,14 +4655,16 @@
     var locGroups = {};
     var locOrder = [];
     var buyFind = [];
+    var CLOSET_FALLBACK = 'Supply Closet';
 
     supplies.forEach(function (s) {
-      if (s.closet_item_id && s.closet_location) {
-        if (!locGroups[s.closet_location]) {
-          locGroups[s.closet_location] = [];
-          locOrder.push(s.closet_location);
+      if (s.closet_item_id) {
+        var loc = s.closet_location || CLOSET_FALLBACK;
+        if (!locGroups[loc]) {
+          locGroups[loc] = [];
+          locOrder.push(loc);
         }
-        locGroups[s.closet_location].push(s);
+        locGroups[loc].push(s);
       } else {
         buyFind.push(s);
       }
@@ -4682,17 +4684,19 @@
 
   function groupSupplyRowsByLocation(rows) {
     // Group: each unique closet location gets a group, plus "Buy / Find" for non-closet items
-    var locGroups = {};  // location name → array of rows
-    var locOrder = [];   // ordered list of location keys
+    var locGroups = {};
+    var locOrder = [];
     var buyFind = [];
+    var CLOSET_FALLBACK = 'Supply Closet';
 
     rows.forEach(function (r) {
-      if (r.closet_item_id && r.location) {
-        if (!locGroups[r.location]) {
-          locGroups[r.location] = [];
-          locOrder.push(r.location);
+      if (r.closet_item_id) {
+        var loc = r.location || CLOSET_FALLBACK;
+        if (!locGroups[loc]) {
+          locGroups[loc] = [];
+          locOrder.push(loc);
         }
-        locGroups[r.location].push(r);
+        locGroups[loc].push(r);
       } else {
         buyFind.push(r);
       }
