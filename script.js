@@ -2592,18 +2592,20 @@
     // Morning classes table
     var myNames = getMyNames();
     html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
-    html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Room</th></tr></thead><tbody>';
+    html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
     var groups = Object.keys(AM_CLASSES);
     groups.forEach(function (groupName) {
       var cls = AM_CLASSES[groupName];
       var s = cls.sessions[viewSess];
       if (!s) return;
-      var isMyRow = myNames.fullNames.some(function (fn) { return fn.toLowerCase() === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === fn.toLowerCase(); }); });
+      var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
+      var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
       html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
       html += '<td><span class="session-group-link">' + groupName + '</span></td>';
       html += '<td>' + cls.ages + '</td>';
       html += '<td>' + s.topic + '</td>';
       html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
+      html += '<td>' + assistantsHtml + '</td>';
       html += '<td>' + s.room + '</td>';
       html += '</tr>';
     });
@@ -2665,7 +2667,9 @@
     html += '</div>';
     if (e.hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
     html += '<p class="elective-card-desc">' + e.description + '</p>';
-    html += '<div class="elective-card-meta">' + e.room + ' &middot; ' + (myNames ? highlightIfMe(e.leader, myNames) : e.leader) + '</div>';
+    var leaderHtml = myNames ? highlightIfMe(e.leader, myNames) : e.leader;
+    var assistHtml = (e.assistants && e.assistants.length > 0) ? ' + ' + e.assistants.map(function (a) { return myNames ? highlightIfMe(a, myNames) : a; }).join(', ') : '';
+    html += '<div class="elective-card-meta">' + e.room + ' &middot; ' + leaderHtml + assistHtml + '</div>';
     html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
     html += '<div class="elective-card-spots">' + e.students.length + '/' + e.maxCapacity + '</div>';
     html += '</button>';
