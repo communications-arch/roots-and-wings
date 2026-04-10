@@ -6442,11 +6442,22 @@ button.staff-role:hover {
 .notif-item-body { font-size: 0.72rem; color: var(--color-text-light); line-height: 1.35; }
 .notif-item-time { font-size: 0.65rem; color: var(--color-text-light); margin-top: 0.2rem; }
 
-/* Push notification alert — above dashboard header */
+/* Push notification alert — fixed above navbar */
 .push-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
   background: var(--color-primary);
   color: #fff;
-  padding: 0.55rem 0;
+  padding: 0.5rem 0;
+}
+.dashboard.has-push-banner .navbar {
+  top: 38px;
+}
+.dashboard.has-push-banner {
+  padding-top: calc(var(--nav-height) + 38px);
 }
 .push-banner-inner {
   display: flex;

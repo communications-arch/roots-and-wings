@@ -5669,13 +5669,15 @@
     var dismissBtn = document.getElementById('pushBannerDismiss');
     if (!banner || !enableBtn) return;
     if (localStorage.getItem('rw_push_dismissed')) return;
-    navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) { if (sub) return; banner.style.display = ''; }).catch(function () { banner.style.display = ''; });
-    if (dismissBtn) { dismissBtn.addEventListener('click', function () { banner.style.display = 'none'; localStorage.setItem('rw_push_dismissed', '1'); }); }
+    function showBanner() { banner.style.display = ''; var dash = document.getElementById('dashboard'); if (dash) dash.classList.add('has-push-banner'); }
+    function hideBanner() { banner.style.display = 'none'; var dash = document.getElementById('dashboard'); if (dash) dash.classList.remove('has-push-banner'); }
+    navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) { if (sub) return; showBanner(); }).catch(function () { showBanner(); });
+    if (dismissBtn) { dismissBtn.addEventListener('click', function () { hideBanner(); localStorage.setItem('rw_push_dismissed', '1'); }); }
     enableBtn.addEventListener('click', function () {
       enableBtn.disabled = true; enableBtn.textContent = 'Enabling\u2026';
       navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription().then(function (existing) { if (existing) return existing; var vapidKey = document.querySelector('meta[name="vapid-public-key"]'); if (!vapidKey) throw new Error('VAPID key not found'); return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey.content) }); }); })
       .then(function (sub) { var cred = sessionStorage.getItem('rw_google_credential'); var subJson = sub.toJSON(); return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) }); })
-      .then(function (r) { if (!r.ok) throw new Error('Subscribe failed'); banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { banner.style.display = 'none'; }, 3000); })
+      .then(function (r) { if (!r.ok) throw new Error('Subscribe failed'); banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { hideBanner(); }, 3000); })
       .catch(function (err) { console.error('Push subscription error:', err); enableBtn.disabled = false; enableBtn.textContent = 'Enable'; if (Notification.permission === 'denied') alert('Notifications are blocked. Please enable them in your browser settings.'); });
     });
   }
