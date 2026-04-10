@@ -5277,6 +5277,358 @@
   applyTheme(savedTheme);
   buildSwitcher();
 
+  // ═══════════════════════════════════════════════════════
+  // ABSENCE & COVERAGE SYSTEM (inside IIFE for scope access)
+  // ═══════════════════════════════════════════════════════
+
+  window._rw_getTuesdaysInSession = getTuesdaysInSession;
+  window._rw_showAbsenceModal = showAbsenceModal;
+  window._rw_loadCoverageBoard = loadCoverageBoard;
+  window._rw_loadNotifications = loadNotifications;
+  window._rw_initAbsenceCoverageSystem = initAbsenceCoverageSystem;
+  window._rw_initPushSubscription = initPushSubscription;
+
+  function getTuesdaysInSession(sessionNumber) {
+    var sess = SESSION_DATES[sessionNumber];
+    if (!sess) return [];
+    var tuesdays = [];
+    var d = new Date(sess.start + 'T12:00:00');
+    var end = new Date(sess.end + 'T12:00:00');
+    while (d.getDay() !== 2) d.setDate(d.getDate() + 1);
+    while (d <= end) {
+      tuesdays.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 7);
+    }
+    return tuesdays;
+  }
+
+  function formatDateLabel(isoDate) {
+    return new Date(isoDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function nameMatchAbsence(a, b) {
+    if (!a || !b) return false;
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+  }
+
+  function getResponsibilitiesForBlocks(parentFullNames, session, blocks, familyName) {
+    var slots = [];
+    function has(b) { return blocks.indexOf(b) !== -1; }
+
+    if (has('AM')) {
+      Object.keys(AM_CLASSES).forEach(function (groupName) {
+        var staff = AM_CLASSES[groupName];
+        var sess = staff.sessions[session];
+        if (!sess) return;
+        parentFullNames.forEach(function (full) {
+          if (nameMatchAbsence(sess.teacher, full)) {
+            slots.push({ block: 'AM', role_type: 'teacher', role_description: 'Leading ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
+          }
+          (sess.assistants || []).forEach(function (a) {
+            if (nameMatchAbsence(a, full)) {
+              slots.push({ block: 'AM', role_type: 'assistant', role_description: 'Assisting ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
+            }
+          });
+        });
+      });
+      var amSupport = AM_SUPPORT_ROLES[session];
+      if (amSupport) {
+        ['10-11', '11-12'].forEach(function (slot) {
+          if (amSupport.floaters && amSupport.floaters[slot]) {
+            amSupport.floaters[slot].forEach(function (name) {
+              parentFullNames.forEach(function (full) {
+                if (nameMatchAbsence(name, full)) slots.push({ block: 'AM', role_type: 'floater', role_description: 'AM Floater ' + slot, group_or_class: '' });
+              });
+            });
+          }
+          if (amSupport.prepPeriod && amSupport.prepPeriod[slot]) {
+            amSupport.prepPeriod[slot].forEach(function (name) {
+              parentFullNames.forEach(function (full) {
+                if (nameMatchAbsence(name, full)) slots.push({ block: 'AM', role_type: 'prep', role_description: 'Prep Period ' + slot, group_or_class: '' });
+              });
+            });
+          }
+        });
+      }
+    }
+
+    if (has('PM1') || has('PM2')) {
+      (PM_ELECTIVES[session] || []).forEach(function (elec) {
+        var isPM1 = elec.hour === 1 || elec.hour === 'both';
+        var isPM2 = elec.hour === 2 || elec.hour === 'both';
+        parentFullNames.forEach(function (full) {
+          if (nameMatchAbsence(elec.leader, full)) {
+            if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
+            if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
+          }
+          (elec.assistants || []).forEach(function (a) {
+            if (nameMatchAbsence(a, full)) {
+              if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
+              if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
+            }
+          });
+        });
+      });
+      var pmSupport = PM_SUPPORT_ROLES[session];
+      if (pmSupport) {
+        if (pmSupport.floaters) pmSupport.floaters.forEach(function (name) {
+          parentFullNames.forEach(function (full) {
+            if (nameMatchAbsence(name, full)) { if (has('PM1')) slots.push({ block: 'PM1', role_type: 'floater', role_description: 'PM Floater', group_or_class: '' }); }
+          });
+        });
+        if (pmSupport.supplyCloset) pmSupport.supplyCloset.forEach(function (name) {
+          parentFullNames.forEach(function (full) {
+            if (nameMatchAbsence(name, full)) { if (has('PM1')) slots.push({ block: 'PM1', role_type: 'supply_closet', role_description: 'Supply Closet', group_or_class: '' }); }
+          });
+        });
+      }
+    }
+
+    if (has('Cleaning')) {
+      var sessClean = CLEANING_CREW.sessions[session];
+      if (sessClean) {
+        ['mainFloor', 'upstairs', 'outside'].forEach(function (floor) {
+          if (!sessClean[floor]) return;
+          Object.keys(sessClean[floor]).forEach(function (area) {
+            if (sessClean[floor][area].some(function (n) { return n.toLowerCase() === familyName.toLowerCase(); }))
+              slots.push({ block: 'Cleaning', role_type: 'cleaning', role_description: 'Cleaning: ' + area, group_or_class: area });
+          });
+        });
+        if (sessClean.floater && sessClean.floater.some(function (n) { return n.toLowerCase() === familyName.toLowerCase(); }))
+          slots.push({ block: 'Cleaning', role_type: 'cleaning', role_description: 'Cleaning Floater', group_or_class: 'Floater' });
+      }
+    }
+    return slots;
+  }
+
+  function showAbsenceModal() {
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email || !FAMILIES) return;
+    var me = null;
+    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    if (!me) { alert('Could not find your family record.'); return; }
+    var tuesdays = getTuesdaysInSession(currentSession);
+    if (tuesdays.length === 0) { alert('No session dates available.'); return; }
+
+    var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
+    var html = '<div class="absence-overlay" id="absenceOverlay"><div class="absence-modal">';
+    html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
+    html += '<h3>Report an Absence</h3>';
+    html += '<div class="absence-field"><label>Who will be out?</label><select class="cl-input" id="absenceWho">';
+    parentNames.forEach(function (name) { html += '<option value="' + name + '">' + name + '</option>'; });
+    html += '</select></div>';
+    html += '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
+    tuesdays.forEach(function (d, idx) { html += '<button class="absence-date-btn' + (idx === 0 ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>'; });
+    html += '</div></div>';
+    html += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
+    html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay" checked> <strong>Whole Day</strong></label>';
+    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="AM" checked> AM (10:00\u201312:00)</label>';
+    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM1" checked> PM1 (1:00\u20131:55)</label>';
+    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM2" checked> PM2 (2:00\u20132:55)</label>';
+    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="Cleaning" checked> Cleaning</label>';
+    html += '</div></div>';
+    html += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
+    html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..."></div>';
+    html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">Submit \u2014 I\'m Out</button>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+
+    var overlay = document.getElementById('absenceOverlay');
+    var selectedDate = tuesdays[0];
+    var selectedPerson = parentNames[0];
+
+    function getSelectedBlocks() {
+      var blocks = [];
+      overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { if (cb.checked) blocks.push(cb.value); });
+      return blocks;
+    }
+    function updatePreview() {
+      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], currentSession, getSelectedBlocks(), me.name);
+      var previewEl = document.getElementById('absencePreview');
+      if (slotsPreview.length === 0) { previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>'; }
+      else {
+        var ph = '<ul class="absence-slot-list">';
+        slotsPreview.forEach(function (s) { ph += '<li><span class="absence-slot-block">' + s.block + '</span> ' + s.role_description + '</li>'; });
+        previewEl.innerHTML = ph + '</ul>';
+      }
+    }
+
+    document.getElementById('absenceCloseBtn').addEventListener('click', function () { overlay.remove(); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.absence-date-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        overlay.querySelectorAll('.absence-date-btn').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        selectedDate = btn.getAttribute('data-date');
+      });
+    });
+    document.getElementById('absenceWho').addEventListener('change', function () { selectedPerson = this.value; updatePreview(); });
+    var wholeDayCb = document.getElementById('absenceWholeDay');
+    wholeDayCb.addEventListener('change', function () {
+      overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
+      updatePreview();
+    });
+    overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var allChecked = true;
+        overlay.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
+        wholeDayCb.checked = allChecked;
+        updatePreview();
+      });
+    });
+    document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
+      var blocks = getSelectedBlocks();
+      if (blocks.length === 0) { alert('Please select at least one block.'); return; }
+      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], currentSession, blocks, me.name);
+      var btn = document.getElementById('absenceSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Submitting\u2026';
+      var cred = sessionStorage.getItem('rw_google_credential');
+      fetch('/api/absences', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: currentSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: (document.getElementById('absenceNotes') || {}).value || '' })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Error: ' + (res.data.error || 'Could not submit absence')); btn.disabled = false; btn.textContent = 'Submit \u2014 I\'m Out'; return; }
+        overlay.remove();
+        loadCoverageBoard();
+        loadNotifications();
+        var coverageSec = document.getElementById('coverage');
+        if (coverageSec) coverageSec.style.display = '';
+      });
+    });
+    updatePreview();
+  }
+
+  function loadCoverageBoard() {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/absences?session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
+    .then(function (r) { return r.json(); })
+    .then(function (data) { renderCoverageBoard((data.absences || []).filter(function (a) { return !a.cancelled_at; })); })
+    .catch(function () { var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
+  }
+
+  function renderCoverageBoard(absences) {
+    var el = document.getElementById('coverageBoardContent');
+    var coverageSec = document.getElementById('coverage');
+    if (!el) return;
+    if (absences.length === 0) { if (coverageSec) coverageSec.style.display = 'none'; return; }
+    if (coverageSec) coverageSec.style.display = '';
+
+    var email = sessionStorage.getItem('rw_user_email');
+    var me = null;
+    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
+
+    var byDate = {};
+    absences.forEach(function (a) { if (!byDate[a.absence_date]) byDate[a.absence_date] = []; byDate[a.absence_date].push(a); });
+    var dates = Object.keys(byDate).sort();
+    var html = '';
+    dates.forEach(function (date) {
+      var dateAbsences = byDate[date];
+      var totalOpen = 0;
+      dateAbsences.forEach(function (a) { (a.slots || []).forEach(function (s) { if (!s.claimed_by_email) totalOpen++; }); });
+      html += '<div class="coverage-date-card"><div class="coverage-date-header"><span class="coverage-date">' + formatDateLabel(date) + '</span>';
+      html += totalOpen > 0 ? '<span class="coverage-open-badge">' + totalOpen + ' open</span>' : '<span class="coverage-all-good">All covered!</span>';
+      html += '</div>';
+      dateAbsences.forEach(function (a) {
+        html += '<div class="coverage-absence"><div class="coverage-person"><strong>' + a.absent_person + '</strong> <span class="coverage-person-note">is out' + (a.notes ? ' \u2014 ' + a.notes : '') + '</span></div>';
+        (a.slots || []).forEach(function (slot) {
+          var isClaimed = !!slot.claimed_by_email;
+          html += '<div class="coverage-slot ' + (isClaimed ? 'coverage-slot-covered' : 'coverage-slot-open') + '">';
+          html += '<span class="coverage-slot-block">' + slot.block + '</span><span class="coverage-slot-desc">' + slot.role_description + '</span>';
+          html += isClaimed ? '<span class="coverage-slot-claimer">Covered by ' + (slot.claimed_by_name || slot.claimed_by_email) + '</span>' : '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '">I\'ll Cover This</button>';
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    el.innerHTML = html;
+
+    el.querySelectorAll('.btn-cover').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
+        btn.disabled = true; btn.textContent = 'Claiming\u2026';
+        var cred = sessionStorage.getItem('rw_google_credential');
+        fetch('/api/coverage', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ slot_id: slotId, claimer_name: myName }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) { if (!res.ok) { alert('Error: ' + (res.data.error || 'claim failed')); btn.disabled = false; btn.textContent = 'I\'ll Cover This'; return; } loadCoverageBoard(); loadNotifications(); });
+      });
+    });
+  }
+
+  var notifState = { notifications: [], unreadCount: 0, dropdownOpen: false };
+
+  function loadNotifications() {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/notifications?limit=20', { headers: { 'Authorization': 'Bearer ' + cred } })
+    .then(function (r) { return r.json(); })
+    .then(function (data) { notifState.notifications = data.notifications || []; notifState.unreadCount = data.unread_count || 0; updateNotifBadge(); if (notifState.dropdownOpen) renderNotifDropdown(); })
+    .catch(function () {});
+  }
+
+  function updateNotifBadge() {
+    document.querySelectorAll('.notif-badge').forEach(function (badge) {
+      if (notifState.unreadCount > 0) { badge.textContent = notifState.unreadCount > 99 ? '99+' : notifState.unreadCount; badge.style.display = ''; }
+      else { badge.style.display = 'none'; }
+    });
+  }
+
+  function renderNotifDropdown() {
+    var existing = document.getElementById('notifDropdown');
+    if (existing) existing.remove();
+    var bell = document.getElementById('notifBellBtn');
+    if (!bell) return;
+    var html = '<div class="notif-dropdown" id="notifDropdown"><div class="notif-dropdown-header"><strong>Notifications</strong>';
+    if (notifState.unreadCount > 0) html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
+    html += '</div>';
+    if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
+    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + n.id + '"><div class="notif-item-title">' + n.title + '</div><div class="notif-item-body">' + n.body + '</div><div class="notif-item-time">' + timeAgo(n.created_at) + '</div></div>'; }); }
+    html += '</div>';
+    bell.insertAdjacentHTML('afterend', html);
+    var dropdown = document.getElementById('notifDropdown');
+    var markAllBtn = document.getElementById('notifMarkAllBtn');
+    if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = sessionStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true', { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
+    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function () { var id = item.getAttribute('data-notif-id'); var cred = sessionStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id, { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
+    setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
+  }
+
+  function closeNotifOnOutsideClick(e) { var dropdown = document.getElementById('notifDropdown'); var bell = document.getElementById('notifBellBtn'); if (dropdown && !dropdown.contains(e.target) && !bell.contains(e.target)) closeNotifDropdown(); }
+  function closeNotifDropdown() { var dropdown = document.getElementById('notifDropdown'); if (dropdown) dropdown.remove(); notifState.dropdownOpen = false; document.removeEventListener('click', closeNotifOnOutsideClick); }
+  function timeAgo(isoStr) { var diff = (Date.now() - new Date(isoStr).getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; }
+
+  function initPushSubscription() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    var banner = document.getElementById('pushBanner');
+    var enableBtn = document.getElementById('pushBannerEnableBtn');
+    var dismissBtn = document.getElementById('pushBannerDismiss');
+    if (!banner || !enableBtn) return;
+    if (localStorage.getItem('rw_push_dismissed')) return;
+    navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) { if (sub) return; banner.style.display = ''; }).catch(function () { banner.style.display = ''; });
+    if (dismissBtn) { dismissBtn.addEventListener('click', function () { banner.style.display = 'none'; localStorage.setItem('rw_push_dismissed', '1'); }); }
+    enableBtn.addEventListener('click', function () {
+      enableBtn.disabled = true; enableBtn.textContent = 'Enabling\u2026';
+      navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription().then(function (existing) { if (existing) return existing; var vapidKey = document.querySelector('meta[name="vapid-public-key"]'); if (!vapidKey) throw new Error('VAPID key not found'); return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey.content) }); }); })
+      .then(function (sub) { var cred = sessionStorage.getItem('rw_google_credential'); var subJson = sub.toJSON(); return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) }); })
+      .then(function (r) { if (!r.ok) throw new Error('Subscribe failed'); banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { banner.style.display = 'none'; }, 3000); })
+      .catch(function (err) { console.error('Push subscription error:', err); enableBtn.disabled = false; enableBtn.textContent = 'Enable'; if (Notification.permission === 'denied') alert('Notifications are blocked. Please enable them in your browser settings.'); });
+    });
+  }
+
+  function urlBase64ToUint8Array(base64String) { var padding = '='.repeat((4 - base64String.length % 4) % 4); var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/'); var rawData = atob(base64); var out = new Uint8Array(rawData.length); for (var i = 0; i < rawData.length; ++i) out[i] = rawData.charCodeAt(i); return out; }
+
+  function initAbsenceCoverageSystem() {
+    var bellBtn = document.getElementById('notifBellBtn');
+    if (bellBtn) { bellBtn.addEventListener('click', function (e) { e.stopPropagation(); if (notifState.dropdownOpen) closeNotifDropdown(); else { notifState.dropdownOpen = true; renderNotifDropdown(); } }); }
+    loadCoverageBoard();
+    loadNotifications();
+    setInterval(loadNotifications, 60000);
+    initPushSubscription();
+  }
+
 })();
 
 // ──────────────────────────────────────────────
@@ -5424,629 +5776,4 @@ function closeAgeGroupModal() {
   document.body.style.overflow = '';
 }
 
-// ═══════════════════════════════════════════════════════
-// ABSENCE & COVERAGE SYSTEM
-// ═══════════════════════════════════════════════════════
-
-function getTuesdaysInSession(sessionNumber) {
-  var sess = SESSION_DATES[sessionNumber];
-  if (!sess) return [];
-  var tuesdays = [];
-  var d = new Date(sess.start + 'T12:00:00');
-  var end = new Date(sess.end + 'T12:00:00');
-  while (d.getDay() !== 2) d.setDate(d.getDate() + 1);
-  while (d <= end) {
-    tuesdays.push(d.toISOString().slice(0, 10));
-    d.setDate(d.getDate() + 7);
-  }
-  return tuesdays;
-}
-
-function formatDateLabel(isoDate) {
-  return new Date(isoDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function nameMatchAbsence(a, b) {
-  if (!a || !b) return false;
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
-function getResponsibilitiesForBlocks(parentFullNames, session, blocks, familyName) {
-  var slots = [];
-  function has(b) { return blocks.indexOf(b) !== -1; }
-
-  if (has('AM')) {
-    var groups = Object.keys(AM_CLASSES);
-    groups.forEach(function (groupName) {
-      var staff = AM_CLASSES[groupName];
-      var sess = staff.sessions[session];
-      if (!sess) return;
-      parentFullNames.forEach(function (full) {
-        if (nameMatchAbsence(sess.teacher, full)) {
-          slots.push({ block: 'AM', role_type: 'teacher', role_description: 'Leading ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
-        }
-        (sess.assistants || []).forEach(function (a) {
-          if (nameMatchAbsence(a, full)) {
-            slots.push({ block: 'AM', role_type: 'assistant', role_description: 'Assisting ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
-          }
-        });
-      });
-    });
-    var amSupport = AM_SUPPORT_ROLES[session];
-    if (amSupport) {
-      ['10-11', '11-12'].forEach(function (slot) {
-        if (amSupport.floaters && amSupport.floaters[slot]) {
-          amSupport.floaters[slot].forEach(function (name) {
-            parentFullNames.forEach(function (full) {
-              if (nameMatchAbsence(name, full)) {
-                slots.push({ block: 'AM', role_type: 'floater', role_description: 'AM Floater ' + slot, group_or_class: '' });
-              }
-            });
-          });
-        }
-        if (amSupport.prepPeriod && amSupport.prepPeriod[slot]) {
-          amSupport.prepPeriod[slot].forEach(function (name) {
-            parentFullNames.forEach(function (full) {
-              if (nameMatchAbsence(name, full)) {
-                slots.push({ block: 'AM', role_type: 'prep', role_description: 'Prep Period ' + slot, group_or_class: '' });
-              }
-            });
-          });
-        }
-      });
-    }
-  }
-
-  if (has('PM1') || has('PM2')) {
-    var electives = PM_ELECTIVES[session] || [];
-    electives.forEach(function (elec) {
-      var isPM1 = elec.hour === 1 || elec.hour === 'both';
-      var isPM2 = elec.hour === 2 || elec.hour === 'both';
-      parentFullNames.forEach(function (full) {
-        if (nameMatchAbsence(elec.leader, full)) {
-          if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
-          if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
-        }
-        (elec.assistants || []).forEach(function (a) {
-          if (nameMatchAbsence(a, full)) {
-            if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
-            if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
-          }
-        });
-      });
-    });
-    var pmSupport = PM_SUPPORT_ROLES[session];
-    if (pmSupport) {
-      if (pmSupport.floaters) pmSupport.floaters.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(name, full)) {
-            if (has('PM1')) slots.push({ block: 'PM1', role_type: 'floater', role_description: 'PM Floater', group_or_class: '' });
-          }
-        });
-      });
-      if (pmSupport.supplyCloset) pmSupport.supplyCloset.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(name, full)) {
-            if (has('PM1')) slots.push({ block: 'PM1', role_type: 'supply_closet', role_description: 'Supply Closet', group_or_class: '' });
-          }
-        });
-      });
-    }
-  }
-
-  if (has('Cleaning')) {
-    var sessClean = CLEANING_CREW.sessions[session];
-    if (sessClean) {
-      ['mainFloor', 'upstairs', 'outside'].forEach(function (floor) {
-        if (!sessClean[floor]) return;
-        Object.keys(sessClean[floor]).forEach(function (area) {
-          var families = sessClean[floor][area];
-          if (families.some(function (n) { return n.toLowerCase() === familyName.toLowerCase(); })) {
-            slots.push({ block: 'Cleaning', role_type: 'cleaning', role_description: 'Cleaning: ' + area, group_or_class: area });
-          }
-        });
-      });
-      if (sessClean.floater && sessClean.floater.some(function (n) { return n.toLowerCase() === familyName.toLowerCase(); })) {
-        slots.push({ block: 'Cleaning', role_type: 'cleaning', role_description: 'Cleaning Floater', group_or_class: 'Floater' });
-      }
-    }
-  }
-
-  return slots;
-}
-
-// ── Absence Modal ──
-function showAbsenceModal() {
-  var email = sessionStorage.getItem('rw_user_email');
-  if (!email || !FAMILIES) return;
-
-  var me = null;
-  for (var i = 0; i < FAMILIES.length; i++) {
-    if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; }
-  }
-  if (!me) { alert('Could not find your family record.'); return; }
-
-  var tuesdays = getTuesdaysInSession(currentSession);
-  if (tuesdays.length === 0) { alert('No session dates available.'); return; }
-
-  var parentFullNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
-
-  // Build modal HTML
-  var html = '<div class="absence-overlay" id="absenceOverlay">';
-  html += '<div class="absence-modal">';
-  html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
-  html += '<h3>Report an Absence</h3>';
-
-  // Who is absent (for families with 2 parents)
-  var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
-  html += '<div class="absence-field"><label>Who will be out?</label>';
-  html += '<select class="cl-input" id="absenceWho">';
-  parentNames.forEach(function (name) {
-    html += '<option value="' + name + '">' + name + '</option>';
-  });
-  html += '</select></div>';
-
-  // Which date
-  html += '<div class="absence-field"><label>Which day?</label>';
-  html += '<div class="absence-dates" id="absenceDates">';
-  tuesdays.forEach(function (d, idx) {
-    html += '<button class="absence-date-btn' + (idx === 0 ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
-  });
-  html += '</div></div>';
-
-  // Which blocks
-  html += '<div class="absence-field"><label>What will you miss?</label>';
-  html += '<div class="absence-blocks">';
-  html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay" checked> <strong>Whole Day</strong></label>';
-  html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="AM" checked> AM (10:00\u201312:00)</label>';
-  html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM1" checked> PM1 (1:00\u20131:55)</label>';
-  html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM2" checked> PM2 (2:00\u20132:55)</label>';
-  html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="Cleaning" checked> Cleaning</label>';
-  html += '</div></div>';
-
-  // Preview
-  html += '<div class="absence-field"><label>Responsibilities needing coverage:</label>';
-  html += '<div class="absence-preview" id="absencePreview"></div></div>';
-
-  // Notes
-  html += '<div class="absence-field"><label>Notes (optional)</label>';
-  html += '<input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..."></div>';
-
-  // Submit
-  html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">Submit \u2014 I\'m Out</button>';
-  html += '</div></div>';
-
-  document.body.insertAdjacentHTML('beforeend', html);
-
-  var overlay = document.getElementById('absenceOverlay');
-  var selectedDate = tuesdays[0];
-  var selectedPerson = parentNames[0];
-
-  function getSelectedBlocks() {
-    var blocks = [];
-    overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) {
-      if (cb.checked) blocks.push(cb.value);
-    });
-    return blocks;
-  }
-
-  function updatePreview() {
-    var blocks = getSelectedBlocks();
-    var personParts = selectedPerson.split(' ');
-    var personFullNames = [selectedPerson];
-    var slotsPreview = getResponsibilitiesForBlocks(personFullNames, currentSession, blocks, me.name);
-    var previewEl = document.getElementById('absencePreview');
-    if (slotsPreview.length === 0) {
-      previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>';
-    } else {
-      var ph = '<ul class="absence-slot-list">';
-      slotsPreview.forEach(function (s) {
-        ph += '<li><span class="absence-slot-block">' + s.block + '</span> ' + s.role_description + '</li>';
-      });
-      ph += '</ul>';
-      previewEl.innerHTML = ph;
-    }
-  }
-
-  // Wire events
-  document.getElementById('absenceCloseBtn').addEventListener('click', function () { overlay.remove(); });
-  overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
-
-  overlay.querySelectorAll('.absence-date-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      overlay.querySelectorAll('.absence-date-btn').forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      selectedDate = btn.getAttribute('data-date');
-    });
-  });
-
-  document.getElementById('absenceWho').addEventListener('change', function () {
-    selectedPerson = this.value;
-    updatePreview();
-  });
-
-  var wholeDayCb = document.getElementById('absenceWholeDay');
-  wholeDayCb.addEventListener('change', function () {
-    overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
-    updatePreview();
-  });
-  overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) {
-    cb.addEventListener('change', function () {
-      var allChecked = true;
-      overlay.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
-      wholeDayCb.checked = allChecked;
-      updatePreview();
-    });
-  });
-
-  document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
-    var blocks = getSelectedBlocks();
-    if (blocks.length === 0) { alert('Please select at least one block.'); return; }
-
-    var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], currentSession, blocks, me.name);
-    var btn = document.getElementById('absenceSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = 'Submitting\u2026';
-
-    var cred = sessionStorage.getItem('rw_google_credential');
-    fetch('/api/absences', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        absent_person: selectedPerson,
-        family_email: me.email,
-        family_name: me.name,
-        session_number: currentSession,
-        absence_date: selectedDate,
-        blocks: blocks,
-        slots: slotsToSend,
-        notes: (document.getElementById('absenceNotes') || {}).value || ''
-      })
-    })
-    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-    .then(function (res) {
-      if (!res.ok) {
-        alert('Error: ' + (res.data.error || 'Could not submit absence'));
-        btn.disabled = false;
-        btn.textContent = 'Submit \u2014 I\'m Out';
-        return;
-      }
-      overlay.remove();
-      loadCoverageBoard();
-      loadNotifications();
-      // Show coverage section
-      var coverageSec = document.getElementById('coverage');
-      if (coverageSec) coverageSec.style.display = '';
-    });
-  });
-
-  updatePreview();
-}
-
-// ── Coverage Board ──
-function loadCoverageBoard() {
-  var cred = sessionStorage.getItem('rw_google_credential');
-  if (!cred) return;
-  fetch('/api/absences?session=' + currentSession, {
-    headers: { 'Authorization': 'Bearer ' + cred }
-  })
-  .then(function (r) { return r.json(); })
-  .then(function (data) {
-    var absences = (data.absences || []).filter(function (a) { return !a.cancelled_at; });
-    renderCoverageBoard(absences);
-  })
-  .catch(function () {
-    var el = document.getElementById('coverageBoardContent');
-    if (el) el.innerHTML = '<p>Could not load coverage data.</p>';
-  });
-}
-
-function renderCoverageBoard(absences) {
-  var el = document.getElementById('coverageBoardContent');
-  var coverageSec = document.getElementById('coverage');
-  if (!el) return;
-
-  if (absences.length === 0) {
-    if (coverageSec) coverageSec.style.display = 'none';
-    return;
-  }
-  if (coverageSec) coverageSec.style.display = '';
-
-  var email = sessionStorage.getItem('rw_user_email');
-  var me = null;
-  for (var i = 0; i < FAMILIES.length; i++) {
-    if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; }
-  }
-  var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
-
-  // Group by date
-  var byDate = {};
-  absences.forEach(function (a) {
-    if (!byDate[a.absence_date]) byDate[a.absence_date] = [];
-    byDate[a.absence_date].push(a);
-  });
-
-  var dates = Object.keys(byDate).sort();
-  var html = '';
-
-  dates.forEach(function (date) {
-    var dateAbsences = byDate[date];
-    var totalOpen = 0;
-    dateAbsences.forEach(function (a) {
-      (a.slots || []).forEach(function (s) { if (!s.claimed_by_email) totalOpen++; });
-    });
-
-    html += '<div class="coverage-date-card">';
-    html += '<div class="coverage-date-header">';
-    html += '<span class="coverage-date">' + formatDateLabel(date) + '</span>';
-    if (totalOpen > 0) {
-      html += '<span class="coverage-open-badge">' + totalOpen + ' open</span>';
-    } else {
-      html += '<span class="coverage-all-good">All covered!</span>';
-    }
-    html += '</div>';
-
-    dateAbsences.forEach(function (a) {
-      html += '<div class="coverage-absence">';
-      html += '<div class="coverage-person"><strong>' + a.absent_person + '</strong> <span class="coverage-person-note">is out' + (a.notes ? ' \u2014 ' + a.notes : '') + '</span></div>';
-
-      (a.slots || []).forEach(function (slot) {
-        var isClaimed = !!slot.claimed_by_email;
-        html += '<div class="coverage-slot ' + (isClaimed ? 'coverage-slot-covered' : 'coverage-slot-open') + '">';
-        html += '<span class="coverage-slot-block">' + slot.block + '</span>';
-        html += '<span class="coverage-slot-desc">' + slot.role_description + '</span>';
-        if (isClaimed) {
-          html += '<span class="coverage-slot-claimer">Covered by ' + (slot.claimed_by_name || slot.claimed_by_email) + '</span>';
-        } else {
-          html += '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '">I\'ll Cover This</button>';
-        }
-        html += '</div>';
-      });
-      html += '</div>';
-    });
-    html += '</div>';
-  });
-
-  el.innerHTML = html;
-
-  // Wire claim buttons
-  el.querySelectorAll('.btn-cover').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
-      btn.disabled = true;
-      btn.textContent = 'Claiming\u2026';
-      var cred = sessionStorage.getItem('rw_google_credential');
-      fetch('/api/coverage', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slot_id: slotId, claimer_name: myName })
-      })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) { alert('Error: ' + (res.data.error || 'claim failed')); btn.disabled = false; btn.textContent = 'I\'ll Cover This'; return; }
-        loadCoverageBoard();
-        loadNotifications();
-      });
-    });
-  });
-}
-
-// ── Notification Bell ──
-var notifState = { notifications: [], unreadCount: 0, dropdownOpen: false };
-
-function loadNotifications() {
-  var cred = sessionStorage.getItem('rw_google_credential');
-  if (!cred) return;
-  fetch('/api/notifications?limit=20', {
-    headers: { 'Authorization': 'Bearer ' + cred }
-  })
-  .then(function (r) { return r.json(); })
-  .then(function (data) {
-    notifState.notifications = data.notifications || [];
-    notifState.unreadCount = data.unread_count || 0;
-    updateNotifBadge();
-    if (notifState.dropdownOpen) renderNotifDropdown();
-  })
-  .catch(function () {});
-}
-
-function updateNotifBadge() {
-  var badges = document.querySelectorAll('.notif-badge');
-  badges.forEach(function (badge) {
-    if (notifState.unreadCount > 0) {
-      badge.textContent = notifState.unreadCount > 99 ? '99+' : notifState.unreadCount;
-      badge.style.display = '';
-    } else {
-      badge.style.display = 'none';
-    }
-  });
-}
-
-function renderNotifDropdown() {
-  var existing = document.getElementById('notifDropdown');
-  if (existing) existing.remove();
-
-  var bell = document.getElementById('notifBellBtn');
-  if (!bell) return;
-
-  var html = '<div class="notif-dropdown" id="notifDropdown">';
-  html += '<div class="notif-dropdown-header"><strong>Notifications</strong>';
-  if (notifState.unreadCount > 0) {
-    html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
-  }
-  html += '</div>';
-
-  if (notifState.notifications.length === 0) {
-    html += '<div class="notif-empty">No notifications yet.</div>';
-  } else {
-    notifState.notifications.forEach(function (n) {
-      var ago = timeAgo(n.created_at);
-      html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + n.id + '">';
-      html += '<div class="notif-item-title">' + n.title + '</div>';
-      html += '<div class="notif-item-body">' + n.body + '</div>';
-      html += '<div class="notif-item-time">' + ago + '</div>';
-      html += '</div>';
-    });
-  }
-  html += '</div>';
-
-  bell.insertAdjacentHTML('afterend', html);
-
-  var dropdown = document.getElementById('notifDropdown');
-
-  // Mark all read
-  var markAllBtn = document.getElementById('notifMarkAllBtn');
-  if (markAllBtn) {
-    markAllBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var cred = sessionStorage.getItem('rw_google_credential');
-      fetch('/api/notifications?mark_all_read=true', {
-        method: 'PATCH',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
-      }).then(function () { loadNotifications(); });
-    });
-  }
-
-  // Mark individual as read on click
-  dropdown.querySelectorAll('.notif-item').forEach(function (item) {
-    item.addEventListener('click', function () {
-      var id = item.getAttribute('data-notif-id');
-      var cred = sessionStorage.getItem('rw_google_credential');
-      fetch('/api/notifications?id=' + id, {
-        method: 'PATCH',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
-      }).then(function () { loadNotifications(); });
-      // Scroll to coverage section
-      var cov = document.getElementById('coverage');
-      if (cov) cov.scrollIntoView({ behavior: 'smooth' });
-      closeNotifDropdown();
-    });
-  });
-
-  // Close on outside click
-  setTimeout(function () {
-    document.addEventListener('click', closeNotifOnOutsideClick);
-  }, 10);
-}
-
-function closeNotifOnOutsideClick(e) {
-  var dropdown = document.getElementById('notifDropdown');
-  var bell = document.getElementById('notifBellBtn');
-  if (dropdown && !dropdown.contains(e.target) && !bell.contains(e.target)) {
-    closeNotifDropdown();
-  }
-}
-
-function closeNotifDropdown() {
-  var dropdown = document.getElementById('notifDropdown');
-  if (dropdown) dropdown.remove();
-  notifState.dropdownOpen = false;
-  document.removeEventListener('click', closeNotifOnOutsideClick);
-}
-
-function timeAgo(isoStr) {
-  var diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-  return Math.floor(diff / 86400) + 'd ago';
-}
-
-// ── Push Notification Subscription ──
-function initPushSubscription() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-
-  var banner = document.getElementById('pushBanner');
-  var enableBtn = document.getElementById('pushBannerEnableBtn');
-  var dismissBtn = document.getElementById('pushBannerDismiss');
-  if (!banner || !enableBtn) return;
-
-  // Check if already subscribed or dismissed
-  if (localStorage.getItem('rw_push_dismissed')) return;
-
-  navigator.serviceWorker.register('/sw.js').then(function (reg) {
-    return reg.pushManager.getSubscription();
-  }).then(function (sub) {
-    if (sub) return; // Already subscribed, don't show banner
-    banner.style.display = '';
-  }).catch(function () {
-    banner.style.display = '';
-  });
-
-  if (dismissBtn) {
-    dismissBtn.addEventListener('click', function () {
-      banner.style.display = 'none';
-      localStorage.setItem('rw_push_dismissed', '1');
-    });
-  }
-
-  enableBtn.addEventListener('click', function () {
-    enableBtn.disabled = true;
-    enableBtn.textContent = 'Enabling\u2026';
-
-    navigator.serviceWorker.register('/sw.js').then(function (reg) {
-      return reg.pushManager.getSubscription().then(function (existing) {
-        if (existing) return existing;
-        var vapidKey = document.querySelector('meta[name="vapid-public-key"]');
-        if (!vapidKey) throw new Error('VAPID key not found');
-        var rawKey = urlBase64ToUint8Array(vapidKey.content);
-        return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: rawKey });
-      });
-    }).then(function (sub) {
-      var cred = sessionStorage.getItem('rw_google_credential');
-      var subJson = sub.toJSON();
-      return fetch('/api/push-subscribe', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys })
-      });
-    }).then(function (r) {
-      if (!r.ok) throw new Error('Subscribe failed');
-      banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>';
-      setTimeout(function () { banner.style.display = 'none'; }, 3000);
-    }).catch(function (err) {
-      console.error('Push subscription error:', err);
-      enableBtn.disabled = false;
-      enableBtn.textContent = 'Enable';
-      if (Notification.permission === 'denied') {
-        alert('Notifications are blocked. Please enable them in your browser settings.');
-      }
-    });
-  });
-}
-
-function urlBase64ToUint8Array(base64String) {
-  var padding = '='.repeat((4 - base64String.length % 4) % 4);
-  var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  var rawData = atob(base64);
-  var outputArray = new Uint8Array(rawData.length);
-  for (var i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
-
-// ── Initialize absence/coverage/notification system ──
-function initAbsenceCoverageSystem() {
-  // Wire notification bell
-  var bellBtn = document.getElementById('notifBellBtn');
-  if (bellBtn) {
-    bellBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      if (notifState.dropdownOpen) {
-        closeNotifDropdown();
-      } else {
-        notifState.dropdownOpen = true;
-        renderNotifDropdown();
-      }
-    });
-  }
-
-  // Load coverage board
-  loadCoverageBoard();
-
-  // Load notifications and poll
-  loadNotifications();
-  setInterval(loadNotifications, 60000);
-
-  // Init push notification banner
-  initPushSubscription();
-}
+// (Absence & Coverage system is inside the IIFE above)
