@@ -4559,7 +4559,7 @@
       var insArr = ls.instruction || [];
       var maxSteps = Math.max(actArr.length, insArr.length);
       if (maxSteps > 0) {
-        html += '<div class="section"><h3>Steps</h3><div class="steps">';
+        html += '<div class="section" style="margin-top:10pt;"><h3>Steps</h3><div class="steps">';
         html += '<div class="header"></div><div class="header">Activity</div><div class="header">Leader notes</div>';
         for (var i = 0; i < maxSteps; i++) {
           var aText = actArr[i] || '';
@@ -6253,7 +6253,7 @@
         var insArr = ls.instruction || [];
         var maxSteps = Math.max(actArr.length, insArr.length);
         if (maxSteps > 0) {
-          html += '<div class="section"><h4>Steps</h4><div class="steps">';
+          html += '<div class="section" style="margin-top:10pt;"><h4>Steps</h4><div class="steps">';
           html += '<div class="header"></div><div class="header">Activity</div><div class="header">Leader notes</div>';
           for (var si = 0; si < maxSteps; si++) {
             var aText = actArr[si] || '';
