@@ -104,10 +104,18 @@ async function getFullCurriculum(sql, id) {
   `;
   const supplies = await sql`
     SELECT cs.id, cs.lesson_id, cs.item_name, cs.qty, cs.qty_unit, cs.notes, cs.closet_item_id,
-           sc.location AS closet_location, l.lesson_number
+           COALESCE(sc_id.location, sc_name.location) AS closet_location,
+           COALESCE(cs.closet_item_id, sc_name.id) AS resolved_closet_id,
+           l.lesson_number
     FROM curriculum_supplies cs
     JOIN lessons l ON l.id = cs.lesson_id
-    LEFT JOIN supply_closet sc ON sc.id = cs.closet_item_id
+    LEFT JOIN supply_closet sc_id ON sc_id.id = cs.closet_item_id
+    LEFT JOIN LATERAL (
+      SELECT id, location FROM supply_closet
+      WHERE cs.closet_item_id IS NULL
+        AND LOWER(TRIM(supply_closet.item_name)) = LOWER(TRIM(cs.item_name))
+      LIMIT 1
+    ) sc_name ON true
     WHERE l.curriculum_id = ${id}
     ORDER BY l.lesson_number, cs.id
   `;
@@ -121,7 +129,7 @@ async function getFullCurriculum(sql, id) {
       qty: s.qty,
       qty_unit: s.qty_unit || '',
       notes: s.notes,
-      closet_item_id: s.closet_item_id,
+      closet_item_id: s.resolved_closet_id || s.closet_item_id,
       closet_location: s.closet_location || ''
     });
   });
