@@ -2364,10 +2364,13 @@
       absenceBtn.addEventListener('click', showAbsenceModal);
     }
 
-    // Render my absences if data is already loaded
+    // Render data that may already be loaded from async fetches
     if (loadedAbsences && loadedAbsences.length > 0) {
       renderMyAbsences();
       updateCoverageNotes();
+    }
+    if (Object.keys(classLinks).length > 0) {
+      updateClassLinkButtons();
     }
 
     // Wire up PayPal pay buttons (semester fees + deposits)
