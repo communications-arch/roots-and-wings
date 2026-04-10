@@ -5466,11 +5466,16 @@
     var tuesdays = getTuesdaysInSession(currentSession);
     if (tuesdays.length === 0) { alert('No session dates available.'); return; }
 
-    // Check if this person has cleaning duties
-    var absBtn = document.getElementById('reportAbsenceBtn');
-    var hasCleaning = absBtn && absBtn.getAttribute('data-has-cleaning') === '1';
-
     var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
+
+    // Determine which blocks this person actually has duties in
+    var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
+    var allSlots = getResponsibilitiesForBlocks(parentNames, currentSession, allBlocks, me.name);
+    var activeBlocks = {};
+    allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
+
+    var blockLabelsModal = { AM: 'AM (10:00\u201312:00)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
+
     var html = '<div class="absence-overlay" id="absenceOverlay"><div class="absence-modal">';
     html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
     html += '<h3>Report an Absence</h3>';
@@ -5482,12 +5487,11 @@
     html += '</div></div>';
     html += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
     html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay" checked> <strong>Whole Day</strong></label>';
-    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="AM" checked> AM (10:00\u201312:00)</label>';
-    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM1" checked> PM1 (1:00\u20131:55)</label>';
-    html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="PM2" checked> PM2 (2:00\u20132:55)</label>';
-    if (hasCleaning) {
-      html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="Cleaning" checked> Cleaning</label>';
-    }
+    allBlocks.forEach(function (blk) {
+      if (activeBlocks[blk]) {
+        html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '" checked> ' + blockLabelsModal[blk] + '</label>';
+      }
+    });
     html += '</div></div>';
     html += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
     html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..."></div>';
