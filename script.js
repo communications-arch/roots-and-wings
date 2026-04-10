@@ -2732,19 +2732,23 @@
   function renderVolunteersTab() {
     var container = document.getElementById('volunteersTabContent');
     if (!container) return;
+    var myNames = getMyNames();
 
     var html = '<h3>Volunteer Committees &mdash; 2025\u20132026</h3>';
     html += '<div class="portal-volunteer-grid">';
 
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
-      html += '<div class="portal-role-card">';
+      var isMyCommittee = false;
+      if (committee.chair && myNames.fullNames.some(function (fn) { return fn.toLowerCase() === (committee.chair.person || '').trim().toLowerCase(); })) isMyCommittee = true;
+      committee.roles.forEach(function (r) { if (r.person && myNames.fullNames.some(function (fn) { return fn.toLowerCase() === r.person.trim().toLowerCase(); })) isMyCommittee = true; });
+      html += '<div class="portal-role-card' + (isMyCommittee ? ' coord-my-card' : '') + '">';
       html += '<h4>' + committee.name + '</h4>';
       if (committee.chair) {
-        html += '<div class="committee-chair"><strong>' + committee.chair.title + ':</strong> ' + committee.chair.person + '</div>';
+        html += '<div class="committee-chair"><strong>' + committee.chair.title + ':</strong> ' + highlightIfMe(committee.chair.person, myNames) + '</div>';
       }
       html += '<ul>';
       committee.roles.forEach(function (r) {
-        var personText = r.person ? r.person : '<em>Open</em>';
+        var personText = r.person ? highlightIfMe(r.person, myNames) : '<em>Open</em>';
         html += '<li><strong>' + r.title + ':</strong> ' + personText + '</li>';
       });
       html += '</ul></div>';
@@ -2757,6 +2761,16 @@
   function renderEventsTab() {
     var container = document.getElementById('eventsTabContent');
     if (!container) return;
+    var myNames = getMyNames();
+
+    // Match by first name since event coordinator field is first-name only
+    function isMyEvent(name) {
+      if (!name || !myNames.fullNames.length) return false;
+      var nl = name.trim().toLowerCase();
+      return myNames.fullNames.some(function (fn) {
+        return fn.toLowerCase() === nl || fn.split(' ')[0].toLowerCase() === nl;
+      });
+    }
 
     var html = '<h3>Special Events &mdash; 2025\u20132026</h3>';
     html += '<div class="events-grid">';
@@ -2766,7 +2780,9 @@
       var coordText = ev.coordinator || '<em class="event-open-slot">Needs volunteer</em>';
       var filled = ev.planningSupport.filter(function (s) { return s !== ''; }).length;
 
-      html += '<div class="event-card">';
+      var isMyCard = isMyEvent(ev.coordinator) || ev.planningSupport.some(function (p) { return isMyEvent(p); });
+
+      html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
       html += '<div class="event-card-header">';
       html += '<div>';
       html += '<strong class="event-card-name">' + ev.name + '</strong>';
@@ -2777,17 +2793,18 @@
 
       // Coordinator
       html += '<div class="event-roles">';
-      html += '<div class="event-role">';
+      html += '<div class="event-role' + (isMyEvent(ev.coordinator) ? ' coord-my-row' : '') + '">';
       html += '<span class="event-role-label">Coordinator</span>';
-      html += '<span class="event-role-person">' + coordText + '</span>';
+      html += '<span class="event-role-person">' + (isMyEvent(ev.coordinator) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
       html += '</div>';
 
       // Planning support slots
       ev.planningSupport.forEach(function (person, idx) {
-        html += '<div class="event-role">';
+        var isMe = isMyEvent(person);
+        html += '<div class="event-role' + (isMe ? ' coord-my-row' : '') + '">';
         html += '<span class="event-role-label">Support ' + (idx + 1) + '</span>';
         if (person) {
-          html += '<span class="event-role-person">' + person + '</span>';
+          html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + person + '</span>' : person) + '</span>';
         } else {
           html += '<span class="event-role-person"><em class="event-open-slot">Open</em></span>';
         }
