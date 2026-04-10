@@ -6805,6 +6805,16 @@ button.staff-role:hover {
   background: var(--color-primary);
   color: #fff;
 }
+.mf-link-classpack {
+  color: #855c1b;
+  border-color: #d4a84b;
+  background: rgba(212, 168, 75, 0.08);
+}
+.mf-link-classpack:hover {
+  background: #d4a84b;
+  color: #fff;
+  border-color: #d4a84b;
+}
 .mf-link-attach {
   color: var(--color-text-light);
   border-style: dashed;

@@ -6013,7 +6013,7 @@
       if (!classKey) return;
       var link = classLinks[classKey];
       if (link) {
-        area.innerHTML = '<button class="mf-link-btn mf-link-view" data-curriculum-id="' + link.curriculum_id + '">View Plan: ' + (link.curriculum_title || 'Lesson Plan') + '</button>';
+        area.innerHTML = '<button class="mf-link-btn mf-link-view" data-curriculum-id="' + link.curriculum_id + '">View Plan</button> <button class="mf-link-btn mf-link-classpack" data-class-key="' + classKey + '" data-curriculum-id="' + link.curriculum_id + '">Class Pack</button>';
       } else if (isTeacher) {
         area.innerHTML = '<button class="mf-link-btn mf-link-attach" data-class-key="' + classKey + '">Attach Lesson Plan</button>';
       } else {
@@ -6049,6 +6049,239 @@
         showAttachPicker(classKey);
       });
     });
+    document.querySelectorAll('.mf-link-classpack').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var classKey = btn.getAttribute('data-class-key');
+        var currId = parseInt(btn.getAttribute('data-curriculum-id'), 10);
+        if (!classKey || !currId) return;
+        showClassPack(classKey, currId);
+      });
+    });
+  }
+
+  function getClassInfo(classKey) {
+    // Get class details from schedule data
+    var isPM = classKey.indexOf('PM:') === 0;
+    var name = isPM ? classKey.slice(3) : classKey;
+    var info = { name: name, isPM: isPM, time: '', room: '', teacher: '', assistants: [], ageRange: '', topic: '', students: [] };
+
+    if (!isPM) {
+      var cls = AM_CLASSES[name];
+      if (cls) {
+        info.ageRange = cls.ages || '';
+        var sess = cls.sessions[currentSession];
+        if (sess) {
+          info.time = '10:00\u201312:00';
+          info.room = sess.room || '';
+          info.teacher = sess.teacher || '';
+          info.assistants = sess.assistants || [];
+          info.topic = sess.topic || '';
+        }
+      }
+    } else {
+      var electives = PM_ELECTIVES[currentSession] || [];
+      for (var i = 0; i < electives.length; i++) {
+        if (electives[i].name === name) {
+          var elec = electives[i];
+          info.time = elec.hour === 1 ? '1:00\u20131:55' : elec.hour === 2 ? '2:00\u20132:55' : '1:00\u20132:55';
+          info.room = elec.room || '';
+          info.teacher = elec.leader || '';
+          info.assistants = elec.assistants || [];
+          info.ageRange = elec.ageRange || '';
+          info.topic = elec.description || '';
+          info.students = elec.students || [];
+          break;
+        }
+      }
+    }
+    return info;
+  }
+
+  function showClassPack(classKey, curriculumId) {
+    var cred = sessionStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?id=' + curriculumId, { headers: { 'Authorization': 'Bearer ' + cred } })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data.curriculum) { alert('Could not load lesson plan.'); return; }
+      var curr = data.curriculum;
+      var info = getClassInfo(classKey);
+      var sessInfo = SESSION_DATES[currentSession];
+      var sessName = sessInfo ? sessInfo.name : 'Session ' + currentSession;
+
+      openClassPackWindow(info, curr, sessName);
+    });
+  }
+
+  function openClassPackWindow(info, curr, sessName) {
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    var css = [
+      '@page { margin: 0.5in; }',
+      '* { box-sizing: border-box; }',
+      'body { font-family: Georgia, serif; color: #000; max-width: 7.5in; margin: 0 auto; padding: 0.25in; line-height: 1.45; }',
+      'h1 { font-size: 20pt; margin: 0 0 2pt 0; }',
+      'h2 { font-size: 14pt; margin: 14pt 0 6pt 0; padding-bottom: 3pt; border-bottom: 1.5pt solid #333; }',
+      '.meta { color: #555; font-size: 10pt; margin-bottom: 4pt; }',
+      '.class-header { background: #f5f5f5; border: 1.5pt solid #333; padding: 12pt 14pt; margin-bottom: 14pt; }',
+      '.class-header h1 { border: none; padding: 0; }',
+      '.class-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 4pt 16pt; font-size: 10pt; margin-top: 6pt; }',
+      '.class-detail dt { font-weight: 700; color: #555; }',
+      '.class-detail dd { margin: 0; }',
+      '.roster { margin-top: 8pt; font-size: 9pt; }',
+      '.roster-title { font-weight: 700; font-size: 10pt; margin-bottom: 3pt; }',
+      '.roster-list { columns: 3; column-gap: 12pt; list-style: none; padding: 0; margin: 0; }',
+      '.roster-list li { margin-bottom: 2pt; }',
+      '.overview { background: #f5f5f5; padding: 8pt 12pt; border-left: 3pt solid #333; font-size: 11pt; margin-bottom: 14pt; }',
+      '.master { border: 1.5pt solid #333; padding: 10pt 14pt; margin-bottom: 16pt; page-break-inside: avoid; }',
+      '.master h3 { font-size: 12pt; margin: 0 0 4pt 0; }',
+      '.master .sub { font-size: 9pt; color: #555; font-style: italic; margin: 0 0 6pt 0; }',
+      '.source-group { margin-bottom: 6pt; }',
+      '.source-heading { font-size: 9pt; font-weight: 700; margin: 4pt 0 2pt 0; padding-bottom: 1pt; border-bottom: 0.5pt solid #999; }',
+      '.master ul { columns: 2; column-gap: 18pt; list-style: none; padding: 0; margin: 0; }',
+      '.master li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 3pt; font-size: 10pt; line-height: 1.3; break-inside: avoid; }',
+      '.master li::before { content: "\\2610  "; font-size: 12pt; }',
+      '.lessons, .qty, .notes { color: #555; font-size: 9pt; }',
+      '.lesson { border: 1pt solid #333; padding: 12pt 14pt; margin-bottom: 14pt; page-break-inside: avoid; }',
+      '.lesson-header { display: flex; align-items: baseline; gap: 8pt; padding-bottom: 4pt; border-bottom: 1pt solid #333; margin-bottom: 8pt; }',
+      '.lesson-num { background: #333; color: #fff; padding: 2pt 8pt; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }',
+      '.lesson-title { font-size: 13pt; font-weight: 700; }',
+      '.lesson-overview { font-style: italic; color: #444; font-size: 10pt; margin: 0 0 8pt 0; }',
+      '.section { margin-bottom: 8pt; font-size: 10pt; }',
+      '.section h4 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 3pt 0; color: #000; }',
+      '.section ul { list-style: none; padding: 0; margin: 0; }',
+      '.section ul.checks li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 3pt; }',
+      '.section ul.checks li::before { content: "\\2610  "; font-size: 12pt; }',
+      '.loc-group { margin-bottom: 4pt; }',
+      '.loc-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin: 4pt 0 1pt 0; }',
+      '.steps { display: grid; grid-template-columns: 24pt 1fr 1fr; gap: 6pt; }',
+      '.steps .header { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4pt; border-bottom: 1pt solid #333; }',
+      '.steps .num { text-align: right; padding-right: 4pt; font-weight: 700; }',
+      '.steps .cell { padding: 3pt 0; border-bottom: 0.5pt solid #ccc; font-size: 10pt; }',
+      '@media print { .no-print { display: none; } }',
+      '.no-print { text-align: center; padding: 10pt; background: #ffe; border-bottom: 1pt solid #ccc; margin: -0.25in -0.25in 12pt -0.25in; }',
+      '.no-print button { font-size: 11pt; padding: 6pt 16pt; cursor: pointer; margin: 0 4pt; }'
+    ].join('\n');
+
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>Class Pack: ' + esc(info.name) + '</title><style>' + css + '</style></head><body>';
+    html += '<div class="no-print"><button onclick="window.print()">Print</button> <button onclick="window.close()">Close</button></div>';
+
+    // ── Class header ──
+    html += '<div class="class-header">';
+    html += '<h1>' + esc(info.name) + (info.ageRange ? ' <span style="font-size:12pt;color:#555;">(' + esc(info.ageRange) + ')</span>' : '') + '</h1>';
+    html += '<div class="meta">' + esc(sessName) + '</div>';
+    html += '<dl class="class-detail">';
+    html += '<dt>Time</dt><dd>' + esc(info.time) + '</dd>';
+    html += '<dt>Room</dt><dd>' + esc(info.room) + '</dd>';
+    html += '<dt>Teacher</dt><dd>' + esc(info.teacher) + '</dd>';
+    if (info.assistants.length) { html += '<dt>Assistants</dt><dd>' + esc(info.assistants.join(', ')) + '</dd>'; }
+    if (info.topic) { html += '<dt>Topic</dt><dd>' + esc(info.topic) + '</dd>'; }
+    html += '</dl>';
+
+    // Student roster (PM electives have student lists)
+    if (info.students && info.students.length > 0) {
+      html += '<div class="roster"><div class="roster-title">Students (' + info.students.length + ')</div><ul class="roster-list">';
+      info.students.forEach(function (s) { html += '<li>' + esc(s) + '</li>'; });
+      html += '</ul></div>';
+    }
+    html += '</div>';
+
+    // ── Lesson plan ──
+    if (curr) {
+      html += '<h2>' + esc(curr.title) + '</h2>';
+      if (curr.overview) html += '<div class="overview">' + esc(curr.overview) + '</div>';
+
+      // Master supply list
+      var rows = aggregateSupplyRows(curr);
+      if (rows.length > 0) {
+        var groups = groupSupplyRowsByLocation(rows);
+        html += '<div class="master"><h3>Master Supply List</h3><p class="sub">Everything needed across all lessons.</p>';
+        groups.forEach(function (g) {
+          html += '<div class="source-group"><div class="source-heading">' + esc(g.heading) + '</div><ul>';
+          g.items.forEach(function (r) {
+            var bits = [];
+            if (r.qty) bits.push(esc(r.qty));
+            if (r.unit === 'student') bits.push('per student');
+            else if (r.unit === 'class') bits.push('per class');
+            var qtyStr = bits.length ? ' <span class="qty">(' + bits.join(' ') + ')</span>' : '';
+            var lessonsStr = ' <span class="lessons">\u00b7 L' + r.lessons.join(',') + '</span>';
+            var notesStr = r.notes ? ' <span class="notes">\u2014 ' + esc(r.notes) + '</span>' : '';
+            html += '<li><strong>' + esc(r.name) + '</strong>' + qtyStr + lessonsStr + notesStr + '</li>';
+          });
+          html += '</ul></div>';
+        });
+        html += '</div>';
+      }
+
+      // Each lesson
+      (curr.lessons || []).forEach(function (ls) {
+        html += '<div class="lesson">';
+        html += '<div class="lesson-header"><span class="lesson-num">Lesson ' + ls.lesson_number + '</span>';
+        if (ls.title) html += '<span class="lesson-title">' + esc(ls.title) + '</span>';
+        html += '</div>';
+        if (ls.overview) html += '<p class="lesson-overview">' + esc(ls.overview) + '</p>';
+
+        if (ls.room_setup) {
+          html += '<div class="section"><h4>Room setup</h4><p style="margin:0;">' + esc(ls.room_setup) + '</p></div>';
+        }
+
+        if (ls.supplies && ls.supplies.length) {
+          html += '<div class="section"><h4>Supplies</h4>';
+          var pGroups = groupLessonSuppliesByLocation(ls.supplies);
+          pGroups.forEach(function (g) {
+            html += '<div class="loc-group"><div class="loc-label">' + esc(g.heading) + '</div><ul class="checks">';
+            g.items.forEach(function (s) {
+              var line = '<strong>' + esc(s.item_name) + '</strong>';
+              var bits = [];
+              if (s.qty) bits.push(esc(s.qty));
+              if (s.qty_unit === 'student') bits.push('per student');
+              else if (s.qty_unit === 'class') bits.push('per class');
+              if (bits.length) line += ' <span class="qty">(' + bits.join(' ') + ')</span>';
+              if (s.notes) line += ' <span class="notes">\u2014 ' + esc(s.notes) + '</span>';
+              html += '<li>' + line + '</li>';
+            });
+            html += '</ul></div>';
+          });
+          html += '</div>';
+        }
+
+        var actArr = ls.activity || [];
+        var insArr = ls.instruction || [];
+        var maxSteps = Math.max(actArr.length, insArr.length);
+        if (maxSteps > 0) {
+          html += '<div class="section"><h4>Steps</h4><div class="steps">';
+          html += '<div class="header"></div><div class="header">Activity</div><div class="header">Leader notes</div>';
+          for (var si = 0; si < maxSteps; si++) {
+            var aText = actArr[si] || '';
+            var iText = insArr[si] || '';
+            if (!aText && !iText) continue;
+            html += '<div class="cell num">' + (si + 1) + '.</div>';
+            html += '<div class="cell">' + esc(aText) + '</div>';
+            html += '<div class="cell">' + esc(iText) + '</div>';
+          }
+          html += '</div></div>';
+        }
+
+        if (ls.links && ls.links.length) {
+          html += '<div class="section"><h4>References</h4><ul>';
+          ls.links.forEach(function (l) {
+            html += '<li><a href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer">' + esc(l.label || l.url) + '</a></li>';
+          });
+          html += '</ul></div>';
+        }
+        html += '</div>';
+      });
+    }
+
+    html += '</body></html>';
+
+    var w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) { alert('Could not open window. Please allow popups.'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   }
 
   function showAttachPicker(classKey) {
