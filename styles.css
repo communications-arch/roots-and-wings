@@ -5951,6 +5951,14 @@ button.staff-role:hover {
 }
 
 /* Detail view step table */
+.cl-step-table-title {
+  color: var(--color-primary-dark);
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
 .cl-step-table {
   display: flex;
   flex-direction: column;

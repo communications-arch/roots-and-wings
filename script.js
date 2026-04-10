@@ -4833,7 +4833,8 @@
       var insArr = ls.instruction || [];
       var maxSteps = Math.max(actArr.length, insArr.length);
       if (maxSteps > 0) {
-        html += '<div class="cl-lesson-section"><strong>Steps</strong><div class="cl-step-table">';
+        html += '<div class="cl-lesson-section"><div class="cl-step-table">';
+        html += '<div class="cl-step-table-title">Steps</div>';
         html += '<div class="cl-step-table-headers"><span class="cl-dyn-bullet"></span><span class="cl-step-col-label">Activity</span><span class="cl-step-col-label">Leader notes</span></div>';
         for (var s = 0; s < maxSteps; s++) {
           var aText = actArr[s] || '';
