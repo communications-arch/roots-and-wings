@@ -6190,8 +6190,6 @@
 
     // ── Lesson plan ──
     if (curr) {
-      html += '<h2>' + esc(curr.title) + '</h2>';
-      if (curr.overview) html += '<div class="overview">' + esc(curr.overview) + '</div>';
 
       // Master supply list
       var rows = aggregateSupplyRows(curr);
