@@ -45,7 +45,7 @@
   --transition-slow: 0.5s ease;
 
   --max-width: 1200px;
-  --nav-height: 100px;
+  --nav-height: 78px;
 }
 
 /* ---------- Reset & Base ---------- */
@@ -6415,6 +6415,32 @@ button.staff-role:hover {
 .notif-item-body { font-size: 0.72rem; color: var(--color-text-light); line-height: 1.35; }
 .notif-item-time { font-size: 0.65rem; color: var(--color-text-light); margin-top: 0.2rem; }
 
+/* Push notification banner */
+.push-banner {
+  background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.08), rgba(var(--color-primary-rgb), 0.03));
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.15);
+  padding: 0.6rem 0;
+}
+.push-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+.push-banner-inner svg {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.push-banner-dismiss {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: var(--color-text-light);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  margin-left: auto;
+}
+
 /* "I'll Be Out" button */
 .btn-absence {
   display: block;
@@ -6544,12 +6570,6 @@ button.staff-role:hover {
 .absence-submit {
   width: 100%;
   margin-top: 0.5rem;
-}
-
-/* Push opt-in card */
-.mf-push-card {
-  border: 1px dashed var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.03);
 }
 
 /* Coverage board */

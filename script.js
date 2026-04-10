@@ -2119,16 +2119,6 @@
     html += '<button class="btn btn-absence" id="reportAbsenceBtn">I\'ll Be Out</button>';
     html += '</div>';
 
-    // ──── Push notification opt-in card ────
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      html += '<div class="mf-card mf-push-card" id="pushOptInCard">';
-      html += '<div style="display:flex;align-items:center;gap:0.75rem;">';
-      html += '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
-      html += '<div><strong>Stay Notified</strong><br><span style="font-size:0.8rem;color:var(--color-text-light);">Get notified when coverage is needed.</span></div>';
-      html += '<button class="btn btn-primary btn-sm" id="enablePushBtn" style="margin-left:auto;white-space:nowrap;">Enable</button>';
-      html += '</div></div>';
-    }
-
     // ──── Billing card ────
     html += '<div class="mf-card mf-billing-card">';
     html += '<h3 class="mf-card-title">Billing &amp; Fees</h3>';
@@ -2293,6 +2283,12 @@
         showElectiveDetail(elecName);
       });
     });
+
+    // Wire up "I'll Be Out" button
+    var absenceBtn = grid.querySelector('#reportAbsenceBtn');
+    if (absenceBtn) {
+      absenceBtn.addEventListener('click', showAbsenceModal);
+    }
 
     // Wire up PayPal pay buttons (semester fees + deposits)
     function wirePaypalButton(btnId, amount, description, invoiceId, email) {
@@ -5958,26 +5954,35 @@ function timeAgo(isoStr) {
 
 // ── Push Notification Subscription ──
 function initPushSubscription() {
-  var pushBtn = document.getElementById('enablePushBtn');
-  if (!pushBtn) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
-  // Check if already subscribed
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistration('/sw.js').then(function (reg) {
-      if (reg) {
-        reg.pushManager.getSubscription().then(function (sub) {
-          if (sub) {
-            var card = document.getElementById('pushOptInCard');
-            if (card) card.style.display = 'none';
-          }
-        });
-      }
+  var banner = document.getElementById('pushBanner');
+  var enableBtn = document.getElementById('pushBannerEnableBtn');
+  var dismissBtn = document.getElementById('pushBannerDismiss');
+  if (!banner || !enableBtn) return;
+
+  // Check if already subscribed or dismissed
+  if (localStorage.getItem('rw_push_dismissed')) return;
+
+  navigator.serviceWorker.register('/sw.js').then(function (reg) {
+    return reg.pushManager.getSubscription();
+  }).then(function (sub) {
+    if (sub) return; // Already subscribed, don't show banner
+    banner.style.display = '';
+  }).catch(function () {
+    banner.style.display = '';
+  });
+
+  if (dismissBtn) {
+    dismissBtn.addEventListener('click', function () {
+      banner.style.display = 'none';
+      localStorage.setItem('rw_push_dismissed', '1');
     });
   }
 
-  pushBtn.addEventListener('click', function () {
-    pushBtn.disabled = true;
-    pushBtn.textContent = 'Enabling\u2026';
+  enableBtn.addEventListener('click', function () {
+    enableBtn.disabled = true;
+    enableBtn.textContent = 'Enabling\u2026';
 
     navigator.serviceWorker.register('/sw.js').then(function (reg) {
       return reg.pushManager.getSubscription().then(function (existing) {
@@ -5997,15 +6002,12 @@ function initPushSubscription() {
       });
     }).then(function (r) {
       if (!r.ok) throw new Error('Subscribe failed');
-      var card = document.getElementById('pushOptInCard');
-      if (card) {
-        card.innerHTML = '<div style="display:flex;align-items:center;gap:0.5rem;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Notifications enabled!</div>';
-        setTimeout(function () { card.style.display = 'none'; }, 3000);
-      }
+      banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>';
+      setTimeout(function () { banner.style.display = 'none'; }, 3000);
     }).catch(function (err) {
       console.error('Push subscription error:', err);
-      pushBtn.disabled = false;
-      pushBtn.textContent = 'Enable';
+      enableBtn.disabled = false;
+      enableBtn.textContent = 'Enable';
       if (Notification.permission === 'denied') {
         alert('Notifications are blocked. Please enable them in your browser settings.');
       }
@@ -6024,12 +6026,6 @@ function urlBase64ToUint8Array(base64String) {
 
 // ── Initialize absence/coverage/notification system ──
 function initAbsenceCoverageSystem() {
-  // Wire "I'll Be Out" button
-  var absenceBtn = document.getElementById('reportAbsenceBtn');
-  if (absenceBtn) {
-    absenceBtn.addEventListener('click', showAbsenceModal);
-  }
-
   // Wire notification bell
   var bellBtn = document.getElementById('notifBellBtn');
   if (bellBtn) {
@@ -6051,6 +6047,6 @@ function initAbsenceCoverageSystem() {
   loadNotifications();
   setInterval(loadNotifications, 60000);
 
-  // Init push subscription
+  // Init push notification banner
   initPushSubscription();
 }
