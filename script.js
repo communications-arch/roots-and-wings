@@ -2180,8 +2180,10 @@
     }
     // Coverage notes area (populated after absences load)
     html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
-    // "I'll Be Out" button — store hasCleaning for the modal
+    // "I'll Be Out" button
     html += '<button class="btn btn-absence" id="reportAbsenceBtn" data-has-cleaning="' + (hasCleaning ? '1' : '0') + '">I\'ll Be Out</button>';
+    // My absences area (populated after absences load)
+    html += '<div id="myAbsencesArea"></div>';
     html += '</div>';
 
     // ──── Billing card ────
@@ -5594,7 +5596,12 @@
     var el = document.getElementById('coverageBoardContent');
     var card = document.getElementById('coverageBoardCard');
     if (!el) return;
-    if (absences.length === 0) { if (card) card.style.display = 'none'; return; }
+    if (absences.length === 0) {
+      if (card) card.style.display = 'none';
+      updateCoverageNotes();
+      renderMyAbsences();
+      return;
+    }
     if (card) card.style.display = '';
 
     var email = sessionStorage.getItem('rw_user_email');
@@ -5716,8 +5723,9 @@
       });
     });
 
-    // Update responsibility coverage notes
+    // Update responsibility coverage notes and my absences
     updateCoverageNotes();
+    renderMyAbsences();
   }
 
   // Add coverage notes to the responsibilities card
@@ -5773,6 +5781,82 @@
     });
 
     notesContainer.innerHTML = notes.length > 0 ? notes.join('') : '';
+  }
+
+  // Show the current user's own absences with edit/cancel options
+  function renderMyAbsences() {
+    var el = document.getElementById('myAbsencesArea');
+    if (!el || !loadedAbsences || loadedAbsences.length === 0) { if (el) el.innerHTML = ''; return; }
+
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email) return;
+
+    var myAbsences = loadedAbsences.filter(function (a) {
+      return a.family_email === email && !a.cancelled_at;
+    });
+    if (myAbsences.length === 0) { el.innerHTML = ''; return; }
+
+    var html = '<div class="my-absences"><div class="mf-block-label" style="margin-top:0.75rem;">Your Upcoming Absences</div>';
+    myAbsences.forEach(function (a) {
+      var dateLabel = formatDateLabel(a.absence_date);
+      var blocks = (a.blocks || []).join(', ');
+      var coveredCount = 0;
+      var totalSlots = (a.slots || []).length;
+      (a.slots || []).forEach(function (s) { if (s.claimed_by_email) coveredCount++; });
+      var statusText = totalSlots === 0 ? '' : coveredCount === totalSlots ? ' \u2014 all covered' : ' \u2014 ' + (totalSlots - coveredCount) + ' slot' + ((totalSlots - coveredCount) === 1 ? '' : 's') + ' open';
+
+      html += '<div class="my-absence-row">';
+      html += '<div class="my-absence-info">';
+      html += '<strong>' + dateLabel + '</strong> \u00b7 ' + a.absent_person;
+      html += '<div class="my-absence-detail">' + blocks + statusText + '</div>';
+      html += '</div>';
+      html += '<div class="my-absence-actions">';
+      html += '<button class="sc-btn my-absence-edit" data-absence-id="' + a.id + '">Edit</button>';
+      html += '<button class="sc-btn sc-btn-del my-absence-cancel" data-absence-id="' + a.id + '">Cancel</button>';
+      html += '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+
+    // Wire cancel buttons
+    el.querySelectorAll('.my-absence-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-absence-id');
+        if (!confirm('Cancel this absence? Coverage slots will be removed.')) return;
+        btn.disabled = true; btn.textContent = 'Cancelling\u2026';
+        var cred = sessionStorage.getItem('rw_google_credential');
+        fetch('/api/absences?id=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + cred }
+        }).then(function (r) { return r.json(); }).then(function (res) {
+          if (res.error) { alert('Error: ' + res.error); btn.disabled = false; btn.textContent = 'Cancel'; return; }
+          loadCoverageBoard();
+        });
+      });
+    });
+
+    // Wire edit buttons — cancel the old one and re-open the modal
+    el.querySelectorAll('.my-absence-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-absence-id');
+        var absence = null;
+        for (var i = 0; i < loadedAbsences.length; i++) {
+          if (String(loadedAbsences[i].id) === id) { absence = loadedAbsences[i]; break; }
+        }
+        if (!absence) return;
+        // Cancel the old absence, then open the modal pre-filled
+        btn.disabled = true; btn.textContent = 'Loading\u2026';
+        var cred = sessionStorage.getItem('rw_google_credential');
+        fetch('/api/absences?id=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + cred }
+        }).then(function (r) { return r.json(); }).then(function () {
+          loadCoverageBoard();
+          showAbsenceModal();
+        });
+      });
+    });
   }
 
   var notifState = { notifications: [], unreadCount: 0, dropdownOpen: false };
