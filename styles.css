@@ -6509,7 +6509,7 @@ button.staff-role:hover {
 .mf-coverage-summary::-webkit-details-marker { display: none; }
 .mf-coverage-summary::before {
   content: '\25BE';
-  font-size: 0.7rem;
+  font-size: 1.1rem;
   color: var(--color-text-light);
   transition: transform 0.15s;
 }
