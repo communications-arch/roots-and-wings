@@ -6442,14 +6442,11 @@ button.staff-role:hover {
 .notif-item-body { font-size: 0.72rem; color: var(--color-text-light); line-height: 1.35; }
 .notif-item-time { font-size: 0.65rem; color: var(--color-text-light); margin-top: 0.2rem; }
 
-/* Push notification banner — above navbar */
+/* Push notification alert — above dashboard header */
 .push-banner {
-  position: sticky;
-  top: 0;
-  z-index: 1001;
   background: var(--color-primary);
   color: #fff;
-  padding: 0.5rem 0;
+  padding: 0.55rem 0;
 }
 .push-banner-inner {
   display: flex;
