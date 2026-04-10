@@ -2549,6 +2549,37 @@
     });
   }
 
+  // Highlight names matching the current user in coordination tabs
+  function getMyNames() {
+    var email = sessionStorage.getItem('rw_user_email');
+    if (!email || !FAMILIES) return { fullNames: [], familyName: '' };
+    var fam = null;
+    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; } }
+    if (!fam) return { fullNames: [], familyName: '' };
+    return {
+      fullNames: fam.parents.split(' & ').map(function (p) { return p.trim() + ' ' + fam.name; }),
+      familyName: fam.name
+    };
+  }
+
+  function highlightIfMe(name, myNames) {
+    if (!name || !myNames) return name;
+    var lower = name.trim().toLowerCase();
+    var match = false;
+    if (myNames.fullNames) {
+      myNames.fullNames.forEach(function (fn) { if (fn.toLowerCase() === lower) match = true; });
+    }
+    if (myNames.familyName && lower === myNames.familyName.toLowerCase()) match = true;
+    return match ? '<span class="coord-highlight">' + name + '</span>' : name;
+  }
+
+  function highlightFamilyIfMe(familyName, myNames) {
+    if (!familyName || !myNames || !myNames.familyName) return familyName;
+    return familyName.trim().toLowerCase() === myNames.familyName.toLowerCase()
+      ? '<span class="coord-highlight">' + familyName + '</span>'
+      : familyName;
+  }
+
   function renderSessionTab() {
     var container = document.getElementById('sessionTabContent');
     if (!container) return;
@@ -2559,6 +2590,7 @@
     var html = buildSessionPager(viewSess, 'session');
 
     // Morning classes table
+    var myNames = getMyNames();
     html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
     html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Room</th></tr></thead><tbody>';
     var groups = Object.keys(AM_CLASSES);
@@ -2566,11 +2598,12 @@
       var cls = AM_CLASSES[groupName];
       var s = cls.sessions[viewSess];
       if (!s) return;
-      html += '<tr class="session-class-row" data-group="' + groupName + '">';
+      var isMyRow = myNames.fullNames.some(function (fn) { return fn.toLowerCase() === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === fn.toLowerCase(); }); });
+      html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
       html += '<td><span class="session-group-link">' + groupName + '</span></td>';
       html += '<td>' + cls.ages + '</td>';
       html += '<td>' + s.topic + '</td>';
-      html += '<td>' + s.teacher + '</td>';
+      html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
       html += '<td>' + s.room + '</td>';
       html += '</tr>';
     });
@@ -2583,12 +2616,12 @@
 
       html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>';
       html += '<div class="elective-card-grid">';
-      hour1.forEach(function (e) { html += buildElectiveCard(e); });
+      hour1.forEach(function (e) { html += buildElectiveCard(e, myNames); });
       html += '</div>';
 
       html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 2: 2:00\u20132:55</h4>';
       html += '<div class="elective-card-grid">';
-      hour2.forEach(function (e) { html += buildElectiveCard(e); });
+      hour2.forEach(function (e) { html += buildElectiveCard(e, myNames); });
       html += '</div>';
     } else {
       html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>Afternoon elective sign-ups not yet available for this session.</em></p>';
@@ -2621,17 +2654,18 @@
     });
   }
 
-  function buildElectiveCard(e) {
+  function buildElectiveCard(e, myNames) {
     var pct = Math.round((e.students.length / e.maxCapacity) * 100);
     var barColor = pct >= 90 ? 'var(--color-error)' : pct >= 70 ? 'var(--color-accent)' : 'var(--color-primary-light)';
-    var html = '<button class="elective-card" data-elective="' + e.name + '">';
+    var isMyCard = myNames && myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === (e.leader || '').trim().toLowerCase() || (e.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
+    var html = '<button class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" data-elective="' + e.name + '">';
     html += '<div class="elective-card-header">';
     html += '<span class="elective-card-name">' + e.name + '</span>';
     html += '<span class="elective-age-pill">' + e.ageRange + '</span>';
     html += '</div>';
     if (e.hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
     html += '<p class="elective-card-desc">' + e.description + '</p>';
-    html += '<div class="elective-card-meta">' + e.room + ' &middot; ' + e.leader + '</div>';
+    html += '<div class="elective-card-meta">' + e.room + ' &middot; ' + (myNames ? highlightIfMe(e.leader, myNames) : e.leader) + '</div>';
     html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
     html += '<div class="elective-card-spots">' + e.students.length + '/' + e.maxCapacity + '</div>';
     html += '</button>';
@@ -2660,6 +2694,7 @@
       { key: 'outside', label: 'Outside' }
     ];
 
+    var myNames = getMyNames();
     html += '<div class="cleaning-grid">';
     floors.forEach(function (floor) {
       if (!sessClean[floor.key]) return;
@@ -2668,18 +2703,20 @@
       var areas = Object.keys(sessClean[floor.key]);
       areas.forEach(function (area) {
         var families = sessClean[floor.key][area];
-        html += '<div class="cleaning-role">';
+        var isMyArea = families.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
+        html += '<div class="cleaning-role' + (isMyArea ? ' coord-my-row' : '') + '">';
         html += '<span class="cleaning-area">' + area + '</span>';
-        html += '<span class="cleaning-families">' + families.map(function (f) { return f + ' family'; }).join(', ') + '</span>';
+        html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ') + '</span>';
         html += '</div>';
       });
       html += '</div>';
     });
 
     if (sessClean.floater && sessClean.floater.length > 0) {
+      var isMyFloater = sessClean.floater.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
       html += '<div class="cleaning-floor-card">';
       html += '<h4>Floater</h4>';
-      html += '<div class="cleaning-role"><span class="cleaning-families">' + sessClean.floater.map(function (f) { return f + ' family'; }).join(', ') + '</span></div>';
+      html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">' + sessClean.floater.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ') + '</span></div>';
       html += '</div>';
     }
     html += '</div>';

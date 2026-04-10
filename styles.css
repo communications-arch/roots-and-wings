@@ -6503,6 +6503,22 @@ button.staff-role:hover {
   color: #fff;
 }
 
+/* Coordination tab — highlight current user's assignments */
+.coord-highlight {
+  background: rgba(var(--color-primary-rgb), 0.12);
+  color: var(--color-primary-dark);
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.coord-my-row {
+  background: rgba(var(--color-primary-rgb), 0.05) !important;
+}
+.coord-my-card {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15);
+}
+
 /* Full-width card in My Family grid */
 .mf-card-full {
   grid-column: 1 / -1;
