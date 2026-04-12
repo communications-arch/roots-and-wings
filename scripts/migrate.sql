@@ -152,3 +152,37 @@ CREATE TABLE IF NOT EXISTS class_curriculum_links (
   attached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (session_number, class_key)
 );
+
+-- ──────────────────────────────────────────────
+-- Cleaning Crew Management
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS cleaning_areas (
+  id SERIAL PRIMARY KEY,
+  floor_key TEXT NOT NULL CHECK (floor_key IN ('mainFloor', 'upstairs', 'outside', 'floater')),
+  area_name TEXT NOT NULL,
+  tasks TEXT[] DEFAULT '{}',
+  sort_order INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT DEFAULT '',
+  UNIQUE (floor_key, area_name)
+);
+
+CREATE TABLE IF NOT EXISTS cleaning_assignments (
+  id SERIAL PRIMARY KEY,
+  session_number INTEGER NOT NULL CHECK (session_number BETWEEN 1 AND 5),
+  cleaning_area_id INTEGER NOT NULL REFERENCES cleaning_areas(id) ON DELETE CASCADE,
+  family_name TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT DEFAULT '',
+  UNIQUE (session_number, cleaning_area_id, family_name)
+);
+CREATE INDEX IF NOT EXISTS cleaning_assign_session_idx ON cleaning_assignments (session_number);
+
+CREATE TABLE IF NOT EXISTS cleaning_config (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  liaison_name TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT DEFAULT ''
+);
+INSERT INTO cleaning_config (liaison_name) VALUES ('') ON CONFLICT (id) DO NOTHING;
