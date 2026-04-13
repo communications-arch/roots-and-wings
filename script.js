@@ -2500,19 +2500,18 @@
       var isTeacher = d.icon === 'teach';
       var h = '<div class="mf-duty' + (d.popup ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (d.popup ? ' style="cursor:pointer;"' : '') + '>';
       h += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
-      h += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
+      var dutyRoleKey = getRoleKeyForDuty(d.text);
+      var infoBtn = '';
+      if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
+        infoBtn = ' <button class="rd-info-btn rd-info-inline" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description"><span class="rd-info-icon">i</span></button>';
+      }
+      h += '<div class="mf-duty-info"><strong>' + d.text + infoBtn + '</strong><span>' + d.detail + '</span>';
       if (classKey && (isTeacher || d.icon === 'assist')) {
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
       }
       h += '</div>';
       // Right-aligned actions area
       h += '<div class="mf-duty-actions">';
-      var dutyRoleKey = getRoleKeyForDuty(d.text);
-      if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
-        h += '<button class="rd-info-btn" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description">';
-        h += '<span class="rd-info-icon">i</span>';
-        h += '</button>';
-      }
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
         h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -3456,21 +3455,21 @@
       html += '<h4>' + committee.name + '</h4>';
       if (committee.chair) {
         var chairRoleKey = getRoleKeyForDuty(committee.chair.title);
-        html += '<div class="committee-chair"><strong>' + committee.chair.title + ':</strong> ' + highlightIfMe(committee.chair.person, myNames);
+        var chairInfo = '';
         if (chairRoleKey && getRoleByKey(chairRoleKey)) {
-          html += ' <button class="rd-info-btn rd-info-inline" data-role-key="' + chairRoleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
+          chairInfo = ' <button class="rd-info-btn rd-info-inline" data-role-key="' + chairRoleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
         }
-        html += '</div>';
+        html += '<div class="committee-chair"><strong>' + committee.chair.title + chairInfo + ':</strong> ' + highlightIfMe(committee.chair.person, myNames) + '</div>';
       }
       html += '<ul>';
       committee.roles.forEach(function (r) {
         var personText = r.person ? highlightIfMe(r.person, myNames) : '<em>Open</em>';
         var roleKey = getRoleKeyForDuty(r.title);
-        html += '<li><strong>' + r.title + ':</strong> ' + personText;
+        var roleInfo = '';
         if (roleKey && getRoleByKey(roleKey)) {
-          html += ' <button class="rd-info-btn rd-info-inline" data-role-key="' + roleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
+          roleInfo = ' <button class="rd-info-btn rd-info-inline" data-role-key="' + roleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
         }
-        html += '</li>';
+        html += '<li><strong>' + r.title + roleInfo + ':</strong> ' + personText + '</li>';
       });
       html += '</ul></div>';
     });
