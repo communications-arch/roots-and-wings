@@ -125,6 +125,18 @@
 
   var CACHE_KEY = 'rw_sheets_cache';
   var CACHE_PHOTOS_KEY = 'rw_photos_cache';
+  var COMMS_EMAIL = 'communications@rootsandwingsindy.com';
+  var VIEW_AS_KEY = 'rw_view_as_email';
+
+  function getActiveEmail() {
+    var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
+    if (viewAs) return viewAs;
+    return sessionStorage.getItem('rw_user_email');
+  }
+
+  function isCommsUser() {
+    return sessionStorage.getItem('rw_user_email') === COMMS_EMAIL;
+  }
 
   function applySheetsData(data) {
     if (!data || data.error) return false;
@@ -607,6 +619,7 @@
           localStorage.removeItem(CACHE_KEY);
           localStorage.removeItem(CACHE_PHOTOS_KEY);
           localStorage.removeItem(CACHE_CLEANING_KEY);
+          sessionStorage.removeItem(VIEW_AS_KEY);
         } catch (e) { /* ignore */ }
         showLogin();
         window.scrollTo(0, 0);
@@ -1980,7 +1993,7 @@
   }
 
   function renderMyFamily() {
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = getActiveEmail();
     var section = document.getElementById('myFamily');
     var grid = document.getElementById('myFamilyGrid');
     var greeting = document.getElementById('dashboardGreeting');
@@ -1998,6 +2011,31 @@
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
 
     var html = '';
+
+    // ──── View As switcher (communications@ only) ────
+    var viewAsEmail = sessionStorage.getItem(VIEW_AS_KEY);
+    if (isCommsUser()) {
+      html += '<div class="view-as-bar">';
+      if (viewAsEmail) {
+        html += '<div class="view-as-banner">';
+        html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        html += ' Viewing as <strong>' + fam.parents + ' ' + fam.name + '</strong>';
+        html += '<button class="view-as-reset" id="viewAsReset">Back to my view</button>';
+        html += '</div>';
+      }
+      html += '<div class="view-as-picker">';
+      html += '<label>View as:</label>';
+      html += '<select class="view-as-select" id="viewAsSelect">';
+      html += '<option value="">— My Dashboard —</option>';
+      var sortedFams = FAMILIES.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+      sortedFams.forEach(function (f) {
+        var selected = viewAsEmail === f.email ? ' selected' : '';
+        html += '<option value="' + f.email + '"' + selected + '>' + f.name + ' (' + f.parents + ')</option>';
+      });
+      html += '</select>';
+      html += '</div>';
+      html += '</div>';
+    }
 
     // ──── Coverage Board (full width, collapsible) ────
     html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
@@ -2418,6 +2456,28 @@
     grid.innerHTML = html;
     section.style.display = '';
 
+    // Wire View As switcher
+    var viewAsSelect = document.getElementById('viewAsSelect');
+    if (viewAsSelect) {
+      viewAsSelect.onchange = function () {
+        if (this.value) {
+          sessionStorage.setItem(VIEW_AS_KEY, this.value);
+        } else {
+          sessionStorage.removeItem(VIEW_AS_KEY);
+        }
+        renderMyFamily();
+        if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
+      };
+    }
+    var viewAsReset = document.getElementById('viewAsReset');
+    if (viewAsReset) {
+      viewAsReset.onclick = function () {
+        sessionStorage.removeItem(VIEW_AS_KEY);
+        renderMyFamily();
+        if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
+      };
+    }
+
     // Wire up duty detail popups
     grid.querySelectorAll('.mf-duty-clickable').forEach(function (row) {
       row.addEventListener('click', function () {
@@ -2641,7 +2701,7 @@
 
   // Highlight names matching the current user in coordination tabs
   function getMyNames() {
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = getActiveEmail();
     if (!email || !FAMILIES) return { fullNames: [], familyName: '' };
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; } }
