@@ -1932,19 +1932,25 @@
     }
 
     else if (p.type === 'board') {
-      html += '<h3>Board of Directors</h3>';
-      html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">2-year terms &middot; Your role: <strong>' + p.role + '</strong></p>';
-      html += '<div class="elective-staff-list">';
-      FAMILIES.forEach(function(f) {
-        if (!f.boardRole) return;
-        var name = f.parents.split(' & ')[0].trim() + ' ' + f.name;
-        var isYou = f.boardRole === p.role;
-        html += '<div class="elective-teacher"' + (isYou ? ' style="background:var(--color-primary-ghost);border-radius:8px;padding:4px 8px;"' : '') + '>';
-        html += '<div class="staff-dot" style="background:' + faceColor(name) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + name.charAt(0) + '</span></div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + name + '</strong><small style="color:var(--color-text-light);">' + f.boardRole + '</small></div>';
-        html += '</div>';
+      // Find the committee this board member chairs
+      var committee = null;
+      VOLUNTEER_COMMITTEES.forEach(function(c) {
+        if (c.chair && nameMatch(c.chair.title, p.role)) committee = c;
       });
-      html += '</div>';
+      html += '<h3>' + p.role + '</h3>';
+      html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Board of Directors &middot; 2-year term</p>';
+      if (committee) {
+        html += '<h4 style="margin-bottom:0.5rem;">' + committee.name + '</h4>';
+        html += '<div class="elective-staff-list">';
+        committee.roles.forEach(function(r) {
+          var person = r.person || 'Open';
+          html += '<div class="elective-teacher">';
+          html += '<div class="staff-dot" style="background:' + (r.person ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
+          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + r.title + '</small></div>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
     }
 
     html += '</div>';
