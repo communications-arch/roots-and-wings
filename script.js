@@ -1954,8 +1954,9 @@
     else if (p.type === 'board') {
       // Find the committee this board member chairs
       var committee = null;
+      var normalizeTitle = function(t) { return (t || '').trim().replace(/\bDir\.\s*$/, 'Director').toLowerCase(); };
       VOLUNTEER_COMMITTEES.forEach(function(c) {
-        if (c.chair && c.chair.title && p.role && c.chair.title.trim().toLowerCase() === p.role.trim().toLowerCase()) committee = c;
+        if (c.chair && c.chair.title && p.role && normalizeTitle(c.chair.title) === normalizeTitle(p.role)) committee = c;
       });
       html += '<h3>' + p.role + '</h3>';
       html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Board of Directors &middot; 2-year term</p>';
@@ -2522,7 +2523,9 @@
     function renderDutyRow(d, globalIdx) {
       var classKey = getClassKey(d);
       var isTeacher = d.icon === 'teach';
-      var h = '<div class="mf-duty' + (d.popup ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (d.popup ? ' style="cursor:pointer;"' : '') + '>';
+      var hasRoleDesc = !!(getRoleKeyForDuty(d.text) && getRoleByKey(getRoleKeyForDuty(d.text)));
+      var isClickable = d.popup || hasRoleDesc;
+      var h = '<div class="mf-duty' + (isClickable ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (isClickable ? ' style="cursor:pointer;"' : '') + '>';
       h += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
       h += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
       if (classKey && (isTeacher || d.icon === 'assist')) {
