@@ -2779,8 +2779,10 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var roleKey = this.getAttribute('data-role-key');
-        // Determine if user holds this role (they do — it's in their duty list)
-        var canEdit = true;
+        // Board-only roles: classroom instructor & assistant can only be edited by board members
+        var boardOnlyRoles = ['classroom_instructor', 'classroom_assistant'];
+        var canEdit = boardOnlyRoles.indexOf(roleKey) !== -1 ? !!(fam && fam.boardRole) : true;
+        if (isCommsUser()) canEdit = true;
         showRoleDescriptionModal(roleKey, canEdit);
       });
     });
