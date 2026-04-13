@@ -2505,19 +2505,23 @@
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
       }
       h += '</div>';
+      // Right-aligned actions area
+      h += '<div class="mf-duty-actions">';
       var dutyRoleKey = getRoleKeyForDuty(d.text);
       if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
         h += '<button class="rd-info-btn" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description">';
-        h += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
-        h += '</button>';
+        h += '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+        h += 'Info</button>';
       }
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
         h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
         h += ' Manage</button>';
-      } else if (d.popup) {
-        h += '<div class="mf-duty-arrow" style="margin-left:auto;opacity:0.4;font-size:1.1rem;">&rsaquo;</div>';
       }
+      if (d.popup && !d.manage) {
+        h += '<div class="mf-duty-arrow">&rsaquo;</div>';
+      }
+      h += '</div>';
       h += '</div>';
       return h;
     }
@@ -3769,7 +3773,7 @@
     var rows = filterAndSortSupplyItems();
 
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail sc-modal">';
+    html += '<div class="elective-detail sc-modal' + (state.browseMode ? ' sc-browse' : '') + '">';
     html += '<h3>Supply Closet Inventory</h3>';
     html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is missing or running low, post in the Supplies chat.</p>';
 
@@ -4299,8 +4303,9 @@
     });
   }
 
-  function showSupplyClosetPopup() {
-    supplyClosetState.canEdit = computeSupplyClosetCanEdit();
+  function showSupplyClosetPopup(browseOnly) {
+    supplyClosetState.canEdit = browseOnly ? false : computeSupplyClosetCanEdit();
+    supplyClosetState.browseMode = !!browseOnly;
     supplyClosetState.searchQuery = '';
     supplyClosetState.sortBy = 'name';
     supplyClosetState.enabledCats = {
@@ -4320,7 +4325,7 @@
 
   var supplyClosetBtn = document.getElementById('supplyClosetBtn');
   if (supplyClosetBtn) {
-    supplyClosetBtn.addEventListener('click', showSupplyClosetPopup);
+    supplyClosetBtn.addEventListener('click', function () { showSupplyClosetPopup(true); });
   }
 
   // ──────────────────────────────────────────────
