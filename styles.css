@@ -3811,15 +3811,6 @@ button.staff-role:hover {
   background: rgba(var(--color-primary-rgb), 0.04);
 }
 
-.mf-duty::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  flex-shrink: 0;
-  opacity: 0.5;
-}
 .mf-duty-icon {
   width: 34px;
   height: 34px;
@@ -7425,13 +7416,18 @@ button.staff-role:hover {
 }
 .rd-duties {
   margin: 0 0 12px;
-  padding-left: 1.25rem;
+  padding-left: 1.5rem;
   font-size: 0.85rem;
   line-height: 1.7;
   color: var(--color-text);
+  list-style: disc;
 }
 .rd-duties li {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+.rd-duties li::marker {
+  color: var(--color-primary);
 }
 .rd-footer {
   font-size: 0.78rem;
