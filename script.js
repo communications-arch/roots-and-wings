@@ -327,29 +327,41 @@
   }
 
   // ── Cleaning Crew DB state ──
+  var CACHE_CLEANING_KEY = 'rw_cleaning_cache';
   var cleaningDB = { areas: [], assignments: [], loaded: false, editMode: false };
 
+  function applyCleaningData(data) {
+    if (!data || data.error) return;
+    cleaningDB.areas = data.areas || [];
+    cleaningDB.assignments = data.assignments || [];
+    cleaningDB.loaded = true;
+    if (data.liaison) CLEANING_CREW.liaison = data.liaison;
+    if (data.sessions) {
+      for (var s in data.sessions) {
+        CLEANING_CREW.sessions[s] = data.sessions[s];
+      }
+    }
+  }
+
   function loadCleaningData() {
+    // Apply cached data immediately for instant load
+    try {
+      var cached = localStorage.getItem(CACHE_CLEANING_KEY);
+      if (cached) applyCleaningData(JSON.parse(cached));
+    } catch (e) { /* ignore */ }
+
     var googleCred = sessionStorage.getItem('rw_google_credential');
     if (!googleCred) return;
     fetch('/api/cleaning', { headers: { 'Authorization': 'Bearer ' + googleCred } })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.error) return;
-        cleaningDB.areas = data.areas || [];
-        cleaningDB.assignments = data.assignments || [];
-        cleaningDB.loaded = true;
-        // Update CLEANING_CREW from DB
-        if (data.liaison) CLEANING_CREW.liaison = data.liaison;
-        if (data.sessions) {
-          for (var s in data.sessions) {
-            CLEANING_CREW.sessions[s] = data.sessions[s];
-          }
-        }
+        try { localStorage.setItem(CACHE_CLEANING_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+        applyCleaningData(data);
         if (typeof renderCleaningTab === 'function') renderCleaningTab();
         if (typeof renderMyFamily === 'function') renderMyFamily();
       })
-      .catch(function () { /* fall back to sheets/hardcoded */ });
+      .catch(function () { /* fall back to cached/hardcoded */ });
   }
 
   // ── Profile Photos from Google Workspace ──
@@ -591,6 +603,7 @@
         try {
           localStorage.removeItem(CACHE_KEY);
           localStorage.removeItem(CACHE_PHOTOS_KEY);
+          localStorage.removeItem(CACHE_CLEANING_KEY);
         } catch (e) { /* ignore */ }
         showLogin();
         window.scrollTo(0, 0);
