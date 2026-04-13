@@ -7375,6 +7375,15 @@ button.staff-role:hover {
   border-color: var(--color-primary);
   color: var(--color-primary-dark);
 }
+.rd-info-inline {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.rd-info-inline .rd-info-icon {
+  font-size: 0.72rem;
+}
 .rd-info-icon {
   font-family: Georgia, 'Times New Roman', serif;
   font-style: italic;

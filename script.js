@@ -3455,18 +3455,36 @@
       html += '<div class="portal-role-card' + (isMyCommittee ? ' coord-my-card' : '') + '">';
       html += '<h4>' + committee.name + '</h4>';
       if (committee.chair) {
-        html += '<div class="committee-chair"><strong>' + committee.chair.title + ':</strong> ' + highlightIfMe(committee.chair.person, myNames) + '</div>';
+        var chairRoleKey = getRoleKeyForDuty(committee.chair.title);
+        html += '<div class="committee-chair"><strong>' + committee.chair.title + ':</strong> ' + highlightIfMe(committee.chair.person, myNames);
+        if (chairRoleKey && getRoleByKey(chairRoleKey)) {
+          html += ' <button class="rd-info-btn rd-info-inline" data-role-key="' + chairRoleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
+        }
+        html += '</div>';
       }
       html += '<ul>';
       committee.roles.forEach(function (r) {
         var personText = r.person ? highlightIfMe(r.person, myNames) : '<em>Open</em>';
-        html += '<li><strong>' + r.title + ':</strong> ' + personText + '</li>';
+        var roleKey = getRoleKeyForDuty(r.title);
+        html += '<li><strong>' + r.title + ':</strong> ' + personText;
+        if (roleKey && getRoleByKey(roleKey)) {
+          html += ' <button class="rd-info-btn rd-info-inline" data-role-key="' + roleKey + '" title="View role description"><span class="rd-info-icon">i</span></button>';
+        }
+        html += '</li>';
       });
       html += '</ul></div>';
     });
     html += '</div>';
 
     container.innerHTML = html;
+    // Wire role description info buttons
+    container.querySelectorAll('.rd-info-btn').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var roleKey = this.getAttribute('data-role-key');
+        showRoleDescriptionModal(roleKey, false);
+      };
+    });
   }
 
   function renderEventsTab() {
