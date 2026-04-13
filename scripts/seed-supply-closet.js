@@ -129,22 +129,22 @@ const ITEMS = [
   ['Balls', 'Outside', 'currently_available'],
   ['Sidewalk Chalk', 'Outside', 'currently_available'],
   // Supplies held by members
-  ['Play/sensory sand', 'Supplies held by members — Jessica Shewan', 'currently_available'],
+  ['Play/sensory sand', 'Supplies held by members', 'currently_available'],
 
   // ── Classroom cabinet (each AM classroom) ──
-  ['Color pencils', '', 'classroom_cabinet'],
-  ['Pencils', '', 'classroom_cabinet'],
-  ['Markers', '', 'classroom_cabinet'],
-  ['Erasers', '', 'classroom_cabinet'],
-  ['Pencil sharpener', '', 'classroom_cabinet'],
-  ['Scissors', '', 'classroom_cabinet'],
-  ['Glue & Glue sticks', '', 'classroom_cabinet'],
-  ['Misc paper', '', 'classroom_cabinet'],
-  ['Crayons', '', 'classroom_cabinet'],
-  ['1-2 rulers', '', 'classroom_cabinet'],
-  ['Scotch/clear tape', '', 'classroom_cabinet'],
-  ['Disinfectant wipes', '', 'classroom_cabinet'],
-  ['Hand sanitizer wipes', '', 'classroom_cabinet'],
+  ['Color pencils', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Pencils', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Markers', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Erasers', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Pencil sharpener', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Scissors', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Glue & Glue sticks', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Misc paper', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Crayons', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['1-2 rulers', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Scotch/clear tape', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Disinfectant wipes', 'Classroom Cabinet', 'classroom_cabinet'],
+  ['Hand sanitizer wipes', 'Classroom Cabinet', 'classroom_cabinet'],
 
   // ── Game closet (Upstairs) ──
   ['Apples to Apples', 'Upstairs', 'game_closet'],
@@ -190,10 +190,10 @@ const LOCATIONS = [
   'Downstairs',
   'Upstairs',
   'Multipurpose Room',
+  'Classroom Cabinet',
   'Kitchen',
   'Upstairs Storage Room',
   'Outside',
-  'Goodness',
   'Supplies held by members',
 ];
 
