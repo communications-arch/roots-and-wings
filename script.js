@@ -347,6 +347,7 @@
           }
         }
         if (typeof renderCleaningTab === 'function') renderCleaningTab();
+        if (typeof renderMyFamily === 'function') renderMyFamily();
       })
       .catch(function () { /* fall back to sheets/hardcoded */ });
   }
