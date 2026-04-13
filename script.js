@@ -829,7 +829,7 @@
 
   // ── Cleaning crew assignments (structured by area) ──
   var CLEANING_CREW = {
-    liaison: 'Parn Sudmee',
+    liaison: 'Erin Bogan',
     sessions: {
       4: {
         mainFloor: {
@@ -861,7 +861,7 @@
         { title: 'Opener & Morning Set-Up', person: 'Kristen Henderson' },
         { title: 'Closer/Lost & Found', person: 'Erica Patterson' },
         { title: 'Safety Coordinator', person: 'Colleen Raymont' },
-        { title: 'Cleaning Crew Liaison', person: 'Parn Sudmee' }
+        { title: 'Cleaning Crew Liaison', person: 'Erin Bogan' }
       ]
     },
     {
