@@ -186,3 +186,20 @@ CREATE TABLE IF NOT EXISTS cleaning_config (
   updated_by TEXT DEFAULT ''
 );
 INSERT INTO cleaning_config (liaison_name) VALUES ('') ON CONFLICT (id) DO NOTHING;
+
+-- ──────────────────────────────────────────────
+-- Role Descriptions
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS role_descriptions (
+  id SERIAL PRIMARY KEY,
+  role_key TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  job_length TEXT DEFAULT '',
+  overview TEXT DEFAULT '',
+  duties TEXT[] DEFAULT '{}',
+  committee TEXT DEFAULT '',
+  last_reviewed_by TEXT DEFAULT '',
+  last_reviewed_date TEXT DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT DEFAULT ''
+);

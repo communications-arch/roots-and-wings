@@ -349,6 +349,238 @@
       });
   }
 
+  // ── Role Descriptions DB state ──
+  var CACHE_ROLES_KEY = 'rw_roles_cache';
+  var roleDescriptions = []; // array of {id, role_key, title, ...}
+  var roleDescriptionsLoaded = false;
+
+  // Map duty text patterns to role_keys
+  var DUTY_TO_ROLE_KEY = {
+    'President': 'president',
+    'Vice President': 'vice_president',
+    'Vice-President': 'vice_president',
+    'Treasurer': 'treasurer',
+    'Secretary': 'secretary',
+    'Membership Director': 'membership_director',
+    'Sustaining Director': 'sustaining_director',
+    'Communications Director': 'communications_director',
+    'Cleaning Crew Liaison': 'cleaning_crew_liaison',
+    'Supply Coordinator': 'supply_coordinator',
+    'Supply Closet': 'supply_coordinator',
+    'Safety Coordinator': 'safety_coordinator',
+    'Opener & Morning Set-Up': 'opener',
+    'Building Opener': 'opener',
+    'Closer/Lost & Found': 'building_closer',
+    'Building Closer': 'building_closer',
+    'Afternoon Class Liaison': 'afternoon_class_liaison',
+    'Morning Class Liaisons': 'morning_class_liaison',
+    'Morning Class Liaison': 'morning_class_liaison',
+    'Fundraising Coordinator': 'fundraising_coordinator',
+    'Field Trip Coordinators': 'field_trip_coordinator',
+    'Field Trip Coordinator': 'field_trip_coordinator',
+    'Welcome Coordinator': 'welcome_coordinator',
+    'Public Communications': 'public_communications',
+    'Yearbook Coordinator': 'yearbook_coordinator',
+    'Summer Social Events': 'summer_social_events',
+    'Parent Social Events': 'parent_social_events',
+    'Special Events Liaison': 'special_events_liaison',
+    'Gratitude/Encouragement': 'gratitude_encouragement',
+    'Archives': 'archives',
+    'Admin/Organization': 'admin_organization',
+    'Classroom Instructor': 'classroom_instructor',
+    'Classroom Assistant': 'classroom_assistant',
+    'Floater': 'floater'
+  };
+
+  function getRoleKeyForDuty(dutyText) {
+    // Direct match
+    if (DUTY_TO_ROLE_KEY[dutyText]) return DUTY_TO_ROLE_KEY[dutyText];
+    // Strip trailing parenthetical like "(Finance Committee)"
+    var base = dutyText.replace(/\s*\(.*\)\s*$/, '').trim();
+    if (DUTY_TO_ROLE_KEY[base]) return DUTY_TO_ROLE_KEY[base];
+    // Check if duty text contains a known role name
+    for (var key in DUTY_TO_ROLE_KEY) {
+      if (dutyText.indexOf(key) !== -1) return DUTY_TO_ROLE_KEY[key];
+    }
+    // Check for "Class Liaison" in group liaison duties
+    if (dutyText.indexOf('Class Liaison') !== -1) return 'morning_class_liaison';
+    // Check for Leading/Assisting patterns
+    if (dutyText.indexOf('Leading') !== -1) return 'classroom_instructor';
+    if (dutyText.indexOf('Assisting') !== -1) return 'classroom_assistant';
+    return null;
+  }
+
+  function getRoleByKey(key) {
+    for (var i = 0; i < roleDescriptions.length; i++) {
+      if (roleDescriptions[i].role_key === key) return roleDescriptions[i];
+    }
+    return null;
+  }
+
+  function applyRoleDescriptions(data) {
+    if (!data || !data.roles) return;
+    roleDescriptions = data.roles;
+    roleDescriptionsLoaded = true;
+  }
+
+  function loadRoleDescriptions() {
+    // Apply cached data immediately
+    try {
+      var cached = localStorage.getItem(CACHE_ROLES_KEY);
+      if (cached) applyRoleDescriptions(JSON.parse(cached));
+    } catch (e) { /* ignore */ }
+
+    var googleCred = sessionStorage.getItem('rw_google_credential');
+    if (!googleCred) return;
+    fetch('/api/cleaning?action=roles', { headers: { 'Authorization': 'Bearer ' + googleCred } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.error) return;
+        try { localStorage.setItem(CACHE_ROLES_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+        applyRoleDescriptions(data);
+        // Re-render to add info icons if dashboard is visible
+        if (dashboard && dashboard.classList.contains('visible')) {
+          if (typeof renderMyFamily === 'function') renderMyFamily();
+        }
+      })
+      .catch(function () { /* fall back to cached */ });
+  }
+
+  function showRoleDescriptionModal(roleKey, canEdit) {
+    var role = getRoleByKey(roleKey);
+    if (!role || !personDetail || !personDetailCard) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<div class="rd-view" id="rdView">';
+    html += '<h3 class="rd-title">' + escapeHtml(role.title) + '</h3>';
+    html += '<div class="rd-meta">';
+    html += '<span class="rd-pill">' + escapeHtml(role.committee || '') + '</span>';
+    html += '<span class="rd-pill">' + escapeHtml(role.job_length || '') + '</span>';
+    html += '</div>';
+    if (role.overview) {
+      html += '<p class="rd-overview">' + escapeHtml(role.overview) + '</p>';
+    }
+    if (role.duties && role.duties.length > 0) {
+      html += '<h4 class="rd-section-title">Responsibilities</h4>';
+      html += '<ul class="rd-duties">';
+      role.duties.forEach(function (d) {
+        html += '<li>' + escapeHtml(d) + '</li>';
+      });
+      html += '</ul>';
+    }
+    if (role.last_reviewed_by || role.last_reviewed_date) {
+      html += '<p class="rd-footer">Last reviewed';
+      if (role.last_reviewed_by) html += ' by ' + escapeHtml(role.last_reviewed_by);
+      if (role.last_reviewed_date) html += ' on ' + escapeHtml(role.last_reviewed_date);
+      html += '</p>';
+    }
+    if (canEdit) {
+      html += '<button class="mf-manage-btn rd-edit-btn" id="rdEditBtn" style="margin-top:12px;">';
+      html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+      html += ' Edit</button>';
+    }
+    html += '</div>';
+
+    // Edit form (hidden initially)
+    html += '<div class="rd-edit" id="rdEdit" style="display:none;">';
+    html += '<h3 class="rd-title">Edit: ' + escapeHtml(role.title) + '</h3>';
+    html += '<label class="rd-label">Overview</label>';
+    html += '<textarea class="rd-textarea" id="rdEditOverview" rows="3">' + escapeHtml(role.overview || '') + '</textarea>';
+    html += '<label class="rd-label">Job Length</label>';
+    html += '<input class="rd-input" id="rdEditJobLength" value="' + escapeHtml(role.job_length || '') + '">';
+    html += '<label class="rd-label">Responsibilities (one per line)</label>';
+    html += '<textarea class="rd-textarea" id="rdEditDuties" rows="10">' + (role.duties || []).map(escapeHtml).join('\n') + '</textarea>';
+    html += '<label class="rd-label">Reviewed by</label>';
+    html += '<input class="rd-input" id="rdEditReviewedBy" value="' + escapeHtml(role.last_reviewed_by || '') + '">';
+    html += '<label class="rd-label">Review date</label>';
+    html += '<input class="rd-input" id="rdEditReviewedDate" value="' + escapeHtml(role.last_reviewed_date || '') + '">';
+    html += '<div class="rd-btn-row">';
+    html += '<button class="btn rd-save-btn" id="rdSaveBtn">Save</button>';
+    html += '<button class="btn rd-cancel-btn" id="rdCancelBtn">Cancel</button>';
+    html += '</div>';
+    html += '</div>';
+
+    html += '</div>';
+
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) {
+      if (e.target === personDetail) closeDetail();
+    });
+
+    if (canEdit) {
+      var editBtn = personDetailCard.querySelector('#rdEditBtn');
+      if (editBtn) {
+        editBtn.addEventListener('click', function () {
+          personDetailCard.querySelector('#rdView').style.display = 'none';
+          personDetailCard.querySelector('#rdEdit').style.display = '';
+        });
+      }
+      var cancelBtn = personDetailCard.querySelector('#rdCancelBtn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', function () {
+          personDetailCard.querySelector('#rdEdit').style.display = 'none';
+          personDetailCard.querySelector('#rdView').style.display = '';
+        });
+      }
+      var saveBtn = personDetailCard.querySelector('#rdSaveBtn');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+          var newOverview = personDetailCard.querySelector('#rdEditOverview').value;
+          var newJobLength = personDetailCard.querySelector('#rdEditJobLength').value;
+          var newDuties = personDetailCard.querySelector('#rdEditDuties').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+          var newReviewedBy = personDetailCard.querySelector('#rdEditReviewedBy').value;
+          var newReviewedDate = personDetailCard.querySelector('#rdEditReviewedDate').value;
+          var googleCred = sessionStorage.getItem('rw_google_credential');
+          fetch('/api/cleaning?action=roles&id=' + role.id, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + googleCred, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              overview: newOverview,
+              job_length: newJobLength,
+              duties: newDuties,
+              last_reviewed_by: newReviewedBy,
+              last_reviewed_date: newReviewedDate
+            })
+          })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              // Update local cache
+              role.overview = newOverview;
+              role.job_length = newJobLength;
+              role.duties = newDuties;
+              role.last_reviewed_by = newReviewedBy;
+              role.last_reviewed_date = newReviewedDate;
+              try { localStorage.setItem(CACHE_ROLES_KEY, JSON.stringify({ roles: roleDescriptions })); } catch (e) { /* quota */ }
+              closeDetail();
+              showRoleDescriptionModal(roleKey, canEdit);
+            } else {
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Save';
+              alert('Save failed: ' + (data.error || 'Unknown error'));
+            }
+          })
+          .catch(function () {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save';
+            alert('Save failed. Please try again.');
+          });
+        });
+      }
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   // ── Cleaning Crew DB state ──
   var CACHE_CLEANING_KEY = 'rw_cleaning_cache';
   var cleaningDB = { areas: [], assignments: [], loaded: false, editMode: false };
@@ -578,6 +810,7 @@
     loadPhotos();
     loadCalendar();
     loadCleaningData();
+    loadRoleDescriptions();
     // Render with whatever data is available (live if preloaded, static otherwise)
     setTimeout(function () {
       if (typeof renderMyFamily === 'function') renderMyFamily();
@@ -2280,6 +2513,13 @@
             html += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
           }
           html += '</div>';
+          // Role description info button
+          var dutyRoleKey = getRoleKeyForDuty(d.text);
+          if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
+            html += '<button class="rd-info-btn" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description">';
+            html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+            html += '</button>';
+          }
           if (d.manage) {
             html += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
             html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -2516,8 +2756,9 @@
     // Wire up duty detail popups
     grid.querySelectorAll('.mf-duty-clickable').forEach(function (row) {
       row.addEventListener('click', function (e) {
-        // Don't trigger detail if Manage button was clicked
+        // Don't trigger detail if Manage button or info button was clicked
         if (e.target.closest('.mf-manage-btn')) return;
+        if (e.target.closest('.rd-info-btn')) return;
         var idx = parseInt(this.getAttribute('data-duty-idx'), 10);
         if (duties[idx]) showDutyDetail(duties[idx]);
       });
@@ -2530,6 +2771,17 @@
         var type = this.getAttribute('data-manage');
         if (type === 'cleaningCrew') showCleaningManagementModal();
         if (type === 'supplyCloset') showSupplyClosetPopup();
+      });
+    });
+
+    // Wire up role description info buttons
+    grid.querySelectorAll('.rd-info-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var roleKey = this.getAttribute('data-role-key');
+        // Determine if user holds this role (they do — it's in their duty list)
+        var canEdit = true;
+        showRoleDescriptionModal(roleKey, canEdit);
       });
     });
 
