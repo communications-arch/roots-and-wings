@@ -2953,7 +2953,21 @@
       html += '<div><strong>' + first + '</strong> <span class="elective-student-last">' + last + '</span></div>';
       html += '</div>';
     });
-    html += '</div></div>';
+    html += '</div>';
+
+    // Append role description for leader/assistant
+    var activeEmail = getActiveEmail();
+    var activeFam = null;
+    for (var fi = 0; fi < FAMILIES.length; fi++) { if (FAMILIES[fi].email === activeEmail) { activeFam = FAMILIES[fi]; break; } }
+    if (activeFam) {
+      var myFullNames = activeFam.parents.split(' & ').map(function(pp) { return pp.trim() + ' ' + activeFam.name; });
+      var isLeader = myFullNames.some(function(fn) { return fn.toLowerCase() === (elec.leader || '').trim().toLowerCase(); });
+      var isAssist = (elec.assistants || []).some(function(a) { return myFullNames.some(function(fn) { return fn.toLowerCase() === a.trim().toLowerCase(); }); });
+      if (isLeader) html += renderRoleDescriptionSection('classroom_instructor');
+      else if (isAssist) html += renderRoleDescriptionSection('classroom_assistant');
+    }
+
+    html += '</div>';
 
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
