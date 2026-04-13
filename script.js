@@ -2494,43 +2494,49 @@
 
     var blockLabels = { AM: 'AM (10:00\u201312:00)', PM1: 'PM Hour 1 (1:00\u20131:55)', PM2: 'PM Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning', annual: 'Annual Roles' };
 
+    // Helper to render a single duty row
+    function renderDutyRow(d, globalIdx) {
+      var classKey = getClassKey(d);
+      var isTeacher = d.icon === 'teach';
+      var h = '<div class="mf-duty' + (d.popup ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (d.popup ? ' style="cursor:pointer;"' : '') + '>';
+      h += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
+      h += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
+      if (classKey && (isTeacher || d.icon === 'assist')) {
+        h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
+      }
+      h += '</div>';
+      var dutyRoleKey = getRoleKeyForDuty(d.text);
+      if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
+        h += '<button class="rd-info-btn" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description">';
+        h += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+        h += '</button>';
+      }
+      if (d.manage) {
+        h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
+        h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+        h += ' Manage</button>';
+      } else if (d.popup) {
+        h += '<div class="mf-duty-arrow" style="margin-left:auto;opacity:0.4;font-size:1.1rem;">&rsaquo;</div>';
+      }
+      h += '</div>';
+      return h;
+    }
+
     if (duties.length === 0) {
       html += '<p class="mf-empty">No assignments found for this session.</p>';
     } else {
+      // Compact summary in card — show count per block + first duty of each
+      html += '<div class="mf-duties-summary">';
       blockOrder.forEach(function (blk) {
         var blockDuties = duties.filter(function (d) { return d.block === blk; });
         if (blockDuties.length === 0) return;
         html += '<div class="mf-block-section"><div class="mf-block-label">' + blockLabels[blk] + '</div>';
-        blockDuties.forEach(function (d, di) {
-          var globalIdx = duties.indexOf(d);
-          var classKey = getClassKey(d);
-          var isTeacher = d.icon === 'teach';
-          html += '<div class="mf-duty' + (d.popup ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (d.popup ? ' style="cursor:pointer;"' : '') + '>';
-          html += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
-          html += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
-          // Lesson plan link area (for teaching/assisting duties with a class)
-          if (classKey && (isTeacher || d.icon === 'assist')) {
-            html += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
-          }
-          html += '</div>';
-          // Role description info button
-          var dutyRoleKey = getRoleKeyForDuty(d.text);
-          if (dutyRoleKey && getRoleByKey(dutyRoleKey)) {
-            html += '<button class="rd-info-btn" data-role-key="' + dutyRoleKey + '" title="View role description" aria-label="View role description">';
-            html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
-            html += '</button>';
-          }
-          if (d.manage) {
-            html += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
-            html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
-            html += ' Manage</button>';
-          } else if (d.popup) {
-            html += '<div class="mf-duty-arrow" style="margin-left:auto;opacity:0.4;font-size:1.1rem;">&rsaquo;</div>';
-          }
-          html += '</div>';
+        blockDuties.forEach(function (d) {
+          html += renderDutyRow(d, duties.indexOf(d));
         });
         html += '</div>';
       });
+      html += '</div>';
     }
     // Coverage notes area (populated after absences load)
     html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
