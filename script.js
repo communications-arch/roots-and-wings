@@ -1409,12 +1409,11 @@
     }
   }
 
-  // Open the current duty-detail card in a standalone print window so the
-  // coordinator can keep a paper copy of their role description and class
-  // info. We clone personDetailCard's innerHTML (minus elements tagged
-  // .no-print, like the close button and the print button itself) so that
-  // whatever variant of the popup was rendered — AM class, committee,
-  // cleaning, board — prints with matching content.
+  // Print the current duty-detail card via a hidden iframe. Using an iframe
+  // instead of window.open sidesteps popup blockers (which were rendering
+  // the print window blank in some browsers) and keeps the paper copy
+  // self-contained. Whichever variant of the popup was rendered — AM class,
+  // committee, cleaning, board — gets printed with matching content.
   function printDetailCard(title) {
     if (!personDetailCard) return;
     var clone = personDetailCard.cloneNode(true);
@@ -1422,10 +1421,9 @@
     var safeTitle = String(title || 'Roots & Wings — Responsibility')
       .replace(/[<>]/g, '').trim();
 
-    // Pick up a few design tokens so colors don't come out black-on-white
-    // flat. Fallback values match styles.css' current palette.
     var styles = [
       '@page { margin: 0.6in; }',
+      'html, body { background: #fff; }',
       'body { font-family: -apple-system, "Source Sans 3", "Segoe UI", sans-serif; color: #2a2420; line-height: 1.5; padding: 0; margin: 0; }',
       'h1 { font-family: "Playfair Display", Georgia, serif; font-size: 1.4rem; margin: 0 0 0.25rem; color: #4a2d3a; }',
       'h3 { font-family: "Playfair Display", Georgia, serif; margin-top: 0.5rem; color: #4a2d3a; }',
@@ -1443,21 +1441,14 @@
       'ul { padding-left: 1.2rem; margin: 0.3rem 0; }',
       'li { margin: 0.15rem 0; }',
       'a { color: inherit; text-decoration: none; }',
-      // Kill anything that's purely decorative / only makes sense in the modal
-      '.detail-close, .no-print, button { display: none !important; }',
+      '.no-print { display: none !important; }',
       '@media print { body { margin: 0; } }'
     ].join('\n');
 
-    var win = window.open('', '_blank', 'noopener,noreferrer');
-    if (!win) {
-      alert('The print window was blocked. Please allow popups for this site.');
-      return;
-    }
     var today = new Date().toLocaleDateString();
-    win.document.write(
+    var docHtml =
       '<!doctype html><html><head><meta charset="utf-8">' +
       '<title>' + safeTitle + ' — Roots & Wings</title>' +
-      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
       '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap">' +
       '<style>' + styles + '</style>' +
       '</head><body>' +
@@ -1466,13 +1457,36 @@
         '<span class="print-brand">Roots &amp; Wings &middot; ' + today + '</span>' +
       '</div>' +
       clone.innerHTML +
-      '</body></html>'
-    );
-    win.document.close();
-    // Give the fonts a moment to arrive before firing the dialog.
-    setTimeout(function () {
-      try { win.focus(); win.print(); } catch (e) { /* user can still Ctrl+P */ }
-    }, 250);
+      '</body></html>';
+
+    // Reuse any prior iframe so we don't accumulate them in the DOM.
+    var iframe = document.getElementById('rw-print-iframe');
+    if (iframe) iframe.remove();
+    iframe = document.createElement('iframe');
+    iframe.id = 'rw-print-iframe';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(iframe);
+
+    iframe.onload = function () {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (e) {
+        alert('Print failed: ' + (e && e.message || e));
+      }
+    };
+
+    // Prefer srcdoc (waits for load to fire after parsing + font CSS); fall
+    // back to document.write on older browsers.
+    if ('srcdoc' in iframe) {
+      iframe.srcdoc = docHtml;
+    } else {
+      var doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(docHtml);
+      doc.close();
+    }
   }
 
   // Responsibility detail popup
@@ -1481,6 +1495,11 @@
     var p = duty.popup;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
+    // Print button — placed at the top-right of the detail card. The
+    // absolute-positioned .detail-close sits next to it.
+    html += '<div class="detail-actions no-print" style="display:flex;justify-content:flex-end;margin-bottom:0.5rem;">';
+    html += '<button class="sc-btn duty-print-btn" aria-label="Print this role and class info">Print</button>';
+    html += '</div>';
 
     if (p.type === 'amClass') {
       var cls = AM_CLASSES[p.group];
@@ -1735,12 +1754,6 @@
     // Append role description if available
     var popupRoleKey = getRoleKeyForDuty(duty.text);
     if (popupRoleKey) html += renderRoleDescriptionSection(popupRoleKey);
-
-    // Print button — opens a standalone print window with the same content
-    // so coordinators can get a clean paper copy of the role + class info.
-    html += '<div class="detail-actions no-print" style="margin-top:1.25rem;display:flex;justify-content:flex-end;gap:0.5rem;">';
-    html += '<button class="sc-btn duty-print-btn" aria-label="Print this role and class info">Print</button>';
-    html += '</div>';
 
     html += '</div>';
     personDetailCard.innerHTML = html;
