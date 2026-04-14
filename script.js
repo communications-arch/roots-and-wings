@@ -7016,7 +7016,6 @@
     ].join('\n');
 
     var html = '<!doctype html><html><head><meta charset="utf-8"><title>Class Pack: ' + esc(info.name) + '</title><style>' + css + '</style></head><body>';
-    html += '<div class="no-print"><button onclick="window.print()">Print</button> <button onclick="window.close()">Close</button></div>';
 
     // ── Class header ──
     html += '<div class="class-header">';
@@ -7125,10 +7124,82 @@
 
     html += '</body></html>';
 
-    // Print via a hidden iframe — no popup, no blocker. The in-document
-    // "Print" and "Close" buttons wouldn't make sense here (the iframe has
-    // no UI surface), so the print dialog fires automatically on load.
-    openPrintIframe(html);
+    // Show the Class Pack in a preview modal first, so the teacher can
+    // review before printing. The modal's "Print" button triggers the
+    // hidden-iframe print flow; "Close" dismisses the preview.
+    showClassPackPreview(info, html);
+  }
+
+  // In-page preview modal for the Class Pack. Renders the standalone
+  // document inside an iframe so the rendered preview matches the printed
+  // output exactly.
+  function showClassPackPreview(info, docHtml) {
+    // Tear down any prior preview
+    var existing = document.getElementById('rw-classpack-overlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'rw-classpack-overlay';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:9999',
+      'background:rgba(0,0,0,0.6)',
+      'display:flex', 'align-items:stretch', 'justify-content:center',
+      'padding:1rem'
+    ].join(';');
+
+    var panel = document.createElement('div');
+    panel.style.cssText = [
+      'background:#fff', 'border-radius:8px',
+      'box-shadow:0 12px 40px rgba(0,0,0,0.3)',
+      'display:flex', 'flex-direction:column',
+      'width:100%', 'max-width:960px', 'margin:auto', 'max-height:100%', 'overflow:hidden'
+    ].join(';');
+
+    var header = document.createElement('div');
+    header.style.cssText = [
+      'display:flex', 'align-items:center', 'justify-content:space-between',
+      'padding:0.75rem 1rem',
+      'border-bottom:1px solid #e0d5c7',
+      'gap:0.5rem', 'flex-wrap:wrap'
+    ].join(';');
+    header.innerHTML =
+      '<strong style="font-family:\'Playfair Display\',Georgia,serif;color:#4a2d3a;">' +
+        'Class Pack &mdash; ' + (info && info.name ? info.name : '') +
+      '</strong>' +
+      '<div style="display:flex;gap:0.5rem;">' +
+        '<button type="button" class="sc-btn" id="rwCpPrint" style="font-weight:600;">\u2399 Print</button>' +
+        '<button type="button" class="sc-btn" id="rwCpClose">Close</button>' +
+      '</div>';
+
+    var iframeWrap = document.createElement('div');
+    iframeWrap.style.cssText = 'flex:1;overflow:auto;background:#f5f1eb;';
+    var iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:100%;height:100%;min-height:60vh;border:0;background:#fff;';
+    iframe.setAttribute('title', 'Class Pack preview');
+    iframeWrap.appendChild(iframe);
+
+    panel.appendChild(header);
+    panel.appendChild(iframeWrap);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    // Write the doc into the iframe so the preview matches print output.
+    try {
+      var doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(docHtml);
+      doc.close();
+    } catch (e) {
+      console.error('Class Pack preview write failed', e);
+    }
+
+    function closePreview() { overlay.remove(); }
+
+    document.getElementById('rwCpClose').addEventListener('click', closePreview);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closePreview(); });
+    document.getElementById('rwCpPrint').addEventListener('click', function () {
+      openPrintIframe(docHtml);
+    });
   }
 
   // Shared print-iframe helper. Used by the Class Pack and duty-detail
