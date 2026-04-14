@@ -1409,6 +1409,72 @@
     }
   }
 
+  // Open the current duty-detail card in a standalone print window so the
+  // coordinator can keep a paper copy of their role description and class
+  // info. We clone personDetailCard's innerHTML (minus elements tagged
+  // .no-print, like the close button and the print button itself) so that
+  // whatever variant of the popup was rendered — AM class, committee,
+  // cleaning, board — prints with matching content.
+  function printDetailCard(title) {
+    if (!personDetailCard) return;
+    var clone = personDetailCard.cloneNode(true);
+    clone.querySelectorAll('.no-print, .detail-close').forEach(function (el) { el.remove(); });
+    var safeTitle = String(title || 'Roots & Wings — Responsibility')
+      .replace(/[<>]/g, '').trim();
+
+    // Pick up a few design tokens so colors don't come out black-on-white
+    // flat. Fallback values match styles.css' current palette.
+    var styles = [
+      '@page { margin: 0.6in; }',
+      'body { font-family: -apple-system, "Source Sans 3", "Segoe UI", sans-serif; color: #2a2420; line-height: 1.5; padding: 0; margin: 0; }',
+      'h1 { font-family: "Playfair Display", Georgia, serif; font-size: 1.4rem; margin: 0 0 0.25rem; color: #4a2d3a; }',
+      'h3 { font-family: "Playfair Display", Georgia, serif; margin-top: 0.5rem; color: #4a2d3a; }',
+      'h4 { font-size: 1rem; margin: 1rem 0 0.35rem; color: #4a2d3a; }',
+      '.print-header { border-bottom: 1px solid #d8c9b9; padding-bottom: 0.5rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; }',
+      '.print-brand { font-size: 0.85rem; color: #7a6857; text-transform: uppercase; letter-spacing: 0.08em; }',
+      '.elective-meta { display: flex; gap: 1rem; flex-wrap: wrap; color: #7a6857; font-size: 0.9rem; margin-bottom: 0.75rem; }',
+      '.elective-staff-list { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0 1rem; }',
+      '.elective-teacher { display: flex; align-items: center; gap: 0.6rem; }',
+      '.staff-dot { width: 24px !important; height: 24px !important; min-width: 24px; border-radius: 50%; background: #ddd; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.75rem; }',
+      '.elective-roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.4rem 1rem; margin: 0.4rem 0 1rem; }',
+      '.elective-student { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }',
+      '.elective-student-dot { width: 22px; height: 22px; border-radius: 50%; background: #ddd; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; }',
+      '.rd-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px dashed #d8c9b9; }',
+      'ul { padding-left: 1.2rem; margin: 0.3rem 0; }',
+      'li { margin: 0.15rem 0; }',
+      'a { color: inherit; text-decoration: none; }',
+      // Kill anything that's purely decorative / only makes sense in the modal
+      '.detail-close, .no-print, button { display: none !important; }',
+      '@media print { body { margin: 0; } }'
+    ].join('\n');
+
+    var win = window.open('', '_blank', 'noopener,noreferrer');
+    if (!win) {
+      alert('The print window was blocked. Please allow popups for this site.');
+      return;
+    }
+    var today = new Date().toLocaleDateString();
+    win.document.write(
+      '<!doctype html><html><head><meta charset="utf-8">' +
+      '<title>' + safeTitle + ' — Roots & Wings</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap">' +
+      '<style>' + styles + '</style>' +
+      '</head><body>' +
+      '<div class="print-header">' +
+        '<h1>' + safeTitle + '</h1>' +
+        '<span class="print-brand">Roots &amp; Wings &middot; ' + today + '</span>' +
+      '</div>' +
+      clone.innerHTML +
+      '</body></html>'
+    );
+    win.document.close();
+    // Give the fonts a moment to arrive before firing the dialog.
+    setTimeout(function () {
+      try { win.focus(); win.print(); } catch (e) { /* user can still Ctrl+P */ }
+    }, 250);
+  }
+
   // Responsibility detail popup
   function showDutyDetail(duty) {
     if (!duty.popup || !personDetail || !personDetailCard) return;
@@ -1670,6 +1736,12 @@
     var popupRoleKey = getRoleKeyForDuty(duty.text);
     if (popupRoleKey) html += renderRoleDescriptionSection(popupRoleKey);
 
+    // Print button — opens a standalone print window with the same content
+    // so coordinators can get a clean paper copy of the role + class info.
+    html += '<div class="detail-actions no-print" style="margin-top:1.25rem;display:flex;justify-content:flex-end;gap:0.5rem;">';
+    html += '<button class="sc-btn duty-print-btn" aria-label="Print this role and class info">Print</button>';
+    html += '</div>';
+
     html += '</div>';
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
@@ -1678,6 +1750,8 @@
     personDetail.addEventListener('click', function (e) {
       if (e.target === personDetail) closeDetail();
     });
+    var printBtn = personDetailCard.querySelector('.duty-print-btn');
+    if (printBtn) printBtn.addEventListener('click', function () { printDetailCard(duty.text || 'My Responsibility'); });
   }
 
   // Board-only detail (when person isn't in directory data yet)
