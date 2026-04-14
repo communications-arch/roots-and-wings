@@ -73,6 +73,46 @@ module.exports = async function handler(req, res) {
   try {
     const sql = getSql();
 
+    // ── Supply Locations (action=locations) ──
+    // MUST be handled before the generic method branches below, otherwise
+    // GET /api/supply-closet?action=locations falls into the item list
+    // handler and the frontend gets undefined locations.
+    if (req.query.action === 'locations') {
+      if (req.method === 'GET') {
+        const rows = await sql`SELECT id, name, sort_order FROM supply_locations ORDER BY sort_order, name`;
+        return res.status(200).json({ locations: rows });
+      }
+      if (req.method === 'POST') {
+        const name = String((req.body && req.body.name) || '').trim();
+        if (!name) return res.status(400).json({ error: 'name is required' });
+        if (name.length > 200) return res.status(400).json({ error: 'name too long' });
+        const maxOrder = await sql`SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM supply_locations`;
+        const inserted = await sql`INSERT INTO supply_locations (name, sort_order) VALUES (${name}, ${maxOrder[0].next}) RETURNING id, name, sort_order`;
+        return res.status(201).json({ location: inserted[0] });
+      }
+      if (req.method === 'PATCH') {
+        const id = parseInt(req.query.id, 10);
+        if (!id) return res.status(400).json({ error: 'id required' });
+        const name = String((req.body && req.body.name) || '').trim();
+        if (!name) return res.status(400).json({ error: 'name is required' });
+        const old = await sql`SELECT name FROM supply_locations WHERE id = ${id}`;
+        if (old.length === 0) return res.status(404).json({ error: 'Not found' });
+        const updated = await sql`UPDATE supply_locations SET name = ${name} WHERE id = ${id} RETURNING id, name, sort_order`;
+        if (old[0].name !== name) await sql`UPDATE supply_closet SET location = ${name} WHERE location = ${old[0].name}`;
+        return res.status(200).json({ location: updated[0] });
+      }
+      if (req.method === 'DELETE') {
+        const id = parseInt(req.query.id, 10);
+        if (!id) return res.status(400).json({ error: 'id required' });
+        const toDelete = await sql`SELECT name FROM supply_locations WHERE id = ${id}`;
+        if (toDelete.length) await sql`UPDATE supply_closet SET location = '' WHERE location = ${toDelete[0].name}`;
+        const deleted = await sql`DELETE FROM supply_locations WHERE id = ${id} RETURNING id`;
+        if (deleted.length === 0) return res.status(404).json({ error: 'Not found' });
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     if (req.method === 'GET') {
       const rows = await sql`
         SELECT id, item_name, location, category, notes, sort_order, updated_at, updated_by
@@ -148,42 +188,6 @@ module.exports = async function handler(req, res) {
       const deleted = await sql`DELETE FROM supply_closet WHERE id = ${id} RETURNING id`;
       if (deleted.length === 0) return res.status(404).json({ error: 'Item not found' });
       return res.status(200).json({ ok: true, id: deleted[0].id });
-    }
-
-    // ── Supply Locations (action=locations) ──
-    if (req.query.action === 'locations') {
-      if (req.method === 'GET') {
-        const rows = await sql`SELECT id, name, sort_order FROM supply_locations ORDER BY sort_order, name`;
-        return res.status(200).json({ locations: rows });
-      }
-      if (req.method === 'POST') {
-        const name = String((req.body && req.body.name) || '').trim();
-        if (!name) return res.status(400).json({ error: 'name is required' });
-        if (name.length > 200) return res.status(400).json({ error: 'name too long' });
-        const maxOrder = await sql`SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM supply_locations`;
-        const inserted = await sql`INSERT INTO supply_locations (name, sort_order) VALUES (${name}, ${maxOrder[0].next}) RETURNING id, name, sort_order`;
-        return res.status(201).json({ location: inserted[0] });
-      }
-      if (req.method === 'PATCH') {
-        const id = parseInt(req.query.id, 10);
-        if (!id) return res.status(400).json({ error: 'id required' });
-        const name = String((req.body && req.body.name) || '').trim();
-        if (!name) return res.status(400).json({ error: 'name is required' });
-        const old = await sql`SELECT name FROM supply_locations WHERE id = ${id}`;
-        if (old.length === 0) return res.status(404).json({ error: 'Not found' });
-        const updated = await sql`UPDATE supply_locations SET name = ${name} WHERE id = ${id} RETURNING id, name, sort_order`;
-        if (old[0].name !== name) await sql`UPDATE supply_closet SET location = ${name} WHERE location = ${old[0].name}`;
-        return res.status(200).json({ location: updated[0] });
-      }
-      if (req.method === 'DELETE') {
-        const id = parseInt(req.query.id, 10);
-        if (!id) return res.status(400).json({ error: 'id required' });
-        const toDelete = await sql`SELECT name FROM supply_locations WHERE id = ${id}`;
-        if (toDelete.length) await sql`UPDATE supply_closet SET location = '' WHERE location = ${toDelete[0].name}`;
-        const deleted = await sql`DELETE FROM supply_locations WHERE id = ${id} RETURNING id`;
-        if (deleted.length === 0) return res.status(404).json({ error: 'Not found' });
-        return res.status(200).json({ ok: true });
-      }
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
