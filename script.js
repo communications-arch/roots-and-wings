@@ -1466,14 +1466,14 @@
   function showDutyDetail(duty) {
     if (!duty.popup || !personDetail || !personDetailCard) return;
     var p = duty.popup;
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail">';
-    // Print button — right-aligned but pushed down far enough that the
-    // absolute-positioned close X doesn't cover it. margin-top clears the
-    // X's hit area so clicks land on Print.
-    html += '<div class="detail-actions no-print" style="display:flex;justify-content:flex-end;margin-top:2.25rem;margin-bottom:0.5rem;">';
+    // Unified modal header: Print button sits as a sibling of the close X
+    // in the top-right corner (see `.detail-actions` in styles.css). This
+    // is the shared navigation pattern used across all modals with actions.
+    var html = '<div class="detail-actions no-print">';
     html += '<button type="button" class="sc-btn duty-print-btn" aria-label="Print this role and class info">\u2399 Print</button>';
     html += '</div>';
+    html += '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail">';
 
     if (p.type === 'amClass') {
       var cls = AM_CLASSES[p.group];
@@ -7147,29 +7147,37 @@
       'padding:1rem'
     ].join(';');
 
+    // Panel uses position:relative so the unified .detail-actions and
+    // .detail-close (top-right corner chrome) anchor correctly.
     var panel = document.createElement('div');
     panel.style.cssText = [
+      'position:relative',
       'background:#fff', 'border-radius:8px',
       'box-shadow:0 12px 40px rgba(0,0,0,0.3)',
       'display:flex', 'flex-direction:column',
       'width:100%', 'max-width:960px', 'margin:auto', 'max-height:100%', 'overflow:hidden'
     ].join(';');
 
-    var header = document.createElement('div');
-    header.style.cssText = [
-      'display:flex', 'align-items:center', 'justify-content:space-between',
-      'padding:0.75rem 1rem',
-      'border-bottom:1px solid #e0d5c7',
-      'gap:0.5rem', 'flex-wrap:wrap'
+    var titleRow = document.createElement('div');
+    titleRow.style.cssText = [
+      'padding:0.85rem 1rem 0.75rem',
+      'border-bottom:1px solid rgba(74,45,58,0.12)',
+      'padding-right:140px'            // reserve room for .detail-actions + .detail-close
     ].join(';');
-    header.innerHTML =
-      '<strong style="font-family:\'Playfair Display\',Georgia,serif;color:#4a2d3a;">' +
+    titleRow.innerHTML =
+      '<strong style="font-family:\'Playfair Display\',Georgia,serif;color:#4a2d3a;font-size:1.05rem;">' +
         'Class Pack &mdash; ' + (info && info.name ? info.name : '') +
-      '</strong>' +
-      '<div style="display:flex;gap:0.5rem;">' +
-        '<button type="button" class="sc-btn" id="rwCpPrint" style="font-weight:600;">\u2399 Print</button>' +
-        '<button type="button" class="sc-btn" id="rwCpClose">Close</button>' +
-      '</div>';
+      '</strong>';
+
+    var actions = document.createElement('div');
+    actions.className = 'detail-actions';
+    actions.innerHTML = '<button type="button" class="sc-btn" id="rwCpPrint">\u2399 Print</button>';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'detail-close';
+    closeBtn.id = 'rwCpClose';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '&times;';
 
     var iframeWrap = document.createElement('div');
     iframeWrap.style.cssText = 'flex:1;overflow:auto;background:#f5f1eb;';
@@ -7178,7 +7186,9 @@
     iframe.setAttribute('title', 'Class Pack preview');
     iframeWrap.appendChild(iframe);
 
-    panel.appendChild(header);
+    panel.appendChild(titleRow);
+    panel.appendChild(actions);
+    panel.appendChild(closeBtn);
     panel.appendChild(iframeWrap);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);

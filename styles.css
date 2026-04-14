@@ -3122,6 +3122,30 @@ p + p { margin-top: 1rem; }
 
 .detail-close:hover { color: var(--color-text); }
 
+/* Unified modal-header actions row.
+   Sits as a sibling of .detail-close in the top-right corner so every
+   modal with additional controls (Print, Save, Manage, etc.) follows the
+   same pattern: actions cluster immediately left of the close X. */
+.detail-actions {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 2;
+}
+.detail-actions .sc-btn {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+@media (max-width: 480px) {
+  .detail-actions { top: 14px; right: 54px; }
+  .detail-actions .sc-btn { padding: 5px 10px; font-size: 0.8rem; }
+}
+
 .detail-header {
   display: flex;
   gap: 18px;
