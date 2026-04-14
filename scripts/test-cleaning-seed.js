@@ -173,5 +173,62 @@ t('regression: Erin\'s session-4 scenario preserves every sheet chip', () => {
   posts.forEach(p => assert.strictEqual(p.session_number, 4));
 });
 
+// ── cleaningDisplayName: same behavior as the copy in script.js ──
+// Re-implemented here (keep in sync with script.js) because script.js is
+// a browser IIFE we can't require().
+function cleaningDisplayName(stored, FAMILIES) {
+  var raw = String(stored || '').trim();
+  if (!raw) return '';
+  if (raw.indexOf(' ') !== -1) return raw;
+  var lower = raw.toLowerCase();
+  for (var i = 0; i < (FAMILIES || []).length; i++) {
+    var f = FAMILIES[i];
+    if (f && f.name && f.name.toLowerCase() === lower) {
+      var full = ((f.parents || '').trim() + ' ' + f.name).trim();
+      return full || raw;
+    }
+  }
+  return raw;
+}
+
+console.log('\ncleaningDisplayName');
+
+const famFixture = [
+  { name: 'Wilson', parents: 'Jody' },
+  { name: 'Furnish', parents: 'Amber & Bobby' },
+  { name: 'Bogan', parents: 'Erin' }
+];
+
+t('enriches a bare last name with the parent names from directory', () => {
+  assert.strictEqual(cleaningDisplayName('Wilson', famFixture), 'Jody Wilson');
+});
+
+t('handles multi-parent families', () => {
+  assert.strictEqual(cleaningDisplayName('Furnish', famFixture), 'Amber & Bobby Furnish');
+});
+
+t('is case-insensitive on the lookup key', () => {
+  assert.strictEqual(cleaningDisplayName('bogan', famFixture), 'Erin Bogan');
+});
+
+t('leaves already-full names alone (stored has a space)', () => {
+  assert.strictEqual(cleaningDisplayName('Parn Sudmee', famFixture), 'Parn Sudmee');
+});
+
+t('returns stored value unchanged when no family matches', () => {
+  assert.strictEqual(cleaningDisplayName('Unknownfamily', famFixture), 'Unknownfamily');
+});
+
+t('returns empty string for empty / null / undefined input', () => {
+  assert.strictEqual(cleaningDisplayName('', famFixture), '');
+  assert.strictEqual(cleaningDisplayName(null, famFixture), '');
+  assert.strictEqual(cleaningDisplayName(undefined, famFixture), '');
+});
+
+t('works with an empty FAMILIES list (no lookup target)', () => {
+  assert.strictEqual(cleaningDisplayName('Wilson', []), 'Wilson');
+  assert.strictEqual(cleaningDisplayName('Wilson', null), 'Wilson');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

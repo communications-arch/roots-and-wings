@@ -119,6 +119,71 @@
 
   var SESSION_KEY = 'rw_member_auth';
 
+  // ── Session expiration detection ──────────────────────────────────────
+  // Google ID tokens expire after ~1 hour. When they do, every authed API
+  // call returns 401, data silently stops refreshing, and things like the
+  // "View As" dropdown render empty with no visible error. Intercept fetch
+  // responses for same-origin /api/* calls and, on the first 401 of the
+  // session, drop an actionable banner.
+  var sessionExpiredHandled = false;
+  (function () {
+    if (!window.fetch || window._rwFetchWrapped) return;
+    var origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      var isApi = url.indexOf('/api/') === 0 ||
+        url.indexOf(location.origin + '/api/') === 0;
+      return origFetch(input, init).then(function (res) {
+        if (isApi && res.status === 401 && !sessionExpiredHandled &&
+            sessionStorage.getItem(SESSION_KEY) === 'true') {
+          sessionExpiredHandled = true;
+          try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+        }
+        return res;
+      });
+    };
+    window._rwFetchWrapped = true;
+  })();
+
+  function showSessionExpiredBanner() {
+    if (document.getElementById('rw-session-expired')) return;
+    var el = document.createElement('div');
+    el.id = 'rw-session-expired';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = [
+      'position:fixed', 'top:0', 'left:0', 'right:0',
+      'z-index:10000',
+      'background:#7a1f2b', 'color:#fff',
+      'padding:0.75rem 1rem',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.2)',
+      'display:flex', 'gap:0.75rem', 'align-items:center',
+      'justify-content:center', 'flex-wrap:wrap',
+      'font-family:inherit', 'font-size:0.95rem'
+    ].join(';');
+    el.innerHTML =
+      '<span>Your session has expired. Sign in again to keep editing.</span>' +
+      '<button id="rwSignInAgainBtn" style="background:#fff;color:#7a1f2b;border:none;padding:0.45rem 0.9rem;border-radius:4px;font-weight:600;cursor:pointer;">Sign in again</button>';
+    document.body.appendChild(el);
+
+    var btn = document.getElementById('rwSignInAgainBtn');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        // Clear session + any potentially-stale cached data so a fresh
+        // sign-in starts clean, then show the login screen.
+        try {
+          sessionStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem('rw_google_credential');
+          sessionStorage.removeItem('rw_user_email');
+          sessionStorage.removeItem(VIEW_AS_KEY);
+        } catch (e) { /* ignore */ }
+        el.remove();
+        sessionExpiredHandled = false;
+        if (typeof showLogin === 'function') showLogin();
+        window.scrollTo(0, 0);
+      });
+    }
+  }
+
   // ── Live Data Loading from Google Sheets ──
   var liveDataLoaded = false;
   var liveDataReady = false; // true once data has been applied
@@ -2822,6 +2887,27 @@
     return null;
   }
 
+  // Map a stored family_name to its full display string ("Jody Wilson"
+  // instead of just "Wilson"). Looks up a matching family in the live
+  // directory by exact last-name match, falling back to the stored value
+  // unchanged so that already-full names or unmatched typed values still
+  // render cleanly.
+  function cleaningDisplayName(stored) {
+    var raw = String(stored || '').trim();
+    if (!raw) return '';
+    // If the stored value already has a space, it's already a full name.
+    if (raw.indexOf(' ') !== -1) return raw;
+    var lower = raw.toLowerCase();
+    for (var i = 0; i < (FAMILIES || []).length; i++) {
+      var f = FAMILIES[i];
+      if (f && f.name && f.name.toLowerCase() === lower) {
+        var full = ((f.parents || '').trim() + ' ' + f.name).trim();
+        return full || raw;
+      }
+    }
+    return raw;
+  }
+
   // Pre-seed the DB with every sheet-derived assignment for a session so that
   // applyCleaningData() no longer wipes the rest of the chips when the next
   // fetch returns a single-row DB view. Idempotent-ish: if the DB already has
@@ -3028,10 +3114,16 @@
     var sessClean = CLEANING_CREW.sessions[viewSess];
 
     // Build the shared autocomplete list from the live directory once per
-    // render. Sorted alphabetically; dedup case-insensitively.
+    // render. Each option is the full "<parents> <lastname>" display string
+    // so what gets typed == what gets stored, and the chip shows the full
+    // name without extra lookups.
     var familyOptions = '';
     var seen = {};
-    (FAMILIES || []).map(function (f) { return f && f.name; })
+    (FAMILIES || []).map(function (f) {
+        if (!f || !f.name) return null;
+        var disp = ((f.parents || '').trim() + ' ' + f.name).trim();
+        return disp;
+      })
       .filter(function (n) { return !!n; })
       .sort(function (a, b) { return a.localeCompare(b); })
       .forEach(function (n) {
@@ -3077,12 +3169,12 @@
         html += '<div class="cle-family-chips">';
         families.forEach(function (f) {
           var aId = findAssignmentId(viewSess, floor.key, area.area_name, f);
-          html += '<span class="cle-chip">' + f + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
+          html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
         });
         html += '</div>';
-        // Add family input
+        // Add volunteer input
         html += '<div class="cle-add-row">';
-        html += '<input class="cle-input cle-add-input" placeholder="Add family name" list="cle-families-datalist" autocomplete="off" data-area-id="' + area.id + '" data-session="' + viewSess + '">';
+        html += '<input class="cle-input cle-add-input" placeholder="Add Volunteer" list="cle-families-datalist" autocomplete="off" data-area-id="' + area.id + '" data-session="' + viewSess + '">';
         html += '<button class="cle-btn cle-btn-add" data-area-id="' + area.id + '" data-session="' + viewSess + '">Add</button>';
         html += '</div>';
         // Task editor (hidden by default)
@@ -3102,11 +3194,11 @@
       html += '<div class="cle-family-chips">';
       floaterFamilies.forEach(function (f) {
         var aId = findAssignmentId(viewSess, 'floater', 'Floater', f);
-        html += '<span class="cle-chip">' + f + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
+        html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
       });
       html += '</div>';
       html += '<div class="cle-add-row">';
-      html += '<input class="cle-input cle-add-input" placeholder="Add family name" data-area-id="' + floaterArea.id + '" data-session="' + viewSess + '">';
+      html += '<input class="cle-input cle-add-input" placeholder="Add Volunteer" list="cle-families-datalist" autocomplete="off" data-area-id="' + floaterArea.id + '" data-session="' + viewSess + '">';
       html += '<button class="cle-btn cle-btn-add" data-area-id="' + floaterArea.id + '" data-session="' + viewSess + '">Add</button>';
       html += '</div>';
       html += '</div>';
