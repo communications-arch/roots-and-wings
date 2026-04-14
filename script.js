@@ -1468,10 +1468,11 @@
     var p = duty.popup;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
-    // Print button — placed at the top-right of the detail card. The
-    // absolute-positioned .detail-close sits next to it.
-    html += '<div class="detail-actions no-print" style="display:flex;justify-content:flex-end;margin-bottom:0.5rem;">';
-    html += '<button class="sc-btn duty-print-btn" aria-label="Print this role and class info">Print</button>';
+    // Print button — top-left, well clear of the absolute .detail-close X
+    // in the top-right corner. Using flex-start so clicks never land on
+    // the close button's hit area.
+    html += '<div class="detail-actions no-print" style="display:flex;justify-content:flex-start;margin-bottom:0.75rem;">';
+    html += '<button type="button" class="sc-btn duty-print-btn" aria-label="Print this role and class info">\u2399 Print</button>';
     html += '</div>';
 
     if (p.type === 'amClass') {
@@ -7130,8 +7131,10 @@
     openPrintIframe(html);
   }
 
-  // Shared print-iframe helper. Used by the Class Pack and anything else
-  // that needs to print a full HTML document without opening a new window.
+  // Shared print-iframe helper. Used by the Class Pack and duty-detail
+  // print. Writes the doc via document.write (more reliable onload firing
+  // than srcdoc in Chromium) and falls back to a timeout if onload never
+  // fires — that way silent failures still produce a print dialog.
   function openPrintIframe(docHtml) {
     var iframe = document.getElementById('rw-print-iframe');
     if (iframe) iframe.remove();
@@ -7139,23 +7142,41 @@
     iframe.id = 'rw-print-iframe';
     iframe.setAttribute('aria-hidden', 'true');
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    // Append first so contentDocument exists and can be written to.
     document.body.appendChild(iframe);
-    iframe.onload = function () {
+
+    var printed = false;
+    function doPrint() {
+      if (printed) return;
+      printed = true;
       try {
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
       } catch (e) {
+        console.error('openPrintIframe: print threw', e);
         alert('Print failed: ' + (e && e.message || e));
       }
-    };
-    if ('srcdoc' in iframe) {
-      iframe.srcdoc = docHtml;
-    } else {
+    }
+
+    iframe.onload = doPrint;
+
+    try {
       var doc = iframe.contentDocument || iframe.contentWindow.document;
       doc.open();
       doc.write(docHtml);
       doc.close();
+    } catch (e) {
+      console.error('openPrintIframe: write threw', e);
+      alert('Could not prepare the print document: ' + (e && e.message || e));
+      iframe.remove();
+      return;
     }
+
+    // Safety net: some environments never fire onload for same-origin
+    // document.write into a fresh iframe. Fire anyway after 600ms so users
+    // always get a print dialog. Fonts may still be loading, but the
+    // content will be present.
+    setTimeout(doPrint, 600);
   }
 
   function showAttachPicker(classKey) {
