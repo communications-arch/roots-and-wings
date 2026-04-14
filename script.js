@@ -2822,6 +2822,84 @@
     return null;
   }
 
+  // Pre-seed the DB with every sheet-derived assignment for a session so that
+  // applyCleaningData() no longer wipes the rest of the chips when the next
+  // fetch returns a single-row DB view. Idempotent-ish: if the DB already has
+  // any assignments for this session we skip the seed. Returns a Promise.
+  function ensureSessionSeeded(sessionNumber) {
+    sessionNumber = parseInt(sessionNumber, 10);
+    if (!sessionNumber) return Promise.resolve();
+
+    var hasDB = (cleaningDB.assignments || []).some(function (a) {
+      return a.session_number === sessionNumber;
+    });
+    if (hasDB) return Promise.resolve();
+
+    var sess = CLEANING_CREW && CLEANING_CREW.sessions && CLEANING_CREW.sessions[sessionNumber];
+    if (!sess) return Promise.resolve();
+
+    var posts = [];
+    ['mainFloor', 'upstairs', 'outside'].forEach(function (floor) {
+      var floorData = sess[floor] || {};
+      Object.keys(floorData).forEach(function (areaName) {
+        var areaId = findAreaId(floor, areaName);
+        if (!areaId) return;
+        (floorData[areaName] || []).forEach(function (familyName) {
+          if (familyName) posts.push({ session_number: sessionNumber, cleaning_area_id: areaId, family_name: familyName });
+        });
+      });
+    });
+    if (Array.isArray(sess.floater)) {
+      var floaterId = findAreaId('floater', 'Floater');
+      if (floaterId) {
+        sess.floater.forEach(function (familyName) {
+          if (familyName) posts.push({ session_number: sessionNumber, cleaning_area_id: floaterId, family_name: familyName });
+        });
+      }
+    }
+
+    if (posts.length === 0) return Promise.resolve();
+
+    // Serialize the seeds so a transient error doesn't leave the DB
+    // half-populated for the session. (Parallel would be faster but the
+    // data set is tiny — ~15 rows at most.)
+    return posts.reduce(function (chain, body) {
+      return chain.then(function () { return cleaningApiCall('POST', 'action=assignment', body); });
+    }, Promise.resolve()).then(function () {
+      // Refresh local cleaningDB so subsequent findAssignmentId calls work.
+      return fetch('/api/cleaning', {
+        headers: { 'Authorization': 'Bearer ' + sessionStorage.getItem('rw_google_credential') }
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data && !data.error) applyCleaningData(data);
+      });
+    });
+  }
+
+  // Given a chip's delete button, infer which floor/area the chip lives in by
+  // walking up the rendered DOM (chips sit inside .cle-family-chips which sits
+  // inside .clm-area). The floor label is rendered as the section heading.
+  function findFloorForFamilyChip(chipBtn) {
+    var area = chipBtn.closest('.clm-area');
+    if (!area) return null;
+    var section = area.closest('.clm-floor-section');
+    if (!section) return null;
+    var heading = section.querySelector('h4');
+    var label = heading ? heading.textContent.trim() : '';
+    if (label === 'Main Floor') return 'mainFloor';
+    if (label === 'Upstairs') return 'upstairs';
+    if (label === 'Outside') return 'outside';
+    if (label === 'Floater') return 'floater';
+    return null;
+  }
+
+  function findAreaForFamilyChip(chipBtn, floorKey) {
+    if (floorKey === 'floater') return 'Floater';
+    var area = chipBtn.closest('.clm-area');
+    if (!area) return null;
+    var nameEl = area.querySelector('.clm-area-name');
+    return nameEl ? nameEl.textContent.trim() : null;
+  }
+
   function findAreaTasks(floorKey, areaName) {
     for (var i = 0; i < cleaningDB.areas.length; i++) {
       if (cleaningDB.areas[i].floor_key === floorKey && cleaningDB.areas[i].area_name === areaName) return cleaningDB.areas[i].tasks || [];
@@ -3073,34 +3151,67 @@
 
 
 
-    // Wire remove assignment
+    // Wire remove assignment. If the chip being removed was rendered from
+    // sheet data (no DB id yet), first migrate the whole session into the DB
+    // so that every existing chip becomes a real, deletable row — then delete
+    // the one the user clicked.
     personDetailCard.querySelectorAll('.cle-chip-x').forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
-        var id = btn.getAttribute('data-assign-id');
-        if (!id || id === 'null') return;
-        cleaningApiCall('DELETE', 'action=assignment&id=' + id).then(function () {
+        var rawId = btn.getAttribute('data-assign-id');
+        var familyName = btn.parentElement ? btn.parentElement.firstChild.textContent : '';
+        var needsSeed = !rawId || rawId === 'null';
+
+        var promise = needsSeed
+          ? ensureSessionSeeded(cleaningModalSession).then(function () {
+              // After seeding, look up the DB id for the chip the user clicked.
+              var floorKey = findFloorForFamilyChip(btn);
+              var areaName = findAreaForFamilyChip(btn, floorKey);
+              var newId = findAssignmentId(cleaningModalSession, floorKey, areaName, familyName);
+              return newId ? cleaningApiCall('DELETE', 'action=assignment&id=' + newId) : null;
+            })
+          : cleaningApiCall('DELETE', 'action=assignment&id=' + rawId);
+
+        promise.then(function () {
           loadCleaningData();
           setTimeout(renderCleaningModal, 300);
-        });
+        }).catch(function (err) { alert('Error removing: ' + (err && err.message || err)); });
       };
     });
 
-    // Wire add assignment
+    // Wire add assignment. Same seeding rule: if this session has sheet-
+    // derived chips but no DB rows, migrate them all to the DB before
+    // inserting the new name, so the UI doesn't lose the existing chips when
+    // applyCleaningData() overwrites CLEANING_CREW.sessions[s] from the DB.
     personDetailCard.querySelectorAll('.cle-btn-add').forEach(function (btn) {
       btn.onclick = function () {
         var input = btn.parentElement.querySelector('.cle-add-input');
         var name = input.value.trim();
         if (!name) return;
-        cleaningApiCall('POST', 'action=assignment', {
-          session_number: parseInt(btn.getAttribute('data-session'), 10),
-          cleaning_area_id: parseInt(btn.getAttribute('data-area-id'), 10),
-          family_name: name
-        }).then(function (r) {
-          if (r.error) { alert(r.error); return; }
-          loadCleaningData();
-          setTimeout(renderCleaningModal, 300);
-        });
+        var session = parseInt(btn.getAttribute('data-session'), 10);
+        var areaId = parseInt(btn.getAttribute('data-area-id'), 10);
+        btn.disabled = true;
+        var originalText = btn.textContent;
+        btn.textContent = 'Saving\u2026';
+
+        ensureSessionSeeded(session)
+          .then(function () {
+            return cleaningApiCall('POST', 'action=assignment', {
+              session_number: session,
+              cleaning_area_id: areaId,
+              family_name: name
+            });
+          })
+          .then(function (r) {
+            if (r && r.error) { alert(r.error); btn.disabled = false; btn.textContent = originalText; return; }
+            loadCleaningData();
+            setTimeout(renderCleaningModal, 300);
+          })
+          .catch(function (err) {
+            alert('Error saving: ' + (err && err.message || err));
+            btn.disabled = false;
+            btn.textContent = originalText;
+          });
       };
     });
 
