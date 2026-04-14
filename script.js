@@ -1459,34 +1459,7 @@
       clone.innerHTML +
       '</body></html>';
 
-    // Reuse any prior iframe so we don't accumulate them in the DOM.
-    var iframe = document.getElementById('rw-print-iframe');
-    if (iframe) iframe.remove();
-    iframe = document.createElement('iframe');
-    iframe.id = 'rw-print-iframe';
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
-    document.body.appendChild(iframe);
-
-    iframe.onload = function () {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch (e) {
-        alert('Print failed: ' + (e && e.message || e));
-      }
-    };
-
-    // Prefer srcdoc (waits for load to fire after parsing + font CSS); fall
-    // back to document.write on older browsers.
-    if ('srcdoc' in iframe) {
-      iframe.srcdoc = docHtml;
-    } else {
-      var doc = iframe.contentDocument || iframe.contentWindow.document;
-      doc.open();
-      doc.write(docHtml);
-      doc.close();
-    }
+    openPrintIframe(docHtml);
   }
 
   // Responsibility detail popup
@@ -7151,11 +7124,38 @@
 
     html += '</body></html>';
 
-    var w = window.open('', '_blank', 'width=900,height=700');
-    if (!w) { alert('Could not open window. Please allow popups.'); return; }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+    // Print via a hidden iframe — no popup, no blocker. The in-document
+    // "Print" and "Close" buttons wouldn't make sense here (the iframe has
+    // no UI surface), so the print dialog fires automatically on load.
+    openPrintIframe(html);
+  }
+
+  // Shared print-iframe helper. Used by the Class Pack and anything else
+  // that needs to print a full HTML document without opening a new window.
+  function openPrintIframe(docHtml) {
+    var iframe = document.getElementById('rw-print-iframe');
+    if (iframe) iframe.remove();
+    iframe = document.createElement('iframe');
+    iframe.id = 'rw-print-iframe';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(iframe);
+    iframe.onload = function () {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (e) {
+        alert('Print failed: ' + (e && e.message || e));
+      }
+    };
+    if ('srcdoc' in iframe) {
+      iframe.srcdoc = docHtml;
+    } else {
+      var doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(docHtml);
+      doc.close();
+    }
   }
 
   function showAttachPicker(classKey) {
