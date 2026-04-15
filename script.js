@@ -7534,11 +7534,29 @@
 
   function initAbsenceCoverageSystem() {
     var bellBtn = document.getElementById('notifBellBtn');
-    if (bellBtn) { bellBtn.addEventListener('click', function (e) { e.stopPropagation(); if (notifState.dropdownOpen) closeNotifDropdown(); else { notifState.dropdownOpen = true; renderNotifDropdown(); } }); }
+    if (bellBtn) {
+      bellBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (notifState.dropdownOpen) {
+          closeNotifDropdown();
+        } else {
+          // Refresh before showing so the user isn't staring at stale state.
+          loadNotifications();
+          notifState.dropdownOpen = true;
+          renderNotifDropdown();
+        }
+      });
+    }
     loadCoverageBoard();
     loadClassLinks();
     loadNotifications();
     setInterval(loadNotifications, 60000);
+    // Re-check notifications when the tab becomes visible again so users
+    // returning after a break see the current state instead of waiting up
+    // to a full polling interval.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') loadNotifications();
+    });
     initPushSubscription();
   }
 
