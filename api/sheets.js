@@ -593,7 +593,13 @@ function parsePMElectives(rows) {
   h2Cols.forEach(function(c) { parseElective(c, 2); });
 
   // Parse support roles (floaters, board duties, supply closet)
-  var supportRoles = { floaters: [], boardDutiesPM1: [], boardDutiesPM2: [], supplyCloset: [] };
+  var supportRoles = {
+    floaters: [],           // combined list (kept for backward compat)
+    floatersPM1: [], floatersPM2: [],
+    prepPeriodPM1: [], prepPeriodPM2: [],
+    boardDutiesPM1: [], boardDutiesPM2: [],
+    supplyCloset: []
+  };
 
   // Label-column helpers. Hour section label column is hour{1,2}StartCol;
   // secondary labels like "Floaters" / "Board Duties" live one column to
@@ -601,20 +607,40 @@ function parsePMElectives(rows) {
   var h1LabelCol = hour1StartCol >= 0 ? hour1StartCol + 1 : 6;
   var h2LabelCol = hour2StartCol > 0 ? hour2StartCol + 1 : 19;
 
-  // Floaters are in the column next to "Student Names" label.
+  // Floaters are in the column next to "Student Names" label. Collect each
+  // hour's floaters into its own array, and mirror into the combined
+  // `floaters` list for backward compat.
   var h1StudCol = hour1StartCol >= 0 ? hour1StartCol : 5;
   var h2StudCol = hour2StartCol > 0 ? hour2StartCol : 18;
   for (var r = 0; r < rows.length; r++) {
     if (cell(rows[r], h1StudCol) === 'Student Names' || cell(rows[r], h2StudCol) === 'Student Names') {
-      var floaterCols = [h1LabelCol, h2LabelCol];
-      for (var fi = 0; fi < floaterCols.length; fi++) {
-        if (cell(rows[r], floaterCols[fi]) === 'Floaters') {
+      var floaterColMap = [[h1LabelCol, 'floatersPM1'], [h2LabelCol, 'floatersPM2']];
+      for (var fi = 0; fi < floaterColMap.length; fi++) {
+        var flCol = floaterColMap[fi][0], flKey = floaterColMap[fi][1];
+        if (cell(rows[r], flCol) === 'Floaters') {
           for (var fr = r + 1; fr < Math.min(r + 15, rows.length); fr++) {
-            var fv = cell(rows[fr], floaterCols[fi]);
+            var fv = cell(rows[fr], flCol);
             if (!fv || fv === '|') continue;
             if (fv.match(/^(Prep Period|Board|Class|Supply|Student)/i)) break;
-            supportRoles.floaters.push(fv);
+            if (supportRoles[flKey].indexOf(fv) === -1) supportRoles[flKey].push(fv);
+            if (supportRoles.floaters.indexOf(fv) === -1) supportRoles.floaters.push(fv);
           }
+        }
+      }
+    }
+  }
+
+  // Prep Period — same label-column layout as Floaters / Board Duties.
+  for (var r = 0; r < rows.length; r++) {
+    var ppColMap = [[h1LabelCol, 'prepPeriodPM1'], [h2LabelCol, 'prepPeriodPM2']];
+    for (var pi = 0; pi < ppColMap.length; pi++) {
+      var ppCol = ppColMap[pi][0], ppKey = ppColMap[pi][1];
+      if (cell(rows[r], ppCol) === 'Prep Period') {
+        for (var pr = r + 1; pr < Math.min(r + 8, rows.length); pr++) {
+          var pv = cell(rows[pr], ppCol);
+          if (!pv || pv === '|') continue;
+          if (pv.match(/^(Board|Class|Supply|Student|Floaters)/i)) break;
+          if (supportRoles[ppKey].indexOf(pv) === -1) supportRoles[ppKey].push(pv);
         }
       }
     }

@@ -1427,10 +1427,18 @@
         (elec.assistants || []).forEach(function (a) { if (isMe(a)) add('Assisting'); });
       });
 
-      // PM support (floater / board PM1 / board PM2 / supply closet)
+      // PM support (floater / prep period / board duties / supply closet)
       var pmSupport = PM_SUPPORT_ROLES && PM_SUPPORT_ROLES[currentSession];
       if (pmSupport) {
-        (pmSupport.floaters || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'PM Floater', detail: '' }); });
+        // Prefer hour-specific floater arrays; fall back to the combined
+        // `floaters` list (surfaces on PM1 only) for older API responses.
+        var flPM1 = pmSupport.floatersPM1;
+        var flPM2 = pmSupport.floatersPM2;
+        if (!flPM1 && !flPM2 && pmSupport.floaters) flPM1 = pmSupport.floaters;
+        (flPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Floater', detail: 'Available to cover' }); });
+        (flPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Floater', detail: 'Available to cover' }); });
+        (pmSupport.prepPeriodPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Prep Period', detail: 'Room setup' }); });
+        (pmSupport.prepPeriodPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Prep Period', detail: 'Room setup' }); });
         (pmSupport.boardDutiesPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Board Duties', detail: '' }); });
         (pmSupport.boardDutiesPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Board Duties', detail: '' }); });
         (pmSupport.supplyCloset || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Supply Closet', detail: 'Manage supplies' }); });
