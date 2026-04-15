@@ -1505,10 +1505,6 @@
     html += phoneSvg + ' ' + fam.phone + '</a>';
     html += '</div>';
 
-    // ──── Today's co-op schedule for this person ────
-    var scheduleHtml = renderPersonDaySchedule(person, fam);
-    if (scheduleHtml) html += scheduleHtml;
-
     // Board responsibilities
     if (boardInfo && boardInfo.responsibilities) {
       html += '<div class="detail-responsibilities">';
@@ -1543,6 +1539,10 @@
       html += '<span>' + kid.name + '</span><small>' + groupWithAge(kid.group) + '</small></div>';
     });
     html += '</div></div>';
+
+    // ──── Today's co-op schedule for this person (below family grid) ────
+    var scheduleHtml = renderPersonDaySchedule(person, fam);
+    if (scheduleHtml) html += scheduleHtml;
 
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
