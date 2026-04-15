@@ -16,11 +16,13 @@
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail } = require('./_permissions');
+const { sendToUser } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const VALID_CATEGORIES = ['permanent', 'currently_available', 'classroom_cabinet', 'game_closet'];
+const VALID_QTY_LEVELS = ['empty', 'low', 'medium', 'high'];
 
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -61,9 +63,12 @@ module.exports = async function handler(req, res) {
   const user = await verifyGoogleAuth(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-  // Write operations are restricted to the Supply Coordinator or the
-  // communications@ super user. GET stays open to any authenticated member.
-  if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+  // Actions that any authenticated member can perform:
+  //   POST /api/supply-closet?id=N&action=flag  (mark an item as needing restock)
+  // Everything else that isn't GET is restricted to the Supply Coordinator
+  // or the communications@ super user.
+  const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
+  if (req.method !== 'GET' && req.method !== 'OPTIONS' && !isMemberFlag) {
     const allowed = await canEditAsRole(user.email, 'Supply Coordinator');
     if (!allowed) {
       return res.status(403).json({ error: 'Only the Supply Coordinator can modify the supply closet.' });
@@ -141,7 +146,9 @@ module.exports = async function handler(req, res) {
 
     if (req.method === 'GET') {
       const rows = await sql`
-        SELECT id, item_name, location, category, notes, sort_order, updated_at, updated_by
+        SELECT id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+               needs_restock, restock_flagged_at, restock_flagged_by,
+               quantity_level, quantity_updated_at, quantity_updated_by
         FROM supply_closet
         ORDER BY category, sort_order, item_name
       `;
@@ -150,6 +157,101 @@ module.exports = async function handler(req, res) {
         if (grouped[r.category]) grouped[r.category].push(r);
       });
       return res.status(200).json({ items: grouped });
+    }
+
+    // ── Restock flag (any authenticated member) ──
+    // POST /api/supply-closet?id=N&action=flag
+    // Idempotent: if already flagged, returns ok without creating a duplicate
+    // notification. Notifies the current Supply Coordinator via the shared
+    // notifications table + web push.
+    if (req.method === 'POST' && req.query.action === 'flag') {
+      const id = parseInt(req.query.id, 10);
+      if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'id required' });
+
+      const existing = await sql`SELECT id, item_name, needs_restock FROM supply_closet WHERE id = ${id}`;
+      if (existing.length === 0) return res.status(404).json({ error: 'Item not found' });
+
+      if (existing[0].needs_restock) {
+        return res.status(200).json({ ok: true, already_flagged: true });
+      }
+
+      const flaggerLabel = user.name || user.email;
+      const updated = await sql`
+        UPDATE supply_closet
+        SET needs_restock = TRUE,
+            restock_flagged_at = NOW(),
+            restock_flagged_by = ${flaggerLabel}
+        WHERE id = ${id}
+        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  quantity_level, quantity_updated_at, quantity_updated_by
+      `;
+
+      // Notify the Supply Coordinator (best-effort; failures don't block flag)
+      try {
+        const coordEmail = await getRoleHolderEmail('Supply Coordinator');
+        if (coordEmail) {
+          const title = 'Supply needs restock: ' + existing[0].item_name;
+          const body = flaggerLabel + ' flagged ' + existing[0].item_name + ' as low/empty';
+          await sql`
+            INSERT INTO notifications (recipient_email, type, title, body, link_url)
+            VALUES (${coordEmail}, 'supply_low', ${title}, ${body}, ${'/members.html#supply-' + id})
+          `;
+          await sendToUser(sql, coordEmail, {
+            title: title,
+            body: body,
+            url: '/members.html#supply-' + id
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Supply flag notification failed:', notifyErr);
+      }
+
+      return res.status(200).json({ item: updated[0] });
+    }
+
+    // ── Clear restock flag (coordinator) ──
+    // POST /api/supply-closet?id=N&action=unflag
+    if (req.method === 'POST' && req.query.action === 'unflag') {
+      const id = parseInt(req.query.id, 10);
+      if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'id required' });
+      const updated = await sql`
+        UPDATE supply_closet
+        SET needs_restock = FALSE,
+            restock_flagged_at = NULL,
+            restock_flagged_by = ''
+        WHERE id = ${id}
+        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  quantity_level, quantity_updated_at, quantity_updated_by
+      `;
+      if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });
+      return res.status(200).json({ item: updated[0] });
+    }
+
+    // ── Set quantity level (coordinator, informational only) ──
+    // PATCH /api/supply-closet?id=N&action=quantity  body: { quantity_level }
+    if (req.method === 'PATCH' && req.query.action === 'quantity') {
+      const id = parseInt(req.query.id, 10);
+      if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'id required' });
+      const body = req.body || {};
+      const raw = body.quantity_level;
+      const level = raw === null || raw === '' ? null : String(raw);
+      if (level !== null && VALID_QTY_LEVELS.indexOf(level) === -1) {
+        return res.status(400).json({ error: 'Invalid quantity_level' });
+      }
+      const updated = await sql`
+        UPDATE supply_closet
+        SET quantity_level = ${level},
+            quantity_updated_at = NOW(),
+            quantity_updated_by = ${user.email}
+        WHERE id = ${id}
+        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  quantity_level, quantity_updated_at, quantity_updated_by
+      `;
+      if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });
+      return res.status(200).json({ item: updated[0] });
     }
 
     if (req.method === 'POST') {
@@ -170,7 +272,9 @@ module.exports = async function handler(req, res) {
       const inserted = await sql`
         INSERT INTO supply_closet (item_name, location, category, notes, updated_by)
         VALUES (${item_name}, ${location}, ${category}, ${notes}, ${user.email})
-        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by
+        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  quantity_level, quantity_updated_at, quantity_updated_by
       `;
       return res.status(201).json({ item: inserted[0] });
     }
@@ -201,7 +305,9 @@ module.exports = async function handler(req, res) {
             updated_at = NOW(),
             updated_by = ${user.email}
         WHERE id = ${id}
-        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by
+        RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  quantity_level, quantity_updated_at, quantity_updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });
       return res.status(200).json({ item: updated[0] });

@@ -3671,12 +3671,14 @@
       classroom_cabinet: true,
       game_closet: true
     },
-    sortBy: 'name',        // 'name' | 'location' | 'category'
+    sortBy: 'name',        // 'name' | 'location' | 'category' | 'attention'
+    locationFilter: '',    // '' = all locations; otherwise exact name
     editingId: null,
     addingNew: false,
     newItemCategory: 'permanent',
     canEdit: false,
-    showLocations: false   // true when location manager panel is open
+    showLocations: false,  // true when location manager panel is open
+    flaggingId: null       // id currently being flagged/unflagged (UI busy state)
   };
 
   function getSupplyCoordinatorName() {
@@ -3755,8 +3757,10 @@
     var state = supplyClosetState;
     if (!state.items) return [];
     var q = state.searchQuery.trim().toLowerCase();
+    var locFilter = (state.locationFilter || '').toLowerCase();
     var rows = state.items.filter(function (item) {
       if (!state.enabledCats[item.category]) return false;
+      if (locFilter && (item.location || '').toLowerCase() !== locFilter) return false;
       if (!q) return true;
       return (
         (item.item_name || '').toLowerCase().indexOf(q) !== -1 ||
@@ -3766,7 +3770,11 @@
     });
     var sortBy = state.sortBy;
     rows.sort(function (a, b) {
-      if (sortBy === 'location') {
+      if (sortBy === 'attention') {
+        var fa = a.needs_restock ? 0 : 1;
+        var fb = b.needs_restock ? 0 : 1;
+        if (fa !== fb) return fa - fb;
+      } else if (sortBy === 'location') {
         var la = (a.location || '\uffff').toLowerCase();
         var lb = (b.location || '\uffff').toLowerCase();
         if (la !== lb) return la < lb ? -1 : 1;
@@ -3788,7 +3796,7 @@
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail sc-modal' + (state.browseMode ? ' sc-browse' : '') + '">';
     html += '<h3>Supply Closet Inventory</h3>';
-    html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is missing or running low, post in the Supplies chat.</p>';
+    html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is running low, tap <strong>Supply is low</strong> next to the item and the Supply Coordinator will be notified.</p>';
 
     // Controls: search + sort
     html += '<div class="sc-controls">';
@@ -3797,7 +3805,8 @@
     var sortOptions = [
       { v: 'name', label: 'Sort: Name' },
       { v: 'location', label: 'Sort: Location' },
-      { v: 'category', label: 'Sort: Category' }
+      { v: 'category', label: 'Sort: Category' },
+      { v: 'attention', label: 'Sort: Needs attention' }
     ];
     sortOptions.forEach(function (o) {
       var sel = state.sortBy === o.v ? ' selected' : '';
@@ -3815,15 +3824,13 @@
     });
     html += '</div>';
 
-    // Locations row
-    html += '<div class="sc-locations-row">';
-    html += '<span class="sc-locations-label">Locations:</span>';
+    // Location filter pills (click to filter; same toggle UX as category chips)
+    html += '<div class="sc-loc-filters">';
+    html += '<button class="sc-loc-chip' + (state.locationFilter ? '' : ' sc-loc-active') + '" data-loc="">All locations</button>';
     SUPPLY_LOCATIONS.forEach(function (loc) {
-      html += '<span class="sc-loc-chip">' + escapeAttr(loc) + '</span>';
+      var active = state.locationFilter === loc;
+      html += '<button class="sc-loc-chip' + (active ? ' sc-loc-active' : '') + '" data-loc="' + escapeAttr(loc) + '">' + escapeAttr(loc) + '</button>';
     });
-    if (SUPPLY_LOCATIONS.length === 0) {
-      html += '<span class="sc-loc-chip sc-loc-none">None yet</span>';
-    }
     if (state.canEdit) {
       html += '<button class="sc-btn sc-manage-locs-btn" id="sc-manage-locs-btn">Manage Locations</button>';
     }
@@ -3876,15 +3883,31 @@
     var canEdit = supplyClosetState.canEdit;
     var cat = supplyCategoryMeta(item.category);
     var badgeLabel = cat ? cat.short : item.category;
+    var flagged = !!item.needs_restock;
+    var busy = supplyClosetState.flaggingId === item.id;
 
-    var html = '<div class="sc-row">';
+    var rowClass = 'sc-row' + (flagged ? ' sc-flagged' : '');
+    var html = '<div class="' + rowClass + '">';
     html += '<div>';
-    html += '<div class="sc-name">' + escapeAttr(item.item_name) + '</div>';
+    html += '<div class="sc-name">' + escapeAttr(item.item_name);
+    if (flagged) {
+      var who = item.restock_flagged_by ? ' by ' + escapeAttr(item.restock_flagged_by) : '';
+      html += ' <span class="sc-flag-indicator" title="Flagged' + who + '">Needs restock</span>';
+    }
+    html += '</div>';
     if (item.location) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
     if (item.notes) html += '<div class="sc-notes">' + linkify(item.notes) + '</div>';
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
     html += '<div class="sc-actions">';
+    // Flag / unflag — everyone sees flag; coordinator also sees unflag
+    if (!flagged) {
+      html += '<button class="sc-btn sc-flag-btn" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>'
+        + (busy ? 'Flagging…' : 'Supply is low') + '</button>';
+    } else if (canEdit) {
+      html += '<button class="sc-btn sc-unflag-btn" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>'
+        + (busy ? 'Clearing…' : 'Mark restocked') + '</button>';
+    }
     if (canEdit) {
       html += '<button class="sc-btn sc-edit-btn" data-id="' + item.id + '">Edit</button>';
       html += '<button class="sc-btn sc-btn-del sc-del-btn" data-id="' + item.id + '">Delete</button>';
@@ -4143,6 +4166,14 @@
       });
     }
 
+    // Location filter pills
+    personDetailCard.querySelectorAll('.sc-loc-filters .sc-loc-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        supplyClosetState.locationFilter = chip.getAttribute('data-loc') || '';
+        renderSupplyClosetModal();
+      });
+    });
+
     // Category filter chips (toggle)
     personDetailCard.querySelectorAll('.sc-cat-chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
@@ -4251,6 +4282,80 @@
           .catch(function (err) { alert('Network error: ' + err.message); });
       });
     });
+
+    // Flag + unflag
+    personDetailCard.querySelectorAll('.sc-flag-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetFlag);
+    });
+    personDetailCard.querySelectorAll('.sc-unflag-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetUnflag);
+    });
+  }
+
+  function handleSupplyClosetFlag() {
+    var id = parseInt(this.getAttribute('data-id'), 10);
+    if (!id) return;
+    supplyClosetState.flaggingId = id;
+    var cred = sessionStorage.getItem('rw_google_credential');
+    // Optimistically re-render busy state
+    renderSupplyClosetModal();
+    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=flag', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        supplyClosetState.flaggingId = null;
+        if (!res.ok) {
+          alert('Could not flag item: ' + (res.data.error || 'error'));
+          renderSupplyClosetModal();
+          return;
+        }
+        loadSupplyClosetAndRender();
+        if (!res.data.already_flagged) showSupplyToast('Supply Coordinator notified — thanks!');
+      })
+      .catch(function (err) {
+        supplyClosetState.flaggingId = null;
+        alert('Network error: ' + err.message);
+        renderSupplyClosetModal();
+      });
+  }
+
+  function handleSupplyClosetUnflag() {
+    var id = parseInt(this.getAttribute('data-id'), 10);
+    if (!id) return;
+    supplyClosetState.flaggingId = id;
+    var cred = sessionStorage.getItem('rw_google_credential');
+    renderSupplyClosetModal();
+    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=unflag', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        supplyClosetState.flaggingId = null;
+        if (!res.ok) {
+          alert('Could not clear flag: ' + (res.data.error || 'error'));
+          renderSupplyClosetModal();
+          return;
+        }
+        loadSupplyClosetAndRender();
+      })
+      .catch(function (err) {
+        supplyClosetState.flaggingId = null;
+        alert('Network error: ' + err.message);
+        renderSupplyClosetModal();
+      });
+  }
+
+  function showSupplyToast(msg) {
+    var t = document.createElement('div');
+    t.className = 'sc-toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function () { t.classList.add('sc-toast-show'); }, 10);
+    setTimeout(function () {
+      t.classList.remove('sc-toast-show');
+      setTimeout(function () { t.parentNode && t.parentNode.removeChild(t); }, 300);
+    }, 2400);
   }
 
   function updateSupplyClosetListOnly() {
@@ -4309,6 +4414,13 @@
     // Delete
     personDetailCard.querySelectorAll('.sc-list .sc-del-btn').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetDelete);
+    });
+    // Flag + unflag
+    personDetailCard.querySelectorAll('.sc-list .sc-flag-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetFlag);
+    });
+    personDetailCard.querySelectorAll('.sc-list .sc-unflag-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetUnflag);
     });
   }
 
@@ -4396,6 +4508,8 @@
     supplyClosetState.addingNew = false;
     supplyClosetState.newItemCategory = 'permanent';
     supplyClosetState.showLocations = false;
+    supplyClosetState.locationFilter = '';
+    supplyClosetState.flaggingId = null;
     // Load locations (if not yet loaded) alongside the items
     var locsPromise = supplyClosetState.locations ? Promise.resolve() : fetchSupplyLocations().catch(function () { SUPPLY_LOCATIONS = []; });
     locsPromise.then(function () { loadSupplyClosetAndRender(); });

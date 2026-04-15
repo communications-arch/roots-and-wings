@@ -21,6 +21,17 @@ CREATE TABLE IF NOT EXISTS supply_closet (
 );
 CREATE INDEX IF NOT EXISTS supply_closet_category_idx ON supply_closet (category);
 
+-- Restock flag (any member can flag; Supply Coordinator clears) +
+-- coordinator-only quantity tracking. Idempotent adds for existing deploys.
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS needs_restock BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS restock_flagged_at TIMESTAMPTZ;
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS restock_flagged_by TEXT DEFAULT '';
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS quantity_level TEXT
+  CHECK (quantity_level IS NULL OR quantity_level IN ('empty','low','medium','high'));
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS quantity_updated_at TIMESTAMPTZ;
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS quantity_updated_by TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS supply_closet_restock_idx ON supply_closet (needs_restock) WHERE needs_restock = TRUE;
+
 -- ──────────────────────────────────────────────
 -- Curriculum: 5-week lesson plans
 -- ──────────────────────────────────────────────

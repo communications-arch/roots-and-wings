@@ -7553,3 +7553,95 @@ button.staff-role:hover {
   font-size: 0.88rem;
 }
 .rd-cancel-btn:hover { background: var(--color-border); }
+
+/* ── Supply closet: location filter pills ── */
+.sc-loc-filters {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.sc-loc-filters .sc-loc-chip {
+  border: 1.5px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  transition: opacity var(--transition-fast), transform 0.1s, background-color var(--transition-fast);
+  user-select: none;
+}
+.sc-loc-filters .sc-loc-chip:hover {
+  transform: translateY(-1px);
+}
+.sc-loc-filters .sc-loc-chip.sc-loc-active {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  border-color: var(--color-primary);
+}
+
+/* ── Supply closet: flag indicator + flag button ── */
+.sc-row.sc-flagged {
+  border-left: 3px solid #e07a2a;
+  background: rgba(224, 122, 42, 0.05);
+}
+.sc-flag-indicator {
+  display: inline-block;
+  margin-left: 0.4rem;
+  background: #e07a2a;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.sc-btn.sc-flag-btn {
+  background: #fff4e8;
+  color: #a5531a;
+  border-color: #e8c6a4;
+}
+.sc-btn.sc-flag-btn:hover:not(:disabled) {
+  background: #e07a2a;
+  color: #fff;
+  border-color: #e07a2a;
+}
+.sc-btn.sc-unflag-btn {
+  background: #eaf5ea;
+  color: #2e6a2e;
+  border-color: #bcd9bc;
+}
+.sc-btn.sc-unflag-btn:hover:not(:disabled) {
+  background: #2e6a2e;
+  color: #fff;
+  border-color: #2e6a2e;
+}
+
+/* ── Supply closet: toast ── */
+.sc-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translate(-50%, 20px);
+  background: #2d3a4a;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 10000;
+  pointer-events: none;
+}
+.sc-toast.sc-toast-show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
