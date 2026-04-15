@@ -5227,34 +5227,53 @@ button.staff-role:hover {
 }
 .sc-cat-filters {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
 }
 .sc-cat-chip {
-  border: 1.5px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-white);
   border-radius: 999px;
-  padding: 5px 14px;
+  padding: 4px 12px 4px 10px;
   font-size: 0.75rem;
   cursor: pointer;
   font-weight: 600;
-  transition: opacity var(--transition-fast), transform 0.1s;
+  color: var(--color-text);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
   user-select: none;
   font-family: inherit;
-  color: var(--color-text-inverse);
 }
-.sc-cat-chip:hover:not(.sc-off) {
-  transform: translateY(-1px);
+.sc-cat-chip .sc-cat-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-border);
+  flex-shrink: 0;
+  transition: background-color var(--transition-fast);
 }
-.sc-cat-chip.sc-cat-permanent           { background: var(--color-primary); }
-.sc-cat-chip.sc-cat-currently_available { background: var(--color-accent); }
-.sc-cat-chip.sc-cat-classroom_cabinet   { background: var(--color-primary-light); }
-.sc-cat-chip.sc-cat-game_closet         { background: var(--color-accent-light); color: var(--color-text); }
+.sc-cat-chip:hover {
+  border-color: var(--color-text-light);
+}
+/* Per-category dot color (stays meaningful but calm) */
+.sc-cat-chip.sc-cat-permanent           .sc-cat-dot { background: var(--color-primary); }
+.sc-cat-chip.sc-cat-currently_available .sc-cat-dot { background: var(--color-accent); }
+.sc-cat-chip.sc-cat-classroom_cabinet   .sc-cat-dot { background: var(--color-primary-light); }
+.sc-cat-chip.sc-cat-game_closet         .sc-cat-dot { background: var(--color-accent-light); }
+/* Active state: soft tinted fill in the category's color */
+.sc-cat-chip.sc-on.sc-cat-permanent           { background: rgba(var(--color-primary-rgb), 0.10);       border-color: var(--color-primary);       color: var(--color-primary-dark); }
+.sc-cat-chip.sc-on.sc-cat-currently_available { background: rgba(196, 74, 56, 0.10);                    border-color: var(--color-accent-dark);   color: var(--color-accent-dark); }
+.sc-cat-chip.sc-on.sc-cat-classroom_cabinet   { background: rgba(var(--color-primary-light-rgb), 0.14); border-color: var(--color-primary-light); color: var(--color-primary-dark); }
+.sc-cat-chip.sc-on.sc-cat-game_closet         { background: rgba(var(--color-accent-light-rgb), 0.25); border-color: var(--color-accent-light);  color: var(--color-text); }
 .sc-cat-chip.sc-off {
-  opacity: 0.35;
-  background: transparent !important;
-  color: var(--color-text-light) !important;
-  border-color: var(--color-border);
+  opacity: 0.7;
+  color: var(--color-text-light);
+}
+.sc-cat-chip.sc-off .sc-cat-dot {
+  opacity: 0.45;
 }
 .sc-count {
   font-size: 0.75rem;
@@ -7554,34 +7573,40 @@ button.staff-role:hover {
 }
 .rd-cancel-btn:hover { background: var(--color-border); }
 
-/* ── Supply closet: location filter pills ── */
-.sc-loc-filters {
-  display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-.sc-loc-filters .sc-loc-chip {
+/* ── Supply closet: location filter select (lives in .sc-controls) ── */
+.sc-loc-select {
+  padding: 9px 12px;
   border: 1.5px solid var(--color-border);
-  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--color-white);
   color: var(--color-text);
-  border-radius: 999px;
-  padding: 5px 14px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  font-weight: 600;
   font-family: inherit;
-  transition: opacity var(--transition-fast), transform 0.1s, background-color var(--transition-fast);
-  user-select: none;
+  cursor: pointer;
+  max-width: 180px;
 }
-.sc-loc-filters .sc-loc-chip:hover {
-  transform: translateY(-1px);
-}
-.sc-loc-filters .sc-loc-chip.sc-loc-active {
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
+.sc-loc-select:focus {
+  outline: none;
   border-color: var(--color-primary);
+}
+.sc-controls .sc-manage-locs-btn {
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+@media (max-width: 540px) {
+  .sc-controls {
+    gap: 0.4rem;
+  }
+  .sc-loc-select,
+  .sc-sort {
+    flex: 1 1 140px;
+    max-width: none;
+  }
+  .sc-controls .sc-manage-locs-btn {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
 }
 
 /* ── Supply closet: flag indicator + flag button ── */
@@ -7645,3 +7670,34 @@ button.staff-role:hover {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* ── Supply closet: coordinator quantity segmented control ── */
+.sc-qty-seg {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-white);
+  height: 28px;
+}
+.sc-qty-seg[data-busy="1"] { opacity: 0.6; }
+.sc-qty-opt {
+  border: none;
+  background: transparent;
+  color: var(--color-text-light);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0 10px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+  border-right: 1px solid var(--color-border);
+}
+.sc-qty-opt:last-child { border-right: none; }
+.sc-qty-opt:hover:not(:disabled) { background: rgba(0,0,0,0.04); color: var(--color-text); }
+.sc-qty-opt:disabled { cursor: not-allowed; }
+.sc-qty-opt.sc-qty-active { color: #fff; }
+.sc-qty-opt.sc-qty-empty.sc-qty-active  { background: #c0392b; }
+.sc-qty-opt.sc-qty-low.sc-qty-active    { background: #e07a2a; }
+.sc-qty-opt.sc-qty-medium.sc-qty-active { background: #b89400; }
+.sc-qty-opt.sc-qty-high.sc-qty-active   { background: #2e6a2e; }

@@ -3678,7 +3678,8 @@
     newItemCategory: 'permanent',
     canEdit: false,
     showLocations: false,  // true when location manager panel is open
-    flaggingId: null       // id currently being flagged/unflagged (UI busy state)
+    flaggingId: null,      // id currently being flagged/unflagged (UI busy state)
+    qtyBusyId: null        // id currently being updated via the qty segmented control
   };
 
   function getSupplyCoordinatorName() {
@@ -3796,12 +3797,19 @@
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail sc-modal' + (state.browseMode ? ' sc-browse' : '') + '">';
     html += '<h3>Supply Closet Inventory</h3>';
-    html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is running low, tap <strong>Supply is low</strong> next to the item and the Supply Coordinator will be notified.</p>';
+    html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is running low, tap <strong>Report low</strong> next to the item and the Supply Coordinator will be notified.</p>';
 
-    // Controls: search + sort
+    // Controls: search + location + sort (single calm row)
     html += '<div class="sc-controls">';
     html += '<input type="text" class="sc-search" id="sc-search-input" placeholder="Search items, locations, notes..." value="' + escapeAttr(state.searchQuery) + '">';
-    html += '<select class="sc-sort" id="sc-sort-select">';
+    html += '<select class="sc-loc-select" id="sc-loc-select" aria-label="Filter by location">';
+    html += '<option value=""' + (state.locationFilter ? '' : ' selected') + '>All locations</option>';
+    SUPPLY_LOCATIONS.forEach(function (loc) {
+      var sel = state.locationFilter === loc ? ' selected' : '';
+      html += '<option value="' + escapeAttr(loc) + '"' + sel + '>' + escapeAttr(loc) + '</option>';
+    });
+    html += '</select>';
+    html += '<select class="sc-sort" id="sc-sort-select" aria-label="Sort order">';
     var sortOptions = [
       { v: 'name', label: 'Sort: Name' },
       { v: 'location', label: 'Sort: Location' },
@@ -3813,27 +3821,21 @@
       html += '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
     });
     html += '</select>';
+    if (state.canEdit) {
+      html += '<button class="sc-btn sc-manage-locs-btn" id="sc-manage-locs-btn" title="Manage locations">Manage locations</button>';
+    }
     html += '</div>';
 
-    // Category filter chips
-    html += '<div class="sc-cat-filters">';
+    // Category filter: calm outlined pills with colored dot (keeps brand colors meaningful but quieter)
+    html += '<div class="sc-cat-filters" role="group" aria-label="Filter by category">';
     SUPPLY_CATEGORIES.forEach(function (cat) {
       var on = state.enabledCats[cat.key];
-      var classes = 'sc-cat-chip sc-cat-' + cat.key + (on ? '' : ' sc-off');
-      html += '<button class="' + classes + '" data-cat="' + cat.key + '">' + cat.short + '</button>';
+      var classes = 'sc-cat-chip sc-cat-' + cat.key + (on ? ' sc-on' : ' sc-off');
+      html += '<button class="' + classes + '" data-cat="' + cat.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">';
+      html += '<span class="sc-cat-dot" aria-hidden="true"></span>';
+      html += '<span class="sc-cat-label">' + cat.short + '</span>';
+      html += '</button>';
     });
-    html += '</div>';
-
-    // Location filter pills (click to filter; same toggle UX as category chips)
-    html += '<div class="sc-loc-filters">';
-    html += '<button class="sc-loc-chip' + (state.locationFilter ? '' : ' sc-loc-active') + '" data-loc="">All locations</button>';
-    SUPPLY_LOCATIONS.forEach(function (loc) {
-      var active = state.locationFilter === loc;
-      html += '<button class="sc-loc-chip' + (active ? ' sc-loc-active' : '') + '" data-loc="' + escapeAttr(loc) + '">' + escapeAttr(loc) + '</button>';
-    });
-    if (state.canEdit) {
-      html += '<button class="sc-btn sc-manage-locs-btn" id="sc-manage-locs-btn">Manage Locations</button>';
-    }
     html += '</div>';
 
     // Count
@@ -3900,10 +3902,28 @@
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
     html += '<div class="sc-actions">';
-    // Flag / unflag — everyone sees flag; coordinator also sees unflag
+    // Coordinator quantity segmented control (sets quantity_level on click).
+    // Shown only to the coordinator; informational, independent of the flag.
+    if (canEdit) {
+      var level = item.quantity_level || '';
+      var qtyBusy = supplyClosetState.qtyBusyId === item.id;
+      html += '<div class="sc-qty-seg" role="radiogroup" aria-label="Quantity"' + (qtyBusy ? ' data-busy="1"' : '') + '>';
+      ['empty', 'low', 'medium', 'high'].forEach(function (opt) {
+        var active = level === opt;
+        html += '<button class="sc-qty-opt sc-qty-' + opt + (active ? ' sc-qty-active' : '') + '"'
+          + ' data-id="' + item.id + '" data-level="' + opt + '"'
+          + (qtyBusy ? ' disabled' : '')
+          + ' aria-pressed="' + (active ? 'true' : 'false') + '"'
+          + ' title="' + opt.charAt(0).toUpperCase() + opt.slice(1) + '">'
+          + opt.charAt(0).toUpperCase() + opt.slice(1)
+          + '</button>';
+      });
+      html += '</div>';
+    }
+    // Flag (any member) / unflag (coord only)
     if (!flagged) {
       html += '<button class="sc-btn sc-flag-btn" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>'
-        + (busy ? 'Flagging…' : 'Supply is low') + '</button>';
+        + (busy ? 'Reporting…' : 'Report low') + '</button>';
     } else if (canEdit) {
       html += '<button class="sc-btn sc-unflag-btn" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>'
         + (busy ? 'Clearing…' : 'Mark restocked') + '</button>';
@@ -4166,13 +4186,14 @@
       });
     }
 
-    // Location filter pills
-    personDetailCard.querySelectorAll('.sc-loc-filters .sc-loc-chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        supplyClosetState.locationFilter = chip.getAttribute('data-loc') || '';
+    // Location filter (native select)
+    var locSelect = personDetailCard.querySelector('#sc-loc-select');
+    if (locSelect) {
+      locSelect.addEventListener('change', function () {
+        supplyClosetState.locationFilter = locSelect.value || '';
         renderSupplyClosetModal();
       });
-    });
+    }
 
     // Category filter chips (toggle)
     personDetailCard.querySelectorAll('.sc-cat-chip').forEach(function (chip) {
@@ -4290,6 +4311,49 @@
     personDetailCard.querySelectorAll('.sc-unflag-btn').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetUnflag);
     });
+    // Quantity segmented control (coordinator only)
+    personDetailCard.querySelectorAll('.sc-qty-opt').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetQuantity);
+    });
+  }
+
+  function handleSupplyClosetQuantity() {
+    var id = parseInt(this.getAttribute('data-id'), 10);
+    var level = this.getAttribute('data-level');
+    if (!id || !level) return;
+    // Clicking the currently-active option clears it (toggle off).
+    var current = (supplyClosetState.items || []).find(function (it) { return it.id === id; });
+    var nextLevel = current && current.quantity_level === level ? null : level;
+    supplyClosetState.qtyBusyId = id;
+    var cred = sessionStorage.getItem('rw_google_credential');
+    updateSupplyClosetListOnly();
+    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=quantity', {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity_level: nextLevel })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        supplyClosetState.qtyBusyId = null;
+        if (!res.ok) {
+          alert('Could not update quantity: ' + (res.data.error || 'error'));
+          updateSupplyClosetListOnly();
+          return;
+        }
+        // Patch local item in place so we don't reload the whole list.
+        var updated = res.data.item;
+        if (updated) {
+          var list = supplyClosetState.items || [];
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].id === updated.id) { list[i] = updated; break; }
+          }
+        }
+        updateSupplyClosetListOnly();
+      })
+      .catch(function (err) {
+        supplyClosetState.qtyBusyId = null;
+        alert('Network error: ' + err.message);
+        updateSupplyClosetListOnly();
+      });
   }
 
   function handleSupplyClosetFlag() {
@@ -4422,6 +4486,9 @@
     personDetailCard.querySelectorAll('.sc-list .sc-unflag-btn').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetUnflag);
     });
+    personDetailCard.querySelectorAll('.sc-list .sc-qty-opt').forEach(function (btn) {
+      btn.addEventListener('click', handleSupplyClosetQuantity);
+    });
   }
 
   function handleSupplyClosetSave() {
@@ -4510,6 +4577,7 @@
     supplyClosetState.showLocations = false;
     supplyClosetState.locationFilter = '';
     supplyClosetState.flaggingId = null;
+    supplyClosetState.qtyBusyId = null;
     // Load locations (if not yet loaded) alongside the items
     var locsPromise = supplyClosetState.locations ? Promise.resolve() : fetchSupplyLocations().catch(function () { SUPPLY_LOCATIONS = []; });
     locsPromise.then(function () { loadSupplyClosetAndRender(); });
