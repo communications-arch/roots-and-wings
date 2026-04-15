@@ -137,6 +137,12 @@
         if (isApi && res.status === 401 && !sessionExpiredHandled &&
             sessionStorage.getItem(SESSION_KEY) === 'true') {
           sessionExpiredHandled = true;
+          // Log what we think the session is so "session expired" bugs are
+          // easier to diagnose from the browser console.
+          console.error('Session 401 for', url, '— signed-in email:',
+            sessionStorage.getItem('rw_user_email') || '(none)',
+            'credential present:',
+            !!sessionStorage.getItem('rw_google_credential'));
           try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
         }
         return res;
@@ -940,16 +946,24 @@
       showDashboard();
     }
 
-    // Logout
+    // Logout — clear *everything* that could keep a stale Google JWT
+    // around, and ask Google Identity Services to drop its auto-select
+    // cache so the next sign-in goes through a real credential exchange.
     if (logoutBtn) {
       logoutBtn.addEventListener('click', function () {
-        // Clear cached data on logout
         try {
           localStorage.removeItem(CACHE_KEY);
           localStorage.removeItem(CACHE_PHOTOS_KEY);
           localStorage.removeItem(CACHE_CLEANING_KEY);
           sessionStorage.removeItem(VIEW_AS_KEY);
+          sessionStorage.removeItem('rw_google_credential');
+          sessionStorage.removeItem('rw_user_email');
+          sessionStorage.removeItem('rw_user_name');
         } catch (e) { /* ignore */ }
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+          try { google.accounts.id.disableAutoSelect(); } catch (e) { /* ignore */ }
+        }
+        sessionExpiredHandled = false;
         showLogin();
         window.scrollTo(0, 0);
       });
