@@ -2611,7 +2611,7 @@
 
       html += '<div class="mf-billing-semester">';
       html += '<div class="mf-billing-header">';
-      html += '<strong>' + sem.name + '</strong>';
+      html += '<strong>' + sem.name + ' Class Fees</strong>';
       html += '<span class="mf-billing-status ' + statusClass + '">' + sem.status + '</span>';
       html += '</div>';
       html += '<div class="mf-billing-due">Due: ' + dueStr + '</div>';
@@ -2843,14 +2843,17 @@
       var sem = calculateSemesterFees(fam, semKey);
       if (!sem) return;
       var capKey = semKey.charAt(0).toUpperCase() + semKey.slice(1);
-      // Membership fee button (the $50 intake fee — also collected via /register.html)
+      var year = new Date().getFullYear();
+      // Each of the four payments identifies its type in description, invoice_id,
+      // and note_to_payee so the treasurer can reconcile without guessing.
       wirePaypalButton('paypal-dep-' + semKey, sem.deposit.toFixed(2),
-        sem.name + ' membership fee — ' + fam.name + ' family',
-        'RW-' + capKey + '-Memb-' + fam.name + '-' + new Date().getFullYear(), fam.email, buildPaypalNote(fam, semKey, 'Membership Fee'));
-      // Semester fees button
+        sem.name + ' Membership Fee — ' + fam.name + ' family',
+        'RW-' + capKey + '-Memb-' + fam.name + '-' + year, fam.email,
+        buildPaypalNote(fam, semKey, sem.name + ' Membership Fee'));
       wirePaypalButton('paypal-btn-' + semKey, sem.total.toFixed(2),
-        sem.name + ' fees — ' + fam.name + ' family',
-        'RW-' + capKey + '-' + fam.name + '-' + new Date().getFullYear(), fam.email, buildPaypalNote(fam, semKey, 'Class Fee'));
+        sem.name + ' Class Fees — ' + fam.name + ' family',
+        'RW-' + capKey + '-Classes-' + fam.name + '-' + year, fam.email,
+        buildPaypalNote(fam, semKey, sem.name + ' Class Fees'));
     });
   }
 
