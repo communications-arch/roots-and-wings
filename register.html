@@ -144,9 +144,8 @@
     <div class="reg-stepper" role="group" aria-label="Registration progress">
       <div class="reg-stepper-dots">
         <div class="reg-step-dot" data-step-dot="1"><div class="bar"></div><div class="label">1 · Identify</div></div>
-        <div class="reg-step-dot" data-step-dot="2"><div class="bar"></div><div class="label">2 · Family</div></div>
-        <div class="reg-step-dot" data-step-dot="3"><div class="bar"></div><div class="label">3 · Waiver</div></div>
-        <div class="reg-step-dot" data-step-dot="4"><div class="bar"></div><div class="label">4 · Payment</div></div>
+        <div class="reg-step-dot" data-step-dot="2"><div class="bar"></div><div class="label">2 · Your Info &amp; Waiver</div></div>
+        <div class="reg-step-dot" data-step-dot="3"><div class="bar"></div><div class="label">3 · Payment</div></div>
       </div>
     </div>
 
@@ -174,10 +173,10 @@
       </div>
     </section>
 
-    <!-- ── Step 2: Form ── -->
+    <!-- ── Step 2: Your Info + Waiver ── -->
     <section class="reg-card" id="reg-step-2" style="display:none;" aria-labelledby="reg-step-2-h">
-      <h2 id="reg-step-2-h" tabindex="-1">Family Information</h2>
-      <p class="reg-lede">Tell us about your family. We'll use this to set up your membership.</p>
+      <h2 id="reg-step-2-h" tabindex="-1">Your Info &amp; Waiver</h2>
+      <p class="reg-lede">Tell us about your family, review the member agreement and waivers, and sign below.</p>
       <div class="reg-prefilled-banner" id="reg-prefilled-banner" style="display:none;">We've pre-filled fields from your existing member record. Please review and update anything that's changed.</div>
 
       <form id="reg-form" novalidate>
@@ -226,109 +225,66 @@
         </fieldset>
 
         <div class="reg-field">
-          <label for="reg-notes">Placement requests or notes (optional)</label>
-          <textarea id="reg-notes" placeholder="e.g., please place my child in the younger/older class, sibling requests, allergies, etc."></textarea>
+          <label for="reg-notes">Placement requests, allergies, or notes (optional)</label>
+          <textarea id="reg-notes" placeholder="e.g., please place my child in the younger/older class, sibling requests, allergies, accommodations, etc."></textarea>
+        </div>
+
+        <h2 style="margin-top: 28px;">Member Agreement &amp; Waivers</h2>
+        <p class="reg-lede" style="margin-top: -4px;">By typing your name to sign below, you agree to all of the following on behalf of your family.</p>
+
+        <div class="reg-waiver">
+          <h3>Membership Requirements &amp; Expectations</h3>
+          <p><strong>Requirements:</strong> Sign this agreement, pay the Fall Membership Fee, and ensure an assigned adult is present with your student(s) each co-op day.</p>
+          <p><strong>Expectations:</strong> Attend co-op and parent meetings reasonably; participate in special events, field trips, and leadership/volunteering per the handbook; pay class fees and sign up for classes on time.</p>
+          <p>If these requirements or expectations don't work for your family, please contact <a href="mailto:board@rootsandwingsindy.com">board@rootsandwingsindy.com</a> before registering.</p>
+        </div>
+
+        <div class="reg-waiver">
+          <h3>Photo &amp; Media Consent</h3>
+          <p>I consent to Roots and Wings Homeschool Co-op photographing, filming, quoting, or interviewing my family for non-commercial co-op use — including the yearbook, social media, website, and other media — and release the co-op and its agents from any claims related to that use.</p>
+        </div>
+
+        <div class="reg-waiver">
+          <h3>Data Storage &amp; AI Use</h3>
+          <p>To run the co-op we store family information — parent and student names, pronouns, home address, phone, email, birthdates, allergies and medical notes, emergency contacts, and any placement or accommodation notes — in <strong>Google Workspace</strong> under the <em>rootsandwingsindy.com</em> account. Access is limited to the Roots and Wings board and committee leads, and we don't share information outside of what's required to run the co-op (e.g., emergency services).</p>
+          <p>We also use AI tools, including <strong>Anthropic's Claude</strong>, to help draft communications and organize records. Family information may be processed by these tools under their enterprise privacy terms; AI is not used to make enrollment, placement, or disciplinary decisions without board review.</p>
+          <p>You can review, correct, or delete your family's stored information any time by emailing <a href="mailto:board@rootsandwingsindy.com">board@rootsandwingsindy.com</a>.</p>
+        </div>
+
+        <div class="reg-waiver">
+          <h3>Liability Waiver</h3>
+          <p>I understand that my family's participation in Roots and Wings Homeschool Co-op Inc. activities — held primarily at First Mennonite Church — is voluntary and could result in injury, including serious injury or death. I affirm that my family is in good physical condition to participate.</p>
+          <p>In consideration of our participation, I release Roots and Wings Homeschool Co-op Inc., First Mennonite Church, and their agents and employees from any claims, demands, or causes of action arising from our participation, now or in the future.</p>
+        </div>
+
+        <h2 style="margin-top: 28px;">Signature</h2>
+        <div class="reg-field">
+          <label for="reg-signature">Parent/Guardian Signature <span class="reg-req" aria-hidden="true">*</span></label>
+          <input type="text" id="reg-signature" placeholder="Type your full legal name as your electronic signature" aria-required="true">
+        </div>
+        <div class="reg-field-row">
+          <div class="reg-field">
+            <label for="reg-sig-date">Date <span class="reg-req" aria-hidden="true">*</span></label>
+            <input type="date" id="reg-sig-date" aria-required="true">
+          </div>
+          <div class="reg-field" id="reg-student-sig-wrap" style="display:none;">
+            <label for="reg-student-sig">Student Signature (18+)</label>
+            <input type="text" id="reg-student-sig" placeholder="Student's full name">
+          </div>
         </div>
 
         <div class="reg-error" id="reg-form-error" role="alert"></div>
 
         <div class="reg-actions">
           <button type="button" class="reg-back-btn" data-goto-step="1">&larr; Back</button>
-          <button type="submit" class="btn btn-primary">Continue to Waiver</button>
+          <button type="submit" class="btn btn-primary">Continue to Payment</button>
         </div>
       </form>
     </section>
 
-    <!-- ── Step 3: Waiver ── -->
+    <!-- ── Step 3: Payment ── -->
     <section class="reg-card" id="reg-step-3" style="display:none;" aria-labelledby="reg-step-3-h">
-      <h2 id="reg-step-3-h" tabindex="-1">Member Agreement &amp; Waivers</h2>
-      <p class="reg-lede">Please read each section carefully.</p>
-
-      <div class="reg-waiver">
-        <h3>Member Requirements &amp; Expectations</h3>
-        <p><strong>Member Requirements</strong></p>
-        <ul>
-          <li>Sign member agreement, photo release and liability waiver</li>
-          <li>Pay Fall Membership Fee upon registration</li>
-          <li>Active assigned adult will be present with student(s) each co-op day</li>
-        </ul>
-        <p><strong>Member Expectations</strong></p>
-        <ul>
-          <li>Reasonable family attendance at co-op</li>
-          <li>Reasonable participation at parent meetings</li>
-          <li>Reasonable participation in special events and field trips</li>
-          <li>Pay class fees on time before/on the first day of co-op each session</li>
-          <li>Sign up for classes on time</li>
-          <li>Active participation in the leadership and facilitation of daily co-op activities through volunteering, as outlined in the member handbook</li>
-        </ul>
-        <p>If you feel you cannot meet the membership requirements and/or expectations, please contact the board at <a href="mailto:board@rootsandwingsindy.com">board@rootsandwingsindy.com</a>.</p>
-      </div>
-
-      <label class="reg-check-label" for="reg-waiver-member">
-        <input type="checkbox" id="reg-waiver-member">
-        <span>I have been given and read the Roots and Wings Homeschool Co-op Inc. handbook and agree to work with Co-op members to complete the requirements and expectations of membership.</span>
-      </label>
-
-      <div class="reg-waiver" style="margin-top: 24px;">
-        <h3>Photo/Media Consent</h3>
-        <p>I hereby consent to the participation in interviews, the use of quotes, and the taking of photographs, movies or video tapes of myself and the Student(s) named above by Roots and Wings Homeschool Co-op.</p>
-        <p>I also grant to Roots and Wings Homeschool Co-op the right to edit, use, and reuse said products for non-profit purposes including use in print (e.g. the yearbook), on the internet, and all other forms of media. I also hereby release Roots and Wings Homeschool Co-op and its agents and employees from all claims, demands, and liabilities whatsoever in connection with the above.</p>
-      </div>
-      <label class="reg-check-label" for="reg-waiver-photo">
-        <input type="checkbox" id="reg-waiver-photo">
-        <span>I acknowledge and consent to photo/media use as described above. (This is required for co-op membership — please contact the board if you have concerns.)</span>
-      </label>
-
-      <div class="reg-waiver" style="margin-top: 24px;">
-        <h3>Data Storage &amp; AI Use</h3>
-        <p>To run the co-op, we collect and store personally identifiable information about your family, including: parent and student names, pronouns, home address, phone number, email address, birthdates, allergies and medical notes, emergency contacts, and any placement or accommodation notes you share with us.</p>
-        <p>This information is stored in <strong>Google Workspace</strong> (Sheets, Drive, Gmail) under the <em>rootsandwingsindy.com</em> account. Access is limited to the Roots and Wings board and committee leads on a need-to-know basis. We do not sell or share your information with third parties outside of what's required to operate the co-op (e.g., emergency services).</p>
-        <p>We also use AI tools, including <strong>Anthropic's Claude</strong>, to help draft communications, organize records, and automate routine co-op tasks. When we use AI, family information may be processed by these tools under their standard enterprise privacy terms. We do not use AI to make enrollment, placement, or disciplinary decisions without board review.</p>
-        <p>You can request to review, correct, or delete your family's stored information at any time by emailing <a href="mailto:board@rootsandwingsindy.com">board@rootsandwingsindy.com</a>.</p>
-      </div>
-      <label class="reg-check-label" for="reg-waiver-data">
-        <input type="checkbox" id="reg-waiver-data">
-        <span>I acknowledge how Roots and Wings stores my family's information and its use of AI tools as described above.</span>
-      </label>
-
-      <div class="reg-waiver" style="margin-top: 24px;">
-        <h3>Liability Waiver</h3>
-        <p>"My child/children and I participate with Roots and Wings Homeschool Co-op Inc. which meets once a week at the First Mennonite Church for group lessons. I recognize that my child's/children's and my participation with Roots and Wings Homeschool Co-op at the First Mennonite Church, although there is no strenuous physical activity during these lessons, could result in possible injury due to accidents or other circumstances during time spent in the church building or other co-op activities. I hereby affirm that my child/children and I are in good physical condition and do not suffer from any known disability or condition which would keep us from participation in this time spent at First Mennonite Church. I acknowledge that my child's/children's and my participation in Roots and Wings Homeschool Co-op Inc. is purely voluntary and in no way mandated by Roots and Wings Homeschool Co-op Inc. or First Mennonite Church."</p>
-        <p>"In consideration of my child's/children's and my participating with Roots and Wings Homeschool Co-op Inc., I hereby release Roots and Wings Homeschool Co-op Inc. and First Mennonite Church and its agents from any claims, demands, and causes of action as a result of my child's/children's and my participation and enrollment."</p>
-        <p>"I fully understand that if my child/children or I suffer an injury as a result of participating with Roots and Wings Homeschool Co-op Inc. while at First Mennonite Church, I hereby release Roots and Wings Inc. and First Mennonite Church and its agents from any liability now or in the future for conditions that my child/children or I may obtain. These conditions may result in serious injury or death."</p>
-      </div>
-      <label class="reg-check-label" for="reg-waiver-liability">
-        <input type="checkbox" id="reg-waiver-liability">
-        <span>I HEREBY AFFIRM THAT I HAVE READ AND FULLY UNDERSTAND THE ABOVE STATEMENTS.</span>
-      </label>
-
-      <h2 style="margin-top: 28px;">Signature</h2>
-      <div class="reg-field">
-        <label for="reg-signature">Parent/Guardian Signature <span class="reg-req" aria-hidden="true">*</span></label>
-        <input type="text" id="reg-signature" placeholder="Type your full legal name as your electronic signature" aria-required="true">
-      </div>
-      <div class="reg-field-row">
-        <div class="reg-field">
-          <label for="reg-sig-date">Date <span class="reg-req" aria-hidden="true">*</span></label>
-          <input type="date" id="reg-sig-date" aria-required="true">
-        </div>
-        <div class="reg-field" id="reg-student-sig-wrap" style="display:none;">
-          <label for="reg-student-sig">Student Signature (18+)</label>
-          <input type="text" id="reg-student-sig" placeholder="Student's full name">
-        </div>
-      </div>
-
-      <div class="reg-error" id="reg-waiver-error" role="alert"></div>
-
-      <div class="reg-actions">
-        <button type="button" class="reg-back-btn" data-goto-step="2">&larr; Back</button>
-        <button type="button" class="btn btn-primary" id="reg-waiver-continue">Continue to Payment</button>
-      </div>
-    </section>
-
-    <!-- ── Step 4: Payment ── -->
-    <section class="reg-card" id="reg-step-4" style="display:none;" aria-labelledby="reg-step-4-h">
-      <h2 id="reg-step-4-h" tabindex="-1">Payment</h2>
+      <h2 id="reg-step-3-h" tabindex="-1">Payment</h2>
       <p class="reg-lede">Your registration will be finalized once payment is received.</p>
 
       <div class="reg-summary">
@@ -351,7 +307,7 @@
       <div class="reg-error" id="reg-pay-error" role="alert"></div>
 
       <div class="reg-actions">
-        <button type="button" class="reg-back-btn" data-goto-step="3">&larr; Back to Waiver</button>
+        <button type="button" class="reg-back-btn" data-goto-step="2">&larr; Back</button>
       </div>
     </section>
 
@@ -464,12 +420,12 @@
 
     function showStep(n) {
       state.step = n;
-      ['1', '2', '3', '4', 'done'].forEach(function (s) {
+      ['1', '2', '3', 'done'].forEach(function (s) {
         var el = document.getElementById('reg-step-' + s);
         if (el) el.style.display = (String(s) === String(n)) ? '' : 'none';
       });
       // stepper dots
-      [1, 2, 3, 4].forEach(function (i) {
+      [1, 2, 3].forEach(function (i) {
         var dot = document.querySelector('[data-step-dot="' + i + '"]');
         if (!dot) return;
         dot.classList.remove('active', 'done');
@@ -747,6 +703,9 @@
       var trackOther = document.getElementById('reg-track-other').value.trim();
       var notes = document.getElementById('reg-notes').value.trim();
       var kids = getKids();
+      var sig = document.getElementById('reg-signature').value.trim();
+      var sigDate = document.getElementById('reg-sig-date').value.trim();
+      var studentSig = document.getElementById('reg-student-sig').value.trim();
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('reg-form-error', 'Please enter a valid email.'); markInvalid('reg-email'); return; }
       if (!coach) { showError('reg-form-error', 'Main Learning Coach is required.'); markInvalid('reg-coach'); return; }
@@ -759,36 +718,14 @@
         if (!kids[i].name) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a name.'); return; }
         if (!kids[i].birth_date) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a birth date.'); return; }
       }
+      if (!sig) { showError('reg-form-error', 'Please type your name to sign the agreement.'); markInvalid('reg-signature'); return; }
+      if (!sigDate) { showError('reg-form-error', 'Signature date is required.'); markInvalid('reg-sig-date'); return; }
 
       state.form = {
         email: email, main_learning_coach: coach, phone: phone, address: address,
         track: trackEl.value, track_other: trackOther, kids: kids, placement_notes: notes,
         existing_family_name: state.prefillFamily || ''
       };
-      if (!document.getElementById('reg-signature').value) document.getElementById('reg-signature').value = coach;
-      if (!document.getElementById('reg-sig-date').value) document.getElementById('reg-sig-date').value = new Date().toISOString().slice(0, 10);
-      updateStudentSigVisibility();
-      showStep(3);
-    });
-
-    // ── Step 3: waiver → (validate, then go to Payment — no DB write yet) ──
-    document.getElementById('reg-waiver-continue').addEventListener('click', function () {
-      clearError('reg-waiver-error');
-      var member = document.getElementById('reg-waiver-member').checked;
-      var photo = document.getElementById('reg-waiver-photo').checked;
-      var data = document.getElementById('reg-waiver-data').checked;
-      var liability = document.getElementById('reg-waiver-liability').checked;
-      var sig = document.getElementById('reg-signature').value.trim();
-      var sigDate = document.getElementById('reg-sig-date').value.trim();
-      var studentSig = document.getElementById('reg-student-sig').value.trim();
-
-      if (!member) return showError('reg-waiver-error', 'Please acknowledge the Member Agreement.');
-      if (!photo) return showError('reg-waiver-error', 'Please acknowledge the Photo/Media Consent.');
-      if (!data) return showError('reg-waiver-error', 'Please acknowledge the Data Storage & AI Use disclosure.');
-      if (!liability) return showError('reg-waiver-error', 'Please acknowledge the Liability Waiver.');
-      if (!sig) { showError('reg-waiver-error', 'Signature is required.'); markInvalid('reg-signature'); return; }
-      if (!sigDate) { showError('reg-waiver-error', 'Signature date is required.'); markInvalid('reg-sig-date'); return; }
-
       state.waiver = {
         waiver_member_agreement: true,
         waiver_photo_consent: 'yes',
@@ -799,7 +736,7 @@
         student_signature: studentSig
       };
 
-      showStep(4);
+      showStep(3);
       wirePaypal();
     });
 
@@ -883,6 +820,11 @@
         return r.json().then(function (d) { return r.ok ? d : null; }).catch(function () { return null; });
       }).catch(function () { return null; });
     }
+
+    // Default signature date to today
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var sigDateEl = document.getElementById('reg-sig-date');
+    if (sigDateEl && !sigDateEl.value) sigDateEl.value = todayStr;
 
     // Initialize step 1
     showStep(1);
