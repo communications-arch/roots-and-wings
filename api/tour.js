@@ -173,11 +173,17 @@ async function handleRegistration(body, res) {
       const kidsList = kids.map(k => `<li>${escapeHtml(k.name)} &mdash; ${escapeHtml(k.birth_date)}</li>`).join('');
       await resend.emails.send({
         from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
-        to: 'membership@rootsandwingsindy.com',
-        replyTo: email,
-        subject: `New ${season} Registration — ${main_learning_coach} (PAID)`,
+        to: email,
+        cc: [
+          'communications@rootsandwingsindy.com',
+          'treasurer@rootsandwingsindy.com',
+          'vicepresident@rootsandwingsindy.com'
+        ],
+        replyTo: 'membership@rootsandwingsindy.com',
+        subject: `Roots & Wings ${season} Registration Confirmed — ${main_learning_coach} family`,
         html: `
-          <h2>New Registration Submitted &amp; Paid</h2>
+          <h2>Registration Confirmed &amp; Paid</h2>
+          <p>Thanks for registering with Roots &amp; Wings Homeschool Co-op! Your ${escapeHtml(season)} Membership Fee has been received. The co-op board has been copied on this email.</p>
           <table style="border-collapse:collapse;font-family:sans-serif;">
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Season</td><td>${escapeHtml(season)}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Main Learning Coach</td><td>${escapeHtml(main_learning_coach)}</td></tr>
@@ -187,11 +193,13 @@ async function handleRegistration(body, res) {
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Track</td><td>${escapeHtml(track)}${track_other ? ' — ' + escapeHtml(track_other) : ''}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Returning family</td><td>${existing_family_name ? escapeHtml(existing_family_name) : '(new)'}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Signature</td><td>${escapeHtml(signature_name)} on ${escapeHtml(signature_date)}</td></tr>
+            ${student_signature ? `<tr><td style="padding:6px 16px 6px 0;font-weight:bold;vertical-align:top;">Adult student signatures</td><td>${escapeHtml(student_signature)}</td></tr>` : ''}
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">PayPal txn</td><td>${escapeHtml(paypal_transaction_id)} — $${escapeHtml(String(payment_amount))}</td></tr>
           </table>
           <h3>Children</h3>
           <ul>${kidsList}</ul>
           ${placement_notes ? `<h3>Placement notes</h3><p>${escapeHtml(placement_notes)}</p>` : ''}
+          <p style="color:#666;font-size:0.9rem;margin-top:20px;">Questions? Reply to this email and it'll reach the Membership team.</p>
         `,
       });
     } catch (mailErr) {
