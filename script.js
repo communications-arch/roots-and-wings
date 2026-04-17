@@ -6610,7 +6610,10 @@
     return slots;
   }
 
-  function showAbsenceModal() {
+  function showAbsenceModal(prefill) {
+    // Guard against double-open (e.g., rapid double-click)
+    if (document.getElementById('absenceOverlay')) return;
+
     var email = sessionStorage.getItem('rw_user_email');
     if (!email || !FAMILIES) return;
     var me = null;
@@ -6626,35 +6629,68 @@
     var allSlots = getResponsibilitiesForBlocks(parentNames, currentSession, allBlocks, me.name);
     var activeBlocks = {};
     allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
+    var hasAnyDuties = Object.keys(activeBlocks).length > 0;
+
+    // Prefill (for Edit flow)
+    var editingAbsenceId = prefill && prefill.id ? prefill.id : null;
+    var prefillPerson = prefill && prefill.absent_person;
+    var prefillDate = prefill && prefill.absence_date ? String(prefill.absence_date).slice(0, 10) : null;
+    var prefillBlocks = prefill && prefill.blocks && prefill.blocks.length ? prefill.blocks.slice() : null;
+    var prefillNotes = prefill && prefill.notes ? String(prefill.notes) : '';
+
+    // If the prefilled date isn't in the current session window, surface it at the top
+    if (prefillDate && tuesdays.indexOf(prefillDate) === -1) tuesdays.unshift(prefillDate);
 
     var blockLabelsModal = { AM: 'AM (10:00\u201312:00)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
 
+    // Which blocks should start checked?
+    var activeBlockList = allBlocks.filter(function (b) { return activeBlocks[b]; });
+    var initialChecked = prefillBlocks ? prefillBlocks.filter(function (b) { return activeBlocks[b]; }) : activeBlockList.slice();
+    var wholeDayChecked = activeBlockList.length > 0 && activeBlockList.every(function (b) { return initialChecked.indexOf(b) !== -1; });
+
+    function escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
     var html = '<div class="absence-overlay" id="absenceOverlay"><div class="absence-modal">';
     html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
-    html += '<h3>Report an Absence</h3>';
+    html += '<h3>' + (editingAbsenceId ? 'Edit Absence' : 'Report an Absence') + '</h3>';
     html += '<div class="absence-field"><label>Who will be out?</label><select class="cl-input" id="absenceWho">';
-    parentNames.forEach(function (name) { html += '<option value="' + name + '">' + name + '</option>'; });
+    parentNames.forEach(function (name) {
+      var sel = (prefillPerson && name === prefillPerson) ? ' selected' : '';
+      html += '<option value="' + escAttr(name) + '"' + sel + '>' + name + '</option>';
+    });
     html += '</select></div>';
     html += '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
-    tuesdays.forEach(function (d, idx) { html += '<button class="absence-date-btn' + (idx === 0 ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>'; });
-    html += '</div></div>';
-    html += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
-    html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay" checked> <strong>Whole Day</strong></label>';
-    allBlocks.forEach(function (blk) {
-      if (activeBlocks[blk]) {
-        html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '" checked> ' + blockLabelsModal[blk] + '</label>';
-      }
+    tuesdays.forEach(function (d, idx) {
+      var isActive = prefillDate ? (d === prefillDate) : (idx === 0);
+      html += '<button class="absence-date-btn' + (isActive ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
     });
     html += '</div></div>';
-    html += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
-    html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..."></div>';
-    html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">Submit \u2014 I\'m Out</button>';
+    html += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
+    if (hasAnyDuties) {
+      html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
+      allBlocks.forEach(function (blk) {
+        if (activeBlocks[blk]) {
+          var checked = initialChecked.indexOf(blk) !== -1;
+          html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
+        }
+      });
+    } else {
+      html += '<em class="absence-no-slots">No session-specific duties on file for either parent \u2014 reporting this absence is informational, no coverage slots will be created.</em>';
+      // Still create a hidden checked block so the submit logic has something to send
+      html += '<input type="checkbox" class="absence-block-cb" value="AM" checked style="display:none;">';
+    }
+    html += '</div></div>';
+    if (hasAnyDuties) {
+      html += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
+    }
+    html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..." value="' + escAttr(prefillNotes) + '"></div>';
+    html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">' + (editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out') + '</button>';
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
 
     var overlay = document.getElementById('absenceOverlay');
-    var selectedDate = tuesdays[0];
-    var selectedPerson = parentNames[0];
+    var selectedDate = (prefillDate && tuesdays.indexOf(prefillDate) !== -1) ? prefillDate : tuesdays[0];
+    var selectedPerson = (prefillPerson && parentNames.indexOf(prefillPerson) !== -1) ? prefillPerson : parentNames[0];
 
     function getSelectedBlocks() {
       var blocks = [];
@@ -6662,8 +6698,9 @@
       return blocks;
     }
     function updatePreview() {
-      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], currentSession, getSelectedBlocks(), me.name);
       var previewEl = document.getElementById('absencePreview');
+      if (!previewEl) return;
+      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], currentSession, getSelectedBlocks(), me.name);
       if (slotsPreview.length === 0) { previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>'; }
       else {
         var ph = '<ul class="absence-slot-list">';
@@ -6683,35 +6720,71 @@
     });
     document.getElementById('absenceWho').addEventListener('change', function () { selectedPerson = this.value; updatePreview(); });
     var wholeDayCb = document.getElementById('absenceWholeDay');
-    wholeDayCb.addEventListener('change', function () {
-      overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
-      updatePreview();
-    });
+    if (wholeDayCb) {
+      wholeDayCb.addEventListener('change', function () {
+        overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
+        updatePreview();
+      });
+    }
     overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) {
       cb.addEventListener('change', function () {
-        var allChecked = true;
-        overlay.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
-        wholeDayCb.checked = allChecked;
+        if (wholeDayCb) {
+          var allChecked = true;
+          overlay.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
+          wholeDayCb.checked = allChecked;
+        }
         updatePreview();
       });
     });
     document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
+      var submitBtn = document.getElementById('absenceSubmitBtn');
+      if (submitBtn.disabled) return;
       var blocks = getSelectedBlocks();
       if (blocks.length === 0) { alert('Please select at least one block.'); return; }
       var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], currentSession, blocks, me.name);
-      var btn = document.getElementById('absenceSubmitBtn');
-      btn.disabled = true; btn.textContent = 'Submitting\u2026';
+      submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
       var cred = sessionStorage.getItem('rw_google_credential');
-      fetch('/api/absences', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: currentSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: (document.getElementById('absenceNotes') || {}).value || '' })
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) { alert('Error: ' + (res.data.error || 'Could not submit absence')); btn.disabled = false; btn.textContent = 'Submit \u2014 I\'m Out'; return; }
+      var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
+      var originalLabel = editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out';
+
+      function doPost() {
+        return fetch('/api/absences', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: currentSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
+      }
+
+      var chain;
+      if (editingAbsenceId) {
+        chain = fetch('/api/absences?id=' + encodeURIComponent(editingAbsenceId), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + cred }
+        }).then(function (r) { return r.json().catch(function () { return {}; }); })
+          .then(function () { return doPost(); });
+      } else {
+        chain = doPost();
+      }
+
+      chain.then(function (res) {
+        if (!res.ok) {
+          if (res.status === 409) {
+            alert('An absence for ' + selectedPerson + ' on ' + formatDateLabel(selectedDate) + ' already exists. Please cancel the existing one first, then try again.');
+          } else {
+            alert('Error: ' + ((res.data && res.data.error) || 'Could not submit absence'));
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+          return;
+        }
         overlay.remove();
+        showSupplyToast(editingAbsenceId ? 'Absence updated' : 'Absence reported \u2014 coverage posted');
         loadCoverageBoard();
         loadNotifications();
+      }).catch(function (err) {
+        alert('Network error: ' + ((err && err.message) || 'could not submit absence'));
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
       });
     });
     updatePreview();
@@ -6970,7 +7043,16 @@
     el.querySelectorAll('.my-absence-cancel').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = btn.getAttribute('data-absence-id');
-        if (!confirm('Cancel this absence? Coverage slots will be removed.')) return;
+        var absence = null;
+        for (var i = 0; i < loadedAbsences.length; i++) {
+          if (String(loadedAbsences[i].id) === id) { absence = loadedAbsences[i]; break; }
+        }
+        var claimedCount = 0;
+        if (absence && absence.slots) absence.slots.forEach(function (s) { if (s.claimed_by_email) claimedCount++; });
+        var msg = claimedCount > 0
+          ? 'Cancel this absence? ' + claimedCount + ' slot' + (claimedCount === 1 ? ' has' : 's have') + ' already been claimed \u2014 those volunteers will be unassigned.'
+          : 'Cancel this absence? Coverage slots will be removed.';
+        if (!confirm(msg)) return;
         btn.disabled = true; btn.textContent = 'Cancelling\u2026';
         var cred = sessionStorage.getItem('rw_google_credential');
         fetch('/api/absences?id=' + encodeURIComponent(id), {
@@ -6978,12 +7060,17 @@
           headers: { 'Authorization': 'Bearer ' + cred }
         }).then(function (r) { return r.json(); }).then(function (res) {
           if (res.error) { alert('Error: ' + res.error); btn.disabled = false; btn.textContent = 'Cancel'; return; }
+          showSupplyToast('Absence cancelled');
           loadCoverageBoard();
+          loadNotifications();
+        }).catch(function (err) {
+          alert('Network error: ' + ((err && err.message) || 'could not cancel'));
+          btn.disabled = false; btn.textContent = 'Cancel';
         });
       });
     });
 
-    // Wire edit buttons — cancel the old one and re-open the modal
+    // Wire edit buttons — open modal prefilled; old absence is replaced on submit
     el.querySelectorAll('.my-absence-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = btn.getAttribute('data-absence-id');
@@ -6992,15 +7079,17 @@
           if (String(loadedAbsences[i].id) === id) { absence = loadedAbsences[i]; break; }
         }
         if (!absence) return;
-        // Cancel the old absence, then open the modal pre-filled
-        btn.disabled = true; btn.textContent = 'Loading\u2026';
-        var cred = sessionStorage.getItem('rw_google_credential');
-        fetch('/api/absences?id=' + encodeURIComponent(id), {
-          method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
-        }).then(function (r) { return r.json(); }).then(function () {
-          loadCoverageBoard();
-          showAbsenceModal();
+        var claimedCount = 0;
+        (absence.slots || []).forEach(function (s) { if (s.claimed_by_email) claimedCount++; });
+        if (claimedCount > 0) {
+          if (!confirm('Heads up: ' + claimedCount + ' slot' + (claimedCount === 1 ? ' has' : 's have') + ' already been claimed for this absence. Saving changes will replace this absence entirely and those volunteers will be unassigned. Continue?')) return;
+        }
+        showAbsenceModal({
+          id: absence.id,
+          absent_person: absence.absent_person,
+          absence_date: absence.absence_date,
+          blocks: absence.blocks,
+          notes: absence.notes
         });
       });
     });
