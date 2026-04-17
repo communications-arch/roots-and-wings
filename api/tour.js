@@ -1,10 +1,10 @@
 // Public intake endpoint.
 // Handles two kinds of submissions, distinguished by body.kind:
 //   - 'tour'         : forwards a tour request via Resend (default, legacy)
-//   - 'registration' : saves a new registration to the DB + emails membership
-//   - 'registration-payment' : PATCH-style update of an existing registration's
-//                              PayPal status after onApprove fires
-// Also supports GET ?list=registrations for authed VPs/membership coordinators.
+//   - 'registration' : saves a completed, paid registration (requires paypal_transaction_id)
+// Also supports:
+//   - GET ?list=registrations  — Workspace-authed list for membership coordinators
+//   - GET ?config=1            — public config (e.g., Google Maps key) for the register page
 
 const { Resend } = require('resend');
 const { neon } = require('@neondatabase/serverless');
@@ -18,7 +18,6 @@ const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 const REGISTRATION_FEE = 50;
 const DEFAULT_SEASON = '2025-2026';
 const VALID_TRACKS = ['Morning Only', 'Afternoon Only', 'Both', 'Other'];
-const VALID_PHOTO = ['yes', 'no'];
 
 function escapeHtml(str) {
   return String(str)
@@ -103,7 +102,7 @@ async function handleTour(body, res) {
   }
 }
 
-// ── Registration (public, no auth) ──
+// ── Registration (public, no auth; PayPal has already captured) ──
 async function handleRegistration(body, res) {
   const email = String(body.email || '').trim().toLowerCase();
   const main_learning_coach = String(body.main_learning_coach || '').trim();
@@ -114,18 +113,16 @@ async function handleRegistration(body, res) {
   const existing_family_name = String(body.existing_family_name || '').trim();
   const placement_notes = String(body.placement_notes || '').trim().slice(0, 2000);
   const waiver_member_agreement = body.waiver_member_agreement === true;
-  const waiver_photo_consent = String(body.waiver_photo_consent || '').trim().toLowerCase();
   const waiver_liability = body.waiver_liability === true;
   const signature_name = String(body.signature_name || '').trim();
   const signature_date = String(body.signature_date || '').trim();
   const student_signature = String(body.student_signature || '').trim();
   const season = String(body.season || DEFAULT_SEASON).trim();
   const kids = Array.isArray(body.kids) ? body.kids : [];
+  const paypal_transaction_id = String(body.paypal_transaction_id || '').trim();
+  const payment_amount = Number.isFinite(Number(body.payment_amount)) ? Number(body.payment_amount) : REGISTRATION_FEE;
 
-  // Validate email
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Valid email required.' });
-  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Valid email required.' });
   if (!main_learning_coach) return res.status(400).json({ error: 'Main Learning Coach name required.' });
   if (!address) return res.status(400).json({ error: 'Address required.' });
   if (!phone) return res.status(400).json({ error: 'Phone number required.' });
@@ -134,22 +131,18 @@ async function handleRegistration(body, res) {
   if (kids.length > 10) return res.status(400).json({ error: 'Too many children.' });
   for (let i = 0; i < kids.length; i++) {
     const k = kids[i];
-    if (!k || !k.name || !k.birth_date) {
-      return res.status(400).json({ error: 'Each child needs a name and birth date.' });
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(k.birth_date)) {
-      return res.status(400).json({ error: 'Birth date must be YYYY-MM-DD.' });
-    }
+    if (!k || !k.name || !k.birth_date) return res.status(400).json({ error: 'Each child needs a name and birth date.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k.birth_date)) return res.status(400).json({ error: 'Birth date must be YYYY-MM-DD.' });
   }
   if (!waiver_member_agreement) return res.status(400).json({ error: 'Member agreement acknowledgment required.' });
   if (!waiver_liability) return res.status(400).json({ error: 'Liability waiver acknowledgment required.' });
-  if (VALID_PHOTO.indexOf(waiver_photo_consent) === -1) return res.status(400).json({ error: 'Photo/media consent required.' });
   if (!signature_name) return res.status(400).json({ error: 'Signature required.' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(signature_date)) return res.status(400).json({ error: 'Signature date required.' });
+  if (!paypal_transaction_id) return res.status(400).json({ error: 'Payment transaction ID required.' });
 
-  // Length caps
   if (email.length > 200 || main_learning_coach.length > 200 || address.length > 500 ||
-      phone.length > 50 || signature_name.length > 200 || student_signature.length > 200) {
+      phone.length > 50 || signature_name.length > 200 || student_signature.length > 200 ||
+      paypal_transaction_id.length > 100) {
     return res.status(400).json({ error: 'One or more fields are too long.' });
   }
 
@@ -162,19 +155,19 @@ async function handleRegistration(body, res) {
         track, track_other, kids, placement_notes,
         waiver_member_agreement, waiver_photo_consent, waiver_liability,
         signature_name, signature_date, student_signature,
-        payment_status, payment_amount
+        payment_status, payment_amount, paypal_transaction_id
       ) VALUES (
         ${season}, ${email}, ${existing_family_name || null}, ${main_learning_coach}, ${address}, ${phone},
         ${track}, ${track_other}, ${JSON.stringify(kids)}::jsonb, ${placement_notes},
-        ${waiver_member_agreement}, ${waiver_photo_consent}, ${waiver_liability},
+        ${waiver_member_agreement}, 'yes', ${waiver_liability},
         ${signature_name}, ${signature_date}, ${student_signature},
-        'pending', ${REGISTRATION_FEE}
+        'paid', ${payment_amount}, ${paypal_transaction_id}
       )
       RETURNING id, created_at
     `;
     const id = inserted[0].id;
 
-    // Fire off a confirmation email (best effort — don't fail the request if it errors)
+    // Best-effort confirmation email — failure does not fail the request.
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
       const kidsList = kids.map(k => `<li>${escapeHtml(k.name)} &mdash; ${escapeHtml(k.birth_date)}</li>`).join('');
@@ -182,9 +175,9 @@ async function handleRegistration(body, res) {
         from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
         to: 'membership@rootsandwingsindy.com',
         replyTo: email,
-        subject: `New ${season} Registration — ${main_learning_coach}`,
+        subject: `New ${season} Registration — ${main_learning_coach} (PAID)`,
         html: `
-          <h2>New Registration Submitted</h2>
+          <h2>New Registration Submitted &amp; Paid</h2>
           <table style="border-collapse:collapse;font-family:sans-serif;">
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Season</td><td>${escapeHtml(season)}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Main Learning Coach</td><td>${escapeHtml(main_learning_coach)}</td></tr>
@@ -193,57 +186,25 @@ async function handleRegistration(body, res) {
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Address</td><td>${escapeHtml(address)}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Track</td><td>${escapeHtml(track)}${track_other ? ' — ' + escapeHtml(track_other) : ''}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Returning family</td><td>${existing_family_name ? escapeHtml(existing_family_name) : '(new)'}</td></tr>
-            <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Photo consent</td><td>${escapeHtml(waiver_photo_consent)}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Signature</td><td>${escapeHtml(signature_name)} on ${escapeHtml(signature_date)}</td></tr>
+            <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">PayPal txn</td><td>${escapeHtml(paypal_transaction_id)} — $${escapeHtml(String(payment_amount))}</td></tr>
           </table>
           <h3>Children</h3>
           <ul>${kidsList}</ul>
           ${placement_notes ? `<h3>Placement notes</h3><p>${escapeHtml(placement_notes)}</p>` : ''}
-          <p><em>Payment: pending &mdash; $${REGISTRATION_FEE} Fall Membership Fee.</em></p>
         `,
       });
     } catch (mailErr) {
       console.error('Registration email error (non-fatal):', mailErr);
     }
 
-    return res.status(201).json({
-      id,
-      fee: REGISTRATION_FEE,
-      success: true
-    });
+    return res.status(201).json({ id, fee: payment_amount, success: true });
   } catch (err) {
     if (err.message && err.message.toLowerCase().indexOf('unique') !== -1) {
       return res.status(409).json({ error: 'A registration already exists for this email this season. Please contact membership@rootsandwingsindy.com.' });
     }
     console.error('Registration insert error:', err);
-    return res.status(500).json({ error: 'Could not save registration. Please try again.' });
-  }
-}
-
-// ── Update payment status after PayPal approve (public; identified by id) ──
-async function handleRegistrationPayment(body, res) {
-  const id = parseInt(body.id, 10);
-  const paypal_transaction_id = String(body.paypal_transaction_id || '').trim();
-  if (!id) return res.status(400).json({ error: 'id required' });
-  if (!paypal_transaction_id) return res.status(400).json({ error: 'paypal_transaction_id required' });
-
-  const sql = getSql();
-  try {
-    const updated = await sql`
-      UPDATE registrations
-      SET payment_status = 'paid',
-          paypal_transaction_id = ${paypal_transaction_id},
-          updated_at = NOW()
-      WHERE id = ${id} AND payment_status <> 'paid'
-      RETURNING id, email, main_learning_coach
-    `;
-    if (updated.length === 0) {
-      return res.status(404).json({ error: 'Registration not found or already paid.' });
-    }
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error('Registration payment update error:', err);
-    return res.status(500).json({ error: 'Could not update payment status.' });
+    return res.status(500).json({ error: 'Could not save registration. Please email treasurer@rootsandwingsindy.com with your PayPal transaction ID.' });
   }
 }
 
@@ -273,12 +234,20 @@ async function handleList(req, res) {
   }
 }
 
+// ── Public config (no secrets — just the public Maps key) ──
+function handleConfig(res) {
+  return res.status(200).json({
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || null
+  });
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
     if (req.query.list === 'registrations') return handleList(req, res);
+    if (req.query.config === '1' || req.query.config === 'true') return handleConfig(res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -287,7 +256,6 @@ module.exports = async function handler(req, res) {
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
     if (kind === 'registration') return handleRegistration(body, res);
-    if (kind === 'registration-payment') return handleRegistrationPayment(body, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 
