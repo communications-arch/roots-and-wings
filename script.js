@@ -6957,11 +6957,17 @@
 
   function loadCoverageBoard() {
     var cred = localStorage.getItem('rw_google_credential');
-    if (!cred) return;
+    if (!cred) { console.log('[coverage] loadCoverageBoard skipped — no credential'); return; }
+    console.log('[coverage] loadCoverageBoard fetching session=' + currentSession);
     fetch('/api/absences?session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
-    .then(function (r) { return r.json(); })
-    .then(function (data) { renderCoverageBoard((data.absences || []).filter(function (a) { return !a.cancelled_at; })); })
-    .catch(function () { var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
+    .then(function (r) { console.log('[coverage] /api/absences status:', r.status); return r.json(); })
+    .then(function (data) {
+      var raw = data.absences || [];
+      var filtered = raw.filter(function (a) { return !a.cancelled_at; });
+      console.log('[coverage] API returned', raw.length, 'absences,', filtered.length, 'active');
+      renderCoverageBoard(filtered);
+    })
+    .catch(function (err) { console.error('[coverage] fetch failed:', err); var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
   }
 
   // Store loaded absences so responsibilities card can reference them
@@ -6969,10 +6975,15 @@
 
   function renderCoverageBoard(absences) {
     loadedAbsences = absences;
-    // Re-render the directory so absence/coverage badges appear on person cards.
-    if (typeof renderDirectory === 'function') renderDirectory();
+    // Re-render the directory so absence/coverage badges appear on person
+    // cards — wrapped in try/catch so a rendering issue here can never block
+    // the coverage card itself from showing up.
+    try {
+      if (typeof renderDirectory === 'function') renderDirectory();
+    } catch (e) { console.error('renderDirectory failed inside renderCoverageBoard:', e); }
     var el = document.getElementById('coverageBoardContent');
     var card = document.getElementById('coverageBoardCard');
+    console.log('[coverage] renderCoverageBoard — absences:', absences.length, 'el:', !!el, 'card:', !!card);
     if (!el) return;
 
     var isVpUser = isVP();
