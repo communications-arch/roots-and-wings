@@ -6555,7 +6555,7 @@
   function showWaiverModal() {
     if (!personDetail || !personDetailCard) return;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail" id="waiverModalBody">';
+    html += '<div class="elective-detail wv-modal" id="waiverModalBody">';
     html += '<div style="text-align:center;color:#777;padding:40px 0;">Loading Member Agreement…</div>';
     html += '</div>';
     personDetailCard.innerHTML = html;
@@ -6576,7 +6576,7 @@
         '<p style="color:#555;margin:0 0 16px;">Reference copy of the agreement families accept when registering.</p>' +
         inner +
         '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;margin-top:20px;">' +
-          '<a href="waiver.html" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Open in new tab / Print</a>' +
+          '<a href="waiver.html?print=1" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Open / Print</a>' +
           '<button type="button" class="btn btn-primary btn-sm" id="waiverModalClose">Close</button>' +
         '</div>';
       // Suppress the inline "Print / Save as PDF" and "Back to Member Portal"

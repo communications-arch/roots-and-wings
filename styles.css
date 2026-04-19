@@ -5245,8 +5245,13 @@ button.staff-role:hover {
    ========================================================================== */
 .person-detail-card:has(.sc-modal),
 .person-detail-card:has(.cl-modal),
-.person-detail-card:has(.rd-modal) {
+.person-detail-card:has(.rd-modal),
+.person-detail-card:has(.wv-modal) {
   max-width: 880px;
+}
+.wv-modal {
+  max-width: 860px;
+  width: 100%;
 }
 /* Resource Card browse → keep default narrow modal */
 .person-detail-card:has(.sc-modal.sc-browse) {
