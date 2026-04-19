@@ -2774,10 +2774,12 @@
       absenceBtn.addEventListener('click', showAbsenceModal);
     }
 
-    // Render data that may already be loaded from async fetches
+    // Render data that may already be loaded from async fetches.
+    // Re-render the coverage board so it survives renderMyFamily() being
+    // called again by loadCleaningData / loadRoleDescriptions / loadLiveData —
+    // those swap grid.innerHTML, which destroys #coverageBoardCard.
     if (loadedAbsences && loadedAbsences.length > 0) {
-      renderMyAbsences();
-      updateCoverageNotes();
+      renderCoverageBoard(loadedAbsences);
     }
     if (Object.keys(classLinks).length > 0) {
       updateClassLinkButtons();
