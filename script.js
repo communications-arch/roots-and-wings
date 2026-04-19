@@ -5895,9 +5895,9 @@
       '.steps .cell { padding: 4pt 0; border-bottom: 0.5pt solid #ccc; }',
       '.qty { color: #555; font-size: 9pt; }',
       '.notes { color: #555; font-size: 9pt; font-style: italic; }',
-      '.low-flag { display: inline-block; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3pt 10pt; border-radius: 999pt; margin-left: 8pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; }',
+      '.low-flag { display: inline-block; font-size: 11pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 5pt 14pt; border-radius: 999pt; margin-left: 10pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; box-shadow: 0 1pt 2pt rgba(0,0,0,0.15); }',
       '.low-flag-empty { background: #c0392b; }',
-      '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; } }',
+      '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; box-shadow: none !important; } }',
       '@media print { .no-print { display: none; } }',
       '.no-print { text-align: center; padding: 12pt; background: #ffe; border-bottom: 1pt solid #ccc; margin: -0.25in -0.25in 12pt -0.25in; }',
       '.no-print button { font-size: 11pt; padding: 6pt 16pt; cursor: pointer; }'
@@ -7852,9 +7852,9 @@
       '.steps .header { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4pt; border-bottom: 1pt solid #333; }',
       '.steps .num { text-align: right; padding-right: 4pt; font-weight: 700; }',
       '.steps .cell { padding: 3pt 0; border-bottom: 0.5pt solid #ccc; font-size: 10pt; }',
-      '.low-flag { display: inline-block; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3pt 10pt; border-radius: 999pt; margin-left: 8pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; }',
+      '.low-flag { display: inline-block; font-size: 11pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 5pt 14pt; border-radius: 999pt; margin-left: 10pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; box-shadow: 0 1pt 2pt rgba(0,0,0,0.15); }',
       '.low-flag-empty { background: #c0392b; }',
-      '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; } }',
+      '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; box-shadow: none !important; } }',
       '@media print { .no-print { display: none; } }',
       '.no-print { text-align: center; padding: 10pt; background: #ffe; border-bottom: 1pt solid #ccc; margin: -0.25in -0.25in 12pt -0.25in; }',
       '.no-print button { font-size: 11pt; padding: 6pt 16pt; cursor: pointer; margin: 0 4pt; }'
