@@ -3910,10 +3910,26 @@ button.staff-role:hover {
   text-decoration: underline;
 }
 
+/* =============================================================
+   Empty-state text — "No assignments yet", "No absences yet", etc.
+   -------------------------------------------------------------
+   Use .empty-state as the canonical class. Legacy classes
+   (.mf-empty, .pds-empty, .cl-dyn-empty, .coverage-empty, etc.)
+   still work because they're defined elsewhere, but new code
+   should prefer .empty-state. .empty-state-lg is the bigger
+   centered variant used for panels with no content yet.
+   ============================================================= */
+.empty-state,
 .mf-empty {
   font-size: 0.9rem;
   color: var(--color-text-light);
   font-style: italic;
+}
+.empty-state-lg {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
 }
 
 .mf-status-done, .mf-status-upcoming, .mf-status-open {
@@ -5305,6 +5321,8 @@ button.staff-role:hover {
   border-radius: var(--radius-sm);
   background: var(--color-white);
 }
+/* .sc-empty is an alias of .empty-state-lg — kept so existing markup
+   continues to work. New code should use .empty-state-lg. */
 .sc-empty {
   padding: 2.5rem 1rem;
   text-align: center;
@@ -5611,6 +5629,8 @@ button.staff-role:hover {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 0.75rem;
 }
+/* .cl-empty is .empty-state-lg with a full-width grid span so it
+   centers inside the curriculum-library grid. */
 .cl-empty {
   padding: 2.5rem 1rem;
   text-align: center;
@@ -6747,10 +6767,22 @@ button.staff-role:hover {
   white-space: nowrap;
 }
 
-/* Coverage notes in responsibilities card */
-.coverage-notes-area {
-  margin-top: 0.5rem;
-}
+/* =============================================================
+   Unified message / note family
+   -------------------------------------------------------------
+   One set of tinted callout styles for inline status messages,
+   row notes, coverage notes, billing feedback, etc. Use .note as
+   the base and pair it with a semantic modifier. Legacy class
+   names (.cov-note, .mf-billing-success, .mf-billing-error) are
+   kept as aliases via comma selectors so call sites don't have
+   to change.
+
+   .note           base inline callout (default neutral tint)
+   .note-ok        success / covered / paid (primary-green tint)
+   .note-warn      attention / open slot / past due (amber tint)
+   .note-error     failure / error / blocker (red tint)
+   ============================================================= */
+.note,
 .cov-note {
   display: block;
   font-size: 0.75rem;
@@ -6758,14 +6790,30 @@ button.staff-role:hover {
   margin-bottom: 0.25rem;
   border-radius: 3px;
   line-height: 1.4;
+  color: var(--color-text);
 }
+.note-ok,
 .cov-note-ok {
   background: rgba(var(--color-primary-rgb), 0.06);
   color: var(--color-text);
 }
+.note-warn,
 .cov-note-open {
   background: #fef3cd;
   color: #856404;
+}
+.note-error {
+  background: rgba(220, 53, 69, 0.06);
+  color: #b02a37;
+}
+
+/* Billing feedback (.mf-billing-success, .mf-billing-error) is a
+   heavier block-level variant of .note-ok / .note-error with more
+   padding + a border. Defined in the billing card section above. */
+
+/* Coverage notes in responsibilities card */
+.coverage-notes-area {
+  margin-top: 0.5rem;
 }
 
 /* Class-curriculum link buttons in responsibilities */
