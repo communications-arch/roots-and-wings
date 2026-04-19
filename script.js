@@ -4302,10 +4302,10 @@
         sendBtn.disabled = true; var origLabel = sendBtn.textContent; sendBtn.textContent = 'Sending\u2026';
         statusEl.className = 'ws-wv-status'; statusEl.textContent = '';
         var cred = localStorage.getItem('rw_google_credential');
-        fetch('/api/waiver-send', {
+        fetch('/api/tour', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name, email: emailVal, note: note })
+          body: JSON.stringify({ kind: 'waiver-send', name: name, email: emailVal, note: note })
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
           sendBtn.disabled = false; sendBtn.textContent = origLabel;
@@ -4328,7 +4328,7 @@
     var body = document.getElementById('ws-waivers-report-body');
     if (!body) return;
     var cred = localStorage.getItem('rw_google_credential');
-    fetch('/api/waiver-send', {
+    fetch('/api/tour?waivers_report=1', {
       method: 'GET',
       headers: { 'Authorization': 'Bearer ' + cred }
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
