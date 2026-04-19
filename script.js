@@ -2264,8 +2264,11 @@
     });
     var memberFee = BILLING_CONFIG.memberFeePerSemester;
     var deposit = sem.deposit || 0;
+    // Class Fees and Membership Fee are now billed separately. The deposit
+    // (Membership Fee) is its own payment and no longer reduces the class
+    // fee balance.
     var subtotal = memberFee + classTotal;
-    var balanceBeforeFee = subtotal - deposit;
+    var balanceBeforeFee = subtotal;
     var paypalFee = Math.ceil(((balanceBeforeFee + BILLING_CONFIG.paypalFeeFixed) / (1 - BILLING_CONFIG.paypalFeeRate) - balanceBeforeFee) * 100) / 100;
     var total = balanceBeforeFee + paypalFee;
     return {
@@ -2544,6 +2547,38 @@
       }
     }
 
+    // ── Coverage (taking someone else's slot for the next co-op day) ──
+    // If any parent in this family has claimed an uncovered slot for the
+    // upcoming co-op day, surface that slot alongside their regular AM/PM1/PM2
+    // duties. Matching is by name (same approach the rest of this card uses).
+    try {
+      var coopDate = getNextCoopDate();
+      (loadedAbsences || []).forEach(function (a) {
+        if (String(a.absence_date || '').slice(0, 10) !== coopDate) return;
+        (a.slots || []).forEach(function (s) {
+          if (!s.claimed_by_email && !s.claimed_by_name) return;
+          var mine = parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
+          if (!mine) return;
+          var blk = (s.block === 'AM' || s.block === 'PM1' || s.block === 'PM2' || s.block === 'Cleaning') ? s.block : 'AM';
+          var icon = s.role_type === 'teacher' ? 'teach' : s.role_type === 'cleaning' ? 'clean' : 'assist';
+          var absentPerson = a.absent_person || 'a member';
+          var text = 'Covering: ' + (s.role_description || 'role');
+          var detail = 'For ' + absentPerson;
+          // If the slot maps to a known class/elective, build a popup link.
+          var popup = null;
+          if (s.block === 'AM' && s.group_or_class && AM_CLASSES[s.group_or_class]) {
+            popup = { type: 'amClass', group: s.group_or_class, session: currentSession };
+          } else if ((s.block === 'PM1' || s.block === 'PM2') && s.group_or_class) {
+            popup = { type: 'elective', name: s.group_or_class };
+          } else if (s.block === 'Cleaning' && s.group_or_class) {
+            popup = { type: 'cleaning', area: s.group_or_class, floor: s.group_or_class === 'Floater' ? 'floater' : '', session: currentSession };
+          }
+          duties.push({ block: blk, icon: icon, text: text, detail: detail, popup: popup, isCoverage: true });
+          if (blk === 'Cleaning') hasCleaning = true;
+        });
+      });
+    } catch (covErr) { console.error('coverage duty injection failed:', covErr); }
+
     // ── Annual roles (board, committees, events) ──
     if (fam.boardRole) {
       duties.push({block: 'annual', icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
@@ -2806,14 +2841,6 @@
       html += '<span>Total</span>';
       html += '<span>$' + sem.subtotal.toFixed(2) + '</span>';
       html += '</div>';
-
-      // Membership fee credit
-      if (sem.deposit > 0) {
-        html += '<div class="mf-billing-line mf-billing-paid-line">';
-        html += '<span>Membership Fee applied</span>';
-        html += '<span>&minus;$' + sem.deposit.toFixed(2) + '</span>';
-        html += '</div>';
-      }
 
       // Processing fee
       html += '<div class="mf-billing-line mf-billing-fee-line">';
@@ -5293,7 +5320,15 @@
 
   function renderCurriculumModal() {
     if (!personDetail || !personDetailCard) return;
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    var html = '';
+    if (curriculumState.view === 'detail') {
+      // Unified modal header: Print lives next to the close X (same pattern
+      // as Class Pack and duty-detail — see `.detail-actions` in styles.css).
+      html += '<div class="detail-actions no-print">';
+      html += '<button type="button" class="sc-btn" id="cl-print-btn" aria-label="Print">\u2399 Print</button>';
+      html += '</div>';
+    }
+    html += '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail cl-modal">';
 
     if (curriculumState.view === 'library') {
@@ -5855,13 +5890,13 @@
       '.section ul { list-style: none; padding: 0; margin: 0; }',
       '.section ul.checks li { padding-left: 18pt; text-indent: -18pt; margin-bottom: 3pt; }',
       '.section ul.checks li::before { content: "☐  "; font-size: 13pt; }',
-      '.steps { display: grid; grid-template-columns: 24pt 1fr 1fr; gap: 8pt; }',
+      '.steps { display: grid; grid-template-columns: 44pt 1fr 1fr; gap: 12pt; }',
       '.steps .header { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4pt; border-bottom: 1pt solid #333; }',
       '.steps .num { text-align: right; padding-right: 4pt; font-weight: 700; }',
       '.steps .cell { padding: 4pt 0; border-bottom: 0.5pt solid #ccc; }',
       '.qty { color: #555; font-size: 9pt; }',
       '.notes { color: #555; font-size: 9pt; font-style: italic; }',
-      '.low-flag { display: inline-block; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2pt 8pt; border-radius: 999pt; margin-left: 6pt; line-height: 1; vertical-align: baseline; background: #e07a2a; color: #fff; }',
+      '.low-flag { display: inline-block; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3pt 10pt; border-radius: 999pt; margin-left: 8pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; }',
       '.low-flag-empty { background: #c0392b; }',
       '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; } }',
       '@media print { .no-print { display: none; } }',
@@ -5979,18 +6014,7 @@
 
   function printCurriculumInNewWindow(curr) {
     if (!curr) return;
-    var w = window.open('', '_blank', 'width=900,height=700');
-    if (!w) {
-      alert('Could not open print window. Please allow popups for this site and try again.');
-      return;
-    }
-    w.document.open();
-    w.document.write(buildPrintHtml(curr));
-    w.document.close();
-    // Give the browser a moment to layout, then trigger print
-    setTimeout(function () {
-      try { w.focus(); w.print(); } catch (e) { /* user can use the Print button in the new window */ }
-    }, 300);
+    openPrintIframe(buildPrintHtml(curr));
   }
 
   var BUY_FIND_KEY = '__buy_find__';
@@ -6158,9 +6182,6 @@
 
     html += '<div class="cl-title-row">';
     html += '<h3>' + escapeAttr(curr.title) + '</h3>';
-    html += '<button class="cl-icon-btn" id="cl-print-btn" aria-label="Print" title="Print">';
-    html += '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
-    html += '</button>';
     html += '</div>';
     html += '<div class="cl-detail-actions cl-detail-actions-top">';
     html += '<button class="cl-action-btn" id="cl-copy-btn-top" data-id="' + curr.id + '">Copy &amp; Modify</button>';
@@ -6554,14 +6575,13 @@
       });
   }
 
-  // Print the waiver in a dedicated popup window (matches the Curriculum
-  // Library print pattern). We reuse the already-fetched/cached wv-card HTML
-  // and wrap it in a minimal standalone document with print-friendly styling.
+  // Print the waiver via the shared openPrintIframe helper (same pattern as
+  // Class Pack and duty-detail). A hidden iframe receives the self-contained
+  // print doc and triggers window.print() — no popup blocker surface, no new
+  // tab.
   function printWaiverInNewWindow() {
     loadWaiverHtml().then(function (inner) {
       if (!inner) { alert('Waiver content failed to load — try again.'); return; }
-      var w = window.open('', '_blank', 'width=900,height=800');
-      if (!w) { alert('Could not open print window. Please allow popups for this site and try again.'); return; }
       var doc = '<!doctype html><html><head><meta charset="utf-8">' +
         '<title>Member Agreement &amp; Waivers</title>' +
         '<style>' +
@@ -6579,18 +6599,18 @@
         '<p class="wv-meta">Reference copy of the agreement families accept when registering.</p>' +
         inner +
         '</body></html>';
-      w.document.open();
-      w.document.write(doc);
-      w.document.close();
-      setTimeout(function () {
-        try { w.focus(); w.print(); } catch (e) { /* user can use the browser Print button */ }
-      }, 300);
+      openPrintIframe(doc);
     });
   }
 
   function showWaiverModal() {
     if (!personDetail || !personDetailCard) return;
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    // Unified modal header: Print lives next to the close X (same pattern as
+    // Class Pack / duty-detail — see `.detail-actions` in styles.css).
+    var html = '<div class="detail-actions no-print">';
+    html += '<button type="button" class="sc-btn" id="waiverModalPrint" aria-label="Print">\u2399 Print</button>';
+    html += '</div>';
+    html += '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail wv-modal" id="waiverModalBody">';
     html += '<div style="text-align:center;color:#777;padding:40px 0;">Loading Member Agreement…</div>';
     html += '</div>';
@@ -6599,6 +6619,8 @@
     document.body.style.overflow = 'hidden';
     personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
     personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+    var printBtn = document.getElementById('waiverModalPrint');
+    if (printBtn) printBtn.addEventListener('click', printWaiverInNewWindow);
 
     loadWaiverHtml().then(function (inner) {
       var body = document.getElementById('waiverModalBody');
@@ -6610,19 +6632,11 @@
       body.innerHTML =
         '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 8px;">Member Agreement &amp; Waivers</h2>' +
         '<p style="color:#555;margin:0 0 16px;">Reference copy of the agreement families accept when registering.</p>' +
-        '<div id="waiverModalContent">' + inner + '</div>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;margin-top:20px;">' +
-          '<button type="button" class="btn btn-outline-dark btn-sm" id="waiverModalPrint">Print</button>' +
-          '<button type="button" class="btn btn-primary btn-sm" id="waiverModalClose">Close</button>' +
-        '</div>';
+        '<div id="waiverModalContent">' + inner + '</div>';
       // Suppress the inline "Print / Save as PDF" and "Back to Member Portal"
       // buttons that live inside the fetched wv-card — they don't make sense
       // inside the modal.
       body.querySelectorAll('.wv-actions').forEach(function (el) { el.style.display = 'none'; });
-      var closeBtn = document.getElementById('waiverModalClose');
-      if (closeBtn) closeBtn.addEventListener('click', closeDetail);
-      var printBtn = document.getElementById('waiverModalPrint');
-      if (printBtn) printBtn.addEventListener('click', printWaiverInNewWindow);
     }).catch(function () {
       var body = document.getElementById('waiverModalBody');
       if (body) body.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
@@ -7089,7 +7103,13 @@
     .then(function (data) {
       var raw = data.absences || [];
       var filtered = raw.filter(function (a) { return !a.cancelled_at; });
-      renderCoverageBoard(filtered);
+      // Publish first so renderMyFamily can inject any coverage assignments
+      // into the user's My Responsibilities card. renderMyFamily() then calls
+      // renderCoverageBoard(loadedAbsences) at the end, which repopulates the
+      // coverage card — avoiding a separate second render here.
+      loadedAbsences = filtered;
+      if (typeof renderMyFamily === 'function') renderMyFamily();
+      else renderCoverageBoard(filtered);
     })
     .catch(function (err) { console.error('Coverage fetch failed:', err); var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
   }
@@ -7829,11 +7849,11 @@
       '.section ul.checks li::before { content: "\\2610  "; font-size: 12pt; }',
       '.loc-group { margin-bottom: 4pt; }',
       '.loc-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin: 4pt 0 1pt 0; }',
-      '.steps { display: grid; grid-template-columns: 24pt 1fr 1fr; gap: 6pt; }',
+      '.steps { display: grid; grid-template-columns: 44pt 1fr 1fr; gap: 12pt; }',
       '.steps .header { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 4pt; border-bottom: 1pt solid #333; }',
       '.steps .num { text-align: right; padding-right: 4pt; font-weight: 700; }',
       '.steps .cell { padding: 3pt 0; border-bottom: 0.5pt solid #ccc; font-size: 10pt; }',
-      '.low-flag { display: inline-block; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2pt 8pt; border-radius: 999pt; margin-left: 6pt; line-height: 1; vertical-align: baseline; background: #e07a2a; color: #fff; }',
+      '.low-flag { display: inline-block; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3pt 10pt; border-radius: 999pt; margin-left: 8pt; line-height: 1; vertical-align: 1pt; background: #e07a2a; color: #fff; }',
       '.low-flag-empty { background: #c0392b; }',
       '@media print { .low-flag { background: transparent !important; color: #000; border: 0.5pt solid #000; } }',
       '@media print { .no-print { display: none; } }',

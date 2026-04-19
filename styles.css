@@ -5253,10 +5253,6 @@ button.staff-role:hover {
   max-width: 860px;
   width: 100%;
 }
-/* Resource Card browse → keep default narrow modal */
-.person-detail-card:has(.sc-modal.sc-browse) {
-  max-width: 440px;
-}
 
 /* ==========================================================================
    Supply Closet Inventory modal
