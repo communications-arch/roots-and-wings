@@ -135,14 +135,14 @@
         url.indexOf(location.origin + '/api/') === 0;
       return origFetch(input, init).then(function (res) {
         if (isApi && res.status === 401 && !sessionExpiredHandled &&
-            sessionStorage.getItem(SESSION_KEY) === 'true') {
+            localStorage.getItem(SESSION_KEY) === 'true') {
           sessionExpiredHandled = true;
           // Log what we think the session is so "session expired" bugs are
           // easier to diagnose from the browser console.
           console.error('Session 401 for', url, '— signed-in email:',
-            sessionStorage.getItem('rw_user_email') || '(none)',
+            localStorage.getItem('rw_user_email') || '(none)',
             'credential present:',
-            !!sessionStorage.getItem('rw_google_credential'));
+            !!localStorage.getItem('rw_google_credential'));
           try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
         }
         return res;
@@ -177,9 +177,9 @@
         // Clear session + any potentially-stale cached data so a fresh
         // sign-in starts clean, then show the login screen.
         try {
-          sessionStorage.removeItem(SESSION_KEY);
-          sessionStorage.removeItem('rw_google_credential');
-          sessionStorage.removeItem('rw_user_email');
+          localStorage.removeItem(SESSION_KEY);
+          localStorage.removeItem('rw_google_credential');
+          localStorage.removeItem('rw_user_email');
           sessionStorage.removeItem(VIEW_AS_KEY);
         } catch (e) { /* ignore */ }
         el.remove();
@@ -202,11 +202,11 @@
   function getActiveEmail() {
     var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
     if (viewAs) return viewAs;
-    return sessionStorage.getItem('rw_user_email');
+    return localStorage.getItem('rw_user_email');
   }
 
   function isCommsUser() {
-    return sessionStorage.getItem('rw_user_email') === COMMS_EMAIL;
+    return localStorage.getItem('rw_user_email') === COMMS_EMAIL;
   }
 
   // True when the active user (respecting View As) is the Vice President,
@@ -412,7 +412,7 @@
     } catch (e) { /* ignore cache errors */ }
 
     // Fetch fresh data in the background
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     if (!googleCred) return;
 
     fetch('/api/sheets', { headers: { 'Authorization': 'Bearer ' + googleCred } })
@@ -516,7 +516,7 @@
       if (cached) applyRoleDescriptions(JSON.parse(cached));
     } catch (e) { /* ignore */ }
 
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     if (!googleCred) return;
     fetch('/api/cleaning?action=roles', { headers: { 'Authorization': 'Bearer ' + googleCred } })
       .then(function (res) { return res.json(); })
@@ -642,7 +642,7 @@
           var newDuties = personDetailCard.querySelector('#rdEditDuties').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
           var newReviewedBy = personDetailCard.querySelector('#rdEditReviewedBy').value;
           var newReviewedDate = personDetailCard.querySelector('#rdEditReviewedDate').value;
-          var googleCred = sessionStorage.getItem('rw_google_credential');
+          var googleCred = localStorage.getItem('rw_google_credential');
           fetch('/api/cleaning?action=roles&id=' + role.id, {
             method: 'PATCH',
             headers: { 'Authorization': 'Bearer ' + googleCred, 'Content-Type': 'application/json' },
@@ -711,7 +711,7 @@
       if (cached) applyCleaningData(JSON.parse(cached));
     } catch (e) { /* ignore */ }
 
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     if (!googleCred) return;
     fetch('/api/cleaning', { headers: { 'Authorization': 'Bearer ' + googleCred } })
       .then(function (res) { return res.json(); })
@@ -739,7 +739,7 @@
     } catch (e) { /* ignore */ }
 
     // Fetch fresh photos in the background
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     if (!googleCred) return;
 
     fetch('/api/photos', { headers: { 'Authorization': 'Bearer ' + googleCred } })
@@ -807,7 +807,7 @@
       if (cached) renderCalendar(JSON.parse(cached));
     } catch (e) { /* ignore */ }
 
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     if (!googleCred) return;
 
     fetch('/api/calendar', { headers: { 'Authorization': 'Bearer ' + googleCred } })
@@ -949,12 +949,16 @@
   function showLogin() {
     if (loginSection) loginSection.style.display = '';
     if (dashboard) dashboard.classList.remove('visible');
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
   }
 
-  // Check for existing session
+  // Check for existing session. We only show the dashboard when the stored
+  // Google credential is still valid (exp claim in the future). If the token
+  // has expired but the user was previously signed in, initGoogleSignIn()
+  // will call google.accounts.id.prompt() below to silently refresh it —
+  // that flow fires handleGoogleSignIn → showDashboard automatically.
   if (loginSection && dashboard) {
-    if (sessionStorage.getItem(SESSION_KEY) === 'true') {
+    if (localStorage.getItem(SESSION_KEY) === 'true' && hasValidStoredCredential()) {
       showDashboard();
     }
 
@@ -968,9 +972,9 @@
           localStorage.removeItem(CACHE_PHOTOS_KEY);
           localStorage.removeItem(CACHE_CLEANING_KEY);
           sessionStorage.removeItem(VIEW_AS_KEY);
-          sessionStorage.removeItem('rw_google_credential');
-          sessionStorage.removeItem('rw_user_email');
-          sessionStorage.removeItem('rw_user_name');
+          localStorage.removeItem('rw_google_credential');
+          localStorage.removeItem('rw_user_email');
+          localStorage.removeItem('rw_user_name');
         } catch (e) { /* ignore */ }
         if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
           try { google.accounts.id.disableAutoSelect(); } catch (e) { /* ignore */ }
@@ -3187,7 +3191,7 @@
   }
 
   function cleaningApiCall(method, params, body) {
-    var googleCred = sessionStorage.getItem('rw_google_credential');
+    var googleCred = localStorage.getItem('rw_google_credential');
     var url = '/api/cleaning' + (params ? '?' + params : '');
     var opts = { method: method, headers: { 'Authorization': 'Bearer ' + googleCred, 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
@@ -3268,7 +3272,7 @@
     }, Promise.resolve()).then(function () {
       // Refresh local cleaningDB so subsequent findAssignmentId calls work.
       return fetch('/api/cleaning', {
-        headers: { 'Authorization': 'Bearer ' + sessionStorage.getItem('rw_google_credential') }
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
       }).then(function (r) { return r.json(); }).then(function (data) {
         if (data && !data.error) applyCleaningData(data);
       });
@@ -3937,7 +3941,7 @@
   function computeSupplyClosetCanEdit() {
     // True only for the Supply Coordinator. communications@ is the app-wide
     // super user and can always edit (including while impersonating via View As).
-    var realEmail = sessionStorage.getItem('rw_user_email');
+    var realEmail = localStorage.getItem('rw_user_email');
     if (realEmail === COMMS_EMAIL) return true;
     var email = getActiveEmail();
     if (!email) return false;
@@ -3953,7 +3957,7 @@
   }
 
   function fetchSupplyCloset() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return Promise.reject(new Error('Not authenticated'));
     return fetch('/api/supply-closet', {
       headers: { 'Authorization': 'Bearer ' + cred }
@@ -3961,7 +3965,7 @@
   }
 
   function fetchSupplyLocations() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return Promise.reject(new Error('Not authenticated'));
     return fetch('/api/supply-closet?action=locations', {
       headers: { 'Authorization': 'Bearer ' + cred }
@@ -4267,7 +4271,7 @@
   }
 
   function wireLocationManagerEvents() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     var headers = { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' };
 
     // Close
@@ -4392,7 +4396,7 @@
   }
 
   function doDeleteLocation(id, moveTo, btn) {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     var headers = { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' };
     var url = '/api/supply-closet?action=locations&id=' + encodeURIComponent(id);
     if (moveTo) url += '&moveTo=' + encodeURIComponent(moveTo);
@@ -4521,7 +4525,7 @@
         btn.disabled = true;
         btn.textContent = 'Saving...';
 
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         var url = '/api/supply-closet';
         var method = 'POST';
         if (idAttr !== 'new') {
@@ -4548,7 +4552,7 @@
       btn.addEventListener('click', function () {
         if (!confirm('Delete this item from the inventory?')) return;
         var id = btn.getAttribute('data-id');
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
           method: 'DELETE',
           headers: { 'Authorization': 'Bearer ' + cred }
@@ -4582,7 +4586,7 @@
     var current = (supplyClosetState.items || []).find(function (it) { return it.id === id; });
     var nextLevel = current && current.quantity_level === level ? null : level;
     supplyClosetState.qtyBusyId = id;
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     updateSupplyClosetListOnly();
     fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=quantity', {
       method: 'PATCH',
@@ -4617,7 +4621,7 @@
     var id = parseInt(this.getAttribute('data-id'), 10);
     if (!id) return;
     supplyClosetState.flaggingId = id;
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     // Optimistically re-render busy state
     renderSupplyClosetModal();
     fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=flag', {
@@ -4645,7 +4649,7 @@
     var id = parseInt(this.getAttribute('data-id'), 10);
     if (!id) return;
     supplyClosetState.flaggingId = id;
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     renderSupplyClosetModal();
     fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=unflag', {
       method: 'POST',
@@ -4752,7 +4756,7 @@
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     var url = '/api/supply-closet';
     var method = 'POST';
     if (idAttr !== 'new') {
@@ -4776,7 +4780,7 @@
   function handleSupplyClosetDelete() {
     if (!confirm('Delete this item from the inventory?')) return;
     var id = this.getAttribute('data-id');
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + cred }
@@ -4884,7 +4888,7 @@
 
   function loadClosetItemsForEditor() {
     if (curriculumState.closetItems) return Promise.resolve();
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     return fetch('/api/supply-closet', {
       headers: { 'Authorization': 'Bearer ' + cred }
     }).then(function (r) { return r.json(); }).then(function (data) {
@@ -4991,7 +4995,7 @@
   }
 
   function currentUserIsBoard() {
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
       if (FAMILIES[i].email === email && FAMILIES[i].boardRole) return true;
@@ -5002,7 +5006,7 @@
   // Returns an array of teaching/assisting assignments for the current user
   // across all sessions. Used to pre-fill the curriculum editor.
   function getMyTeachingAssignments() {
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     if (!email) return [];
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
@@ -5098,7 +5102,7 @@
 
   function canEditCurriculum(curr) {
     if (!curr) return false;
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     if (!email) return false;
     if (curr.edit_policy === 'open') return true;
     if (curr.author_email === email) return true;
@@ -5111,7 +5115,7 @@
   }
 
   function curriculumFetchInner(url, options, isRetry) {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     options = options || {};
     options.headers = Object.assign({
       'Authorization': 'Bearer ' + cred,
@@ -5144,10 +5148,10 @@
         resolve(false);
         return;
       }
-      var oldCred = sessionStorage.getItem('rw_google_credential');
+      var oldCred = localStorage.getItem('rw_google_credential');
       var done = false;
       function check() {
-        var c = sessionStorage.getItem('rw_google_credential');
+        var c = localStorage.getItem('rw_google_credential');
         if (c && c !== oldCred) { done = true; resolve(true); }
       }
       // Watch for the existing Google sign-in callback to update sessionStorage
@@ -5653,7 +5657,7 @@
         var linkSession = parseInt(parts[parts.length - 1], 10);
         var linkKey = parts.slice(0, -1).join(':');
         if (linkKey && linkSession) {
-          var cred = sessionStorage.getItem('rw_google_credential');
+          var cred = localStorage.getItem('rw_google_credential');
           fetch('/api/curriculum?action=link', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
@@ -6515,8 +6519,8 @@
   // Render tabs on load
   renderCoordinationTabs();
 
-  // Render on load if already logged in
-  if (sessionStorage.getItem(SESSION_KEY) === 'true') {
+  // Render on load if already logged in with a non-expired credential.
+  if (localStorage.getItem(SESSION_KEY) === 'true' && hasValidStoredCredential()) {
     renderMyFamily();
   }
 
@@ -6532,13 +6536,33 @@
   // Optional: restrict to your Google Workspace domain
   var ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
+  // True when localStorage holds a Google credential whose `exp` claim is
+  // still in the future. Used to decide whether to attempt a silent reauth
+  // on page load.
+  function hasValidStoredCredential() {
+    try {
+      var cred = localStorage.getItem('rw_google_credential');
+      if (!cred) return false;
+      var payload = JSON.parse(atob(cred.split('.')[1]));
+      if (!payload || !payload.exp) return false;
+      return (payload.exp * 1000) > Date.now();
+    } catch (e) { return false; }
+  }
+
   function initGoogleSignIn() {
     if (!GOOGLE_CLIENT_ID || typeof google === 'undefined' || !google.accounts) return false;
     google.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
       callback: handleGoogleSignIn,
-      auto_select: false
+      auto_select: true
     });
+
+    // Attempt silent reauth when we have a stale/missing credential but the
+    // user has previously signed in. With auto_select, Google will fire the
+    // callback silently if there's a single eligible session.
+    if (!hasValidStoredCredential()) {
+      try { google.accounts.id.prompt(); } catch (e) { /* ignore */ }
+    }
 
     var googleBtn = document.getElementById('googleSignInBtn');
     if (googleBtn) {
@@ -6574,10 +6598,10 @@
       }
 
       // Success — store session and credential for API auth
-      sessionStorage.setItem(SESSION_KEY, 'true');
-      sessionStorage.setItem('rw_user_name', payload.name || '');
-      sessionStorage.setItem('rw_user_email', email);
-      sessionStorage.setItem('rw_google_credential', response.credential);
+      localStorage.setItem(SESSION_KEY, 'true');
+      localStorage.setItem('rw_user_name', payload.name || '');
+      localStorage.setItem('rw_user_email', email);
+      localStorage.setItem('rw_google_credential', response.credential);
       showDashboard();
     } catch (err) {
       console.error('Google Sign-In error:', err);
@@ -6755,7 +6779,7 @@
     // Guard against double-open (e.g., rapid double-click)
     if (document.getElementById('absenceOverlay')) return;
 
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     if (!email || !FAMILIES) return;
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
@@ -6884,7 +6908,7 @@
       if (blocks.length === 0) { alert('Please select at least one block.'); return; }
       var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], currentSession, blocks, me.name);
       submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
-      var cred = sessionStorage.getItem('rw_google_credential');
+      var cred = localStorage.getItem('rw_google_credential');
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
       var originalLabel = editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out';
 
@@ -6932,7 +6956,7 @@
   }
 
   function loadCoverageBoard() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/absences?session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
@@ -6983,7 +7007,7 @@
       summaryBadge.className = 'coverage-summary-badge ' + (totalOpenAll > 0 ? 'coverage-summary-open' : 'coverage-summary-ok');
     }
 
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
     var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
@@ -7128,7 +7152,7 @@
       btn.addEventListener('click', function () {
         var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
         btn.disabled = true; btn.textContent = 'Claiming\u2026';
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ slot_id: slotId, claimer_name: myName }) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) { if (!res.ok) { alert('Error: ' + (res.data.error || 'claim failed')); btn.disabled = false; btn.textContent = 'I\'ll Cover This'; return; } loadCoverageBoard(); loadNotifications(); });
@@ -7152,7 +7176,7 @@
         if (!confirm('Remove this coverage assignment?')) return;
         var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
         btn.disabled = true;
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage?id=' + slotId, {
           method: 'PATCH',
           headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
@@ -7224,7 +7248,7 @@
       var assigneeName = val.slice(pipeIdx + 1);
       var btn = document.getElementById('assignCoverageSubmitBtn');
       btn.disabled = true; btn.textContent = 'Assigning\u2026';
-      var cred = sessionStorage.getItem('rw_google_credential');
+      var cred = localStorage.getItem('rw_google_credential');
       fetch('/api/coverage?id=' + slotId, {
         method: 'PATCH',
         headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
@@ -7250,7 +7274,7 @@
     var notesContainer = document.getElementById('coverageNotesArea');
     if (!notesContainer) return;
 
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
     if (!me) return;
@@ -7303,7 +7327,7 @@
     var el = document.getElementById('myAbsencesArea');
     if (!el || !loadedAbsences || loadedAbsences.length === 0) { if (el) el.innerHTML = ''; return; }
 
-    var email = sessionStorage.getItem('rw_user_email');
+    var email = localStorage.getItem('rw_user_email');
     if (!email) return;
 
     var myAbsences = loadedAbsences.filter(function (a) {
@@ -7349,7 +7373,7 @@
           : 'Cancel this absence? Coverage slots will be removed.';
         if (!confirm(msg)) return;
         btn.disabled = true; btn.textContent = 'Cancelling\u2026';
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/absences?id=' + encodeURIComponent(id), {
           method: 'DELETE',
           headers: { 'Authorization': 'Bearer ' + cred }
@@ -7396,7 +7420,7 @@
   // reads that user's notification inbox instead of comms@'s own. This lets
   // the super user triage on behalf of whoever they're helping.
   function notifViewAsSuffix() {
-    var realEmail = sessionStorage.getItem('rw_user_email');
+    var realEmail = localStorage.getItem('rw_user_email');
     if (realEmail !== COMMS_EMAIL) return '';
     var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
     if (!viewAs) return '';
@@ -7404,7 +7428,7 @@
   }
 
   function loadNotifications() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/notifications?limit=20' + notifViewAsSuffix(), { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
@@ -7438,8 +7462,8 @@
     bell.insertAdjacentHTML('afterend', html);
     var dropdown = document.getElementById('notifDropdown');
     var markAllBtn = document.getElementById('notifMarkAllBtn');
-    if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = sessionStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true' + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
-    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function () { var id = item.getAttribute('data-notif-id'); var cred = sessionStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
+    if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true' + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
+    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function () { var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
     setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
   }
 
@@ -7461,7 +7485,7 @@
     enableBtn.addEventListener('click', function () {
       enableBtn.disabled = true; enableBtn.textContent = 'Enabling\u2026';
       navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription().then(function (existing) { if (existing) return existing; var vapidKey = document.querySelector('meta[name="vapid-public-key"]'); if (!vapidKey) throw new Error('VAPID key not found'); return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey.content) }); }); })
-      .then(function (sub) { var cred = sessionStorage.getItem('rw_google_credential'); var subJson = sub.toJSON(); return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) }); })
+      .then(function (sub) { var cred = localStorage.getItem('rw_google_credential'); var subJson = sub.toJSON(); return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) }); })
       .then(function (r) { if (!r.ok) throw new Error('Subscribe failed'); banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { hideBanner(); }, 3000); })
       .catch(function (err) { console.error('Push subscription error:', err); enableBtn.disabled = false; enableBtn.textContent = 'Enable'; if (Notification.permission === 'denied') alert('Notifications are blocked. Please enable them in your browser settings.'); });
     });
@@ -7473,7 +7497,7 @@
   var classLinks = {}; // class_key → { id, curriculum_id, curriculum_title, ... }
 
   function loadClassLinks() {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/curriculum?action=links&session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
@@ -7520,7 +7544,7 @@
         var currId = parseInt(btn.getAttribute('data-curriculum-id'), 10);
         if (!currId) return;
         // Open the curriculum detail
-        var cred = sessionStorage.getItem('rw_google_credential');
+        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/curriculum?id=' + currId, { headers: { 'Authorization': 'Bearer ' + cred } })
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -7589,7 +7613,7 @@
   }
 
   function showClassPack(classKey, curriculumId) {
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/curriculum?id=' + curriculumId, { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
     .then(function (data) {
@@ -7913,7 +7937,7 @@
 
   function showAttachPicker(classKey) {
     // Load curriculum list if not cached
-    var cred = sessionStorage.getItem('rw_google_credential');
+    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/curriculum', { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
     .then(function (data) {
