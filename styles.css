@@ -7908,6 +7908,7 @@ button.staff-role:hover {
   background: rgba(var(--color-coral-rgb), 0.08);
   border-radius: var(--radius-md);
   padding: 10px 14px;
+  margin-top: 14px;
   margin-bottom: 6px;
 }
 .class-allergy-title {
