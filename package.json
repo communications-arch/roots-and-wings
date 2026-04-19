@@ -1,6 +1,9 @@
 {
   "name": "roots-and-wings",
   "private": true,
+  "scripts": {
+    "test": "node scripts/regression.js"
+  },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
     "googleapis": "^144.0.0",

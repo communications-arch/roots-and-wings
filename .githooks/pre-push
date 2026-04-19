@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Block any push whose regression suite fails.
+#
+# Installed by:  git config core.hooksPath .githooks
+# Bypassed by:   git push --no-verify      (use sparingly)
+#
+# The suite runs static syntax + landmine + unit checks and takes a few
+# seconds. If you're pushing a branch that intentionally has WIP failures,
+# --no-verify is the escape hatch.
+
+set -e
+
+echo ""
+echo "pre-push: running regression suite…"
+echo ""
+
+if ! node scripts/regression.js; then
+  echo ""
+  echo "pre-push: regression suite FAILED — push blocked."
+  echo "  Fix the failures above, or re-run with --no-verify to override."
+  exit 1
+fi
+
+echo ""
+echo "pre-push: regression suite passed."
+exit 0
