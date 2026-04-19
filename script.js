@@ -1836,19 +1836,19 @@
       // Show kids in this group
       var groupKids = allPeople.filter(function(person) { return person.type === 'kid' && person.group === p.group; });
       if (groupKids.length > 0) {
+        var studentFullNames = groupKids.map(function (kid) { return kid.name + ' ' + (kid.lastName || kid.family); });
         html += '<h4 class="elective-roster-title">' + groupKids.length + ' Students</h4>';
+        // Allergy / medical alerts surface BEFORE the roster so they're visible
+        // without scrolling on smaller modals.
+        html += studentAllergyCallout(studentFullNames);
         html += '<div class="elective-roster">';
-        var studentFullNames = [];
         groupKids.forEach(function(kid) {
-          var kidFull = kid.name + ' ' + (kid.lastName || kid.family);
-          studentFullNames.push(kidFull);
           html += '<div class="elective-student">';
           html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
           html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + '</div>';
           html += '</div>';
         });
         html += '</div>';
-        html += studentAllergyCallout(studentFullNames);
       }
     }
 
@@ -3059,6 +3059,9 @@
 
     // Student roster
     html += '<h4 class="elective-roster-title">' + elec.students.length + ' Students</h4>';
+    // Allergy / medical alerts surface BEFORE the roster so they're visible
+    // without scrolling on smaller modals.
+    html += studentAllergyCallout(elec.students);
     html += '<div class="elective-roster">';
     elec.students.forEach(function (kidName) {
       var first = kidName.split(' ')[0];
@@ -3070,7 +3073,6 @@
       html += '</div>';
     });
     html += '</div>';
-    html += studentAllergyCallout(elec.students);
 
     // Append role description for leader/assistant
     var activeEmail = getActiveEmail();
@@ -6552,6 +6554,40 @@
       });
   }
 
+  // Print the waiver in a dedicated popup window (matches the Curriculum
+  // Library print pattern). We reuse the already-fetched/cached wv-card HTML
+  // and wrap it in a minimal standalone document with print-friendly styling.
+  function printWaiverInNewWindow() {
+    loadWaiverHtml().then(function (inner) {
+      if (!inner) { alert('Waiver content failed to load — try again.'); return; }
+      var w = window.open('', '_blank', 'width=900,height=800');
+      if (!w) { alert('Could not open print window. Please allow popups for this site and try again.'); return; }
+      var doc = '<!doctype html><html><head><meta charset="utf-8">' +
+        '<title>Member Agreement &amp; Waivers</title>' +
+        '<style>' +
+          'body { font-family: Georgia, "Times New Roman", serif; color: #222; margin: 0.5in; line-height: 1.45; }' +
+          'h1 { font-family: "Playfair Display", Georgia, serif; color: #4a2d3a; font-size: 20pt; margin: 0 0 4pt 0; }' +
+          'h2 { font-family: "Playfair Display", Georgia, serif; color: #4a2d3a; font-size: 14pt; margin: 14pt 0 4pt; page-break-after: avoid; }' +
+          'h3 { font-size: 11pt; margin: 10pt 0 3pt; page-break-after: avoid; }' +
+          'p, li { font-size: 10.5pt; }' +
+          'ul, ol { margin: 4pt 0 8pt 18pt; padding: 0; }' +
+          '.wv-meta { color: #666; font-size: 9pt; margin: 0 0 12pt 0; }' +
+          '.wv-actions, #wv-sign-card { display: none !important; }' +
+          '@media print { @page { margin: 0.5in; } }' +
+        '</style></head><body>' +
+        '<h1>Member Agreement &amp; Waivers</h1>' +
+        '<p class="wv-meta">Reference copy of the agreement families accept when registering.</p>' +
+        inner +
+        '</body></html>';
+      w.document.open();
+      w.document.write(doc);
+      w.document.close();
+      setTimeout(function () {
+        try { w.focus(); w.print(); } catch (e) { /* user can use the browser Print button */ }
+      }, 300);
+    });
+  }
+
   function showWaiverModal() {
     if (!personDetail || !personDetailCard) return;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
@@ -6574,9 +6610,9 @@
       body.innerHTML =
         '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 8px;">Member Agreement &amp; Waivers</h2>' +
         '<p style="color:#555;margin:0 0 16px;">Reference copy of the agreement families accept when registering.</p>' +
-        inner +
+        '<div id="waiverModalContent">' + inner + '</div>' +
         '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;margin-top:20px;">' +
-          '<a href="waiver.html?print=1" target="_blank" rel="noopener" class="btn btn-outline-dark btn-sm">Open / Print</a>' +
+          '<button type="button" class="btn btn-outline-dark btn-sm" id="waiverModalPrint">Print</button>' +
           '<button type="button" class="btn btn-primary btn-sm" id="waiverModalClose">Close</button>' +
         '</div>';
       // Suppress the inline "Print / Save as PDF" and "Back to Member Portal"
@@ -6585,6 +6621,8 @@
       body.querySelectorAll('.wv-actions').forEach(function (el) { el.style.display = 'none'; });
       var closeBtn = document.getElementById('waiverModalClose');
       if (closeBtn) closeBtn.addEventListener('click', closeDetail);
+      var printBtn = document.getElementById('waiverModalPrint');
+      if (printBtn) printBtn.addEventListener('click', printWaiverInNewWindow);
     }).catch(function () {
       var body = document.getElementById('waiverModalBody');
       if (body) body.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
@@ -7760,7 +7798,7 @@
       'h1 { font-size: 20pt; margin: 0 0 2pt 0; }',
       'h2 { font-size: 14pt; margin: 14pt 0 6pt 0; padding-bottom: 3pt; border-bottom: 1.5pt solid #333; }',
       '.meta { color: #555; font-size: 10pt; margin-bottom: 4pt; }',
-      '.class-header { background: #f5f5f5; border: 1.5pt solid #333; padding: 12pt 14pt; margin-bottom: 14pt; }',
+      '.class-header { background: #f5f5f5; border: 1.5pt solid #333; padding: 12pt 14pt; margin-bottom: 14pt; page-break-after: avoid; break-after: avoid; }',
       '.class-header h1 { border: none; padding: 0; }',
       '.class-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 4pt 16pt; font-size: 10pt; margin-top: 6pt; }',
       '.class-detail dt { font-weight: 700; color: #555; }',

@@ -215,16 +215,6 @@
       });
     });
 
-    // Auto-open the browser print dialog when the page is requested via ?print=1
-    // (the members-portal modal uses this to hand off printing to the full page,
-    // since the modal itself doesn't print cleanly). Runs after images/fonts
-    // load so the rendered page is what actually goes to the printer.
-    if (new URLSearchParams(window.location.search).get('print') === '1') {
-      window.addEventListener('load', function () {
-        setTimeout(function () { window.print(); }, 150);
-      });
-    }
-
     // ── Backup Learning Coach signing flow ──
     (function () {
       var params = new URLSearchParams(window.location.search);
