@@ -1,5 +1,5 @@
 // Morning-of reminder cron endpoint
-// Triggered by Vercel Cron at 7 AM ET on Tuesdays
+// Triggered by Vercel Cron at 7 AM ET on Wednesdays (co-op day)
 // Checks for uncovered slots today and broadcasts a reminder
 
 const { neon } = require('@neondatabase/serverless');

@@ -6930,10 +6930,44 @@ button.staff-role:hover {
 }
 .btn-cover:hover { background: var(--color-primary-dark); }
 
+/* Coverage — "Covered" section (who is covering whose role) */
+.coverage-covered-section { margin-bottom: 0.75rem; }
+.coverage-section-label-ok { color: var(--color-primary); }
+
+/* Wrap multiple action buttons on a coverage slot */
+.coverage-slot-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Link-style button used for low-emphasis actions (e.g. VP Unassign) */
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--color-text-light);
+  padding: 0.3rem 0.4rem;
+  font-size: 0.72rem;
+  font-family: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.btn-link:hover { color: var(--color-primary); }
+
+/* Assign-coverage modal subtitle */
+.assign-coverage-slot {
+  margin: 0 0 1rem 0;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+}
+
 @media (max-width: 640px) {
   .notif-dropdown { width: 280px; right: -20px; }
   .absence-modal { padding: 1rem; }
   .coverage-slot { flex-wrap: wrap; }
+  .coverage-slot-actions { width: 100%; justify-content: flex-end; margin-top: 0.35rem; }
 }
 
 /* ── Cleaning Coordinator Edit UI ── */
@@ -7684,4 +7718,37 @@ button.staff-role:hover {
 .pds-empty { font-size: 0.8rem; color: var(--color-text-light); font-style: italic; }
 @media (max-width: 480px) {
   .pds-row { grid-template-columns: 70px 1fr; gap: 0.5rem; }
+}
+
+/* Directory absence / coverage badges */
+.yb-absent-badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--color-coral);
+  background: rgba(var(--color-coral-rgb), 0.1);
+  padding: 2px 6px;
+  border-radius: 8px;
+  margin-top: 5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  max-width: 100%;
+}
+.yb-covering-badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--color-teal);
+  background: rgba(var(--color-teal-rgb), 0.1);
+  padding: 2px 6px;
+  border-radius: 8px;
+  margin-top: 5px;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+.yb-card-absent {
+  border-color: var(--color-coral);
+  background: rgba(var(--color-coral-rgb), 0.04);
 }

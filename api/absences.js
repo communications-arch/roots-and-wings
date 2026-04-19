@@ -8,11 +8,11 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
+const { canEditAsRole } = require('./_permissions');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-const VP_EMAILS = (process.env.VP_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
 async function verifyGoogleAuth(req) {
   const authHeader = req.headers.authorization || '';
@@ -26,9 +26,8 @@ async function verifyGoogleAuth(req) {
   } catch (e) { return null; }
 }
 
-function isVP(email) {
-  return VP_EMAILS.includes(email.toLowerCase());
-}
+// VP resolved from the volunteer sheet — see api/coverage.js for notes.
+function isVP(email) { return canEditAsRole(email, 'Vice President'); }
 
 function getSql() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
@@ -106,10 +105,10 @@ module.exports = async function handler(req, res) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(absence_date)) {
         return res.status(400).json({ error: 'Invalid date format' });
       }
-      // Validate it's a Tuesday
+      // Validate it's a Wednesday (co-op day)
       const dateObj = new Date(absence_date + 'T12:00:00');
-      if (dateObj.getDay() !== 2) {
-        return res.status(400).json({ error: 'absence_date must be a Tuesday' });
+      if (dateObj.getDay() !== 3) {
+        return res.status(400).json({ error: 'absence_date must be a Wednesday' });
       }
 
       // Insert absence
@@ -183,7 +182,7 @@ module.exports = async function handler(req, res) {
       if (existing.length === 0) return res.status(404).json({ error: 'Absence not found' });
 
       // Only original creator or VP can cancel
-      if (existing[0].created_by !== user.email && existing[0].family_email !== user.email && !isVP(user.email)) {
+      if (existing[0].created_by !== user.email && existing[0].family_email !== user.email && !(await isVP(user.email))) {
         return res.status(403).json({ error: 'Not authorized to cancel this absence' });
       }
 

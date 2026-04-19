@@ -209,6 +209,18 @@
     return sessionStorage.getItem('rw_user_email') === COMMS_EMAIL;
   }
 
+  // True when the active user (respecting View As) is the Vice President,
+  // derived from the boardRole assigned in applySheetsData. Backend re-checks
+  // via canEditAsRole against the volunteer sheet, so this only drives UI.
+  function isVP() {
+    var email = getActiveEmail();
+    if (!email) return false;
+    for (var i = 0; i < FAMILIES.length; i++) {
+      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Vice President') return true;
+    }
+    return false;
+  }
+
   function applySheetsData(data) {
     if (!data || data.error) return false;
 
@@ -1177,6 +1189,18 @@
     return AM_CLASSES[f] || (f === 'Teens' && AM_CLASSES['Pigeons']);
   }
 
+  // Nearest upcoming co-op day — returns today's date if today is co-op day,
+  // else the next one. Formatted YYYY-MM-DD.
+  function getNextCoopDate() {
+    var d = new Date();
+    var daysUntil = (3 - d.getDay() + 7) % 7; // 0 if today IS Wednesday
+    d.setDate(d.getDate() + daysUntil);
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
   function renderDirectory() {
     if (!directoryGrid) return;
     var query = (directorySearch ? directorySearch.value : '').toLowerCase();
@@ -1184,6 +1208,34 @@
     var isClassView = isGroupFilter(activeFilter) && !query;
     var html = '';
     var shown = 0;
+
+    // Build the absence/coverage picture for the next co-op day so directory
+    // cards can surface who's out and who's covering for that day.
+    var coopDateIso = getNextCoopDate();
+    var todayIso = new Date().toISOString().slice(0, 10);
+    var coopLabel = coopDateIso === todayIso ? 'today' : formatDateLabel(coopDateIso).replace(/^\w+,\s*/, '');
+    var outByName = {};      // "Amber Furnish" -> true
+    var coveringByName = {}; // "Bobby Furnish" -> ["AM: Saplings Assistant", ...]
+    (loadedAbsences || []).forEach(function (a) {
+      if (String(a.absence_date || '').slice(0, 10) !== coopDateIso) return;
+      if (a.absent_person) outByName[a.absent_person] = true;
+      (a.slots || []).forEach(function (slot) {
+        if (!slot.claimed_by_name) return;
+        if (!coveringByName[slot.claimed_by_name]) coveringByName[slot.claimed_by_name] = [];
+        coveringByName[slot.claimed_by_name].push(slot.role_description);
+      });
+    });
+
+    function absenceTagFor(fullName) {
+      if (outByName[fullName]) return '<div class="yb-absent-badge">Out ' + coopLabel + '</div>';
+      var covs = coveringByName[fullName];
+      if (covs && covs.length > 0) {
+        var first = covs[0];
+        var more = covs.length > 1 ? ' +' + (covs.length - 1) : '';
+        return '<div class="yb-covering-badge">Covering: ' + first + more + '</div>';
+      }
+      return '';
+    }
 
     // ---- Class view (group filter, no search) — cards with extra info ----
     if (isClassView) {
@@ -1276,7 +1328,13 @@
           ? '<div class="yb-board-badge"><span class="yb-board-emoji">' + (boardEmojis[person.boardRole] || '\u{1F331}') + '</span> ' + person.boardRole + '</div>'
           : '';
 
-        html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
+        // Absences/coverage are parent-level (only learning coaches are ever
+        // marked "out"); kids show through the parent card.
+        var absenceTag = person.type === 'parent'
+          ? absenceTagFor(person.name + ' ' + (person.lastName || person.family))
+          : '';
+
+        html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
@@ -1284,6 +1342,7 @@
           pronounTag +
           '<div class="yb-family">' + person.family + ' Family</div>' +
           parentOfTag +
+          absenceTag +
           '</button>';
         shown++;
       });
@@ -1457,12 +1516,12 @@
     // If the person has nothing in any block, skip the section entirely.
     if (am.length === 0 && pm1.length === 0 && pm2.length === 0) return '';
 
-    // Header wording: if today is a Tuesday within the active session, call
-    // it "Today at Co-op"; otherwise frame it around the current session.
+    // Header wording: if today is the co-op day (Wednesday) within the active
+    // session, call it "Today at Co-op"; otherwise frame it around the session.
     var d = new Date();
     var nowIso = d.toISOString().slice(0, 10);
-    var isCoopTuesday = d.getDay() === 2 && nowIso >= sessInfo.start && nowIso <= sessInfo.end;
-    var title = isCoopTuesday ? "Today at Co-op" : "Co-op Schedule";
+    var isCoopDay = d.getDay() === COOP_DAY_OF_WEEK && nowIso >= sessInfo.start && nowIso <= sessInfo.end;
+    var title = isCoopDay ? "Today at Co-op" : "Co-op Schedule";
     var subtitle = esc(sessInfo.name);
 
     function renderBlock(label, times, items) {
@@ -2777,10 +2836,10 @@
     // Render data that may already be loaded from async fetches.
     // Re-render the coverage board so it survives renderMyFamily() being
     // called again by loadCleaningData / loadRoleDescriptions / loadLiveData —
-    // those swap grid.innerHTML, which destroys #coverageBoardCard.
-    if (loadedAbsences && loadedAbsences.length > 0) {
-      renderCoverageBoard(loadedAbsences);
-    }
+    // those swap grid.innerHTML, which destroys #coverageBoardCard. We always
+    // call this (even with an empty array) so the VP's empty-state card
+    // survives re-renders too.
+    renderCoverageBoard(loadedAbsences || []);
     if (Object.keys(classLinks).length > 0) {
       updateClassLinkButtons();
     }
@@ -6564,25 +6623,29 @@
   // ABSENCE & COVERAGE SYSTEM (inside IIFE for scope access)
   // ═══════════════════════════════════════════════════════
 
-  window._rw_getTuesdaysInSession = getTuesdaysInSession;
+  window._rw_getCoopDatesInSession = getCoopDatesInSession;
   window._rw_showAbsenceModal = showAbsenceModal;
   window._rw_loadCoverageBoard = loadCoverageBoard;
   window._rw_loadNotifications = loadNotifications;
   window._rw_initAbsenceCoverageSystem = initAbsenceCoverageSystem;
   window._rw_initPushSubscription = initPushSubscription;
 
-  function getTuesdaysInSession(sessionNumber) {
+  // Returns an array of YYYY-MM-DD strings for every co-op day (Wednesday)
+  // within the session window. Named generically so a future day-of-week
+  // change is a single-constant edit.
+  var COOP_DAY_OF_WEEK = 3; // 0=Sun, 3=Wed
+  function getCoopDatesInSession(sessionNumber) {
     var sess = SESSION_DATES[sessionNumber];
     if (!sess) return [];
-    var tuesdays = [];
+    var dates = [];
     var d = new Date(sess.start + 'T12:00:00');
     var end = new Date(sess.end + 'T12:00:00');
-    while (d.getDay() !== 2) d.setDate(d.getDate() + 1);
+    while (d.getDay() !== COOP_DAY_OF_WEEK) d.setDate(d.getDate() + 1);
     while (d <= end) {
-      tuesdays.push(d.toISOString().slice(0, 10));
+      dates.push(d.toISOString().slice(0, 10));
       d.setDate(d.getDate() + 7);
     }
-    return tuesdays;
+    return dates;
   }
 
   function formatDateLabel(isoDate) {
@@ -6697,8 +6760,8 @@
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
     if (!me) { alert('Could not find your family record.'); return; }
-    var tuesdays = getTuesdaysInSession(currentSession);
-    if (tuesdays.length === 0) { alert('No session dates available.'); return; }
+    var coopDates = getCoopDatesInSession(currentSession);
+    if (coopDates.length === 0) { alert('No session dates available.'); return; }
 
     var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
 
@@ -6717,7 +6780,7 @@
     var prefillNotes = prefill && prefill.notes ? String(prefill.notes) : '';
 
     // If the prefilled date isn't in the current session window, surface it at the top
-    if (prefillDate && tuesdays.indexOf(prefillDate) === -1) tuesdays.unshift(prefillDate);
+    if (prefillDate && coopDates.indexOf(prefillDate) === -1) coopDates.unshift(prefillDate);
 
     var blockLabelsModal = { AM: 'AM (10:00\u201312:00)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
 
@@ -6738,7 +6801,7 @@
     });
     html += '</select></div>';
     html += '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
-    tuesdays.forEach(function (d, idx) {
+    coopDates.forEach(function (d, idx) {
       var isActive = prefillDate ? (d === prefillDate) : (idx === 0);
       html += '<button class="absence-date-btn' + (isActive ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
     });
@@ -6767,7 +6830,7 @@
     document.body.insertAdjacentHTML('beforeend', html);
 
     var overlay = document.getElementById('absenceOverlay');
-    var selectedDate = (prefillDate && tuesdays.indexOf(prefillDate) !== -1) ? prefillDate : tuesdays[0];
+    var selectedDate = (prefillDate && coopDates.indexOf(prefillDate) !== -1) ? prefillDate : coopDates[0];
     var selectedPerson = (prefillPerson && parentNames.indexOf(prefillPerson) !== -1) ? prefillPerson : parentNames[0];
 
     function getSelectedBlocks() {
@@ -6882,11 +6945,29 @@
 
   function renderCoverageBoard(absences) {
     loadedAbsences = absences;
+    // Re-render the directory so absence/coverage badges appear on person cards.
+    if (typeof renderDirectory === 'function') renderDirectory();
     var el = document.getElementById('coverageBoardContent');
     var card = document.getElementById('coverageBoardCard');
     if (!el) return;
+
+    var isVpUser = isVP();
+
+    // Non-VP users: hide the card entirely when there's nothing to show.
+    // VP always sees it (empty state below) because they're responsible for
+    // making sure every position is filled.
     if (absences.length === 0) {
-      if (card) card.style.display = 'none';
+      if (isVpUser) {
+        if (card) card.style.display = '';
+        var summaryBadge0 = document.getElementById('coverageSummaryBadge');
+        if (summaryBadge0) {
+          summaryBadge0.textContent = 'All clear';
+          summaryBadge0.className = 'coverage-summary-badge coverage-summary-ok';
+        }
+        el.innerHTML = '<div class="coverage-empty">No absences reported for this session. You\u2019ll see coverage here as soon as someone reports one.</div>';
+      } else {
+        if (card) card.style.display = 'none';
+      }
       updateCoverageNotes();
       renderMyAbsences();
       return;
@@ -6915,9 +6996,16 @@
       byDate[dateKey].push(a);
     });
 
-    var tuesdays = getTuesdaysInSession(currentSession);
-    var activeDates = tuesdays.filter(function (d) { return byDate[d] && byDate[d].length > 0; });
-    if (activeDates.length === 0) { if (card) card.style.display = 'none'; return; }
+    var coopDates = getCoopDatesInSession(currentSession);
+    var activeDates = coopDates.filter(function (d) { return byDate[d] && byDate[d].length > 0; });
+    if (activeDates.length === 0) {
+      if (isVpUser) {
+        el.innerHTML = '<div class="coverage-empty">No absences reported for any upcoming co-op day this session.</div>';
+      } else if (card) {
+        card.style.display = 'none';
+      }
+      return;
+    }
 
     // Find default tab — first date with open slots
     var defaultDate = activeDates[0];
@@ -6941,19 +7029,22 @@
     });
     html += '</div>';
 
-    // Build panels — primary view: open slots only, detail view: all coverage
+    // Build panels — primary view shows both open ("Needs Coverage") and
+    // filled slots ("Covered"); detail view keeps the per-person breakdown.
     activeDates.forEach(function (date) {
       var dateAbsences = byDate[date] || [];
       var isActive = date === defaultDate;
 
       // Collect open and covered slots
       var openSlots = [];
+      var coveredSlots = [];
       var allSlotsByPerson = [];
       dateAbsences.forEach(function (a) {
         var personSlots = { person: a.absent_person, notes: a.notes, slots: [] };
         (a.slots || []).forEach(function (slot) {
           slot._person = a.absent_person;
-          if (!slot.claimed_by_email) openSlots.push(slot);
+          if (slot.claimed_by_email) coveredSlots.push(slot);
+          else openSlots.push(slot);
           personSlots.slots.push(slot);
         });
         allSlotsByPerson.push(personSlots);
@@ -6969,12 +7060,35 @@
           html += '<div class="coverage-slot coverage-slot-open">';
           html += '<span class="coverage-slot-block">' + slot.block + '</span>';
           html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span></span>';
+          html += '<span class="coverage-slot-actions">';
           html += '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '">I\'ll Cover This</button>';
+          if (isVpUser) html += '<button class="btn btn-sm btn-outline btn-assign" data-slot-id="' + slot.id + '" data-slot-desc="' + (slot.role_description || '').replace(/"/g, '&quot;') + '" data-slot-date="' + date + '">Assign\u2026</button>';
+          html += '</span>';
           html += '</div>';
         });
         html += '</div>';
       } else {
         html += '<div class="coverage-all-covered">All slots covered for this day!</div>';
+      }
+
+      // ── Primary: who is covering whose role (always visible) ──
+      if (coveredSlots.length > 0) {
+        html += '<div class="coverage-covered-section">';
+        html += '<div class="coverage-section-label coverage-section-label-ok">Covered</div>';
+        coveredSlots.forEach(function (slot) {
+          html += '<div class="coverage-slot coverage-slot-covered">';
+          html += '<span class="coverage-slot-block">' + slot.block + '</span>';
+          html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span></span>';
+          html += '<span class="coverage-slot-claimer">Covered by <strong>' + (slot.claimed_by_name || slot.claimed_by_email) + '</strong></span>';
+          if (isVpUser) {
+            html += '<span class="coverage-slot-actions">';
+            html += '<button class="btn btn-sm btn-outline btn-reassign" data-slot-id="' + slot.id + '" data-slot-desc="' + (slot.role_description || '').replace(/"/g, '&quot;') + '" data-slot-date="' + date + '">Reassign</button>';
+            html += '<button class="btn btn-sm btn-link btn-unassign" data-slot-id="' + slot.id + '" title="Remove coverage">Unassign</button>';
+            html += '</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
       }
 
       // ── Secondary: full detail (collapsed by default) ──
@@ -7021,9 +7135,112 @@
       });
     });
 
+    // Wire VP assign/reassign buttons
+    el.querySelectorAll('.btn-assign, .btn-reassign').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showAssignCoverageModal({
+          slotId: parseInt(btn.getAttribute('data-slot-id'), 10),
+          slotDesc: btn.getAttribute('data-slot-desc') || '',
+          slotDate: btn.getAttribute('data-slot-date') || ''
+        });
+      });
+    });
+
+    // Wire VP unassign buttons
+    el.querySelectorAll('.btn-unassign').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!confirm('Remove this coverage assignment?')) return;
+        var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
+        btn.disabled = true;
+        var cred = sessionStorage.getItem('rw_google_credential');
+        fetch('/api/coverage?id=' + slotId, {
+          method: 'PATCH',
+          headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ claimed_by_email: '', claimed_by_name: '' })
+        })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert('Error: ' + (res.data.error || 'unassign failed')); btn.disabled = false; return; }
+          loadCoverageBoard();
+        });
+      });
+    });
+
     // Update responsibility coverage notes and my absences
     updateCoverageNotes();
     renderMyAbsences();
+  }
+
+  // ── VP: assign/reassign a coverage slot to any family ────────────────────
+  function showAssignCoverageModal(opts) {
+    if (document.getElementById('assignCoverageOverlay')) return;
+    var slotId = opts.slotId;
+    var slotDesc = opts.slotDesc || 'this slot';
+    var dateLabel = opts.slotDate ? formatDateLabel(opts.slotDate) : '';
+
+    // Build a flat list of parents across all families (sorted by last name)
+    // so the VP can pick any individual who might cover.
+    var people = [];
+    FAMILIES.forEach(function (fam) {
+      if (!fam.email) return;
+      (fam.parents || '').split(/\s*&\s*/).forEach(function (first) {
+        var firstClean = first.trim();
+        if (!firstClean) return;
+        people.push({
+          email: fam.email,
+          displayName: firstClean + ' ' + fam.name,
+          sortKey: (fam.name + ' ' + firstClean).toLowerCase()
+        });
+      });
+    });
+    people.sort(function (a, b) { return a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0; });
+
+    var html = '<div class="absence-overlay" id="assignCoverageOverlay"><div class="absence-modal">';
+    html += '<button class="detail-close absence-close" id="assignCoverageCloseBtn" aria-label="Close">&times;</button>';
+    html += '<h3>Assign Coverage</h3>';
+    html += '<p class="assign-coverage-slot"><strong>' + slotDesc + '</strong>' + (dateLabel ? ' \u00b7 ' + dateLabel : '') + '</p>';
+    html += '<div class="absence-field"><label>Who will cover this?</label>';
+    html += '<select class="cl-input" id="assignCoveragePerson">';
+    html += '<option value="">\u2014 Pick a person \u2014</option>';
+    people.forEach(function (p) {
+      html += '<option value="' + p.email + '|' + p.displayName.replace(/\|/g, '') + '">' + p.displayName + '</option>';
+    });
+    html += '</select></div>';
+    html += '<button class="btn btn-primary absence-submit" id="assignCoverageSubmitBtn">Assign</button>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+
+    var overlay = document.getElementById('assignCoverageOverlay');
+    function close() { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    document.getElementById('assignCoverageCloseBtn').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    document.getElementById('assignCoverageSubmitBtn').addEventListener('click', function () {
+      var sel = document.getElementById('assignCoveragePerson');
+      var val = sel ? sel.value : '';
+      if (!val) { alert('Please pick a person.'); return; }
+      var pipeIdx = val.indexOf('|');
+      var assigneeEmail = val.slice(0, pipeIdx);
+      var assigneeName = val.slice(pipeIdx + 1);
+      var btn = document.getElementById('assignCoverageSubmitBtn');
+      btn.disabled = true; btn.textContent = 'Assigning\u2026';
+      var cred = sessionStorage.getItem('rw_google_credential');
+      fetch('/api/coverage?id=' + slotId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claimed_by_email: assigneeEmail, claimed_by_name: assigneeName })
+      })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          alert('Error: ' + (res.data.error || 'assign failed'));
+          btn.disabled = false; btn.textContent = 'Assign';
+          return;
+        }
+        close();
+        loadCoverageBoard();
+      });
+    });
   }
 
   // Add coverage notes to the responsibilities card

@@ -8,11 +8,11 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { sendToUser } = require('./_push');
+const { canEditAsRole } = require('./_permissions');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-const VP_EMAILS = (process.env.VP_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
 async function verifyGoogleAuth(req) {
   const authHeader = req.headers.authorization || '';
@@ -26,7 +26,10 @@ async function verifyGoogleAuth(req) {
   } catch (e) { return null; }
 }
 
-function isVP(email) { return VP_EMAILS.includes(email.toLowerCase()); }
+// VP is resolved from the volunteer sheet ("Chair: Vice President - <name>"),
+// so Colleen's personal @rootsandwingsindy.com login authorizes automatically
+// — no env var update needed when the role changes hands.
+function isVP(email) { return canEditAsRole(email, 'Vice President'); }
 
 function getSql() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
@@ -89,7 +92,7 @@ module.exports = async function handler(req, res) {
 
     // ── PATCH: VP reassign ──
     if (req.method === 'PATCH') {
-      if (!isVP(user.email)) return res.status(403).json({ error: 'Only the VP can reassign slots' });
+      if (!(await isVP(user.email))) return res.status(403).json({ error: 'Only the VP can reassign slots' });
 
       const id = parseInt(req.query.id, 10);
       if (!id) return res.status(400).json({ error: 'id query param required' });
@@ -146,7 +149,7 @@ module.exports = async function handler(req, res) {
       if (slot.length === 0) return res.status(404).json({ error: 'Slot not found' });
 
       // Only the claimer or VP can unclaim
-      if (slot[0].claimed_by_email !== user.email && !isVP(user.email)) {
+      if (slot[0].claimed_by_email !== user.email && !(await isVP(user.email))) {
         return res.status(403).json({ error: 'Not authorized' });
       }
 
