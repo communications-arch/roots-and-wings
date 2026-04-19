@@ -6849,15 +6849,20 @@ button.staff-role:hover {
   margin-top: 0.25rem;
 }
 .my-absence-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "info actions"
+    "slots slots";
+  align-items: start;
+  column-gap: 0.5rem;
   padding: 0.45rem 0;
   border-bottom: 1px solid rgba(0,0,0,0.04);
 }
 .my-absence-row:last-child { border-bottom: none; }
 .my-absence-info {
-  flex: 1;
+  grid-area: info;
+  min-width: 0;
   font-size: 0.82rem;
 }
 .my-absence-detail {
@@ -6866,16 +6871,20 @@ button.staff-role:hover {
   margin-top: 0.1rem;
 }
 .my-absence-actions {
+  grid-area: actions;
   display: flex;
   gap: 0.3rem;
   flex-shrink: 0;
+  align-self: start;
 }
 .my-absence-slots {
+  grid-area: slots;
   list-style: none;
-  margin: 0.3rem 0 0 0;
+  margin: 0.35rem 0 0 0;
   padding: 0;
   font-size: 0.72rem;
   line-height: 1.35;
+  width: 100%;
 }
 .my-absence-slot {
   padding: 0.2rem 0.5rem;

@@ -7378,7 +7378,14 @@
       html += '<div class="my-absence-info">';
       html += '<strong>' + dateLabel + '</strong> \u00b7 ' + a.absent_person;
       html += '<div class="my-absence-detail">' + blocks + statusText + '</div>';
+      html += '</div>';
+      html += '<div class="my-absence-actions">';
+      html += '<button class="sc-btn my-absence-edit" data-absence-id="' + a.id + '">Edit</button>';
+      html += '<button class="sc-btn sc-btn-del my-absence-cancel" data-absence-id="' + a.id + '">Cancel</button>';
+      html += '</div>';
       // Per-slot coverage status so the user sees who's covering each role.
+      // Rendered as a direct child of .my-absence-row so it spans the full
+      // card width on its own grid row (below info + actions).
       if (totalSlots > 0) {
         html += '<ul class="my-absence-slots">';
         (a.slots || []).forEach(function (s) {
@@ -7391,11 +7398,6 @@
         });
         html += '</ul>';
       }
-      html += '</div>';
-      html += '<div class="my-absence-actions">';
-      html += '<button class="sc-btn my-absence-edit" data-absence-id="' + a.id + '">Edit</button>';
-      html += '<button class="sc-btn sc-btn-del my-absence-cancel" data-absence-id="' + a.id + '">Cancel</button>';
-      html += '</div>';
       html += '</div>';
     });
     html += '</div>';
