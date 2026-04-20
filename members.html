@@ -158,20 +158,20 @@
     <!-- ====== Page-level mode switcher: Workspace / Info ====== -->
     <nav class="page-mode-nav" role="tablist" aria-label="Page mode">
       <div class="container">
-        <button class="page-mode-btn active" role="tab" data-mode="workspace">My Workspace</button>
-        <button class="page-mode-btn" role="tab" data-mode="info">Co-op Info</button>
+        <button class="page-mode-btn active" role="tab" data-mode="info">Co-op Info</button>
+        <button class="page-mode-btn" role="tab" data-mode="workspace">My Workspace</button>
       </div>
     </nav>
 
     <!-- ====== My Workspace (top-level mode) — role-based doing-stuff area ====== -->
-    <section class="page-mode-panel active" id="page-workspace" role="tabpanel">
+    <section class="page-mode-panel" id="page-workspace" role="tabpanel" style="display:none;">
       <div class="container">
         <div id="workspaceTabContent"></div>
       </div>
     </section>
 
-    <!-- ====== Co-op Info (top-level mode) — everything else ====== -->
-    <div class="page-mode-panel" id="page-info" role="tabpanel" style="display:none;">
+    <!-- ====== Co-op Info (top-level mode) — everything else (default) ====== -->
+    <div class="page-mode-panel active" id="page-info" role="tabpanel">
 
     <!-- ====== My Family Dashboard ====== -->
     <section class="my-family-section" id="myFamily" style="display:none;">
@@ -501,6 +501,6 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=BAAEXrFcNz-Q5sFay27KpbAs3d29W3AdjACtLpfAJXN5XshPFGjdnKD7ueLJcdHCNUNlhk7YigOuyoB1HQ&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260419d"></script>
+  <script src="script.js?v=20260419e"></script>
 </body>
 </html>

@@ -18,6 +18,20 @@ const SUPER_USER_EMAIL = 'communications@rootsandwingsindy.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const ROLE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Abbreviated titles in the volunteer sheet are normalised to their canonical
+// form so permission checks can use the full title (matches client-side
+// BOARD_TITLE_MAP in script.js).
+const TITLE_NORMALIZATIONS = {
+  'communications dir.': 'Communications Director',
+  'membership dir.': 'Membership Director',
+  'sustaining dir.': 'Sustaining Director'
+};
+function normalizeTitle(title) {
+  if (!title) return title;
+  const key = String(title).trim().toLowerCase();
+  return TITLE_NORMALIZATIONS[key] || title;
+}
+
 let roleCache = null; // { fetchedAt, roleHolders: { roleTitle_lowercase: email } }
 
 function getSheetsClient() {
@@ -87,9 +101,9 @@ function parseVolunteerRoles(rows) {
       const parts = label.replace(/^Chair:\s*/i, '');
       const dashIdx = parts.lastIndexOf('-');
       if (dashIdx <= -1) continue;
-      const title = parts.substring(0, dashIdx).trim();
+      const rawTitle = parts.substring(0, dashIdx).trim();
       const person = parts.substring(dashIdx + 1).trim();
-      if (title && person) out.push({ title, person });
+      if (rawTitle && person) out.push({ title: normalizeTitle(rawTitle), person });
       continue;
     }
 
@@ -98,7 +112,7 @@ function parseVolunteerRoles(rows) {
 
     // Regular role rows require a person in col 2.
     if (!value) continue;
-    out.push({ title: label, person: value });
+    out.push({ title: normalizeTitle(label), person: value });
   }
   return out;
 }
