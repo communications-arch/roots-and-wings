@@ -8236,6 +8236,27 @@ button.staff-role:hover {
   background: rgba(82, 58, 121, 0.06);
   text-decoration: underline;
 }
+/* Buttons inside the link list (for actions like waiver/curriculum that open
+   in-app modals instead of linking out). Styled to match the anchor rows. */
+.ws-link-list li .ws-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--color-primary);
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.ws-link-list li .ws-link-btn:hover {
+  background: rgba(82, 58, 121, 0.06);
+  text-decoration: underline;
+}
 .ws-link-icon {
   display: inline-flex;
   width: 20px;

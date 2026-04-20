@@ -19,7 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.png?v=20260417d" as="image">
   <link rel="preload" href="logo-combined-mark.png?v=20260417d" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260420f">
+  <link rel="stylesheet" href="styles.css?v=20260420g">
   <link rel="icon" href="favicon-32.png?v=20260417d" type="image/png" sizes="32x32">
   <script src="https://accounts.google.com/gsi/client" async defer onload="if(window.__initGSI)window.__initGSI()"></script>
 </head>
@@ -80,6 +80,12 @@
           <a href="https://drive.google.com/drive/shared-drives" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Shared Drive" title="Shared Drive">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </a>
+          <button class="nav-icon-btn" onclick="document.getElementById('calendarNavBtn').click()" aria-label="Co-op Calendar" title="Co-op Calendar" style="background:none;border:none;cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </button>
+          <button class="nav-icon-btn" onclick="document.getElementById('addressNavBtn').click()" aria-label="Location &amp; Map" title="Location &amp; Map" style="background:none;border:none;cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </button>
           <button class="nav-icon-btn" onclick="document.getElementById('wifiNavBtn').click()" aria-label="WiFi Info" title="WiFi Info" style="background:none;border:none;cursor:pointer;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
           </button>
@@ -116,6 +122,12 @@
           <a href="https://drive.google.com/drive/shared-drives" class="nav-icon-btn" target="_blank" rel="noopener" aria-label="Shared Drive" title="Shared Drive">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </a>
+          <button class="nav-icon-btn" id="calendarNavBtn" aria-label="Co-op Calendar" title="Co-op Calendar" style="background:none;border:none;cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </button>
+          <button class="nav-icon-btn" id="addressNavBtn" aria-label="Location &amp; Map" title="Location &amp; Map" style="background:none;border:none;cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </button>
           <button class="nav-icon-btn" id="wifiNavBtn" aria-label="WiFi Info" title="WiFi Info" style="background:none;border:none;cursor:pointer;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
           </button>
@@ -150,13 +162,9 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>
           <span>My Workspace</span>
         </a>
-        <a href="#coordination" class="qsb-pill" data-view="info">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span>Coordination</span>
-        </a>
-        <a href="#quick-links" class="qsb-pill" data-view="info">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          <span>Resources</span>
+        <a href="#myFamily" class="qsb-pill" data-view="info">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>My Family</span>
         </a>
       </div>
     </nav>
@@ -179,83 +187,8 @@
       </div>
     </section>
 
-    <!-- ====== Co-op Info (default view) ====== -->
-    <div class="page-mode-panel active" id="page-info">
-
-    <!-- ====== My Family Dashboard ====== -->
-    <section class="my-family-section" id="myFamily" style="display:none;">
-      <div class="container">
-        <div class="my-family-grid" id="myFamilyGrid"></div>
-      </div>
-    </section>
-
-    <!-- ====== Quick Links ====== -->
-    <section class="quick-links" id="quick-links">
-      <div class="container">
-        <h2 class="text-center fade-in">Resources</h2>
-        <div class="links-grid">
-          <div class="link-card link-card-policies fade-in">
-            <div class="link-card-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            </div>
-            <h3>Policies &amp; Guidelines</h3>
-            <ul class="policy-links">
-              <li>
-                <a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener noreferrer">
-                  <span>Member Handbook</span>
-                  <span class="policy-link-arrow">&rsaquo;</span>
-                </a>
-              </li>
-              <li>
-                <button type="button" id="waiverBtn">
-                  <span>Member Agreement &amp; Waivers</span>
-                  <span class="policy-link-arrow">&rsaquo;</span>
-                </button>
-              </li>
-              <li>
-                <a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener noreferrer">
-                  <span>Google Chat Guide</span>
-                  <span class="policy-link-arrow">&rsaquo;</span>
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          <a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" class="link-card fade-in" target="_blank" rel="noopener noreferrer">
-            <div class="link-card-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            </div>
-            <h3>Reimbursement Form</h3>
-            <p>Submit receipts for co-op expenses</p>
-          </a>
-
-          <button class="link-card fade-in" id="curriculumBtn" style="text-align:left;border:none;cursor:pointer;">
-            <div class="link-card-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-            </div>
-            <h3>Curriculum Library</h3>
-            <p>Browse, create, and share 5-week lesson plans</p>
-          </button>
-
-          <button class="link-card fade-in" id="classIdeasBtn" style="text-align:left;border:none;cursor:pointer;">
-            <div class="link-card-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
-            </div>
-            <h3>Class Ideas</h3>
-            <p>Browse and share ideas for future classes</p>
-          </button>
-
-          <button class="link-card fade-in" id="supplyClosetBtn" style="text-align:left;border:none;cursor:pointer;">
-            <div class="link-card-icon" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v4H3z"/><path d="M3 10h18v4H3z"/><path d="M3 17h18v4H3z"/><line x1="8" y1="5" x2="8" y2="5"/><line x1="8" y1="12" x2="8" y2="12"/><line x1="8" y1="19" x2="8" y2="19"/></svg>
-            </div>
-            <h3>Supply Closet Inventory</h3>
-            <p>Browse what's in the closets and cabinets</p>
-          </button>
-
-        </div>
-      </div>
-    </section>
+    <!-- ====== Shared modals (kept as siblings of the page panels so they
+         work from either My Workspace or the My Family / Co-op Info view) ====== -->
 
     <!-- ====== Member Directory (modal overlay, opened from the quick-icon row) ====== -->
     <div class="directory-overlay" id="directoryOverlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="directoryModalTitle">
@@ -295,12 +228,31 @@
       <div class="person-detail-card" id="personDetailCard"></div>
     </div>
 
-    <!-- ====== Calendar ====== -->
-    <section class="portal-calendar" id="calendar">
-      <div class="container">
-        <h2 class="text-center fade-in">Co-op Calendar</h2>
-        <p class="section-subtitle text-center fade-in">Upcoming co-op days, field trips, and events.</p>
-        <div id="calendarEvents" class="calendar-events fade-in" style="background:var(--color-white); border-radius:var(--radius-md); border:1px solid var(--color-border); padding:24px; min-height:200px;">
+    <!-- ====== Calendar modal (opened from the top calendar icon) ====== -->
+    <div class="directory-overlay" id="calendarOverlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="calendarModalTitle">
+      <div class="directory-modal-card" style="max-width:720px;">
+        <button class="detail-close calendar-close" aria-label="Close calendar">&times;</button>
+        <h2 id="calendarModalTitle" class="directory-modal-title">Co-op Calendar</h2>
+        <p class="directory-modal-sub">Upcoming co-op days, field trips, and events.</p>
+
+        <div class="info-card" style="margin-bottom:20px;">
+          <h4>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Wednesday Routine
+          </h4>
+          <table class="schedule-table" style="width:100%;border-collapse:collapse;font-size:0.95rem;margin-bottom:0.75rem;">
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:40–9:45 AM</strong></td><td style="padding:3px 0;">Arrive</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:50 AM</strong></td><td style="padding:3px 0;">Announcements in Fellowship Hall</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>10 AM–12 PM</strong></td><td style="padding:3px 0;">A.M. Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>12–1 PM</strong></td><td style="padding:3px 0;">Lunch (indoor or outdoor) &amp; parent-supervised outdoor play</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:00–1:55 PM</strong></td><td style="padding:3px 0;">1st set of P.M. Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:45–2:55 PM</strong></td><td style="padding:3px 0;">2nd set of P.M. Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:55–3:15 PM</strong></td><td style="padding:3px 0;">Clean Up</td></tr>
+          </table>
+          <p style="font-size:0.85rem;color:var(--color-text-muted);margin:0;"><em>Delays and cancellations due to weather or calendar changes will be posted to the chat announcements and added to the calendars shown on this page.</em></p>
+        </div>
+
+        <div id="calendarEvents" class="calendar-events" style="background:var(--color-white); border-radius:var(--radius-md); border:1px solid var(--color-border); padding:24px; min-height:200px;">
           <div style="text-align:center;color:var(--color-text-light);padding:40px 0;">Loading events...</div>
         </div>
         <div style="display:flex; justify-content:center; margin-top:20px;">
@@ -309,7 +261,38 @@
             Add to Google Calendar
           </a>
         </div>
-        <p class="text-center fade-in" style="font-size:0.85rem; color:var(--color-text-light); margin-top:10px;">Subscribe to stay up to date in your Google Calendar.</p>
+        <p class="text-center" style="font-size:0.85rem; color:var(--color-text-light); margin-top:10px;">Subscribe to stay up to date in your Google Calendar.</p>
+      </div>
+    </div>
+
+    <!-- ====== Address/Map modal (opened from the top pin icon) ====== -->
+    <div class="directory-overlay" id="addressOverlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="addressModalTitle">
+      <div class="directory-modal-card" style="max-width:680px;">
+        <button class="detail-close address-close" aria-label="Close address">&times;</button>
+        <h2 id="addressModalTitle" class="directory-modal-title">Where We Meet</h2>
+        <div class="info-card" style="margin-bottom:16px;">
+          <h4>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            Address
+          </h4>
+          <p>First Mennonite Church<br>4601 Knollton Rd<br>Indianapolis, IN 46228</p>
+          <a href="https://maps.google.com/?q=4601+Knollton+Rd+Indianapolis+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
+        </div>
+        <iframe
+          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3056.8!2d-86.19!3d39.83!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zFirst+Mennonite+Church+Indianapolis!5e0!3m2!1sen!2sus!4v1"
+          width="100%" height="320" style="border:0;border-radius:var(--radius-md);" allowfullscreen loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          title="First Mennonite Church location"></iframe>
+      </div>
+    </div>
+
+    <!-- ====== Co-op Info (default view) — My Family + Coordination + Board + Announcements ====== -->
+    <div class="page-mode-panel active" id="page-info">
+
+    <!-- ====== My Family Dashboard ====== -->
+    <section class="my-family-section" id="myFamily" style="display:none;">
+      <div class="container">
+        <div class="my-family-grid" id="myFamilyGrid"></div>
       </div>
     </section>
 
@@ -353,70 +336,8 @@
       </div>
     </section>
 
-    <!-- ====== Location, Map & Wifi ====== -->
-    <section class="portal-location" id="location">
-      <div class="container">
-        <h2 class="text-center fade-in">Location &amp; Info</h2>
-        <div class="location-grid fade-in">
-          <div class="location-map">
-            <div class="info-card" style="margin-bottom:16px;">
-              <h4>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                Address
-              </h4>
-              <p>First Mennonite Church<br>4601 Knollton Rd<br>Indianapolis, IN 46228</p>
-              <a href="https://maps.google.com/?q=4601+Knollton+Rd+Indianapolis+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
-            </div>
-            <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3056.8!2d-86.19!3d39.83!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zFirst+Mennonite+Church+Indianapolis!5e0!3m2!1sen!2sus!4v1"
-              width="100%" height="300" style="border:0;border-radius:var(--radius-md);" allowfullscreen loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade"
-              title="First Mennonite Church location"></iframe>
-          </div>
-          <div class="location-info">
-            <div class="info-card">
-              <h4>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-                Wifi
-              </h4>
-              <div class="wifi-credentials">
-                <div class="wifi-field">
-                  <span class="wifi-label">Network</span>
-                  <span class="wifi-value">ROOTS</span>
-                </div>
-                <div class="wifi-field">
-                  <span class="wifi-label">Password</span>
-                  <span class="wifi-value">Educ@t3!</span>
-                </div>
-                <div class="wifi-field">
-                  <span class="wifi-label">Security</span>
-                  <span class="wifi-value">WPA2/WPA3</span>
-                </div>
-              </div>
-              <p style="font-size:0.8rem; color:var(--color-text-light); margin-top:10px;">
-                <strong>Note:</strong> The network is hidden — select "Find other/new network" (or similar) on your device the first time. Adults only, except for specific needs like online classes.
-              </p>
-            </div>
-            <div class="info-card">
-              <h4>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Wednesday Routine
-              </h4>
-              <table class="schedule-table" style="width:100%;border-collapse:collapse;font-size:0.95rem;margin-bottom:0.75rem;">
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:40–9:45 AM</strong></td><td style="padding:3px 0;">Arrive</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:50 AM</strong></td><td style="padding:3px 0;">Announcements in Fellowship Hall</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>10 AM–12 PM</strong></td><td style="padding:3px 0;">A.M. Classes</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>12–1 PM</strong></td><td style="padding:3px 0;">Lunch (indoor or outdoor) &amp; parent-supervised outdoor play</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:00–1:55 PM</strong></td><td style="padding:3px 0;">1st set of P.M. Classes</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:45–2:55 PM</strong></td><td style="padding:3px 0;">2nd set of P.M. Classes</td></tr>
-                <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:55–3:15 PM</strong></td><td style="padding:3px 0;">Clean Up</td></tr>
-              </table>
-              <p style="font-size:0.85rem;color:var(--color-text-muted);margin:0;"><em>Delays and cancellations due to weather or calendar changes will be posted to the chat announcements and added to the calendars shown on this page.</em></p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <!-- Address/Map content now lives in #addressOverlay (map pin icon).
+         WiFi has its own icon modal already. -->
 
     <!-- ====== Announcements ====== -->
     <section class="announcements-section" id="announcements">
@@ -514,6 +435,6 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=BAAEXrFcNz-Q5sFay27KpbAs3d29W3AdjACtLpfAJXN5XshPFGjdnKD7ueLJcdHCNUNlhk7YigOuyoB1HQ&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260420f"></script>
+  <script src="script.js?v=20260420g"></script>
 </body>
 </html>

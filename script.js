@@ -2261,6 +2261,64 @@
     }
   });
 
+  // Calendar modal — opened from the calendar nav icon. Events are
+  // populated by loadCalendar() into #calendarEvents regardless of modal
+  // visibility, so the first open is instant if the cache is warm.
+  var calendarOverlay = document.getElementById('calendarOverlay');
+  var calendarNavBtn = document.getElementById('calendarNavBtn');
+  if (calendarOverlay && calendarNavBtn) {
+    calendarNavBtn.addEventListener('click', function () {
+      calendarOverlay.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    });
+    var calClose = calendarOverlay.querySelector('.calendar-close');
+    if (calClose) calClose.addEventListener('click', function () {
+      calendarOverlay.style.display = 'none';
+      document.body.style.overflow = '';
+    });
+    calendarOverlay.addEventListener('click', function (e) {
+      if (e.target === calendarOverlay) {
+        calendarOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && calendarOverlay.style.display === 'flex'
+          && (!personDetail || personDetail.style.display === 'none')) {
+        calendarOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    });
+  }
+
+  // Address modal — opened from the map pin nav icon.
+  var addressOverlay = document.getElementById('addressOverlay');
+  var addressNavBtn = document.getElementById('addressNavBtn');
+  if (addressOverlay && addressNavBtn) {
+    addressNavBtn.addEventListener('click', function () {
+      addressOverlay.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    });
+    var addrClose = addressOverlay.querySelector('.address-close');
+    if (addrClose) addrClose.addEventListener('click', function () {
+      addressOverlay.style.display = 'none';
+      document.body.style.overflow = '';
+    });
+    addressOverlay.addEventListener('click', function (e) {
+      if (e.target === addressOverlay) {
+        addressOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && addressOverlay.style.display === 'flex'
+          && (!personDetail || personDetail.style.display === 'none')) {
+        addressOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    });
+  }
+
   // Board card click handlers
   document.querySelectorAll('.portal-board-card[data-board]').forEach(function (card) {
     card.style.cursor = 'pointer';
@@ -4267,6 +4325,23 @@
         return h;
       }
     },
+    'resources': {
+      title: 'Resources',
+      roleGate: null,
+      render: function () {
+        var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
+        h += '<ul class="ws-link-list">';
+        h += '<li><a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">\u270D</span>Member Agreement &amp; Waivers</button></li>';
+        h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
+        h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCB5</span>Reimbursement Form</a></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="class-ideas"><span class="ws-link-icon">\uD83D\uDCA1</span>Class Ideas</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
+        h += '</ul>';
+        return h;
+      }
+    },
     'my-links': {
       title: 'My Links',
       roleGate: null,
@@ -4351,8 +4426,8 @@
   };
 
   var WORKSPACE_DEFAULTS = {
-    'Communications Director': ['waivers-report', 'send-waiver', 'admin-consoles', 'my-links', 'ways-to-help', 'shared-tools'],
-    '*': ['my-links', 'ways-to-help', 'shared-tools']
+    'Communications Director': ['waivers-report', 'send-waiver', 'admin-consoles', 'my-links', 'ways-to-help', 'shared-tools', 'resources'],
+    '*': ['my-links', 'ways-to-help', 'shared-tools', 'resources']
   };
 
   // Resolve the ordered widget list for a user: union of defaults for each
@@ -7388,6 +7463,18 @@
   if (waiverBtn) {
     waiverBtn.addEventListener('click', showWaiverModal);
   }
+
+  // Delegated click handler for Resources widget buttons (rendered dynamically
+  // inside the Workspace panel, so static IDs don't attach).
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-resource-action]');
+    if (!btn) return;
+    var action = btn.getAttribute('data-resource-action');
+    if (action === 'waiver') showWaiverModal();
+    else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
+    else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
+    else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
+  });
 
   // Render all coordination tabs
   function renderCoordinationTabs() {
