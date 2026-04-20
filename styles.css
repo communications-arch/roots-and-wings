@@ -5246,12 +5246,89 @@ button.staff-role:hover {
 .person-detail-card:has(.sc-modal),
 .person-detail-card:has(.cl-modal),
 .person-detail-card:has(.rd-modal),
-.person-detail-card:has(.wv-modal) {
+.person-detail-card:has(.wv-modal),
+.person-detail-card:has(.policies-modal) {
   max-width: 880px;
 }
 .wv-modal {
   max-width: 860px;
   width: 100%;
+}
+
+/* ==========================================================================
+   Policies & Guidelines chooser modal
+   ========================================================================== */
+.policies-modal {
+  max-width: 640px;
+  width: 100%;
+  padding: 8px 4px 4px;
+}
+.policies-title {
+  font-family: var(--font-heading);
+  color: var(--color-primary-dark);
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+}
+.policies-sub {
+  color: var(--color-text-light);
+  margin: 0 0 20px;
+  font-size: 0.95rem;
+}
+.policies-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.policies-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.policies-option:hover,
+.policies-option:focus-visible {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(82, 58, 121, 0.12);
+  transform: translateY(-1px);
+  outline: none;
+}
+.policies-option-icon {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(82, 58, 121, 0.08);
+  color: var(--color-primary);
+  border-radius: 50%;
+}
+.policies-option-text { flex: 1 1 auto; min-width: 0; }
+.policies-option-text h3 {
+  margin: 0 0 3px;
+  font-size: 1.02rem;
+  color: var(--color-primary-dark);
+  font-family: var(--font-heading);
+}
+.policies-option-text p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-light);
+  line-height: 1.35;
+}
+.policies-option-arrow {
+  color: var(--color-text-light);
+  font-size: 1.5rem;
+  flex: 0 0 auto;
 }
 
 /* ==========================================================================
@@ -7966,64 +8043,84 @@ button.staff-role:hover {
    so the page-level scope is visually distinct from the underline
    subtabs used inside sections (.portal-tab). Different shape =
    different hierarchy. */
-.page-mode-nav {
+/* Sticky quick-access shortcut bar: always-visible primary nav for the
+   most-used destinations. Sits below the main navbar on both desktop and
+   mobile. The main .nav-links row stays as the full menu (with Public Site,
+   Log Out, etc.) — this bar is the short list. */
+.quick-shortcut-bar {
+  position: sticky;
+  top: var(--nav-height);
+  z-index: 95;
   background: var(--color-white);
   border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
-.page-mode-nav .container {
+.quick-shortcut-bar .container {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
-.page-mode-btn {
-  padding: 9px 20px;
-  border: 1px solid transparent;
+.quick-shortcut-bar .container::-webkit-scrollbar { display: none; }
+.qsb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
   border-radius: 999px;
-  background: transparent;
+  background: var(--color-white);
+  color: var(--color-text);
   font-family: var(--font-body);
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--color-text-light);
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
-.page-mode-btn:hover {
+.qsb-pill svg { flex-shrink: 0; }
+.qsb-pill:hover {
   color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.06);
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
 }
-.page-mode-btn.active {
+.qsb-pill.active {
   color: var(--color-text-inverse);
   background: var(--color-primary);
   border-color: var(--color-primary);
-  box-shadow: 0 2px 6px rgba(var(--color-primary-rgb), 0.25);
+  box-shadow: 0 2px 5px rgba(var(--color-primary-rgb), 0.22);
 }
-.page-mode-btn.active:hover {
+.qsb-pill.active:hover {
   background: var(--color-primary-dark);
   border-color: var(--color-primary-dark);
   color: var(--color-text-inverse);
 }
+.qsb-pill-workspace { /* Workspace gets a subtle visual anchor as the first pill */
+  border-color: rgba(var(--color-primary-rgb), 0.3);
+}
+
 .page-mode-panel#page-workspace {
   padding: 40px 0 60px;
 }
 
-/* Narrow screens: keep pills compact but still tappable */
 @media (max-width: 640px) {
-  .page-mode-nav .container {
-    gap: 4px;
-    padding-top: 8px;
-    padding-bottom: 8px;
+  .quick-shortcut-bar .container {
+    gap: 5px;
+    padding-top: 7px;
+    padding-bottom: 7px;
   }
-  .page-mode-btn {
-    padding: 8px 14px;
-    font-size: 0.9rem;
+  .qsb-pill {
+    padding: 7px 11px;
+    font-size: 0.82rem;
   }
+  .qsb-pill svg { width: 14px; height: 14px; }
 }
 
 /* ── My Workspace tab ── */

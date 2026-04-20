@@ -1149,17 +1149,36 @@
     });
   });
 
-  // Page-level mode switcher: Workspace / Info (top-level, peer of each other)
-  document.querySelectorAll('.page-mode-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var mode = this.getAttribute('data-mode');
-      document.querySelectorAll('.page-mode-btn').forEach(function (b) { b.classList.remove('active'); });
-      this.classList.add('active');
-      var ws = document.getElementById('page-workspace');
-      var info = document.getElementById('page-info');
-      if (ws) ws.style.display = mode === 'workspace' ? '' : 'none';
-      if (info) info.style.display = mode === 'info' ? '' : 'none';
-      if (mode === 'workspace' && typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+  // View switcher: nav-links and quick-shortcut-bar pills drive visibility of
+  // the Workspace panel vs the Co-op Info scroll view. data-view="workspace"
+  // reveals the Workspace; data-view="info" returns to the info scroll (and
+  // lets the browser handle the anchor jump). Links without data-view
+  // (Public Site, etc.) fall through to default behavior.
+  function showViewMode(mode) {
+    var ws = document.getElementById('page-workspace');
+    var info = document.getElementById('page-info');
+    if (ws) ws.style.display = mode === 'workspace' ? '' : 'none';
+    if (info) info.style.display = mode === 'info' ? '' : 'none';
+    document.querySelectorAll('[data-view]').forEach(function (el) {
+      var isActive = el.getAttribute('data-view') === mode;
+      el.classList.toggle('active', isActive);
+    });
+    if (mode === 'workspace' && typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+  }
+  document.querySelectorAll('[data-view]').forEach(function (el) {
+    el.addEventListener('click', function (e) {
+      var mode = this.getAttribute('data-view');
+      showViewMode(mode);
+      // For info-view links, let the browser scroll to the anchor — don't
+      // preventDefault. For Workspace, #page-workspace is the natural anchor
+      // target so scrolling there is fine too.
+      // Close the hamburger menu if it's open.
+      var toggle = document.querySelector('.nav-toggle');
+      var links = document.querySelector('.nav-links');
+      if (toggle && links && links.classList.contains('open')) {
+        links.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
     });
   });
 
@@ -2702,6 +2721,53 @@
         duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>', popup: {type: 'event', name: ev.name}});
       }
     });
+
+    // ── Personalized hero subtitle ──
+    // Surface the most actionable thing for this family in plain English so
+    // the hero isn't a static banner. We lead with the single most
+    // noteworthy duty for the current session, then tack on a count of
+    // "plus N more" plus the next co-op day.
+    (function setActionableSubtitle() {
+      var subtitleEl = document.getElementById('dashboardSubtitle');
+      if (!subtitleEl) return;
+      var sessionDuties = duties.filter(function (d) { return d.block !== 'annual'; });
+      var nextDate = typeof getNextCoopDate === 'function' ? getNextCoopDate() : '';
+      var dateLabel = '';
+      if (nextDate && typeof formatDateLabel === 'function') {
+        dateLabel = formatDateLabel(nextDate).replace(/^\w+,\s*/, '');
+      }
+      if (sessionDuties.length === 0) {
+        var annual = duties.filter(function (d) { return d.block === 'annual'; });
+        if (annual.length > 0) {
+          subtitleEl.textContent = 'Session ' + currentSession + ' \u2014 nothing scheduled this session. Thanks for serving as ' + annual[0].text + '.';
+        } else {
+          subtitleEl.textContent = 'Session ' + currentSession + ' \u2014 no responsibilities scheduled. Your schedule is below.';
+        }
+        return;
+      }
+      var cleaningDuties = sessionDuties.filter(function (d) { return d.icon === 'clean'; });
+      var teachDuties = sessionDuties.filter(function (d) { return d.icon === 'teach'; });
+      var assistDuties = sessionDuties.filter(function (d) { return d.icon === 'assist'; });
+      var primary = '';
+      if (cleaningDuties.length) {
+        primary = "You're on cleaning crew this session";
+      } else if (teachDuties.length) {
+        primary = "You're leading " + teachDuties[0].text.split(' \u2014 ')[0];
+      } else if (assistDuties.length) {
+        primary = "You're assisting with " + assistDuties[0].text.split(' \u2014 ')[0];
+      } else {
+        primary = "You have " + sessionDuties.length + " " + (sessionDuties.length === 1 ? 'responsibility' : 'responsibilities') + ' this session';
+      }
+      var extraCount = sessionDuties.length - (cleaningDuties.length ? 0 : 1);
+      var extra = '';
+      if (!cleaningDuties.length && extraCount > 0) {
+        extra = ' + ' + extraCount + ' more';
+      } else if (cleaningDuties.length && sessionDuties.length > cleaningDuties.length) {
+        extra = ' + ' + (sessionDuties.length - cleaningDuties.length) + ' more';
+      }
+      var datePart = dateLabel ? ' \u00b7 Next co-op day: ' + dateLabel : '';
+      subtitleEl.textContent = primary + extra + datePart + '.';
+    })();
 
     // ── Render by section ──
     var blockOrder = ['AM', 'PM1', 'PM2'];
@@ -7289,6 +7355,46 @@
   var waiverBtn = document.getElementById('waiverBtn');
   if (waiverBtn) {
     waiverBtn.addEventListener('click', showWaiverModal);
+  }
+
+  // Policies & Guidelines launcher — shows a chooser modal with three options:
+  // Handbook (external Drive PDF), Member Agreement & Waivers (in-app modal),
+  // Google Chat Guide (external Drive doc).
+  function showPoliciesModal() {
+    if (!personDetail || !personDetailCard) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="policies-modal">';
+    html += '<h2 class="policies-title">Policies &amp; Guidelines</h2>';
+    html += '<p class="policies-sub">Key documents for Roots &amp; Wings members.</p>';
+    html += '<div class="policies-options">';
+    html += '<a class="policies-option" href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener noreferrer">';
+    html += '<div class="policies-option-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>';
+    html += '<div class="policies-option-text"><h3>Member Handbook</h3><p>Policies, guidelines, and co-op expectations</p></div>';
+    html += '<span class="policies-option-arrow">&rsaquo;</span>';
+    html += '</a>';
+    html += '<button type="button" class="policies-option" id="policiesWaiverBtn">';
+    html += '<div class="policies-option-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>';
+    html += '<div class="policies-option-text"><h3>Member Agreement &amp; Waivers</h3><p>Membership expectations, photo consent, data/AI use, and liability release</p></div>';
+    html += '<span class="policies-option-arrow">&rsaquo;</span>';
+    html += '</button>';
+    html += '<a class="policies-option" href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener noreferrer">';
+    html += '<div class="policies-option-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>';
+    html += '<div class="policies-option-text"><h3>Google Chat Guide</h3><p>Our chat spaces and which ones to join</p></div>';
+    html += '<span class="policies-option-arrow">&rsaquo;</span>';
+    html += '</a>';
+    html += '</div></div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+    var waiverOpt = document.getElementById('policiesWaiverBtn');
+    if (waiverOpt) waiverOpt.addEventListener('click', showWaiverModal);
+  }
+
+  var policiesBtn = document.getElementById('policiesBtn');
+  if (policiesBtn) {
+    policiesBtn.addEventListener('click', showPoliciesModal);
   }
 
   // Render all coordination tabs
