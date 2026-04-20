@@ -330,6 +330,7 @@ async function handleBackupWaiverInfo(req, res) {
     if (rows.length > 0) {
       const row = rows[0];
       return res.status(200).json({
+        source: 'backup',
         name: row.name,
         email: row.email,
         main_learning_coach: row.main_learning_coach,
@@ -351,6 +352,7 @@ async function handleBackupWaiverInfo(req, res) {
     if (oneOff.length === 0) return res.status(404).json({ error: 'Waiver link not found. Please contact membership@rootsandwingsindy.com.' });
     const oo = oneOff[0];
     return res.status(200).json({
+      source: 'one_off',
       name: oo.name,
       email: oo.email,
       main_learning_coach: '',

@@ -145,7 +145,7 @@
 
       <div class="wv-actions">
         <button type="button" class="btn btn-outline-dark" onclick="window.print()">Print / Save as PDF</button>
-        <a href="members.html" class="btn btn-primary">Back to Member Portal</a>
+        <a href="members.html" class="btn btn-primary" id="backToPortalBtn">Back to Member Portal</a>
       </div>
     </div>
   </main>
@@ -250,14 +250,25 @@
             return;
           }
           var d = result.data;
-          heroTitle.textContent = 'Backup Learning Coach Waiver';
+          var isOneOff = d.source === 'one_off';
+          // One-off recipients aren't members — hide the "Back to Member Portal"
+          // link since it'd only lead to a login screen they can't pass.
+          if (isOneOff) {
+            var backBtn = document.getElementById('backToPortalBtn');
+            if (backBtn) backBtn.style.display = 'none';
+          }
+          heroTitle.textContent = isOneOff ? 'Roots & Wings Co-op Waiver' : 'Backup Learning Coach Waiver';
           heroSub.textContent = 'Review the agreement below, then sign at the top of this page.';
           if (d.signed) {
             showStatus('ok', 'This waiver was signed on ' + (d.signature_date || '').slice(0, 10) + ' by ' + (d.signature_name || d.name) + '. No further action needed.');
             form.style.display = 'none';
             return;
           }
-          intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — ' + escapeText(d.main_learning_coach) + ' listed you as a backup Learning Coach for the <strong>' + escapeText(d.family_name) + ' family</strong>. Review the Member Agreement &amp; Waivers below, then sign to put your waiver on file.';
+          if (isOneOff) {
+            intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — please review the Roots &amp; Wings Member Agreement &amp; Waivers below, then sign at the top of this page to put your waiver on file.';
+          } else {
+            intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — ' + escapeText(d.main_learning_coach) + ' listed you as a backup Learning Coach for the <strong>' + escapeText(d.family_name) + ' family</strong>. Review the Member Agreement &amp; Waivers below, then sign to put your waiver on file.';
+          }
           nameInput.value = d.name || '';
           dateInput.value = new Date().toISOString().slice(0, 10);
           status.style.display = 'none';
