@@ -8331,15 +8331,17 @@ button.staff-role:hover {
 
 /* ── My Workspace tab ── */
 .workspace-intro {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 .workspace-intro h3 {
+  font-family: var(--font-heading);
+  color: var(--color-primary-dark);
   margin: 0 0 6px 0;
-  font-size: 1.25rem;
 }
 .workspace-intro p {
   margin: 0;
   color: var(--color-text-light);
+  font-family: var(--font-body);
 }
 .workspace-grid {
   display: grid;
@@ -8355,23 +8357,32 @@ button.staff-role:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--color-primary-light);
 }
 .workspace-card-header h4 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-light);
+  line-height: 1.3;
 }
 .workspace-card-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  font-family: var(--font-body);
+  color: var(--color-text);
 }
 .ws-body-hint {
   margin: 0 0 4px 0;
   color: var(--color-text-light);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 .ws-empty {
   color: var(--color-text-light);
@@ -8398,13 +8409,14 @@ button.staff-role:hover {
   gap: 8px;
   text-decoration: none;
   color: var(--color-primary);
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   flex: 1;
   min-width: 0;
+  transition: background var(--transition-fast);
 }
 .ws-link-list li a:hover {
-  background: rgba(82, 58, 121, 0.06);
+  background: rgba(var(--color-primary-rgb), 0.08);
   text-decoration: underline;
 }
 /* Buttons inside the link list (for actions like waiver/curriculum that open
@@ -8417,15 +8429,16 @@ button.staff-role:hover {
   border: none;
   font: inherit;
   color: var(--color-primary);
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   flex: 1;
   min-width: 0;
   text-align: left;
+  transition: background var(--transition-fast);
 }
 .ws-link-list li .ws-link-btn:hover {
-  background: rgba(82, 58, 121, 0.06);
+  background: rgba(var(--color-primary-rgb), 0.08);
   text-decoration: underline;
 }
 .ws-link-icon {
@@ -8441,19 +8454,29 @@ button.staff-role:hover {
 .ws-mylink-form {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-  padding-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--color-border);
 }
 .ws-mylink-form input[type="text"],
 .ws-mylink-form input[type="url"] {
   flex: 1 1 120px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font: inherit;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--color-text);
   min-width: 0;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.ws-mylink-form input[type="text"]:focus,
+.ws-mylink-form input[type="url"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-white);
 }
 .ws-opportunities {
   list-style: none;
@@ -8464,10 +8487,11 @@ button.staff-role:hover {
   gap: 6px;
 }
 .ws-opportunities li {
-  padding: 8px 10px;
-  background: #f6f3fa;
-  border-radius: 6px;
+  padding: 10px 12px;
+  background: rgba(var(--color-primary-rgb), 0.06);
+  border-radius: var(--radius-sm);
   font-size: 0.9rem;
+  color: var(--color-text);
 }
 .ws-opp-committee {
   color: var(--color-text-light);
@@ -8477,50 +8501,66 @@ button.staff-role:hover {
 .ws-waiver-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .ws-waiver-form label {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.85rem;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
   color: var(--color-text-light);
-  font-weight: 500;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 .ws-waiver-form input,
 .ws-waiver-form textarea {
-  padding: 7px 9px;
+  padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font: inherit;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--color-text);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.ws-waiver-form input:focus,
+.ws-waiver-form textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-white);
 }
 .ws-waiver-form textarea {
   resize: vertical;
-  min-height: 48px;
+  min-height: 56px;
 }
 .ws-wv-status {
   font-size: 0.85rem;
   min-height: 1em;
 }
-.ws-wv-err { color: #b00020; }
-.ws-wv-ok { color: #2a7a2a; }
-.ws-wv-pending { color: #b06a00; }
+.ws-wv-err { color: var(--color-error); font-weight: 600; }
+.ws-wv-ok { color: var(--color-success); font-weight: 600; }
+.ws-wv-pending { color: var(--color-accent-dark); font-weight: 600; }
 .ws-waivers-table-wrap {
   overflow-x: auto;
   max-height: 420px;
   overflow-y: auto;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .ws-waivers-table {
   width: 100%;
   border-collapse: collapse;
+  font-family: var(--font-body);
   font-size: 0.85rem;
 }
 .ws-waivers-table th,
 .ws-waivers-table td {
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--color-border);
   text-align: left;
   vertical-align: top;
@@ -8528,39 +8568,41 @@ button.staff-role:hover {
 .ws-waivers-table thead th {
   position: sticky;
   top: 0;
-  background: #faf8fc;
-  font-weight: 600;
-  font-size: 0.8rem;
+  background: var(--color-cream);
+  font-weight: 700;
+  font-size: 0.75rem;
   color: var(--color-text-light);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 1px;
 }
 .ws-waivers-table tbody tr:last-child td { border-bottom: none; }
 .workspace-role-section {
-  margin: 0 0 28px 0;
+  margin: 0 0 32px 0;
 }
 .workspace-role-section + .workspace-role-section {
-  padding-top: 20px;
+  padding-top: 24px;
   border-top: 1px solid var(--color-border);
 }
 .ws-role-header {
-  margin: 0 0 10px 0;
+  margin: 0 0 14px 0;
 }
 .ws-role-header h4 {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--color-primary);
-  letter-spacing: 0.01em;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+  line-height: 1.3;
 }
 .ws-role-description {
   margin: 0 0 12px 0;
-  padding: 10px 12px;
-  background: #faf8fc;
+  padding: 12px 14px;
+  background: rgba(var(--color-primary-rgb), 0.06);
   border-left: 3px solid var(--color-primary);
-  border-radius: 4px;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.6;
   color: var(--color-text);
 }
 .ws-role-desc-block {
@@ -8568,14 +8610,15 @@ button.staff-role:hover {
 }
 .ws-role-playbook {
   margin: 0 0 10px 0;
-  padding: 8px 12px;
-  background: #ffffff;
+  padding: 10px 14px;
+  background: var(--color-white);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .ws-role-playbook summary {
   cursor: pointer;
-  font-weight: 600;
+  font-family: var(--font-body);
+  font-weight: 700;
   color: var(--color-primary);
   font-size: 0.9rem;
   padding: 2px 0;
@@ -8585,8 +8628,9 @@ button.staff-role:hover {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--color-border);
-  font-size: 0.92rem;
-  line-height: 1.55;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.6;
   color: var(--color-text);
   max-height: 460px;
   overflow-y: auto;
@@ -8600,13 +8644,15 @@ button.staff-role:hover {
 .ws-role-playbook-body h2, .ws-role-playbook-body h3, .ws-role-playbook-body h4 {
   font-family: var(--font-heading);
   color: var(--color-primary-dark);
-  margin: 12px 0 4px 0;
+  margin: 14px 0 6px 0;
+  line-height: 1.3;
 }
-.ws-role-playbook-body h2 { font-size: 1rem; }
-.ws-role-playbook-body h3 { font-size: 0.95rem; }
-.ws-role-playbook-body h4 { font-size: 0.9rem; }
-.ws-role-playbook-body ul, .ws-role-playbook-body ol { margin: 0 0 8px 22px; }
-.ws-role-playbook-body li { margin-bottom: 3px; }
+.ws-role-playbook-body h2 { font-size: 1.1rem; }
+.ws-role-playbook-body h3 { font-size: 1rem; }
+.ws-role-playbook-body h4 { font-size: 0.95rem; }
+.ws-role-playbook-body ul, .ws-role-playbook-body ol { margin: 0 0 8px 22px; list-style: disc; }
+.ws-role-playbook-body ol { list-style: decimal; }
+.ws-role-playbook-body li { margin-bottom: 4px; }
 .ws-role-playbook-body blockquote {
   border-left: 3px solid var(--color-accent);
   margin: 6px 0;
@@ -8615,8 +8661,9 @@ button.staff-role:hover {
   font-style: italic;
 }
 .ws-role-stamp {
-  margin: 0 0 8px 0;
-  font-size: 0.75rem;
+  margin: 0 0 10px 0;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
   color: var(--color-text-light);
   font-style: italic;
 }
@@ -8626,13 +8673,16 @@ button.staff-role:hover {
 .ws-role-notes {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 0 0 16px 0;
 }
 .ws-role-notes-label {
+  font-family: var(--font-body);
   font-size: 0.8rem;
   color: var(--color-text-light);
-  font-weight: 500;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -8642,35 +8692,44 @@ button.staff-role:hover {
   font-size: 0.72rem;
   color: var(--color-text-light);
   font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .ws-role-notes-textarea {
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font: inherit;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
   color: var(--color-text);
   resize: vertical;
-  min-height: 56px;
+  min-height: 60px;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 .ws-role-notes-textarea:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(82, 58, 121, 0.15);
+  background-color: var(--color-white);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
 }
 .workspace-hidden {
-  margin-top: 20px;
-  padding: 12px 14px;
-  background: #faf8fc;
-  border-radius: 8px;
+  margin-top: 24px;
+  padding: 14px 16px;
+  background: rgba(var(--color-primary-rgb), 0.06);
+  border-radius: var(--radius-sm);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 .workspace-hidden-label {
+  font-family: var(--font-body);
   color: var(--color-text-light);
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 @media (max-width: 600px) {
   .workspace-grid {
