@@ -7580,6 +7580,32 @@ button.staff-role:hover {
   font-style: italic;
 }
 .rd-edit-btn { margin-top: 12px; }
+.rd-playbook {
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: #faf8fc;
+  padding: 12px 14px;
+  border-radius: 6px;
+  margin: 8px 0 12px 0;
+  max-height: 480px;
+  overflow-y: auto;
+  border-left: 3px solid var(--color-primary);
+}
+.rd-playbook a { color: var(--color-primary); word-break: break-word; }
+.rd-playbook-edit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  min-height: 300px;
+}
+.rd-hint {
+  margin: 2px 0 6px 0;
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  font-style: italic;
+}
 .rd-label {
   display: block;
   font-size: 0.8rem;
@@ -8213,6 +8239,48 @@ button.staff-role:hover {
   line-height: 1.45;
   color: var(--color-text);
 }
+.ws-role-desc-block {
+  margin: 0 0 16px 0;
+}
+.ws-role-playbook {
+  margin: 0 0 10px 0;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+.ws-role-playbook summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  padding: 2px 0;
+}
+.ws-role-playbook summary:hover { text-decoration: underline; }
+.ws-role-playbook-body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  max-height: 460px;
+  overflow-y: auto;
+}
+.ws-role-playbook-body a {
+  color: var(--color-primary);
+  word-break: break-word;
+}
+.ws-role-stamp {
+  margin: 0 0 8px 0;
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  font-style: italic;
+}
+.ws-role-edit-btn {
+  margin: 0;
+}
 .ws-role-notes {
   display: flex;
   flex-direction: column;
@@ -8223,6 +8291,15 @@ button.staff-role:hover {
   font-size: 0.8rem;
   color: var(--color-text-light);
   font-weight: 500;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ws-role-notes-scope {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-style: italic;
 }
 .ws-role-notes-textarea {
   padding: 8px 10px;

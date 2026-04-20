@@ -103,7 +103,7 @@ module.exports = async function handler(req, res) {
       if (req.method === 'GET') {
         const roles = await sql`
           SELECT id, role_key, title, job_length, overview, duties, committee,
-                 last_reviewed_by, last_reviewed_date, updated_at
+                 last_reviewed_by, last_reviewed_date, playbook, updated_at, updated_by
           FROM role_descriptions ORDER BY title
         `;
         return res.status(200).json({ roles });
@@ -112,9 +112,10 @@ module.exports = async function handler(req, res) {
       if (req.method === 'PATCH') {
         const id = parseInt(req.query.id, 10);
         if (!id) return res.status(400).json({ error: 'id required' });
-        const { overview, duties, job_length, last_reviewed_by, last_reviewed_date } = req.body || {};
+        const { overview, duties, job_length, last_reviewed_by, last_reviewed_date, playbook } = req.body || {};
         if (overview === undefined && duties === undefined && job_length === undefined
-            && last_reviewed_by === undefined && last_reviewed_date === undefined) {
+            && last_reviewed_by === undefined && last_reviewed_date === undefined
+            && playbook === undefined) {
           return res.status(400).json({ error: 'No fields to update' });
         }
         if (overview !== undefined) {
@@ -132,6 +133,9 @@ module.exports = async function handler(req, res) {
         if (duties !== undefined) {
           const dutiesArr = Array.isArray(duties) ? duties.map(d => String(d).trim()).filter(Boolean) : [];
           await sql`UPDATE role_descriptions SET duties = ${dutiesArr}, updated_at = NOW(), updated_by = ${user.email} WHERE id = ${id}`;
+        }
+        if (playbook !== undefined) {
+          await sql`UPDATE role_descriptions SET playbook = ${String(playbook)}, updated_at = NOW(), updated_by = ${user.email} WHERE id = ${id}`;
         }
         return res.status(200).json({ ok: true });
       }

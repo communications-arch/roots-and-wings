@@ -636,6 +636,18 @@
       });
       html += '</ul>';
     }
+    if (role.playbook) {
+      html += '<h4 class="rd-section-title">Playbook &amp; Handoff Notes</h4>';
+      html += '<div class="rd-playbook">' + renderPlaybookHtml(role.playbook) + '</div>';
+    }
+    var updatedBy = role.updated_by || '';
+    var updatedOn = formatUpdatedAt(role.updated_at);
+    if (updatedBy || updatedOn) {
+      html += '<p class="rd-footer">Last updated';
+      if (updatedBy) html += ' by ' + escapeHtml(updatedBy);
+      if (updatedOn) html += ' on ' + escapeHtml(updatedOn);
+      html += '</p>';
+    }
     if (role.last_reviewed_by || role.last_reviewed_date) {
       html += '<p class="rd-footer">Last reviewed';
       if (role.last_reviewed_by) html += ' by ' + escapeHtml(role.last_reviewed_by);
@@ -658,6 +670,9 @@
     html += '<input class="rd-input" id="rdEditJobLength" value="' + escapeHtml(role.job_length || '') + '">';
     html += '<label class="rd-label">Responsibilities (one per line)</label>';
     html += '<textarea class="rd-textarea" id="rdEditDuties" rows="10">' + (role.duties || []).map(escapeHtml).join('\n') + '</textarea>';
+    html += '<label class="rd-label">Playbook &amp; Handoff Notes</label>';
+    html += '<p class="rd-hint">Long-form guide for whoever holds this role. Timelines, instructions, troubleshooting, links\u2014anything the next person will need. URLs become clickable automatically.</p>';
+    html += '<textarea class="rd-textarea rd-playbook-edit" id="rdEditPlaybook" rows="20">' + escapeHtml(role.playbook || '') + '</textarea>';
     html += '<label class="rd-label">Reviewed by</label>';
     html += '<input class="rd-input" id="rdEditReviewedBy" value="' + escapeHtml(role.last_reviewed_by || '') + '">';
     html += '<label class="rd-label">Review date</label>';
@@ -704,6 +719,8 @@
           var newDuties = personDetailCard.querySelector('#rdEditDuties').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
           var newReviewedBy = personDetailCard.querySelector('#rdEditReviewedBy').value;
           var newReviewedDate = personDetailCard.querySelector('#rdEditReviewedDate').value;
+          var playbookEl = personDetailCard.querySelector('#rdEditPlaybook');
+          var newPlaybook = playbookEl ? playbookEl.value : (role.playbook || '');
           var googleCred = localStorage.getItem('rw_google_credential');
           fetch('/api/cleaning?action=roles&id=' + role.id, {
             method: 'PATCH',
@@ -713,7 +730,8 @@
               job_length: newJobLength,
               duties: newDuties,
               last_reviewed_by: newReviewedBy,
-              last_reviewed_date: newReviewedDate
+              last_reviewed_date: newReviewedDate,
+              playbook: newPlaybook
             })
           })
           .then(function (res) { return res.json(); })
@@ -725,9 +743,18 @@
               role.duties = newDuties;
               role.last_reviewed_by = newReviewedBy;
               role.last_reviewed_date = newReviewedDate;
+              role.playbook = newPlaybook;
+              role.updated_at = new Date().toISOString();
+              // Active email (respects View As) for the stamp preview.
+              role.updated_by = (typeof getActiveEmail === 'function' && getActiveEmail()) || role.updated_by || '';
               try { localStorage.setItem(CACHE_ROLES_KEY, JSON.stringify({ roles: roleDescriptions })); } catch (e) { /* quota */ }
               closeDetail();
               showRoleDescriptionModal(roleKey, canEdit);
+              // Workspace may be open — re-render so the Edit button section
+              // shows the fresh playbook and updated-by stamp immediately.
+              if (typeof renderWorkspaceTab === 'function') {
+                try { renderWorkspaceTab(); } catch (e) { /* workspace tab not rendered — fine */ }
+              }
             } else {
               saveBtn.disabled = false;
               saveBtn.textContent = 'Save';
@@ -747,6 +774,31 @@
   function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Render a block of free-form text as HTML: escape, preserve newlines (the
+  // container uses white-space: pre-wrap), and auto-linkify URLs. Used for
+  // the role playbook / handoff document.
+  function renderPlaybookHtml(text) {
+    if (!text) return '';
+    var escaped = escapeHtml(text);
+    return escaped.replace(/(https?:\/\/[^\s<]+)/g, function (url) {
+      var trailing = '';
+      while (/[).,;!?]$/.test(url)) {
+        trailing = url.slice(-1) + trailing;
+        url = url.slice(0, -1);
+      }
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>' + trailing;
+    });
+  }
+
+  function formatUpdatedAt(iso) {
+    if (!iso) return '';
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch (e) { return ''; }
   }
 
   // ── Cleaning Crew DB state ──
@@ -4294,13 +4346,33 @@
 
       if (opts.showNotes && roleKey) {
         var role = getRoleByKey(roleKey);
-        if (role && role.overview) {
-          s += '<p class="ws-role-description">' + escapeHtml(role.overview) + '</p>';
+        if (role) {
+          // Shared role description + playbook (stored in Postgres, edited
+          // via the modal by the current role holder).
+          s += '<div class="ws-role-desc-block">';
+          if (role.overview) {
+            s += '<p class="ws-role-description">' + escapeHtml(role.overview) + '</p>';
+          }
+          if (role.playbook) {
+            s += '<details class="ws-role-playbook"><summary>Playbook &amp; handoff notes</summary>';
+            s += '<div class="ws-role-playbook-body">' + renderPlaybookHtml(role.playbook) + '</div>';
+            s += '</details>';
+          }
+          var uBy = role.updated_by || '';
+          var uOn = formatUpdatedAt(role.updated_at);
+          if (uBy || uOn) {
+            s += '<p class="ws-role-stamp">Last updated';
+            if (uBy) s += ' by ' + escapeHtml(uBy);
+            if (uOn) s += ' on ' + escapeHtml(uOn);
+            s += '</p>';
+          }
+          s += '<button class="sc-btn ws-role-edit-btn" data-role-key="' + roleKey + '">Edit role description &amp; playbook</button>';
+          s += '</div>';
         }
         var notesVal = getWorkspaceNotes(roleKey);
         s += '<div class="ws-role-notes">';
-        s += '<label class="ws-role-notes-label" for="ws-notes-' + roleKey + '">My notes for this role</label>';
-        s += '<textarea class="ws-role-notes-textarea" id="ws-notes-' + roleKey + '" data-role-key="' + roleKey + '" rows="3" placeholder="Reminders, contacts, anything you want to keep handy\u2026">' + escapeHtml(notesVal) + '</textarea>';
+        s += '<label class="ws-role-notes-label" for="ws-notes-' + roleKey + '">My private notes <span class="ws-role-notes-scope">(only you)</span></label>';
+        s += '<textarea class="ws-role-notes-textarea" id="ws-notes-' + roleKey + '" data-role-key="' + roleKey + '" rows="3" placeholder="Reminders, scratch work, anything just for you. Not visible to the next role holder.">' + escapeHtml(notesVal) + '</textarea>';
         s += '</div>';
       }
 
@@ -4357,6 +4429,18 @@
     container.querySelectorAll('.ws-role-notes-textarea').forEach(function (ta) {
       ta.addEventListener('blur', function () {
         saveWorkspaceNotes(this.getAttribute('data-role-key'), this.value);
+      });
+    });
+
+    // Edit role description / playbook: opens the shared modal in edit mode.
+    // canEdit=true is safe — the section only renders for roles the current
+    // viewer actually holds (getWorkspaceRoles put it there).
+    container.querySelectorAll('.ws-role-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = this.getAttribute('data-role-key');
+        if (key && typeof showRoleDescriptionModal === 'function') {
+          showRoleDescriptionModal(key, true);
+        }
       });
     });
 

@@ -218,6 +218,9 @@ CREATE TABLE IF NOT EXISTS role_descriptions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_by TEXT DEFAULT ''
 );
+-- Long-form playbook / handoff doc. Shared across whoever holds the role;
+-- editable from the Workspace by the current role holder.
+ALTER TABLE role_descriptions ADD COLUMN IF NOT EXISTS playbook TEXT DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Board photo cache (for the public site)
