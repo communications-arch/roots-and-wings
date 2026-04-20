@@ -876,6 +876,25 @@
   var DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  // Google Calendar event colorId → hex. Matches the palette in Google
+  // Calendar's "Event color" picker. colorId is a string "1"-"11" as
+  // returned by the Calendar API. Sage is the co-op's default (most
+  // regular co-op days have no explicit colorId set).
+  var GCAL_EVENT_COLORS = {
+    '1':  '#7986CB', // Lavender
+    '2':  '#33B679', // Sage
+    '3':  '#8E24AA', // Grape
+    '4':  '#E67C73', // Flamingo
+    '5':  '#F6BF26', // Banana
+    '6':  '#F4511E', // Tangerine
+    '7':  '#039BE5', // Peacock
+    '8':  '#616161', // Graphite
+    '9':  '#3F51B5', // Blueberry
+    '10': '#0B8043', // Basil
+    '11': '#D50000'  // Tomato
+  };
+  var GCAL_DEFAULT_COLOR = '#33B679'; // Sage — regular co-op days
+
   function renderCalendar(events) {
     var el = document.getElementById('calendarEvents');
     if (!el || !events) return;
@@ -905,7 +924,8 @@
         timeStr = 'All day';
       }
 
-      html += '<div class="cal-event">';
+      var color = GCAL_EVENT_COLORS[ev.colorId] || GCAL_DEFAULT_COLOR;
+      html += '<div class="cal-event" style="border-left:4px solid ' + color + ';padding-left:12px;">';
       html += '<div class="cal-date"><span class="cal-day-num">' + start.getDate() + '</span><span class="cal-day-name">' + DAYS[start.getDay()] + '</span></div>';
       html += '<div class="cal-details"><strong class="cal-summary">' + ev.summary + '</strong><span class="cal-time">' + timeStr + '</span>';
       if (ev.location) html += '<span class="cal-location">' + ev.location + '</span>';

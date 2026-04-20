@@ -69,7 +69,7 @@ module.exports = async function handler(req, res) {
           singleEvents: true,
           orderBy: 'startTime',
           maxResults: 50,
-          fields: 'items(summary,start,end,location,description)'
+          fields: 'items(summary,start,end,location,description,colorId)'
         });
         if (result.data.items) {
           allEvents = allEvents.concat(result.data.items);
@@ -97,7 +97,8 @@ module.exports = async function handler(req, res) {
         end: endStr,
         allDay: allDay,
         location: ev.location || '',
-        description: ev.description || ''
+        description: ev.description || '',
+        colorId: ev.colorId || ''
       };
     });
 
