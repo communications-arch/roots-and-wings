@@ -3245,6 +3245,12 @@ p + p { margin-top: 1rem; }
   .detail-actions .sc-btn { padding: 5px 10px; font-size: 0.8rem; }
 }
 
+/* When the header action row is present, push the modal body down so the
+   heading doesn't collide with the Print/X buttons. */
+.person-detail-card:has(.detail-actions) .elective-detail {
+  padding-top: 22px;
+}
+
 .detail-header {
   display: flex;
   gap: 18px;
