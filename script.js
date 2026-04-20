@@ -4202,16 +4202,8 @@
 
   var WORKSPACE_PREFS_KEY_PREFIX = 'rw_workspace_prefs_';
 
-  // Fixed link sets used by the shared-tools and admin-consoles widgets.
+  // Fixed link set used by the admin-consoles widget.
   // Kept inline in v1; move to DB when the volunteer-sheet migration lands.
-  var WORKSPACE_SHARED_TOOLS = [
-    { title: 'Members Handbook', url: 'https://docs.google.com/document/d/PLACEHOLDER', icon: '\uD83D\uDCD6' },
-    { title: 'Shared Drive', url: 'https://drive.google.com/drive/folders/PLACEHOLDER', icon: '\uD83D\uDCC1' },
-    { title: 'Member Directory Sheet', url: 'https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit', icon: '\uD83D\uDCCB' },
-    { title: 'Google Calendar', url: 'https://calendar.google.com/calendar/u/0/r', icon: '\uD83D\uDCC5' },
-    { title: 'Google Chat', url: 'https://chat.google.com/', icon: '\uD83D\uDCAC' }
-  ];
-
   var WORKSPACE_ADMIN_CONSOLES = [
     { title: 'Google Admin', url: 'https://admin.google.com/', icon: '\u2699' },
     { title: 'Vercel', url: 'https://vercel.com/dashboard', icon: '\u25B2' },
@@ -4312,19 +4304,6 @@
   // Role gate null = universal. A widget is shown if roleGate is null OR any of
   // the user's roles is in roleGate.
   var WORKSPACE_WIDGETS = {
-    'shared-tools': {
-      title: 'Shared Tools',
-      roleGate: null,
-      render: function () {
-        var h = '<p class="ws-body-hint">Tools everyone can reach.</p>';
-        h += '<ul class="ws-link-list">';
-        WORKSPACE_SHARED_TOOLS.forEach(function (l) {
-          h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + l.icon + '</span>' + l.title + '</a></li>';
-        });
-        h += '</ul>';
-        return h;
-      }
-    },
     'resources': {
       title: 'Resources',
       roleGate: null,
@@ -4426,8 +4405,8 @@
   };
 
   var WORKSPACE_DEFAULTS = {
-    'Communications Director': ['waivers-report', 'send-waiver', 'admin-consoles', 'my-links', 'ways-to-help', 'shared-tools', 'resources'],
-    '*': ['my-links', 'ways-to-help', 'shared-tools', 'resources']
+    'Communications Director': ['waivers-report', 'send-waiver', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
+    '*': ['my-links', 'ways-to-help', 'resources']
   };
 
   // Resolve the ordered widget list for a user: union of defaults for each
