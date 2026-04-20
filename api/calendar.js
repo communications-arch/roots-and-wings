@@ -68,8 +68,7 @@ module.exports = async function handler(req, res) {
           timeMax: threeMonths.toISOString(),
           singleEvents: true,
           orderBy: 'startTime',
-          maxResults: 50,
-          fields: 'items(summary,start,end,location,description,colorId)'
+          maxResults: 50
         });
         if (result.data.items) {
           allEvents = allEvents.concat(result.data.items);
