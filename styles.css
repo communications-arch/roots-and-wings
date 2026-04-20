@@ -7935,7 +7935,11 @@ button.staff-role:hover {
 }
 .class-allergy-alerts li strong { color: var(--color-text); }
 
-/* ── Top-level page mode switcher: Workspace vs Info ── */
+/* ── Top-level page mode switcher: Workspace vs Info ──
+   Rendered as a pill-style segmented control (not an underline)
+   so the page-level scope is visually distinct from the underline
+   subtabs used inside sections (.portal-tab). Different shape =
+   different hierarchy. */
 .page-mode-nav {
   background: var(--color-white);
   border-bottom: 1px solid var(--color-border);
@@ -7946,33 +7950,54 @@ button.staff-role:hover {
 }
 .page-mode-nav .container {
   display: flex;
-  gap: 4px;
-  padding-top: 0;
-  padding-bottom: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 .page-mode-btn {
-  padding: 14px 22px;
-  border: none;
-  background: none;
+  padding: 9px 20px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
   font-family: var(--font-body);
   font-size: 0.95rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--color-text-light);
   cursor: pointer;
-  border-bottom: 3px solid transparent;
-  margin-bottom: -1px;
   transition: all var(--transition-fast);
 }
 .page-mode-btn:hover {
   color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.04);
+  background: rgba(var(--color-primary-rgb), 0.06);
 }
 .page-mode-btn.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 6px rgba(var(--color-primary-rgb), 0.25);
+}
+.page-mode-btn.active:hover {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  color: var(--color-text-inverse);
 }
 .page-mode-panel#page-workspace {
   padding: 40px 0 60px;
+}
+
+/* Narrow screens: keep pills compact but still tappable */
+@media (max-width: 640px) {
+  .page-mode-nav .container {
+    gap: 4px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .page-mode-btn {
+    padding: 8px 14px;
+    font-size: 0.9rem;
+  }
 }
 
 /* ── My Workspace tab ── */
