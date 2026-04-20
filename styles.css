@@ -4231,6 +4231,19 @@ button.staff-role:hover {
   color: var(--color-accent-dark);
 }
 
+/* Block-level note used when a payment is submitted but the Treasurer
+   hasn't yet marked the sheet row Paid. Replaces the Pay button. */
+.mf-billing-pending-note {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(var(--color-accent-light-rgb), 0.15);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  color: var(--color-text);
+  font-style: italic;
+}
+
 .mf-billing-overdue {
   background: rgba(220, 53, 69, 0.12);
   color: #b02a37;

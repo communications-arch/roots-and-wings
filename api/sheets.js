@@ -1,6 +1,12 @@
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
+const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
+
+function getDb() {
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
+  return neon(process.env.DATABASE_URL);
+}
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -912,6 +918,142 @@ function parseClassIdeas(rows) {
 }
 
 // ══════════════════════════════════════════════
+// BILLING
+// ══════════════════════════════════════════════
+// Billing spreadsheet layout:
+//   "Family Payment Tracking" tab:
+//     Row 1 = headers, rows 2+ = data.
+//     A = Family Name, B = Fall Deposit, C = Fall Fees,
+//     D = Spring Deposit, E = Spring Fees.
+//     Cell value "Paid" (case-insensitive) means paid; anything else → not paid.
+//   "Morning Classes" tab: H2 = Sem1 rate, H3 = Sem2 rate.
+//   "Afternoons" tab:     H2 = Sem1 rate, H3 = Sem2 rate.
+
+function numFromCell(raw) {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  var s = String(raw).replace(/[$,\s]/g, '');
+  var n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+
+function parseBillingSheet(tabs) {
+  var out = {
+    rates: {
+      fall: { amRate: 0, pmRate: 0 },
+      spring: { amRate: 0, pmRate: 0 }
+    },
+    families: {}
+  };
+
+  var amTab = tabs['Morning Classes'] || [];
+  if (amTab[1]) out.rates.fall.amRate = numFromCell(amTab[1][7]);
+  if (amTab[2]) out.rates.spring.amRate = numFromCell(amTab[2][7]);
+
+  var pmTab = tabs['Afternoons'] || [];
+  if (pmTab[1]) out.rates.fall.pmRate = numFromCell(pmTab[1][7]);
+  if (pmTab[2]) out.rates.spring.pmRate = numFromCell(pmTab[2][7]);
+
+  var payTab = tabs['Family Payment Tracking'] || [];
+  for (var r = 1; r < payTab.length; r++) {
+    var row = payTab[r];
+    if (!row) continue;
+    var famName = cell(row, 0);
+    if (!famName) continue;
+    function statusOf(v) {
+      return /paid/i.test(String(v || '').trim()) ? 'Paid' : '';
+    }
+    out.families[famName.toLowerCase()] = {
+      name: famName,
+      fall: {
+        deposit: statusOf(cell(row, 1)),
+        classFee: statusOf(cell(row, 2))
+      },
+      spring: {
+        deposit: statusOf(cell(row, 3)),
+        classFee: statusOf(cell(row, 4))
+      }
+    };
+  }
+
+  return out;
+}
+
+async function handleBillingGet(req, res, sheets) {
+  var billingSheetId = process.env.BILLING_SHEET_ID;
+  if (!billingSheetId) {
+    return res.status(200).json({
+      error: 'BILLING_SHEET_ID not configured',
+      rates: { fall: {}, spring: {} },
+      families: {}
+    });
+  }
+
+  var billingTabs;
+  try {
+    billingTabs = await fetchSheet(sheets, billingSheetId);
+  } catch (e) {
+    console.error('Billing sheet fetch failed:', e.message);
+    return res.status(502).json({ error: 'Failed to fetch billing sheet' });
+  }
+
+  var parsed = parseBillingSheet(billingTabs);
+
+  // Overlay DB Pending records — but only where the sheet doesn't already
+  // say Paid (sheet wins).
+  try {
+    var sql = getDb();
+    var pendingRows = await sql('SELECT family_name, semester_key, payment_type FROM payments WHERE status = $1', ['Pending']);
+    pendingRows.forEach(function (p) {
+      var key = String(p.family_name || '').toLowerCase();
+      var fam = parsed.families[key];
+      if (!fam) {
+        fam = { name: p.family_name, fall: { deposit: '', classFee: '' }, spring: { deposit: '', classFee: '' } };
+        parsed.families[key] = fam;
+      }
+      var sem = fam[p.semester_key];
+      if (!sem) return;
+      var field = p.payment_type === 'deposit' ? 'deposit' : 'classFee';
+      if (sem[field] !== 'Paid') sem[field] = 'Pending';
+    });
+  } catch (e) {
+    console.error('Billing DB overlay failed:', e.message);
+    // fall through with sheet-only data
+  }
+
+  return res.status(200).json(parsed);
+}
+
+async function handleBillingPost(req, res) {
+  var body = req.body || {};
+  var familyName = String(body.family_name || '').trim();
+  var semesterKey = String(body.semester_key || '').trim();
+  var paymentType = String(body.payment_type || '').trim();
+  var paypalId = String(body.paypal_transaction_id || '').trim();
+  var amountCents = parseInt(body.amount_cents, 10) || 0;
+  var payerEmail = String(body.payer_email || '').trim();
+
+  if (!familyName) return res.status(400).json({ error: 'family_name required' });
+  if (semesterKey !== 'fall' && semesterKey !== 'spring') {
+    return res.status(400).json({ error: "semester_key must be 'fall' or 'spring'" });
+  }
+  if (paymentType !== 'deposit' && paymentType !== 'class_fee') {
+    return res.status(400).json({ error: "payment_type must be 'deposit' or 'class_fee'" });
+  }
+
+  try {
+    var sql = getDb();
+    var rows = await sql(
+      'INSERT INTO payments (family_name, semester_key, payment_type, paypal_transaction_id, amount_cents, payer_email, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, created_at',
+      [familyName, semesterKey, paymentType, paypalId, amountCents, payerEmail, 'Pending']
+    );
+    return res.status(200).json({ ok: true, id: rows[0].id, created_at: rows[0].created_at });
+  } catch (e) {
+    console.error('Billing POST failed:', e.message);
+    return res.status(500).json({ error: 'Failed to save pending payment' });
+  }
+}
+
+// ══════════════════════════════════════════════
 // MAIN HANDLER
 // ══════════════════════════════════════════════
 module.exports = async function handler(req, res) {
@@ -919,14 +1061,29 @@ module.exports = async function handler(req, res) {
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // ── Authentication required ──
   var authResult = await verifyAuth(req);
   if (!authResult.ok) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // ── Billing sub-routes ──
+  var action = (req.query && req.query.action) || '';
+  if (action === 'billing') {
+    try {
+      var billingAuth = getAuth();
+      var billingSheets = google.sheets({ version: 'v4', auth: billingAuth });
+      if (req.method === 'GET') return handleBillingGet(req, res, billingSheets);
+      if (req.method === 'POST') return handleBillingPost(req, res);
+      return res.status(405).json({ error: 'Method not allowed' });
+    } catch (err) {
+      console.error('Billing action error:', err);
+      return res.status(500).json({ error: 'Billing request failed' });
+    }
   }
 
   try {

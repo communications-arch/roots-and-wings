@@ -311,3 +311,24 @@ CREATE TABLE IF NOT EXISTS one_off_waivers (
 );
 CREATE INDEX IF NOT EXISTS one_off_waivers_token_idx ON one_off_waivers (token);
 CREATE INDEX IF NOT EXISTS one_off_waivers_email_idx ON one_off_waivers (email);
+
+-- ──────────────────────────────────────────────
+-- Payments: Pending state between PayPal approval and Treasurer
+-- marking the row "Paid" in the Family Payment Tracking sheet.
+-- Source of truth for "Paid" is the sheet; this table only holds the
+-- in-flight Pending records so the UI can show them while the
+-- Treasurer reconciles.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS payments (
+  id SERIAL PRIMARY KEY,
+  family_name TEXT NOT NULL,
+  semester_key TEXT NOT NULL CHECK (semester_key IN ('fall', 'spring')),
+  payment_type TEXT NOT NULL CHECK (payment_type IN ('deposit', 'class_fee')),
+  paypal_transaction_id TEXT DEFAULT '',
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  payer_email TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Paid', 'Failed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS payments_family_sem_type_idx
+  ON payments (LOWER(family_name), semester_key, payment_type);

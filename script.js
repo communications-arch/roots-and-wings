@@ -488,6 +488,10 @@
         try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
         // Apply fresh data (re-renders everything)
         applySheetsData(data);
+        // Pull live billing status (per-family Paid/Pending + semester rates).
+        loadBillingStatus(function () {
+          if (typeof renderMyFamily === 'function') renderMyFamily();
+        });
       })
       .catch(function (err) {
         console.warn('Failed to load live data, using cached/static data:', err);
@@ -2601,11 +2605,13 @@
     }
   };
 
-  // ── Stub billing data (to be replaced with Google Sheets API) ──
-  // Each family key is the family name (matches FAMILIES[].name)
-  // amounts are per-semester; lineItems show the breakdown
+  // ── Billing config ──
+  // Per-family status + semester rates are loaded live from the billing sheet
+  // via /api/sheets?action=billing — see billingStatus below. The static bits
+  // below (deposit amount, per-session class rates, PayPal constants) don't
+  // change mid-year and remain hardcoded.
   var BILLING_CONFIG = {
-    memberFeePerSemester: 40,
+    memberFeePerSemester: 40, // fallback; overridden by billingStatus.rates
     amFeePerSession: 10,
     pmFeePerSession: 10,
     paypalFeeRate: 0.0199,
@@ -2614,10 +2620,50 @@
     checkDeliverTo: 'Jessica Shewan (Treasurer)',
     paypalMerchantId: 'MHDL7HTNRVQHE',
     semesters: {
-      fall: { name: 'Fall 2025', sessions: [1, 2], dueDate: '2025-08-27', deposit: 50, depositStatus: 'Paid', status: 'Paid' },
-      spring: { name: 'Spring 2026', sessions: [3, 4, 5], dueDate: '2026-01-07', deposit: 50, depositStatus: 'Paid', status: 'Due' }
+      fall: { name: 'Fall 2025', sessions: [1, 2], dueDate: '2025-08-27', deposit: 50 },
+      spring: { name: 'Spring 2026', sessions: [3, 4, 5], dueDate: '2026-01-07', deposit: 50 }
     }
   };
+
+  // Live billing state: { rates: { fall: {amRate, pmRate}, spring: {...} },
+  //                       families: { 'smith': { name, fall: {deposit, classFee}, spring: {...} } } }
+  // Populated by loadBillingStatus(); reused by calculateSemesterFees().
+  var billingStatus = null;
+  var billingStatusLoaded = false;
+
+  function loadBillingStatus(cb) {
+    var googleCred = localStorage.getItem('rw_google_credential');
+    if (!googleCred) { if (cb) cb(); return; }
+    fetch('/api/sheets?action=billing', {
+      headers: { 'Authorization': 'Bearer ' + googleCred }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && !data.error) {
+          billingStatus = data;
+        }
+        billingStatusLoaded = true;
+        if (cb) cb();
+      })
+      .catch(function (e) {
+        console.warn('[billing] status load failed:', e);
+        billingStatusLoaded = true;
+        if (cb) cb();
+      });
+  }
+
+  function getFamilyBillingStatus(fam, semKey) {
+    if (!fam || !billingStatus || !billingStatus.families) {
+      return { deposit: 'Due', classFee: 'Due' };
+    }
+    var entry = billingStatus.families[String(fam.name || '').toLowerCase()];
+    if (!entry || !entry[semKey]) return { deposit: 'Due', classFee: 'Due' };
+    var sem = entry[semKey];
+    return {
+      deposit: sem.deposit || 'Due',
+      classFee: sem.classFee || 'Due'
+    };
+  }
 
   function calculateSessionFees(fam, sessionNum) {
     var lineItems = [];
@@ -2654,7 +2700,13 @@
       sessionFees.push(sf);
       classTotal += sf.subtotal;
     });
+    // Member fee from live sheet rates when available (AM + PM halves).
     var memberFee = BILLING_CONFIG.memberFeePerSemester;
+    if (billingStatus && billingStatus.rates && billingStatus.rates[semesterKey]) {
+      var r = billingStatus.rates[semesterKey];
+      var live = (r.amRate || 0) + (r.pmRate || 0);
+      if (live > 0) memberFee = live;
+    }
     var deposit = sem.deposit || 0;
     // Class Fees cover AM/PM class charges only. Member / Membership fees are
     // billed as their own payments and no longer roll into the class-fee
@@ -2663,10 +2715,14 @@
     var balanceBeforeFee = subtotal;
     var paypalFee = Math.ceil(((balanceBeforeFee + BILLING_CONFIG.paypalFeeFixed) / (1 - BILLING_CONFIG.paypalFeeRate) - balanceBeforeFee) * 100) / 100;
     var total = balanceBeforeFee + paypalFee;
+
+    // Live per-family status (falls back to 'Due' if sheet hasn't loaded).
+    var live = getFamilyBillingStatus(fam, semesterKey);
+
     return {
       name: sem.name,
-      status: sem.status || 'Due',
-      depositStatus: sem.depositStatus || 'Due',
+      status: live.classFee || 'Due',
+      depositStatus: live.deposit || 'Due',
       dueDate: sem.dueDate,
       memberFee: memberFee,
       deposit: deposit,
@@ -3208,7 +3264,9 @@
       // this is what the public registration flow collects at sign-up)
       if (sem.deposit) {
         var depPaid = sem.depositStatus === 'Paid';
-        var depStatusClass = depPaid ? 'mf-billing-paid' : 'mf-billing-due-status';
+        var depPending = sem.depositStatus === 'Pending';
+        var depStatusClass = depPaid ? 'mf-billing-paid'
+          : depPending ? 'mf-billing-pending' : 'mf-billing-due-status';
         html += '<div class="mf-billing-semester">';
         html += '<div class="mf-billing-header">';
         html += '<strong>' + sem.name + ' Membership Fee</strong>';
@@ -3220,7 +3278,9 @@
         html += '<span>$' + sem.deposit.toFixed(2) + '</span>';
         html += '</div>';
         html += '</div>';
-        if (!depPaid) {
+        if (depPending) {
+          html += '<div class="mf-billing-pending-note">Payment received — awaiting Treasurer confirmation.</div>';
+        } else if (!depPaid) {
           var depBtnId = 'paypal-dep-' + semKey;
           html += '<div class="mf-billing-pay-wrap">';
           html += '<button class="mf-billing-pay-btn" id="' + depBtnId + '">';
@@ -3233,7 +3293,9 @@
 
       // Semester fees subsection
       var isPaid = sem.status === 'Paid';
-      var statusClass = isPaid ? 'mf-billing-paid' : 'mf-billing-due-status';
+      var isPending = sem.status === 'Pending';
+      var statusClass = isPaid ? 'mf-billing-paid'
+        : isPending ? 'mf-billing-pending' : 'mf-billing-due-status';
       var dueStr = new Date(sem.dueDate + 'T00:00:00').toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'});
 
       html += '<div class="mf-billing-semester">';
@@ -3295,8 +3357,10 @@
       html += '</div>';
       html += '</div>';
 
-      // Pay button (only if not paid)
-      if (!isPaid) {
+      // Pay button (only if not paid or pending)
+      if (isPending) {
+        html += '<div class="mf-billing-pending-note">Payment received — awaiting Treasurer confirmation.</div>';
+      } else if (!isPaid) {
         var paypalContainerId = 'paypal-btn-' + semKey;
         html += '<div class="mf-billing-pay-wrap">';
         html += '<button class="mf-billing-pay-btn" id="' + paypalContainerId + '">';
@@ -3448,8 +3512,32 @@
         ' | ' + schedule + ' | Semester ' + semesterNum + ' (Sessions ' + sem.sessions.join(', ') + ') | ' + paymentType;
     }
 
+    // Record a Pending payment to /api/sheets?action=billing so the UI can
+    // show "Pending" until the Treasurer marks the row Paid in the sheet.
+    function recordPendingPayment(familyName, semKey, paymentType, paypalId, amount, payerEmail) {
+      var googleCred = localStorage.getItem('rw_google_credential');
+      if (!googleCred) return Promise.resolve();
+      return fetch('/api/sheets?action=billing', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + googleCred,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          family_name: familyName,
+          semester_key: semKey,
+          payment_type: paymentType,
+          paypal_transaction_id: paypalId || '',
+          amount_cents: Math.round((parseFloat(amount) || 0) * 100),
+          payer_email: payerEmail || ''
+        })
+      }).catch(function (e) {
+        console.warn('[billing] recordPendingPayment failed:', e);
+      });
+    }
+
     // Wire up PayPal pay buttons (semester fees + deposits)
-    function wirePaypalButton(btnId, amount, description, invoiceId, email, note) {
+    function wirePaypalButton(btnId, amount, description, invoiceId, email, note, semKey, paymentType) {
       var btn = document.getElementById(btnId);
       if (!btn || typeof paypal_sdk === 'undefined') return;
       btn.onclick = function () {
@@ -3471,6 +3559,9 @@
             return actions.order.capture().then(function (details) {
               var wrap = btn.closest('.mf-billing-pay-wrap');
               wrap.innerHTML = '<div class="mf-billing-success">Payment complete! Transaction ID: ' + details.id + '</div>';
+              // Record Pending in our DB so the UI flips to "Pending" on next load.
+              recordPendingPayment(fam.name, semKey, paymentType, details.id, amount, email)
+                .then(function () { loadBillingStatus(function () { renderMyFamily(); }); });
             });
           },
           onError: function (err) {
@@ -3493,11 +3584,13 @@
       wirePaypalButton('paypal-dep-' + semKey, sem.deposit.toFixed(2),
         sem.name + ' Membership Fee — ' + fam.name + ' family',
         'RW-' + capKey + '-Memb-' + fam.name + '-' + year, fam.email,
-        buildPaypalNote(fam, semKey, sem.name + ' Membership Fee'));
+        buildPaypalNote(fam, semKey, sem.name + ' Membership Fee'),
+        semKey, 'deposit');
       wirePaypalButton('paypal-btn-' + semKey, sem.total.toFixed(2),
         sem.name + ' Class Fees — ' + fam.name + ' family',
         'RW-' + capKey + '-Classes-' + fam.name + '-' + year, fam.email,
-        buildPaypalNote(fam, semKey, sem.name + ' Class Fees'));
+        buildPaypalNote(fam, semKey, sem.name + ' Class Fees'),
+        semKey, 'class_fee');
     });
   }
 
