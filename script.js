@@ -1120,6 +1120,25 @@
     'c_f7e599c566fa32ba8da0c20bf51c82967e9d8aedffa8f775673db5146646b1b2@group.calendar.google.com': '#D81B60'  // Raspberry
   };
 
+  // Title-keyword rules. Evaluated in order; first match wins. Used when
+  // Google's per-event colorId isn't set (it often isn't — event-level
+  // color overrides don't reliably round-trip through the API to service
+  // accounts). Keep a single Members calendar and drive colors from naming.
+  var GCAL_TITLE_RULES = [
+    { match: /deadline/i,       color: '#D50000' }, // Tomato — Deadlines
+    { match: /field trip/i,     color: '#3F51B5' }, // Blueberry — Field Trips
+    { match: /special event/i,  color: '#8E24AA' }, // Grape — Special Events
+    { match: /member meeting/i, color: '#F4511E' }  // Tangerine — Member Meetings
+  ];
+
+  function matchTitleColor(summary) {
+    if (!summary) return null;
+    for (var i = 0; i < GCAL_TITLE_RULES.length; i++) {
+      if (GCAL_TITLE_RULES[i].match.test(summary)) return GCAL_TITLE_RULES[i].color;
+    }
+    return null;
+  }
+
   function renderCalendar(events) {
     var el = document.getElementById('calendarEvents');
     if (!el || !events) return;
@@ -1156,6 +1175,7 @@
       }
 
       var color = GCAL_EVENT_COLORS[ev.colorId]
+        || matchTitleColor(ev.summary)
         || GCAL_SOURCE_COLORS[ev.sourceCalendarId]
         || GCAL_DEFAULT_COLOR;
       html += '<div class="cal-event" style="border-left:4px solid ' + color + ';padding-left:12px;">';
