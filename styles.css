@@ -2109,7 +2109,7 @@ p + p { margin-top: 1rem; }
 }
 
 @media (max-width: 768px) {
-  .dashboard { padding-top: var(--portal-header-height-mobile, 120px); }
+  .dashboard { padding-top: var(--portal-header-height-mobile, 168px); }
 }
 
 /* ── Unified portal-header (docked + compact) ──
@@ -2214,7 +2214,16 @@ p + p { margin-top: 1rem; }
 .portal-header .hero-watermark { display: none; }
 
 @media (max-width: 768px) {
-  .portal-header .navbar { height: 52px; }
+  .portal-header .navbar {
+    height: auto;
+    min-height: 52px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .portal-header .navbar .container {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
   .portal-header .nav-brand img { height: 34px; }
   .dashboard-header p { display: none; }
 }
@@ -2538,7 +2547,8 @@ p + p { margin-top: 1rem; }
 
   .nav-toggle {
     display: flex;
-    order: 3;
+    order: 2;
+    margin-left: auto;
   }
 
   .nav-quick-icons {
@@ -2550,15 +2560,23 @@ p + p { margin-top: 1rem; }
     height: 36px;
   }
 
-  /* Show quick icons in the navbar bar, before the hamburger */
+  /* On mobile, put quick-access icons on their own row below logo+hamburger
+     so users always have one-tap access without them pushing the header off-screen.
+     Scrolls horizontally if more icons than fit. */
   .nav-quick-icons-mobile {
     display: flex;
     align-items: center;
-    gap: 2px;
-    order: 2;
-    margin-left: auto;
-    margin-right: 4px;
+    gap: 4px;
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0;
+    padding: 0 2px;
   }
+  .nav-quick-icons-mobile::-webkit-scrollbar { display: none; }
 
   .nav-icon-btn svg {
     width: 18px;
@@ -6701,7 +6719,7 @@ button.staff-role:hover {
 }
 @media (max-width: 768px) {
   .dashboard.has-push-banner {
-    padding-top: calc(var(--portal-header-height-mobile, 126px) + 38px);
+    padding-top: calc(var(--portal-header-height-mobile, 168px) + 38px);
   }
 }
 .push-banner-inner {
