@@ -2559,10 +2559,9 @@ p + p { margin-top: 1rem; }
     justify-content: center;
   }
 
-  .nav-toggle {
-    display: flex;
-    order: 3;
-  }
+  /* Hamburger no longer needed — Log Out moved inline with the icons row
+     and the logo now covers the "Public Site" navigation. */
+  .nav-toggle { display: none; }
 
   .nav-quick-icons {
     display: none;
@@ -2571,6 +2570,15 @@ p + p { margin-top: 1rem; }
   .nav-icon-btn {
     width: 36px;
     height: 36px;
+  }
+
+  /* Inline Log Out at the end of the mobile icon row */
+  .nav-mobile-logout {
+    margin-left: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 4px 12px;
+    font-size: 0.85rem;
   }
 
   .nav-icon-btn svg {

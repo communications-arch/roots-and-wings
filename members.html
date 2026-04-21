@@ -19,7 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.png?v=20260417d" as="image">
   <link rel="preload" href="logo-combined-mark.png?v=20260417d" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260421g">
+  <link rel="stylesheet" href="styles.css?v=20260421h">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
   <link rel="icon" href="favicon-32.png?v=20260417d" type="image/png" sizes="32x32">
   <script src="https://accounts.google.com/gsi/client" async defer onload="if(window.__initGSI)window.__initGSI()"></script>
@@ -126,7 +126,6 @@
         </div>
 
         <div class="nav-links" role="menubar">
-          <a href="index.html" role="menuitem">Public Site</a>
           <button class="btn btn-outline-dark btn-sm" id="logoutBtn" type="button">Log Out</button>
         </div>
       </div>
@@ -166,6 +165,7 @@
           <path d="M8 16L5.5 17.5"/><path d="M16 16L18.5 17.5"/>
         </svg>
       </a>
+      <button class="btn btn-outline-dark btn-sm nav-mobile-logout" type="button" onclick="document.getElementById('logoutBtn').click()">Log Out</button>
     </div>
 
     <!-- Greeting + view-mode pills on one row (merged band) -->
