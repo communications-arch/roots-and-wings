@@ -4583,7 +4583,9 @@
   var WORKSPACE_TITLE_NORMALIZATIONS = {
     'membership dir.': 'Membership Director',
     'sustaining dir.': 'Sustaining Director',
-    'communications dir.': 'Communications Director'
+    'communications dir.': 'Communications Director',
+    'vice-president': 'Vice President',
+    'vice president': 'Vice President'
   };
   function normalizeWorkspaceTitle(title) {
     if (!title) return title;
@@ -4723,7 +4725,7 @@
     },
     'reports': {
       title: 'Reports',
-      roleGate: ['Communications Director', 'Membership Director'],
+      roleGate: ['Communications Director', 'Membership Director', 'Vice President'],
       render: function (prefs, roles, role) {
         var items = (ROLE_REPORTS[role] || []);
         var h = '<p class="ws-body-hint">Live reports scoped to your role.</p>';
@@ -4746,7 +4748,7 @@
     },
     'forms': {
       title: 'Forms',
-      roleGate: ['Communications Director', 'Membership Director'],
+      roleGate: ['Communications Director', 'Membership Director', 'Vice President'],
       render: function (prefs, roles, role) {
         var items = (ROLE_FORMS[role] || []);
         var h = '<p class="ws-body-hint">Send a form or invite to someone outside the co-op.</p>';
@@ -4773,7 +4775,8 @@
     ],
     'Membership Director': [
       { key: 'membership', title: 'Membership Report' }
-    ]
+    ],
+    'Vice President': []
   };
   var ROLE_FORMS = {
     'Communications Director': [
@@ -4781,12 +4784,14 @@
     ],
     'Membership Director': [
       { key: 'send-registration', title: 'Send Registration Form' }
-    ]
+    ],
+    'Vice President': []
   };
 
   var WORKSPACE_DEFAULTS = {
     'Communications Director': ['reports', 'forms', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
