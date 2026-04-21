@@ -11,8 +11,9 @@ const { Resend } = require('resend');
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { google } = require('googleapis');
+const { put } = require('@vercel/blob');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, SUPER_USER_EMAIL } = require('./_permissions');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -706,6 +707,194 @@ async function handleRegistrationInvite(body, req, res) {
   return res.status(200).json({ success: true, emailed, link });
 }
 
+// ══════════════════════════════════════════════
+// MEMBER PROFILES — editable Directory overlay
+// ══════════════════════════════════════════════
+// One row per family in member_profiles, keyed by the family's portal login
+// (family_email, derived from the Directory sheet). Anyone signed in with
+// that Workspace account can edit their own family. Communications Director
+// (super user) can edit any family.
+
+function normalizeEmail(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function sanitizeParent(p) {
+  if (!p || typeof p !== 'object') return null;
+  const name = String(p.name || '').trim().slice(0, 200);
+  if (!name) return null;
+  return {
+    name,
+    pronouns: String(p.pronouns || '').trim().slice(0, 60),
+    photo_url: String(p.photo_url || '').trim().slice(0, 500)
+  };
+}
+
+function sanitizeKid(k) {
+  if (!k || typeof k !== 'object') return null;
+  const name = String(k.name || '').trim().slice(0, 200);
+  if (!name) return null;
+  const birth_date = String(k.birth_date || '').trim();
+  let bd = '';
+  if (birth_date && /^\d{4}-\d{2}-\d{2}$/.test(birth_date)) bd = birth_date;
+  const schedule = String(k.schedule || '').trim().toLowerCase();
+  let sch = '';
+  if (['all-day', 'morning', 'afternoon'].indexOf(schedule) !== -1) sch = schedule;
+  return {
+    name,
+    birth_date: bd,
+    pronouns: String(k.pronouns || '').trim().slice(0, 60),
+    allergies: String(k.allergies || '').trim().slice(0, 500),
+    schedule: sch,
+    photo_url: String(k.photo_url || '').trim().slice(0, 500)
+  };
+}
+
+// Owner: the JWT'd Workspace email MUST equal the family_email, OR the caller
+// is communications@ (super user).
+function canEditFamily(userEmail, familyEmail) {
+  const u = normalizeEmail(userEmail);
+  const f = normalizeEmail(familyEmail);
+  if (!u || !f) return false;
+  return u === f || u === SUPER_USER_EMAIL;
+}
+
+async function handleProfileGet(req, res) {
+  const user = await verifyWorkspaceAuth(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const familyEmail = normalizeEmail(req.query.family_email);
+  if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
+  if (!canEditFamily(user.email, familyEmail)) {
+    return res.status(403).json({ error: 'You can only view/edit your own family.' });
+  }
+
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT family_email, family_name, phone, address,
+             parents, kids, placement_notes, updated_at, updated_by
+      FROM member_profiles
+      WHERE family_email = ${familyEmail}
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return res.status(200).json({ profile: null, family_email: familyEmail });
+    }
+    return res.status(200).json({ profile: rows[0] });
+  } catch (err) {
+    console.error('Profile GET error:', err);
+    return res.status(500).json({ error: 'Could not load profile.' });
+  }
+}
+
+async function handleProfileUpdate(body, req, res) {
+  const user = await verifyWorkspaceAuth(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const familyEmail = normalizeEmail(body.family_email);
+  if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
+  if (!canEditFamily(user.email, familyEmail)) {
+    return res.status(403).json({ error: 'You can only edit your own family.' });
+  }
+
+  const familyName = String(body.family_name || '').trim().slice(0, 100);
+  if (!familyName) return res.status(400).json({ error: 'family_name required' });
+
+  const phone = String(body.phone || '').trim().slice(0, 50);
+  const address = String(body.address || '').trim().slice(0, 500);
+  const placementNotes = String(body.placement_notes || '').trim().slice(0, 2000);
+
+  const parentsRaw = Array.isArray(body.parents) ? body.parents : [];
+  const kidsRaw = Array.isArray(body.kids) ? body.kids : [];
+  if (parentsRaw.length > 6) return res.status(400).json({ error: 'Too many parents.' });
+  if (kidsRaw.length > 12) return res.status(400).json({ error: 'Too many kids.' });
+
+  const parents = parentsRaw.map(sanitizeParent).filter(Boolean);
+  const kids = kidsRaw.map(sanitizeKid).filter(Boolean);
+
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      INSERT INTO member_profiles (
+        family_email, family_name, phone, address, parents, kids,
+        placement_notes, updated_by
+      ) VALUES (
+        ${familyEmail}, ${familyName}, ${phone}, ${address},
+        ${JSON.stringify(parents)}::jsonb, ${JSON.stringify(kids)}::jsonb,
+        ${placementNotes}, ${user.email}
+      )
+      ON CONFLICT (family_email) DO UPDATE SET
+        family_name = EXCLUDED.family_name,
+        phone = EXCLUDED.phone,
+        address = EXCLUDED.address,
+        parents = EXCLUDED.parents,
+        kids = EXCLUDED.kids,
+        placement_notes = EXCLUDED.placement_notes,
+        updated_at = NOW(),
+        updated_by = EXCLUDED.updated_by
+      RETURNING family_email, family_name, phone, address, parents, kids,
+                placement_notes, updated_at, updated_by
+    `;
+    return res.status(200).json({ success: true, profile: rows[0] });
+  } catch (err) {
+    console.error('Profile update error:', err);
+    return res.status(500).json({ error: 'Could not save profile.' });
+  }
+}
+
+// Client posts { family_email, person_name, data_url } where data_url is a
+// base64-encoded image (data:image/...;base64,XXX). The client is expected to
+// resize to ~512x512 before uploading, keeping payload well under 1 MB.
+async function handleProfilePhoto(body, req, res) {
+  const user = await verifyWorkspaceAuth(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return res.status(500).json({ error: 'Photo uploads not configured. Ask communications@ to add Vercel Blob.' });
+  }
+
+  const familyEmail = normalizeEmail(body.family_email);
+  if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
+  if (!canEditFamily(user.email, familyEmail)) {
+    return res.status(403).json({ error: 'You can only upload photos for your own family.' });
+  }
+
+  const personName = String(body.person_name || '').trim().slice(0, 100);
+  if (!personName) return res.status(400).json({ error: 'person_name required' });
+
+  const dataUrl = String(body.data_url || '');
+  const m = dataUrl.match(/^data:(image\/(png|jpeg|jpg|webp));base64,(.+)$/);
+  if (!m) return res.status(400).json({ error: 'Image must be a base64 data URL (png, jpeg, or webp).' });
+  const mime = m[1];
+  const ext = m[2] === 'jpg' ? 'jpeg' : m[2];
+  const base64 = m[3];
+
+  let buf;
+  try { buf = Buffer.from(base64, 'base64'); }
+  catch (e) { return res.status(400).json({ error: 'Invalid image data.' }); }
+  // Cap at 2 MB server-side defensively — client should pre-resize to far below this.
+  if (buf.length > 2 * 1024 * 1024) {
+    return res.status(413).json({ error: 'Image too large (max 2 MB). Try a smaller photo.' });
+  }
+
+  try {
+    const slug = personName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'person';
+    const famSlug = familyEmail.split('@')[0];
+    const key = `profiles/${famSlug}/${slug}-${Date.now()}.${ext}`;
+    const blob = await put(key, buf, {
+      access: 'public',
+      contentType: mime,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: false
+    });
+    return res.status(200).json({ success: true, photo_url: blob.url });
+  } catch (err) {
+    console.error('Profile photo upload error:', err);
+    return res.status(500).json({ error: 'Could not upload photo.' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -715,6 +904,7 @@ module.exports = async function handler(req, res) {
     if (req.query.config === '1' || req.query.config === 'true') return handleConfig(res);
     if (req.query.backup_waiver_token) return handleBackupWaiverInfo(req, res);
     if (req.query.waivers_report === '1') return handleWaiversReport(req, res);
+    if (req.query.action === 'profile') return handleProfileGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -726,6 +916,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'backup-waiver-sign') return handleBackupWaiverSign(body, req, res);
     if (kind === 'waiver-send') return handleWaiverSend(body, req, res);
     if (kind === 'registration-invite') return handleRegistrationInvite(body, req, res);
+    if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
+    if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 

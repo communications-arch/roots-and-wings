@@ -313,6 +313,26 @@ CREATE INDEX IF NOT EXISTS one_off_waivers_token_idx ON one_off_waivers (token);
 CREATE INDEX IF NOT EXISTS one_off_waivers_email_idx ON one_off_waivers (email);
 
 -- ──────────────────────────────────────────────
+-- Member Profiles — editable overlay on top of the Directory sheet.
+-- One row per family, keyed by the derived portal login email
+-- (firstParentFirstName + familyLastInitial + @rootsandwingsindy.com).
+-- The Google Sheet remains the membership coordinator's seed/import surface;
+-- member-self-edits land here and are overlaid by /api/sheets at read time.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS member_profiles (
+  family_email    TEXT PRIMARY KEY,
+  family_name     TEXT NOT NULL,
+  phone           TEXT DEFAULT '',
+  address         TEXT DEFAULT '',
+  parents         JSONB NOT NULL DEFAULT '[]'::jsonb,
+  kids            JSONB NOT NULL DEFAULT '[]'::jsonb,
+  placement_notes TEXT DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by      TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS member_profiles_family_name_idx ON member_profiles (LOWER(family_name));
+
+-- ──────────────────────────────────────────────
 -- Payments: Pending state between PayPal approval and Treasurer
 -- marking the row "Paid" in the Family Payment Tracking sheet.
 -- Source of truth for "Paid" is the sheet; this table only holds the

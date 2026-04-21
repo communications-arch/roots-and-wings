@@ -1213,6 +1213,39 @@
 
   function getPhotoUrl(personName, email, familyName) {
     if (!email && !familyName && !personName) return null;
+    // DB-sourced photo (set via Edit My Info -> Vercel Blob) wins over Workspace
+    // photos. Overlay from /api/sheets lands on fam.parentInfo[].photoUrl and
+    // fam.kids[].photoUrl.
+    if (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES) && personName) {
+      var firstNameLower = String(personName).trim().split(/\s+/)[0].toLowerCase();
+      var matchFam = null;
+      if (email) {
+        var emailLower = String(email).toLowerCase();
+        for (var fi = 0; fi < FAMILIES.length; fi++) {
+          if (String(FAMILIES[fi].email || '').toLowerCase() === emailLower) { matchFam = FAMILIES[fi]; break; }
+        }
+      }
+      if (!matchFam && familyName) {
+        var famLower = String(familyName).toLowerCase();
+        for (var fj = 0; fj < FAMILIES.length; fj++) {
+          if (String(FAMILIES[fj].name || '').toLowerCase() === famLower) { matchFam = FAMILIES[fj]; break; }
+        }
+      }
+      if (matchFam) {
+        var pInfo = matchFam.parentInfo || [];
+        for (var pk = 0; pk < pInfo.length; pk++) {
+          if (pInfo[pk].photoUrl && String(pInfo[pk].name || '').trim().split(/\s+/)[0].toLowerCase() === firstNameLower) {
+            return pInfo[pk].photoUrl;
+          }
+        }
+        var famKids = matchFam.kids || [];
+        for (var kk = 0; kk < famKids.length; kk++) {
+          if (famKids[kk].photoUrl && String(famKids[kk].name || '').trim().split(/\s+/)[0].toLowerCase() === firstNameLower) {
+            return famKids[kk].photoUrl;
+          }
+        }
+      }
+    }
     // Try matching by firstname + last initial first (e.g. "erinb" for "Erin Bogan")
     // This prioritizes personal accounts over role accounts (e.g. president@)
     if (personName && familyName) {
@@ -9922,6 +9955,11 @@
         }
       });
     }
+    var emiBtn = document.getElementById('editMyInfoNavBtn');
+    if (emiBtn && !emiBtn._rwWired) {
+      emiBtn.addEventListener('click', function () { showEditMyInfo(); });
+      emiBtn._rwWired = true;
+    }
     loadCoverageBoard();
     loadClassLinks();
     loadNotifications();
@@ -9933,6 +9971,367 @@
       if (document.visibilityState === 'visible') loadNotifications();
     });
     initPushSubscription();
+  }
+
+  // ──────────────────────────────────────────────
+  // Edit My Info — self-service profile overlay
+  // ──────────────────────────────────────────────
+  // Lets a signed-in member edit phone, address, per-parent pronouns+photo,
+  // per-kid birthday/pronouns/allergies/schedule/photo, and placement notes.
+  // Photos are resized client-side to ~512 px JPEG, uploaded to Vercel Blob
+  // via /api/tour kind=profile-photo, then saved as part of the profile POST.
+  function showEditMyInfo() {
+    if (!personDetail || !personDetailCard) return;
+    var email = getActiveEmail();
+    if (!email) { alert('Please sign in to edit your info.'); return; }
+    var fam = null;
+    for (var i = 0; i < FAMILIES.length; i++) {
+      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+    }
+    if (!fam) {
+      alert('Could not find your family. Contact communications@rootsandwingsindy.com for help.');
+      return;
+    }
+
+    var parentSeed;
+    if (Array.isArray(fam.parentInfo) && fam.parentInfo.length) {
+      parentSeed = fam.parentInfo.map(function (p) {
+        return { name: p.name || '', pronouns: p.pronouns || '', photo_url: p.photoUrl || '', _queuedPhoto: null };
+      });
+    } else {
+      parentSeed = String(fam.parents || '').split(/\s*&\s*/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (n) {
+        return { name: n, pronouns: (fam.parentPronouns && fam.parentPronouns[n]) || '', photo_url: '', _queuedPhoto: null };
+      });
+    }
+    if (parentSeed.length === 0) parentSeed.push({ name: '', pronouns: '', photo_url: '', _queuedPhoto: null });
+
+    var state = {
+      family_email: fam.email,
+      family_name: fam.name,
+      phone: fam.phone || '',
+      address: fam.address || '',
+      placement_notes: fam.placementNotes || '',
+      parents: parentSeed,
+      kids: (fam.kids || []).map(function (k) {
+        return {
+          name: k.name || '',
+          birth_date: k.birthDate || '',
+          pronouns: k.pronouns || '',
+          allergies: k.allergies || '',
+          schedule: k.schedule || 'all-day',
+          photo_url: k.photoUrl || '',
+          _queuedPhoto: null
+        };
+      })
+    };
+
+    function scheduleOptionsHtml(selected) {
+      var opts = [['all-day', 'All day'], ['morning', 'Morning'], ['afternoon', 'Afternoon']];
+      return opts.map(function (o) {
+        return '<option value="' + o[0] + '"' + (selected === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('');
+    }
+
+    function thumbHtml(p, initial) {
+      var src = p._queuedPhoto || p.photo_url || '';
+      if (src) return '<img src="' + escapeHtml(src) + '" alt="">';
+      return '<span>' + escapeHtml((initial || '?').charAt(0).toUpperCase()) + '</span>';
+    }
+
+    function parentRowHtml(p, idx) {
+      var h = '<div class="emi-row" data-parent-idx="' + idx + '">';
+      h += '<div class="emi-photo-thumb">' + thumbHtml(p, p.name) +
+           '<button type="button" class="emi-photo-btn" data-role="upload-parent" data-idx="' + idx + '" aria-label="Upload photo">' +
+           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+           '</button></div>';
+      h += '<div class="emi-fields">';
+      h += '<input class="rd-input" placeholder="First name" data-field="name" value="' + escapeHtml(p.name) + '">';
+      h += '<input class="rd-input" placeholder="Pronouns (e.g. she/her)" data-field="pronouns" value="' + escapeHtml(p.pronouns) + '">';
+      h += '</div>';
+      h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-parent" data-idx="' + idx + '" aria-label="Remove adult">&times;</button>';
+      h += '</div>';
+      return h;
+    }
+
+    function kidRowHtml(k, idx) {
+      var h = '<div class="emi-row emi-kid-row" data-kid-idx="' + idx + '">';
+      h += '<div class="emi-photo-thumb">' + thumbHtml(k, k.name) +
+           '<button type="button" class="emi-photo-btn" data-role="upload-kid" data-idx="' + idx + '" aria-label="Upload photo">' +
+           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+           '</button></div>';
+      h += '<div class="emi-fields emi-kid-fields">';
+      h += '<input class="rd-input" placeholder="First name" data-field="name" value="' + escapeHtml(k.name) + '">';
+      h += '<input class="rd-input" placeholder="Pronouns" data-field="pronouns" value="' + escapeHtml(k.pronouns) + '">';
+      h += '<label class="emi-inline-label">Birthday<input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
+      h += '<label class="emi-inline-label">Schedule<select class="rd-input" data-field="schedule">' + scheduleOptionsHtml(k.schedule) + '</select></label>';
+      h += '<label class="emi-inline-label emi-full">Allergies &amp; notes<input class="rd-input" placeholder="None" data-field="allergies" value="' + escapeHtml(k.allergies) + '"></label>';
+      h += '</div>';
+      h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-kid" data-idx="' + idx + '" aria-label="Remove kid">&times;</button>';
+      h += '</div>';
+      return h;
+    }
+
+    function render() {
+      var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+      html += '<div class="elective-detail emi-modal">';
+      html += '<h3 style="margin:0 0 4px;">Edit My Info</h3>';
+      html += '<p class="emi-subtitle">' + escapeHtml(fam.name) + ' family — these updates show up across the member portal.</p>';
+      html += '<div id="emiError" class="emi-error" style="display:none;"></div>';
+
+      html += '<label class="rd-label">Family phone</label>';
+      html += '<input class="rd-input" id="emiPhone" placeholder="555-123-4567" value="' + escapeHtml(state.phone) + '">';
+
+      html += '<label class="rd-label">Home address</label>';
+      html += '<input class="rd-input" id="emiAddress" placeholder="123 Main St, Indianapolis, IN" value="' + escapeHtml(state.address) + '">';
+
+      html += '<div class="emi-section-head"><h4>Adults in your family</h4><button type="button" class="sc-btn" id="emiAddParent">+ Add adult</button></div>';
+      html += '<div id="emiParentList" class="emi-list">';
+      state.parents.forEach(function (p, idx) { html += parentRowHtml(p, idx); });
+      html += '</div>';
+
+      html += '<div class="emi-section-head"><h4>Kids</h4><button type="button" class="sc-btn" id="emiAddKid">+ Add kid</button></div>';
+      html += '<div id="emiKidList" class="emi-list">';
+      state.kids.forEach(function (k, idx) { html += kidRowHtml(k, idx); });
+      if (state.kids.length === 0) {
+        html += '<p class="emi-empty">No kids added yet. Use "Add kid" above.</p>';
+      }
+      html += '</div>';
+
+      html += '<label class="rd-label">Placement notes (optional)</label>';
+      html += '<p class="rd-hint">Anything else the Membership team should know? Schedule constraints, siblings-together requests, etc.</p>';
+      html += '<textarea class="rd-textarea" id="emiPlacementNotes" rows="3">' + escapeHtml(state.placement_notes) + '</textarea>';
+
+      html += '<div class="rd-btn-row emi-btn-row">';
+      html += '<button type="button" class="rd-save-btn" id="emiSaveBtn">Save changes</button>';
+      html += '<button type="button" class="rd-cancel-btn" id="emiCancelBtn">Cancel</button>';
+      html += '</div>';
+      html += '</div>';
+
+      personDetailCard.innerHTML = html;
+      wire();
+    }
+
+    function readAndResize(file, cb) {
+      if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+        return cb(new Error('Photo must be PNG, JPEG, or WebP.'));
+      }
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var img = new Image();
+        img.onload = function () {
+          var max = 512;
+          var w = img.width, h = img.height;
+          if (w > h) { if (w > max) { h = Math.round(h * max / w); w = max; } }
+          else { if (h > max) { w = Math.round(w * max / h); h = max; } }
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          cb(null, canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = function () { cb(new Error('Could not decode image.')); };
+        img.src = e.target.result;
+      };
+      reader.onerror = function () { cb(new Error('Could not read file.')); };
+      reader.readAsDataURL(file);
+    }
+
+    function syncStateFromDom() {
+      var phoneEl = document.getElementById('emiPhone');
+      var addressEl = document.getElementById('emiAddress');
+      var pnEl = document.getElementById('emiPlacementNotes');
+      if (phoneEl) state.phone = phoneEl.value;
+      if (addressEl) state.address = addressEl.value;
+      if (pnEl) state.placement_notes = pnEl.value;
+      var pRows = personDetailCard.querySelectorAll('#emiParentList [data-parent-idx]');
+      pRows.forEach(function (row) {
+        var idx = parseInt(row.getAttribute('data-parent-idx'), 10);
+        if (!state.parents[idx]) return;
+        row.querySelectorAll('[data-field]').forEach(function (el) {
+          state.parents[idx][el.getAttribute('data-field')] = el.value;
+        });
+      });
+      var kRows = personDetailCard.querySelectorAll('#emiKidList [data-kid-idx]');
+      kRows.forEach(function (row) {
+        var idx = parseInt(row.getAttribute('data-kid-idx'), 10);
+        if (!state.kids[idx]) return;
+        row.querySelectorAll('[data-field]').forEach(function (el) {
+          state.kids[idx][el.getAttribute('data-field')] = el.value;
+        });
+      });
+    }
+
+    function showError(msg) {
+      var el = document.getElementById('emiError');
+      if (!el) { alert(msg); return; }
+      el.textContent = msg;
+      el.style.display = '';
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function clearError() {
+      var el = document.getElementById('emiError');
+      if (el) { el.style.display = 'none'; el.textContent = ''; }
+    }
+
+    function wire() {
+      personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+      personDetail.addEventListener('click', function (e) {
+        if (e.target === personDetail) closeDetail();
+      });
+      document.getElementById('emiCancelBtn').addEventListener('click', closeDetail);
+
+      personDetailCard.addEventListener('click', function (e) {
+        var upBtn = e.target.closest('[data-role="upload-parent"], [data-role="upload-kid"]');
+        if (upBtn) {
+          var role = upBtn.getAttribute('data-role');
+          var idx = parseInt(upBtn.getAttribute('data-idx'), 10);
+          var fileInput = document.createElement('input');
+          fileInput.type = 'file';
+          fileInput.accept = 'image/png,image/jpeg,image/webp';
+          fileInput.addEventListener('change', function () {
+            var f = fileInput.files && fileInput.files[0];
+            if (!f) return;
+            if (f.size > 12 * 1024 * 1024) { showError('Photo is too large (max 12 MB before resize).'); return; }
+            readAndResize(f, function (err, dataUrl) {
+              if (err) { showError(err.message || 'Could not load image.'); return; }
+              syncStateFromDom();
+              if (role === 'upload-parent' && state.parents[idx]) state.parents[idx]._queuedPhoto = dataUrl;
+              if (role === 'upload-kid' && state.kids[idx]) state.kids[idx]._queuedPhoto = dataUrl;
+              render();
+            });
+          });
+          fileInput.click();
+          return;
+        }
+        var rmBtn = e.target.closest('[data-role="remove-parent"], [data-role="remove-kid"]');
+        if (rmBtn) {
+          var rmRole = rmBtn.getAttribute('data-role');
+          var rmIdx = parseInt(rmBtn.getAttribute('data-idx'), 10);
+          syncStateFromDom();
+          if (rmRole === 'remove-parent') {
+            if (state.parents.length <= 1) { showError('Families need at least one adult.'); return; }
+            state.parents.splice(rmIdx, 1);
+          } else {
+            state.kids.splice(rmIdx, 1);
+          }
+          render();
+          return;
+        }
+      });
+
+      document.getElementById('emiAddParent').addEventListener('click', function () {
+        syncStateFromDom();
+        state.parents.push({ name: '', pronouns: '', photo_url: '', _queuedPhoto: null });
+        render();
+      });
+      document.getElementById('emiAddKid').addEventListener('click', function () {
+        syncStateFromDom();
+        state.kids.push({ name: '', birth_date: '', pronouns: '', allergies: '', schedule: 'all-day', photo_url: '', _queuedPhoto: null });
+        render();
+      });
+      document.getElementById('emiSaveBtn').addEventListener('click', onSave);
+    }
+
+    function onSave() {
+      syncStateFromDom();
+      clearError();
+
+      for (var pi = 0; pi < state.parents.length; pi++) {
+        if (!String(state.parents[pi].name || '').trim()) {
+          showError('Please name each adult or remove blank rows.'); return;
+        }
+      }
+      for (var ki = 0; ki < state.kids.length; ki++) {
+        if (!String(state.kids[ki].name || '').trim()) {
+          showError('Please name each kid or remove blank rows.'); return;
+        }
+      }
+
+      var cred = localStorage.getItem('rw_google_credential');
+      if (!cred) { showError('Session expired. Please sign in again.'); return; }
+
+      var btn = document.getElementById('emiSaveBtn');
+      var originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      var pendingPhotos = [];
+      state.parents.forEach(function (p, i) { if (p._queuedPhoto) pendingPhotos.push({ kind: 'parent', idx: i, name: p.name, data: p._queuedPhoto }); });
+      state.kids.forEach(function (k, i) { if (k._queuedPhoto) pendingPhotos.push({ kind: 'kid', idx: i, name: k.name, data: k._queuedPhoto }); });
+
+      function restoreBtn() { btn.disabled = false; btn.textContent = originalText; }
+
+      function uploadPhoto(item) {
+        return fetch('/api/tour', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+          body: JSON.stringify({
+            kind: 'profile-photo',
+            family_email: state.family_email,
+            person_name: item.name,
+            data_url: item.data
+          })
+        }).then(function (r) { return r.json().then(function (body) { return { status: r.status, body: body }; }); })
+          .then(function (resp) {
+            if (resp.status !== 200) throw new Error((resp.body && resp.body.error) || 'Photo upload failed.');
+            if (item.kind === 'parent' && state.parents[item.idx]) {
+              state.parents[item.idx].photo_url = resp.body.photo_url;
+              state.parents[item.idx]._queuedPhoto = null;
+            } else if (item.kind === 'kid' && state.kids[item.idx]) {
+              state.kids[item.idx].photo_url = resp.body.photo_url;
+              state.kids[item.idx]._queuedPhoto = null;
+            }
+          });
+      }
+
+      function uploadAll(i) {
+        if (i >= pendingPhotos.length) return saveProfile();
+        return uploadPhoto(pendingPhotos[i]).then(function () { return uploadAll(i + 1); });
+      }
+
+      function saveProfile() {
+        var payload = {
+          kind: 'profile-update',
+          family_email: state.family_email,
+          family_name: state.family_name,
+          phone: state.phone,
+          address: state.address,
+          placement_notes: state.placement_notes,
+          parents: state.parents.map(function (p) { return { name: p.name, pronouns: p.pronouns, photo_url: p.photo_url }; }),
+          kids: state.kids.map(function (k) { return { name: k.name, birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url }; })
+        };
+        return fetch('/api/tour', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+          body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().then(function (body) { return { status: r.status, body: body }; }); })
+          .then(function (resp) {
+            if (resp.status !== 200) throw new Error((resp.body && resp.body.error) || 'Save failed.');
+            // Refresh sheets data so the overlay renders immediately.
+            return fetch('/api/sheets', { headers: { 'Authorization': 'Bearer ' + cred } })
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                if (data && !data.error) {
+                  try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+                  applySheetsData(data);
+                  if (typeof renderMyFamily === 'function') renderMyFamily();
+                  if (typeof renderDirectory === 'function') renderDirectory();
+                }
+                closeDetail();
+              })
+              .catch(function () { closeDetail(); });
+          });
+      }
+
+      uploadAll(0).catch(function (err) {
+        showError(err.message || 'Could not save changes.');
+        restoreBtn();
+      });
+    }
+
+    render();
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
   }
 
 })();

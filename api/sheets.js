@@ -1055,6 +1055,122 @@ async function handleBillingPost(req, res) {
 }
 
 // ══════════════════════════════════════════════
+// MEMBER PROFILE OVERLAY
+// ══════════════════════════════════════════════
+// member_profiles stores family-editable values that override the Directory
+// sheet for phone / address / per-parent pronouns + photos / per-kid
+// pronouns, allergies, birth_date, schedule, photo. Non-empty DB values win;
+// empty DB values fall through so membership@'s sheet edits still show up.
+
+async function applyMemberProfileOverlay(families) {
+  if (!Array.isArray(families) || families.length === 0) return;
+  var sql = getDb();
+  var rows = await sql`
+    SELECT family_email, family_name, phone, address,
+           parents, kids, placement_notes
+    FROM member_profiles
+  `;
+  if (!rows || rows.length === 0) return;
+  var byEmail = {};
+  rows.forEach(function (r) {
+    if (r.family_email) byEmail[String(r.family_email).toLowerCase()] = r;
+  });
+
+  families.forEach(function (fam) {
+    var key = String(fam.email || '').toLowerCase();
+    var p = byEmail[key];
+    if (!p) return;
+
+    if (p.phone) fam.phone = p.phone;
+    if (p.address) fam.address = p.address;
+    if (p.placement_notes) fam.placementNotes = p.placement_notes;
+
+    // Parents: merge pronouns and photoUrl onto the derived parent list.
+    // parents are stored on the family as a "First & First" string; we expose
+    // a parsed structure here (parentInfo) so the client can render per-parent
+    // pronouns/photos without rebuilding the split logic.
+    var parentFirstNames = String(fam.parents || '')
+      .split(/\s*&\s*/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var pMap = {};
+    (p.parents || []).forEach(function (pp) {
+      if (pp && pp.name) {
+        var first = String(pp.name).trim().split(/\s+/)[0].toLowerCase();
+        pMap[first] = pp;
+      }
+    });
+    fam.parentInfo = parentFirstNames.map(function (n) {
+      var key = n.toLowerCase();
+      var hit = pMap[key] || {};
+      var pronouns = hit.pronouns || (fam.parentPronouns && fam.parentPronouns[n]) || '';
+      if (pronouns) {
+        fam.parentPronouns = fam.parentPronouns || {};
+        fam.parentPronouns[n] = pronouns;
+      }
+      return {
+        name: n,
+        pronouns: pronouns,
+        photoUrl: hit.photo_url || ''
+      };
+    });
+    // Any DB-only parents (name not yet in the sheet) appended so edits are
+    // visible before the sheet catches up.
+    (p.parents || []).forEach(function (pp) {
+      if (!pp || !pp.name) return;
+      var first = String(pp.name).trim().split(/\s+/)[0];
+      var exists = fam.parentInfo.some(function (x) { return x.name.toLowerCase() === first.toLowerCase(); });
+      if (!exists) {
+        fam.parentInfo.push({ name: first, pronouns: pp.pronouns || '', photoUrl: pp.photo_url || '' });
+        // Keep the `parents` string in sync so family-name rendering picks it up.
+        fam.parents = fam.parents ? fam.parents + ' & ' + first : first;
+        if (pp.pronouns) {
+          fam.parentPronouns = fam.parentPronouns || {};
+          fam.parentPronouns[first] = pp.pronouns;
+        }
+      }
+    });
+
+    // Kids: match by first name (case-insensitive).
+    var kMap = {};
+    (p.kids || []).forEach(function (k) {
+      if (k && k.name) {
+        var first = String(k.name).trim().split(/\s+/)[0].toLowerCase();
+        kMap[first] = k;
+      }
+    });
+    (fam.kids || []).forEach(function (kid) {
+      var first = String(kid.name || '').trim().split(/\s+/)[0].toLowerCase();
+      var ov = kMap[first];
+      if (!ov) return;
+      if (ov.pronouns) kid.pronouns = ov.pronouns;
+      if (ov.allergies) kid.allergies = ov.allergies;
+      if (ov.birth_date) kid.birthDate = ov.birth_date;
+      if (ov.schedule) kid.schedule = ov.schedule;
+      if (ov.photo_url) kid.photoUrl = ov.photo_url;
+    });
+    // Append DB-only kids (not yet in the sheet).
+    (p.kids || []).forEach(function (k) {
+      if (!k || !k.name) return;
+      var first = String(k.name).trim().split(/\s+/)[0];
+      var exists = (fam.kids || []).some(function (x) {
+        return String(x.name || '').trim().toLowerCase() === first.toLowerCase();
+      });
+      if (!exists) {
+        fam.kids = fam.kids || [];
+        fam.kids.push({
+          name: first,
+          group: '',
+          schedule: k.schedule || 'all-day',
+          pronouns: k.pronouns || '',
+          allergies: k.allergies || '',
+          birthDate: k.birth_date || '',
+          photoUrl: k.photo_url || ''
+        });
+      }
+    });
+  });
+}
+
+// ══════════════════════════════════════════════
 // MAIN HANDLER
 // ══════════════════════════════════════════════
 module.exports = async function handler(req, res) {
@@ -1119,6 +1235,16 @@ module.exports = async function handler(req, res) {
     var dirParsed = parseDirectory(dirTab, classTab, allergyTab);
     result.families = dirParsed.families || [];
     result.groupMeta = dirParsed.groupMeta || {};
+
+    // Overlay member_profiles (member self-edits). DB wins for any non-empty
+    // field; blank DB fields fall through to the sheet value so membership@
+    // can still import/correct data via the Sheet when needed.
+    try {
+      await applyMemberProfileOverlay(result.families);
+    } catch (overlayErr) {
+      console.error('Member profile overlay failed:', overlayErr);
+      // fall through: sheet-only data still serves
+    }
 
     // ── AM Classes ──
     var amTab = null;
