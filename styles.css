@@ -5409,7 +5409,8 @@ button.staff-role:hover {
 .person-detail-card:has(.sc-modal),
 .person-detail-card:has(.cl-modal),
 .person-detail-card:has(.rd-modal),
-.person-detail-card:has(.wv-modal) {
+.person-detail-card:has(.wv-modal),
+.person-detail-card:has(.emi-modal) {
   max-width: 880px;
 }
 .wv-modal {
@@ -9030,13 +9031,13 @@ button.staff-role:hover {
 }
 .emi-row {
   display: grid;
-  grid-template-columns: 64px 1fr auto;
-  gap: 12px;
+  grid-template-columns: 72px 1fr auto;
+  gap: 14px;
   align-items: start;
   background: rgba(var(--color-primary-rgb), 0.04);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 .emi-photo-thumb {
   position: relative;
@@ -9080,23 +9081,26 @@ button.staff-role:hover {
 .emi-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 .emi-kid-fields {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1.2fr 1fr 1.1fr 1fr;
+  gap: 10px 12px;
 }
 .emi-inline-label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  gap: 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
   color: var(--color-text-light);
 }
 .emi-inline-label .rd-input {
-  font-size: 0.85rem;
-  padding: 6px 8px;
+  font-size: 0.88rem;
+  padding: 8px 10px;
 }
 .emi-full {
   grid-column: 1 / -1;
@@ -9117,9 +9121,10 @@ button.staff-role:hover {
   justify-content: flex-end;
   margin-top: 20px;
 }
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .emi-row {
     grid-template-columns: 56px 1fr;
+    gap: 10px;
   }
   .emi-remove {
     grid-column: 2;
@@ -9134,5 +9139,11 @@ button.staff-role:hover {
   .emi-fields,
   .emi-kid-fields {
     grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .emi-fields,
+  .emi-kid-fields {
+    grid-template-columns: 1fr;
   }
 }
