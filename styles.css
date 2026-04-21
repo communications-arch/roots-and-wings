@@ -2214,18 +2214,22 @@ p + p { margin-top: 1rem; }
 .portal-header .hero-watermark { display: none; }
 
 @media (max-width: 768px) {
-  .portal-header .navbar {
-    height: auto;
-    min-height: 52px;
-    padding-top: 4px;
-    padding-bottom: 4px;
-  }
-  .portal-header .navbar .container {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
+  .portal-header .navbar { height: 52px; }
   .portal-header .nav-brand img { height: 34px; }
   .dashboard-header p { display: none; }
+  /* Dedicated icon-nav row sits between the navbar and the greeting band */
+  .portal-header > .nav-quick-icons-mobile {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.08);
+    background-color: rgba(247, 247, 242, 0.94);
+  }
+  .portal-header > .nav-quick-icons-mobile::-webkit-scrollbar { display: none; }
 }
 
 /* Quick Links Grid */
@@ -2547,8 +2551,7 @@ p + p { margin-top: 1rem; }
 
   .nav-toggle {
     display: flex;
-    order: 2;
-    margin-left: auto;
+    order: 3;
   }
 
   .nav-quick-icons {
@@ -2559,24 +2562,6 @@ p + p { margin-top: 1rem; }
     width: 36px;
     height: 36px;
   }
-
-  /* On mobile, put quick-access icons on their own row below logo+hamburger
-     so users always have one-tap access without them pushing the header off-screen.
-     Scrolls horizontally if more icons than fit. */
-  .nav-quick-icons-mobile {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    order: 3;
-    flex-basis: 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    margin: 0;
-    padding: 0 2px;
-  }
-  .nav-quick-icons-mobile::-webkit-scrollbar { display: none; }
 
   .nav-icon-btn svg {
     width: 18px;
