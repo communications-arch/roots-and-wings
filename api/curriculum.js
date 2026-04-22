@@ -92,7 +92,7 @@ function normalizeLesson(raw, lessonNumber) {
 async function getFullCurriculum(sql, id) {
   const curr = await sql`
     SELECT id, title, subject, age_range, overview, tags, author_email, author_name,
-           parent_id, edit_policy, lesson_count, created_at, updated_at
+           parent_id, edit_policy, lesson_count, block, is_favorite, created_at, updated_at
     FROM curricula
     WHERE id = ${id}
   `;
@@ -146,6 +146,14 @@ async function getFullCurriculum(sql, id) {
   return result;
 }
 
+// 'AM' / 'PM' / 'both' / '' (empty = not categorised). Anything else is
+// dropped. Validation shared by create + update paths.
+function normalizeBlock(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (v === 'AM' || v === 'PM' || v === 'both') return v;
+  return '';
+}
+
 async function createCurriculum(sql, user, body) {
   const title = String(body.title || '').trim().slice(0, 200);
   if (!title) throw new Error('title required');
@@ -158,6 +166,7 @@ async function createCurriculum(sql, user, body) {
     : [];
   const edit_policy = (body.edit_policy === 'open') ? 'open' : 'author_only';
   const lesson_count = Math.max(1, Math.min(5, parseInt(body.lesson_count, 10) || 5));
+  const block = normalizeBlock(body.block);
 
   const lessonRows = Array.isArray(body.lessons) ? body.lessons : [];
   const normalizedLessons = [];
@@ -166,8 +175,8 @@ async function createCurriculum(sql, user, body) {
   }
 
   const inserted = await sql`
-    INSERT INTO curricula (title, subject, age_range, overview, tags, author_email, author_name, edit_policy, lesson_count, parent_id)
-    VALUES (${title}, ${subject}, ${age_range}, ${overview}, ${tags}, ${user.email}, ${user.name}, ${edit_policy}, ${lesson_count}, ${body.parent_id || null})
+    INSERT INTO curricula (title, subject, age_range, overview, tags, author_email, author_name, edit_policy, lesson_count, block, parent_id)
+    VALUES (${title}, ${subject}, ${age_range}, ${overview}, ${tags}, ${user.email}, ${user.name}, ${edit_policy}, ${lesson_count}, ${block}, ${body.parent_id || null})
     RETURNING id
   `;
   const id = inserted[0].id;
@@ -572,6 +581,19 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ submission: serializeSubmission(r) });
       }
 
+      // Favorited PM/both curricula — feeds the "Need inspiration?" strip
+      // inside the PM class submission modal. Any logged-in member can read.
+      if (action === 'inspiration') {
+        const rows = await sql`
+          SELECT id, title, subject, age_range, overview, tags, author_name, lesson_count, block
+          FROM curricula
+          WHERE is_favorite = TRUE AND block IN ('PM', 'both')
+          ORDER BY updated_at DESC
+          LIMIT 20
+        `;
+        return res.status(200).json({ curricula: rows });
+      }
+
       // Get class-curriculum links for a session
       if (action === 'links') {
         const session = parseInt(req.query.session, 10);
@@ -596,7 +618,7 @@ module.exports = async function handler(req, res) {
       // List summaries
       const rows = await sql`
         SELECT id, title, subject, age_range, overview, tags, author_email, author_name,
-               edit_policy, lesson_count, updated_at
+               edit_policy, lesson_count, block, is_favorite, updated_at
         FROM curricula
         ORDER BY updated_at DESC
       `;
@@ -770,6 +792,24 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ submission: serializeSubmission(updated[0]) });
       }
 
+      // Reviewer-only: toggle the ⭐ favorite flag on a curriculum. Dedicated
+      // action so the main curriculum PATCH stays author-only. VP + PMA +
+      // super user gate.
+      if (action === 'favorite') {
+        if (!id) return res.status(400).json({ error: 'id query param required' });
+        if (!(await canReviewSubmissions(user.email))) {
+          return res.status(403).json({ error: 'Reviewer access only' });
+        }
+        const desired = !!(req.body && req.body.is_favorite);
+        const updated = await sql`
+          UPDATE curricula SET is_favorite = ${desired}, updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING id, is_favorite
+        `;
+        if (updated.length === 0) return res.status(404).json({ error: 'Not found' });
+        return res.status(200).json({ id: updated[0].id, is_favorite: updated[0].is_favorite });
+      }
+
       if (!id) return res.status(400).json({ error: 'id query param required' });
 
       const existing = await sql`SELECT id, author_email, edit_policy FROM curricula WHERE id = ${id}`;
@@ -789,12 +829,13 @@ module.exports = async function handler(req, res) {
         : [];
       const edit_policy = (body.edit_policy === 'open') ? 'open' : 'author_only';
       const lesson_count = Math.max(1, Math.min(5, parseInt(body.lesson_count, 10) || 5));
+      const block = normalizeBlock(body.block);
 
       await sql`
         UPDATE curricula
         SET title = ${title}, subject = ${subject}, age_range = ${age_range},
             overview = ${overview}, tags = ${tags}, edit_policy = ${edit_policy},
-            lesson_count = ${lesson_count}, updated_at = NOW()
+            lesson_count = ${lesson_count}, block = ${block}, updated_at = NOW()
         WHERE id = ${id}
       `;
       await replaceLessons(sql, id, lesson_count, Array.isArray(body.lessons) ? body.lessons : []);

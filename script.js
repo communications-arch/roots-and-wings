@@ -4873,6 +4873,19 @@
         return h;
       }
     },
+    'pm-scheduling': {
+      // Visible to VP + PM Assistant (Afternoon Class Liaison) + Comms
+      // super user. Server-side canReviewSubmissions makes the same call.
+      title: 'PM Class Scheduling',
+      roleGate: ['Vice President', 'Afternoon Class Liaison', 'Communications Director'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Review inbound PM class submissions and draft the upcoming session.</p>';
+        h += '<ul class="ws-link-list">';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Schedule Builder</button></li>';
+        h += '</ul>';
+        return h;
+      }
+    },
     'reports': {
       title: 'Reports',
       roleGate: ['Communications Director', 'Membership Director', 'Vice President', 'Afternoon Class Liaison'],
@@ -4948,10 +4961,10 @@
   };
 
   var WORKSPACE_DEFAULTS = {
-    'Communications Director': ['reports', 'forms', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
+    'Communications Director': ['reports', 'forms', 'pm-scheduling', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
-    'Afternoon Class Liaison': ['reports', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['reports', 'forms', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
@@ -7450,6 +7463,7 @@
       title: '',
       subject: '',
       age_range: '',
+      block: '',
       overview: '',
       tags: [],
       edit_policy: 'author_only',
@@ -7464,6 +7478,7 @@
       title: curr.title || '',
       subject: curr.subject || '',
       age_range: curr.age_range || '',
+      block: curr.block || '',
       overview: curr.overview || '',
       tags: (curr.tags || []).slice(),
       edit_policy: curr.edit_policy || 'author_only',
@@ -7865,6 +7880,13 @@
       html += '<option value="' + escapeAttr(a) + '"' + (d.age_range === a ? ' selected' : '') + '>' + escapeAttr(a) + '</option>';
     });
     html += '</select></label>';
+    html += '<label class="cl-label">Block<select class="cl-input" id="cl-f-block">';
+    var curBlock = d.block || '';
+    html += '<option value=""' + (curBlock === '' ? ' selected' : '') + '>— Not set —</option>';
+    html += '<option value="AM"' + (curBlock === 'AM' ? ' selected' : '') + '>AM (morning class)</option>';
+    html += '<option value="PM"' + (curBlock === 'PM' ? ' selected' : '') + '>PM (afternoon elective)</option>';
+    html += '<option value="both"' + (curBlock === 'both' ? ' selected' : '') + '>Works for AM or PM</option>';
+    html += '</select></label>';
     html += '</div>';
 
     html += '<label class="cl-label">Overview<textarea class="cl-input cl-textarea" id="cl-f-overview" rows="3" placeholder="What will students learn across the whole unit?">' + escapeAttr(d.overview) + '</textarea></label>';
@@ -8032,6 +8054,7 @@
     var titleEl = personDetailCard.querySelector('#cl-f-title');
     var subjEl = personDetailCard.querySelector('#cl-f-subject');
     var ageEl = personDetailCard.querySelector('#cl-f-age');
+    var blockEl = personDetailCard.querySelector('#cl-f-block');
     var overviewEl = personDetailCard.querySelector('#cl-f-overview');
     var tagsEl = personDetailCard.querySelector('#cl-f-tags');
     var lcEl = personDetailCard.querySelector('#cl-f-lesson-count');
@@ -8040,6 +8063,7 @@
     if (titleEl) d.title = titleEl.value;
     if (subjEl) d.subject = subjEl.value;
     if (ageEl) d.age_range = ageEl.value;
+    if (blockEl) d.block = blockEl.value;
     if (overviewEl) d.overview = overviewEl.value;
     if (tagsEl) d.tags = tagsEl.value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
     if (lcEl) d.lesson_count = parseInt(lcEl.value, 10) || 5;
@@ -8123,6 +8147,7 @@
       title: d.title,
       subject: d.subject,
       age_range: d.age_range,
+      block: d.block || '',
       overview: d.overview,
       tags: d.tags,
       edit_policy: d.edit_policy,
@@ -8211,6 +8236,13 @@
     } else {
       rows.forEach(function (c) {
         html += '<button class="cl-card" data-id="' + c.id + '">';
+        // Badges strip — block (AM/PM/both) + favorite star
+        var badges = '';
+        if (c.block === 'AM') badges += '<span class="cl-badge cl-badge-am">AM</span>';
+        else if (c.block === 'PM') badges += '<span class="cl-badge cl-badge-pm">PM</span>';
+        else if (c.block === 'both') badges += '<span class="cl-badge cl-badge-both">AM/PM</span>';
+        if (c.is_favorite) badges += '<span class="cl-badge cl-badge-fav" title="Kid favorite">⭐ Favorite</span>';
+        if (badges) html += '<div class="cl-card-badges">' + badges + '</div>';
         html += '<div class="cl-card-title">' + escapeAttr(c.title) + '</div>';
         var meta = [];
         if (c.subject) meta.push(escapeAttr(c.subject));
@@ -8566,11 +8598,25 @@
     html += '<div class="cl-title-row">';
     html += '<h3>' + escapeAttr(curr.title) + '</h3>';
     html += '</div>';
+    // Block + favorite badges under the title
+    var detailBadges = '';
+    if (curr.block === 'AM') detailBadges += '<span class="cl-badge cl-badge-am">AM Class</span>';
+    else if (curr.block === 'PM') detailBadges += '<span class="cl-badge cl-badge-pm">PM Elective</span>';
+    else if (curr.block === 'both') detailBadges += '<span class="cl-badge cl-badge-both">AM or PM</span>';
+    if (curr.is_favorite) detailBadges += '<span class="cl-badge cl-badge-fav" title="Kid favorite">⭐ Favorite</span>';
+    if (detailBadges) html += '<div class="cl-detail-badges">' + detailBadges + '</div>';
+
     html += '<div class="cl-detail-actions cl-detail-actions-top">';
     html += '<button class="cl-action-btn" id="cl-copy-btn-top" data-id="' + curr.id + '">Copy &amp; Modify</button>';
     if (canEdit) {
       html += '<button class="cl-action-btn" id="cl-edit-btn-top" data-id="' + curr.id + '">Edit</button>';
       html += '<button class="cl-action-btn cl-action-del" id="cl-delete-btn-top" data-id="' + curr.id + '">Delete</button>';
+    }
+    // Reviewer-only ⭐ favorite toggle — a kid-loved class earns a star from VP/PMA.
+    if (classSubmissionReviewer) {
+      html += '<button class="cl-action-btn" id="cl-fav-btn-top" data-id="' + curr.id + '" data-fav="' + (curr.is_favorite ? '1' : '0') + '">';
+      html += curr.is_favorite ? '★ Unfavorite' : '☆ Mark as Favorite';
+      html += '</button>';
     }
     html += '</div>';
     var metaParts = [];
@@ -8757,6 +8803,37 @@
         });
       });
     });
+    // Reviewer-only ⭐ favorite toggle. Flips curriculum.is_favorite and
+    // updates the button label without reloading the library.
+    var favBtn = personDetailCard.querySelector('#cl-fav-btn-top');
+    if (favBtn) {
+      favBtn.addEventListener('click', function () {
+        var id = favBtn.getAttribute('data-id');
+        var isFav = favBtn.getAttribute('data-fav') === '1';
+        var desired = !isFav;
+        favBtn.disabled = true;
+        favBtn.textContent = desired ? 'Starring…' : 'Removing star…';
+        curriculumFetch('/api/curriculum?action=favorite&id=' + encodeURIComponent(id), {
+          method: 'PATCH',
+          body: JSON.stringify({ is_favorite: desired })
+        }).then(function (res) {
+          if (!res.ok) {
+            alert('Error: ' + (res.data.error || 'favorite toggle failed'));
+            favBtn.disabled = false;
+            favBtn.textContent = isFav ? '★ Unfavorite' : '☆ Mark as Favorite';
+            return;
+          }
+          // Mutate the in-memory state so the detail re-renders with the new badge
+          if (curriculumState.current) curriculumState.current.is_favorite = desired;
+          if (Array.isArray(curriculumState.list)) {
+            curriculumState.list.forEach(function (c) {
+              if (c.id === parseInt(id, 10)) c.is_favorite = desired;
+            });
+          }
+          renderCurriculumModal();
+        });
+      });
+    }
 
     // ── Editor view wiring ──
     // Debounced autosave on any input change inside the editor
@@ -9041,6 +9118,7 @@
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
+    else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
   });
 
   // Render all coordination tabs
@@ -10326,22 +10404,14 @@
       html += '</ul>';
     }
 
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
     html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;">';
     html += (activeSubs.length === 0 ? '+ Submit a PM Class' : '+ Submit Another Class');
     html += '</button>';
-    if (classSubmissionReviewer) {
-      html += '<button class="sc-btn" id="mfScheduleBuilderBtn" style="font-size:0.9rem;">\u{1F4CB} Open Schedule Builder</button>';
-    }
-    html += '</div>';
 
     body.innerHTML = html;
 
     var newBtn = document.getElementById('mfSubmitClassBtn');
     if (newBtn) newBtn.addEventListener('click', function () { showClassSubmissionModal(null); });
-
-    var schedBtn = document.getElementById('mfScheduleBuilderBtn');
-    if (schedBtn) schedBtn.addEventListener('click', function () { showScheduleBuilder(); });
 
     body.querySelectorAll('.mf-classsubs-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -10403,9 +10473,15 @@
     html += '<div class="cls-modal" role="dialog" aria-modal="true" aria-label="Submit a PM class">';
     html += '<button class="detail-close" id="clsCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + (isEdit ? 'Edit PM Class Submission' : 'Submit a PM Class') + '</h3>';
-    html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1.5rem;">';
+    html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
     html += '</p>';
+    // Placeholder for the "Need inspiration?" strip — filled asynchronously
+    // by loadInspirationStrip() so the modal opens instantly even if the
+    // curriculum fetch is slow.
+    if (!isEdit) {
+      html += '<div id="clsInspiration" class="cls-inspire" style="display:none;"></div>';
+    }
     html += '<form id="clsForm" novalidate>';
 
     // 1. Class Name
@@ -10518,6 +10594,8 @@
     document.getElementById('clsCancelBtn').addEventListener('click', closeCls);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCls(); });
 
+    if (!isEdit) loadInspirationStrip();
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var errEl = document.getElementById('clsError');
@@ -10598,6 +10676,105 @@
         submitBtn.textContent = isEdit ? 'Save Changes' : 'Submit Class';
       });
     });
+  }
+
+  // Loads favorited PM/both curricula and renders a "Need inspiration?" strip
+  // inside the Submit modal. Best-effort — strip stays hidden on failure.
+  function loadInspirationStrip() {
+    var strip = document.getElementById('clsInspiration');
+    if (!strip) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=inspiration', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      var list = Array.isArray(data.curricula) ? data.curricula : [];
+      if (list.length === 0) return; // keep hidden — no favorites yet
+      renderInspirationStrip(list.slice(0, 6));
+    })
+    .catch(function () { /* best-effort */ });
+  }
+
+  function renderInspirationStrip(list) {
+    var strip = document.getElementById('clsInspiration');
+    if (!strip) return;
+    var html = '<div class="cls-inspire-head">⭐ <strong>Need inspiration?</strong> ';
+    html += '<span style="color:var(--color-text-light);font-size:0.85rem;">Past PM classes kids loved — click to use as a starting point.</span></div>';
+    html += '<div class="cls-inspire-grid">';
+    list.forEach(function (c) {
+      var overview = (c.overview || '').slice(0, 120);
+      html += '<button type="button" class="cls-inspire-card" data-id="' + c.id + '">';
+      html += '<strong>' + escClsHtml(c.title) + '</strong>';
+      var meta = [];
+      if (c.subject) meta.push(escClsHtml(c.subject));
+      if (c.age_range) meta.push(escClsHtml(c.age_range));
+      if (meta.length) html += '<div class="cls-inspire-meta">' + meta.join(' · ') + '</div>';
+      if (overview) html += '<div class="cls-inspire-desc">' + escClsHtml(overview) + (c.overview.length > 120 ? '…' : '') + '</div>';
+      html += '<span class="cls-inspire-use">Use this as my class →</span>';
+      html += '</button>';
+    });
+    html += '</div>';
+    strip.innerHTML = html;
+    strip.style.display = '';
+
+    strip.querySelectorAll('.cls-inspire-card').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var picked = list.filter(function (c) { return c.id === id; })[0];
+        if (!picked) return;
+        applyInspirationPrefill(picked);
+      });
+    });
+  }
+
+  // Copy fields from a favorited curriculum into the current submit form.
+  // Only fills empty fields so we don't clobber anything the user typed.
+  function applyInspirationPrefill(curr) {
+    var titleEl = document.getElementById('clsClassName');
+    var descEl = document.getElementById('clsDescription');
+    if (titleEl && !titleEl.value.trim()) titleEl.value = curr.title || '';
+    if (descEl && !descEl.value.trim()) descEl.value = curr.overview || '';
+    // Best-effort age-group inference from curriculum.age_range → checkbox keys.
+    var inferred = inferAgeGroups(curr.age_range);
+    if (inferred.length > 0) {
+      inferred.forEach(function (g) {
+        var cb = document.querySelector('input.cls-cb[data-field="age_groups"][value="' + g + '"]');
+        if (cb && !cb.checked) cb.checked = true;
+      });
+    }
+    // Scroll the class-name field into view so it's obvious something happened.
+    if (titleEl) titleEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (titleEl) titleEl.focus();
+  }
+
+  // Map the library's free-form age_range string to AGE_GROUP_VALUES keys.
+  // AGE_RANGE_OPTIONS lives in the curriculum editor — we just match on
+  // name substrings so "Saplings (3-5)" → ['saplings'], "Mixed: Older" →
+  // ['mixed-older'], etc.
+  function inferAgeGroups(ageRange) {
+    if (!ageRange) return [];
+    var s = String(ageRange).toLowerCase();
+    var map = [
+      ['saplings', 'saplings'],
+      ['sassafras', 'sassafras'],
+      ['oaks', 'oaks'],
+      ['maples', 'maples'],
+      ['birch', 'birch'],
+      ['willows', 'willows'],
+      ['cedars', 'cedars'],
+      ['pigeons', 'pigeons'],
+      ['mixed: younger', 'mixed-younger'],
+      ['mixed: elementary', 'mixed-elementary'],
+      ['mixed: older', 'mixed-older'],
+      ['all ages', 'all-ages']
+    ];
+    var out = [];
+    map.forEach(function (pair) {
+      if (s.indexOf(pair[0]) !== -1) out.push(pair[1]);
+    });
+    return out;
   }
 
   // ──────────────────────────────────────────────

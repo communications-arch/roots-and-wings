@@ -49,11 +49,23 @@ CREATE TABLE IF NOT EXISTS curricula (
     CHECK (edit_policy IN ('author_only', 'open')),
   lesson_count INTEGER NOT NULL DEFAULT 5
     CHECK (lesson_count BETWEEN 1 AND 5),
+  -- 'AM' / 'PM' / 'both' — helps PM submitters browse relevant past plans.
+  block TEXT DEFAULT ''
+    CHECK (block IN ('', 'AM', 'PM', 'both')),
+  -- VP + Afternoon Class Liaison can star lessons kids loved or rushed to sign up for.
+  is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Back-compat: pick up the new columns on existing deployments. Must run
+-- before the indexes below that reference them.
+ALTER TABLE curricula ADD COLUMN IF NOT EXISTS block TEXT DEFAULT '';
+ALTER TABLE curricula ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS curricula_author_idx ON curricula (author_email);
 CREATE INDEX IF NOT EXISTS curricula_subject_idx ON curricula (subject);
+CREATE INDEX IF NOT EXISTS curricula_block_idx ON curricula (block);
+CREATE INDEX IF NOT EXISTS curricula_favorite_idx ON curricula (is_favorite) WHERE is_favorite;
 
 CREATE TABLE IF NOT EXISTS lessons (
   id SERIAL PRIMARY KEY,
