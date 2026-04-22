@@ -10209,11 +10209,11 @@
   };
   var HOUR_PREF_VALUES = ['first','last','flexible','2hr-required','2hr-optional'];
   var HOUR_PREF_LABELS = {
-    'first':'First hour after lunch',
-    'last':'Last hour before we leave',
-    'flexible':'Either first or second hour',
-    '2hr-required':'2 hours — kids commit to both',
-    '2hr-optional':'2 hours — kids can take one or both'
+    'first':'PM1 — First hour after lunch',
+    'last':'PM2 — Last hour before we leave',
+    'flexible':'Either PM1 or PM2',
+    '2hr-required':'Both PM1 & PM2 — kids commit to both',
+    '2hr-optional':'Both PM1 & PM2 — kids can take one or both'
   };
   var ASSISTANT_COUNT_VALUES = [1, 2, 3];
   var SPACE_REQ_VALUES = ['any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'];

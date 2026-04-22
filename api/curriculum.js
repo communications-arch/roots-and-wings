@@ -333,11 +333,11 @@ function prettySessionPrefs(a) {
 }
 function prettyHourPrefs(a) {
   const map = {
-    'first': 'First hour',
-    'last': 'Last hour',
-    'flexible': 'Either hour',
-    '2hr-required': '2 hours (both required)',
-    '2hr-optional': '2 hours (one or both)'
+    'first': 'PM1 (first hour)',
+    'last': 'PM2 (last hour)',
+    'flexible': 'Either PM1 or PM2',
+    '2hr-required': 'Both PM1 & PM2 (required)',
+    '2hr-optional': 'Both PM1 & PM2 (one or both)'
   };
   return a.map(v => map[v] || v).join(', ');
 }
