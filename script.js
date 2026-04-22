@@ -2299,16 +2299,20 @@
       html += '<div class="elective-staff-list">';
       if (sess && sess.teacher) {
         var teacherPerson = lookupPerson(sess.teacher);
+        var teacherEmail = teacherPerson ? teacherPerson.email : '';
+        var teacherFamily = teacherPerson ? teacherPerson.family : '';
         html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(sess.teacher) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + sess.teacher.charAt(0) + '</span></div>';
+        html += '<div class="staff-dot" style="background:' + faceColor(sess.teacher) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(sess.teacher, sess.teacher, teacherEmail, teacherFamily) + '</div>';
         html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + sess.teacher + pronounTag(teacherPerson) + '</strong><small style="color:var(--color-text-light);">Leader</small></div>';
         html += '</div>';
       }
       if (sess && sess.assistants) {
         sess.assistants.forEach(function(a) {
           var assistPerson = lookupPerson(a);
+          var aEmail = assistPerson ? assistPerson.email : '';
+          var aFamily = assistPerson ? assistPerson.family : '';
           html += '<div class="elective-teacher">';
-          html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + a.charAt(0) + '</span></div>';
+          html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(a, a, aEmail, aFamily) + '</div>';
           html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + a + pronounTag(assistPerson) + '</strong><small style="color:var(--color-text-light);">Assistant</small></div>';
           html += '</div>';
         });
@@ -3785,15 +3789,19 @@
     // Leader + assistants
     html += '<div class="elective-staff-list">';
     var leaderPerson = lookupPerson(elec.leader);
+    var leaderEmail = leaderPerson ? leaderPerson.email : '';
+    var leaderFamily = leaderPerson ? leaderPerson.family : '';
     html += '<div class="elective-teacher">';
-    html += '<div class="staff-dot" style="background:' + faceColor(elec.leader) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + elec.leader.charAt(0) + '</span></div>';
+    html += '<div class="staff-dot" style="background:' + faceColor(elec.leader) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(elec.leader, elec.leader, leaderEmail, leaderFamily) + '</div>';
     html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + elec.leader + pronounTag(leaderPerson) + '</strong><small style="color:var(--color-text-light);">Leader</small></div>';
     html += '</div>';
     if (elec.assistants && elec.assistants.length > 0) {
       elec.assistants.forEach(function (a) {
         var assistPerson = lookupPerson(a);
+        var aEmail = assistPerson ? assistPerson.email : '';
+        var aFamily = assistPerson ? assistPerson.family : '';
         html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + a.charAt(0) + '</span></div>';
+        html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(a, a, aEmail, aFamily) + '</div>';
         html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + a + pronounTag(assistPerson) + '</strong><small style="color:var(--color-text-light);">Assistant</small></div>';
         html += '</div>';
       });
@@ -10278,8 +10286,14 @@
 
     function staffLine(name) {
       var p = lookupPerson(name);
-      if (p && p.pronouns) return esc(name) + ' <span style="color:#555;font-style:italic;">(' + esc(p.pronouns) + ')</span>';
-      return esc(name);
+      var url = getPhotoUrl(name, p ? p.email : '', p ? p.family : '');
+      var imgHtml = '';
+      if (url) {
+        var hi = url.replace(/=s\d+-c/, '=s256-c');
+        imgHtml = '<img src="' + esc(hi) + '" alt="' + esc(name) + '" style="width:20pt;height:20pt;border-radius:50%;object-fit:cover;vertical-align:-5pt;margin-right:4pt;">';
+      }
+      var pron = (p && p.pronouns) ? ' <span style="color:#555;font-style:italic;">(' + esc(p.pronouns) + ')</span>' : '';
+      return imgHtml + esc(name) + pron;
     }
 
     // ── Class header ──
