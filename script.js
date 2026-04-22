@@ -10044,7 +10044,16 @@
   function renderNotifDropdown() {
     var existing = document.getElementById('notifDropdown');
     if (existing) existing.remove();
-    var bell = document.getElementById('notifBellBtn');
+    // Pick the visible bell. On mobile the desktop #notifBellBtn lives inside
+    // a display:none container (.nav-quick-icons), so anchoring the dropdown
+    // there would hide it too — tap the mobile bell and nothing appears.
+    // offsetParent is null when an ancestor is display:none.
+    var bells = document.querySelectorAll('.notif-bell-btn');
+    var bell = null;
+    for (var bi = 0; bi < bells.length; bi++) {
+      if (bells[bi].offsetParent !== null) { bell = bells[bi]; break; }
+    }
+    if (!bell) bell = document.getElementById('notifBellBtn');
     if (!bell) return;
     var html = '<div class="notif-dropdown" id="notifDropdown"><div class="notif-dropdown-header"><strong>Notifications</strong>';
     if (notifState.unreadCount > 0) html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
@@ -10060,7 +10069,17 @@
     setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
   }
 
-  function closeNotifOnOutsideClick(e) { var dropdown = document.getElementById('notifDropdown'); var bell = document.getElementById('notifBellBtn'); if (dropdown && !dropdown.contains(e.target) && !bell.contains(e.target)) closeNotifDropdown(); }
+  function closeNotifOnOutsideClick(e) {
+    var dropdown = document.getElementById('notifDropdown');
+    if (!dropdown) return;
+    // Either bell counts as "inside" — otherwise tapping the mobile bell to
+    // toggle it closed would fall through as an outside click.
+    var bells = document.querySelectorAll('.notif-bell-btn');
+    for (var bi = 0; bi < bells.length; bi++) {
+      if (bells[bi].contains(e.target)) return;
+    }
+    if (!dropdown.contains(e.target)) closeNotifDropdown();
+  }
   function closeNotifDropdown() { var dropdown = document.getElementById('notifDropdown'); if (dropdown) dropdown.remove(); notifState.dropdownOpen = false; document.removeEventListener('click', closeNotifOnOutsideClick); }
   function timeAgo(isoStr) { var diff = (Date.now() - new Date(isoStr).getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; }
 
@@ -10327,7 +10346,8 @@
       class_name:'', session_preferences:[], hour_preference:[], assistant_count:[],
       co_teachers:'', space_request:[], space_request_other:'',
       max_students: 12, max_students_other:'', age_groups:[], age_groups_other:'',
-      pre_enroll_kids:'', prerequisites:'', description:'', other_info:''
+      pre_enroll_kids:'', open_to_teen_assistant: false,
+      prerequisites:'', description:'', other_info:''
     };
 
     function has(arr, v) { return Array.isArray(arr) && arr.indexOf(v) !== -1; }
@@ -10384,7 +10404,12 @@
     html += '<label class="cls-label">How many helpers? <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group cls-cb-inline">';
     ASSISTANT_COUNT_VALUES.forEach(function (n) { html += checkbox('assistant_count', String(n), n + ' Classroom assistant' + (n > 1 ? 's' : '')); });
-    html += '</div></div>';
+    html += '</div>';
+    html += '<label class="cls-cb-label" style="margin-top:8px;">';
+    html += '<input type="checkbox" id="clsTeenAssist"' + (cur.open_to_teen_assistant ? ' checked' : '') + '> ';
+    html += 'Open to a teen (Pigeons) assistant';
+    html += '</label>';
+    html += '</div>';
 
     // 6. Co-teachers
     html += '<div class="cls-field">';
@@ -10422,12 +10447,7 @@
     html += '<input class="cl-input cls-input" type="text" id="clsAgeOther" maxlength="200" value="' + escClsAttr(cur.age_groups_other) + '" placeholder="Other (optional)" style="margin-top:8px;">';
     html += '</div>';
 
-    // 10. Pre-enroll own kids
-    html += '<div class="cls-field">';
-    html += '<label class="cls-label">Pre-enroll your own kids?</label>';
-    html += '<p class="cls-help">If so, list who (optional).</p>';
-    html += '<input class="cl-input cls-input" type="text" id="clsPreEnroll" maxlength="500" value="' + escClsAttr(cur.pre_enroll_kids) + '">';
-    html += '</div>';
+    // (Pre-enroll your own kids is deferred to a later flow.)
 
     // 11. Prerequisites
     html += '<div class="cls-field">';
@@ -10504,7 +10524,8 @@
         max_students_other: max_students_other,
         age_groups: collectChecked('age_groups'),
         age_groups_other: document.getElementById('clsAgeOther').value.trim(),
-        pre_enroll_kids: document.getElementById('clsPreEnroll').value.trim(),
+        pre_enroll_kids: cur.pre_enroll_kids || '', // field not in v1 UI, preserve existing value on edit
+        open_to_teen_assistant: document.getElementById('clsTeenAssist').checked,
         prerequisites: document.getElementById('clsPrereq').value.trim(),
         other_info: document.getElementById('clsOtherInfo').value.trim()
       };

@@ -430,7 +430,8 @@ CREATE TABLE IF NOT EXISTS class_submissions (
   max_students_other    TEXT NOT NULL DEFAULT '',       -- free-text when submitter picks "Other"
   age_groups            TEXT[] NOT NULL DEFAULT '{}',   -- {'3-7','7-9','10-12','teens'}
   age_groups_other      TEXT NOT NULL DEFAULT '',
-  pre_enroll_kids       TEXT NOT NULL DEFAULT '',
+  pre_enroll_kids       TEXT NOT NULL DEFAULT '',       -- reserved for a future flow (not surfaced in v1 UI)
+  open_to_teen_assistant BOOLEAN NOT NULL DEFAULT FALSE, -- teachers opting in to Pigeons-age assistants
   prerequisites         TEXT NOT NULL DEFAULT '',
   description           TEXT NOT NULL,
   other_info            TEXT NOT NULL DEFAULT '',
@@ -453,3 +454,6 @@ CREATE INDEX IF NOT EXISTS class_submissions_submitter_idx
   ON class_submissions (LOWER(submitted_by_email));
 CREATE INDEX IF NOT EXISTS class_submissions_status_idx ON class_submissions (status);
 CREATE INDEX IF NOT EXISTS class_submissions_school_year_idx ON class_submissions (school_year);
+
+-- Back-compat: pick up the teen-assistant flag on existing deployments.
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS open_to_teen_assistant BOOLEAN NOT NULL DEFAULT FALSE;

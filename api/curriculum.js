@@ -302,12 +302,13 @@ function normalizeSubmission(body) {
   const prerequisites   = String(body.prerequisites || '').trim().slice(0, 1000);
   const other_info      = String(body.other_info || '').trim().slice(0, 2000);
   const school_year     = String(body.school_year || '2026-2027').trim().slice(0, 20);
+  const open_to_teen_assistant = !!body.open_to_teen_assistant;
 
   return {
     class_name, session_preferences, hour_preference, assistant_count,
     co_teachers, space_request, space_request_other,
     max_students, max_students_other, age_groups, age_groups_other,
-    pre_enroll_kids, prerequisites, description, other_info, school_year
+    pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info, school_year
   };
 }
 
@@ -376,7 +377,7 @@ async function sendSubmissionConfirmation(sub) {
     ['Space request',    escapeHtml(prettySpace(sub.space_request, sub.space_request_other))],
     ['Max students',     escapeHtml(String(sub.max_students))],
     ['Age groups',       escapeHtml(prettyAges(sub.age_groups, sub.age_groups_other))],
-    ['Pre-enrolling',    escapeHtml(sub.pre_enroll_kids || '—')],
+    ['Teen assistant OK', sub.open_to_teen_assistant ? 'Yes — open to a Pigeons-age assistant' : 'No'],
     ['Prerequisites',    escapeHtml(sub.prerequisites || '—')]
   ];
   const rowsHtml = rows.map(
@@ -426,6 +427,7 @@ function serializeSubmission(r) {
     age_groups: r.age_groups || [],
     age_groups_other: r.age_groups_other || '',
     pre_enroll_kids: r.pre_enroll_kids || '',
+    open_to_teen_assistant: !!r.open_to_teen_assistant,
     prerequisites: r.prerequisites || '',
     description: r.description,
     other_info: r.other_info || '',
@@ -543,14 +545,14 @@ module.exports = async function handler(req, res) {
             class_name, session_preferences, hour_preference, assistant_count,
             co_teachers, space_request, space_request_other,
             max_students, max_students_other, age_groups, age_groups_other,
-            pre_enroll_kids, prerequisites, description, other_info
+            pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info
           )
           VALUES (
             ${user.email}, ${user.name || ''}, ${clean.school_year},
             ${clean.class_name}, ${clean.session_preferences}, ${clean.hour_preference}, ${clean.assistant_count},
             ${clean.co_teachers}, ${clean.space_request}, ${clean.space_request_other},
             ${clean.max_students}, ${clean.max_students_other}, ${clean.age_groups}, ${clean.age_groups_other},
-            ${clean.pre_enroll_kids}, ${clean.prerequisites}, ${clean.description}, ${clean.other_info}
+            ${clean.pre_enroll_kids}, ${clean.open_to_teen_assistant}, ${clean.prerequisites}, ${clean.description}, ${clean.other_info}
           )
           RETURNING *
         `;
@@ -648,6 +650,7 @@ module.exports = async function handler(req, res) {
             age_groups = ${clean.age_groups},
             age_groups_other = ${clean.age_groups_other},
             pre_enroll_kids = ${clean.pre_enroll_kids},
+            open_to_teen_assistant = ${clean.open_to_teen_assistant},
             prerequisites = ${clean.prerequisites},
             description = ${clean.description},
             other_info = ${clean.other_info},

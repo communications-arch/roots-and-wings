@@ -22,6 +22,7 @@ const { neon } = require('@neondatabase/serverless');
     age_groups: ['7-9', '10-12'],
     age_groups_other: '',
     pre_enroll_kids: 'My own kids',
+    open_to_teen_assistant: true,
     prerequisites: 'Bring a notebook',
     description: 'A smoke-test class to verify the round trip.',
     other_info: 'Delete me after verification.'
@@ -34,14 +35,14 @@ const { neon } = require('@neondatabase/serverless');
       class_name, session_preferences, hour_preference, assistant_count,
       co_teachers, space_request, space_request_other,
       max_students, max_students_other, age_groups, age_groups_other,
-      pre_enroll_kids, prerequisites, description, other_info
+      pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info
     )
     VALUES (
       ${fake.submitted_by_email}, ${fake.submitted_by_name}, ${fake.school_year},
       ${fake.class_name}, ${fake.session_preferences}, ${fake.hour_preference}, ${fake.assistant_count},
       ${fake.co_teachers}, ${fake.space_request}, ${fake.space_request_other},
       ${fake.max_students}, ${fake.max_students_other}, ${fake.age_groups}, ${fake.age_groups_other},
-      ${fake.pre_enroll_kids}, ${fake.prerequisites}, ${fake.description}, ${fake.other_info}
+      ${fake.pre_enroll_kids}, ${fake.open_to_teen_assistant}, ${fake.prerequisites}, ${fake.description}, ${fake.other_info}
     )
     RETURNING *
   `;
@@ -57,6 +58,7 @@ const { neon } = require('@neondatabase/serverless');
   console.log('  scalars:', {
     class_name: row.class_name,
     max_students: row.max_students,
+    open_to_teen_assistant: row.open_to_teen_assistant,
     status: row.status,
     created_at: row.created_at
   });
