@@ -1334,6 +1334,19 @@
     return '<span>' + name.charAt(0) + '</span>';
   }
 
+  // Kids don't have Workspace accounts — using getPhotoUrl would fall through
+  // to the parent's photo via the family email. getDbPhotoForPerson is the
+  // correct path for EMI-uploaded kid photos (set on fam.kids[].photoUrl).
+  function kidAvatarInnerHtml(kidName, email, familyName) {
+    var url = getDbPhotoForPerson(kidName, email, familyName);
+    if (url) {
+      var hi = url.replace(/=s\d+-c/, '=s256-c');
+      return '<img src="' + hi + '" alt="' + kidName + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'">' +
+        '<span style="display:none">' + kidName.charAt(0) + '</span>';
+    }
+    return '<span>' + kidName.charAt(0) + '</span>';
+  }
+
   // Temporary debug hook so we can inspect state from the browser console.
   // Exposes the in-IIFE objects without altering behavior. Safe to leave in
   // for now — there's nothing sensitive that isn't already rendered in the UI.
@@ -2312,7 +2325,7 @@
         html += '<div class="elective-roster">';
         groupKids.forEach(function(kid) {
           html += '<div class="elective-student">';
-          html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
+          html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, kid.email, kid.family) + '</div>';
           html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + '</div>';
           html += '</div>';
         });
@@ -3362,7 +3375,7 @@
       html += '<div class="mf-kid">';
       // Kid header bar
       html += '<div class="mf-kid-bar">';
-      html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
+      html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
       html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
       html += '<button class="mf-class-link" data-group="' + kid.group + '">View Classmates &rarr;</button>';
       html += '</div>';
@@ -3803,8 +3816,10 @@
       var first = kidName.split(' ')[0];
       var last = kidName.split(' ').slice(1).join(' ');
       var kidPerson = lookupPerson(kidName);
+      var kidEmail = kidPerson ? kidPerson.email : '';
+      var kidFamily = kidPerson ? kidPerson.family : last;
       html += '<div class="elective-student">';
-      html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '"><span>' + first.charAt(0) + '</span></div>';
+      html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '">' + kidAvatarInnerHtml(kidName, kidEmail, kidFamily) + '</div>';
       html += '<div><strong>' + first + '</strong> <span class="elective-student-last">' + last + '</span>' + pronounTag(kidPerson) + '</div>';
       html += '</div>';
     });
@@ -4834,9 +4849,18 @@
     },
     'reports': {
       title: 'Reports',
-      roleGate: ['Communications Director', 'Membership Director', 'Vice President'],
+      roleGate: ['Communications Director', 'Membership Director', 'Vice President', 'Afternoon Class Liaison'],
       render: function (prefs, roles, role) {
-        var items = (ROLE_REPORTS[role] || []);
+        var items = (ROLE_REPORTS[role] || []).slice();
+        // VP + Afternoon Class Liaison share the participation tracker.
+        // communications@ (super user) sees it under the Comms Director tab.
+        var sharedParticipation = { key: 'participation', title: 'Member Participation' };
+        if (role === 'Vice President' || role === 'Afternoon Class Liaison'
+            || (role === 'Communications Director' && isCommsUser())) {
+          if (!items.some(function (r) { return r.key === 'participation'; })) {
+            items.unshift(sharedParticipation);
+          }
+        }
         var h = '<p class="ws-body-hint">Live reports scoped to your role.</p>';
         h += '<ul class="ws-link-list">';
         if (items.length === 0) {
@@ -4901,6 +4925,7 @@
     'Communications Director': ['reports', 'forms', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
@@ -5170,6 +5195,7 @@
         var key = this.getAttribute('data-report-key');
         if (key === 'waivers') showWaiversReportModal();
         else if (key === 'membership') showMembershipReportModal();
+        else if (key === 'participation') showParticipationReportModal();
       });
     });
 
@@ -5627,6 +5653,583 @@
       h += '<div class="ws-reg-detail-section"><h5>Placement notes</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(r.placement_notes) + '</div></div>';
     }
     return h;
+  }
+
+  // ══════════════════════════════════════════════
+  // Participation Tracker (VP / Afternoon Class Liaison / super user)
+  // ══════════════════════════════════════════════
+  // Backend: /api/sheets?action=participation-* (gated server-side against
+  // the volunteer sheet role holders; this UI just mirrors that gate).
+
+  var PARTICIPATION_COUNT_FIELDS = [
+    { key: 'board_role',       label: 'Board' },
+    { key: 'one_year_role',    label: '1-yr Role' },
+    { key: 'am_lead',          label: 'AM Lead' },
+    { key: 'am_assist',        label: 'AM Assist' },
+    { key: 'pm_lead',          label: 'PM Lead' },
+    { key: 'pm_assist',        label: 'PM Assist' },
+    { key: 'cleaning_session', label: 'Cleaning' },
+    { key: 'event_lead',       label: 'Event Lead' },
+    { key: 'event_assist',     label: 'Event Assist' }
+  ];
+
+  var PARTICIPATION_STATUS_LABELS = {
+    on_track: 'On track',
+    near:     'Close',
+    behind:   'Behind',
+    'new':    'New',
+    exempt:   'Exempt'
+  };
+
+  function participationCanWrite() {
+    // VP or super user (communications@) — backend re-checks. The super-user
+    // shortcut lets communications@ act as VP for the report.
+    if (isCommsUser()) return true;
+    return isVP();
+  }
+
+  function showParticipationReportModal() {
+    if (!personDetail || !personDetailCard) return;
+    var canWrite = participationCanWrite();
+    var html = '<div class="detail-actions no-print">';
+    if (canWrite) {
+      html += '<button class="sc-btn" type="button" data-part-action="weights" aria-label="Edit the weights used in the participation score">⚙️ Weights</button>';
+      html += '<button class="sc-btn" type="button" data-part-action="exemptions" aria-label="Add or edit health/family exemptions">🩺 Exemptions</button>';
+    }
+    html += '<button class="sc-btn" type="button" data-part-action="csv" aria-label="Download the full report as CSV">⬇️ Export CSV</button>';
+    html += '<button class="sc-btn" type="button" data-part-action="print" aria-label="Print the report">🖨️ Print</button>';
+    html += '</div>';
+    html += '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<h3 class="rd-title">Member Participation Tracker</h3>';
+    html += '<p class="rd-subtitle">Session-slot counts for every member this school year. Click a row for the session-by-session breakdown.</p>';
+    html += '<div id="ws-participation-body"><p class="ws-empty">Loading participation data…</p></div>';
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+
+    personDetailCard.querySelectorAll('[data-part-action]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var a = this.getAttribute('data-part-action');
+        if (a === 'weights') showParticipationWeightsModal();
+        else if (a === 'exemptions') showParticipationExemptionsModal();
+        else if (a === 'csv') exportParticipationCSV();
+        else if (a === 'print') printParticipationReport();
+      });
+    });
+
+    loadParticipationReport();
+  }
+
+  // In-memory cache of the most recently loaded report, so CSV/print and
+  // the drill-down modal don't have to re-fetch.
+  var _participationReport = null;
+
+  function loadParticipationReport() {
+    var body = personDetailCard && personDetailCard.querySelector('#ws-participation-body');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/sheets?action=participation-report', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        var msg = (res.data && res.data.error) || 'error';
+        body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtmlWs(msg) + '</p>';
+        return;
+      }
+      _participationReport = res.data;
+      renderParticipationReport();
+    }).catch(function (err) {
+      body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>';
+    });
+  }
+
+  function renderParticipationReport() {
+    var body = personDetailCard && personDetailCard.querySelector('#ws-participation-body');
+    if (!body || !_participationReport) return;
+    var members = _participationReport.members || [];
+    var season = _participationReport.season || '';
+    var statusCounts = { on_track: 0, near: 0, behind: 0, 'new': 0, exempt: 0 };
+    members.forEach(function (m) {
+      if (statusCounts[m.status] != null) statusCounts[m.status] += 1;
+    });
+
+    var headerHtml = '<p class="ws-body-hint"><strong>' + members.length + '</strong> members · Season <strong>' + escapeHtmlWs(season) + '</strong>'
+      + ' · <strong class="ws-wv-ok">' + statusCounts.on_track + ' on track</strong>'
+      + ' · <strong class="ws-wv-pending">' + statusCounts.near + ' close</strong>'
+      + ' · <strong class="ws-wv-err">' + statusCounts.behind + ' behind</strong>'
+      + ' · <strong>' + statusCounts['new'] + ' new</strong>'
+      + ' · <strong>' + statusCounts.exempt + ' exempt</strong>'
+      + '</p>';
+
+    // Status filter chips
+    var filterHtml = '<div class="ws-part-filter">Filter: '
+      + '<button type="button" class="sc-btn ws-part-filter-btn ws-part-filter-active" data-filter="all">All</button>'
+      + '<button type="button" class="sc-btn ws-part-filter-btn" data-filter="behind">Behind</button>'
+      + '<button type="button" class="sc-btn ws-part-filter-btn" data-filter="near">Close</button>'
+      + '<button type="button" class="sc-btn ws-part-filter-btn" data-filter="new">New</button>'
+      + '<button type="button" class="sc-btn ws-part-filter-btn" data-filter="exempt">Exempt</button>'
+      + '<button type="button" class="sc-btn ws-part-filter-btn" data-filter="on_track">On track</button>'
+      + '</div>';
+
+    body.innerHTML = headerHtml + filterHtml + '<div id="ws-part-table-target"></div>';
+
+    var currentFilter = 'all';
+    function filteredRows() {
+      if (currentFilter === 'all') return members;
+      return members.filter(function (m) { return m.status === currentFilter; });
+    }
+
+    function renderTable() {
+      var tableTarget = body.querySelector('#ws-part-table-target');
+      if (!tableTarget) return;
+      renderSortableTable(tableTarget, participationTableColumns(), filteredRows(), {
+        initialSort: { key: 'weightedTotal', dir: 'desc' },
+        expandable: true,
+        renderDetail: renderParticipationTimeline
+      });
+    }
+
+    body.querySelectorAll('.ws-part-filter-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        body.querySelectorAll('.ws-part-filter-btn').forEach(function (b) { b.classList.remove('ws-part-filter-active'); });
+        this.classList.add('ws-part-filter-active');
+        currentFilter = this.getAttribute('data-filter');
+        renderTable();
+      });
+    });
+    renderTable();
+  }
+
+  function participationTableColumns() {
+    var cols = [
+      { key: 'displayName', label: 'Member', type: 'string',
+        sortValue: function (r) { return (r.family + ' ' + r.first).toLowerCase(); },
+        render: function (r) {
+          var badges = '';
+          if (r.isBoard) badges += ' <span class="ws-part-badge ws-part-badge-board">Board</span>';
+          if (r.isNewMember) badges += ' <span class="ws-part-badge ws-part-badge-new">New</span>';
+          if (r.exemption) badges += ' <span class="ws-part-badge ws-part-badge-exempt">Exempt</span>';
+          return '<strong>' + escapeHtmlWs(r.displayName) + '</strong>' + badges;
+        }
+      }
+    ];
+    PARTICIPATION_COUNT_FIELDS.forEach(function (f) {
+      cols.push({
+        key: f.key, label: f.label, type: 'number',
+        sortValue: function (r) { return r.counts[f.key] || 0; },
+        render: function (r) {
+          var v = r.counts[f.key] || 0;
+          return v > 0 ? String(v) : '<span class="ws-part-zero">–</span>';
+        }
+      });
+    });
+    cols.push({
+      key: 'weightedTotal', label: 'Weighted', type: 'number',
+      render: function (r) { return '<strong>' + (r.weightedTotal || 0) + '</strong>'; }
+    });
+    cols.push({
+      key: 'expectedPoints', label: 'Expected', type: 'number',
+      render: function (r) { return String(r.expectedPoints || 0); }
+    });
+    cols.push({
+      key: 'coverageGiven', label: 'Coverage Given', type: 'number',
+      render: function (r) {
+        var v = r.coverageGiven || 0;
+        return v > 0 ? String(v) : '<span class="ws-part-zero">–</span>';
+      }
+    });
+    cols.push({
+      key: 'status', label: 'Status', type: 'string',
+      sortValue: function (r) {
+        // Behind first, then near, new, on-track, exempt last
+        var order = { behind: 0, near: 1, 'new': 2, on_track: 3, exempt: 4 };
+        return String(order[r.status] != null ? order[r.status] : 5);
+      },
+      render: function (r) {
+        var cls = 'ws-part-status ws-part-status-' + r.status;
+        return '<span class="' + cls + '">' + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[r.status] || r.status) + '</span>';
+      }
+    });
+    return cols;
+  }
+
+  function renderParticipationTimeline(r) {
+    var h = '<div class="ws-part-timeline">';
+    if (r.roles && r.roles.length) {
+      h += '<div class="ws-part-roles"><strong>Roles this year:</strong> ' + r.roles.map(escapeHtmlWs).join(' · ') + '</div>';
+    }
+    if (r.exemption) {
+      h += '<div class="ws-part-exemption"><strong>Active exemption:</strong> '
+        + escapeHtmlWs(r.exemption.reason)
+        + ' · ' + escapeHtmlWs(r.exemption.start_date)
+        + (r.exemption.end_date ? ' → ' + escapeHtmlWs(r.exemption.end_date) : ' → ongoing')
+        + (r.exemption.note ? ' — <em>' + escapeHtmlWs(r.exemption.note) + '</em>' : '')
+        + '</div>';
+    }
+    var anySessions = false;
+    for (var s = 1; s <= 5; s++) {
+      var entries = (r.timeline && r.timeline[s]) || [];
+      if (entries.length === 0) continue;
+      anySessions = true;
+      h += '<div class="ws-part-session"><h5>Session ' + s + '</h5><ul>';
+      entries.forEach(function (e) {
+        h += '<li>' + escapeHtmlWs(e.label) + '</li>';
+      });
+      h += '</ul></div>';
+    }
+    if (!anySessions) {
+      h += '<p class="ws-empty">No session-slot assignments recorded yet.</p>';
+    }
+    if (r.coverageGiven) {
+      h += '<p class="ws-part-coverage-note"><em>Coverage given: ' + r.coverageGiven + ' slot(s) stepped into for absent members. Not counted toward the weighted total.</em></p>';
+    }
+    if (r.absencesCount) {
+      h += '<p class="ws-part-coverage-note"><em>Absences logged: ' + r.absencesCount + '.</em></p>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // ─── Weights admin (VP / super user only) ───
+  function showParticipationWeightsModal() {
+    if (!personDetail || !personDetailCard) return;
+    if (!participationCanWrite()) { alert('Vice President or super user only.'); return; }
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<h3 class="rd-title">Participation Weights</h3>';
+    html += '<p class="rd-subtitle">These values are the points each session-slot contributes to the weighted score. Adjust as needed; the report recomputes on save.</p>';
+    html += '<div id="ws-part-weights-body"><p class="ws-empty">Loading weights…</p></div>';
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', function () {
+      // Return to the report view with fresh data
+      showParticipationReportModal();
+    });
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/sheets?action=participation-weights', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      var body = personDetailCard.querySelector('#ws-part-weights-body');
+      if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
+      var weights = (res.data && res.data.weights) || [];
+      if (weights.length === 0) { body.innerHTML = '<p class="ws-empty">No weights configured.</p>'; return; }
+      var h = '<table class="ws-part-weights-table"><thead><tr><th>Label</th><th>Value</th><th></th></tr></thead><tbody>';
+      weights.forEach(function (w) {
+        h += '<tr data-weight-key="' + escapeHtmlWs(w.key) + '">'
+          + '<td><strong>' + escapeHtmlWs(w.label) + '</strong>'
+          + (w.description ? '<br><span class="ws-part-weight-desc">' + escapeHtmlWs(w.description) + '</span>' : '')
+          + '</td>'
+          + '<td><input type="number" step="0.25" class="ws-part-weight-input" value="' + escapeHtmlWs(w.value) + '" /></td>'
+          + '<td><button type="button" class="btn btn-primary btn-sm ws-part-weight-save">Save</button>'
+          + '<span class="ws-part-weight-status"></span></td>'
+          + '</tr>';
+      });
+      h += '</tbody></table>';
+      body.innerHTML = h;
+
+      body.querySelectorAll('.ws-part-weight-save').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var row = this.closest('tr');
+          var key = row.getAttribute('data-weight-key');
+          var input = row.querySelector('.ws-part-weight-input');
+          var statusEl = row.querySelector('.ws-part-weight-status');
+          var value = parseFloat(input.value);
+          if (!isFinite(value)) { statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = 'Not a number'; return; }
+          var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Saving…';
+          statusEl.textContent = '';
+          fetch('/api/sheets?action=participation-weight-save', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: key, value: value })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res2) {
+            btn.disabled = false; btn.textContent = orig;
+            if (!res2.ok) { statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = (res2.data && res2.data.error) || 'Save failed'; return; }
+            statusEl.className = 'ws-part-weight-status ws-wv-ok'; statusEl.textContent = 'Saved';
+          }).catch(function (err) {
+            btn.disabled = false; btn.textContent = orig;
+            statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = (err && err.message) || 'Network error';
+          });
+        });
+      });
+    });
+  }
+
+  // ─── Exemptions admin (VP / super user only) ───
+  function showParticipationExemptionsModal() {
+    if (!personDetail || !personDetailCard) return;
+    if (!participationCanWrite()) { alert('Vice President or super user only.'); return; }
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<h3 class="rd-title">Participation Exemptions</h3>';
+    html += '<p class="rd-subtitle">Health / family leave pro-rates a member’s expected points. Leave end date blank for ongoing.</p>';
+    html += '<div id="ws-part-exempt-body"><p class="ws-empty">Loading…</p></div>';
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', function () {
+      showParticipationReportModal();
+    });
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+
+    loadParticipationExemptions();
+  }
+
+  function loadParticipationExemptions() {
+    var body = personDetailCard && personDetailCard.querySelector('#ws-part-exempt-body');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/sheets?action=participation-exemptions', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
+      var list = (res.data && res.data.exemptions) || [];
+      var h = '<div class="ws-part-exempt-form"><h5>Add / Edit</h5>';
+      h += participationExemptionFormHtml(null);
+      h += '</div>';
+      h += '<h5 class="ws-part-exempt-existing">Current & past exemptions</h5>';
+      if (list.length === 0) {
+        h += '<p class="ws-empty">No exemptions on file.</p>';
+      } else {
+        h += '<table class="ws-part-exempt-table"><thead><tr><th>Member</th><th>Window</th><th>Reason</th><th>Note</th><th></th></tr></thead><tbody>';
+        list.forEach(function (e) {
+          h += '<tr data-exempt-id="' + escapeHtmlWs(e.id) + '">'
+            + '<td><strong>' + escapeHtmlWs(e.member_name) + '</strong><br><span class="ws-part-weight-desc">' + escapeHtmlWs(e.member_email) + '</span></td>'
+            + '<td>' + escapeHtmlWs(e.start_date) + ' → ' + (e.end_date ? escapeHtmlWs(e.end_date) : 'ongoing') + '</td>'
+            + '<td>' + escapeHtmlWs(e.reason) + '</td>'
+            + '<td>' + escapeHtmlWs(e.note || '') + '</td>'
+            + '<td>'
+            + '<button type="button" class="sc-btn ws-part-exempt-edit">Edit</button> '
+            + '<button type="button" class="sc-btn sc-btn-del ws-part-exempt-delete">Delete</button>'
+            + '</td></tr>';
+        });
+        h += '</tbody></table>';
+      }
+      body.innerHTML = h;
+
+      wireParticipationExemptionForm(body, null);
+
+      body.querySelectorAll('.ws-part-exempt-edit').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var row = this.closest('tr');
+          var id = row.getAttribute('data-exempt-id');
+          var target = list.filter(function (x) { return String(x.id) === String(id); })[0];
+          if (!target) return;
+          var form = body.querySelector('.ws-part-exempt-form');
+          form.innerHTML = '<h5>Edit exemption</h5>' + participationExemptionFormHtml(target);
+          wireParticipationExemptionForm(body, target);
+        });
+      });
+
+      body.querySelectorAll('.ws-part-exempt-delete').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var row = this.closest('tr');
+          var id = row.getAttribute('data-exempt-id');
+          if (!confirm('Delete this exemption?')) return;
+          fetch('/api/sheets?action=participation-exemption-delete', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: parseInt(id, 10) })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res2) {
+            if (!res2.ok) { alert((res2.data && res2.data.error) || 'Delete failed'); return; }
+            loadParticipationExemptions();
+          });
+        });
+      });
+    });
+  }
+
+  function participationExemptionFormHtml(existing) {
+    existing = existing || {};
+    var members = (_participationReport && _participationReport.members) || [];
+    var opts = '<option value="">— pick a member —</option>';
+    members.forEach(function (m) {
+      var sel = (existing.member_email && existing.member_email.toLowerCase() === (m.email || '').toLowerCase()
+                 && existing.member_name === m.displayName) ? ' selected' : '';
+      opts += '<option value="' + escapeHtmlWs(m.email) + '|' + escapeHtmlWs(m.displayName) + '"' + sel + '>'
+        + escapeHtmlWs(m.displayName) + '</option>';
+    });
+    var reasonOpts = ['medical', 'family', 'other'].map(function (r) {
+      return '<option value="' + r + '"' + (existing.reason === r ? ' selected' : '') + '>' + r + '</option>';
+    }).join('');
+    var h = '<div class="ws-waiver-form">';
+    h += '<label>Member<select class="ws-part-exempt-member">' + opts + '</select></label>';
+    h += '<label>Start date<input type="date" class="ws-part-exempt-start" value="' + escapeHtmlWs(existing.start_date || '') + '"></label>';
+    h += '<label>End date <span class="ws-part-weight-desc">(optional, blank = ongoing)</span><input type="date" class="ws-part-exempt-end" value="' + escapeHtmlWs(existing.end_date || '') + '"></label>';
+    h += '<label>Reason<select class="ws-part-exempt-reason">' + reasonOpts + '</select></label>';
+    h += '<label>Note <span class="ws-part-weight-desc">(optional)</span><textarea class="ws-part-exempt-note" rows="2" maxlength="500">' + escapeHtmlWs(existing.note || '') + '</textarea></label>';
+    h += '<input type="hidden" class="ws-part-exempt-id" value="' + escapeHtmlWs(existing.id || '') + '">';
+    h += '<button class="btn btn-primary btn-sm ws-part-exempt-save">' + (existing.id ? 'Save changes' : 'Add exemption') + '</button>';
+    h += '<span class="ws-part-exempt-status"></span>';
+    h += '</div>';
+    return h;
+  }
+
+  function wireParticipationExemptionForm(body, existing) {
+    var cred = localStorage.getItem('rw_google_credential');
+    var saveBtn = body.querySelector('.ws-part-exempt-save');
+    if (!saveBtn) return;
+    saveBtn.addEventListener('click', function () {
+      var memberSel = body.querySelector('.ws-part-exempt-member');
+      var startEl = body.querySelector('.ws-part-exempt-start');
+      var endEl = body.querySelector('.ws-part-exempt-end');
+      var reasonEl = body.querySelector('.ws-part-exempt-reason');
+      var noteEl = body.querySelector('.ws-part-exempt-note');
+      var idEl = body.querySelector('.ws-part-exempt-id');
+      var statusEl = body.querySelector('.ws-part-exempt-status');
+      var pick = memberSel.value || '';
+      var parts = pick.split('|');
+      var email = parts[0] || '';
+      var name = parts[1] || '';
+      var payload = {
+        id: idEl.value ? parseInt(idEl.value, 10) : null,
+        member_email: email,
+        member_name: name,
+        start_date: startEl.value,
+        end_date: endEl.value,
+        reason: reasonEl.value,
+        note: noteEl.value
+      };
+      if (!email || !name || !payload.start_date) {
+        statusEl.className = 'ws-part-exempt-status ws-wv-err';
+        statusEl.textContent = 'Member and start date are required.';
+        return;
+      }
+      var orig = saveBtn.textContent; saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      statusEl.textContent = '';
+      fetch('/api/sheets?action=participation-exemption-save', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        saveBtn.disabled = false; saveBtn.textContent = orig;
+        if (!res.ok) { statusEl.className = 'ws-part-exempt-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+        loadParticipationExemptions();
+      }).catch(function (err) {
+        saveBtn.disabled = false; saveBtn.textContent = orig;
+        statusEl.className = 'ws-part-exempt-status ws-wv-err';
+        statusEl.textContent = (err && err.message) || 'Network error';
+      });
+    });
+  }
+
+  // ─── CSV export ───
+  function exportParticipationCSV() {
+    if (!_participationReport || !_participationReport.members) {
+      alert('Report still loading — try again in a moment.');
+      return;
+    }
+    var members = _participationReport.members;
+    var header = ['Member', 'Family', 'Board', 'Volunteer Roles', 'Board (count)', '1-yr Roles',
+      'AM Lead', 'AM Assist', 'PM Lead', 'PM Assist', 'Cleaning',
+      'Event Lead', 'Event Assist', 'Weighted Total', 'Expected', 'Coverage Given',
+      'Absences', 'New', 'Exempt', 'Status'];
+    var rows = [header];
+    members.forEach(function (m) {
+      rows.push([
+        m.displayName,
+        m.family,
+        m.isBoard ? 'Yes' : '',
+        (m.roles || []).join('; '),
+        m.counts.board_role || 0,
+        m.counts.one_year_role || 0,
+        m.counts.am_lead || 0,
+        m.counts.am_assist || 0,
+        m.counts.pm_lead || 0,
+        m.counts.pm_assist || 0,
+        m.counts.cleaning_session || 0,
+        m.counts.event_lead || 0,
+        m.counts.event_assist || 0,
+        m.weightedTotal || 0,
+        m.expectedPoints || 0,
+        m.coverageGiven || 0,
+        m.absencesCount || 0,
+        m.isNewMember ? 'Yes' : '',
+        m.exemption ? (m.exemption.reason + (m.exemption.end_date ? ' (ends ' + m.exemption.end_date + ')' : ' (ongoing)')) : '',
+        PARTICIPATION_STATUS_LABELS[m.status] || m.status
+      ]);
+    });
+    function esc(v) {
+      var s = v == null ? '' : String(v);
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    var csv = rows.map(function (r) { return r.map(esc).join(','); }).join('\r\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'participation-' + (_participationReport.season || 'report') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  }
+
+  // ─── Print ───
+  function printParticipationReport() {
+    if (!_participationReport || !_participationReport.members) {
+      alert('Report still loading — try again in a moment.');
+      return;
+    }
+    openPrintIframe(buildParticipationPrintHtml(_participationReport));
+  }
+
+  function buildParticipationPrintHtml(report) {
+    var members = report.members || [];
+    var rows = '';
+    members.forEach(function (m) {
+      var c = m.counts || {};
+      rows += '<tr>'
+        + '<td>' + escapeHtmlWs(m.displayName) + (m.isBoard ? ' <em>[Board]</em>' : '') + (m.isNewMember ? ' <em>[New]</em>' : '') + '</td>'
+        + '<td>' + (c.am_lead || 0) + '</td>'
+        + '<td>' + (c.am_assist || 0) + '</td>'
+        + '<td>' + (c.pm_lead || 0) + '</td>'
+        + '<td>' + (c.pm_assist || 0) + '</td>'
+        + '<td>' + (c.cleaning_session || 0) + '</td>'
+        + '<td>' + (c.one_year_role || 0) + '</td>'
+        + '<td>' + (c.event_lead || 0) + '</td>'
+        + '<td>' + (c.event_assist || 0) + '</td>'
+        + '<td><strong>' + (m.weightedTotal || 0) + '</strong></td>'
+        + '<td>' + (m.expectedPoints || 0) + '</td>'
+        + '<td>' + (m.coverageGiven || 0) + '</td>'
+        + '<td>' + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[m.status] || m.status) + '</td>'
+        + '</tr>';
+    });
+    var css = 'body{font-family:Arial,sans-serif;font-size:11px;margin:24px;}'
+      + 'h1{font-size:18px;margin:0 0 4px;}'
+      + 'p.sub{color:#555;margin:0 0 16px;}'
+      + 'table{width:100%;border-collapse:collapse;}'
+      + 'th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;}'
+      + 'th{background:#eee;}'
+      + 'td:nth-child(n+2):nth-child(-n+12){text-align:right;}';
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>Member Participation — ' + escapeHtmlWs(report.season || '') + '</title><style>' + css + '</style></head><body>';
+    html += '<h1>Member Participation Tracker</h1>';
+    html += '<p class="sub">Season ' + escapeHtmlWs(report.season || '') + ' · ' + members.length + ' members · printed ' + new Date().toLocaleDateString() + '</p>';
+    html += '<table><thead><tr>'
+      + '<th>Member</th><th>AM Ld</th><th>AM As</th><th>PM Ld</th><th>PM As</th>'
+      + '<th>Clean</th><th>Roles</th><th>Evt Ld</th><th>Evt As</th>'
+      + '<th>Wtd</th><th>Exp</th><th>Cov</th><th>Status</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    html += '</body></html>';
+    return html;
   }
 
   function showSendRegistrationFormModal() {

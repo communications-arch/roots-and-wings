@@ -352,3 +352,53 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS payments_family_sem_type_idx
   ON payments (LOWER(family_name), semester_key, payment_type);
+
+-- ──────────────────────────────────────────────
+-- Participation tracking: VP + Afternoon Class Liaison report
+-- Weights are admin-editable so the scoring can be tuned without a
+-- redeploy. Exemptions pro-rate the expected baseline for members on
+-- health/family leave. Everything the report counts (AM/PM assignments,
+-- cleaning sessions, events, coverage, absences) comes from existing
+-- sheet data + DB tables — these two tables only hold config + overrides.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS participation_weights (
+  key         TEXT PRIMARY KEY,
+  label       TEXT NOT NULL,
+  value       NUMERIC(6, 2) NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  description TEXT DEFAULT '',
+  updated_by  TEXT DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS participation_exemptions (
+  id           SERIAL PRIMARY KEY,
+  member_email TEXT NOT NULL,
+  member_name  TEXT NOT NULL,
+  start_date   DATE NOT NULL,
+  end_date     DATE,
+  reason       TEXT NOT NULL DEFAULT 'other'
+               CHECK (reason IN ('medical', 'family', 'other')),
+  note         TEXT DEFAULT '',
+  created_by   TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS participation_exemptions_email_idx
+  ON participation_exemptions (LOWER(member_email));
+
+-- Seed default weights (only inserts on first migration; won't overwrite
+-- tuned values on re-runs).
+INSERT INTO participation_weights (key, label, value, sort_order, description) VALUES
+  ('board_role',               'Board role',                5, 10, 'Weight per member who holds a board position for the year.'),
+  ('one_year_role',            '1-2 year volunteer role',   2, 20, 'Weight per named volunteer role (Supply Coordinator, AM/PM Class Liaison, Kitchen, Pavilion, etc.).'),
+  ('am_lead',                  'AM class — Leading',        2, 30, 'Per session, per group the member teaches in the morning.'),
+  ('am_assist',                'AM class — Assisting',      1, 40, 'Per session, per group the member assists in the morning.'),
+  ('pm_lead',                  'PM elective — Leading',     2, 50, 'Per elective hour led (both-hour electives count twice).'),
+  ('pm_assist',                'PM elective — Assisting',   1, 60, 'Per elective hour assisted.'),
+  ('cleaning_session',         'Cleaning crew session',     1, 70, 'Per session the member is on the cleaning crew.'),
+  ('event_lead',               'Special event — Leading',   2, 80, 'Per event coordinated.'),
+  ('event_assist',             'Special event — Assisting', 1, 90, 'Per event support slot filled.'),
+  ('annual_expected_points',   'Annual expected points',   14,100, 'Default baseline each member is expected to hit across the school year. Adjust as the co-op grows.'),
+  ('new_member_baseline_pct',  'New-member baseline %',    60,110, 'Percent of normal expectation for a member''s first sessions after joining. 60 means a new member is "on track" at 60%% of the normal points.'),
+  ('new_member_grace_sessions','New-member grace sessions', 2,120, 'How many sessions a new member gets the reduced baseline before the full expectation kicks in.')
+ON CONFLICT (key) DO NOTHING;

@@ -9152,3 +9152,118 @@ button.staff-role:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Participation Tracker (VP / Afternoon Class Liaison) ---------- */
+.ws-part-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 10px 0 12px;
+  font-size: 0.85rem;
+}
+.ws-part-filter-btn.ws-part-filter-active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+.ws-part-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 10px;
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ws-part-badge-board  { background: #edf4ff; color: #1f4788; }
+.ws-part-badge-new    { background: #fff4e0; color: #a85b00; }
+.ws-part-badge-exempt { background: #f3e8fd; color: #5e2c8a; }
+.ws-part-zero { color: var(--color-text-light); }
+.ws-part-status {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 10px;
+}
+.ws-part-status-on_track { background: #e5f5e9; color: #1f6c3a; }
+.ws-part-status-near     { background: #fff4d9; color: #8a6400; }
+.ws-part-status-behind   { background: #fde2e2; color: #a32222; }
+.ws-part-status-new      { background: #fff4e0; color: #a85b00; }
+.ws-part-status-exempt   { background: #f3e8fd; color: #5e2c8a; }
+
+.ws-part-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-part-roles,
+.ws-part-exemption,
+.ws-part-coverage-note {
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+.ws-part-session h5 {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ws-part-session ul { margin: 0 0 4px 16px; padding: 0; }
+.ws-part-session li { font-size: 0.85rem; line-height: 1.45; }
+
+.ws-part-weights-table,
+.ws-part-exempt-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+.ws-part-weights-table th,
+.ws-part-weights-table td,
+.ws-part-exempt-table th,
+.ws-part-exempt-table td {
+  border: 1px solid var(--color-border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.ws-part-weights-table thead th,
+.ws-part-exempt-table thead th {
+  background: rgba(var(--color-accent-light-rgb), 0.2);
+  font-weight: 700;
+}
+.ws-part-weight-input {
+  width: 80px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+.ws-part-weight-desc {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-weight: 400;
+}
+.ws-part-weight-status,
+.ws-part-exempt-status {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.78rem;
+}
+.ws-part-exempt-form,
+.ws-part-exempt-existing {
+  margin-top: 12px;
+}
+.ws-part-exempt-form h5 {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

@@ -24,7 +24,10 @@ const ROLE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TITLE_NORMALIZATIONS = {
   'communications dir.': 'Communications Director',
   'membership dir.': 'Membership Director',
-  'sustaining dir.': 'Sustaining Director'
+  'sustaining dir.': 'Sustaining Director',
+  // The volunteer sheet labels the role as "Afternoon Class Liaisons" (plural);
+  // canonicalise to the singular used everywhere else in the app.
+  'afternoon class liaisons': 'Afternoon Class Liaison'
 };
 function normalizeTitle(title) {
   if (!title) return title;

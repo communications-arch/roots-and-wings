@@ -2,6 +2,7 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
+const { canEditAsRole, SUPER_USER_EMAIL } = require('./_permissions');
 
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
@@ -1171,6 +1172,568 @@ async function applyMemberProfileOverlay(families) {
 }
 
 // ══════════════════════════════════════════════
+// PARTICIPATION TRACKING
+// ══════════════════════════════════════════════
+// Report surface for VP + Afternoon Class Liaison. Counts every
+// session-slot a member fills across AM classes, PM electives, cleaning
+// crew, special events, board/volunteer roles, and AM class liaisons,
+// then applies admin-editable weights + exemptions + new-member grace.
+// Coverage Given is reported separately without a weight so the "assigned
+// responsibility" score can't be gamed by swapping slots.
+
+async function participationCanRead(email) {
+  if (!email) return false;
+  if (String(email).toLowerCase() === SUPER_USER_EMAIL) return true;
+  if (await canEditAsRole(email, 'Vice President')) return true;
+  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
+  return false;
+}
+
+async function participationCanWrite(email) {
+  if (!email) return false;
+  if (String(email).toLowerCase() === SUPER_USER_EMAIL) return true;
+  return await canEditAsRole(email, 'Vice President');
+}
+
+function participationNormName(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/\s*\([^)]*\)\s*/g, ' ')  // strip pronouns
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function participationCurrentSeason() {
+  // School year runs Aug–May. Anything before August rolls back a year.
+  var now = new Date();
+  var y = now.getFullYear();
+  var start = now.getMonth() >= 7 ? y : y - 1; // month 7 = Aug
+  var end = start + 1;
+  return String(start).slice(2) + '_' + String(end).slice(2);
+}
+
+function participationYearBounds() {
+  var season = participationCurrentSeason();
+  var startYear = 2000 + parseInt(season.slice(0, 2), 10);
+  return {
+    start: new Date(startYear, 7, 1),       // Aug 1
+    end: new Date(startYear + 1, 4, 31)     // May 31
+  };
+}
+
+function participationBuildNameIndex(families) {
+  var idx = {};
+  (families || []).forEach(function (fam) {
+    var famName = String(fam.name || '').trim();
+    if (!famName) return;
+    var famInitial = famName.charAt(0);
+    var parentNames = String(fam.parents || '')
+      .split(/\s*[&\/,]\s*/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    parentNames.forEach(function (first) {
+      var canonical = participationNormName(first + ' ' + famName);
+      idx[canonical] = canonical;
+      idx[participationNormName(first + ' ' + famInitial)] = canonical;
+      var fKey = '~first~' + participationNormName(first);
+      if (!idx[fKey]) idx[fKey] = [];
+      if (idx[fKey].indexOf(canonical) === -1) idx[fKey].push(canonical);
+    });
+  });
+  return idx;
+}
+
+function participationResolveName(raw, idx) {
+  var n = participationNormName(raw);
+  if (!n) return null;
+  if (idx[n] && typeof idx[n] === 'string') return idx[n];
+  // Try single-word matches (first-name only) — only disambiguates when unique
+  var parts = n.split(/\s+/);
+  if (parts.length >= 1) {
+    var firstKey = '~first~' + parts[0];
+    var list = idx[firstKey];
+    if (list && list.length === 1) return list[0];
+  }
+  return null;
+}
+
+function participationBlankCounts() {
+  return {
+    board_role: 0,
+    one_year_role: 0,
+    am_lead: 0,
+    am_assist: 0,
+    pm_lead: 0,
+    pm_assist: 0,
+    cleaning_session: 0,
+    event_lead: 0,
+    event_assist: 0
+  };
+}
+
+async function participationFetchSheetData(sheetsClient) {
+  var directorySheetId = process.env.DIRECTORY_SHEET_ID;
+  var masterSheetId = process.env.MASTER_SHEET_ID;
+
+  var directoryTabs = {}, masterTabs = {};
+  try { directoryTabs = await fetchSheet(sheetsClient, directorySheetId); } catch (e) { console.error('Directory fetch failed:', e.message); }
+  try { masterTabs = await fetchSheet(sheetsClient, masterSheetId); } catch (e) { console.error('Master fetch failed:', e.message); }
+
+  var dirTab = directoryTabs['Directory'] || null;
+  var classTab = directoryTabs['Classlist'] || null;
+  var allergyTab = directoryTabs['Allergies'] || null;
+  var dirParsed = parseDirectory(dirTab, classTab, allergyTab);
+  var families = dirParsed.families || [];
+
+  try { await applyMemberProfileOverlay(families); } catch (e) { /* sheet-only fine */ }
+
+  var amTab = null;
+  for (var k1 in masterTabs) if (k1.match(/AM.*Volunteer/i)) { amTab = masterTabs[k1]; break; }
+  var amClasses = amTab ? (parseAMClasses(amTab).classes || {}) : {};
+
+  var pmElectives = {};
+  for (var k2 in masterTabs) {
+    var pmMatch = k2.match(/PM.*Session\s*(\d+)/i);
+    if (pmMatch) {
+      pmElectives[parseInt(pmMatch[1], 10)] = (parsePMElectives(masterTabs[k2]).electives || []);
+    }
+  }
+
+  var cleanTab = null;
+  for (var k3 in masterTabs) if (k3.match(/Cleaning/i)) { cleanTab = masterTabs[k3]; break; }
+  var cleaningCrew = cleanTab ? parseCleaningCrew(cleanTab) : { liaison: '', sessions: {} };
+
+  var volTab = null;
+  for (var k4 in masterTabs) if (k4.match(/Year.*Volunteer/i)) { volTab = masterTabs[k4]; break; }
+  var volParsed = volTab ? parseVolunteerCommittees(volTab) : { committees: [], liaisons: [] };
+
+  var eventTab = null;
+  for (var k5 in masterTabs) if (k5.match(/Special.*Event/i)) { eventTab = masterTabs[k5]; break; }
+  var specialEvents = eventTab ? parseSpecialEvents(eventTab) : [];
+
+  return {
+    families: families,
+    amClasses: amClasses,
+    pmElectives: pmElectives,
+    cleaningCrew: cleaningCrew,
+    volunteerCommittees: volParsed.committees || [],
+    classLiaisons: volParsed.liaisons || [],
+    specialEvents: specialEvents
+  };
+}
+
+async function buildParticipationReport(sql, data) {
+  var families = data.families || [];
+  var nameIndex = participationBuildNameIndex(families);
+  var members = {};
+
+  families.forEach(function (fam) {
+    var famName = String(fam.name || '').trim();
+    if (!famName) return;
+    var parentNames = String(fam.parents || '')
+      .split(/\s*[&\/,]\s*/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    parentNames.forEach(function (first) {
+      var key = participationNormName(first + ' ' + famName);
+      if (members[key]) return;
+      members[key] = {
+        key: key,
+        first: first,
+        family: famName,
+        email: fam.email || '',
+        displayName: first + ' ' + famName,
+        counts: participationBlankCounts(),
+        coverageGiven: 0,
+        roles: [],
+        timeline: { 1: [], 2: [], 3: [], 4: [], 5: [] },
+        weightedTotal: 0,
+        expectedPoints: 0,
+        status: 'on_track',
+        isNewMember: false,
+        isBoard: false,
+        absencesCount: 0,
+        exemption: null
+      };
+    });
+  });
+
+  function addTimeline(memberKey, sessionNum, entry) {
+    var m = members[memberKey];
+    if (!m || !sessionNum || !m.timeline[sessionNum]) return;
+    m.timeline[sessionNum].push(entry);
+  }
+
+  // AM classes — counts per session per group
+  var amClasses = data.amClasses || {};
+  Object.keys(amClasses).forEach(function (groupName) {
+    var cls = amClasses[groupName];
+    var sessions = cls.sessions || {};
+    Object.keys(sessions).forEach(function (sKey) {
+      var sNum = parseInt(sKey, 10);
+      var s = sessions[sKey] || {};
+      var teacherKey = participationResolveName(s.teacher, nameIndex);
+      if (teacherKey && members[teacherKey]) {
+        members[teacherKey].counts.am_lead += 1;
+        addTimeline(teacherKey, sNum, { category: 'am_lead', label: 'Leading AM — ' + groupName });
+      }
+      (s.assistants || []).forEach(function (a) {
+        var aKey = participationResolveName(a, nameIndex);
+        if (aKey && members[aKey]) {
+          members[aKey].counts.am_assist += 1;
+          addTimeline(aKey, sNum, { category: 'am_assist', label: 'Assisting AM — ' + groupName });
+        }
+      });
+    });
+  });
+
+  // PM electives — "both hour" electives count twice
+  var pmElectives = data.pmElectives || {};
+  Object.keys(pmElectives).forEach(function (sKey) {
+    var sNum = parseInt(sKey, 10);
+    (pmElectives[sKey] || []).forEach(function (el) {
+      var mult = el.hour === 'both' ? 2 : 1;
+      var leaderKey = participationResolveName(el.leader, nameIndex);
+      if (leaderKey && members[leaderKey]) {
+        members[leaderKey].counts.pm_lead += mult;
+        addTimeline(leaderKey, sNum, { category: 'pm_lead', label: 'Leading PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
+      }
+      (el.assistants || []).forEach(function (a) {
+        var aKey = participationResolveName(a, nameIndex);
+        if (aKey && members[aKey]) {
+          members[aKey].counts.pm_assist += mult;
+          addTimeline(aKey, sNum, { category: 'pm_assist', label: 'Assisting PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
+        }
+      });
+    });
+  });
+
+  // Cleaning crew — one count per session per person (dedupe across areas)
+  var cleaning = data.cleaningCrew || {};
+  var cSessions = cleaning.sessions || {};
+  Object.keys(cSessions).forEach(function (sKey) {
+    var sNum = parseInt(sKey, 10);
+    var s = cSessions[sKey] || {};
+    var seen = {};
+    function tally(name, label) {
+      var key = participationResolveName(name, nameIndex);
+      if (!key || !members[key] || seen[key]) return;
+      seen[key] = true;
+      members[key].counts.cleaning_session += 1;
+      addTimeline(key, sNum, { category: 'cleaning_session', label: label });
+    }
+    ['mainFloor', 'upstairs', 'outside'].forEach(function (floor) {
+      var areas = s[floor] || {};
+      Object.keys(areas).forEach(function (area) {
+        (areas[area] || []).forEach(function (n) { tally(n, 'Cleaning — ' + area); });
+      });
+    });
+    (s.floater || []).forEach(function (n) { tally(n, 'Cleaning floater'); });
+  });
+
+  // Volunteer committees — chair = board role (annual, count once),
+  // other roles = one-year role (count once per role held).
+  (data.volunteerCommittees || []).forEach(function (comm) {
+    if (comm.chair && comm.chair.person) {
+      var ckey = participationResolveName(comm.chair.person, nameIndex);
+      if (ckey && members[ckey]) {
+        if (members[ckey].counts.board_role === 0) members[ckey].counts.board_role = 1;
+        members[ckey].isBoard = true;
+        if (comm.chair.title) members[ckey].roles.push(comm.chair.title);
+      }
+    }
+    (comm.roles || []).forEach(function (role) {
+      if (!role.person) return;
+      String(role.person).split(/\s*[&\/,]\s*/).map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (p) {
+        var k = participationResolveName(p, nameIndex);
+        if (k && members[k]) {
+          members[k].counts.one_year_role += 1;
+          members[k].roles.push(role.title || 'Volunteer role');
+        }
+      });
+    });
+  });
+
+  // AM class liaisons — counted as a 1-year role
+  (data.classLiaisons || []).forEach(function (l) {
+    if (!l.person) return;
+    var k = participationResolveName(l.person, nameIndex);
+    if (k && members[k]) {
+      members[k].counts.one_year_role += 1;
+      members[k].roles.push('AM Class Liaison — ' + (l.group || ''));
+    }
+  });
+
+  // Special events
+  (data.specialEvents || []).forEach(function (ev) {
+    if (ev.coordinator) {
+      var ck = participationResolveName(ev.coordinator, nameIndex);
+      if (ck && members[ck]) {
+        members[ck].counts.event_lead += 1;
+        members[ck].roles.push('Event coordinator — ' + (ev.name || ''));
+      }
+    }
+    (ev.support || []).forEach(function (n) {
+      var k = participationResolveName(n, nameIndex);
+      if (k && members[k]) members[k].counts.event_assist += 1;
+    });
+  });
+
+  // Coverage given (not weighted — reported alongside)
+  try {
+    var coverageRows = await sql`
+      SELECT claimed_by_email, claimed_by_name, COUNT(*)::int AS c
+      FROM coverage_slots
+      WHERE claimed_by_email IS NOT NULL
+      GROUP BY claimed_by_email, claimed_by_name
+    `;
+    coverageRows.forEach(function (r) {
+      var k = participationResolveName(r.claimed_by_name, nameIndex);
+      if (k && members[k]) members[k].coverageGiven += r.c;
+    });
+  } catch (e) {
+    console.error('Participation coverage query failed:', e.message);
+  }
+
+  // Active absences count (informational)
+  try {
+    var absRows = await sql`
+      SELECT absent_person, COUNT(*)::int AS c
+      FROM absences
+      WHERE cancelled_at IS NULL
+      GROUP BY absent_person
+    `;
+    absRows.forEach(function (r) {
+      var k = participationResolveName(r.absent_person, nameIndex);
+      if (k && members[k]) members[k].absencesCount = r.c;
+    });
+  } catch (e) {
+    console.error('Participation absences query failed:', e.message);
+  }
+
+  // New-member detection: first registration season is the current season
+  var season = participationCurrentSeason();
+  try {
+    var regRows = await sql`
+      SELECT LOWER(email) AS e, MIN(season) AS first_season
+      FROM registrations
+      GROUP BY LOWER(email)
+    `;
+    var regByEmail = {};
+    regRows.forEach(function (r) { regByEmail[r.e] = r.first_season; });
+    Object.keys(members).forEach(function (k) {
+      var m = members[k];
+      var emailLc = String(m.email || '').toLowerCase();
+      var firstSeason = regByEmail[emailLc];
+      if (firstSeason && firstSeason === season) m.isNewMember = true;
+    });
+  } catch (e) {
+    console.error('Participation registrations query failed:', e.message);
+  }
+
+  // Active exemptions
+  var today = new Date().toISOString().slice(0, 10);
+  var exemptionRows = [];
+  try {
+    exemptionRows = await sql`
+      SELECT id, member_email, member_name, start_date, end_date, reason, note
+      FROM participation_exemptions
+      WHERE end_date IS NULL OR end_date >= ${today}
+    `;
+    exemptionRows.forEach(function (r) {
+      var k = null;
+      var emailLc = String(r.member_email || '').toLowerCase();
+      var nameNorm = participationNormName(r.member_name);
+      // Prefer family-email + name match so we pick the right parent.
+      Object.keys(members).forEach(function (mk) {
+        var m = members[mk];
+        if (!k && m.email && m.email.toLowerCase() === emailLc && participationNormName(m.displayName) === nameNorm) {
+          k = mk;
+        }
+      });
+      if (!k) k = participationResolveName(r.member_name, nameIndex);
+      if (k && members[k]) {
+        members[k].exemption = {
+          id: r.id,
+          start_date: r.start_date,
+          end_date: r.end_date,
+          reason: r.reason,
+          note: r.note || ''
+        };
+      }
+    });
+  } catch (e) {
+    console.error('Participation exemptions query failed:', e.message);
+  }
+
+  // Load weights
+  var weights = {};
+  try {
+    var wRows = await sql`SELECT key, value FROM participation_weights`;
+    wRows.forEach(function (w) { weights[w.key] = parseFloat(w.value); });
+  } catch (e) {
+    console.error('Participation weights query failed:', e.message);
+  }
+
+  var annualExpected = Number.isFinite(weights.annual_expected_points) ? weights.annual_expected_points : 14;
+  var newPct = (Number.isFinite(weights.new_member_baseline_pct) ? weights.new_member_baseline_pct : 60) / 100;
+  var yearBounds = participationYearBounds();
+  var yearMs = yearBounds.end - yearBounds.start;
+
+  Object.keys(members).forEach(function (k) {
+    var m = members[k];
+    var total = 0;
+    ['board_role', 'one_year_role', 'am_lead', 'am_assist', 'pm_lead', 'pm_assist', 'cleaning_session', 'event_lead', 'event_assist'].forEach(function (field) {
+      var cnt = m.counts[field] || 0;
+      var w = Number.isFinite(weights[field]) ? weights[field] : 0;
+      total += cnt * w;
+    });
+    m.weightedTotal = Math.round(total * 100) / 100;
+
+    var exp = annualExpected;
+    if (m.isNewMember) exp = exp * newPct;
+    if (m.exemption) {
+      var exStart = new Date(m.exemption.start_date);
+      var exEnd = m.exemption.end_date ? new Date(m.exemption.end_date) : yearBounds.end;
+      if (exStart < yearBounds.start) exStart = yearBounds.start;
+      if (exEnd > yearBounds.end) exEnd = yearBounds.end;
+      if (exEnd >= exStart && yearMs > 0) {
+        var covered = (exEnd - exStart) / yearMs;
+        covered = Math.max(0, Math.min(1, covered));
+        exp = exp * (1 - covered);
+      }
+    }
+    m.expectedPoints = Math.round(exp * 10) / 10;
+
+    if (m.exemption && m.expectedPoints < 0.5) m.status = 'exempt';
+    else if (m.isNewMember && m.weightedTotal < m.expectedPoints) m.status = 'new';
+    else if (m.weightedTotal >= m.expectedPoints) m.status = 'on_track';
+    else if (m.expectedPoints > 0 && m.weightedTotal >= m.expectedPoints * 0.8) m.status = 'near';
+    else m.status = 'behind';
+  });
+
+  var out = Object.keys(members).map(function (k) { return members[k]; });
+  out.sort(function (a, b) {
+    if (a.family < b.family) return -1;
+    if (a.family > b.family) return 1;
+    return a.first < b.first ? -1 : (a.first > b.first ? 1 : 0);
+  });
+
+  return { season: season, members: out, weights: weights };
+}
+
+async function handleParticipationAction(req, res, action, userEmail) {
+  var canRead = await participationCanRead(userEmail);
+  if (!canRead) return res.status(403).json({ error: 'Not authorized' });
+
+  var sql = getDb();
+
+  if (action === 'participation-report' && req.method === 'GET') {
+    var auth = getAuth();
+    var sheetsClient = google.sheets({ version: 'v4', auth: auth });
+    var data = await participationFetchSheetData(sheetsClient);
+    var report = await buildParticipationReport(sql, data);
+    return res.status(200).json(report);
+  }
+
+  if (action === 'participation-weights' && req.method === 'GET') {
+    var wRows = await sql`
+      SELECT key, label, value, sort_order, description, updated_by, updated_at
+      FROM participation_weights
+      ORDER BY sort_order, key
+    `;
+    return res.status(200).json({ weights: wRows });
+  }
+
+  if (action === 'participation-weight-save' && req.method === 'POST') {
+    if (!(await participationCanWrite(userEmail))) {
+      return res.status(403).json({ error: 'Vice President or super user only' });
+    }
+    var body = req.body || {};
+    var key = String(body.key || '').trim();
+    if (!key) return res.status(400).json({ error: 'key required' });
+    var value = parseFloat(body.value);
+    if (!Number.isFinite(value)) return res.status(400).json({ error: 'value must be a number' });
+    var rows = await sql`
+      UPDATE participation_weights
+      SET value = ${value}, updated_by = ${userEmail}, updated_at = NOW()
+      WHERE key = ${key}
+      RETURNING key, value, updated_at
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'weight key not found' });
+    return res.status(200).json({ ok: true, weight: rows[0] });
+  }
+
+  if (action === 'participation-exemptions' && req.method === 'GET') {
+    var exRows = await sql`
+      SELECT id, member_email, member_name, start_date, end_date, reason, note, created_by, created_at
+      FROM participation_exemptions
+      ORDER BY start_date DESC, id DESC
+    `;
+    return res.status(200).json({ exemptions: exRows });
+  }
+
+  if (action === 'participation-exemption-save' && req.method === 'POST') {
+    if (!(await participationCanWrite(userEmail))) {
+      return res.status(403).json({ error: 'Vice President or super user only' });
+    }
+    var body2 = req.body || {};
+    var exId = body2.id ? parseInt(body2.id, 10) : null;
+    var mEmail = String(body2.member_email || '').trim();
+    var mName = String(body2.member_name || '').trim();
+    var startDate = String(body2.start_date || '').trim();
+    var endDate = String(body2.end_date || '').trim();
+    var reason = String(body2.reason || 'other').trim();
+    var note = String(body2.note || '').trim();
+    if (!mEmail || !mName || !startDate) {
+      return res.status(400).json({ error: 'member_email, member_name, start_date required' });
+    }
+    if (['medical', 'family', 'other'].indexOf(reason) === -1) {
+      return res.status(400).json({ error: "reason must be 'medical', 'family', or 'other'" });
+    }
+    var endDateVal = endDate || null;
+    var saved;
+    if (exId) {
+      saved = await sql`
+        UPDATE participation_exemptions
+        SET member_email = ${mEmail},
+            member_name = ${mName},
+            start_date = ${startDate},
+            end_date = ${endDateVal},
+            reason = ${reason},
+            note = ${note}
+        WHERE id = ${exId}
+        RETURNING *
+      `;
+      if (saved.length === 0) return res.status(404).json({ error: 'exemption not found' });
+    } else {
+      saved = await sql`
+        INSERT INTO participation_exemptions
+          (member_email, member_name, start_date, end_date, reason, note, created_by)
+        VALUES
+          (${mEmail}, ${mName}, ${startDate}, ${endDateVal}, ${reason}, ${note}, ${userEmail})
+        RETURNING *
+      `;
+    }
+    return res.status(200).json({ ok: true, exemption: saved[0] });
+  }
+
+  if (action === 'participation-exemption-delete' && req.method === 'POST') {
+    if (!(await participationCanWrite(userEmail))) {
+      return res.status(403).json({ error: 'Vice President or super user only' });
+    }
+    var body3 = req.body || {};
+    var delId = parseInt(body3.id, 10);
+    if (!delId) return res.status(400).json({ error: 'id required' });
+    await sql`DELETE FROM participation_exemptions WHERE id = ${delId}`;
+    return res.status(200).json({ ok: true });
+  }
+
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+
+// ══════════════════════════════════════════════
 // MAIN HANDLER
 // ══════════════════════════════════════════════
 module.exports = async function handler(req, res) {
@@ -1200,6 +1763,16 @@ module.exports = async function handler(req, res) {
     } catch (err) {
       console.error('Billing action error:', err);
       return res.status(500).json({ error: 'Billing request failed' });
+    }
+  }
+
+  // ── Participation sub-routes (VP / Afternoon Class Liaison / super-user) ──
+  if (action && action.indexOf('participation-') === 0) {
+    try {
+      return await handleParticipationAction(req, res, action, authResult.email);
+    } catch (err) {
+      console.error('Participation action error:', err);
+      return res.status(500).json({ error: 'Participation request failed' });
     }
   }
 
