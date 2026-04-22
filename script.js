@@ -3551,6 +3551,17 @@
     html += '</div>';
     html += '</div>';
 
+    // PM class submissions — member-authored ideas for upcoming PM electives.
+    // Card is always visible; body is populated by renderClassSubsCardBody()
+    // after loadMyClassSubmissions() fills `myClassSubmissions`.
+    html += '<div class="mf-card mf-classsubs-card" id="mfClassSubsCard">';
+    html += '<h3 class="mf-card-title">PM Class Submissions</h3>';
+    html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
+    html += 'Have an idea for an afternoon class? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
+    html += '</p>';
+    html += '<div class="mf-classsubs-body" id="mfClassSubsBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
+    html += '</div>';
+
     grid.innerHTML = html;
     section.style.display = '';
 
@@ -10156,6 +10167,381 @@
     });
   }
 
+  // ──────────────────────────────────────────────
+  // PM Class Submissions (replaces the Google Form)
+  // ──────────────────────────────────────────────
+  // Member-authored submissions for upcoming PM electives. Status lifecycle:
+  // submitted → drafted (by VP/PMA) → scheduled, or withdrawn / declined.
+
+  var myClassSubmissions = [];
+
+  // Whitelists mirror the API normaliser; label maps are for display.
+  var SESSION_PREF_VALUES = ['1','2','3','4','5','flexible'];
+  var SESSION_PREF_LABELS = {
+    '1':'Session 1','2':'Session 2','3':'Session 3','4':'Session 4','5':'Session 5',
+    'flexible':'Flexible — any session'
+  };
+  var HOUR_PREF_VALUES = ['first','last','flexible','2hr-required','2hr-optional'];
+  var HOUR_PREF_LABELS = {
+    'first':'First hour after lunch',
+    'last':'Last hour before we leave',
+    'flexible':'Either first or second hour',
+    '2hr-required':'2 hours — kids commit to both',
+    '2hr-optional':'2 hours — kids can take one or both'
+  };
+  var ASSISTANT_COUNT_VALUES = [1, 2, 3];
+  var SPACE_REQ_VALUES = ['any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'];
+  var SPACE_REQ_LABELS = {
+    any:'Any room', pavilion:'Outside Pavilion', outside:'Outside',
+    'larger-open':'Larger open room', kitchen:'Kitchen',
+    dirty:'Someplace to get dirty', noisy:'We will be noisy', quiet:'I need quiet, please'
+  };
+  var AGE_GROUP_VALUES = ['3-7','7-9','10-12','teens'];
+  var AGE_GROUP_LABELS = { '3-7':'3–7','7-9':'7–9','10-12':'10–12', teens:'Teens' };
+  var MAX_STUDENT_OPTIONS = [10, 12, 15];
+
+  function escClsAttr(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escClsHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function statusBadge(status) {
+    var map = {
+      submitted:  { label:'Awaiting review', bg:'#FFF3E0', fg:'#7A4E00' },
+      drafted:    { label:'Drafted — planning',  bg:'#E1F0FF', fg:'#0A4A85' },
+      scheduled:  { label:'Scheduled',      bg:'#DEF3DE', fg:'#2E6B2E' },
+      declined:   { label:'Declined',       bg:'#F7E0E0', fg:'#8A2222' },
+      withdrawn:  { label:'Withdrawn',      bg:'#EEE',     fg:'#555'    }
+    };
+    var s = map[status] || map.submitted;
+    return '<span class="mf-classsubs-status" style="background:' + s.bg + ';color:' + s.fg + ';padding:2px 10px;border-radius:999px;font-size:0.75rem;font-weight:600;white-space:nowrap;">' + s.label + '</span>';
+  }
+
+  function loadMyClassSubmissions() {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=class-submissions&scope=mine', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      myClassSubmissions = Array.isArray(data.submissions) ? data.submissions : [];
+      renderClassSubsCardBody();
+    })
+    .catch(function () {
+      var body = document.getElementById('mfClassSubsBody');
+      if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Could not load submissions. Refresh to try again.</em>';
+    });
+  }
+
+  function renderClassSubsCardBody() {
+    var body = document.getElementById('mfClassSubsBody');
+    if (!body) return;
+
+    var html = '';
+    var activeSubs = myClassSubmissions.filter(function (s) { return s.status !== 'withdrawn'; });
+
+    if (activeSubs.length === 0) {
+      html += '<p style="margin:0 0 0.75rem;color:var(--color-text-light);font-size:0.9rem;">';
+      html += 'You haven\'t proposed a PM class yet.';
+      html += '</p>';
+    } else {
+      html += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
+      activeSubs.forEach(function (s) {
+        var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
+        var canEdit = s.status === 'submitted';
+        html += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
+        html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
+        html += '<strong style="font-size:1rem;">' + escClsHtml(s.class_name) + '</strong>';
+        html += statusBadge(s.status);
+        html += '</div>';
+        html += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
+        html += 'For: ' + escClsHtml(sessText);
+        html += '</div>';
+        if (canEdit) {
+          html += '<div style="margin-top:0.5rem;display:flex;gap:6px;">';
+          html += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
+          html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">Withdraw</button>';
+          html += '</div>';
+        } else if (s.status === 'drafted' || s.status === 'scheduled') {
+          html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
+          html += 'The VP / PM Assistant is planning this one. Contact them for changes.';
+          html += '</div>';
+        }
+        html += '</li>';
+      });
+      html += '</ul>';
+    }
+
+    html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;">';
+    html += (activeSubs.length === 0 ? '+ Submit a PM Class' : '+ Submit Another Class');
+    html += '</button>';
+
+    body.innerHTML = html;
+
+    var newBtn = document.getElementById('mfSubmitClassBtn');
+    if (newBtn) newBtn.addEventListener('click', function () { showClassSubmissionModal(null); });
+
+    body.querySelectorAll('.mf-classsubs-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var sub = myClassSubmissions.filter(function (s) { return s.id === id; })[0];
+        if (sub) showClassSubmissionModal(sub);
+      });
+    });
+    body.querySelectorAll('.mf-classsubs-withdraw').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        if (!confirm('Withdraw this class submission? The VP and PM Assistant will be notified it was cancelled.')) return;
+        withdrawClassSubmission(id);
+      });
+    });
+  }
+
+  function withdrawClassSubmission(id) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=class-submission&id=' + id, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (!res.ok) { alert('Could not withdraw: ' + (res.data.error || 'unknown error')); return; }
+      loadMyClassSubmissions();
+    })
+    .catch(function () { alert('Network error withdrawing submission.'); });
+  }
+
+  // Builds the submission modal (all 13 form fields). `existing` is either
+  // null (new submission) or a submission row (edit mode).
+  function showClassSubmissionModal(existing) {
+    if (document.getElementById('classSubOverlay')) return;
+    var isEdit = !!existing;
+    var cur = existing || {
+      class_name:'', session_preferences:[], hour_preference:[], assistant_count:[],
+      co_teachers:'', space_request:[], space_request_other:'',
+      max_students: 12, max_students_other:'', age_groups:[], age_groups_other:'',
+      pre_enroll_kids:'', prerequisites:'', description:'', other_info:''
+    };
+
+    function has(arr, v) { return Array.isArray(arr) && arr.indexOf(v) !== -1; }
+    function checkbox(field, value, label) {
+      var checked = has(cur[field], (field === 'assistant_count' ? parseInt(value, 10) : value));
+      return '<label class="cls-cb-label">' +
+        '<input type="checkbox" class="cls-cb" data-field="' + field + '" value="' + escClsAttr(value) + '"' + (checked ? ' checked' : '') + '> ' +
+        escClsHtml(label) + '</label>';
+    }
+
+    // Max students: pre-select radio or "Other" based on current value
+    var isPreset = MAX_STUDENT_OPTIONS.indexOf(parseInt(cur.max_students, 10)) !== -1 && !cur.max_students_other;
+    var maxStudentsOtherVal = cur.max_students_other || (!isPreset && cur.max_students ? String(cur.max_students) : '');
+
+    var html = '<div class="cls-overlay" id="classSubOverlay">';
+    html += '<div class="cls-modal" role="dialog" aria-modal="true" aria-label="Submit a PM class">';
+    html += '<button class="detail-close" id="clsCloseBtn" aria-label="Close">&times;</button>';
+    html += '<h3 style="margin:0 0 0.25rem;">' + (isEdit ? 'Edit PM Class Submission' : 'Submit a PM Class') + '</h3>';
+    html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1.5rem;">';
+    html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
+    html += '</p>';
+    html += '<form id="clsForm" novalidate>';
+
+    // 1. Class Name
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Class Name <span class="cls-req">*</span></label>';
+    html += '<input class="cl-input cls-input" type="text" id="clsClassName" maxlength="200" value="' + escClsAttr(cur.class_name) + '" required>';
+    html += '</div>';
+
+    // 2. Description (moved up from #12 so it sits with Class Name)
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Brief description <span class="cls-req">*</span></label>';
+    html += '<p class="cls-help">Just a start — can get updated along the way.</p>';
+    html += '<textarea class="cl-input cls-textarea" id="clsDescription" rows="4" maxlength="3000" required>' + escClsHtml(cur.description) + '</textarea>';
+    html += '</div>';
+
+    // 3. Session preferences
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Which session(s)? <span class="cls-req">*</span></label>';
+    html += '<p class="cls-help">You\'ll be notified when your class is added to the roster.</p>';
+    html += '<div class="cls-cb-group">';
+    SESSION_PREF_VALUES.forEach(function (v) { html += checkbox('session_preferences', v, SESSION_PREF_LABELS[v]); });
+    html += '</div></div>';
+
+    // 4. Hour preference
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Which afternoon hour? <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group">';
+    HOUR_PREF_VALUES.forEach(function (v) { html += checkbox('hour_preference', v, HOUR_PREF_LABELS[v]); });
+    html += '</div></div>';
+
+    // 5. Number of assistants
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">How many helpers? <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    ASSISTANT_COUNT_VALUES.forEach(function (n) { html += checkbox('assistant_count', String(n), n + ' Classroom assistant' + (n > 1 ? 's' : '')); });
+    html += '</div></div>';
+
+    // 6. Co-teachers
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Co-teachers or assistants already identified?</label>';
+    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="500" value="' + escClsAttr(cur.co_teachers) + '" placeholder="Names (optional)">';
+    html += '</div>';
+
+    // 7. Space request
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Space request <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group">';
+    SPACE_REQ_VALUES.forEach(function (v) { html += checkbox('space_request', v, SPACE_REQ_LABELS[v]); });
+    html += '</div>';
+    html += '<input class="cl-input cls-input" type="text" id="clsSpaceOther" maxlength="300" value="' + escClsAttr(cur.space_request_other) + '" placeholder="Other (optional)" style="margin-top:8px;">';
+    html += '</div>';
+
+    // 8. Max students
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Maximum class size <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    MAX_STUDENT_OPTIONS.forEach(function (n) {
+      var checked = isPreset && parseInt(cur.max_students, 10) === n;
+      html += '<label class="cls-cb-label"><input type="radio" name="clsMaxStudents" value="' + n + '"' + (checked ? ' checked' : '') + '> ' + n + '</label>';
+    });
+    html += '<label class="cls-cb-label"><input type="radio" name="clsMaxStudents" value="other"' + (!isPreset && maxStudentsOtherVal ? ' checked' : '') + '> Other:</label>';
+    html += '<input class="cl-input cls-input" type="number" id="clsMaxStudentsOther" min="1" max="100" value="' + escClsAttr(maxStudentsOtherVal) + '" style="width:6rem;" placeholder="#">';
+    html += '</div></div>';
+
+    // 9. Age groups
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Age group(s) the class is designed for <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group">';
+    AGE_GROUP_VALUES.forEach(function (v) { html += checkbox('age_groups', v, AGE_GROUP_LABELS[v]); });
+    html += '</div>';
+    html += '<input class="cl-input cls-input" type="text" id="clsAgeOther" maxlength="200" value="' + escClsAttr(cur.age_groups_other) + '" placeholder="Other (optional)" style="margin-top:8px;">';
+    html += '</div>';
+
+    // 10. Pre-enroll own kids
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Pre-enroll your own kids?</label>';
+    html += '<p class="cls-help">If so, list who (optional).</p>';
+    html += '<input class="cl-input cls-input" type="text" id="clsPreEnroll" maxlength="500" value="' + escClsAttr(cur.pre_enroll_kids) + '">';
+    html += '</div>';
+
+    // 11. Prerequisites
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Prerequisites or items students supply?</label>';
+    html += '<textarea class="cl-input cls-textarea" id="clsPrereq" rows="2" maxlength="1000">' + escClsHtml(cur.prerequisites) + '</textarea>';
+    html += '</div>';
+
+    // 12. Other info
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Anything else that would help plan or support this class?</label>';
+    html += '<textarea class="cl-input cls-textarea" id="clsOtherInfo" rows="3" maxlength="2000">' + escClsHtml(cur.other_info) + '</textarea>';
+    html += '</div>';
+
+    // Error + submit
+    html += '<div id="clsError" class="cls-error" style="display:none;"></div>';
+    html += '<div class="cls-actions">';
+    html += '<button type="button" class="sc-btn" id="clsCancelBtn">Cancel</button>';
+    html += '<button type="submit" class="btn btn-primary" id="clsSubmitBtn">' + (isEdit ? 'Save Changes' : 'Submit Class') + '</button>';
+    html += '</div>';
+
+    html += '</form>';
+    html += '</div></div>';
+
+    document.body.insertAdjacentHTML('beforeend', html);
+    document.body.style.overflow = 'hidden';
+    var overlay = document.getElementById('classSubOverlay');
+    var form = document.getElementById('clsForm');
+
+    function closeCls() { overlay.remove(); document.body.style.overflow = ''; }
+    document.getElementById('clsCloseBtn').addEventListener('click', closeCls);
+    document.getElementById('clsCancelBtn').addEventListener('click', closeCls);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCls(); });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var errEl = document.getElementById('clsError');
+      errEl.style.display = 'none';
+      errEl.textContent = '';
+
+      function collectChecked(field) {
+        var vals = [];
+        overlay.querySelectorAll('input.cls-cb[data-field="' + field + '"]').forEach(function (cb) {
+          if (cb.checked) vals.push(cb.value);
+        });
+        return vals;
+      }
+
+      var maxSel = overlay.querySelector('input[name="clsMaxStudents"]:checked');
+      var max_students, max_students_other = '';
+      if (!maxSel) {
+        errEl.textContent = 'Pick a maximum class size.'; errEl.style.display = ''; return;
+      }
+      if (maxSel.value === 'other') {
+        var otherVal = parseInt(document.getElementById('clsMaxStudentsOther').value, 10);
+        if (!Number.isFinite(otherVal) || otherVal <= 0) {
+          errEl.textContent = 'Enter a number for the custom class size.'; errEl.style.display = ''; return;
+        }
+        max_students = otherVal;
+        max_students_other = String(otherVal);
+      } else {
+        max_students = parseInt(maxSel.value, 10);
+      }
+
+      var payload = {
+        class_name: document.getElementById('clsClassName').value.trim(),
+        description: document.getElementById('clsDescription').value.trim(),
+        session_preferences: collectChecked('session_preferences'),
+        hour_preference: collectChecked('hour_preference'),
+        assistant_count: collectChecked('assistant_count').map(function (v) { return parseInt(v, 10); }),
+        co_teachers: document.getElementById('clsCoTeachers').value.trim(),
+        space_request: collectChecked('space_request'),
+        space_request_other: document.getElementById('clsSpaceOther').value.trim(),
+        max_students: max_students,
+        max_students_other: max_students_other,
+        age_groups: collectChecked('age_groups'),
+        age_groups_other: document.getElementById('clsAgeOther').value.trim(),
+        pre_enroll_kids: document.getElementById('clsPreEnroll').value.trim(),
+        prerequisites: document.getElementById('clsPrereq').value.trim(),
+        other_info: document.getElementById('clsOtherInfo').value.trim()
+      };
+
+      var submitBtn = document.getElementById('clsSubmitBtn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = isEdit ? 'Saving…' : 'Submitting…';
+
+      var cred = localStorage.getItem('rw_google_credential');
+      var url = '/api/curriculum?action=class-submission' + (isEdit ? '&id=' + existing.id : '');
+      var method = isEdit ? 'PATCH' : 'POST';
+      fetch(url, {
+        method: method,
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          errEl.textContent = res.data.error || 'Could not save submission.';
+          errEl.style.display = '';
+          submitBtn.disabled = false;
+          submitBtn.textContent = isEdit ? 'Save Changes' : 'Submit Class';
+          return;
+        }
+        closeCls();
+        loadMyClassSubmissions();
+      })
+      .catch(function () {
+        errEl.textContent = 'Network error — please try again.';
+        errEl.style.display = '';
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEdit ? 'Save Changes' : 'Submit Class';
+      });
+    });
+  }
+
   function getClassInfo(classKey) {
     // Get class details from schedule data
     var isPM = classKey.indexOf('PM:') === 0;
@@ -10664,6 +11050,7 @@
     }
     loadCoverageBoard();
     loadClassLinks();
+    loadMyClassSubmissions();
     loadNotifications();
     setInterval(loadNotifications, 60000);
     // Re-check notifications when the tab becomes visible again so users

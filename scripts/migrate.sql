@@ -402,3 +402,54 @@ INSERT INTO participation_weights (key, label, value, sort_order, description) V
   ('new_member_baseline_pct',  'New-member baseline %',    60,110, 'Percent of normal expectation for a member''s first sessions after joining. 60 means a new member is "on track" at 60%% of the normal points.'),
   ('new_member_grace_sessions','New-member grace sessions', 2,120, 'How many sessions a new member gets the reduced baseline before the full expectation kicks in.')
 ON CONFLICT (key) DO NOTHING;
+
+-- ──────────────────────────────────────────────
+-- PM class submissions
+-- ──────────────────────────────────────────────
+-- Replaces the "25/26 Afternoon Class Submission" Google Form. Members
+-- submit a proposed PM elective; VP + Afternoon Class Liaison (PM
+-- Assistant) review, assign to a session/hour/age slot, and mark as
+-- scheduled. When status='scheduled' the row participates in PM_ELECTIVES
+-- for 26/27+ sessions (no Google Sheet write-back — DB is source of truth
+-- going forward).
+CREATE TABLE IF NOT EXISTS class_submissions (
+  id                    SERIAL PRIMARY KEY,
+  submitted_by_email    TEXT NOT NULL,
+  submitted_by_name     TEXT NOT NULL DEFAULT '',
+  school_year           TEXT NOT NULL DEFAULT '2026-2027',
+
+  -- Mirrors the Google Form fields.
+  class_name            TEXT NOT NULL,
+  session_preferences   TEXT[] NOT NULL DEFAULT '{}',   -- {'1','2','3','4','5','flexible'}
+  hour_preference       TEXT[] NOT NULL DEFAULT '{}',   -- {'first','last','flexible','2hr-required','2hr-optional'}
+  assistant_count       INTEGER[] NOT NULL DEFAULT '{}', -- {1,2,3}
+  co_teachers           TEXT NOT NULL DEFAULT '',
+  space_request         TEXT[] NOT NULL DEFAULT '{}',   -- {'any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'}
+  space_request_other   TEXT NOT NULL DEFAULT '',
+  max_students          INTEGER NOT NULL DEFAULT 12,
+  max_students_other    TEXT NOT NULL DEFAULT '',       -- free-text when submitter picks "Other"
+  age_groups            TEXT[] NOT NULL DEFAULT '{}',   -- {'3-7','7-9','10-12','teens'}
+  age_groups_other      TEXT NOT NULL DEFAULT '',
+  pre_enroll_kids       TEXT NOT NULL DEFAULT '',
+  prerequisites         TEXT NOT NULL DEFAULT '',
+  description           TEXT NOT NULL,
+  other_info            TEXT NOT NULL DEFAULT '',
+
+  -- Review + scheduling state.
+  status                TEXT NOT NULL DEFAULT 'submitted'
+                        CHECK (status IN ('submitted','drafted','scheduled','declined','withdrawn')),
+  scheduled_session     INTEGER,                        -- 1..5
+  scheduled_hour        TEXT,                           -- 'PM1','PM2','both'
+  scheduled_age_range   TEXT,                           -- e.g. 'Saplings (3-5)'
+  scheduled_room        TEXT,
+  reviewer_notes        TEXT NOT NULL DEFAULT '',
+  reviewed_by_email     TEXT,
+  reviewed_at           TIMESTAMPTZ,
+
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS class_submissions_submitter_idx
+  ON class_submissions (LOWER(submitted_by_email));
+CREATE INDEX IF NOT EXISTS class_submissions_status_idx ON class_submissions (status);
+CREATE INDEX IF NOT EXISTS class_submissions_school_year_idx ON class_submissions (school_year);
