@@ -10222,8 +10222,26 @@
     'larger-open':'Larger open room', kitchen:'Kitchen',
     dirty:'Someplace to get dirty', noisy:'We will be noisy', quiet:'I need quiet, please'
   };
-  var AGE_GROUP_VALUES = ['3-7','7-9','10-12','teens'];
-  var AGE_GROUP_LABELS = { '3-7':'3–7','7-9':'7–9','10-12':'10–12', teens:'Teens' };
+  // Mirrors AGE_RANGE_OPTIONS in the curriculum library so the two places use
+  // the same co-op group names. Keys are stable ids; labels are for display.
+  var AGE_GROUP_VALUES = [
+    'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons',
+    'mixed-younger','mixed-elementary','mixed-older','all-ages'
+  ];
+  var AGE_GROUP_LABELS = {
+    saplings: 'Saplings (3–5)',
+    sassafras: 'Sassafras (5–6)',
+    oaks: 'Oaks (7–8)',
+    maples: 'Maples (8–9)',
+    birch: 'Birch (9–10)',
+    willows: 'Willows (10–11)',
+    cedars: 'Cedars (12–13)',
+    pigeons: 'Pigeons (14+)',
+    'mixed-younger': 'Mixed: Younger (3–8)',
+    'mixed-elementary': 'Mixed: Elementary (5–11)',
+    'mixed-older': 'Mixed: Older (8–14)',
+    'all-ages': 'All ages'
+  };
   var MAX_STUDENT_OPTIONS = [10, 12, 15];
 
   function escClsAttr(s) {

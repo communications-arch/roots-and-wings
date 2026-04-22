@@ -236,7 +236,12 @@ const SESSION_PREF_VALUES  = ['1','2','3','4','5','flexible'];
 const HOUR_PREF_VALUES     = ['first','last','flexible','2hr-required','2hr-optional'];
 const ASSISTANT_COUNT_VALS = [1, 2, 3];
 const SPACE_REQ_VALUES     = ['any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'];
-const AGE_GROUP_VALUES     = ['3-7','7-9','10-12','teens'];
+// Matches AGE_RANGE_OPTIONS in the curriculum library (script.js) so reviewers
+// see familiar co-op group names instead of generic age bands.
+const AGE_GROUP_VALUES     = [
+  'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons',
+  'mixed-younger','mixed-elementary','mixed-older','all-ages'
+];
 
 function pickArray(raw, allowed, opts) {
   if (!Array.isArray(raw)) return [];
@@ -352,7 +357,15 @@ function prettySpace(a, other) {
   return parts.join(', ');
 }
 function prettyAges(a, other) {
-  const map = { '3-7': '3–7', '7-9': '7–9', '10-12': '10–12', teens: 'Teens' };
+  const map = {
+    saplings: 'Saplings (3–5)', sassafras: 'Sassafras (5–6)',
+    oaks: 'Oaks (7–8)', maples: 'Maples (8–9)', birch: 'Birch (9–10)',
+    willows: 'Willows (10–11)', cedars: 'Cedars (12–13)', pigeons: 'Pigeons (14+)',
+    'mixed-younger': 'Mixed: Younger (3–8)',
+    'mixed-elementary': 'Mixed: Elementary (5–11)',
+    'mixed-older': 'Mixed: Older (8–14)',
+    'all-ages': 'All ages'
+  };
   const parts = a.map(v => map[v] || v);
   if (other) parts.push(other);
   return parts.join(', ');
