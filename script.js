@@ -5757,7 +5757,10 @@
     var season = _participationReport.season || '';
     var statusCounts = { on_track: 0, near: 0, behind: 0, 'new': 0, exempt: 0 };
     members.forEach(function (m) {
-      if (statusCounts[m.status] != null) statusCounts[m.status] += 1;
+      // Anyone with an active exemption counts under "exempt" regardless of
+      // where their weighted score landed — matches the filter below.
+      var bucket = m.exemption ? 'exempt' : m.status;
+      if (statusCounts[bucket] != null) statusCounts[bucket] += 1;
     });
 
     var headerHtml = '<p class="ws-body-hint"><strong>' + members.length + '</strong> members · Season <strong>' + escapeHtmlWs(season) + '</strong>'
@@ -5783,7 +5786,12 @@
     var currentFilter = 'all';
     function filteredRows() {
       if (currentFilter === 'all') return members;
-      return members.filter(function (m) { return m.status === currentFilter; });
+      if (currentFilter === 'exempt') {
+        return members.filter(function (m) { return !!m.exemption; });
+      }
+      // Non-exempt buckets: skip members with an active exemption so they
+      // only surface under "Exempt".
+      return members.filter(function (m) { return !m.exemption && m.status === currentFilter; });
     }
 
     function renderTable() {
