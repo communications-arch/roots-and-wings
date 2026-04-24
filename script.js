@@ -4969,10 +4969,14 @@
           if (c.chair && !c.chair.person) open.push({ committee: c.name, title: c.chair.title });
           (c.roles || []).forEach(function (r) { if (!r.person) open.push({ committee: c.name, title: r.title }); });
         });
+        h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
+        // A PM class proposal is always a welcome way to contribute, whether
+        // or not committee seats are open. Button opens the same submission
+        // modal that the My Family "+ Submit a PM Class" card uses.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit a PM Class</button><span class="ws-part-submit-hint">Teach an elective you love — propose an idea for an upcoming session.</span></p>';
         if (open.length === 0) {
           h += '<p class="ws-empty">Every volunteer seat is filled right now. If you want to start something new, pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
-          h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
           h += '<p class="ws-body-hint">Open committee seats — email <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> to claim one.</p>';
           h += '<ul class="ws-opportunities">';
           open.forEach(function (o) {
@@ -5992,6 +5996,23 @@
       .then(function (data) {
         if (!data || _participationMineEmail !== email) return; // stale response
         _participationMine = data;
+        // Temporary diagnostic: surface status/tier/totals on the badge as
+        // data-* attributes + a console.debug line. Lets us eyeball why a
+        // given member lands on sprout vs. tree without guessing.
+        try {
+          var m = data.member || {};
+          console.debug('[participation-mine] status=' + m.status + ' tier=' + m.tier +
+            ' weightedTotal=' + m.weightedTotal + ' expectedPoints=' + m.expectedPoints +
+            ' isNewMember=' + m.isNewMember + ' exemption=' + (m.exemption ? 'yes' : 'no') +
+            ' first=' + m.first);
+          var badgeEl = document.getElementById('qsbPlantBadge');
+          if (badgeEl) {
+            badgeEl.dataset.status = m.status || '';
+            badgeEl.dataset.tier = m.tier || '';
+            badgeEl.dataset.total = String(m.weightedTotal);
+            badgeEl.dataset.expected = String(m.expectedPoints);
+          }
+        } catch (e) { /* ignore */ }
         renderParticipationBadge();
         // If Ways to Help is currently on-screen, refresh so the panel
         // picks up the new data without requiring a tab bounce.
@@ -9437,6 +9458,7 @@
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
+    else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
   });
 
   // Render all coordination tabs
