@@ -9930,24 +9930,29 @@ button.staff-role:hover {
   font-size: 0.84rem;
 }
 
-/* ---------- PM Submissions Report (in PM Class Scheduling card) ---------- */
-.pmrep-wrap {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border);
+/* ---------- PM Submissions Report (modal opened from PM Class Scheduling) ---------- */
+.pmrep-modal {
+  width: min(980px, 96vw);
+  max-width: 100%;
 }
+/* The "N new" pill on the workspace Submissions Report button. */
+.ws-link-count {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  background: var(--color-coral);
+  color: var(--color-white);
+  letter-spacing: 0.02em;
+}
+.ws-link-count[hidden] { display: none; }
 .pmrep-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
   margin-bottom: 6px;
-}
-.pmrep-title {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--color-primary-dark);
 }
 .pmrep-count {
   font-size: 0.8rem;

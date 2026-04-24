@@ -5013,49 +5013,16 @@
         var h = '<p class="ws-body-hint">Review inbound PM class submissions and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Schedule Builder</button></li>';
+        // The submissions report opens in a modal so the workspace card
+        // stays scannable. Count of pending-submitted is fetched in
+        // afterRender and painted into the ws-link-count pill so the
+        // reviewer sees activity at a glance without opening it.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="pm-submissions-report"><span class="ws-link-icon">📝</span>Submissions Report<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
         h += '</ul>';
-
-        // Quick-triage report: filterable table of submissions with
-        // inline Approve / Decline. The Schedule Builder is still the
-        // right tool for placing a class into a session/hour — this is
-        // the list view VP/PMA asked for when scanning new submissions.
-        h += '<div class="pmrep-wrap">';
-        h += '<div class="pmrep-head">';
-        h += '<h5 class="pmrep-title">Submissions</h5>';
-        h += '<span class="pmrep-count" id="pmrep-count">—</span>';
-        h += '</div>';
-        h += '<div class="pmrep-filters">';
-        h += '<label>Status <select class="pmrep-f" data-filter="status">';
-        h += '<option value="submitted" selected>Submitted</option>';
-        h += '<option value="drafted">Drafted</option>';
-        h += '<option value="scheduled">Scheduled</option>';
-        h += '<option value="declined">Declined</option>';
-        h += '<option value="withdrawn">Withdrawn</option>';
-        h += '<option value="all">All</option>';
-        h += '</select></label>';
-        h += '<label>Session <select class="pmrep-f" data-filter="session">';
-        h += '<option value="all">Any</option>';
-        h += '<option value="flexible">Flexible</option>';
-        for (var s = 1; s <= 5; s++) h += '<option value="' + s + '">S' + s + '</option>';
-        h += '</select></label>';
-        h += '<label>Age <select class="pmrep-f" data-filter="age">';
-        h += '<option value="all">Any</option>';
-        h += '<option value="3-7">3–7</option>';
-        h += '<option value="7-9">7–9</option>';
-        h += '<option value="10-12">10–12</option>';
-        h += '<option value="teens">Teens</option>';
-        h += '</select></label>';
-        h += '<label>Year <select class="pmrep-f" data-filter="school_year">';
-        h += '<option value="2026-2027" selected>2026–2027</option>';
-        h += '<option value="2027-2028">2027–2028</option>';
-        h += '</select></label>';
-        h += '</div>';
-        h += '<div class="pmrep-tbl-wrap" id="pmrep-body"><p class="ws-empty">Loading submissions…</p></div>';
-        h += '</div>';
         return h;
       },
       afterRender: function () {
-        if (typeof loadPmSubmissionsReport === 'function') loadPmSubmissionsReport();
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       }
     },
     'reports': {
@@ -9523,6 +9490,7 @@
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
+    else if (action === 'pm-submissions-report' && typeof showPmSubmissionsModal === 'function') showPmSubmissionsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
   });
 
@@ -11228,6 +11196,82 @@
     filters: { status: 'submitted', session: 'all', age: 'all', school_year: '2026-2027' }
   };
 
+  function showPmSubmissionsModal() {
+    if (!personDetail || !personDetailCard) return;
+    var h = '<button class="detail-close" aria-label="Close">&times;</button>';
+    h += '<div class="elective-detail rd-modal pmrep-modal">';
+    h += '<div class="pmrep-head">';
+    h += '<h3 class="rd-title" style="margin:0;">PM Class Submissions</h3>';
+    h += '<span class="pmrep-count" id="pmrep-count">—</span>';
+    h += '</div>';
+    h += '<p class="rd-subtitle">Approve to queue a submission for scheduling, or decline with a confirmation. The Schedule Builder still owns final session/hour placement.</p>';
+    h += '<div class="pmrep-filters">';
+    h += '<label>Status <select class="pmrep-f" data-filter="status">';
+    h += '<option value="submitted">Submitted</option>';
+    h += '<option value="drafted">Drafted</option>';
+    h += '<option value="scheduled">Scheduled</option>';
+    h += '<option value="declined">Declined</option>';
+    h += '<option value="withdrawn">Withdrawn</option>';
+    h += '<option value="all">All</option>';
+    h += '</select></label>';
+    h += '<label>Session <select class="pmrep-f" data-filter="session">';
+    h += '<option value="all">Any</option>';
+    h += '<option value="flexible">Flexible</option>';
+    for (var s = 1; s <= 5; s++) h += '<option value="' + s + '">S' + s + '</option>';
+    h += '</select></label>';
+    h += '<label>Age <select class="pmrep-f" data-filter="age">';
+    h += '<option value="all">Any</option>';
+    h += '<option value="3-7">3–7</option>';
+    h += '<option value="7-9">7–9</option>';
+    h += '<option value="10-12">10–12</option>';
+    h += '<option value="teens">Teens</option>';
+    h += '</select></label>';
+    h += '<label>Year <select class="pmrep-f" data-filter="school_year">';
+    h += '<option value="2026-2027">2026–2027</option>';
+    h += '<option value="2027-2028">2027–2028</option>';
+    h += '</select></label>';
+    h += '</div>';
+    h += '<div id="pmrep-body"><p class="ws-empty">Loading submissions…</p></div>';
+    h += '</div>';
+    personDetailCard.innerHTML = h;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+    loadPmSubmissionsReport();
+  }
+
+  // Lightweight count fetch used on workspace render to paint a "N pending"
+  // pill next to the Submissions Report button without loading the full list.
+  function loadPmSubmissionsPendingCount() {
+    var pill = document.getElementById('pmrep-pending-count');
+    if (!pill) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=class-submissions&scope=all', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var subs = Array.isArray(data.submissions) ? data.submissions : [];
+        // Cache so the modal can open instantly without a second fetch.
+        _pmReportState.submissions = subs;
+        _pmReportState.loaded = true;
+        var year = _pmReportState.filters.school_year;
+        var pending = subs.filter(function (s) {
+          return s.status === 'submitted' && s.school_year === year;
+        }).length;
+        if (pending > 0) {
+          pill.textContent = pending + ' new';
+          pill.hidden = false;
+        } else {
+          pill.hidden = true;
+        }
+      })
+      .catch(function () { /* silent — pill stays hidden */ });
+  }
+
   function loadPmSubmissionsReport(forceRefetch) {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -11381,6 +11425,8 @@
       })
       .then(function () {
         loadPmSubmissionsReport(true); // force refetch — list changes after action
+        // Keep the workspace-card "N new" pill in sync with the server.
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       })
       .catch(function (err) {
         alert('Could not ' + actionLabel + ': ' + (err.message || 'unknown error'));
