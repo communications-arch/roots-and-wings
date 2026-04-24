@@ -11315,13 +11315,19 @@
         }
         _rolesMgrState.roles = Array.isArray(rolesRes.data.roles) ? rolesRes.data.roles : [];
         _rolesMgrState.holdersByRoleId = {};
-        if (holdersRes.ok && Array.isArray(holdersRes.data.holders)) {
-          holdersRes.data.holders.forEach(function (h) {
-            var k = h.role_id;
-            if (!_rolesMgrState.holdersByRoleId[k]) _rolesMgrState.holdersByRoleId[k] = [];
-            _rolesMgrState.holdersByRoleId[k].push(h);
-          });
-        }
+        var holdersArr = (holdersRes.ok && holdersRes.data && Array.isArray(holdersRes.data.holders)) ? holdersRes.data.holders : [];
+        holdersArr.forEach(function (h) {
+          var k = h.role_id;
+          if (!_rolesMgrState.holdersByRoleId[k]) _rolesMgrState.holdersByRoleId[k] = [];
+          _rolesMgrState.holdersByRoleId[k].push(h);
+        });
+        // Temporary diagnostic — paste the output if the modal still
+        // shows everyone as Unassigned despite the DB having rows.
+        try {
+          console.debug('[roles-manager] holders response status=' + (holdersRes.ok ? 'ok' : 'err') +
+            ' rawCount=' + holdersArr.length +
+            ' groupedRoleIds=' + Object.keys(_rolesMgrState.holdersByRoleId).join(','));
+        } catch (e) { /* ignore */ }
         renderRolesManagerTree();
       })
       .catch(function (err) {
