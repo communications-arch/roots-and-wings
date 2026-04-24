@@ -10161,6 +10161,19 @@ button.staff-role:hover {
   flex-wrap: wrap;
   gap: 4px 6px;
 }
+.roles-row-main {
+  justify-content: flex-start;
+}
+.roles-row-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.roles-row-actions .sc-btn {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+}
 .roles-pill {
   display: inline-block;
   padding: 1px 8px;

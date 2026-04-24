@@ -11354,6 +11354,14 @@
       h2 += '<span class="roles-pill roles-pill-cat roles-pill-cat-' + r.category + '">' + escapeHtml(r.category.replace(/_/g, ' ')) + '</span>';
       if (archived) h2 += '<span class="roles-pill roles-pill-archived">archived</span>';
       h2 += '</div>';
+      h2 += '<div class="roles-row-actions">';
+      h2 += '<button type="button" class="sc-btn roles-row-edit" data-role-id="' + r.id + '" aria-label="Edit ' + escapeHtml(r.title) + '">Edit</button>';
+      if (archived) {
+        h2 += '<button type="button" class="sc-btn roles-row-restore" data-role-id="' + r.id + '" aria-label="Restore ' + escapeHtml(r.title) + '">Restore</button>';
+      } else {
+        h2 += '<button type="button" class="sc-btn sc-btn-del roles-row-archive" data-role-id="' + r.id + '" aria-label="Archive ' + escapeHtml(r.title) + '">Archive</button>';
+      }
+      h2 += '</div>';
       h2 += '</div>';
       h2 += '<div class="roles-row-meta">';
       if (r.overview) h2 += '<span class="roles-row-overview">' + escapeHtml(String(r.overview).slice(0, 120)) + (String(r.overview).length > 120 ? '…' : '') + '</span>';
@@ -11393,13 +11401,51 @@
     }
     body.innerHTML = h;
 
-    body.querySelectorAll('.roles-row-title').forEach(function (btn) {
+    function findRoleById(id) {
+      return _rolesMgrState.roles.find(function (r) { return r.id === id; });
+    }
+    body.querySelectorAll('.roles-row-title, .roles-row-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(this.getAttribute('data-role-id'), 10);
-        var role = _rolesMgrState.roles.find(function (r) { return r.id === id; });
+        var role = findRoleById(id);
         if (role) showRoleEditModal(role);
       });
     });
+    body.querySelectorAll('.roles-row-archive').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-role-id'), 10);
+        var role = findRoleById(id);
+        if (!role) return;
+        if (!confirm('Archive "' + role.title + '"? It stays in the database for history but hides from the default list. You can restore it from "Show archived".')) return;
+        patchRoleStatusInline(id, 'archived');
+      });
+    });
+    body.querySelectorAll('.roles-row-restore').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-role-id'), 10);
+        patchRoleStatusInline(id, 'active');
+      });
+    });
+  }
+
+  function patchRoleStatusInline(id, nextStatus) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/cleaning?action=roles&id=' + id, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          alert((res.data && res.data.error) || 'Could not update role (' + res.status + ')');
+          return;
+        }
+        loadRolesManagerTree(true);
+        if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
+      })
+      .catch(function (err) { alert('Network error: ' + (err.message || 'unknown')); });
   }
 
   // Dedicated edit / create modal. Uses a second overlay so closing it
