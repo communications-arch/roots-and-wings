@@ -5948,22 +5948,27 @@
   };
 
   // Derive the 3-tier growth stage client-side from the member row.
-  // Backend also sets `tier`, but we compute here too so a stale or
-  // misbehaving response can't strand someone on the wrong icon. Logic
-  // mirrors participationTier() on the server but uses weightedTotal vs
-  // expectedPoints directly when status is missing.
+  // The icon MUST match the numbers the user sees in the panel, so the
+  // raw weightedTotal vs. expectedPoints comparison is authoritative —
+  // if the server's pre-computed status string disagrees (stale, racy,
+  // edge-case in the bucket logic) we still render the correct tier.
   function deriveParticipationTier(member) {
     if (!member) return 'sprout';
+    var t = Number(member.weightedTotal) || 0;
+    var e = Number(member.expectedPoints) || 0;
+    // Exempt: expected collapses to ~0 during an exemption — render tree
+    // so members taking a break don't feel nudged.
+    if (e < 0.5 && member.exemption) return 'tree';
+    if (e > 0) {
+      if (t >= e) return 'tree';
+      if (t >= e * 0.8) return 'sapling';
+      return 'sprout';
+    }
+    // Only if we have no expected points at all do we fall back to the
+    // status string (which could itself still be missing).
     var status = member.status || '';
     if (status === 'on_track' || status === 'exempt') return 'tree';
     if (status === 'near') return 'sapling';
-    if (status === 'behind' || status === 'new') return 'sprout';
-    // No status → fall back to the raw points.
-    var t = Number(member.weightedTotal) || 0;
-    var e = Number(member.expectedPoints) || 0;
-    if (e < 0.5 && member.exemption) return 'tree';
-    if (e > 0 && t >= e) return 'tree';
-    if (e > 0 && t >= e * 0.8) return 'sapling';
     return 'sprout';
   }
 
