@@ -8,11 +8,41 @@
 // back to '2025-2026'.
 //
 // Run with:
-//   node --env-file=.env.local scripts/seed-role-holders.js
-//   node --env-file=.env.local scripts/seed-role-holders.js 2026-2027
+//   node scripts/seed-role-holders.js
+//   node scripts/seed-role-holders.js 2026-2027
+//
+// Uses the `dotenv` package to load .env.local rather than Node's
+// --env-file flag — that flag mangles multi-line values, which
+// breaks the embedded \n characters inside GOOGLE_SERVICE_ACCOUNT_KEY's
+// private_key field. Same pattern as seed-profiles-from-sheet.js.
+
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env.local') });
 
 const { neon } = require('@neondatabase/serverless');
 const { google } = require('googleapis');
+
+// Tolerant JSON parser for GOOGLE_SERVICE_ACCOUNT_KEY — even with
+// dotenv, some shells still leave raw \n / \r inside the string value
+// of private_key. Walk the JSON, and while inside a string convert raw
+// newlines to their escaped form before JSON.parse. Mirrors the
+// helper in seed-profiles-from-sheet.js.
+function loadServiceAccountKey() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not set');
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) { out += c; escaped = false; continue; }
+    if (c === '\\') { out += c; escaped = true; continue; }
+    if (c === '"') { inString = !inString; out += c; continue; }
+    if (inString && c === '\n') { out += '\\n'; continue; }
+    if (inString && c === '\r') { continue; }
+    out += c;
+  }
+  return JSON.parse(out);
+}
 
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
@@ -41,9 +71,8 @@ function cell(row, col) {
 }
 
 function getSheetsClient() {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
   const auth = new google.auth.GoogleAuth({
-    credentials,
+    credentials: loadServiceAccountKey(),
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
   });
   return google.sheets({ version: 'v4', auth });
