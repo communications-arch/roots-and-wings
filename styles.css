@@ -10203,6 +10203,17 @@ button.staff-role:hover {
 }
 .roles-row-overview { flex: 1 1 auto; max-width: 640px; }
 .roles-row-stamp { flex: 0 0 auto; font-size: 0.75rem; }
+.roles-row-holder {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+.roles-row-holder-empty {
+  color: var(--color-coral);
+  font-weight: 500;
+  font-style: italic;
+}
 
 /* Role edit overlay (opens on top of the Roles Manager modal). Uses its
    own stacking context so closing it doesn't collapse the manager. */

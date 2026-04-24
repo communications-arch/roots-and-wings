@@ -289,6 +289,24 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // ── Role Holders (Phase A: read-only, seeded from the volunteer sheet).
+    // Returns an array of holders; the client groups by role_id on render.
+    // Phase B adds POST/DELETE + cuts over the permission lookup here.
+    if (action === 'role-holders') {
+      if (req.method === 'GET') {
+        const schoolYear = req.query.school_year || '2025-2026';
+        const holders = await sql`
+          SELECT rh.id, rh.role_id, rh.email, rh.person_name, rh.family_name,
+                 rh.school_year, rh.started_at, rh.updated_at, rh.updated_by
+          FROM role_holders rh
+          WHERE rh.school_year = ${schoolYear}
+          ORDER BY rh.role_id, rh.person_name
+        `;
+        return res.status(200).json({ school_year: schoolYear, holders });
+      }
+      return res.status(405).json({ error: 'Method not allowed (Phase A is read-only)' });
+    }
+
     // ── Assignment CRUD ──
     if (action === 'assignment') {
       if (req.method === 'POST') {

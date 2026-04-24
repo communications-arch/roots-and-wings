@@ -11231,6 +11231,7 @@
   var _rolesMgrState = {
     loaded: false,
     roles: [],
+    holdersByRoleId: {}, // { role_id: [ {email, person_name, family_name}, ... ] }
     showArchived: false
   };
 
@@ -11295,16 +11296,36 @@
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) { body.innerHTML = '<p class="ws-empty">Sign-in required.</p>'; return; }
     body.innerHTML = '<p class="ws-empty">Loading roles…</p>';
-    fetch('/api/cleaning?action=roles&includeArchived=1', {
+    // Fetch roles + current-year holders in parallel. Holders are Phase A
+    // read-only — displayed on each row to show who currently holds it.
+    var rolesReq = fetch('/api/cleaning?action=roles&includeArchived=1', {
       headers: { 'Authorization': 'Bearer ' + cred }
-    })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) {
-          body.innerHTML = '<p class="ws-empty">' + escapeHtml((res.data && res.data.error) || 'Could not load roles.') + '</p>';
+    });
+    var holdersReq = fetch('/api/cleaning?action=role-holders', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    });
+    Promise.all([rolesReq, holdersReq])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }));
+      })
+      .then(function (results) {
+        var rolesRes = results[0];
+        var holdersRes = results[1];
+        if (!rolesRes.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((rolesRes.data && rolesRes.data.error) || 'Could not load roles.') + '</p>';
           return;
         }
-        _rolesMgrState.roles = Array.isArray(res.data.roles) ? res.data.roles : [];
+        _rolesMgrState.roles = Array.isArray(rolesRes.data.roles) ? rolesRes.data.roles : [];
+        _rolesMgrState.holdersByRoleId = {};
+        if (holdersRes.ok && Array.isArray(holdersRes.data.holders)) {
+          holdersRes.data.holders.forEach(function (h) {
+            var k = h.role_id;
+            if (!_rolesMgrState.holdersByRoleId[k]) _rolesMgrState.holdersByRoleId[k] = [];
+            _rolesMgrState.holdersByRoleId[k].push(h);
+          });
+        }
         _rolesMgrState.loaded = true;
         renderRolesManagerTree();
       })
@@ -11365,6 +11386,21 @@
       h2 += '</div>';
       h2 += '<div class="roles-row-meta">';
       if (r.overview) h2 += '<span class="roles-row-overview">' + escapeHtml(String(r.overview).slice(0, 120)) + (String(r.overview).length > 120 ? '…' : '') + '</span>';
+      // Holders for this role (Phase A: read-only, seeded from the
+      // volunteer sheet). Skip on cleaning_area rows — per-session
+      // assignments live in cleaning_assignments and surface elsewhere.
+      if (r.category !== 'cleaning_area') {
+        var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
+        var holderText;
+        if (held.length === 0) {
+          holderText = '<span class="roles-row-holder roles-row-holder-empty">Unassigned</span>';
+        } else {
+          holderText = '<span class="roles-row-holder">Held by ' +
+            held.map(function (h) { return escapeHtml(h.person_name || h.email); }).join(', ') +
+            '</span>';
+        }
+        h2 += holderText;
+      }
       var stampBits = [];
       if (r.updated_by) stampBits.push(escapeHtml(r.updated_by));
       if (r.updated_at) {

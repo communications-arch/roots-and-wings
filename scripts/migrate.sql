@@ -268,6 +268,39 @@ CREATE INDEX IF NOT EXISTS role_descriptions_category_idx
   ON role_descriptions (category);
 
 -- ──────────────────────────────────────────────
+-- Role Holders
+-- ──────────────────────────────────────────────
+-- Who currently holds each board / committee role for a given school
+-- year. Many-to-one with role_descriptions: multiple holders per role
+-- are allowed (e.g., Classroom Instructor in a session, co-chairs).
+-- Cleaning-crew assignments stay in cleaning_assignments (per-session,
+-- different cadence), so role_holders only concerns board +
+-- committee_role categories in practice.
+--
+-- Phase A: this table is seeded from the volunteer sheet for read-only
+-- display. The sheet stays authoritative for permission checks until
+-- Phase B cuts _permissions.js and the participation tracker over to
+-- read from here.
+CREATE TABLE IF NOT EXISTS role_holders (
+  id SERIAL PRIMARY KEY,
+  role_id INTEGER NOT NULL REFERENCES role_descriptions(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  person_name TEXT NOT NULL DEFAULT '',
+  family_name TEXT NOT NULL DEFAULT '',
+  school_year TEXT NOT NULL DEFAULT '2025-2026',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT NOT NULL DEFAULT ''
+);
+-- Prevent the same person being listed twice for the same role in the
+-- same year (normalize email to lowercase via a functional index).
+CREATE UNIQUE INDEX IF NOT EXISTS role_holders_unique_idx
+  ON role_holders (role_id, LOWER(email), school_year);
+CREATE INDEX IF NOT EXISTS role_holders_role_idx ON role_holders (role_id);
+CREATE INDEX IF NOT EXISTS role_holders_year_idx ON role_holders (school_year);
+CREATE INDEX IF NOT EXISTS role_holders_email_idx ON role_holders (LOWER(email));
+
+-- ──────────────────────────────────────────────
 -- Board photo cache (for the public site)
 -- Populated as a side effect of /api/photos calls from logged-in members.
 -- Served unauthenticated via /api/photos?scope=board so index.html can
