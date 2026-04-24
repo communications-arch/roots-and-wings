@@ -3060,6 +3060,8 @@
       section.style.display = '';
       renderHeaderViewAs();
       if (greeting) greeting.textContent = 'Welcome!';
+      // Empty state (no active family) — hide the plant badge.
+      if (typeof loadParticipationBadge === 'function') loadParticipationBadge();
       return;
     }
 
@@ -3715,6 +3717,9 @@
     if (typeof renderClassSubsCardBody === 'function') {
       renderClassSubsCardBody();
     }
+    // Refresh the personal participation badge in the greeting. Internally
+    // caches by active email, so re-renders are cheap.
+    if (typeof loadParticipationBadge === 'function') loadParticipationBadge();
 
     // Build PayPal note with family details
     function buildPaypalNote(fam, semKey, paymentType) {
@@ -4887,20 +4892,94 @@
       title: 'Ways to Help',
       roleGate: null,
       render: function () {
+        var h = '';
+
+        // ── Your year so far (personal participation panel) ────────────
+        // Backed by the same data as the greeting's plant badge
+        // (_participationMine). If it hasn't loaded yet we show a
+        // placeholder; loadParticipationBadge() re-renders the workspace
+        // tab once the fetch completes.
+        var member = _participationMine && _participationMine.member;
+        if (member) {
+          var tier = member.tier || 'sprout';
+          var tierHeadline = {
+            sprout:  'Every contribution matters — here’s how to jump in.',
+            sapling: 'You’re well on your way this year.',
+            tree:    'You’re a cornerstone of our co-op this year. Thank you!'
+          }[tier] || '';
+          var expected = Number(member.expectedPoints) || 0;
+          var total = Number(member.weightedTotal) || 0;
+          var pct = expected > 0 ? Math.min(100, Math.round((total / expected) * 100)) : 100;
+          h += '<div class="ws-part-panel ws-part-panel-' + tier + '">';
+          h += '<div class="ws-part-panel-head">';
+          h += '<span class="ws-part-panel-icon" aria-hidden="true">' + (PLANT_SVGS[tier] || '') + '</span>';
+          h += '<div class="ws-part-panel-headings">';
+          h += '<h5>Your year so far</h5>';
+          h += '<p>' + escapeHtml(tierHeadline) + '</p>';
+          h += '</div>';
+          h += '</div>';
+
+          // Progress meter. For exempt members expected is ~0; we
+          // render a full bar and a "thanks for what you’ve given"
+          // line instead of the usual points readout.
+          if (expected < 0.5 && member.exemption) {
+            h += '<p class="ws-part-exempt-note">Thanks for what you’ve given this year — your plan is marked as a break for now.</p>';
+          } else {
+            h += '<div class="ws-part-meter" role="img" aria-label="' + total.toFixed(1) + ' of ' + expected.toFixed(1) + ' participation points">';
+            h += '<div class="ws-part-meter-fill" style="width:' + pct + '%;"></div>';
+            h += '</div>';
+            h += '<p class="ws-part-meter-caption"><strong>' + total.toFixed(1) + '</strong> of <strong>' + expected.toFixed(1) + '</strong> participation points';
+            if (member.isNewMember) h += ' <span class="ws-part-new-pill">New this year</span>';
+            h += '</p>';
+          }
+
+          // Recap: translate counts into sentences.
+          var recap = [];
+          var c = member.counts || {};
+          function pluralize(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+          if (c.am_lead)          recap.push('Taught ' + pluralize(c.am_lead, 'AM session', 'AM sessions'));
+          if (c.am_assist)        recap.push('Assisted ' + pluralize(c.am_assist, 'AM session', 'AM sessions'));
+          if (c.pm_lead)          recap.push('Led ' + pluralize(c.pm_lead, 'PM elective', 'PM electives'));
+          if (c.pm_assist)        recap.push('Assisted ' + pluralize(c.pm_assist, 'PM elective', 'PM electives'));
+          if (c.cleaning_session) recap.push('Cleaned ' + pluralize(c.cleaning_session, 'session', 'sessions'));
+          if (c.event_lead)       recap.push('Coordinated ' + pluralize(c.event_lead, 'special event', 'special events'));
+          if (c.event_assist)     recap.push('Supported ' + pluralize(c.event_assist, 'event', 'events'));
+          if (member.coverageGiven) recap.push('Covered ' + pluralize(member.coverageGiven, 'slot', 'slots') + ' for others');
+          if (recap.length) {
+            h += '<ul class="ws-part-recap">';
+            recap.forEach(function (line) { h += '<li>' + escapeHtml(line) + '</li>'; });
+            h += '</ul>';
+          }
+          if (member.roles && member.roles.length) {
+            h += '<p class="ws-part-roles-line"><strong>Roles:</strong> ' + member.roles.map(escapeHtml).join(' · ') + '</p>';
+          }
+
+          h += '</div>'; // /.ws-part-panel
+        } else if (_participationMineEmail && localStorage.getItem('rw_google_credential')) {
+          // Fetch is in flight (or errored silently). Show a gentle
+          // placeholder so the card isn't empty on first paint.
+          h += '<div class="ws-part-panel ws-part-panel-loading">';
+          h += '<p class="ws-part-meter-caption">Loading your year so far…</p>';
+          h += '</div>';
+        }
+
+        // ── Ways to get more involved (open seats) ─────────────────────
         var open = [];
         (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
           if (c.chair && !c.chair.person) open.push({ committee: c.name, title: c.chair.title });
           (c.roles || []).forEach(function (r) { if (!r.person) open.push({ committee: c.name, title: r.title }); });
         });
         if (open.length === 0) {
-          return '<p class="ws-empty">Every volunteer seat is filled right now. If you want to start something new, pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
+          h += '<p class="ws-empty">Every volunteer seat is filled right now. If you want to start something new, pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
+        } else {
+          h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
+          h += '<p class="ws-body-hint">Open committee seats — email <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> to claim one.</p>';
+          h += '<ul class="ws-opportunities">';
+          open.forEach(function (o) {
+            h += '<li><strong>' + escapeHtml(o.title) + '</strong> <span class="ws-opp-committee">' + escapeHtml(o.committee) + '</span></li>';
+          });
+          h += '</ul>';
         }
-        var h = '<p class="ws-body-hint">Open committee seats — email membership@rootsandwingsindy.com to claim one.</p>';
-        h += '<ul class="ws-opportunities">';
-        open.forEach(function (o) {
-          h += '<li><strong>' + o.title + '</strong> <span class="ws-opp-committee">' + o.committee + '</span></li>';
-        });
-        h += '</ul>';
         return h;
       }
     },
@@ -5804,6 +5883,125 @@
     h += '<p class="ws-reg-decline-hint">Deletes the registration, emails the family + Treasurer + Membership + Communications, and frees up the refund for the Treasurer to process.</p>';
     h += '</div>';
     return h;
+  }
+
+  // ══════════════════════════════════════════════
+  // Personal Participation Badge (all authed members)
+  // ══════════════════════════════════════════════
+  // A small growing-plant icon in the greeting strip showing how the active
+  // member is tracking against their year-to-date participation score. The
+  // same icon advances from sprout → sapling → tree as contributions grow.
+  // Click jumps to Workspace → Ways to Help for the full breakdown + open
+  // seats. Backend: /api/sheets?action=participation-mine&email=<active>;
+  // the super user's View As picker sets the email automatically.
+
+  var _participationMine = null;        // { season, member, tier }
+  var _participationMineEmail = null;   // active email the cache is keyed to
+  var _participationBadgeWired = false;
+
+  // One icon, three growth stages. Uses currentColor so CSS tinting picks it
+  // up from the theme palette (coral / gold / leaf-green).
+  var PLANT_SVGS = {
+    sprout:
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 22v-6"/>' +
+      '<path d="M12 16c-3.5 0-5-2.5-5-5.5 3.5 0 5 2.5 5 5.5z"/>' +
+      '<path d="M12 14c3.5 0 5-2.5 5-5.5-3.5 0-5 2.5-5 5.5z"/>' +
+      '</svg>',
+    sapling:
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 22V10"/>' +
+      '<path d="M12 14c-4 0-6-3-6-7 4 0 6 3 6 7z"/>' +
+      '<path d="M12 12c4 0 6-3 6-7-4 0-6 3-6 7z"/>' +
+      '<path d="M12 18c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4z"/>' +
+      '</svg>',
+    tree:
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 22v-7"/>' +
+      '<path d="M12 15c-5 0-8-3.5-7-8.5 4 0 7 3 7 8.5z"/>' +
+      '<path d="M12 15c5 0 8-3.5 7-8.5-4 0-7 3-7 8.5z"/>' +
+      '<path d="M12 11c-3.5 0-5.5-2-4.5-5.5 3 0 5 2 4.5 5.5z"/>' +
+      '<path d="M12 11c3.5 0 5.5-2 4.5-5.5-3 0-5 2-4.5 5.5z"/>' +
+      '</svg>'
+  };
+
+  var PLANT_TOOLTIPS = {
+    sprout:  'Just getting started — tap to see ways to jump in.',
+    sapling: 'You’re well on your way this year — tap for more ways to help.',
+    tree:    'You’re a cornerstone of our co-op this year. Thank you! Tap to see your year so far.'
+  };
+
+  function renderParticipationBadge() {
+    var btn = document.getElementById('qsbPlantBadge');
+    var iconEl = document.getElementById('qsbPlantIcon');
+    if (!btn || !iconEl) return;
+    var member = _participationMine && _participationMine.member;
+    if (!member) { btn.hidden = true; return; }
+    var tier = member.tier || 'sprout';
+    btn.hidden = false;
+    btn.classList.remove('plant-sprout', 'plant-sapling', 'plant-tree');
+    btn.classList.add('plant-' + tier);
+    iconEl.innerHTML = PLANT_SVGS[tier] || PLANT_SVGS.sprout;
+    var tip = PLANT_TOOLTIPS[tier] || '';
+    btn.title = tip;
+    btn.setAttribute('aria-label', tip || 'Your participation this year');
+  }
+
+  function wireParticipationBadge() {
+    if (_participationBadgeWired) return;
+    var btn = document.getElementById('qsbPlantBadge');
+    if (!btn) return;
+    _participationBadgeWired = true;
+    btn.addEventListener('click', function () {
+      var wsPill = document.querySelector('.qsb-pill[data-view="workspace"]');
+      if (wsPill) wsPill.click();
+      // Scroll the Ways to Help card into view once the workspace renders.
+      setTimeout(function () {
+        var card = document.querySelector('[data-widget-type="ways-to-help"]');
+        if (card && card.scrollIntoView) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          card.classList.add('ws-card-flash');
+          setTimeout(function () { card.classList.remove('ws-card-flash'); }, 1600);
+        }
+      }, 80);
+    });
+  }
+
+  function loadParticipationBadge() {
+    wireParticipationBadge();
+    var email = getActiveEmail();
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!email || !cred) {
+      _participationMine = null;
+      _participationMineEmail = null;
+      renderParticipationBadge();
+      return;
+    }
+    // Already fetched for this email — just re-render. renderMyFamily calls
+    // us on every re-render; the fetch runs only when the active email
+    // changes (login, View As switch, or logout/reswitch).
+    if (_participationMineEmail === email && _participationMine) {
+      renderParticipationBadge();
+      return;
+    }
+    _participationMineEmail = email;
+    fetch('/api/sheets?action=participation-mine&email=' + encodeURIComponent(email), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || _participationMineEmail !== email) return; // stale response
+        _participationMine = data;
+        renderParticipationBadge();
+        // If Ways to Help is currently on-screen, refresh so the panel
+        // picks up the new data without requiring a tab bounce.
+        var wsPanel = document.getElementById('page-workspace');
+        if (wsPanel && wsPanel.style.display !== 'none' &&
+            typeof renderWorkspaceTab === 'function') {
+          renderWorkspaceTab();
+        }
+      })
+      .catch(function () { /* silent — badge stays hidden on error */ });
   }
 
   // ══════════════════════════════════════════════

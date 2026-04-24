@@ -30,7 +30,12 @@ async function verifyAuth(req) {
       if (domain !== ALLOWED_DOMAIN) {
         return { ok: false, reason: 'Domain not allowed' };
       }
-      return { ok: true, email: payload.email };
+      return {
+        ok: true,
+        email: payload.email,
+        givenName: payload.given_name || '',
+        familyName: payload.family_name || ''
+      };
     } catch (e) {
       return { ok: false, reason: 'Invalid token' };
     }
@@ -1584,11 +1589,59 @@ async function buildParticipationReport(sql, data) {
   return { season: season, members: out, weights: weights };
 }
 
-async function handleParticipationAction(req, res, action, userEmail) {
+// Collapse the 5-state participation status into a 3-tier growth stage for
+// the dashboard badge. 'exempt' and 'on_track' count as the fully-grown tree;
+// 'near' is the sapling; 'behind' and 'new' both map to sprout (soft-coral
+// nudge).
+function participationTier(status) {
+  if (status === 'on_track' || status === 'exempt') return 'tree';
+  if (status === 'near') return 'sapling';
+  return 'sprout';
+}
+
+async function handleParticipationAction(req, res, action, userEmail, authGivenName) {
+  var sql = getDb();
+
+  // Personal participation view — any authed @rootsandwingsindy.com member
+  // can fetch their own row. Super user (communications@) can fetch any
+  // family's row by passing ?email=<target> (used by the View As picker).
+  if (action === 'participation-mine' && req.method === 'GET') {
+    var emailLc = String(userEmail || '').toLowerCase();
+    var isSuperUser = emailLc === SUPER_USER_EMAIL;
+    var targetEmail = String((req.query && req.query.email) || userEmail || '').toLowerCase();
+    if (!targetEmail) return res.status(400).json({ error: 'email required' });
+    if (targetEmail !== emailLc && !isSuperUser) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+    var auth = getAuth();
+    var sheetsClient = google.sheets({ version: 'v4', auth: auth });
+    var data = await participationFetchSheetData(sheetsClient);
+    var report = await buildParticipationReport(sql, data);
+    var familyMembers = (report.members || []).filter(function (m) {
+      return String(m.email || '').toLowerCase() === targetEmail;
+    });
+    if (familyMembers.length === 0) {
+      return res.status(200).json({ season: report.season, member: null });
+    }
+    // Prefer the parent matching the signed-in given_name. For super-user
+    // view-as we can't disambiguate — fall back to the first parent.
+    var mine = null;
+    var gn = String(authGivenName || '').toLowerCase();
+    if (gn && !isSuperUser) {
+      for (var i = 0; i < familyMembers.length; i++) {
+        if (String(familyMembers[i].first || '').toLowerCase() === gn) {
+          mine = familyMembers[i];
+          break;
+        }
+      }
+    }
+    if (!mine) mine = familyMembers[0];
+    mine.tier = participationTier(mine.status);
+    return res.status(200).json({ season: report.season, member: mine });
+  }
+
   var canRead = await participationCanRead(userEmail);
   if (!canRead) return res.status(403).json({ error: 'Not authorized' });
-
-  var sql = getDb();
 
   if (action === 'participation-report' && req.method === 'GET') {
     var auth = getAuth();
@@ -1727,10 +1780,12 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── Participation sub-routes (VP / Afternoon Class Liaison / super-user) ──
+  // ── Participation sub-routes. Most are VP / Afternoon Class Liaison /
+  // super-user only; participation-mine lets any authed member fetch just
+  // their own row. The router gates at the action level inside the handler.
   if (action && action.indexOf('participation-') === 0) {
     try {
-      return await handleParticipationAction(req, res, action, authResult.email);
+      return await handleParticipationAction(req, res, action, authResult.email, authResult.givenName || '');
     } catch (err) {
       console.error('Participation action error:', err);
       return res.status(500).json({ error: 'Participation request failed' });
