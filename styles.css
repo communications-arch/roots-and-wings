@@ -10048,7 +10048,7 @@ button.staff-role:hover {
 }
 
 /* ---------- Roles Manager (President workspace widget → modal) ---------- */
-.roles-mgr-modal { width: min(900px, 96vw); }
+.roles-mgr-modal { width: min(720px, 96vw); }
 /* Toolbar row sits under the modal subtitle (the "+ Add Role" button
    lives in .detail-actions at the top, same slot Participation Tracker
    uses). Right-aligned single-row toolbar, subtle divider below. */
