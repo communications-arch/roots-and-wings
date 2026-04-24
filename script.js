@@ -11229,7 +11229,6 @@
   // endpoint. Server-side permissions enforce that only the President +
   // super user can change meta fields or create/archive roles.
   var _rolesMgrState = {
-    loaded: false,
     roles: [],
     holdersByRoleId: {}, // { role_id: [ {email, person_name, family_name}, ... ] }
     showArchived: false
@@ -11246,9 +11245,10 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
+        // Only update the pill — don't touch _rolesMgrState, since the
+        // modal needs to fetch roles + holders together in a single
+        // consistent pass when it opens.
         var roles = Array.isArray(data.roles) ? data.roles : [];
-        _rolesMgrState.roles = roles;
-        _rolesMgrState.loaded = true;
         var active = roles.filter(function (r) { return r.status === 'active'; }).length;
         pill.textContent = active + ' active';
         pill.hidden = false;
@@ -11286,13 +11286,9 @@
     loadRolesManagerTree();
   }
 
-  function loadRolesManagerTree(force) {
+  function loadRolesManagerTree() {
     var body = document.getElementById('roles-mgr-body');
     if (!body) return;
-    if (_rolesMgrState.loaded && !force) {
-      renderRolesManagerTree();
-      return;
-    }
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) { body.innerHTML = '<p class="ws-empty">Sign-in required.</p>'; return; }
     body.innerHTML = '<p class="ws-empty">Loading roles…</p>';
@@ -11326,7 +11322,6 @@
             _rolesMgrState.holdersByRoleId[k].push(h);
           });
         }
-        _rolesMgrState.loaded = true;
         renderRolesManagerTree();
       })
       .catch(function (err) {
@@ -11481,7 +11476,7 @@
           alert((res.data && res.data.error) || 'Could not update role (' + res.status + ')');
           return;
         }
-        loadRolesManagerTree(true);
+        loadRolesManagerTree();
         if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
       })
       .catch(function (err) { alert('Network error: ' + (err.message || 'unknown')); });
@@ -11638,7 +11633,7 @@
           return;
         }
         onDone();
-        loadRolesManagerTree(true);
+        loadRolesManagerTree();
         if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
       })
       .catch(function (err) {

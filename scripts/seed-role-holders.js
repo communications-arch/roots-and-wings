@@ -55,13 +55,34 @@ const TITLE_NORMALIZATIONS = {
   'sustaining dir.': 'Sustaining Director',
   'afternoon class liaisons': 'Afternoon Class Liaison',
   'vice-president': 'Vice-President',
-  'vice president': 'Vice-President'
+  'vice president': 'Vice-President',
+  // Volunteer-sheet labels drift from role_descriptions.title over
+  // time — keep these aliases in sync with seed-role-descriptions.js.
+  'opener & morning set-up': 'Building Opener',
+  'closer/lost & found': 'Building Closer',
+  'field trip coordinators': 'Field Trip Coordinator',
+  'gratitude/encouragement': 'Gratitude/Encouragement Leader'
 };
 
 function normalizeTitle(title) {
   if (!title) return title;
   const key = String(title).trim().toLowerCase();
   return TITLE_NORMALIZATIONS[key] || String(title).trim();
+}
+
+// Sheet cells often contain placeholders like "TBD", "not filling for
+// 25", or bare year numbers that the comma-splitter leaves behind.
+// Filter those out before we try to resolve a Workspace email — they
+// don't represent a real holder.
+function isPlaceholderPerson(s) {
+  if (!s) return true;
+  const t = String(s).trim().toLowerCase();
+  if (!t) return true;
+  if (t === 'tbd') return true;
+  if (/^not filling/i.test(t)) return true;
+  if (/^\d{1,4}$/.test(t)) return true;           // "25", "26", "2026"
+  if (/^\d{1,4}[-/]\d{1,4}$/.test(t)) return true; // "25-26", "2025/2026"
+  return false;
 }
 
 function cell(row, col) {
@@ -268,6 +289,7 @@ async function main() {
     // Split a "John & Jane" or "John / Jane" person cell into multiple holders.
     const personChunks = String(person).split(/\s*[&\/,]\s*/).map(s => s.trim()).filter(Boolean);
     for (const p of personChunks) {
+      if (isPlaceholderPerson(p)) continue;   // drop "TBD", "not filling", "26"
       const resolved = resolvePerson(p, dir);
       if (!resolved) { unresolvedPeople.push(title + ': ' + p); continue; }
       try {
