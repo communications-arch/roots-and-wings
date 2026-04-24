@@ -6,12 +6,120 @@
 // Idempotent. Preserves any DB values a family has already self-edited in the
 // portal — the member_profiles row always wins. Sheet values only fill gaps.
 //
-// Run with: node --env-file=.env.local scripts/seed-profiles-from-sheet.js
+// Run with: node scripts/seed-profiles-from-sheet.js
 // Add --dry to preview without writing.
+//
+// Uses the `dotenv` package instead of Node's --env-file flag — Node's
+// built-in parser mangles multi-line JSON values, which breaks the
+// GOOGLE_SERVICE_ACCOUNT_KEY containing embedded \n in the private key.
 
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env.local') });
 const { google } = require('googleapis');
 const { neon } = require('@neondatabase/serverless');
-const { parseDirectory, fetchSheet, getAuth } = require('../api/sheets.js');
+const { parseDirectory, fetchSheet } = require('../api/sheets.js');
+
+// parseDirectory no longer reads pronouns / allergies from the sheet (they
+// live in member_profiles now). This script is the migration that fills the
+// DB the first time, so it needs the legacy parse logic duplicated here.
+function parseLegacyPronounsAndAllergies(dirRows, allergyRows) {
+  const parentPronounsByFamily = {};   // familyName (lower) -> { firstNameLower: pronouns }
+  const kidPronounsByFamily = {};      // familyName (lower) -> { firstNameLower: pronouns }
+  const kidAllergies = {};             // "firstname lastinitial" -> allergy  AND  "firstname" -> allergy
+
+  const cell = (row, col) => (row && col < row.length && row[col] != null) ? String(row[col]).trim() : '';
+
+  if (dirRows && dirRows.length > 1) {
+    for (let r = 1; r < dirRows.length; r++) {
+      const parentStr = cell(dirRows[r], 0);
+      if (!parentStr) continue;
+
+      // Family name = last word of cleaned parent string
+      const parentClean = parentStr.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+      const parentWords = parentClean.split(/\s+/);
+      const familyName = (parentWords[parentWords.length - 1] || '').toLowerCase();
+      if (!familyName) continue;
+
+      // Parent pronouns — same regex as the old parser.
+      parentPronounsByFamily[familyName] = parentPronounsByFamily[familyName] || {};
+      const pronRe = /(\S+)\s+\(([^)]+)\)/g;
+      let pMatch;
+      while ((pMatch = pronRe.exec(parentStr)) !== null) {
+        const before = parentStr.substring(0, pMatch.index + pMatch[1].length)
+          .replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+        const segments = before.split(/\s*&\s*/);
+        const lastSeg = segments[segments.length - 1].trim();
+        const firstName = lastSeg.split(/\s+/)[0];
+        if (firstName) parentPronounsByFamily[familyName][firstName.toLowerCase()] = pMatch[2].trim();
+      }
+
+      // Kid pronouns — scan cols 2+
+      kidPronounsByFamily[familyName] = kidPronounsByFamily[familyName] || {};
+      for (let c = 2; c < (dirRows[r] ? dirRows[r].length : 0); c++) {
+        const kidStr = cell(dirRows[r], c);
+        if (!kidStr) continue;
+        const pronMatch = kidStr.match(/\(([^)]+)\)/);
+        const pronouns = pronMatch ? pronMatch[1].trim() : '';
+        let kidFirst = kidStr.replace(/\s*\([^)]*\)\s*/g, '').trim();
+        // Strip family surname if included in kid cell
+        if (kidFirst.toLowerCase().endsWith(' ' + familyName)) {
+          kidFirst = kidFirst.substring(0, kidFirst.length - familyName.length - 1).trim();
+        }
+        if (kidFirst && pronouns) {
+          kidPronounsByFamily[familyName][kidFirst.toLowerCase().split(/\s+/)[0]] = pronouns;
+        }
+      }
+    }
+  }
+
+  if (allergyRows && allergyRows.length > 1) {
+    for (let c = 0; c < (allergyRows[0] ? allergyRows[0].length : 0); c += 2) {
+      for (let r = 1; r < allergyRows.length; r++) {
+        const kidNameCell = cell(allergyRows[r], c);
+        const allergy = cell(allergyRows[r], c + 1);
+        if (!kidNameCell || !allergy) continue;
+        const key = kidNameCell.toLowerCase();
+        kidAllergies[key] = allergy;
+        // Also index by first-name-only for fuzzier matching
+        const first = key.split(/\s+/)[0];
+        if (first && !kidAllergies[first]) kidAllergies[first] = allergy;
+      }
+    }
+  }
+
+  return { parentPronounsByFamily, kidPronounsByFamily, kidAllergies };
+}
+
+// Local getAuth that tolerates .env.local service-account keys with raw
+// newlines embedded inside the JSON string value (the usual result of
+// pasting the service-account JSON file straight into .env.local). The prod
+// version in api/sheets.js is stricter because Vercel env vars don't have
+// this issue.
+function loadServiceAccountKey() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not set');
+  // Walk the string; inside a JSON string value, convert any raw \n / \r to
+  // their escaped \\n / drop \\r. Outside strings we leave everything alone.
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) { out += c; escaped = false; continue; }
+    if (c === '\\') { out += c; escaped = true; continue; }
+    if (c === '"') { inString = !inString; out += c; continue; }
+    if (inString && c === '\n') { out += '\\n'; continue; }
+    if (inString && c === '\r') { continue; }
+    out += c;
+  }
+  return JSON.parse(out);
+}
+
+function getAuth() {
+  return new google.auth.GoogleAuth({
+    credentials: loadServiceAccountKey(),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+  });
+}
 
 const DRY_RUN = process.argv.includes('--dry');
 
@@ -45,6 +153,7 @@ async function main() {
   }
 
   const { families } = parseDirectory(dirTab, classTab, allergyTab);
+  const legacy = parseLegacyPronounsAndAllergies(dirTab, allergyTab);
   console.log(`Parsed ${families.length} families from sheet.`);
 
   const existing = await sql`
@@ -69,12 +178,14 @@ async function main() {
     existingParents.forEach(p => {
       if (p && p.name) parentsByFirst[String(p.name).trim().split(/\s+/)[0].toLowerCase()] = p;
     });
+    const famKey = String(fam.name || '').toLowerCase();
+    const legacyParentPronouns = legacy.parentPronounsByFamily[famKey] || {};
     const mergedParents = parentFirstNames.map(n => {
       const existingP = parentsByFirst[n.toLowerCase()] || {};
-      const sheetPronoun = (fam.parentPronouns && fam.parentPronouns[n]) || '';
+      const sheetPronoun = legacyParentPronouns[n.toLowerCase()] || '';
       return {
         name: existingP.name || n,
-        // DB wins for pronouns; sheet fills gaps.
+        // DB wins for pronouns; legacy sheet parens fill gaps.
         pronouns: existingP.pronouns || sheetPronoun || '',
         photo_url: existingP.photo_url || ''
       };
@@ -86,14 +197,20 @@ async function main() {
     existingKids.forEach(k => {
       if (k && k.name) kidsByFirst[String(k.name).trim().split(/\s+/)[0].toLowerCase()] = k;
     });
+    const legacyKidPronouns = legacy.kidPronounsByFamily[famKey] || {};
+    const familyInitial = String(fam.name || '').charAt(0).toUpperCase();
     const mergedKids = (fam.kids || []).map(sheetKid => {
       const first = String(sheetKid.name || '').trim().split(/\s+/)[0].toLowerCase();
       const dbKid = kidsByFirst[first] || {};
+      // Try allergy lookup: "firstname lastinitial" first, then firstname only.
+      const allergyKey1 = (first + ' ' + familyInitial).toLowerCase();
+      const legacyAllergy = legacy.kidAllergies[allergyKey1] || legacy.kidAllergies[first] || '';
+      const legacyPronoun = legacyKidPronouns[first] || '';
       return {
         name: dbKid.name || sheetKid.name || '',
         birth_date: dbKid.birth_date || '',
-        pronouns: dbKid.pronouns || sheetKid.pronouns || '',
-        allergies: dbKid.allergies || sheetKid.allergies || '',
+        pronouns: dbKid.pronouns || sheetKid.pronouns || legacyPronoun || '',
+        allergies: dbKid.allergies || sheetKid.allergies || legacyAllergy || '',
         schedule: dbKid.schedule || sheetKid.schedule || 'all-day',
         photo_url: dbKid.photo_url || '',
         // Default: photos allowed. The seed never turns opt-out on — families
@@ -134,9 +251,13 @@ async function main() {
 
     if (DRY_RUN) {
       console.log(`WOULD ${existingRow ? 'UPDATE' : 'CREATE'} ${key} (${familyName}) — ${mergedKids.length} kids, ${mergedParents.length} parents`);
+      mergedParents.forEach(p => {
+        const pron = p.pronouns ? ` (${p.pronouns})` : '';
+        console.log(`    parent: ${p.name}${pron}`);
+      });
       mergedKids.forEach(k => {
-        const pron = k.pronouns ? ` ${k.pronouns}` : '';
-        const allergy = k.allergies ? ` [${k.allergies}]` : '';
+        const pron = k.pronouns ? ` (${k.pronouns})` : '';
+        const allergy = k.allergies ? ` ⚠ ${k.allergies}` : '';
         console.log(`    kid: ${k.name}${pron}${allergy}`);
       });
     } else {
