@@ -2369,9 +2369,10 @@
         html += studentAllergyCallout(studentFullNames);
         html += '<div class="elective-roster">';
         groupKids.forEach(function(kid) {
-          html += '<div class="elective-student">';
+          var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+          html += '<div class="elective-student' + (kid.photoConsent === false ? ' elective-student-nophoto-card' : '') + '">';
           html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, kid.email, kid.family) + '</div>';
-          html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + '</div>';
+          html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + noPhoto + '</div>';
           html += '</div>';
         });
         html += '</div>';
@@ -3885,9 +3886,11 @@
       var kidPerson = lookupPerson(kidName);
       var kidEmail = kidPerson ? kidPerson.email : '';
       var kidFamily = kidPerson ? kidPerson.family : last;
-      html += '<div class="elective-student">';
+      var optedOut = kidPerson && kidPerson.photoConsent === false;
+      var noPhoto = optedOut ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+      html += '<div class="elective-student' + (optedOut ? ' elective-student-nophoto-card' : '') + '">';
       html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '">' + kidAvatarInnerHtml(kidName, kidEmail, kidFamily) + '</div>';
-      html += '<div><strong>' + first + '</strong> <span class="elective-student-last">' + last + '</span>' + pronounTag(kidPerson) + '</div>';
+      html += '<div><strong>' + first + '</strong> <span class="elective-student-last">' + last + '</span>' + pronounTag(kidPerson) + noPhoto + '</div>';
       html += '</div>';
     });
     html += '</div>';
