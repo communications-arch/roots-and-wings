@@ -4901,7 +4901,7 @@
         // tab once the fetch completes.
         var member = _participationMine && _participationMine.member;
         if (member) {
-          var tier = member.tier || 'sprout';
+          var tier = deriveParticipationTier(member);
           var tierHeadline = {
             sprout:  'Every contribution matters — here’s how to jump in.',
             sapling: 'You’re well on your way this year.',
@@ -5014,7 +5014,48 @@
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Schedule Builder</button></li>';
         h += '</ul>';
+
+        // Quick-triage report: filterable table of submissions with
+        // inline Approve / Decline. The Schedule Builder is still the
+        // right tool for placing a class into a session/hour — this is
+        // the list view VP/PMA asked for when scanning new submissions.
+        h += '<div class="pmrep-wrap">';
+        h += '<div class="pmrep-head">';
+        h += '<h5 class="pmrep-title">Submissions</h5>';
+        h += '<span class="pmrep-count" id="pmrep-count">—</span>';
+        h += '</div>';
+        h += '<div class="pmrep-filters">';
+        h += '<label>Status <select class="pmrep-f" data-filter="status">';
+        h += '<option value="submitted" selected>Submitted</option>';
+        h += '<option value="drafted">Drafted</option>';
+        h += '<option value="scheduled">Scheduled</option>';
+        h += '<option value="declined">Declined</option>';
+        h += '<option value="withdrawn">Withdrawn</option>';
+        h += '<option value="all">All</option>';
+        h += '</select></label>';
+        h += '<label>Session <select class="pmrep-f" data-filter="session">';
+        h += '<option value="all">Any</option>';
+        h += '<option value="flexible">Flexible</option>';
+        for (var s = 1; s <= 5; s++) h += '<option value="' + s + '">S' + s + '</option>';
+        h += '</select></label>';
+        h += '<label>Age <select class="pmrep-f" data-filter="age">';
+        h += '<option value="all">Any</option>';
+        h += '<option value="3-7">3–7</option>';
+        h += '<option value="7-9">7–9</option>';
+        h += '<option value="10-12">10–12</option>';
+        h += '<option value="teens">Teens</option>';
+        h += '</select></label>';
+        h += '<label>Year <select class="pmrep-f" data-filter="school_year">';
+        h += '<option value="2026-2027" selected>2026–2027</option>';
+        h += '<option value="2027-2028">2027–2028</option>';
+        h += '</select></label>';
+        h += '</div>';
+        h += '<div class="pmrep-tbl-wrap" id="pmrep-body"><p class="ws-empty">Loading submissions…</p></div>';
+        h += '</div>';
         return h;
+      },
+      afterRender: function () {
+        if (typeof loadPmSubmissionsReport === 'function') loadPmSubmissionsReport();
       }
     },
     'reports': {
@@ -5939,13 +5980,33 @@
     tree:    'You’re a cornerstone of our co-op this year. Thank you! Tap to see your year so far.'
   };
 
+  // Derive the 3-tier growth stage client-side from the member row.
+  // Backend also sets `tier`, but we compute here too so a stale or
+  // misbehaving response can't strand someone on the wrong icon. Logic
+  // mirrors participationTier() on the server but uses weightedTotal vs
+  // expectedPoints directly when status is missing.
+  function deriveParticipationTier(member) {
+    if (!member) return 'sprout';
+    var status = member.status || '';
+    if (status === 'on_track' || status === 'exempt') return 'tree';
+    if (status === 'near') return 'sapling';
+    if (status === 'behind' || status === 'new') return 'sprout';
+    // No status → fall back to the raw points.
+    var t = Number(member.weightedTotal) || 0;
+    var e = Number(member.expectedPoints) || 0;
+    if (e < 0.5 && member.exemption) return 'tree';
+    if (e > 0 && t >= e) return 'tree';
+    if (e > 0 && t >= e * 0.8) return 'sapling';
+    return 'sprout';
+  }
+
   function renderParticipationBadge() {
     var btn = document.getElementById('qsbPlantBadge');
     var iconEl = document.getElementById('qsbPlantIcon');
     if (!btn || !iconEl) return;
     var member = _participationMine && _participationMine.member;
     if (!member) { btn.hidden = true; return; }
-    var tier = member.tier || 'sprout';
+    var tier = deriveParticipationTier(member);
     btn.hidden = false;
     btn.classList.remove('plant-sprout', 'plant-sapling', 'plant-tree');
     btn.classList.add('plant-' + tier);
@@ -11152,6 +11213,179 @@
     submissions: [],  // all submissions for the school year
     loaded: false
   };
+
+  // ══════════════════════════════════════════════
+  // PM Submissions Report (in the PM Class Scheduling workspace card)
+  // ══════════════════════════════════════════════
+  // Quick-triage list view of /api/curriculum?action=class-submissions.
+  // The Schedule Builder (opens in an overlay) is the right place for
+  // visual placement; this in-card table is the scannable list VP/PMA
+  // asked for — filter by status/session/age/year, see counts, and do
+  // fast approve (→drafted) or decline (→declined) per row.
+  var _pmReportState = {
+    loaded: false,
+    submissions: [],
+    filters: { status: 'submitted', session: 'all', age: 'all', school_year: '2026-2027' }
+  };
+
+  function loadPmSubmissionsReport(forceRefetch) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    // Re-bind filter change handlers each render (elements get re-created).
+    document.querySelectorAll('.pmrep-f').forEach(function (el) {
+      var key = el.getAttribute('data-filter');
+      if (!key) return;
+      if (_pmReportState.filters[key] != null) el.value = _pmReportState.filters[key];
+      if (el._pmrepWired) return;
+      el._pmrepWired = true;
+      el.addEventListener('change', function () {
+        var k = this.getAttribute('data-filter');
+        _pmReportState.filters[k] = this.value;
+        renderPmSubmissionsReport();
+      });
+    });
+    if (_pmReportState.loaded && !forceRefetch) {
+      renderPmSubmissionsReport();
+      return;
+    }
+    fetch('/api/curriculum?action=class-submissions&scope=all', {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) {
+        if (r.status === 403) throw new Error('Reviewer access only.');
+        return r.json();
+      })
+      .then(function (data) {
+        _pmReportState.submissions = Array.isArray(data.submissions) ? data.submissions : [];
+        _pmReportState.loaded = true;
+        renderPmSubmissionsReport();
+      })
+      .catch(function (err) {
+        var body = document.getElementById('pmrep-body');
+        if (body) body.innerHTML = '<p class="ws-empty">' + escapeHtml(err.message || 'Could not load submissions.') + '</p>';
+      });
+  }
+
+  function pmrepFormatHourPrefs(arr) {
+    if (!arr || arr.length === 0) return '—';
+    return arr.map(function (h) {
+      if (h === 'first')        return 'PM1';
+      if (h === 'last')         return 'PM2';
+      if (h === 'flexible')     return 'Flex';
+      if (h === '2hr-required') return '2-hr req';
+      if (h === '2hr-optional') return '2-hr opt';
+      return h;
+    }).join(', ');
+  }
+
+  function pmrepFormatSessions(arr) {
+    if (!arr || arr.length === 0) return '—';
+    return arr.map(function (p) {
+      return String(p) === 'flexible' ? 'Flex' : 'S' + p;
+    }).join(', ');
+  }
+
+  function renderPmSubmissionsReport() {
+    var body = document.getElementById('pmrep-body');
+    var countEl = document.getElementById('pmrep-count');
+    if (!body) return;
+
+    var f = _pmReportState.filters;
+    var all = _pmReportState.submissions;
+    var filtered = all.filter(function (s) {
+      if (f.status !== 'all' && s.status !== f.status) return false;
+      if (f.school_year !== 'all' && s.school_year !== f.school_year) return false;
+      if (f.session !== 'all') {
+        var prefs = s.session_preferences || [];
+        if (!prefs.some(function (p) { return String(p) === f.session; })) return false;
+      }
+      if (f.age !== 'all') {
+        var ages = (s.age_groups || []).map(function (a) { return String(a).toLowerCase(); });
+        if (ages.indexOf(f.age) === -1) return false;
+      }
+      return true;
+    });
+
+    if (countEl) {
+      countEl.textContent = filtered.length === all.length
+        ? filtered.length + ' submission' + (filtered.length === 1 ? '' : 's')
+        : filtered.length + ' of ' + all.length;
+    }
+
+    if (filtered.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No submissions match these filters.</p>';
+      return;
+    }
+
+    var h = '<div class="pmrep-tbl-scroll"><table class="pmrep-tbl">';
+    h += '<thead><tr>';
+    h += '<th>Class</th><th>Submitter</th><th>Sessions</th><th>Hour</th><th>Ages</th><th>Max</th><th>Status</th><th class="pmrep-actions-col">Actions</th>';
+    h += '</tr></thead><tbody>';
+    filtered.forEach(function (s) {
+      h += '<tr data-sub-id="' + s.id + '">';
+      h += '<td class="pmrep-class-cell"><strong>' + escapeHtml(s.class_name) + '</strong>';
+      if (s.description) {
+        var snippet = String(s.description).slice(0, 120);
+        h += '<div class="pmrep-class-desc">' + escapeHtml(snippet) + (String(s.description).length > 120 ? '…' : '') + '</div>';
+      }
+      h += '</td>';
+      h += '<td>' + escapeHtml(s.submitted_by_name || s.submitted_by_email) + '</td>';
+      h += '<td>' + escapeHtml(pmrepFormatSessions(s.session_preferences)) + '</td>';
+      h += '<td>' + escapeHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</td>';
+      h += '<td>' + (s.age_groups || []).map(escapeHtml).join(', ') + '</td>';
+      h += '<td>' + (s.max_students || '—') + '</td>';
+      h += '<td><span class="pmrep-status pmrep-status-' + s.status + '">' + s.status + '</span></td>';
+      h += '<td class="pmrep-actions">';
+      if (s.status === 'submitted') {
+        h += '<button class="sc-btn pmrep-btn pmrep-approve-btn" data-sub-id="' + s.id + '" title="Queue for scheduling (status → drafted)">✓ Approve</button>';
+        h += '<button class="sc-btn sc-btn-del pmrep-btn pmrep-decline-btn" data-sub-id="' + s.id + '" title="Decline this submission">✗ Decline</button>';
+      } else if (s.status === 'declined' || s.status === 'withdrawn') {
+        h += '<button class="sc-btn pmrep-btn pmrep-requeue-btn" data-sub-id="' + s.id + '" title="Send back to Submitted">↩ Re-queue</button>';
+      } else {
+        h += '<span class="pmrep-schedule-note">Use Schedule Builder</span>';
+      }
+      h += '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    body.innerHTML = h;
+
+    // Wire per-row action buttons.
+    body.querySelectorAll('.pmrep-approve-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { pmReportAction(this.getAttribute('data-sub-id'), 'drafted', 'approve'); });
+    });
+    body.querySelectorAll('.pmrep-decline-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!confirm('Decline this submission? The submitter will see "Declined" on their dashboard.')) return;
+        pmReportAction(this.getAttribute('data-sub-id'), 'declined', 'decline');
+      });
+    });
+    body.querySelectorAll('.pmrep-requeue-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { pmReportAction(this.getAttribute('data-sub-id'), 'submitted', 're-queue'); });
+    });
+  }
+
+  function pmReportAction(subId, newStatus, actionLabel) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=class-submission&review=1&id=' + subId, {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || 'Request failed (' + r.status + ')');
+          return d;
+        });
+      })
+      .then(function () {
+        loadPmSubmissionsReport(true); // force refetch — list changes after action
+      })
+      .catch(function (err) {
+        alert('Could not ' + actionLabel + ': ' + (err.message || 'unknown error'));
+      });
+  }
 
   function showScheduleBuilder() {
     if (document.getElementById('sbOverlay')) return;
