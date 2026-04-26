@@ -1023,7 +1023,6 @@ async function handleProfileUpdate(body, req, res) {
 
   const phone = String(body.phone || '').trim().slice(0, 50);
   const address = String(body.address || '').trim().slice(0, 500);
-  const placementNotes = String(body.placement_notes || '').trim().slice(0, 2000);
 
   const parentsRaw = Array.isArray(body.parents) ? body.parents : [];
   const kidsRaw = Array.isArray(body.kids) ? body.kids : [];
@@ -1035,14 +1034,17 @@ async function handleProfileUpdate(body, req, res) {
 
   const sql = getSql();
   try {
+    // placement_notes is intentionally not touched here — it's collected
+    // at registration only and the Edit My Info form no longer exposes
+    // it. New profiles default to '' from the column default; existing
+    // values are preserved across updates.
     const rows = await sql`
       INSERT INTO member_profiles (
-        family_email, family_name, phone, address, parents, kids,
-        placement_notes, updated_by
+        family_email, family_name, phone, address, parents, kids, updated_by
       ) VALUES (
         ${familyEmail}, ${familyName}, ${phone}, ${address},
         ${JSON.stringify(parents)}::jsonb, ${JSON.stringify(kids)}::jsonb,
-        ${placementNotes}, ${user.email}
+        ${user.email}
       )
       ON CONFLICT (family_email) DO UPDATE SET
         family_name = EXCLUDED.family_name,
@@ -1050,7 +1052,6 @@ async function handleProfileUpdate(body, req, res) {
         address = EXCLUDED.address,
         parents = EXCLUDED.parents,
         kids = EXCLUDED.kids,
-        placement_notes = EXCLUDED.placement_notes,
         updated_at = NOW(),
         updated_by = EXCLUDED.updated_by
       RETURNING family_email, family_name, phone, address, parents, kids,

@@ -12826,7 +12826,6 @@
       family_name: fam.name,
       phone: fam.phone || '',
       address: fam.address || '',
-      placement_notes: fam.placementNotes || '',
       parents: parentSeed,
       kids: (fam.kids || []).map(function (k) {
         return {
@@ -12934,10 +12933,6 @@
       }
       html += '</div>';
 
-      html += '<label class="rd-label">Placement notes (optional)</label>';
-      html += '<p class="rd-hint">Anything else the Membership team should know? Schedule constraints, siblings-together requests, etc.</p>';
-      html += '<textarea class="rd-textarea" id="emiPlacementNotes" rows="3">' + escapeHtml(state.placement_notes) + '</textarea>';
-
       html += '<div class="rd-btn-row emi-btn-row">';
       html += '<button type="button" class="rd-save-btn" id="emiSaveBtn">Save changes</button>';
       html += '<button type="button" class="rd-cancel-btn" id="emiCancelBtn">Cancel</button>';
@@ -12976,10 +12971,8 @@
     function syncStateFromDom() {
       var phoneEl = document.getElementById('emiPhone');
       var addressEl = document.getElementById('emiAddress');
-      var pnEl = document.getElementById('emiPlacementNotes');
       if (phoneEl) state.phone = phoneEl.value;
       if (addressEl) state.address = addressEl.value;
-      if (pnEl) state.placement_notes = pnEl.value;
       var pRows = personDetailCard.querySelectorAll('#emiParentList [data-parent-idx]');
       pRows.forEach(function (row) {
         var idx = parseInt(row.getAttribute('data-parent-idx'), 10);
@@ -13182,7 +13175,6 @@
           family_name: state.family_name,
           phone: state.phone,
           address: state.address,
-          placement_notes: state.placement_notes,
           parents: state.parents.map(function (p) { return { name: p.name, pronouns: p.pronouns, photo_url: p.photo_url, photo_consent: p.photo_consent !== false }; }),
           kids: state.kids.map(function (k) { return { name: k.name, birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
         };
