@@ -333,7 +333,7 @@ async function handleRegistration(body, req, res) {
         subject: `Roots & Wings ${season} Registration Confirmed — ${main_learning_coach} family`,
         html: `
           <h2>Registration Confirmed &amp; Paid</h2>
-          <p>Thanks for registering with Roots &amp; Wings Homeschool Co-op! Your ${escapeHtml(season)} Membership Fee has been received. The co-op board has been copied on this email.</p>
+          <p>Thanks for registering with Roots &amp; Wings Homeschool Co-op! Your ${escapeHtml(season)} Membership Fee has been received. The Membership Director, Treasurer, and Communications Director have been copied on this email.</p>
           <table style="border-collapse:collapse;font-family:sans-serif;">
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Season</td><td>${escapeHtml(season)}</td></tr>
             <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Main Learning Coach</td><td>${escapeHtml(main_learning_coach)}</td></tr>
