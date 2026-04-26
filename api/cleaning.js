@@ -37,9 +37,16 @@ const REVIEW_TRIGGER_FIELDS = new Set([
   'overview', 'duties', 'job_length', 'playbook'
 ]);
 
+// Vercel runs in UTC, so we have to anchor "today" to Indianapolis
+// (Eastern time, year-round) explicitly — otherwise an edit submitted
+// after 8 PM ET stamps tomorrow's date.
 function formatTodayMDY() {
-  const d = new Date();
-  return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Indianapolis',
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(new Date());
 }
 const VALID_CATEGORIES = ['board', 'committee_role', 'cleaning_area', 'class'];
 const VALID_STATUSES = ['active', 'archived'];

@@ -702,14 +702,9 @@
       });
       html += '</ul>';
     }
-    var updatedBy = role.updated_by || '';
-    var updatedOn = formatUpdatedAt(role.updated_at);
-    if (updatedBy || updatedOn) {
-      html += '<p class="rd-footer">Last updated';
-      if (updatedBy) html += ' by ' + escapeHtml(updatedBy);
-      if (updatedOn) html += ' on ' + escapeHtml(updatedOn);
-      html += '</p>';
-    }
+    // "Last reviewed by [name] on [date]" supersedes the older
+    // "Last updated by [email] on [date]" — same information, friendlier
+    // formatting, and stamped server-side from the JWT now.
     if (role.last_reviewed_by || role.last_reviewed_date) {
       html += '<p class="rd-footer">Last reviewed';
       if (role.last_reviewed_by) html += ' by ' + escapeHtml(role.last_reviewed_by);
@@ -5672,7 +5667,7 @@
 
   function showMembershipReportModal() {
     if (!personDetail || !personDetailCard) return;
-    var sheetUrl = 'https://docs.google.com/spreadsheets/d/1du9BvMoe_ulPwN58cuD0OgyuP5IAIB7OGYAZC5K9-K4/edit';
+    var sheetUrl = 'https://docs.google.com/spreadsheets/d/1ACLxC6nYfzb2vXbL3JzeaedNlqXzAPL-lEfq6dTIkRg/edit';
     var html = '<div class="detail-actions no-print">';
     html += '<a class="sc-btn" href="' + sheetUrl + '" target="_blank" rel="noopener" aria-label="Open the flat CSV-style Google Sheet of all registrations in a new tab">\uD83D\uDCCA View as Google Sheet</a>';
     html += '</div>';
