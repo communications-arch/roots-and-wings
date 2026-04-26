@@ -19,8 +19,8 @@ const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.goo
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-const REGISTRATION_FEE = 50;
-const DEFAULT_SEASON = '2025-2026';
+const REGISTRATION_FEE = 40;
+const DEFAULT_SEASON = '2026-2027';
 const VALID_TRACKS = ['Morning Only', 'Afternoon Only', 'Both', 'Other'];
 
 function escapeHtml(str) {
