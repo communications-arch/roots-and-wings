@@ -107,7 +107,11 @@ module.exports = async function handler(req, res) {
     const action = req.query.action || '';
 
     // ── GET: return everything ──
-    if (req.method === 'GET' && action !== 'roles') {
+    // Excludes action-routed GETs (roles, role-holders) — they have
+    // their own handlers below. Without this guard, GET ?action=role-holders
+    // falls into this branch and returns cleaning data with no `holders`
+    // field, which silently parses as an empty list on the client.
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
