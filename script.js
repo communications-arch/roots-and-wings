@@ -11321,18 +11321,6 @@
           if (!_rolesMgrState.holdersByRoleId[k]) _rolesMgrState.holdersByRoleId[k] = [];
           _rolesMgrState.holdersByRoleId[k].push(h);
         });
-        // Temporary diagnostic — paste the output if the modal still
-        // shows everyone as Unassigned despite the DB having rows.
-        try {
-          console.log('[roles-manager] holders response status=' + (holdersRes.ok ? 'ok' : 'err') +
-            ' rawCount=' + holdersArr.length +
-            ' groupedRoleIds=' + Object.keys(_rolesMgrState.holdersByRoleId).join(','));
-          if (holdersArr.length > 0) {
-            console.log('[roles-manager] first holder sample:', holdersArr[0]);
-          }
-          console.log('[roles-manager] roles count=' + _rolesMgrState.roles.length +
-            ' first role ids=' + _rolesMgrState.roles.slice(0, 3).map(function (r) { return r.id; }).join(','));
-        } catch (e) { /* ignore */ }
         renderRolesManagerTree();
       })
       .catch(function (err) {
@@ -11393,9 +11381,18 @@
       // Holder line sits directly under title/pills (before overview)
       // so the first thing a reviewer scans is "who is this?". Phase A
       // is read-only — Phase B adds the Assign button in this slot.
-      // Cleaning areas skip this line (per-session assignments live in
-      // cleaning_assignments and surface elsewhere).
-      if (r.category !== 'cleaning_area') {
+      // Skip the line for roles whose assignments live elsewhere:
+      //   - cleaning_area: per-session assignments in cleaning_assignments
+      //   - Classroom Instructor / Assistant / Floater / Morning Class
+      //     Liaison: per-class staffing in AM_CLASSES, not the volunteer
+      //     sheet. Showing "Unassigned" misled reviewers into thinking
+      //     these were vacant.
+      var holderManagedElsewhere = r.category === 'cleaning_area' ||
+        r.title === 'Classroom Instructor' ||
+        r.title === 'Classroom Assistant' ||
+        r.title === 'Floater' ||
+        r.title === 'Morning Class Liaison';
+      if (!holderManagedElsewhere) {
         var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
         h2 += '<div class="roles-row-holder-line">';
         if (held.length === 0) {
