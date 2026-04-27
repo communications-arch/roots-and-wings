@@ -2825,6 +2825,18 @@
   // via /api/sheets?action=billing — see billingStatus below. The static bits
   // below (deposit amount, per-session class rates, PayPal constants) don't
   // change mid-year and remain hardcoded.
+  // Active school year flips on April 1. Registrations go out in late
+  // April for the upcoming year, and class fees are due before classes
+  // start (Aug for Fall, Jan for Spring), so April is the natural pivot
+  // for surfacing the upcoming year's billing card to families.
+  // Returns { fallYear, springYear, label } e.g. { 2026, 2027, '2026-2027' }.
+  function activeSchoolYear(now) {
+    now = now || new Date();
+    var fallYear = (now.getMonth() < 3) ? now.getFullYear() - 1 : now.getFullYear();
+    return { fallYear: fallYear, springYear: fallYear + 1, label: fallYear + '-' + (fallYear + 1) };
+  }
+  var ACTIVE_YEAR = activeSchoolYear();
+
   var BILLING_CONFIG = {
     memberFeePerSemester: 40, // fallback; overridden by billingStatus.rates
     amFeePerSession: 10,
@@ -2835,8 +2847,8 @@
     checkDeliverTo: 'Jessica Shewan (Treasurer)',
     paypalMerchantId: 'MHDL7HTNRVQHE',
     semesters: {
-      fall: { name: 'Fall 2025', sessions: [1, 2], dueDate: '2025-08-27', deposit: 50 },
-      spring: { name: 'Spring 2026', sessions: [3, 4, 5], dueDate: '2026-01-07', deposit: 50 }
+      fall:   { name: 'Fall '   + ACTIVE_YEAR.fallYear,   sessions: [1, 2],     dueDate: ACTIVE_YEAR.fallYear   + '-08-27', deposit: 50 },
+      spring: { name: 'Spring ' + ACTIVE_YEAR.springYear, sessions: [3, 4, 5], dueDate: ACTIVE_YEAR.springYear + '-01-07', deposit: 50 }
     }
   };
 
@@ -11258,11 +11270,20 @@
     roles: [],
     holdersByRoleId: {}, // { role_id: [ {id, email, person_name, family_name}, ... ] }
     showArchived: false,
-    // Default to the in-progress school year (2025-2026 holders are seeded
-    // in the DB; 2026-2027 will be empty until the new board is assigned).
-    schoolYear: '2025-2026'
+    // Defaults to the active school year (April flip), same logic as
+    // BILLING_CONFIG. Past years stay accessible via the picker.
+    schoolYear: ACTIVE_YEAR.label
   };
-  var ROLES_MGR_YEARS = ['2025-2026', '2026-2027'];
+  var ROLES_MGR_YEARS = (function () {
+    var years = [];
+    var fy = ACTIVE_YEAR.fallYear;
+    // Show the current active year + the prior year so a Membership
+    // Director who's mid-transition can still see / edit historical
+    // assignments without code changes.
+    years.push((fy - 1) + '-' + fy);
+    years.push(fy + '-' + (fy + 1));
+    return years;
+  })();
 
   function loadRolesManagerCount() {
     var pill = document.getElementById('rolesmgr-count');
