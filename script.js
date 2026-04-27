@@ -5662,13 +5662,11 @@
           // toggle ascending puts signed first.
           sortValue: function (w) { return w.signed ? 'z' : 'a'; },
           render: function (w) {
-            return w.signed
-              ? '<span class="ws-wv-ok">Signed ' + (w.signed_at ? new Date(w.signed_at).toLocaleDateString() : '') + '</span>'
-              : '<span class="ws-wv-pending">Pending</span>';
+            return renderStatusPill(w.signed ? 'signed' : 'pending', w.signed_at);
           }
         },
         { key: 'sent_at', label: 'Sent', type: 'date',
-          render: function (w) { return w.sent_at ? new Date(w.sent_at).toLocaleDateString() : ''; }
+          render: function (w) { return formatReportDate(w.sent_at); }
         }
       ], merged, { initialSort: { key: 'status', dir: 'asc' } });
     }).catch(function (err) {
@@ -5678,6 +5676,26 @@
 
   function escapeHtmlWs(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Compact local date: "Apr 27" or "Apr 27, 25" depending on year.
+  // Used by report tables to keep Status pills tight on the right edge.
+  function formatReportDate(d) {
+    if (!d) return '';
+    var date = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  // Shared status-pill renderer for the Membership + Waivers reports.
+  // Consistent shape: one pill (Paid / Signed / Pending) optionally
+  // followed by a date stamp. Centralized so future reports adopt it
+  // without re-deriving the format.
+  function renderStatusPill(state, dateInput) {
+    var stamp = formatReportDate(dateInput);
+    if (state === 'paid') return '<span class="ws-wv-ok">Paid</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
+    if (state === 'signed') return '<span class="ws-wv-ok">Signed</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
+    return '<span class="ws-wv-pending">Pending</span>';
   }
 
   // ─── Sortable report-table helper ───
@@ -5910,20 +5928,21 @@
       render: function (r) { return String((r.kids || []).length); }
     },
     { key: 'payment_status', label: 'Paid', type: 'string',
+      sortValue: function (r) { return String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'; },
       render: function (r) {
         var ok = String(r.payment_status || '').toLowerCase() === 'paid';
-        return ok ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">' + escapeHtmlWs(r.payment_status || 'Pending') + '</span>';
+        return renderStatusPill(ok ? 'paid' : 'pending', null);
       }
     },
     { key: 'waiverStatus', label: 'Waiver', type: 'string',
-      sortValue: function (r) { return (!!r.waiver_member_agreement && !!r.signature_name) ? 'signed' : 'pending'; },
+      sortValue: function (r) { return (!!r.waiver_member_agreement && !!r.signature_name) ? 'z' : 'a'; },
       render: function (r) {
         var ok = !!r.waiver_member_agreement && !!r.signature_name;
-        return ok ? '<span class="ws-wv-ok">Signed ' + escapeHtmlWs(r.signature_date || '') + '</span>' : '<span class="ws-wv-pending">Pending</span>';
+        return renderStatusPill(ok ? 'signed' : 'pending', r.signature_date);
       }
     },
     { key: 'created_at', label: 'Registered', type: 'date',
-      render: function (r) { return r.created_at ? new Date(r.created_at).toLocaleDateString() : ''; }
+      render: function (r) { return formatReportDate(r.created_at); }
     }
   ];
 

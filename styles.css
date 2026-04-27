@@ -9053,8 +9053,26 @@ button.staff-role:hover {
   min-height: 1em;
 }
 .ws-wv-err { color: var(--color-error); font-weight: 600; }
-.ws-wv-ok { color: var(--color-success); font-weight: 600; }
-.ws-wv-pending { color: var(--color-accent-dark); font-weight: 600; }
+/* Status pills shared by Membership Report + Waivers Report (and any
+   other table that needs Paid/Pending/Signed status cells). Pill shape
+   so the two reports look visually consistent at a glance. */
+.ws-wv-ok,
+.ws-wv-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ws-wv-ok      { background: rgba(90, 107, 57, 0.14);   color: var(--color-leaf); }
+.ws-wv-pending { background: rgba(224, 181, 44, 0.18);  color: var(--color-accent-dark); }
+.ws-wv-ok::before      { content: '✓'; font-weight: 700; }
+.ws-wv-pending::before { content: '●'; font-size: 0.6em; }
+.ws-wv-stamp { color: var(--color-text-light); font-weight: 500; font-size: 0.86em; margin-left: 2px; }
 .ws-wv-context { color: var(--color-text-light); font-size: 0.78rem; font-style: italic; }
 .ws-waivers-table-wrap {
   overflow-x: auto;
