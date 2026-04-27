@@ -6194,23 +6194,38 @@
     fetch('/api/tour?waivers_report=1', {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) {
-        if (!data) return;
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
+          .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          // Surface the auth diagnostic in the console so we can see why
+          // the Pending Waivers count isn't loading. Item stays hidden.
+          var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
+          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+          console.warn('[loadPendingWaiversCount] ' + msg);
+          item.hidden = true;
+          recomputeTodoEmptyState();
+          return;
+        }
+        var data = res.data || {};
         var backup = Array.isArray(data.backup) ? data.backup : [];
         var oneOff = Array.isArray(data.oneOff) ? data.oneOff : [];
         var pending = backup.filter(function (b) { return !b.signed_at; }).length
           + oneOff.filter(function (o) { return !o.signed_at; }).length;
         if (pending > 0) {
-          if (label) label.textContent = pending + ' Pending Waiver' + (pending === 1 ? '' : 's');
-          if (pill) { pill.textContent = 'Open report'; pill.hidden = false; }
+          if (label) label.textContent = 'Pending Waivers';
+          if (pill) { pill.textContent = String(pending); pill.hidden = false; }
           item.hidden = false;
         } else {
           item.hidden = true;
         }
         recomputeTodoEmptyState();
       })
-      .catch(function () { /* silent */ });
+      .catch(function (err) {
+        console.warn('[loadPendingWaiversCount] network error:', err);
+      });
   }
 
   function loadMemberOnboardingCount() {
