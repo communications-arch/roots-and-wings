@@ -2844,18 +2844,26 @@
   // to recoup PayPal fees the org absorbed on each Fall transaction
   // (~2.5% of every $50 deposit + $40 member fee payment). Compute the
   // amount per family from billingStatus when wiring this up.
-  var SHOW_CLASS_FEES = ACTIVE_YEAR.label !== '2026-2027';
+  var DEPOSIT_ONLY_YEAR = ACTIVE_YEAR.label === '2026-2027';
 
-  // Spring billing surfaces 2 weeks before the deposit due date, so
-  // families have lead time to pay without seeing it months in advance
-  // (which also avoids the prior-year billing-sheet "Paid" markers
+  // Each subsection (deposit OR class fees) appears 2 weeks before its
+  // due date so families get lead time without seeing the card months
+  // early (which also avoids prior-year billing-sheet "Paid" markers
   // bleeding through into a fresh view). Implicit upper bound is the
-  // April 1 ACTIVE_YEAR flip — after that, "Spring" refers to the new
-  // year and its own due date drives visibility.
-  var _springDue = new Date(ACTIVE_YEAR.springYear + '-01-07T00:00:00');
-  var _springLeadStart = new Date(_springDue);
-  _springLeadStart.setDate(_springLeadStart.getDate() - 14);
-  var SHOW_SPRING = new Date() >= _springLeadStart;
+  // April 1 ACTIVE_YEAR flip — after that, the next year's due dates
+  // drive visibility.
+  function withinTwoWeeksOf(dateStr) {
+    var due = new Date(dateStr + 'T00:00:00');
+    var leadStart = new Date(due);
+    leadStart.setDate(leadStart.getDate() - 14);
+    return new Date() >= leadStart;
+  }
+
+  var FALL_DUE_DATE = ACTIVE_YEAR.fallYear + '-08-27';
+  var SPRING_DUE_DATE = ACTIVE_YEAR.springYear + '-01-07';
+  var SHOW_SPRING = withinTwoWeeksOf(SPRING_DUE_DATE);
+  var SHOW_FALL_CLASS_FEES = !DEPOSIT_ONLY_YEAR && withinTwoWeeksOf(FALL_DUE_DATE);
+  var SHOW_SPRING_CLASS_FEES = !DEPOSIT_ONLY_YEAR && withinTwoWeeksOf(SPRING_DUE_DATE);
 
   var BILLING_CONFIG = {
     memberFeePerSemester: 40, // fallback; overridden by billingStatus.rates
@@ -2867,8 +2875,8 @@
     checkDeliverTo: 'Jessica Shewan (Treasurer)',
     paypalMerchantId: 'MHDL7HTNRVQHE',
     semesters: {
-      fall:   { name: 'Fall '   + ACTIVE_YEAR.fallYear,   sessions: [1, 2],     dueDate: ACTIVE_YEAR.fallYear   + '-08-27', deposit: 40, showClassFees: SHOW_CLASS_FEES, visible: true },
-      spring: { name: 'Spring ' + ACTIVE_YEAR.springYear, sessions: [3, 4, 5], dueDate: ACTIVE_YEAR.springYear + '-01-07', deposit: 50, showClassFees: SHOW_CLASS_FEES, visible: SHOW_SPRING }
+      fall:   { name: 'Fall '   + ACTIVE_YEAR.fallYear,   sessions: [1, 2],     dueDate: FALL_DUE_DATE,   deposit: 40, showClassFees: SHOW_FALL_CLASS_FEES,   visible: true },
+      spring: { name: 'Spring ' + ACTIVE_YEAR.springYear, sessions: [3, 4, 5], dueDate: SPRING_DUE_DATE, deposit: 50, showClassFees: SHOW_SPRING_CLASS_FEES, visible: SHOW_SPRING }
     }
   };
 
