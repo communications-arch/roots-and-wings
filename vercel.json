@@ -5,6 +5,10 @@
   }],
   "rewrites": [
     {
+      "source": "/_rwtest_marker",
+      "destination": "/register.html"
+    },
+    {
       "source": "/",
       "has": [{ "type": "host", "value": "register.rootsandwingsindy.com" }],
       "destination": "/register.html"
