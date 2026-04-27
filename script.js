@@ -5220,11 +5220,11 @@
         return h;
       },
       afterRender: function () {
-        console.log('[todos.afterRender] DOM has: pending=' +
-          !!document.getElementById('ws-todo-pending-item') +
-          ' onboard=' + !!document.getElementById('ws-todo-onboard-item') +
-          ' waivers=' + !!document.getElementById('ws-todo-waivers-item') +
-          ' empty=' + !!document.getElementById('ws-todo-empty'));
+        // afterRender gets no role context (renderSection calls it once
+        // per type, not per role-section). Each loader self-gates by
+        // checking for its own DOM element and no-ops if missing — so
+        // we can safely fire all three. Whichever role's tab is on the
+        // page picks up its own item.
         if (typeof loadTreasurerPendingCount === 'function') loadTreasurerPendingCount();
         if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
@@ -6247,7 +6247,6 @@
         var oneOff = Array.isArray(data.oneOff) ? data.oneOff : [];
         var pending = backup.filter(function (b) { return !b.signed_at; }).length
           + oneOff.filter(function (o) { return !o.signed_at; }).length;
-        console.log('[loadPendingWaiversCount] backup=' + backup.length + ' oneOff=' + oneOff.length + ' pending=' + pending);
         if (pending > 0) {
           if (label) label.textContent = 'Pending Waiver' + (pending === 1 ? '' : 's');
           if (pill) pill.textContent = String(pending);
