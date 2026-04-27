@@ -5141,25 +5141,6 @@
         return h;
       }
     },
-    'member-onboarding': {
-      // Comms-only checklist + welcome-email queue for paid+signed
-      // registrations. New families show in the queue until they're
-      // fully onboarded (Workspace account + distribution list +
-      // welcome email all done). Returning families are skipped —
-      // they already have an account.
-      title: 'Member Onboarding',
-      roleGate: ['Communications Director'],
-      render: function () {
-        var h = '<p class="ws-body-hint">Walk new families through Workspace setup and removal at season end.</p>';
-        h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Open Member Onboarding</span><span class="ws-link-count" id="ws-onboard-count" hidden></span></button></li>';
-        h += '</ul>';
-        return h;
-      },
-      afterRender: function () {
-        if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
-      }
-    },
     'admin-consoles': {
       title: 'Admin Consoles',
       roleGate: ['Communications Director'],
@@ -5216,24 +5197,30 @@
       }
     },
     'todos': {
-      // Action queue for the Treasurer — surfaces pending cash/check
-      // registrations so she knows when there's something to record. The
-      // count comes from the same /api/tour?list=registrations endpoint
-      // the report uses; clicking the link opens the Membership Report
-      // pre-filtered to Pending. Other roles get an empty card today;
-      // future to-dos slot in here naturally.
+      // Per-role action queue. Items show only when the active role has
+      // something waiting (e.g. Treasurer sees pending cash/check
+      // payments; Comms sees new families to onboard). When every item
+      // is hidden the card collapses to an "all caught up" empty state.
+      // Server-side data fetches stay role-scoped via the /api/tour?
+      // list=registrations endpoint each loader hits.
       title: 'To Do',
-      roleGate: ['Treasurer'],
-      render: function () {
+      roleGate: ['Treasurer', 'Communications Director'],
+      render: function (prefs, roles, role) {
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
-        h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span><span class="ws-link-count" id="ws-todo-pending-count" hidden></span></button></li>';
+        if (role === 'Treasurer') {
+          h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span><span class="ws-link-count" id="ws-todo-pending-count" hidden></span></button></li>';
+        }
+        if (role === 'Communications Director') {
+          h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span><span class="ws-link-count" id="ws-onboard-count" hidden></span></button></li>';
+        }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
         return h;
       },
-      afterRender: function () {
-        if (typeof loadTreasurerPendingCount === 'function') loadTreasurerPendingCount();
+      afterRender: function (prefs, roles, role) {
+        if (role === 'Treasurer' && typeof loadTreasurerPendingCount === 'function') loadTreasurerPendingCount();
+        if (role === 'Communications Director' && typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
       }
     },
     'reports': {
@@ -5317,7 +5304,7 @@
 
   var WORKSPACE_DEFAULTS = {
     'President': ['roles', 'my-links', 'ways-to-help', 'resources'],
-    'Communications Director': ['member-onboarding', 'reports', 'forms', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['reports', 'forms', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'reports', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['reports', 'forms', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
@@ -6157,9 +6144,11 @@
   }
 
   function loadMemberOnboardingCount() {
+    var item = document.getElementById('ws-todo-onboard-item');
+    var emptyEl = document.getElementById('ws-todo-empty');
     var pill = document.getElementById('ws-onboard-count');
     var label = document.getElementById('ws-onboard-label');
-    if (!pill) return;
+    if (!item) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/tour?list=registrations', {
@@ -6172,11 +6161,12 @@
         var pending = regs.filter(isReadyToOnboard).length;
         if (pending > 0) {
           if (label) label.textContent = pending + ' new member' + (pending === 1 ? '' : 's') + ' to onboard';
-          pill.textContent = 'Open';
-          pill.hidden = false;
+          if (pill) { pill.textContent = 'Open'; pill.hidden = false; }
+          item.hidden = false;
+          if (emptyEl) emptyEl.hidden = true;
         } else {
-          if (label) label.textContent = 'Open Member Onboarding';
-          pill.hidden = true;
+          item.hidden = true;
+          if (emptyEl) emptyEl.hidden = false;
         }
       })
       .catch(function () { /* silent */ });
