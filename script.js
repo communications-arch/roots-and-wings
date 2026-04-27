@@ -2951,6 +2951,13 @@
     var balanceBeforeFee = subtotal;
     var paypalFee = Math.ceil(((balanceBeforeFee + BILLING_CONFIG.paypalFeeFixed) / (1 - BILLING_CONFIG.paypalFeeRate) - balanceBeforeFee) * 100) / 100;
     var total = balanceBeforeFee + paypalFee;
+    // Deposit/membership-fee gets its own PayPal fee added on top so the
+    // org isn't absorbing transaction costs on it. Computed separately
+    // because it's a separate PayPal transaction from the class fees.
+    var depositPaypalFee = deposit
+      ? Math.ceil(((deposit + BILLING_CONFIG.paypalFeeFixed) / (1 - BILLING_CONFIG.paypalFeeRate) - deposit) * 100) / 100
+      : 0;
+    var depositTotal = deposit + depositPaypalFee;
 
     // Live per-family status (falls back to 'Due' if sheet hasn't loaded).
     var live = getFamilyBillingStatus(fam, semesterKey);
@@ -2962,6 +2969,8 @@
       dueDate: sem.dueDate,
       memberFee: memberFee,
       deposit: deposit,
+      depositPaypalFee: depositPaypalFee,
+      depositTotal: depositTotal,
       sessionFees: sessionFees,
       classTotal: classTotal,
       subtotal: subtotal,
@@ -3484,7 +3493,9 @@
       if (!sem) return;
 
       // Membership fee subsection (the $50 that was previously labeled "deposit" —
-      // this is what the public registration flow collects at sign-up)
+      // this is what the public registration flow collects at sign-up). PayPal
+      // charges us a per-transaction fee on every payment, so we add it on top
+      // of the $50 here rather than absorbing it.
       if (sem.deposit) {
         var depPaid = sem.depositStatus === 'Paid';
         var depPending = sem.depositStatus === 'Pending';
@@ -3496,11 +3507,27 @@
         html += '<span class="mf-billing-status ' + depStatusClass + '">' + sem.depositStatus + '</span>';
         html += '</div>';
         html += '<div class="mf-billing-lines">';
-        html += '<div class="mf-billing-line mf-billing-total">';
+        html += '<div class="mf-billing-line">';
         html += '<span>Membership Fee (per family)</span>';
         html += '<span>$' + sem.deposit.toFixed(2) + '</span>';
         html += '</div>';
+        if (!depPaid && sem.depositPaypalFee) {
+          html += '<div class="mf-billing-line mf-billing-fee-line">';
+          html += '<span>Processing fee</span>';
+          html += '<span>$' + sem.depositPaypalFee.toFixed(2) + '</span>';
+          html += '</div>';
+        }
+        var depBottomLabel = depPaid ? 'Amount paid'
+          : depPending ? 'Payment submitted' : 'Balance due';
+        var depBottomAmount = depPaid ? sem.deposit : sem.depositTotal;
+        html += '<div class="mf-billing-line mf-billing-balance">';
+        html += '<span>' + depBottomLabel + '</span>';
+        html += '<span>$' + depBottomAmount.toFixed(2) + '</span>';
         html += '</div>';
+        html += '</div>';
+        if (!depPaid) {
+          html += '<p class="mf-billing-fee-note">PayPal charges a per-transaction processing fee on every payment. We add it here so the full $' + sem.deposit.toFixed(0) + ' membership fee reaches the co-op.</p>';
+        }
         if (depPending) {
           html += '<div class="mf-billing-pending-note">Payment received — awaiting Treasurer confirmation.</div>';
         } else if (!depPaid) {
@@ -3508,7 +3535,7 @@
           html += '<div class="mf-billing-pay-wrap">';
           html += '<button class="mf-billing-pay-btn" id="' + depBtnId + '">';
           html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
-          html += ' Pay $' + sem.deposit.toFixed(2) + '</button>';
+          html += ' Pay $' + sem.depositTotal.toFixed(2) + '</button>';
           html += '</div>';
         }
         html += '</div>';
@@ -3826,7 +3853,7 @@
       var year = new Date().getFullYear();
       // Each of the four payments identifies its type in description, invoice_id,
       // and note_to_payee so the treasurer can reconcile without guessing.
-      wirePaypalButton('paypal-dep-' + semKey, sem.deposit.toFixed(2),
+      wirePaypalButton('paypal-dep-' + semKey, sem.depositTotal.toFixed(2),
         sem.name + ' Membership Fee — ' + fam.name + ' family',
         'RW-' + capKey + '-Memb-' + fam.name + '-' + year, fam.email,
         buildPaypalNote(fam, semKey, sem.name + ' Membership Fee'),
