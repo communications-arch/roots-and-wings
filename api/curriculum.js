@@ -452,7 +452,7 @@ async function sendSubmissionConfirmation(sub) {
     ['Space request',    escapeHtml(prettySpace(sub.space_request, sub.space_request_other))],
     ['Max students',     escapeHtml(String(sub.max_students))],
     ['Age groups',       escapeHtml(prettyAges(sub.age_groups, sub.age_groups_other))],
-    ['Teen assistant OK', sub.open_to_teen_assistant ? 'Yes — open to a Cedars or Pigeons (12+) assistant' : 'No'],
+    ['Teen assistant OK', sub.open_to_teen_assistant ? 'Yes — willing to host a Cedars or Pigeons (12+) assistant' : 'No'],
     ['Prerequisites',    escapeHtml(sub.prerequisites || '—')]
   ];
   const rowsHtml = rows.map(
