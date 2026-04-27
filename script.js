@@ -5678,10 +5678,21 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // Compact local date: "Apr 27" or "Apr 27, 25" depending on year.
-  // Used by report tables to keep Status pills tight on the right edge.
+  // Compact local date: "Apr 27". Used by report tables to keep Status
+  // pills tight on the right edge.
+  //
+  // TZ-aware: date-only strings ("2026-04-27") get parsed as local day,
+  // not midnight UTC — otherwise they back-shift one day in any timezone
+  // west of UTC (the "signed yesterday" bug Comms saw). Timestamps with
+  // a time component go through normal Date parsing and render in the
+  // viewer's timezone correctly.
   function formatReportDate(d) {
     if (!d) return '';
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      var p = d.split('-');
+      var local = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      return local.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
     var date = (d instanceof Date) ? d : new Date(d);
     if (isNaN(date.getTime())) return '';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
