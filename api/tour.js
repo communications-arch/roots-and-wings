@@ -812,8 +812,9 @@ async function handleRegistrationMarkPaid(body, req, res) {
         from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
         to: reg.email,
         cc: [
-          'communications@rootsandwingsindy.com',
-          'membership@rootsandwingsindy.com'
+          'treasurer@rootsandwingsindy.com',
+          'membership@rootsandwingsindy.com',
+          'communications@rootsandwingsindy.com'
         ],
         replyTo: 'treasurer@rootsandwingsindy.com',
         subject: `Roots & Wings ${reg.season} Payment Received — ${reg.main_learning_coach} family`,
