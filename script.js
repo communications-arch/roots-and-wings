@@ -5207,8 +5207,9 @@
       roleGate: ['Treasurer'],
       render: function () {
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
-        h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span><span class="ws-link-count" id="ws-todo-pending-count" hidden></span></button></li>';
+        h += '<ul class="ws-link-list" id="ws-todo-list">';
+        h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span><span class="ws-link-count" id="ws-todo-pending-count" hidden></span></button></li>';
+        h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
         return h;
       },
@@ -12133,9 +12134,11 @@
   // Report) so we don't add a second route. Counts rows whose
   // payment_status is anything other than 'paid'.
   function loadTreasurerPendingCount() {
+    var item = document.getElementById('ws-todo-pending-item');
+    var emptyEl = document.getElementById('ws-todo-empty');
     var pill = document.getElementById('ws-todo-pending-count');
     var label = document.getElementById('ws-todo-pending-label');
-    if (!pill) return;
+    if (!item) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/tour?list=registrations', {
@@ -12148,15 +12151,17 @@
         var pending = regs.filter(function (r) {
           return String(r.payment_status || '').toLowerCase() !== 'paid';
         }).length;
-        if (label) label.textContent = pending + ' Pending Payment Registration' + (pending === 1 ? '' : 's');
         if (pending > 0) {
-          pill.textContent = 'Open report';
-          pill.hidden = false;
+          if (label) label.textContent = pending + ' Pending Payment Registration' + (pending === 1 ? '' : 's');
+          if (pill) { pill.textContent = 'Open report'; pill.hidden = false; }
+          item.hidden = false;
+          if (emptyEl) emptyEl.hidden = true;
         } else {
-          pill.hidden = true;
+          item.hidden = true;
+          if (emptyEl) emptyEl.hidden = false;
         }
       })
-      .catch(function () { /* silent — pill stays hidden, label stays default */ });
+      .catch(function () { /* silent — item stays hidden, empty state shows */ });
   }
 
   function loadPmSubmissionsPendingCount() {
