@@ -5511,10 +5511,12 @@
       }
     });
 
-    // Notes: persist on blur (no noise on every keystroke, but save-on-tab-away
-    // is reliable enough for scratch notes).
+    // Notes: persist on every input. Blur alone isn't reliable — async
+    // re-renders (e.g. participation badge fetch returning while the user
+    // is typing) replace innerHTML, which destroys the focused textarea
+    // without firing blur, so in-flight edits would be lost.
     container.querySelectorAll('.ws-role-notes-textarea').forEach(function (ta) {
-      ta.addEventListener('blur', function () {
+      ta.addEventListener('input', function () {
         saveWorkspaceNotes(this.getAttribute('data-role-key'), this.value);
       });
     });
