@@ -44,3 +44,17 @@ Deferred items — work that's known and scoped but waiting on outside input, a 
   - Privacy: families haven't paid, so we're capturing PII for people who never joined. Auto-purge drafts after 30 days? Add a line to the form telling them we save progress?
   - Should a "draft" still count toward the unique-email constraint, or only paid registrations? Current constraint is on paid rows; draft-and-retry should not block the paid flow.
 - **Priority:** Nice-to-have, not urgent. Land the PayPal fix first — otherwise we'd just be tracking 100% failures.
+
+## Google Chat Spaces directory
+- **Goal:** Help new (and existing) members discover the co-op's Google Chat spaces. Today people learn about Field Trips / Camp / Special Events / Announcements / etc. by word of mouth, and miss spaces they'd want to be in.
+- **Why this and not deeper Chat integration:** The co-op already lives in Chat — that's where the social energy is. The portal's job is the structured layer (rosters, dates, payment state); Chat stays the discussion layer. A directory bridges the two without trying to pull threads into the portal (Google Chat's API is restrictive and would fight the way people actually use it).
+- **Sketch:**
+  1. New "Co-op Spaces" page (or a card on the home / onboarding pages) listing each Chat space.
+  2. Per space: name, one-line purpose ("Field trip planning + RSVPs"), who it's for ("All members" / "Camp families only" / "Board"), and a "Join in Google Chat" deep link.
+  3. Source of truth options: hard-coded in a JS constant for v1 (cheap, fine for ~10 spaces), or a `chat_spaces` DB table editable by Comms (cleaner if the list churns).
+  4. Surface the directory in the Member Onboarding workflow so welcome emails / new-family checklists point at it.
+- **Open questions:**
+  - Are Chat space join links stable / shareable, or do people need to be invited individually? Verify before promising a one-click join.
+  - Public-facing too (rootsandwingsindy.com), or members-portal only? Some spaces are board-only and shouldn't be advertised broadly.
+- **Future extension (not in scope here):** outbound webhooks from portal → relevant Chat space when structured events happen (new field trip added, camp registration opens, payment due). Decide on spaces directory first; this is a separate parking-lot item if it becomes interesting.
+- **Priority:** Low. Onboarding pain is real but not bleeding; revisit when the next batch of new families joins.
