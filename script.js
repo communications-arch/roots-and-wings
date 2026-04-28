@@ -14049,6 +14049,7 @@
            '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
            '</label>';
       h += '<label class="emi-inline-label emi-full">Allergies, medical &amp; notes<input class="rd-input" placeholder="e.g. peanut allergy, ADHD, type-1 diabetes, sensory accommodations…" data-field="allergies" value="' + escapeHtml(k.allergies) + '"></label>';
+      h += '<p class="emi-full" style="font-size:0.8em;color:var(--color-text-light);margin:-4px 0 0;">Visible to all co-op members in the directory and class rosters — share what teachers + leaders should know to keep your child safe.</p>';
       var optOut = k.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (optOut ? ' checked' : '') + '>' +
@@ -14064,7 +14065,7 @@
       var html = '<button class="detail-close" aria-label="Close">&times;</button>';
       html += '<div class="elective-detail emi-modal">';
       html += '<h3 style="margin:0 0 4px;">Edit My Info</h3>';
-      html += '<p class="emi-subtitle">' + escapeHtml(fam.displayName || fam.name) + ' family — these updates show up across the member portal.</p>';
+      html += '<p class="emi-subtitle">' + escapeHtml(fam.displayName || fam.name) + ' family — everything you enter here is visible to all signed-in co-op members in the directory and class rosters. (Not shown to the public.)</p>';
       html += '<div id="emiError" class="emi-error" style="display:none;"></div>';
 
       html += '<label class="rd-label">Family last name</label>';
