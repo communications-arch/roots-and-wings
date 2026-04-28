@@ -14065,8 +14065,11 @@
            '<input class="rd-input emi-readonly" value="' + escapeHtml(schedLabel) + '" readonly tabindex="-1" title="Contact the Membership Director to change schedule — affects dues.">' +
            '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
            '</label>';
-      h += '<label class="emi-inline-label emi-full">Allergies, medical &amp; notes<input class="rd-input" placeholder="e.g. peanut allergy, ADHD, type-1 diabetes, sensory accommodations…" data-field="allergies" value="' + escapeHtml(k.allergies) + '"></label>';
-      h += '<p class="emi-full" style="font-size:0.8em;color:var(--color-text-light);margin:-4px 0 0;">Visible to all co-op members in the directory and class rosters — share what teachers + leaders should know to keep your child safe.</p>';
+      h += '<label class="emi-inline-label emi-full">' +
+             'Allergies, medical &amp; notes ' +
+             '<span style="font-weight:400;font-size:0.8em;color:var(--color-text-light);">— visible to all co-op members; share what teachers + leaders should know to keep your child safe.</span>' +
+             '<input class="rd-input" placeholder="e.g. peanut allergy, ADHD, type-1 diabetes, sensory accommodations…" data-field="allergies" value="' + escapeHtml(k.allergies) + '">' +
+           '</label>';
       var optOut = k.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (optOut ? ' checked' : '') + '>' +
