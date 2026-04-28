@@ -56,8 +56,14 @@ async function main() {
     const parents = Array.isArray(row.parents) ? row.parents : [];
     if (parents.length === 0) { skipped++; continue; }
 
-    // Skip if every parent already has a role assigned (idempotent).
-    const allTagged = parents.every(p => p && typeof p.role === 'string' && p.role);
+    // Skip if every parent already has a role + first_name + last_name
+    // populated (idempotent across multiple backfill passes).
+    const allTagged = parents.every(p =>
+      p
+      && typeof p.role === 'string' && p.role
+      && typeof p.first_name === 'string'
+      && typeof p.last_name === 'string'
+    );
     if (allTagged) { skipped++; continue; }
 
     const additionalLc = (row.additional_emails || []).map(e => String(e || '').toLowerCase());
@@ -77,10 +83,25 @@ async function main() {
         }
         if (merged.phone == null) merged.phone = '';
       }
-      // Personal email defaults to empty — there's no source we can pull
-      // from automatically without joining registrations table heuristically.
-      // Members fill in their own via Edit My Info.
       if (merged.personal_email == null) merged.personal_email = '';
+      // Split the legacy `name` field into first_name + last_name for
+      // each adult. Heuristic: last whitespace-separated word becomes
+      // last_name, everything before it becomes first_name. Single-word
+      // names (e.g. "Jessica") get last_name="" — display falls back to
+      // family_name. Members can edit either via the new EMI form.
+      if (merged.first_name == null || merged.last_name == null) {
+        const parts = String(merged.name || '').trim().split(/\s+/).filter(Boolean);
+        if (parts.length === 0) {
+          merged.first_name = merged.first_name || '';
+          merged.last_name = merged.last_name || '';
+        } else if (parts.length === 1) {
+          merged.first_name = merged.first_name || parts[0];
+          merged.last_name = merged.last_name || '';
+        } else {
+          merged.first_name = merged.first_name || parts.slice(0, -1).join(' ');
+          merged.last_name = merged.last_name || parts[parts.length - 1];
+        }
+      }
       return merged;
     });
 

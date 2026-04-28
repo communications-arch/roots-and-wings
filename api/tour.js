@@ -1168,21 +1168,26 @@ const VALID_PARENT_ROLES = ['mlc', 'blc', 'parent'];
 
 function sanitizeParent(p) {
   if (!p || typeof p !== 'object') return null;
-  const name = String(p.name || '').trim().slice(0, 200);
+  // Each adult carries first_name + last_name as separate fields so a parent
+  // who kept their maiden name (e.g. "Sarah Smith" married into the Jones
+  // family) displays as "Sarah Smith" rather than "Sarah Smith Jones". The
+  // legacy `name` field is preserved for back-compat and used as a fallback
+  // when first_name is missing — saved as "first last" so existing readers
+  // (lookupPerson, allPeople matchers) keep working.
+  const first_name = String(p.first_name || '').trim().slice(0, 100);
+  const last_name = String(p.last_name || '').trim().slice(0, 100);
+  const fallbackName = String(p.name || '').trim().slice(0, 200);
+  const composed = [first_name, last_name].filter(Boolean).join(' ').trim();
+  const name = composed || fallbackName;
   if (!name) return null;
-  // Phase 4 of directory→DB migration: each parent carries an MLC/BLC role,
-  // their R&W Workspace email (`email` — used for auth via additional_emails
-  // sync), their personal email (`personal_email` — where they actually read
-  // mail), and their phone. All optional on input — empty strings tolerated
-  // so legacy clients (old Edit My Info UI, the seed script) keep working.
-  // Server defaults role to '' rather than guessing, since position-in-array
-  // is a UI concern.
   const role = VALID_PARENT_ROLES.includes(p.role) ? p.role : '';
   const email = String(p.email || '').trim().toLowerCase().slice(0, 200);
   const personal_email = String(p.personal_email || '').trim().toLowerCase().slice(0, 200);
   const phone = String(p.phone || '').trim().slice(0, 50);
   return {
     name,
+    first_name,
+    last_name,
     pronouns: String(p.pronouns || '').trim().slice(0, 60),
     photo_url: String(p.photo_url || '').trim().slice(0, 500),
     // Per-adult photo opt-out. Default consent = true; explicit false opts out.

@@ -1131,6 +1131,11 @@ async function applyMemberProfileOverlay(families) {
       var displayedName = hit.name || n;
       return {
         name: displayedName,
+        // First/last name carried separately so a parent with their own
+        // surname (maiden name kept) displays correctly without the family
+        // last name being appended.
+        firstName: hit.first_name || '',
+        lastName: hit.last_name || '',
         pronouns: pronouns,
         photoUrl: hit.photo_url || '',
         // Explicit false opts the adult out; anything else (missing field, true)
@@ -1156,6 +1161,8 @@ async function applyMemberProfileOverlay(families) {
         var nextIdx = fam.parentInfo.length;
         fam.parentInfo.push({
           name: pp.name,
+          firstName: pp.first_name || '',
+          lastName: pp.last_name || '',
           pronouns: pp.pronouns || '',
           photoUrl: pp.photo_url || '',
           photoConsent: pp.photo_consent !== false,
