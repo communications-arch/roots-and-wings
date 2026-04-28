@@ -444,6 +444,11 @@
               var pEmail = (pFirstLc && pLastInit)
                 ? (pFirstLc + pLastInit + '@rootsandwingsindy.com')
                 : (fam.email || '');
+              // Board role belongs to the specific parent who holds it — the
+              // primary family_email holder — not every adult in the family.
+              // A co-parent (Jay) shouldn't inherit their spouse's Treasurer
+              // badge in the directory.
+              var isPrimaryParent = pEmail.toLowerCase() === String(fam.email || '').toLowerCase();
               allPeople.push({
                 name: pName.trim(),
                 type: 'parent',
@@ -459,8 +464,8 @@
                 parentNames: fam.parents,
                 diffNameKids: diffNameKids,
                 kidNames: (fam.kids || []).map(function(k) { return k.name + ' ' + (k.lastName || fam.name); }),
-                boardRole: fam.boardRole || null,
-                boardEmail: fam.boardEmail || null
+                boardRole: (isPrimaryParent && fam.boardRole) ? fam.boardRole : null,
+                boardEmail: (isPrimaryParent && fam.boardRole) ? (fam.boardEmail || null) : null
               });
             });
             (fam.kids || []).forEach(function (kid) {
