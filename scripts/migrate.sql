@@ -553,3 +553,16 @@ CREATE INDEX IF NOT EXISTS class_submissions_school_year_idx ON class_submission
 
 -- Back-compat: pick up the teen-assistant flag on existing deployments.
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS open_to_teen_assistant BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ──────────────────────────────────────────────
+-- Phase 3 of directory→DB migration: secondary-email login resolution.
+-- Lets a co-parent (e.g. Jay Shewan with login jays@) sign in with their own
+-- Workspace email and have it resolve to the existing family row keyed by
+-- the primary parent's family_email. Auth/ownership checks across the codebase
+-- (tour.js, absences.js, photos.js) compare the JWT email to family_email +
+-- additional_emails via the api/_family.js helpers.
+-- ──────────────────────────────────────────────
+ALTER TABLE member_profiles
+  ADD COLUMN IF NOT EXISTS additional_emails TEXT[] NOT NULL DEFAULT '{}'::text[];
+CREATE INDEX IF NOT EXISTS member_profiles_additional_emails_idx
+  ON member_profiles USING GIN (additional_emails);

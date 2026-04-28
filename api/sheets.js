@@ -1056,7 +1056,7 @@ async function applyMemberProfileOverlay(families) {
   var sql = getDb();
   var rows = await sql`
     SELECT family_email, family_name, phone, address,
-           parents, kids, placement_notes
+           parents, kids, placement_notes, additional_emails
     FROM member_profiles
   `;
   if (!rows || rows.length === 0) return;
@@ -1073,6 +1073,21 @@ async function applyMemberProfileOverlay(families) {
     if (p.phone) fam.phone = p.phone;
     if (p.address) fam.address = p.address;
     if (p.placement_notes) fam.placementNotes = p.placement_notes;
+
+    // Phase 3: surface co-parent secondary login emails. The client uses this
+    // to match the authenticated user's JWT email against ANY of the family's
+    // emails, not just the derived primary. fam.email stays as the canonical
+    // primary (still the member_profiles PK + the value used as family_email
+    // in API requests).
+    var addl = Array.isArray(p.additional_emails) ? p.additional_emails : [];
+    var primary = String(fam.email || '').toLowerCase();
+    var seen = primary ? { [primary]: true } : {};
+    var loginEmails = primary ? [primary] : [];
+    addl.forEach(function (ae) {
+      var lc = String(ae || '').toLowerCase();
+      if (lc && !seen[lc]) { seen[lc] = true; loginEmails.push(lc); }
+    });
+    fam.loginEmails = loginEmails;
 
     // Parents: merge pronouns and photoUrl onto the derived parent list.
     // parents are stored on the family as a "First & First" string; we expose
@@ -1293,6 +1308,16 @@ async function participationFetchSheetData(sheetsClient) {
   var families = dirParsed.families || [];
 
   try { await applyMemberProfileOverlay(families); } catch (e) { /* sheet-only fine */ }
+
+  // Default loginEmails = [primary] for every family, so the client can use
+  // a single uniform shape (loginEmails.includes(...)) regardless of whether
+  // the family had a member_profiles row when the overlay ran.
+  families.forEach(function (fam) {
+    if (!Array.isArray(fam.loginEmails)) {
+      var primary = String(fam.email || '').toLowerCase();
+      fam.loginEmails = primary ? [primary] : [];
+    }
+  });
 
   var amTab = null;
   for (var k1 in masterTabs) if (k1.match(/AM.*Volunteer/i)) { amTab = masterTabs[k1]; break; }
@@ -1874,6 +1899,15 @@ module.exports = async function handler(req, res) {
       console.error('Member profile overlay failed:', overlayErr);
       // fall through: sheet-only data still serves
     }
+
+    // Default loginEmails = [primary] for every family — see buildSheetData
+    // sibling for the shape rationale.
+    result.families.forEach(function (fam) {
+      if (!Array.isArray(fam.loginEmails)) {
+        var primary = String(fam.email || '').toLowerCase();
+        fam.loginEmails = primary ? [primary] : [];
+      }
+    });
 
     // ── AM Classes ──
     var amTab = null;

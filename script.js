@@ -328,7 +328,7 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Vice President') return true;
+      if (familyMatchesEmail(FAMILIES[i], email) && FAMILIES[i].boardRole === 'Vice President') return true;
     }
     return false;
   }
@@ -340,7 +340,7 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Treasurer') return true;
+      if (familyMatchesEmail(FAMILIES[i], email) && FAMILIES[i].boardRole === 'Treasurer') return true;
     }
     return false;
   }
@@ -349,7 +349,7 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Membership Director') return true;
+      if (familyMatchesEmail(FAMILIES[i], email) && FAMILIES[i].boardRole === 'Membership Director') return true;
     }
     return false;
   }
@@ -1244,6 +1244,39 @@
       });
   }
 
+  // True iff the given email matches the family's primary OR any co-parent
+  // login. Phase 3: replaces the old direct fam.email comparison so a
+  // co-parent's secondary login (e.g. jays@ for the Shewan family) resolves
+  // to the right family object.
+  function familyMatchesEmail(fam, emailLower) {
+    if (!fam || !emailLower) return false;
+    var loginEmails = Array.isArray(fam.loginEmails) ? fam.loginEmails : null;
+    if (loginEmails && loginEmails.length > 0) {
+      for (var i = 0; i < loginEmails.length; i++) {
+        if (String(loginEmails[i] || '').toLowerCase() === emailLower) return true;
+      }
+      return false;
+    }
+    return String(fam.email || '').toLowerCase() === emailLower;
+  }
+
+  // Best-effort first name for the active user, given their login email and
+  // their family's last name. Follows the firstname+lastinitial convention
+  // used to derive Workspace emails — strips the trailing initial off the
+  // local part. Returns null if it can't infer; callers should fall back to
+  // the family's primary parent string. Phase 3: lets the greeting and avatar
+  // lookups address the actual signed-in co-parent (e.g. Jay) rather than
+  // always defaulting to the family's first parent (Jessica).
+  function deriveFirstNameFromLogin(email, familyName) {
+    if (!email || !familyName) return null;
+    var local = String(email).split('@')[0].toLowerCase().replace(/[^a-z]/g, '');
+    var initial = String(familyName).charAt(0).toLowerCase();
+    if (!local || !initial) return null;
+    var stem = local.endsWith(initial) ? local.slice(0, -1) : local;
+    if (!stem) return null;
+    return stem.charAt(0).toUpperCase() + stem.slice(1);
+  }
+
   // DB-only photo lookup — used for kids, who don't have Workspace accounts
   // and whose family email would resolve to the parent's photo via the
   // memberPhotos map if we fell through.
@@ -1254,7 +1287,7 @@
     if (email) {
       var emailLower = String(email).toLowerCase();
       for (var fi = 0; fi < FAMILIES.length; fi++) {
-        if (String(FAMILIES[fi].email || '').toLowerCase() === emailLower) { matchFam = FAMILIES[fi]; break; }
+        if (familyMatchesEmail(FAMILIES[fi], emailLower)) { matchFam = FAMILIES[fi]; break; }
       }
     }
     if (!matchFam && familyName) {
@@ -1291,7 +1324,7 @@
       if (email) {
         var emailLower = String(email).toLowerCase();
         for (var fi = 0; fi < FAMILIES.length; fi++) {
-          if (String(FAMILIES[fi].email || '').toLowerCase() === emailLower) { matchFam = FAMILIES[fi]; break; }
+          if (familyMatchesEmail(FAMILIES[fi], emailLower)) { matchFam = FAMILIES[fi]; break; }
         }
       }
       if (!matchFam && familyName) {
@@ -3113,7 +3146,7 @@
     // Find the family by email
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
 
     var html = '';
@@ -3148,8 +3181,12 @@
       return;
     }
 
-    // Personalize greeting
-    var firstName = fam.parents.split(' & ')[0].split(' ')[0];
+    // Personalize greeting. Use the login-email derivation so a co-parent
+    // (e.g. Jay logging in as jays@) sees their own name, not the family's
+    // primary parent. Falls back to the first parent string if the
+    // derivation can't infer (e.g. unusual email shape).
+    var derivedFirst = deriveFirstNameFromLogin(email, fam.name);
+    var firstName = derivedFirst || fam.parents.split(' & ')[0].split(' ')[0];
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
 
     // ──── Coverage Board (full width, collapsible) ────
@@ -4021,7 +4058,7 @@
     // Append role description for leader/assistant
     var activeEmail = getActiveEmail();
     var activeFam = null;
-    for (var fi = 0; fi < FAMILIES.length; fi++) { if (FAMILIES[fi].email === activeEmail) { activeFam = FAMILIES[fi]; break; } }
+    for (var fi = 0; fi < FAMILIES.length; fi++) { if (familyMatchesEmail(FAMILIES[fi], activeEmail)) { activeFam = FAMILIES[fi]; break; } }
     if (activeFam) {
       var myFullNames = activeFam.parents.split(' & ').map(function(pp) { return pp.trim() + ' ' + activeFam.name; });
       var isLeader = myFullNames.some(function(fn) { return fn.toLowerCase() === (elec.leader || '').trim().toLowerCase(); });
@@ -4102,7 +4139,7 @@
     var email = getActiveEmail();
     if (!email || !FAMILIES) return { fullNames: [], familyName: '' };
     var fam = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; } }
     if (!fam) return { fullNames: [], familyName: '' };
     return {
       fullNames: fam.parents.split(' & ').map(function (p) { return p.trim() + ' ' + fam.name; }),
@@ -7570,7 +7607,7 @@
     if (!email) return false;
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; }
     }
     if (!me) return false;
     var coordName = getSupplyCoordinatorName();
@@ -8623,7 +8660,7 @@
     var email = localStorage.getItem('rw_user_email');
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole) return true;
+      if (familyMatchesEmail(FAMILIES[i], email) && FAMILIES[i].boardRole) return true;
     }
     return false;
   }
@@ -8635,7 +8672,7 @@
     if (!email) return [];
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
     if (!fam) return [];
     var parentFullNames = (fam.parents || '').split(' & ').map(function (p) {
@@ -10532,7 +10569,7 @@
     var email = getActiveEmail();
     if (!email || !FAMILIES) return;
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     if (!me) { alert('Could not find your family record.'); return; }
     var coopDates = getCoopDatesInSession(currentSession);
     if (coopDates.length === 0) { alert('No session dates available.'); return; }
@@ -10773,7 +10810,7 @@
 
     var email = getActiveEmail();
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
 
     // Group absences by date
@@ -11062,7 +11099,7 @@
 
     var email = getActiveEmail();
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     if (!me) return;
     var parentFullNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
 
@@ -13711,7 +13748,7 @@
     if (!email) { alert('Please sign in to edit your info.'); return; }
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
     if (!fam) {
       alert('Could not find your family. Contact communications@rootsandwingsindy.com for help.');

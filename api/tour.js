@@ -14,6 +14,7 @@ const { google } = require('googleapis');
 const { put } = require('@vercel/blob');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, SUPER_USER_EMAIL } = require('./_permissions');
+const { canActAs } = require('./_family');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1272,13 +1273,16 @@ function sanitizeKid(k) {
   };
 }
 
-// Owner: the JWT'd Workspace email MUST equal the family_email, OR the caller
-// is communications@ (super user).
-function canEditFamily(userEmail, familyEmail) {
+// Owner: the JWT'd Workspace email MUST equal the family_email, OR appear in
+// the family's additional_emails (a co-parent), OR the caller is
+// communications@ (super user). The co-parent path requires a DB lookup.
+async function canEditFamily(sql, userEmail, familyEmail) {
   const u = normalizeEmail(userEmail);
   const f = normalizeEmail(familyEmail);
   if (!u || !f) return false;
-  return u === f || u === SUPER_USER_EMAIL;
+  if (u === SUPER_USER_EMAIL) return true;
+  if (u === f) return true;
+  return canActAs(sql, u, f);
 }
 
 async function handleProfileGet(req, res) {
@@ -1287,11 +1291,11 @@ async function handleProfileGet(req, res) {
 
   const familyEmail = normalizeEmail(req.query.family_email);
   if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
-  if (!canEditFamily(user.email, familyEmail)) {
-    return res.status(403).json({ error: 'You can only view/edit your own family.' });
-  }
 
   const sql = getSql();
+  if (!(await canEditFamily(sql, user.email, familyEmail))) {
+    return res.status(403).json({ error: 'You can only view/edit your own family.' });
+  }
   try {
     const rows = await sql`
       SELECT family_email, family_name, phone, address,
@@ -1316,7 +1320,9 @@ async function handleProfileUpdate(body, req, res) {
 
   const familyEmail = normalizeEmail(body.family_email);
   if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
-  if (!canEditFamily(user.email, familyEmail)) {
+
+  const sql = getSql();
+  if (!(await canEditFamily(sql, user.email, familyEmail))) {
     return res.status(403).json({ error: 'You can only edit your own family.' });
   }
 
@@ -1334,7 +1340,6 @@ async function handleProfileUpdate(body, req, res) {
   const parents = parentsRaw.map(sanitizeParent).filter(Boolean);
   const kids = kidsRaw.map(sanitizeKid).filter(Boolean);
 
-  const sql = getSql();
   try {
     // placement_notes is intentionally not touched here — it's collected
     // at registration only and the Edit My Info form no longer exposes
@@ -1379,7 +1384,7 @@ async function handleProfilePhoto(body, req, res) {
 
   const familyEmail = normalizeEmail(body.family_email);
   if (!familyEmail) return res.status(400).json({ error: 'family_email required' });
-  if (!canEditFamily(user.email, familyEmail)) {
+  if (!(await canEditFamily(getSql(), user.email, familyEmail))) {
     return res.status(403).json({ error: 'You can only upload photos for your own family.' });
   }
 
