@@ -89,3 +89,30 @@ Phased so the auth path doesn't all change at once.
 - **Plan:** centralize the "is this email a member of this family?" check into a helper (`isFamilyMember(userEmail, familyEmail, sql)`) and replace direct comparisons one file at a time. Add a regression test (`scripts/test-coparent-auth.js`) that exercises the alias path before flipping any single check.
 - **Migration:** for each existing family with a real co-parent (Jay Shewan + future ones), populate `additional_emails` (or `member_logins` rows). Existing single-login families keep `additional_emails` empty.
 - **Auth-path scope = real risk:** miss one comparison and a co-parent silently can't claim coverage / can't edit their kids / etc. The test script is mandatory before this phase ships.
+
+## Family data model: Main Learning Coach + Back Up Learning Coach
+
+End-state goal: align the portal's family data model with the vocabulary already used by registration + waivers — Main Learning Coach (MLC) and Back Up Learning Coach (BLC) — instead of a generic "parents" list. Each role gets its own contact info (name, email, phone, pronouns, photo). Subsumes the Phase 3 co-parent story into a clearer primary/backup model and gives every role-holder its own phone number (today there's one phone per family).
+
+**Depends on:** Phase 3 merged first. This work is a real schema + UI refactor and shouldn't be layered onto the in-flight Phase 3 branch.
+
+**Schema sketch (not final — pick once we start):**
+- **Option A (cleanest):** extend the existing `member_profiles.parents` JSONB so each entry has `{ name, role: 'mlc'|'blc'|'parent', email, phone, pronouns, photo_url, photo_consent }`. First MLC entry's email becomes `family_email` (current PK). Subsequent BLC/parent emails go in (or replace) `additional_emails`. Drops the family-level `phone` column once UI is migrated.
+- **Option B:** dedicated `member_contacts(family_email, role, name, email, phone, ...)` table. More normalized; more code changes.
+
+**Touch points:**
+- Migration: backfill MLC role on the first parent of every existing row; copy family-level `phone` onto the MLC entry. BLC defaults to null.
+- `api/tour.js` registration intake: registration already collects MLC + BLC fields — verify and route into the new shape.
+- `api/tour.js` family profile read/write: sanitizeParent gains email + phone + role.
+- `api/_family.js`: `additional_emails` can probably be derived from the BLC entry's email instead of being a separate column. Decide whether to keep `additional_emails` for non-BLC aliases or retire it.
+- Edit My Info form (`renderEMI…` in script.js): per-parent phone + email + role label.
+- Display surfaces: My Family card, Directory detail card, parent detail popups — show MLC + BLC roles + per-person contact instead of family-level phone.
+- Waivers: existing waiver flows already differentiate MLC vs BLC; map them to the DB shape.
+- Notifications: route based on role (e.g., absences notify MLC primarily, BLC as fallback).
+
+**Open questions:**
+- Families with 3+ adults (multi-generational, divorced+remarried) — keep generic 'parent' role for the extras, or limit to MLC/BLC only?
+- Single-parent families: MLC required, BLC optional. Confirm.
+- The Directory sheet still drives some name parsing — does the MLC concept eventually replace the Directory sheet entirely (Phase 2 read-path flip), or stay layered on top?
+
+**Estimated:** 4–8 hours focused work post-Phase 3 merge.
