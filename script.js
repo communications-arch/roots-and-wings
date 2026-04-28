@@ -300,31 +300,41 @@
     }
     var viewAsEmail = sessionStorage.getItem(VIEW_AS_KEY) || '';
     var html = '<option value="">\u2014 My Dashboard \u2014</option>';
-    var sortedFams = FAMILIES.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
-    sortedFams.forEach(function (f) {
-      if (!f.email) return;
-      // Phase 3: emit one option per login email so the comms super user can
-      // impersonate a specific co-parent (e.g. Jay vs Jessica Shewan), not
-      // just "the family". Each option's parent name is derived from the
-      // login email (firstname+lastinitial convention) so a multi-login
-      // family disambiguates cleanly.
-      var emails = Array.isArray(f.loginEmails) && f.loginEmails.length > 0
-        ? f.loginEmails
-        : [f.email];
-      // Use the DB-corrected family name when present (e.g. "O'Connor
-      // Gading" instead of the sheet-parsed last word "Gading"). f.parents
-      // is already overlay-corrected, so typo fixes flow through too.
-      var familyDisplay = f.displayName || f.name;
-      emails.forEach(function (em) {
-        var emLc = String(em).toLowerCase();
-        var who = deriveFirstNameFromLogin(emLc, f.name);
-        // Single-login families keep the legacy "(parents-string)" label
-        // (e.g. "Shewan (Jessica & Jay)") so nothing changes for them.
-        var label = (emails.length > 1 && who) ? (familyDisplay + ' (' + who + ')') : (familyDisplay + ' (' + f.parents + ')');
-        var selected = viewAsEmail === emLc ? ' selected' : '';
-        html += '<option value="' + emLc + '"' + selected + '>' + label + '</option>';
+    try {
+      var sortedFams = FAMILIES.slice().sort(function (a, b) {
+        return String(a && a.name || '').localeCompare(String(b && b.name || ''));
       });
-    });
+      sortedFams.forEach(function (f) {
+        if (!f || !f.email) return;
+        // Phase 3: emit one option per login email so the comms super user can
+        // impersonate a specific co-parent (e.g. Jay vs Jessica Shewan), not
+        // just "the family". Each option's parent name is derived from the
+        // login email (firstname+lastinitial convention) so a multi-login
+        // family disambiguates cleanly.
+        var emails = Array.isArray(f.loginEmails) && f.loginEmails.length > 0
+          ? f.loginEmails
+          : [f.email];
+        // Use the DB-corrected family name when present (e.g. "O'Connor
+        // Gading" instead of the sheet-parsed last word "Gading"). f.parents
+        // is already overlay-corrected, so typo fixes flow through too.
+        var familyDisplay = f.displayName || f.name || '';
+        var parentsStr = f.parents || '';
+        emails.forEach(function (em) {
+          if (!em) return;
+          var emLc = String(em).toLowerCase();
+          var who = deriveFirstNameFromLogin(emLc, f.name);
+          // Single-login families keep the legacy "(parents-string)" label
+          // (e.g. "Shewan (Jessica & Jay)") so nothing changes for them.
+          var label = (emails.length > 1 && who) ? (familyDisplay + ' (' + who + ')') : (familyDisplay + ' (' + parentsStr + ')');
+          var selected = viewAsEmail === emLc ? ' selected' : '';
+          html += '<option value="' + emLc + '"' + selected + '>' + label + '</option>';
+        });
+      });
+    } catch (err) {
+      // If a single bad family blows up the loop, log it and still render the
+      // empty-state dropdown rather than hiding the picker entirely.
+      console.error('[viewAs] picker build failed:', err);
+    }
     select.innerHTML = html;
     wrap.hidden = false;
     if (!select._rwWired) {
