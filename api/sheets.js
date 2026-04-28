@@ -1114,15 +1114,23 @@ async function applyMemberProfileOverlay(families) {
     // DB row hasn't been backfilled yet, default by position so the client
     // gets sensible values: parents[0] = mlc, [1] = blc, [2+] = parent.
     fam.parentInfo = parentFirstNames.map(function (n, idx) {
-      var key = n.toLowerCase();
-      var hit = pMap[key] || {};
+      // Match DB entry by FIRST WORD of the parsed sheet name. For a
+      // compound name like "Aimee O'Connor", the sheet's parsed value is
+      // "Aimee O'Connor" while the DB key is "aimee" — full-string lookup
+      // would miss every time and create phantom duplicates.
+      var firstWord = String(n).trim().split(/\s+/)[0].toLowerCase();
+      var hit = pMap[firstWord] || {};
       var pronouns = hit.pronouns || (fam.parentPronouns && fam.parentPronouns[n]) || '';
       if (pronouns) {
         fam.parentPronouns = fam.parentPronouns || {};
         fam.parentPronouns[n] = pronouns;
       }
+      // Prefer the DB-stored name when present so corrections (typo fixes,
+      // updated spellings) flow through to display without waiting on a
+      // sheet edit.
+      var displayedName = hit.name || n;
       return {
-        name: n,
+        name: displayedName,
         pronouns: pronouns,
         photoUrl: hit.photo_url || '',
         // Explicit false opts the adult out; anything else (missing field, true)
@@ -1135,15 +1143,19 @@ async function applyMemberProfileOverlay(families) {
       };
     });
     // Any DB-only parents (name not yet in the sheet) appended so edits are
-    // visible before the sheet catches up.
+    // visible before the sheet catches up. Existence check uses FIRST WORD
+    // so a DB entry "Aimee" doesn't get appended again when parentInfo
+    // already has "Aimee O'Connor".
     (p.parents || []).forEach(function (pp) {
       if (!pp || !pp.name) return;
       var first = String(pp.name).trim().split(/\s+/)[0];
-      var exists = fam.parentInfo.some(function (x) { return x.name.toLowerCase() === first.toLowerCase(); });
+      var exists = fam.parentInfo.some(function (x) {
+        return String(x.name || '').trim().split(/\s+/)[0].toLowerCase() === first.toLowerCase();
+      });
       if (!exists) {
         var nextIdx = fam.parentInfo.length;
         fam.parentInfo.push({
-          name: first,
+          name: pp.name,
           pronouns: pp.pronouns || '',
           photoUrl: pp.photo_url || '',
           photoConsent: pp.photo_consent !== false,
@@ -1152,14 +1164,17 @@ async function applyMemberProfileOverlay(families) {
           personalEmail: pp.personal_email || '',
           phone: pp.phone || ''
         });
-        // Keep the `parents` string in sync so family-name rendering picks it up.
-        fam.parents = fam.parents ? fam.parents + ' & ' + first : first;
         if (pp.pronouns) {
           fam.parentPronouns = fam.parentPronouns || {};
-          fam.parentPronouns[first] = pp.pronouns;
+          fam.parentPronouns[pp.name] = pp.pronouns;
         }
       }
     });
+    // Re-sync the family's parents-string from the (possibly DB-corrected)
+    // parentInfo names so downstream consumers (allPeople, Directory grid,
+    // detail card heading) use the corrected name even when the sheet still
+    // has the legacy spelling.
+    fam.parents = fam.parentInfo.map(function (pi) { return pi.name; }).join(' & ');
 
     // Kids: match by first name (case-insensitive).
     var kMap = {};

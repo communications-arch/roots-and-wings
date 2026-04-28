@@ -13894,7 +13894,10 @@
 
     var state = {
       family_email: fam.email,
-      family_name: fam.name,
+      // Seed from the DB-corrected display name when present so a compound
+      // surname (Aimee O'Connor Gading) appears correctly in the form, not
+      // the sheet-parsed last word (Gading).
+      family_name: fam.displayName || fam.name,
       phone: fam.phone || '',
       address: fam.address || '',
       parents: parentSeed,
@@ -14005,7 +14008,7 @@
       var html = '<button class="detail-close" aria-label="Close">&times;</button>';
       html += '<div class="elective-detail emi-modal">';
       html += '<h3 style="margin:0 0 4px;">Edit My Info</h3>';
-      html += '<p class="emi-subtitle">' + escapeHtml(fam.name) + ' family — these updates show up across the member portal.</p>';
+      html += '<p class="emi-subtitle">' + escapeHtml(fam.displayName || fam.name) + ' family — these updates show up across the member portal.</p>';
       html += '<div id="emiError" class="emi-error" style="display:none;"></div>';
 
       html += '<label class="rd-label">Family last name</label>';
