@@ -303,8 +303,23 @@
     var sortedFams = FAMILIES.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     sortedFams.forEach(function (f) {
       if (!f.email) return;
-      var selected = viewAsEmail === f.email ? ' selected' : '';
-      html += '<option value="' + f.email + '"' + selected + '>' + f.name + ' (' + f.parents + ')</option>';
+      // Phase 3: emit one option per login email so the comms super user can
+      // impersonate a specific co-parent (e.g. Jay vs Jessica Shewan), not
+      // just "the family". Each option's parent name is derived from the
+      // login email (firstname+lastinitial convention) so a multi-login
+      // family disambiguates cleanly.
+      var emails = Array.isArray(f.loginEmails) && f.loginEmails.length > 0
+        ? f.loginEmails
+        : [f.email];
+      emails.forEach(function (em) {
+        var emLc = String(em).toLowerCase();
+        var who = deriveFirstNameFromLogin(emLc, f.name);
+        // Single-login families keep the legacy "(parents-string)" label
+        // (e.g. "Shewan (Jessica & Jay)") so nothing changes for them.
+        var label = (emails.length > 1 && who) ? (f.name + ' (' + who + ')') : (f.name + ' (' + f.parents + ')');
+        var selected = viewAsEmail === emLc ? ' selected' : '';
+        html += '<option value="' + emLc + '"' + selected + '>' + label + '</option>';
+      });
     });
     select.innerHTML = html;
     wrap.hidden = false;
@@ -328,7 +343,10 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Vice President') return true;
+      // Board roles are person-scoped, not family-scoped. Use strict primary
+      // family_email match so a co-parent doesn't inherit their spouse's role.
+      if (String(FAMILIES[i].email || '').toLowerCase() === email.toLowerCase()
+        && FAMILIES[i].boardRole === 'Vice President') return true;
     }
     return false;
   }
@@ -340,7 +358,10 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Treasurer') return true;
+      // Board roles are person-scoped, not family-scoped. Use strict primary
+      // family_email match so a co-parent doesn't inherit their spouse's role.
+      if (String(FAMILIES[i].email || '').toLowerCase() === email.toLowerCase()
+        && FAMILIES[i].boardRole === 'Treasurer') return true;
     }
     return false;
   }
@@ -349,7 +370,10 @@
     var email = getActiveEmail();
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole === 'Membership Director') return true;
+      // Board roles are person-scoped, not family-scoped. Use strict primary
+      // family_email match so a co-parent doesn't inherit their spouse's role.
+      if (String(FAMILIES[i].email || '').toLowerCase() === email.toLowerCase()
+        && FAMILIES[i].boardRole === 'Membership Director') return true;
     }
     return false;
   }
@@ -412,11 +436,24 @@
             parentNames.forEach(function (pName) {
               if (!pName.trim()) return;
               var piHit = piByFirst[pName.trim().split(/\s+/)[0].toLowerCase()] || {};
+              // Phase 3: derive each parent's own login email so downstream
+              // lookups (getPhotoUrl, lookupPerson) resolve per-person rather
+              // than collapsing both parents to fam.email (the primary).
+              var pFirstLc = pName.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+              var pLastInit = String(fam.name || '').charAt(0).toLowerCase();
+              var pEmail = (pFirstLc && pLastInit)
+                ? (pFirstLc + pLastInit + '@rootsandwingsindy.com')
+                : (fam.email || '');
+              // Board role belongs to the specific parent who holds it — the
+              // primary family_email holder — not every adult in the family.
+              // A co-parent (Jay) shouldn't inherit their spouse's Treasurer
+              // badge in the directory.
+              var isPrimaryParent = pEmail.toLowerCase() === String(fam.email || '').toLowerCase();
               allPeople.push({
                 name: pName.trim(),
                 type: 'parent',
                 family: fam.name,
-                email: fam.email || '',
+                email: pEmail,
                 phone: fam.phone || '',
                 group: null,
                 age: null,
@@ -427,8 +464,8 @@
                 parentNames: fam.parents,
                 diffNameKids: diffNameKids,
                 kidNames: (fam.kids || []).map(function(k) { return k.name + ' ' + (k.lastName || fam.name); }),
-                boardRole: fam.boardRole || null,
-                boardEmail: fam.boardEmail || null
+                boardRole: (isPrimaryParent && fam.boardRole) ? fam.boardRole : null,
+                boardEmail: (isPrimaryParent && fam.boardRole) ? (fam.boardEmail || null) : null
               });
             });
             (fam.kids || []).forEach(function (kid) {
@@ -1244,6 +1281,39 @@
       });
   }
 
+  // True iff the given email matches the family's primary OR any co-parent
+  // login. Phase 3: replaces the old direct fam.email comparison so a
+  // co-parent's secondary login (e.g. jays@ for the Shewan family) resolves
+  // to the right family object.
+  function familyMatchesEmail(fam, emailLower) {
+    if (!fam || !emailLower) return false;
+    var loginEmails = Array.isArray(fam.loginEmails) ? fam.loginEmails : null;
+    if (loginEmails && loginEmails.length > 0) {
+      for (var i = 0; i < loginEmails.length; i++) {
+        if (String(loginEmails[i] || '').toLowerCase() === emailLower) return true;
+      }
+      return false;
+    }
+    return String(fam.email || '').toLowerCase() === emailLower;
+  }
+
+  // Best-effort first name for the active user, given their login email and
+  // their family's last name. Follows the firstname+lastinitial convention
+  // used to derive Workspace emails — strips the trailing initial off the
+  // local part. Returns null if it can't infer; callers should fall back to
+  // the family's primary parent string. Phase 3: lets the greeting and avatar
+  // lookups address the actual signed-in co-parent (e.g. Jay) rather than
+  // always defaulting to the family's first parent (Jessica).
+  function deriveFirstNameFromLogin(email, familyName) {
+    if (!email || !familyName) return null;
+    var local = String(email).split('@')[0].toLowerCase().replace(/[^a-z]/g, '');
+    var initial = String(familyName).charAt(0).toLowerCase();
+    if (!local || !initial) return null;
+    var stem = local.endsWith(initial) ? local.slice(0, -1) : local;
+    if (!stem) return null;
+    return stem.charAt(0).toUpperCase() + stem.slice(1);
+  }
+
   // DB-only photo lookup — used for kids, who don't have Workspace accounts
   // and whose family email would resolve to the parent's photo via the
   // memberPhotos map if we fell through.
@@ -1254,7 +1324,7 @@
     if (email) {
       var emailLower = String(email).toLowerCase();
       for (var fi = 0; fi < FAMILIES.length; fi++) {
-        if (String(FAMILIES[fi].email || '').toLowerCase() === emailLower) { matchFam = FAMILIES[fi]; break; }
+        if (familyMatchesEmail(FAMILIES[fi], emailLower)) { matchFam = FAMILIES[fi]; break; }
       }
     }
     if (!matchFam && familyName) {
@@ -1291,7 +1361,7 @@
       if (email) {
         var emailLower = String(email).toLowerCase();
         for (var fi = 0; fi < FAMILIES.length; fi++) {
-          if (String(FAMILIES[fi].email || '').toLowerCase() === emailLower) { matchFam = FAMILIES[fi]; break; }
+          if (familyMatchesEmail(FAMILIES[fi], emailLower)) { matchFam = FAMILIES[fi]; break; }
         }
       }
       if (!matchFam && familyName) {
@@ -1332,10 +1402,25 @@
       var guess = first + lastInitial + '@rootsandwingsindy.com';
       if (memberPhotos[guess]) return memberPhotos[guess];
     }
-    // Try direct email match
+    // Try direct email match — but only if the email is plausibly THIS person's,
+    // not a co-parent's. Phase 3: allPeople sets each parent's email to the
+    // family's primary family_email, which means a co-parent (Jay) would fall
+    // back to the primary parent's (Jessica's) photo here. Gate by checking
+    // that the email's local part starts with the person's first name; that
+    // includes the firstname+lastinitial convention plus role-email aliases
+    // like "president@" (no person name = no gate, keeps board-photo flow).
     if (email) {
-      var url = memberPhotos[email] || memberPhotos[email.toLowerCase()];
-      if (url) return url;
+      var emailLc = email.toLowerCase();
+      var coherent = true;
+      if (personName) {
+        var firstLc = personName.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '');
+        var localLc = emailLc.split('@')[0].replace(/[^a-z]/g, '');
+        coherent = firstLc && localLc.indexOf(firstLc) === 0;
+      }
+      if (coherent) {
+        var url = memberPhotos[email] || memberPhotos[emailLc];
+        if (url) return url;
+      }
     }
     // Try matching by family last name
     if (familyName) {
@@ -3113,7 +3198,7 @@
     // Find the family by email
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
 
     var html = '';
@@ -3127,7 +3212,16 @@
       html += '<div class="view-as-bar">';
       html += '<div class="view-as-banner">';
       html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-      html += ' Viewing as <strong>' + fam.parents + ' ' + fam.name + '</strong>';
+      // If the View As email resolves to a specific co-parent (e.g.
+      // jays@ for the Shewan family), label the banner with just that
+      // person — "Jay Shewan" — not the family's joined parents string
+      // ("Jessica & Jay Shewan"). Falls back to the family-level label
+      // for single-login families or when derivation can't infer.
+      var viewAsFirst = deriveFirstNameFromLogin(viewAsEmail, fam.name);
+      var viewAsLabel = (Array.isArray(fam.loginEmails) && fam.loginEmails.length > 1 && viewAsFirst)
+        ? (viewAsFirst + ' ' + fam.name)
+        : (fam.parents + ' ' + fam.name);
+      html += ' Viewing as <strong>' + viewAsLabel + '</strong>';
       html += '<button class="view-as-reset" id="viewAsReset">Back to my view</button>';
       html += '</div>';
       html += '</div>';
@@ -3148,8 +3242,12 @@
       return;
     }
 
-    // Personalize greeting
-    var firstName = fam.parents.split(' & ')[0].split(' ')[0];
+    // Personalize greeting. Use the login-email derivation so a co-parent
+    // (e.g. Jay logging in as jays@) sees their own name, not the family's
+    // primary parent. Falls back to the first parent string if the
+    // derivation can't infer (e.g. unusual email shape).
+    var derivedFirst = deriveFirstNameFromLogin(email, fam.name);
+    var firstName = derivedFirst || fam.parents.split(' & ')[0].split(' ')[0];
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
 
     // ──── Coverage Board (full width, collapsible) ────
@@ -3327,7 +3425,10 @@
     } catch (covErr) { console.error('coverage duty injection failed:', covErr); }
 
     // ── Annual roles (board, committees, events) ──
-    if (fam.boardRole) {
+    // Board role is held by ONE person, not the whole family. Only inject
+    // it as a duty for the active user when they're the primary family_email
+    // holder — co-parents don't inherit their spouse's board role.
+    if (fam.boardRole && String(fam.email || '').toLowerCase() === String(email || '').toLowerCase()) {
       duties.push({block: 'annual', icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
     }
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
@@ -4021,7 +4122,7 @@
     // Append role description for leader/assistant
     var activeEmail = getActiveEmail();
     var activeFam = null;
-    for (var fi = 0; fi < FAMILIES.length; fi++) { if (FAMILIES[fi].email === activeEmail) { activeFam = FAMILIES[fi]; break; } }
+    for (var fi = 0; fi < FAMILIES.length; fi++) { if (familyMatchesEmail(FAMILIES[fi], activeEmail)) { activeFam = FAMILIES[fi]; break; } }
     if (activeFam) {
       var myFullNames = activeFam.parents.split(' & ').map(function(pp) { return pp.trim() + ' ' + activeFam.name; });
       var isLeader = myFullNames.some(function(fn) { return fn.toLowerCase() === (elec.leader || '').trim().toLowerCase(); });
@@ -4102,7 +4203,7 @@
     var email = getActiveEmail();
     if (!email || !FAMILIES) return { fullNames: [], familyName: '' };
     var fam = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; } }
     if (!fam) return { fullNames: [], familyName: '' };
     return {
       fullNames: fam.parents.split(' & ').map(function (p) { return p.trim() + ' ' + fam.name; }),
@@ -7570,7 +7671,7 @@
     if (!email) return false;
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; }
     }
     if (!me) return false;
     var coordName = getSupplyCoordinatorName();
@@ -8623,7 +8724,9 @@
     var email = localStorage.getItem('rw_user_email');
     if (!email) return false;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email && FAMILIES[i].boardRole) return true;
+      // Board roles are person-scoped — strict primary family_email match
+      // so a co-parent doesn't pick up their spouse's role.
+      if (String(FAMILIES[i].email || '').toLowerCase() === email.toLowerCase() && FAMILIES[i].boardRole) return true;
     }
     return false;
   }
@@ -8635,7 +8738,7 @@
     if (!email) return [];
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
     if (!fam) return [];
     var parentFullNames = (fam.parents || '').split(' & ').map(function (p) {
@@ -10532,7 +10635,7 @@
     var email = getActiveEmail();
     if (!email || !FAMILIES) return;
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     if (!me) { alert('Could not find your family record.'); return; }
     var coopDates = getCoopDatesInSession(currentSession);
     if (coopDates.length === 0) { alert('No session dates available.'); return; }
@@ -10773,7 +10876,7 @@
 
     var email = getActiveEmail();
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
 
     // Group absences by date
@@ -11062,7 +11165,7 @@
 
     var email = getActiveEmail();
     var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) { if (FAMILIES[i].email === email) { me = FAMILIES[i]; break; } }
+    for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     if (!me) return;
     var parentFullNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
 
@@ -13711,7 +13814,7 @@
     if (!email) { alert('Please sign in to edit your info.'); return; }
     var fam = null;
     for (var i = 0; i < FAMILIES.length; i++) {
-      if (FAMILIES[i].email === email) { fam = FAMILIES[i]; break; }
+      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
     }
     if (!fam) {
       alert('Could not find your family. Contact communications@rootsandwingsindy.com for help.');

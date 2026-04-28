@@ -157,6 +157,7 @@ const unitTests = [
   'scripts/test-cleaning-seed.js',
   'scripts/test-helpers.js',
   'scripts/test-reports.js',
+  'scripts/test-coparent-auth.js',
 ];
 
 for (const rel of unitTests) {

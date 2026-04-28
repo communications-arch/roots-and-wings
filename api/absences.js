@@ -9,6 +9,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
 const { canEditAsRole } = require('./_permissions');
+const { canActAs } = require('./_family');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -181,8 +182,12 @@ module.exports = async function handler(req, res) {
       const existing = await sql`SELECT id, created_by, family_email FROM absences WHERE id = ${id} AND cancelled_at IS NULL`;
       if (existing.length === 0) return res.status(404).json({ error: 'Absence not found' });
 
-      // Only original creator or VP can cancel
-      if (existing[0].created_by !== user.email && existing[0].family_email !== user.email && !(await isVP(user.email))) {
+      // Only original creator, the family the absence belongs to (primary or
+      // co-parent via additional_emails), or VP can cancel.
+      const isOwner = existing[0].created_by === user.email
+        || existing[0].family_email === user.email
+        || (await canActAs(sql, user.email, existing[0].family_email));
+      if (!isOwner && !(await isVP(user.email))) {
         return res.status(403).json({ error: 'Not authorized to cancel this absence' });
       }
 
