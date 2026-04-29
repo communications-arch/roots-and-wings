@@ -956,17 +956,6 @@ async function handleBillingGet(req, res, sheets) {
   var parsed = parseBillingSheet(billingTabs);
   var schoolYear = String(req.query.school_year || activeSchoolYearLabel());
 
-  // Sheet has no year column — old Paid markers carry across school years.
-  // For 2026-27 specifically, the DB is the source of truth for the Fall
-  // membership fee (registration auto-write). Wipe the sheet's Fall.deposit
-  // values so a family who hasn't registered for 2026-27 doesn't inherit
-  // last year's Paid status from the sheet.
-  if (schoolYear === '2026-2027') {
-    Object.keys(parsed.families).forEach(function (k) {
-      if (parsed.families[k].fall) parsed.families[k].fall.deposit = '';
-    });
-  }
-
   // Overlay DB payment records on top of the sheet. Sheet still wins for
   // anything it explicitly marks Paid; DB Paid records (mostly from the
   // registration auto-write) light up cells the sheet hasn't touched yet,
