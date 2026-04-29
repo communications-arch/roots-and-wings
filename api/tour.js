@@ -1789,3 +1789,9 @@ module.exports = async function handler(req, res) {
 
   return res.status(405).json({ error: 'Method not allowed' });
 };
+
+// Exposed for backfill scripts (scripts/backfill-registration-profiles.js)
+// so the one-time catch-up uses the same merge logic as live registrations.
+module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
+module.exports.deriveFamilyName = deriveFamilyName;
+module.exports.deriveFamilyEmail = deriveFamilyEmail;
