@@ -1,24 +1,25 @@
 // Shared role-based permission helper.
 //
-// Uses the master Google Sheet to look up who holds a given coordinator role
-// (e.g. "Supply Coordinator", "Cleaning Liaison") and derives their
-// @rootsandwingsindy.com email from the directory. No env vars per role
-// required — when a role changes hands in the sheet, the API picks it up.
+// Phase B (2026-04-29): the role-holder source of truth is the
+// `role_holders` Postgres table (joined to `role_descriptions`), not the
+// volunteer Google sheet. The President + super users manage holders
+// through the Workspace UI (api/cleaning.js role-holders endpoints).
+// The seed script `scripts/seed-role-holders.js` is now a one-shot
+// migration tool only — runtime no longer touches the sheet.
 //
-// Cached in-memory on warm Lambda instances for ROLE_CACHE_TTL_MS to keep
-// write-path latency low.
-//
-// Every role check is additionally satisfied by SUPER_USER_EMAIL
-// (communications@). That address is the app-wide super user intended for
-// helping members who are out or struggling technically.
+// Every role check is additionally satisfied by:
+//   - any address in SUPER_USER_EMAILS (app-wide super users), or
+//   - the canonical board mailbox for that role (BOARD_ROLE_EMAILS),
+//     so signing in as e.g. treasurer@ always grants Treasurer
+//     regardless of who currently holds the role in role_holders.
 
-const { google } = require('googleapis');
+const { neon } = require('@neondatabase/serverless');
 
 const SUPER_USER_EMAIL = 'communications@rootsandwingsindy.com';
 // All addresses that get app-wide super-user privileges (edit anything,
 // View-As any family). communications@ is the primary; vicepresident@
-// (and its vp@ alias) was added so the VP can help members from their
-// own mailbox without sharing comms@ credentials.
+// (and its vp@ alias) was added so the VP can help members from her own
+// mailbox without sharing comms@ credentials.
 const SUPER_USER_EMAILS = [
   SUPER_USER_EMAIL,
   'vicepresident@rootsandwingsindy.com',
@@ -26,22 +27,10 @@ const SUPER_USER_EMAILS = [
 ];
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
-function isSuperUser(email) {
-  if (!email) return false;
-  return SUPER_USER_EMAILS.indexOf(String(email).toLowerCase()) !== -1;
-}
-// Short TTL keeps any transient sheet-fetch hiccup from poisoning the
-// role gate for long. Worst case the user retries and the next request
-// re-fetches the live data.
-const ROLE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
-
-// Board roles each have a dedicated Workspace mailbox (e.g. membership@,
-// vp@). When someone signs in with one of those addresses we treat them as
-// the holder of that role unconditionally — the mailbox IS the role, and
-// not depending on a sheet→directory→email derivation makes the auth path
-// resilient to spelling drift, missing chair rows, and abbreviated names.
-// Each entry is the canonical mailbox + any extra aliases that resolve to
-// the same role. Confirmed against the Workspace directory.
+// Board roles each have a dedicated Workspace mailbox. Signing in with
+// the mailbox itself unconditionally grants the role — the mailbox IS
+// the role, and a static map sidesteps any flakiness in role_holders
+// being seeded for the right year.
 const BOARD_ROLE_EMAILS = {
   'president':              ['president@rootsandwingsindy.com'],
   'vice president':         ['vicepresident@rootsandwingsindy.com', 'vp@rootsandwingsindy.com'],
@@ -53,251 +42,144 @@ const BOARD_ROLE_EMAILS = {
   'communications director':['communications@rootsandwingsindy.com']
 };
 
-// Abbreviated titles in the volunteer sheet are normalised to their canonical
-// form so permission checks can use the full title (matches client-side
-// BOARD_TITLE_MAP in script.js).
-const TITLE_NORMALIZATIONS = {
-  'communications dir.': 'Communications Director',
-  'membership dir.': 'Membership Director',
-  'sustaining dir.': 'Sustaining Director',
-  // The volunteer sheet labels the role as "Afternoon Class Liaisons" (plural);
-  // canonicalise to the singular used everywhere else in the app.
-  'afternoon class liaisons': 'Afternoon Class Liaison'
+// Title aliases — call sites use the un-hyphenated form ("Vice
+// President"); role_descriptions stores the hyphenated canonical
+// ("Vice-President"). Map common variants to the canonical title used
+// in the DB so the lookup matches.
+const TITLE_ALIASES = {
+  'vice president': 'Vice-President'
 };
-function normalizeTitle(title) {
-  if (!title) return title;
-  const key = String(title).trim().toLowerCase();
-  return TITLE_NORMALIZATIONS[key] || title;
+
+function canonicalTitle(t) {
+  const lower = String(t || '').trim().toLowerCase();
+  return TITLE_ALIASES[lower] || String(t || '').trim();
 }
 
-let roleCache = null; // { fetchedAt, roleHolders: { roleTitle_lowercase: email } }
-
-function getSheetsClient() {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
-  });
-  return google.sheets({ version: 'v4', auth });
+function isSuperUser(email) {
+  if (!email) return false;
+  return SUPER_USER_EMAILS.indexOf(String(email).toLowerCase()) !== -1;
 }
 
-function cell(row, col) {
-  if (!row || col >= row.length) return '';
-  const v = row[col];
-  return (v === undefined || v === null) ? '' : String(v).trim();
+// April 1 flip — matches activeSchoolYear() in script.js and
+// activeSchoolYearLabel() in api/sheets.js so server defaults agree
+// with the client default. Registrations open in late April for the
+// upcoming school year, so April is the natural pivot.
+function activeSchoolYear(now) {
+  now = now || new Date();
+  const fallYear = (now.getMonth() < 3) ? now.getFullYear() - 1 : now.getFullYear();
+  return fallYear + '-' + (fallYear + 1);
 }
 
-// Build lastName -> email map from the Directory tab.
-// Matches the email-generation rule in api/sheets.js parseDirectory:
-//   firstParentFirstName + familyLastInitial + @rootsandwingsindy.com
-function buildDirectoryEmailMap(dirRows) {
-  const map = {};
-  if (!dirRows || dirRows.length < 2) return map;
-
-  for (let r = 1; r < dirRows.length; r++) {
-    const parentStr = cell(dirRows[r], 0);
-    if (!parentStr) continue;
-
-    // Strip pronoun parens: "Amber Furnish (she/her)" -> "Amber Furnish"
-    const parentClean = parentStr.replace(/\s*\([^)]*\)\s*/g, '').trim();
-    if (!parentClean) continue;
-
-    // Family last name = last word of the FULL parentClean string
-    // (matches api/sheets.js parseDirectory). For "Amber & Bobby Furnish"
-    // that's "Furnish"; for a single "Madonna" entry there is no last
-    // name and we skip the row.
-    const parentWords = parentClean.split(/\s+/);
-    if (parentWords.length < 2) continue;
-    const familyName = parentWords[parentWords.length - 1];
-
-    // First parent's first name = first word of parentClean
-    const firstParentFirst = parentWords[0].toLowerCase().replace(/[^a-z]/g, '');
-    const lastInitial = familyName.charAt(0).toLowerCase();
-    if (!firstParentFirst || !lastInitial) continue;
-    const email = firstParentFirst + lastInitial + '@' + ALLOWED_DOMAIN;
-
-    map[familyName.toLowerCase()] = email;
-  }
-  return map;
+function getDb() {
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
+  return neon(process.env.DATABASE_URL);
 }
 
-// Minimal volunteer-committee parse: return a flat list of { title, person }
-// from the "Year Volunteer Roles" tab. Mirrors api/sheets.js logic but trimmed
-// to what we need (role title + person name).
-function parseVolunteerRoles(rows) {
-  const out = [];
-  if (!rows || rows.length < 2) return out;
-
-  for (let r = 0; r < rows.length; r++) {
-    const label = cell(rows[r], 1);
-    const value = cell(rows[r], 2);
-    if (!label) continue;
-    if (label.match(/Committee\s*$/i)) continue;
-
-    // Chair rows: everything lives in col 1 as "Chair: <title>-<person>"
-    if (label.match(/^Chair:/i)) {
-      const parts = label.replace(/^Chair:\s*/i, '');
-      const dashIdx = parts.lastIndexOf('-');
-      if (dashIdx <= -1) continue;
-      const rawTitle = parts.substring(0, dashIdx).trim();
-      const person = parts.substring(dashIdx + 1).trim();
-      if (rawTitle && person) out.push({ title: normalizeTitle(rawTitle), person });
-      continue;
-    }
-
-    // Filler rows, unrelated liaison-chart rows, etc.
-    if (label.match(/^(Morning Class|See chart|>)/i)) continue;
-
-    // Regular role rows require a person in col 2.
-    if (!value) continue;
-    out.push({ title: normalizeTitle(label), person: value });
-  }
-  return out;
-}
-
-async function loadRoleHolders() {
-  const now = Date.now();
-  if (roleCache && (now - roleCache.fetchedAt) < ROLE_CACHE_TTL_MS) {
-    return roleCache.roleHolders;
-  }
-
-  const spreadsheetId = process.env.MASTER_SHEET_ID;
-  const directoryId = process.env.DIRECTORY_SHEET_ID;
-  if (!spreadsheetId || !directoryId) {
-    throw new Error('MASTER_SHEET_ID / DIRECTORY_SHEET_ID not configured');
-  }
-
-  const sheets = getSheetsClient();
-
-  // Find the volunteer-roles tab by title so we can fetch just that range.
-  const [masterMeta, dirMeta] = await Promise.all([
-    sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' }),
-    sheets.spreadsheets.get({ spreadsheetId: directoryId, fields: 'sheets.properties.title' })
-  ]);
-
-  const volTab = masterMeta.data.sheets
-    .map(s => s.properties.title)
-    .find(t => /Year.*Volunteer/i.test(t));
-  if (!volTab) throw new Error('Volunteer roles tab not found in master sheet');
-
-  const dirTab = dirMeta.data.sheets
-    .map(s => s.properties.title)
-    .find(t => /Directory/i.test(t)) || dirMeta.data.sheets[0].properties.title;
-
-  const [volData, dirData] = await Promise.all([
-    sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: "'" + volTab + "'",
-      valueRenderOption: 'UNFORMATTED_VALUE'
-    }),
-    sheets.spreadsheets.values.get({
-      spreadsheetId: directoryId,
-      range: "'" + dirTab + "'",
-      valueRenderOption: 'UNFORMATTED_VALUE'
-    })
-  ]);
-
-  const roles = parseVolunteerRoles(volData.data.values || []);
-  const emailByLastName = buildDirectoryEmailMap(dirData.data.values || []);
-
-  // Map role title (lowercased) -> email (by last name of the named person)
-  const roleHolders = {};
-  for (const { title, person } of roles) {
-    if (!title || !person) continue;
-    const lastName = person.trim().split(/\s+/).pop().toLowerCase();
-    const email = emailByLastName[lastName];
-    if (email) {
-      roleHolders[title.toLowerCase()] = email;
-    }
-  }
-
-  roleCache = { fetchedAt: now, roleHolders };
-  return roleHolders;
-}
-
-// Force-refresh the cache on next lookup. Call this from admin/debug paths
-// if you need to clear stale data without waiting for the TTL.
-function invalidateRoleCache() {
-  roleCache = null;
-}
-
-// Look up the email of whoever holds `roleTitle` (case-insensitive). Returns
-// null if the role isn't named in the sheet or the person can't be matched to
-// a family in the directory.
-async function getRoleHolderEmail(roleTitle) {
-  if (!roleTitle) return null;
-  const key = String(roleTitle).toLowerCase();
-  try {
-    const holders = await loadRoleHolders();
-    if (holders[key]) return holders[key];
-  } catch (err) {
-    console.error('getRoleHolderEmail lookup failed:', err);
-  }
-  // Fall back to the board mailbox so the 403 response surfaces an
-  // actionable email instead of "(unknown — sheet lookup failed)".
-  const boardEmails = BOARD_ROLE_EMAILS[key];
-  return (boardEmails && boardEmails[0]) || null;
-}
-
-// Batch variant: returns { [roleTitle]: email } for all titles that matched.
-async function getRoleHolderEmails(roleTitles) {
-  if (!Array.isArray(roleTitles) || roleTitles.length === 0) return {};
-  try {
-    const holders = await loadRoleHolders();
-    const out = {};
-    for (const title of roleTitles) {
-      const email = holders[String(title).toLowerCase()];
-      if (email) out[title] = email;
-    }
-    return out;
-  } catch (err) {
-    console.error('getRoleHolderEmails lookup failed:', err);
-    return {};
-  }
-}
-
-// True if `userEmail` is authorized to perform actions gated to `roleTitle`,
-// either because they hold that role in the volunteer committees sheet, or
-// because they are the communications@ super user.
+// True if `userEmail` is authorized to perform actions gated to
+// `roleTitle`. Resolution order:
+//   1. App-wide super user (communications@ / vicepresident@ / vp@)
+//   2. Canonical board mailbox for that role (treasurer@, etc.)
+//   3. role_holders row matching this email + role for the active year
 async function canEditAsRole(userEmail, roleTitle) {
-  if (!userEmail) return false;
-  const email = userEmail.toLowerCase();
+  if (!userEmail || !roleTitle) return false;
+  const email = String(userEmail).toLowerCase();
   if (isSuperUser(email)) return true;
-  // Dedicated board-role mailbox short-circuits the sheet lookup. Lets
-  // Tiffany / Molly / etc. act in their board capacity even when the
-  // sheet derivation can't resolve their personal email.
-  const boardEmails = BOARD_ROLE_EMAILS[String(roleTitle || '').toLowerCase()] || [];
+
+  const titleLc = String(roleTitle).toLowerCase();
+  const boardEmails = BOARD_ROLE_EMAILS[titleLc] || [];
   if (boardEmails.indexOf(email) !== -1) return true;
 
   try {
-    const holders = await loadRoleHolders();
-    const holder = holders[roleTitle.toLowerCase()];
-    const ok = !!holder && email === holder.toLowerCase();
-    // Log denied attempts so Vercel surfaces the exact mismatch — the
-    // most common failure mode is a sheet→directory derivation that
-    // doesn't match the user's actual Workspace email.
-    if (!ok) {
-      console.warn('[perms] canEditAsRole DENY user=' + email +
-        ' role=' + roleTitle + ' expectedHolder=' + (holder || '<none>'));
-    }
-    return ok;
+    const sql = getDb();
+    const canonical = canonicalTitle(roleTitle).toLowerCase();
+    const rows = await sql`
+      SELECT 1
+      FROM role_holders rh
+      JOIN role_descriptions rd ON rd.id = rh.role_id
+      WHERE LOWER(rh.email) = ${email}
+        AND LOWER(rd.title) = ${canonical}
+        AND rh.school_year = ${activeSchoolYear()}
+      LIMIT 1
+    `;
+    if (rows.length > 0) return true;
+    console.warn('[perms] canEditAsRole DENY user=' + email +
+      ' role=' + roleTitle + ' (no role_holders row for active year)');
+    return false;
   } catch (err) {
-    console.error('[perms] canEditAsRole lookup failed for user=' + email +
+    console.error('[perms] canEditAsRole DB lookup failed for user=' + email +
       ' role=' + roleTitle + ':', err);
-    // On sheet failure, fall back to super-user-only so we fail closed.
+    // Fail closed — without DB we can't authorize.
     return false;
   }
+}
+
+// Look up the email of whoever holds `roleTitle` for the active year.
+// Returns the canonical board mailbox as a fallback so 403 responses
+// always surface an actionable address.
+async function getRoleHolderEmail(roleTitle) {
+  if (!roleTitle) return null;
+  try {
+    const sql = getDb();
+    const canonical = canonicalTitle(roleTitle).toLowerCase();
+    const rows = await sql`
+      SELECT rh.email
+      FROM role_holders rh
+      JOIN role_descriptions rd ON rd.id = rh.role_id
+      WHERE LOWER(rd.title) = ${canonical}
+        AND rh.school_year = ${activeSchoolYear()}
+      ORDER BY rh.id ASC
+      LIMIT 1
+    `;
+    if (rows.length > 0) return rows[0].email;
+  } catch (err) {
+    console.error('[perms] getRoleHolderEmail failed:', err);
+  }
+  const boardEmails = BOARD_ROLE_EMAILS[String(roleTitle).toLowerCase()];
+  return (boardEmails && boardEmails[0]) || null;
+}
+
+// Batch variant for endpoints that need several role holders at once
+// (e.g. workspace cards). Returns { [originalTitle]: email } only for
+// titles that resolved.
+async function getRoleHolderEmails(roleTitles) {
+  if (!Array.isArray(roleTitles) || roleTitles.length === 0) return {};
+  const out = {};
+  try {
+    const sql = getDb();
+    // Map each input title to its canonical lowercase form so the
+    // join hits role_descriptions even when callers use the unhyphenated
+    // alias.
+    const canonicalLc = roleTitles.map(t => canonicalTitle(t).toLowerCase());
+    const rows = await sql`
+      SELECT LOWER(rd.title) AS title, rh.email, rh.id
+      FROM role_holders rh
+      JOIN role_descriptions rd ON rd.id = rh.role_id
+      WHERE LOWER(rd.title) = ANY(${canonicalLc}::text[])
+        AND rh.school_year = ${activeSchoolYear()}
+      ORDER BY rh.id ASC
+    `;
+    rows.forEach(r => {
+      // Map back to the caller's original title casing.
+      const idx = canonicalLc.indexOf(r.title);
+      if (idx === -1) return;
+      const original = roleTitles[idx];
+      if (!out[original]) out[original] = r.email;
+    });
+  } catch (err) {
+    console.error('[perms] getRoleHolderEmails failed:', err);
+  }
+  return out;
 }
 
 module.exports = {
   SUPER_USER_EMAIL,
   SUPER_USER_EMAILS,
+  BOARD_ROLE_EMAILS,
   isSuperUser,
   canEditAsRole,
   getRoleHolderEmail,
   getRoleHolderEmails,
-  invalidateRoleCache,
+  activeSchoolYear,
   // Exported for tests:
-  _parseVolunteerRoles: parseVolunteerRoles,
-  _buildDirectoryEmailMap: buildDirectoryEmailMap
+  _canonicalTitle: canonicalTitle
 };

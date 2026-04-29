@@ -1,15 +1,14 @@
-// Unit tests for api/_permissions.js
+// Unit tests for api/_permissions.js (Phase B — DB-backed).
 //
 // Run with: node scripts/test-permissions.js
 //
-// These tests do NOT hit Google Sheets. They validate:
-//   1. Volunteer-role parsing from sheet-shaped row data
-//   2. Directory email derivation (firstname + last initial + domain)
-//   3. canEditAsRole's super-user short-circuit
-//   4. canEditAsRole's fail-closed behavior on sheet errors
-//
-// The live sheet lookup is exercised by the module's default path; these
-// tests substitute the cache so we don't need real credentials.
+// These tests do NOT hit Postgres or Google. They validate:
+//   1. isSuperUser — communications@ + vicepresident@ + vp@
+//   2. canEditAsRole short-circuits — super user + board mailbox
+//   3. canEditAsRole fail-closed when DATABASE_URL is missing
+//   4. getRoleHolderEmail / getRoleHolderEmails fallbacks
+//   5. activeSchoolYear date logic
+//   6. canonicalTitle alias resolution
 
 const assert = require('assert');
 const perms = require('../api/_permissions');
@@ -19,169 +18,193 @@ let failed = 0;
 
 function t(name, fn) {
   try {
-    fn();
-    console.log('  \u2713 ' + name);
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      return result.then(() => { console.log('  ✓ ' + name); passed++; })
+        .catch(err => { console.log('  ✗ ' + name); console.log('      ' + err.message); failed++; });
+    }
+    console.log('  ✓ ' + name);
     passed++;
   } catch (err) {
-    console.log('  \u2717 ' + name);
+    console.log('  ✗ ' + name);
     console.log('      ' + err.message);
     failed++;
   }
 }
 
-// ── 1. parseVolunteerRoles ──────────────────────────────────────────────
-console.log('\nparseVolunteerRoles');
-
-// Shape mirrors the real volunteer-roles tab: col 1 = label, col 2 = value.
-// Committee headers (label matches /Committee\s*$/) should be skipped.
-// "Chair: <title> - <person>" rows should produce { title, person }.
-// Regular rows should produce { title, person }.
-const volFixture = [
-  [''],
-  ['', 'Facility Committee'],
-  ['', 'Chair: President - Molly Bellner'],
-  ['', 'Opener & Morning Set-Up', 'Ada Lovelace'],
-  ['', 'Cleaning Crew Liaison', 'Grace Hopper'],
-  ['', 'Programming Committee'],
-  ['', 'Chair: Vice President - Colleen Raymont'],
-  ['', 'Supply Coordinator', 'Jody Wilson'],
-  ['', 'See chart to the right'],
-  ['', 'Support Committee'],
-  ['', 'Parent Social Events', 'Alan Turing']
-];
-
-const roles = perms._parseVolunteerRoles(volFixture);
-
-t('returns array', () => assert(Array.isArray(roles)));
-
-t('skips committee headers', () => {
-  assert(!roles.some(r => /Committee\s*$/i.test(r.title)));
-});
-
-t('extracts Chair rows with title + person', () => {
-  const chair = roles.find(r => r.title === 'President');
-  assert(chair, 'expected a President entry');
-  assert.strictEqual(chair.person, 'Molly Bellner');
-});
-
-t('extracts normal role rows', () => {
-  const sc = roles.find(r => r.title === 'Supply Coordinator');
-  assert(sc, 'expected Supply Coordinator entry');
-  assert.strictEqual(sc.person, 'Jody Wilson');
-});
-
-t('skips "See chart" filler rows', () => {
-  assert(!roles.some(r => /See chart/i.test(r.title)));
-});
-
-t('skips rows with empty person', () => {
-  // The fixture has a committee header with no value; it should not become a role.
-  assert(!roles.some(r => r.person === ''));
-});
-
-// ── 2. buildDirectoryEmailMap ──────────────────────────────────────────
-console.log('\nbuildDirectoryEmailMap');
-
-const dirFixture = [
-  ['Name', 'Phone Number', 'Child 1'],
-  ['Jody Wilson', '555-0100', 'Kid (he/him)'],
-  ['Amber & Bobby Furnish', '555-0101', 'Kid'],
-  ['Grace Hopper (she/her)', '555-0102', 'Kid'],
-  ['', '', ''],
-  ['Madonna', '555-0199', '']  // malformed — only one word, no last name — should skip
-];
-
-const emailMap = perms._buildDirectoryEmailMap(dirFixture);
-
-t('derives firstname+lastinitial email for single parent', () => {
-  assert.strictEqual(emailMap['wilson'], 'jodyw@rootsandwingsindy.com');
-});
-
-t('uses FIRST parent of multi-parent family', () => {
-  assert.strictEqual(emailMap['furnish'], 'amberf@rootsandwingsindy.com');
-});
-
-t('strips pronoun parens', () => {
-  assert.strictEqual(emailMap['hopper'], 'graceh@rootsandwingsindy.com');
-});
-
-t('skips rows with only one word (no last name)', () => {
-  // "Madonna" has no last name — should produce no email, no key.
-  assert(!('madonna' in emailMap));
-});
-
-t('keys are lowercased', () => {
-  assert('wilson' in emailMap);
-  assert(!('Wilson' in emailMap));
-});
-
-// ── 3. canEditAsRole: super-user short-circuit ────────────────────────
-console.log('\ncanEditAsRole (super-user path — no sheet access needed)');
-
 (async () => {
-  t('super user allowed for any role', async () => {
-    // communications@ hits the short-circuit BEFORE the sheet call, so it
-    // does not need MASTER_SHEET_ID / credentials to pass.
-    const ok = await perms.canEditAsRole('communications@rootsandwingsindy.com', 'Supply Coordinator');
-    assert.strictEqual(ok, true);
-  });
 
-  t('super user check is case-insensitive on email', async () => {
-    const ok = await perms.canEditAsRole('Communications@RootsAndWingsIndy.com', 'Supply Coordinator');
-    assert.strictEqual(ok, true);
-  });
+// ── 1. isSuperUser ─────────────────────────────────────────────────────
+console.log('\nisSuperUser');
 
-  t('empty email rejected', async () => {
-    const ok = await perms.canEditAsRole('', 'Supply Coordinator');
-    assert.strictEqual(ok, false);
-  });
+t('communications@ is super user', () => {
+  assert.strictEqual(perms.isSuperUser('communications@rootsandwingsindy.com'), true);
+});
 
-  t('null email rejected', async () => {
-    const ok = await perms.canEditAsRole(null, 'Supply Coordinator');
-    assert.strictEqual(ok, false);
-  });
+t('vicepresident@ is super user', () => {
+  assert.strictEqual(perms.isSuperUser('vicepresident@rootsandwingsindy.com'), true);
+});
 
-  // ── 4. Fail-closed on sheet error ──────────────────────────────────
-  console.log('\ncanEditAsRole (fail-closed on lookup error)');
+t('vp@ alias is super user', () => {
+  assert.strictEqual(perms.isSuperUser('vp@rootsandwingsindy.com'), true);
+});
 
-  t('non-super-user rejected when sheet env is unconfigured', async () => {
-    // Without MASTER_SHEET_ID, loadRoleHolders() throws; canEditAsRole
-    // should catch and return false for non-super-users.
-    const prevMaster = process.env.MASTER_SHEET_ID;
-    const prevDir = process.env.DIRECTORY_SHEET_ID;
-    delete process.env.MASTER_SHEET_ID;
-    delete process.env.DIRECTORY_SHEET_ID;
-    perms.invalidateRoleCache();
-    const ok = await perms.canEditAsRole('jodyw@rootsandwingsindy.com', 'Supply Coordinator');
-    process.env.MASTER_SHEET_ID = prevMaster;
-    process.env.DIRECTORY_SHEET_ID = prevDir;
-    perms.invalidateRoleCache();
-    assert.strictEqual(ok, false, 'should fail closed when sheet fetch errors');
-  });
+t('case-insensitive', () => {
+  assert.strictEqual(perms.isSuperUser('Communications@RootsAndWingsIndy.com'), true);
+});
 
-  // ── getRoleHolderEmails batch lookup: fail-closed when no sheet ────
-  console.log('\ngetRoleHolderEmails (fail-closed)');
+t('regular member is not super user', () => {
+  assert.strictEqual(perms.isSuperUser('jodyw@rootsandwingsindy.com'), false);
+});
 
-  t('returns {} when sheet fetch errors', async () => {
-    const prevMaster = process.env.MASTER_SHEET_ID;
-    const prevDir = process.env.DIRECTORY_SHEET_ID;
-    delete process.env.MASTER_SHEET_ID;
-    delete process.env.DIRECTORY_SHEET_ID;
-    perms.invalidateRoleCache();
-    const out = await perms.getRoleHolderEmails(['President', 'Treasurer']);
-    process.env.MASTER_SHEET_ID = prevMaster;
-    process.env.DIRECTORY_SHEET_ID = prevDir;
-    perms.invalidateRoleCache();
-    assert.deepStrictEqual(out, {});
-  });
+t('empty/null rejected', () => {
+  assert.strictEqual(perms.isSuperUser(''), false);
+  assert.strictEqual(perms.isSuperUser(null), false);
+  assert.strictEqual(perms.isSuperUser(undefined), false);
+});
 
-  t('returns {} for empty/invalid input', async () => {
-    assert.deepStrictEqual(await perms.getRoleHolderEmails([]), {});
-    assert.deepStrictEqual(await perms.getRoleHolderEmails(null), {});
-    assert.deepStrictEqual(await perms.getRoleHolderEmails(undefined), {});
-  });
+// ── 2. canonicalTitle ──────────────────────────────────────────────────
+console.log('\ncanonicalTitle');
 
-  // ── Wrap-up ────────────────────────────────────────────────────────
-  console.log('\n' + passed + ' passed, ' + failed + ' failed');
-  process.exit(failed > 0 ? 1 : 0);
+t('"Vice President" → "Vice-President"', () => {
+  assert.strictEqual(perms._canonicalTitle('Vice President'), 'Vice-President');
+});
+
+t('"vice president" → "Vice-President" (case-insensitive)', () => {
+  assert.strictEqual(perms._canonicalTitle('vice president'), 'Vice-President');
+});
+
+t('untouched titles pass through trimmed', () => {
+  assert.strictEqual(perms._canonicalTitle('  Treasurer  '), 'Treasurer');
+});
+
+t('empty/null returns empty', () => {
+  assert.strictEqual(perms._canonicalTitle(''), '');
+  assert.strictEqual(perms._canonicalTitle(null), '');
+});
+
+// ── 3. activeSchoolYear ────────────────────────────────────────────────
+console.log('\nactiveSchoolYear');
+
+t('Mar 31 returns prior fall year', () => {
+  assert.strictEqual(perms.activeSchoolYear(new Date(2026, 2, 31)), '2025-2026');
+});
+
+t('Apr 1 flips to upcoming year', () => {
+  assert.strictEqual(perms.activeSchoolYear(new Date(2026, 3, 1)), '2026-2027');
+});
+
+t('Aug returns current school year', () => {
+  assert.strictEqual(perms.activeSchoolYear(new Date(2026, 7, 15)), '2026-2027');
+});
+
+t('Dec returns the in-progress year', () => {
+  assert.strictEqual(perms.activeSchoolYear(new Date(2026, 11, 15)), '2026-2027');
+});
+
+// ── 4. canEditAsRole — super-user short-circuit ───────────────────────
+console.log('\ncanEditAsRole (super-user path)');
+
+await t('super user allowed for any role', async () => {
+  // Hits the short-circuit before any DB call, so it works with no DB.
+  const ok = await perms.canEditAsRole('communications@rootsandwingsindy.com', 'Supply Coordinator');
+  assert.strictEqual(ok, true);
+});
+
+await t('vicepresident@ as super user passes any role', async () => {
+  const ok = await perms.canEditAsRole('vicepresident@rootsandwingsindy.com', 'Supply Coordinator');
+  assert.strictEqual(ok, true);
+});
+
+await t('case-insensitive on email', async () => {
+  const ok = await perms.canEditAsRole('Communications@RootsAndWingsIndy.com', 'Supply Coordinator');
+  assert.strictEqual(ok, true);
+});
+
+await t('empty email rejected', async () => {
+  assert.strictEqual(await perms.canEditAsRole('', 'Supply Coordinator'), false);
+});
+
+await t('null email rejected', async () => {
+  assert.strictEqual(await perms.canEditAsRole(null, 'Supply Coordinator'), false);
+});
+
+// ── 5. canEditAsRole — board mailbox short-circuit ────────────────────
+console.log('\ncanEditAsRole (board mailbox path)');
+
+await t('treasurer@ passes Treasurer role without DB', async () => {
+  const ok = await perms.canEditAsRole('treasurer@rootsandwingsindy.com', 'Treasurer');
+  assert.strictEqual(ok, true);
+});
+
+await t('membership@ passes Membership Director role', async () => {
+  const ok = await perms.canEditAsRole('membership@rootsandwingsindy.com', 'Membership Director');
+  assert.strictEqual(ok, true);
+});
+
+await t('president@ passes President role', async () => {
+  const ok = await perms.canEditAsRole('president@rootsandwingsindy.com', 'President');
+  assert.strictEqual(ok, true);
+});
+
+await t('treasurer@ does NOT pass Membership Director', async () => {
+  // Without DB the board map only matches the right role.
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const ok = await perms.canEditAsRole('treasurer@rootsandwingsindy.com', 'Membership Director');
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.strictEqual(ok, false);
+});
+
+// ── 6. canEditAsRole — fail-closed when DB unconfigured ──────────────
+console.log('\ncanEditAsRole (fail-closed without DB)');
+
+await t('non-super, non-board email rejected without DATABASE_URL', async () => {
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const ok = await perms.canEditAsRole('jodyw@rootsandwingsindy.com', 'Supply Coordinator');
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.strictEqual(ok, false);
+});
+
+// ── 7. getRoleHolderEmails ─────────────────────────────────────────────
+console.log('\ngetRoleHolderEmails');
+
+await t('returns {} for empty input', async () => {
+  assert.deepStrictEqual(await perms.getRoleHolderEmails([]), {});
+  assert.deepStrictEqual(await perms.getRoleHolderEmails(null), {});
+  assert.deepStrictEqual(await perms.getRoleHolderEmails(undefined), {});
+});
+
+await t('returns {} when DB unconfigured', async () => {
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const out = await perms.getRoleHolderEmails(['President', 'Treasurer']);
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.deepStrictEqual(out, {});
+});
+
+// ── 8. getRoleHolderEmail board fallback ──────────────────────────────
+console.log('\ngetRoleHolderEmail (board fallback)');
+
+await t('falls back to board mailbox when DB unconfigured', async () => {
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const email = await perms.getRoleHolderEmail('Treasurer');
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.strictEqual(email, 'treasurer@rootsandwingsindy.com');
+});
+
+await t('returns null for unknown role with no DB', async () => {
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const email = await perms.getRoleHolderEmail('Made Up Role');
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.strictEqual(email, null);
+});
+
+// ── Wrap-up ────────────────────────────────────────────────────────────
+console.log('\n' + passed + ' passed, ' + failed + ' failed');
+process.exit(failed > 0 ? 1 : 0);
+
 })();
