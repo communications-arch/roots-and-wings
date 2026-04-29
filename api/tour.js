@@ -267,6 +267,7 @@ async function handleRegistration(body, req, res) {
           mlcPhotoConsent: waiver_photo_consent === 'yes',
           backupCoaches: backup_coaches,
           kids: kids,
+          track: track,
           phone: phone,
           address: address,
           placementNotes: placement_notes
@@ -1481,9 +1482,24 @@ async function upsertProfileFromRegistration(sql, params) {
     });
   });
 
-  const newKids = (Array.isArray(params.kids) ? params.kids : [])
-    .map(sanitizeKid)
-    .filter(Boolean);
+  // Default per-kid schedule from the family-level `track` choice when
+  // the kid object itself doesn't carry one (the public registration form
+  // collects track once per family, not per child). Maps Morning Only →
+  // morning, Afternoon Only → afternoon, Both → all-day; Other / unknown
+  // leaves it empty for the family to set in Edit My Info.
+  const trackToSchedule = {
+    'morning only': 'morning',
+    'afternoon only': 'afternoon',
+    'both': 'all-day'
+  };
+  const defaultSchedule = trackToSchedule[String(params.track || '').toLowerCase()] || '';
+  const rawKids = Array.isArray(params.kids) ? params.kids : [];
+  const newKids = rawKids.map(k => {
+    const sk = sanitizeKid(k);
+    if (!sk) return null;
+    if (!sk.schedule && defaultSchedule) sk.schedule = defaultSchedule;
+    return sk;
+  }).filter(Boolean);
 
   const existingRows = await sql`
     SELECT parents, kids FROM member_profiles WHERE family_email = ${familyEmail} LIMIT 1

@@ -36,7 +36,7 @@ const DRY = process.argv.includes('--dry');
   const regs = await sql`
     SELECT id, season, email, existing_family_name, main_learning_coach,
            address, phone, kids, placement_notes, waiver_photo_consent,
-           created_at
+           track, created_at
     FROM registrations
     ORDER BY created_at ASC
   `;
@@ -86,6 +86,7 @@ const DRY = process.argv.includes('--dry');
         mlcPhotoConsent: String(r.waiver_photo_consent || '').toLowerCase() === 'yes',
         backupCoaches,
         kids,
+        track: r.track,
         phone: r.phone,
         address: r.address,
         placementNotes: r.placement_notes
