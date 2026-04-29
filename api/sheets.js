@@ -3,6 +3,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser } = require('./_permissions');
+const { resolveFamily } = require('./_family');
 
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
@@ -1791,21 +1792,35 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
     if (targetEmail !== emailLc && !canViewAny) {
       return res.status(403).json({ error: 'Not authorized' });
     }
+
+    // Resolve targetEmail to its canonical family. Backup learning
+    // coaches sign in with their own Workspace email (e.g. brianr@),
+    // which lives in member_profiles.additional_emails — not on any
+    // member row's email field. Without this hop, the per-family
+    // filter below misses every BLC and they see "no member" / 0 score.
+    var familyRow = await resolveFamily(sql, targetEmail);
+    var canonicalFamilyEmail = familyRow
+      ? String(familyRow.family_email || '').toLowerCase()
+      : targetEmail;
+
     var auth = getAuth();
     var sheetsClient = google.sheets({ version: 'v4', auth: auth });
     var data = await participationFetchSheetData(sheetsClient);
     var report = await buildParticipationReport(sql, data);
     var familyMembers = (report.members || []).filter(function (m) {
-      return String(m.email || '').toLowerCase() === targetEmail;
+      return String(m.email || '').toLowerCase() === canonicalFamilyEmail;
     });
     if (familyMembers.length === 0) {
       return res.status(200).json({ season: report.season, member: null });
     }
-    // Prefer the parent matching the signed-in given_name. For super-user
-    // view-as we can't disambiguate — fall back to the first parent.
+    // Prefer the parent matching the signed-in given_name. For super-
+    // user view-as we can't disambiguate — fall back to the first
+    // parent. (Earlier this checked `!isSuperUser` instead of
+    // `!canViewAny` which was always-false because isSuperUser is the
+    // imported function — meant given_name disambiguation never ran.)
     var mine = null;
     var gn = String(authGivenName || '').toLowerCase();
-    if (gn && !isSuperUser) {
+    if (gn && !canViewAny) {
       for (var i = 0; i < familyMembers.length; i++) {
         if (String(familyMembers[i].first || '').toLowerCase() === gn) {
           mine = familyMembers[i];
