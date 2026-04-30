@@ -14105,26 +14105,28 @@
       h += '<input class="rd-input" style="flex:3;min-width:0;" placeholder="Last name (leave blank to use family last name)" data-field="last_name" value="' + escapeHtml(p.last_name || '') + '">';
       h += '<input class="rd-input" style="flex:1.5;min-width:0;" placeholder="Pronouns" data-field="pronouns" value="' + escapeHtml(p.pronouns) + '">';
       h += '</div>';
-      // Nicknames row — placed right after the name row so it reads as
-      // part of "who is this person" identity. Comma-separated; e.g.
-      // "Jess, Jessie" so the master sheet's "Jess Shewan" cleaning-crew
-      // entry counts toward Jessica. Common forms (Becca↔Rebecca,
-      // Matt↔Matthew, etc.) are already built in — only add the
-      // idiosyncratic ones.
+      // Nicknames + phone row — both compact identifiers. Placed right
+      // after the name row so they sit in the "who is this person"
+      // header before contact details. Nicknames feed participation
+      // name resolution (e.g. "Jess, Jessie" so the master sheet's
+      // "Jess Shewan" cleaning-crew entry counts toward Jessica);
+      // common forms (Becca↔Rebecca, Matt↔Matthew, etc.) are built in.
       var nicksDisplay = (Array.isArray(p.nicknames) ? p.nicknames : []).join(', ');
-      h += '<input class="rd-input" type="text" placeholder="Nicknames (comma-separated, e.g. Jess, Jessie)" data-field="nicknames" value="' + escapeHtml(nicksDisplay) + '">';
-      // Email: MLC's email is the family_email (PK) — read-only here so the
-      // member can't accidentally orphan their family. BLC + Parent are
-      // editable so members can fill in their own Workspace login.
+      h += '<div class="emi-full" style="display:flex;gap:8px;min-width:0;">';
+      h += '<input class="rd-input" style="flex:2;min-width:0;" type="text" placeholder="Nicknames (comma-separated, e.g. Jess, Jessie)" data-field="nicknames" value="' + escapeHtml(nicksDisplay) + '">';
+      h += '<input class="rd-input" style="flex:1;min-width:0;" type="tel" placeholder="Phone" data-field="phone" value="' + escapeHtml(p.phone) + '">';
+      h += '</div>';
+      // Email row — workspace + personal side by side. MLC's workspace
+      // email is the family_email (PK) so it's read-only; BLC + Parent
+      // are editable. Personal email is where reminders / billing
+      // notices actually get read; differs from the Workspace login.
       var emailAttrs = emailIsPrimary
         ? 'readonly tabindex="-1" title="This is your family\'s primary login. Contact communications@ to change it."'
         : 'placeholder="Their workspace email (optional)"';
-      h += '<input class="rd-input' + (emailIsPrimary ? ' emi-readonly' : '') + '" type="email" data-field="email" value="' + escapeHtml(p.email) + '" ' + emailAttrs + '>';
-      // Personal email — where reminders, billing notices, etc. actually
-      // get read. Editable for everyone (the MLC's personal email differs
-      // from their R&W Workspace login).
-      h += '<input class="rd-input" type="email" placeholder="Personal email (gmail, etc.)" data-field="personal_email" value="' + escapeHtml(p.personal_email || '') + '">';
-      h += '<input class="rd-input" type="tel" placeholder="Their phone number" data-field="phone" value="' + escapeHtml(p.phone) + '">';
+      h += '<div class="emi-full" style="display:flex;gap:8px;min-width:0;">';
+      h += '<input class="rd-input' + (emailIsPrimary ? ' emi-readonly' : '') + '" style="flex:1;min-width:0;" type="email" data-field="email" value="' + escapeHtml(p.email) + '" ' + emailAttrs + '>';
+      h += '<input class="rd-input" style="flex:1;min-width:0;" type="email" placeholder="Personal email (gmail, etc.)" data-field="personal_email" value="' + escapeHtml(p.personal_email || '') + '">';
+      h += '</div>';
       var pOptOut = p.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (pOptOut ? ' checked' : '') + '>' +
