@@ -25,6 +25,29 @@ const { parseDirectory, fetchSheet } = require('../api/sheets.js');
 
 const DRY = process.argv.includes('--dry');
 
+// .env.local typically holds the service-account JSON with the private
+// key's newlines as real \n characters (the result of pasting the JSON
+// file straight in). JSON.parse rejects those — same trick as
+// seed-profiles-from-sheet.js: walk the string and re-escape \n / drop
+// \r ONLY inside JSON string literals. Outside strings, leave alone.
+function loadServiceAccountKey() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not set');
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) { out += c; escaped = false; continue; }
+    if (c === '\\') { out += c; escaped = true; continue; }
+    if (c === '"') { inString = !inString; out += c; continue; }
+    if (inString && c === '\n') { out += '\\n'; continue; }
+    if (inString && c === '\r') { continue; }
+    out += c;
+  }
+  return JSON.parse(out);
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.error('DATABASE_URL not set.');
@@ -40,7 +63,7 @@ async function main() {
   }
 
   const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+    credentials: loadServiceAccountKey(),
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
   });
   const sheets = google.sheets({ version: 'v4', auth });
