@@ -348,8 +348,12 @@ module.exports = async function handler(req, res) {
     return handleBoardScope(req, res);
   }
 
-  // Authenticated endpoint
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  // Authenticated endpoint. Short cache (60s) so portal sessions
+  // re-trigger the board photo upsert below within a minute of any
+  // board change. The hour-long cache that used to live here held
+  // /api/photos responses long enough that role rotations went days
+  // without refreshing board_photos.
+  res.setHeader('Cache-Control', 'private, max-age=60');
   if (!(await verifyGoogleAuth(req))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -372,13 +376,16 @@ module.exports = async function handler(req, res) {
       photos[email] = allowedUsers[email].url;
     }
 
-    // Fire-and-forget: keep public board photo cache warm. Don't await so
-    // slow DB calls never delay the photo response to the portal. The
-    // opted-out set is passed along so any board member who flips the
-    // opt-out has their stale cached row deleted on the next fetch.
-    upsertBoardPhotos(workspaceUsers, optedOut).catch(err =>
-      console.warn('upsertBoardPhotos failed:', err && err.message)
-    );
+    // Await the board photo cache refresh so Vercel doesn't terminate
+    // the function before the upserts land in the DB. Previously this
+    // was fire-and-forget and could be killed mid-write, leaving
+    // newly-rotated board members without a board_photos row. The
+    // refresh is ~7 small upserts — well within the budget.
+    try {
+      await upsertBoardPhotos(workspaceUsers, optedOut);
+    } catch (err) {
+      console.warn('upsertBoardPhotos failed:', err && err.message);
+    }
 
     res.status(200).json({ photos });
   } catch (err) {
