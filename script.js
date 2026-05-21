@@ -1895,6 +1895,24 @@
     }
   }
 
+  // Summer-break detection. True when today is past every session's end
+  // date — i.e. the loop above couldn't land on a current or future
+  // session. Auto-recovers as soon as SESSION_DATES gets the next year's
+  // dates: the loop lands on a future Session 1 and today <= latestEnd
+  // flips this back to false.
+  // Phase B (DB-backed co-op calendar managed by President + VP) will
+  // replace SESSION_DATES with a server-managed table; this detection
+  // logic stays.
+  var isSummerBreak = false;
+  (function detectSummerBreak() {
+    var ends = Object.keys(SESSION_DATES)
+      .map(function (id) { return SESSION_DATES[id] && SESSION_DATES[id].end; })
+      .filter(Boolean);
+    if (ends.length === 0) return;
+    var latestEnd = ends.sort().pop(); // YYYY-MM-DD sorts chronologically
+    if (today > latestEnd) isSummerBreak = true;
+  })();
+
   // ── Morning classes (by group, per session) ──
   var AM_CLASSES = {
   };
@@ -3558,11 +3576,14 @@
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
 
     // ──── Coverage Board (full width, collapsible) ────
-    html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
-    html += '<summary class="mf-card-title mf-coverage-summary">Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
-    html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
-    html += '<div id="coverageBoardContent"></div>';
-    html += '</details>';
+    // Hidden during summer break — no co-op days = no coverage to claim.
+    if (!isSummerBreak) {
+      html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
+      html += '<summary class="mf-card-title mf-coverage-summary">Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
+      html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
+      html += '<div id="coverageBoardContent"></div>';
+      html += '</details>';
+    }
 
     // ──── Responsibilities card (first on mobile) ────
     html += '<div class="mf-card">';
@@ -3588,6 +3609,13 @@
       if (!a || !b) return false;
       return a.trim().toLowerCase() === b.trim().toLowerCase();
     }
+
+    // ── Session-bound duties (AM, PM, Cleaning, Coverage) ──
+    // Skipped entirely during summer break — none of these blocks have
+    // session data for the in-between months, and "Cleaning: Session 5"
+    // would be stale. Annual roles below still render.
+    var hasCleaning = false;
+    if (!isSummerBreak) {
 
     // ── AM duties ──
     Object.keys(AM_CLASSES).forEach(function (groupName) {
@@ -3682,7 +3710,6 @@
     }
 
     // ── Cleaning ──
-    var hasCleaning = false;
     var sessClean = CLEANING_CREW.sessions[currentSession];
     if (sessClean) {
       var cleanAreas = ['mainFloor', 'upstairs', 'outside'];
@@ -3744,6 +3771,8 @@
         });
       });
     } catch (covErr) { console.error('coverage duty injection failed:', covErr); }
+
+    } // end if (!isSummerBreak)
 
     // ── Annual roles (board, committees, events) ──
     // Board role is held by ONE person, not the whole family. Only inject
@@ -3817,6 +3846,15 @@
     (function setActionableSubtitle() {
       var subtitleEl = document.getElementById('dashboardSubtitle');
       if (!subtitleEl) return;
+      if (isSummerBreak) {
+        var annualSummer = duties.filter(function (d) { return d.block === 'annual'; });
+        if (annualSummer.length > 0) {
+          subtitleEl.textContent = 'Summer break \u2014 co-op resumes in the fall. Thanks for serving as ' + annualSummer[0].text + ' year-round.';
+        } else {
+          subtitleEl.textContent = 'Summer break \u2014 co-op resumes in the fall. See you then!';
+        }
+        return;
+      }
       var sessionDuties = duties.filter(function (d) { return d.block !== 'annual'; });
       var nextDate = typeof getNextCoopDate === 'function' ? getNextCoopDate() : '';
       var dateLabel = '';
@@ -3894,7 +3932,11 @@
     }
 
     if (duties.length === 0) {
-      html += '<p class="mf-empty">No assignments found for this session.</p>';
+      if (isSummerBreak) {
+        html += '<p class="mf-empty">Summer break — no co-op responsibilities right now. See you in the fall!</p>';
+      } else {
+        html += '<p class="mf-empty">No assignments found for this session.</p>';
+      }
     } else {
       // Compact summary in card — show count per block + first duty of each
       html += '<div class="mf-duties-summary">';
@@ -3909,16 +3951,38 @@
       });
       html += '</div>';
     }
-    // Coverage notes area (populated after absences load)
-    html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
-    // "I'll Be Out" button
-    html += '<button class="btn btn-absence" id="reportAbsenceBtn" data-has-cleaning="' + (hasCleaning ? '1' : '0') + '">I\'ll Be Out</button>';
-    // My absences area (populated after absences load)
-    html += '<div id="myAbsencesArea"></div>';
+    // Coverage notes + "I'll Be Out" + My Absences — all hidden during
+    // summer break (no co-op days to be absent from or cover for).
+    if (!isSummerBreak) {
+      // Coverage notes area (populated after absences load)
+      html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
+      // "I'll Be Out" button
+      html += '<button class="btn btn-absence" id="reportAbsenceBtn" data-has-cleaning="' + (hasCleaning ? '1' : '0') + '">I\'ll Be Out</button>';
+      // My absences area (populated after absences load)
+      html += '<div id="myAbsencesArea"></div>';
+    }
     html += '</div>';
 
     // ──── Kids' schedule card ────
     html += '<div class="mf-card">';
+    if (isSummerBreak) {
+      // Drop the "— Session N" suffix and show a friendly summer state.
+      // Each kid's CURRENT group is shown as reference; placements for
+      // the next school year happen later in summer and will appear
+      // automatically once SESSION_DATES rolls forward.
+      html += '<h3 class="mf-card-title">Kids\' Schedule</h3>';
+      html += '<p class="mf-empty" style="margin-bottom:12px;">Co-op resumes in the fall — class assignments for the next school year will be posted closer to the start.</p>';
+      fam.kids.forEach(function (kid) {
+        html += '<div class="mf-kid">';
+        html += '<div class="mf-kid-bar">';
+        html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
+        html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
+        html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + groupWithAge(kid.group) + ' (this past year)</span>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
     html += '<h3 class="mf-card-title">Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
     fam.kids.forEach(function (kid) {
       var staff = AM_CLASSES[kid.group];
@@ -3972,6 +4036,7 @@
       html += '</div></div>';
     });
     html += '</div>';
+    } // end else (non-summer Kids' Schedule)
 
     // ──── Billing card ────
     html += '<div class="mf-card mf-billing-card">';
@@ -4562,6 +4627,25 @@
   function renderSessionTab() {
     var container = document.getElementById('sessionTabContent');
     if (!container) return;
+
+    // Summer-break: no current session to show. The pager + Session 5
+    // schedule would be stale, so flip to a friendly empty state and
+    // surface the year's annual volunteer slate from the Volunteers tab
+    // as a hint of where co-op life continues year-round.
+    if (isSummerBreak) {
+      container.innerHTML =
+        '<div class="session-summer-state" style="padding:32px 16px;text-align:center;">' +
+        '<h4 class="session-section-title" style="margin-top:0;">Summer break</h4>' +
+        '<p style="color:var(--color-text-light);max-width:480px;margin:0 auto;">' +
+        'Co-op resumes in the fall. Session-by-session schedules will appear here once the new school year’s dates are set.' +
+        '</p>' +
+        '<p style="color:var(--color-text-light);max-width:480px;margin:12px auto 0;font-size:0.92rem;">' +
+        'Year-round volunteer roles, special events, and class ideas are still available in the other tabs above.' +
+        '</p>' +
+        '</div>';
+      return;
+    }
+
     var viewSess = sessionTabView;
     var sess = SESSION_DATES[viewSess];
     var electives = PM_ELECTIVES[viewSess] || [];
@@ -4856,6 +4940,24 @@
   function renderCleaningTab() {
     var container = document.getElementById('cleaningTabContent');
     if (!container) return;
+
+    if (isSummerBreak) {
+      // No session = no cleaning rota. Liaison name (annual role) is
+      // still meaningful; show it as the only persistent fact.
+      var liaisonLineHtml = CLEANING_CREW && CLEANING_CREW.liaison
+        ? '<p style="color:var(--color-text-light);max-width:480px;margin:12px auto 0;font-size:0.92rem;">Liaison: <strong>' + CLEANING_CREW.liaison + '</strong></p>'
+        : '';
+      container.innerHTML =
+        '<div class="cleaning-summer-state" style="padding:32px 16px;text-align:center;">' +
+        '<h4 class="session-section-title" style="margin-top:0;">Summer break</h4>' +
+        '<p style="color:var(--color-text-light);max-width:480px;margin:0 auto;">' +
+        'No cleaning rota in summer. Assignments will return when the new school year starts.' +
+        '</p>' +
+        liaisonLineHtml +
+        '</div>';
+      return;
+    }
+
     var viewSess = cleaningTabView;
     var sessClean = CLEANING_CREW.sessions[viewSess];
 
