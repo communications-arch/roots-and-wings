@@ -2302,6 +2302,9 @@
           if (person.type !== 'parent') return;
           if (person.role !== 'mlc') return;
         }
+        if (activeFilter === 'allKids') {
+          if (person.type !== 'kid') return;
+        }
         if (isGroupFilter(activeFilter)) {
           if (person.type === 'parent') return;
           if (person.group !== activeFilter) return;
