@@ -1244,6 +1244,58 @@
   }
 
   // ── Cleaning Crew DB state ──
+  // ── Co-op sessions (Phase B: DB-backed SESSION_DATES) ──
+  // Reads from /api/cleaning?action=sessions and reshapes into
+  // SESSION_DATES via applyCoopSessionsData(). Cached in localStorage
+  // for instant load; the cache is replaced on every successful API
+  // response. Hardcoded SESSION_DATES at the top of the file is the
+  // last-resort fallback if both cache + API are unavailable.
+  var CACHE_SESSIONS_KEY = 'rw_sessions_cache';
+
+  // Tracked here so afterRender hooks (which fire before the API
+  // responds) and the API response itself can both feed the workspace
+  // card's "Set up" badge. Recomputed every time we apply sessions
+  // data — true means the President needs to set up the active year.
+  var coopCalendarNeedsSetup = false;
+
+  function updateCoopCalendarBadge() {
+    var el = document.getElementById('coop-cal-needs-setup');
+    if (!el) return;
+    if (coopCalendarNeedsSetup) {
+      el.hidden = false;
+      el.textContent = 'Set up';
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  function loadCoopSessions() {
+    try {
+      var cached = localStorage.getItem(CACHE_SESSIONS_KEY);
+      if (cached) applyCoopSessionsData(JSON.parse(cached));
+    } catch (e) { /* ignore */ }
+    updateCoopCalendarBadge();
+
+    var googleCred = localStorage.getItem('rw_google_credential');
+    if (!googleCred) return;
+    fetch('/api/cleaning?action=sessions', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || data.error) return;
+        try { localStorage.setItem(CACHE_SESSIONS_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+        applyCoopSessionsData(data);
+        updateCoopCalendarBadge();
+        if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
+        // Re-render anything that reads SESSION_DATES / currentSession /
+        // isSummerBreak so the spring-to-fall handoff happens
+        // automatically without a page reload.
+        if (typeof renderMyFamily === 'function') renderMyFamily();
+        if (typeof renderSessionTab === 'function') renderSessionTab();
+        if (typeof renderCleaningTab === 'function') renderCleaningTab();
+      })
+      .catch(function () { /* fall back to cached/hardcoded */ });
+  }
+
   var CACHE_CLEANING_KEY = 'rw_cleaning_cache';
   var cleaningDB = { areas: [], assignments: [], loaded: false, editMode: false };
 
@@ -1706,6 +1758,7 @@
     loadCalendar();
     loadCleaningData();
     loadRoleDescriptions();
+    loadCoopSessions();
     // Render with whatever data is available (live if preloaded, static otherwise)
     setTimeout(function () {
       if (typeof renderMyFamily === 'function') renderMyFamily();
@@ -1760,6 +1813,7 @@
           localStorage.removeItem(CACHE_KEY);
           localStorage.removeItem(CACHE_PHOTOS_KEY);
           localStorage.removeItem(CACHE_CLEANING_KEY);
+          localStorage.removeItem(CACHE_SESSIONS_KEY);
           sessionStorage.removeItem(VIEW_AS_KEY);
           localStorage.removeItem('rw_google_credential');
           localStorage.removeItem('rw_user_email');
@@ -1877,6 +1931,11 @@
 
 
   // ── Session metadata ──
+  // Defensive hardcoded fallback for the 2025-2026 school year. Phase B
+  // moved the source of truth to the co_op_sessions DB table — loaded by
+  // loadCoopSessions() and applied via applyCoopSessionsData() — but
+  // these values keep the dashboard functional on first render before
+  // the API responds and as a backstop if the API ever fails.
   var SESSION_DATES = {
     1: { name: 'Fall Session 1', start: '2025-09-03', end: '2025-10-01' },
     2: { name: 'Fall Session 2', start: '2025-10-15', end: '2025-11-12' },
@@ -1884,46 +1943,126 @@
     4: { name: 'Spring Session 4', start: '2026-03-04', end: '2026-04-01' },
     5: { name: 'Spring Session 5', start: '2026-04-15', end: '2026-05-13' }
   };
+  // Active school-year label whose sessions are currently in SESSION_DATES.
+  // Updated when loadCoopSessions picks a year. Falls back to '2025-2026'
+  // until the API responds.
+  var ACTIVE_SESSION_YEAR = '2025-2026';
 
-  // Auto-detect current session: move to next session once the end date passes
-  var currentSession = 5; // default to last session
+  // Today as YYYY-MM-DD. Module-level so recomputeSessionState() can
+  // re-read it (and tests can stub it).
   var today = new Date().toISOString().slice(0, 10);
-  for (var s = 1; s <= 5; s++) {
-    if (SESSION_DATES[s] && today <= SESSION_DATES[s].end) {
-      currentSession = s;
-      break;
-    }
-  }
-
-  // Summer-break detection. The school year flips at the end of Field
-  // Day, which is the Wednesday AFTER Session 5 ends (Session 5 itself
-  // is always a Wednesday). So summer break starts the day after Field
-  // Day — i.e. today > (latestEnd + 1 week, snapped to Wednesday).
-  // Auto-recovers as soon as SESSION_DATES gets the next year's dates:
-  // the session-detect loop above lands on a future Session 1 and
-  // currentSession reflects the upcoming year.
-  // Phase B (DB-backed co-op calendar managed by President + VP) will
-  // replace SESSION_DATES with a server-managed table; this detection
-  // logic stays.
+  var currentSession = 5;
   var isSummerBreak = false;
-  (function detectSummerBreak() {
-    var ends = Object.keys(SESSION_DATES)
+
+  // Re-derive currentSession + isSummerBreak from whatever's in
+  // SESSION_DATES right now. Called once at IIFE init time and again
+  // every time the DB-backed sessions arrive.
+  //
+  // Summer-break rule: the school year flips at the end of Field Day,
+  // which is the Wednesday AFTER Session 5 ends (Session 5 itself is
+  // always a Wednesday). So summer break starts the day after Field
+  // Day — i.e. today > (latestEnd + 1 week, snapped to Wednesday).
+  function recomputeSessionState() {
+    // currentSession picks the first session whose end is today-or-later.
+    var keys = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; });
+    currentSession = keys[keys.length - 1] || 5;
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (SESSION_DATES[k] && today <= SESSION_DATES[k].end) {
+        currentSession = k;
+        break;
+      }
+    }
+    // isSummerBreak: today is past the Field Day (Wed after latest
+    // session end). Snap-to-Wednesday defensively in case a
+    // non-Wednesday end date ever gets entered.
+    isSummerBreak = false;
+    var ends = keys
       .map(function (id) { return SESSION_DATES[id] && SESSION_DATES[id].end; })
       .filter(Boolean);
     if (ends.length === 0) return;
-    var latestEnd = ends.sort().pop(); // YYYY-MM-DD sorts chronologically
-    // Compute Field Day: the next Wednesday strictly after latestEnd.
-    // Session 5 always ends on a Wednesday, so this lands 7 days later;
-    // we still snap-to-Wednesday defensively in case a non-Wednesday
-    // end date ever gets entered.
+    var latestEnd = ends.sort().pop();
     var endDt = new Date(latestEnd + 'T00:00:00');
-    var dow = endDt.getDay(); // 0=Sun..3=Wed..6=Sat
+    var dow = endDt.getDay();
     var daysToFieldDay = (3 - dow + 7) % 7;
-    if (daysToFieldDay === 0) daysToFieldDay = 7; // strictly after
+    if (daysToFieldDay === 0) daysToFieldDay = 7;
     endDt.setDate(endDt.getDate() + daysToFieldDay);
     var fieldDay = endDt.toISOString().slice(0, 10);
     if (today > fieldDay) isSummerBreak = true;
-  })();
+  }
+  recomputeSessionState();
+
+  // Replace SESSION_DATES with rows pulled from /api/cleaning?action=sessions.
+  // Picks ONE school year to show (matches the single-year shape the
+  // hardcoded fallback always had):
+  //   1. If today falls within any year's span (earliest start..latest
+  //      end), use that year.
+  //   2. Else use the most recent year whose latest session has already
+  //      ended — so summer detection has data even when the next year's
+  //      calendar hasn't been set yet.
+  //   3. Else use the earliest year (we're before any school year — rare).
+  // After repopulating, re-derives currentSession + isSummerBreak.
+  // Full sessions list (across all years) cached for the To Do loader
+  // and any other surface that needs to reason about multi-year state.
+  var _allCoopSessions = [];
+
+  function applyCoopSessionsData(data) {
+    if (!data || !Array.isArray(data.sessions) || data.sessions.length === 0) {
+      // Empty payload = no sessions for any year. Flag setup for the
+      // President + VP workspace card; fallback SESSION_DATES stays put.
+      coopCalendarNeedsSetup = true;
+      _allCoopSessions = [];
+      return;
+    }
+    _allCoopSessions = data.sessions;
+    var byYear = {};
+    data.sessions.forEach(function (s) {
+      if (!byYear[s.school_year]) byYear[s.school_year] = [];
+      byYear[s.school_year].push(s);
+    });
+    var years = Object.keys(byYear).sort();
+    if (years.length === 0) return;
+    function yearSpan(yr) {
+      var rows = byYear[yr];
+      var minStart = rows.reduce(function (a, s) { return (!a || s.start_date < a) ? s.start_date : a; }, null);
+      var maxEnd   = rows.reduce(function (a, s) { return (!a || s.end_date   > a) ? s.end_date   : a; }, null);
+      return { minStart: minStart, maxEnd: maxEnd };
+    }
+    var pick = null;
+    for (var i = 0; i < years.length; i++) {
+      var span = yearSpan(years[i]);
+      if (today >= span.minStart && today <= span.maxEnd) { pick = years[i]; break; }
+    }
+    if (!pick) {
+      for (var j = years.length - 1; j >= 0; j--) {
+        if (today > yearSpan(years[j]).maxEnd) { pick = years[j]; break; }
+      }
+    }
+    if (!pick) pick = years[0];
+    ACTIVE_SESSION_YEAR = pick;
+    Object.keys(SESSION_DATES).forEach(function (k) { delete SESSION_DATES[k]; });
+    byYear[pick].forEach(function (s) {
+      SESSION_DATES[s.session_number] = {
+        name: s.name,
+        start: s.start_date,
+        end: s.end_date
+      };
+    });
+    recomputeSessionState();
+
+    // "Needs setup" surface check: the active school year per
+    // activeSchoolYear() (April-1 pivot) has zero sessions. That's the
+    // signal the President should set up the new year. Note the active
+    // year and the year whose sessions populate SESSION_DATES can
+    // diverge in late spring (April–May): activeSchoolYear() has
+    // already rolled to next year for billing purposes but the picker
+    // still uses last year's dates so summer detection works. We want
+    // the setup nudge only when the upcoming year really has nothing.
+    var billingActive = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    coopCalendarNeedsSetup = !byYear[billingActive] || byYear[billingActive].length === 0;
+  }
 
   // ── Morning classes (by group, per session) ──
   var AM_CLASSES = {
@@ -5780,26 +5919,29 @@
       }
     },
     'roles': {
-      // Each board chair can manage their own committee from the
-      // Roles Manager. The President + super user can edit anything;
-      // everyone else can rename / reorder / archive roles and assign
-      // holders only inside their own committee. Structural changes
-      // (move between committees, change category) stay President-only.
-      // Server-side gates in api/cleaning.js are the real enforcement.
-      title: 'Roles & Committees',
+      // Consolidated card: Roles Management for every board chair, plus
+      // Session Dates for President + VP (the two roles allowed to edit
+      // the school year's session calendar). Server-side gates in
+      // api/cleaning.js are the real enforcement; the role-aware render
+      // here just hides links the user can't act on.
+      title: 'Co-op Management',
       roleGate: [
         'President', 'Vice President', 'Treasurer', 'Secretary',
         'Membership Director', 'Sustaining Director', 'Communications Director'
       ],
-      render: function () {
+      render: function (prefs, roles, role) {
         var h = '<p class="ws-body-hint">Manage role descriptions, terms, and current holders for your committee.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Open Roles Manager<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
+        if (role === 'President' || role === 'Vice President') {
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-icon">📆</span>Session Dates<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span></button></li>';
+        }
         h += '</ul>';
         return h;
       },
       afterRender: function () {
         if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
+        if (typeof updateCoopCalendarBadge === 'function') updateCoopCalendarBadge();
       }
     },
     'pm-scheduling': {
@@ -5834,7 +5976,7 @@
       // Server-side data fetches stay role-scoped via the /api/tour?
       // list=registrations endpoint each loader hits.
       title: 'To Do',
-      roleGate: ['Treasurer', 'Communications Director', 'Membership Director'],
+      roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President'],
       render: function (prefs, roles, role) {
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
@@ -5845,6 +5987,13 @@
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-pre-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
           h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
+          // Confirm role holders for the new school year. Fires after
+          // Field Day (roles switch then) when the active year has
+          // fewer holders recorded than the previous year — handles
+          // both the "nothing set up yet" and "started but stopped
+          // partway" cases. Click opens Roles Assignments pre-scoped
+          // to the active year via _rolesMgrState.schoolYear default.
+          h += '<li id="ws-todo-role-holders-item" hidden><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-pre-count" id="ws-role-holders-count">0</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">Confirm role holders</span></button></li>';
         }
         if (role === 'Membership Director') {
           h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-pre-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
@@ -5857,6 +6006,14 @@
           h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-pre-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
+        }
+        if (role === 'President' || role === 'Vice President') {
+          // "Set next year's co-op calendar". Triggered by
+          // loadCoopCalendarTodoCount once we're 2 weeks past the
+          // previous year's Session 5 AND the upcoming year still has
+          // fewer than 5 sessions defined. Click opens the Co-op
+          // Calendar modal pre-scoped to the missing year.
+          h += '<li id="ws-todo-coop-cal-item" hidden><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">0</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">Set co-op calendar</span></button></li>';
         }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
@@ -5872,6 +6029,8 @@
         if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
+        if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
+        if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
       }
     },
     'reports': {
@@ -6014,11 +6173,11 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
-    'President': ['roles', 'my-links', 'ways-to-help', 'resources'],
+    'President': ['todos', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['todos', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Secretary': ['roles', 'my-links', 'ways-to-help', 'resources'],
     'Sustaining Director': ['roles', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
@@ -12174,6 +12333,8 @@
     else if (action === 'pm-submissions-report' && typeof showPmSubmissionsModal === 'function') showPmSubmissionsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
+    else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
+    else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
     else if (action === 'waivers-pending' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
     else if (action === 'treasurer-pending-payments' && typeof showMembershipReportModal === 'function') {
@@ -13964,6 +14125,11 @@
     toolbar += '</select>';
     toolbar += '</label>';
     toolbar += '<label class="roles-mgr-toggle"><input type="checkbox" id="roles-show-archived"' + (_rolesMgrState.showArchived ? ' checked' : '') + ' /> Show archived</label>';
+    // Mark/un-mark current year as confirmed. Only the Communications
+    // Director can change it (server enforces); the button stays in the
+    // DOM for everyone so they can see the current state but click is
+    // a no-op for non-Comms.
+    toolbar += '<button id="roles-confirm-btn" class="btn btn-outline-dark btn-sm" hidden></button>';
     toolbar += '</div>';
     body.innerHTML = toolbar + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>';
 
@@ -13974,8 +14140,524 @@
     document.getElementById('roles-school-year').addEventListener('change', function () {
       _rolesMgrState.schoolYear = this.value;
       loadRolesManagerTree();
+      loadRolesConfirmState();
     });
     loadRolesManagerTree();
+    loadRolesConfirmState();
+  }
+
+  // Toggle button labels + click handler reflect the current
+  // confirmation state for the picker's school year. Re-runs on year
+  // change. Comms can tick "Mark as confirmed" to clear the To Do nag,
+  // and untick it to put the nag back. Non-Comms sees the state read-only.
+  function loadRolesConfirmState() {
+    var btn = document.getElementById('roles-confirm-btn');
+    if (!btn) return;
+    var year = _rolesMgrState.schoolYear;
+    btn.hidden = true;
+    fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.confirmations)) return;
+        var isConfirmed = data.confirmations.some(function (c) { return c.school_year === year; });
+        btn.dataset.confirmed = isConfirmed ? '1' : '0';
+        btn.dataset.year = year;
+        btn.textContent = isConfirmed
+          ? '✓ ' + year + ' confirmed (click to undo)'
+          : 'Mark ' + year + ' as confirmed';
+        btn.hidden = false;
+      })
+      .catch(function () { /* silent */ });
+
+    if (!btn._rwWired) {
+      btn._rwWired = true;
+      btn.addEventListener('click', function () {
+        var yr = btn.dataset.year || _rolesMgrState.schoolYear;
+        var confirmed = btn.dataset.confirmed === '1';
+        btn.disabled = true;
+        var req = confirmed
+          ? fetch('/api/cleaning?action=role-confirm&school_year=' + encodeURIComponent(yr), {
+              method: 'DELETE',
+              headers: rwAuthHeaders()
+            })
+          : fetch('/api/cleaning?action=role-confirm', {
+              method: 'POST',
+              headers: rwAuthHeaders(true),
+              body: JSON.stringify({ school_year: yr })
+            });
+        req
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            btn.disabled = false;
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not update confirmation.');
+              return;
+            }
+            loadRolesConfirmState();
+            // Re-fire the To Do nag so it reflects the new state right away.
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            alert('Network error: ' + (err.message || 'unknown'));
+          });
+      });
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Co-op Calendar (Phase B: DB-backed SESSION_DATES)
+  // ──────────────────────────────────────────────
+  // President + VP set the start + end of each session per school year.
+  // Past years are server-enforced read-only; the UI hides the action
+  // controls accordingly. Edits write through /api/cleaning?action=sessions
+  // and the dashboard's SESSION_DATES picks them up on the next page
+  // load (and the loadCoopSessions refresh in the foreground).
+  var _coopCalState = {
+    schoolYear: '',     // active school year picker value
+    sessions: [],       // full payload from /api/cleaning?action=sessions
+    isLoading: false
+  };
+
+  // Default the picker to the active school year per activeSchoolYear()
+  // (April-1 pivot). When that year has zero rows the table will show
+  // an empty state + "+ Add session" — exactly what the President sees
+  // after April 1 of the new year. Past years are still reachable via
+  // the picker.
+  function coopCalDefaultYear() {
+    return (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+  }
+
+  function isPastSchoolYear(yr) {
+    var active = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    return String(yr || '') < active;
+  }
+
+  // Confirm Role Holders modal — purpose-built view that lists the 7
+  // board roles + currently-assigned holders for the active school year.
+  // Opened from the Comms Director's To Do nag. Comms scans the list,
+  // confirms via the button (which sets role_holder_confirmations), or
+  // jumps to the full Roles Assignments modal to make changes. Other
+  // users with the link can read but the Confirm button is read-only
+  // for them (server enforces).
+  function showConfirmRoleHoldersModal() {
+    var activeYear = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var body = renderReportModal({
+      title: 'Confirm Role Holders — ' + activeYear,
+      subtitle: 'Review the board roles for the new school year. Once they look right, mark the year as confirmed and the reminder will clear.',
+      meta: '',
+      icons: [],
+      bodyId: 'confirm-roles-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading board roles…</p>'
+    });
+    if (!body) return;
+    loadConfirmRoleHolders(activeYear);
+  }
+
+  function loadConfirmRoleHolders(year) {
+    var body = document.getElementById('confirm-roles-body');
+    if (!body) return;
+    body.innerHTML = '<p class="ws-empty">Loading board roles…</p>';
+    Promise.all([
+      fetch('/api/cleaning?action=roles&includeArchived=0', { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(year), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+    ])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }));
+      })
+      .then(function (results) {
+        var allRoles = (results[0].ok && Array.isArray(results[0].data.roles)) ? results[0].data.roles : [];
+        var holders  = (results[1].ok && Array.isArray(results[1].data.holders)) ? results[1].data.holders : [];
+        var confirms = (results[2].ok && Array.isArray(results[2].data.confirmations)) ? results[2].data.confirmations : [];
+        renderConfirmRoleHoldersBody(year, allRoles, holders, confirms);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderConfirmRoleHoldersBody(year, allRoles, holders, confirms) {
+    var body = document.getElementById('confirm-roles-body');
+    if (!body) return;
+    var boardRoles = allRoles
+      .filter(function (r) { return r.category === 'board' && r.status === 'active'; })
+      .sort(function (a, b) { return (a.display_order || 0) - (b.display_order || 0) || a.title.localeCompare(b.title); });
+    var holdersByRole = {};
+    holders.forEach(function (h) {
+      if (!holdersByRole[h.role_id]) holdersByRole[h.role_id] = [];
+      holdersByRole[h.role_id].push(h);
+    });
+    var isConfirmed = confirms.some(function (c) { return c.school_year === year; });
+    var userIsComms = (typeof getWorkspaceRoles === 'function')
+      && getWorkspaceRoles().indexOf('Communications Director') !== -1;
+
+    var h = '<div class="confirm-roles-year-banner">School year <strong>' + escapeHtml(year) + '</strong>';
+    if (isConfirmed) h += ' &middot; <span class="confirm-roles-state-yes">✓ Confirmed</span>';
+    else h += ' &middot; <span class="confirm-roles-state-no">Not yet confirmed</span>';
+    h += '</div>';
+
+    if (boardRoles.length === 0) {
+      h += '<p class="ws-empty">No active board roles found.</p>';
+    } else {
+      h += '<ul class="confirm-roles-list">';
+      boardRoles.forEach(function (r) {
+        var held = holdersByRole[r.id] || [];
+        h += '<li class="confirm-roles-row">';
+        h += '<span class="confirm-roles-title">' + escapeHtml(r.title) + '</span>';
+        h += '<span class="confirm-roles-holders">';
+        if (held.length === 0) {
+          h += '<span class="confirm-roles-empty">Unassigned</span>';
+        } else {
+          h += held.map(function (hh) {
+            var name = hh.person_name || hh.email || '';
+            return '<span class="confirm-roles-chip">' + escapeHtml(name) + '</span>';
+          }).join(' ');
+        }
+        h += '</span>';
+        h += '</li>';
+      });
+      h += '</ul>';
+    }
+
+    h += '<div class="confirm-roles-actions">';
+    if (userIsComms) {
+      if (isConfirmed) {
+        h += '<button id="confirm-roles-undo" class="btn btn-outline-dark btn-sm">↺ Undo confirmation</button>';
+      } else {
+        h += '<button id="confirm-roles-confirm" class="btn btn-primary btn-sm">✓ Mark ' + escapeHtml(year) + ' as confirmed</button>';
+      }
+      h += '<button id="confirm-roles-edit" class="btn btn-outline-dark btn-sm">Edit assignments…</button>';
+    } else {
+      h += '<p class="ws-empty" style="margin:0;">Only the Communications Director can confirm or change board-role assignments.</p>';
+    }
+    h += '</div>';
+
+    body.innerHTML = h;
+    wireConfirmRoleHoldersBody(year);
+  }
+
+  function wireConfirmRoleHoldersBody(year) {
+    var confirmBtn = document.getElementById('confirm-roles-confirm');
+    var undoBtn = document.getElementById('confirm-roles-undo');
+    var editBtn = document.getElementById('confirm-roles-edit');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Saving…';
+        fetch('/api/cleaning?action=role-confirm', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({ school_year: year })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not confirm.');
+              confirmBtn.disabled = false;
+              confirmBtn.textContent = '✓ Mark ' + year + ' as confirmed';
+              return;
+            }
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+            loadConfirmRoleHolders(year);
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            confirmBtn.disabled = false;
+          });
+      });
+    }
+    if (undoBtn) {
+      undoBtn.addEventListener('click', function () {
+        if (!confirm('Un-confirm ' + year + '? The To Do reminder will reappear.')) return;
+        undoBtn.disabled = true;
+        fetch('/api/cleaning?action=role-confirm&school_year=' + encodeURIComponent(year), {
+          method: 'DELETE',
+          headers: rwAuthHeaders()
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not un-confirm.');
+              undoBtn.disabled = false;
+              return;
+            }
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+            loadConfirmRoleHolders(year);
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            undoBtn.disabled = false;
+          });
+      });
+    }
+    if (editBtn) {
+      editBtn.addEventListener('click', function () {
+        // Close this modal then open Roles Assignments. The Comms
+        // Director gets the full board-roles tree (per the updated
+        // scopeRolesToUser).
+        if (typeof closeAnyOpenDetailCard === 'function') closeAnyOpenDetailCard();
+        if (personDetail) personDetail.style.display = 'none';
+        if (typeof showRolesManagerModal === 'function') showRolesManagerModal();
+      });
+    }
+  }
+
+  function showCoopCalendarModal() {
+    var icons = [];
+    var body = renderReportModal({
+      title: 'Session Dates',
+      subtitle: 'Set the start and end dates for each session of the school year. Past years are read-only history.',
+      meta: '',
+      icons: icons,
+      bodyId: 'coop-cal-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading sessions…</p>'
+    });
+    if (!body) return;
+    loadCoopCalendar();
+  }
+
+  function loadCoopCalendar() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return;
+    body.innerHTML = '<p class="ws-empty">Loading sessions…</p>';
+    _coopCalState.isLoading = true;
+    fetch('/api/cleaning?action=sessions', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        _coopCalState.isLoading = false;
+        if (!r.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((r.data && r.data.error) || 'Could not load sessions.') + '</p>';
+          return;
+        }
+        _coopCalState.sessions = Array.isArray(r.data.sessions) ? r.data.sessions : [];
+        if (!_coopCalState.schoolYear) {
+          _coopCalState.schoolYear = coopCalDefaultYear();
+        }
+        renderCoopCalendarBody();
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderCoopCalendarBody() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return;
+    var allYears = Array.from(new Set(_coopCalState.sessions.map(function (s) { return s.school_year; }))).sort();
+    // Also offer the active + next year even if they have no rows yet,
+    // so the President can add the first session for the new year.
+    var active = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var nextYear = (function () {
+      var p = active.split('-'); return (parseInt(p[0], 10) + 1) + '-' + (parseInt(p[1], 10) + 1);
+    })();
+    [active, nextYear].forEach(function (yr) { if (allYears.indexOf(yr) === -1) allYears.push(yr); });
+    allYears.sort();
+    if (allYears.indexOf(_coopCalState.schoolYear) === -1) {
+      _coopCalState.schoolYear = active;
+    }
+
+    var rowsForYear = _coopCalState.sessions
+      .filter(function (s) { return s.school_year === _coopCalState.schoolYear; })
+      .sort(function (a, b) { return a.session_number - b.session_number; });
+    var readOnly = isPastSchoolYear(_coopCalState.schoolYear);
+
+    var h = '<div class="coop-cal-toolbar">';
+    h += '<label class="coop-cal-yearpick">School year ';
+    h += '<select id="coop-cal-year">';
+    allYears.forEach(function (yr) {
+      h += '<option value="' + yr + '"' + (yr === _coopCalState.schoolYear ? ' selected' : '') + '>' + yr + '</option>';
+    });
+    h += '</select></label>';
+    if (readOnly) {
+      h += '<span class="coop-cal-ro-pill">Read-only history</span>';
+    }
+    h += '</div>';
+
+    if (rowsForYear.length === 0) {
+      h += '<p class="ws-empty" style="margin-top:12px;">No sessions yet for ' + escapeHtml(_coopCalState.schoolYear) + '.</p>';
+    } else {
+      h += '<div class="coop-cal-table-wrap">';
+      h += '<table class="coop-cal-table"><thead><tr>';
+      h += '<th>#</th><th>Name</th><th>Start</th><th>End</th>';
+      if (!readOnly) h += '<th></th>';
+      h += '</tr></thead><tbody>';
+      rowsForYear.forEach(function (s) {
+        h += '<tr data-id="' + s.id + '" data-num="' + s.session_number + '">';
+        h += '<td>' + s.session_number + '</td>';
+        if (readOnly) {
+          h += '<td>' + escapeHtml(s.name) + '</td>';
+          h += '<td>' + escapeHtml(s.start_date) + '</td>';
+          h += '<td>' + escapeHtml(s.end_date) + '</td>';
+        } else {
+          h += '<td><input type="text" class="coop-cal-input" data-f="name" value="' + escapeHtml(s.name) + '" /></td>';
+          h += '<td><input type="date" class="coop-cal-input" data-f="start_date" value="' + escapeHtml(s.start_date) + '" /></td>';
+          h += '<td><input type="date" class="coop-cal-input" data-f="end_date" value="' + escapeHtml(s.end_date) + '" /></td>';
+          h += '<td class="coop-cal-actions">';
+          h += '<button class="btn btn-primary btn-sm coop-cal-save" data-id="' + s.id + '" disabled>Save</button>';
+          h += '<button class="btn btn-danger btn-sm coop-cal-delete" data-id="' + s.id + '" title="Remove this session">Delete</button>';
+          h += '</td>';
+        }
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    if (!readOnly) {
+      // "+ Add Session" — defaults to the next session_number and
+      // empty name/dates. President fills in and clicks Save.
+      var nextNum = rowsForYear.length > 0
+        ? Math.max.apply(null, rowsForYear.map(function (r) { return r.session_number; })) + 1
+        : 1;
+      h += '<div class="coop-cal-add-row">';
+      h += '<button id="coop-cal-add" class="btn btn-outline-dark btn-sm" data-next="' + nextNum + '">+ Add session</button>';
+      h += '</div>';
+    }
+
+    body.innerHTML = h;
+    wireCoopCalendarBody();
+  }
+
+  function wireCoopCalendarBody() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return;
+    var picker = document.getElementById('coop-cal-year');
+    if (picker) {
+      picker.addEventListener('change', function () {
+        _coopCalState.schoolYear = this.value;
+        renderCoopCalendarBody();
+      });
+    }
+    // Inputs: enable Save when any field changes.
+    body.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      var saveBtn = tr.querySelector('.coop-cal-save');
+      tr.querySelectorAll('.coop-cal-input').forEach(function (inp) {
+        inp.addEventListener('input', function () {
+          if (saveBtn) saveBtn.disabled = false;
+        });
+      });
+    });
+    // Save row.
+    body.querySelectorAll('.coop-cal-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tr = this.closest('tr');
+        if (!tr) return;
+        var payload = {
+          school_year: _coopCalState.schoolYear,
+          session_number: parseInt(tr.getAttribute('data-num'), 10),
+          name: tr.querySelector('[data-f="name"]').value.trim(),
+          start_date: tr.querySelector('[data-f="start_date"]').value,
+          end_date: tr.querySelector('[data-f="end_date"]').value
+        };
+        if (!payload.name || !payload.start_date || !payload.end_date) {
+          alert('Name, start date, and end date are required.');
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        fetch('/api/cleaning?action=sessions', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify(payload)
+        })
+          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Save failed.');
+              btn.disabled = false;
+              btn.textContent = 'Save';
+              return;
+            }
+            // Refresh sessions list + invalidate dashboard cache so the
+            // next dashboard load picks up the new dates.
+            localStorage.removeItem(CACHE_SESSIONS_KEY);
+            loadCoopCalendar();
+            // Foreground refresh the dashboard's SESSION_DATES too —
+            // user might pop back to My Family next.
+            if (typeof loadCoopSessions === 'function') loadCoopSessions();
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = 'Save';
+          });
+      });
+    });
+    // Delete row.
+    body.querySelectorAll('.coop-cal-delete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        if (!confirm('Remove this session from the calendar?')) return;
+        btn.disabled = true;
+        fetch('/api/cleaning?action=sessions&id=' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: rwAuthHeaders()
+        })
+          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Delete failed.');
+              btn.disabled = false;
+              return;
+            }
+            localStorage.removeItem(CACHE_SESSIONS_KEY);
+            loadCoopCalendar();
+            if (typeof loadCoopSessions === 'function') loadCoopSessions();
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            btn.disabled = false;
+          });
+      });
+    });
+    // "+ Add Session" — opens a tiny prompt-driven flow. Could become
+    // an inline new-row in a follow-up; keeping minimal for v1.
+    var addBtn = document.getElementById('coop-cal-add');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        var next = parseInt(this.getAttribute('data-next'), 10) || 1;
+        var name = prompt('Session name (e.g. "Fall Session 1"):', 'Session ' + next);
+        if (!name) return;
+        var start = prompt('Start date (YYYY-MM-DD):', '');
+        if (!start) return;
+        var end = prompt('End date (YYYY-MM-DD):', '');
+        if (!end) return;
+        fetch('/api/cleaning?action=sessions', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({
+            school_year: _coopCalState.schoolYear,
+            session_number: next,
+            name: name.trim(),
+            start_date: start.trim(),
+            end_date: end.trim()
+          })
+        })
+          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not add session.');
+              return;
+            }
+            localStorage.removeItem(CACHE_SESSIONS_KEY);
+            loadCoopCalendar();
+            if (typeof loadCoopSessions === 'function') loadCoopSessions();
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+          });
+      });
+    }
   }
 
   // Export current-year role holders as a CSV. One row per holder; roles
@@ -14077,9 +14759,14 @@
     allRoles.forEach(function (r) {
       if (r.category === 'board' && roleSet[normalize(r.title)]) userBoardIds[r.id] = true;
     });
+    // Communications Director also sees ALL board roles (regardless of
+    // committee) so she can manage the Google Workspace-tied board
+    // assignments. Mirror the server's canEditRoleHolders gate.
+    var isComms = userRoles.indexOf('Communications Director') !== -1;
     return allRoles.filter(function (r) {
       if (userBoardIds[r.id]) return true;
       if (r.parent_role_id && userBoardIds[r.parent_role_id]) return true;
+      if (isComms && r.category === 'board') return true;
       return false;
     });
   }
@@ -14159,6 +14846,13 @@
         r.title === 'Morning Class Liaison';
       if (!holderManagedElsewhere) {
         var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
+        // Board-role holders are gated to the Comms Director (server
+        // enforces). For everyone else, board rows render without the
+        // Assign button and without the × on each chip — they can see
+        // who holds the seat but can't change it. Mirrors the new
+        // canEditRoleHolders helper on the server.
+        var isBoardRow = r.category === 'board';
+        var canManageThisRow = !isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1);
         h2 += '<div class="roles-row-holder-line">';
         if (held.length === 0) {
           h2 += '<span class="roles-row-holder roles-row-holder-empty">Unassigned</span>';
@@ -14166,16 +14860,23 @@
           h2 += '<span class="roles-row-holder-label">Held by</span> ';
           h2 += '<span class="roles-row-holder">';
           h2 += held.map(function (hh) {
+            var removeBtn = canManageThisRow
+              ? '<button type="button" class="roles-row-holder-remove" data-holder-id="' + hh.id +
+                  '" data-holder-name="' + escapeHtml(hh.person_name || hh.email) +
+                  '" aria-label="Remove ' + escapeHtml(hh.person_name || hh.email) + '">&times;</button>'
+              : '';
             return '<span class="roles-row-holder-chip">' +
               escapeHtml(hh.person_name || hh.email) +
-              '<button type="button" class="roles-row-holder-remove" data-holder-id="' + hh.id +
-              '" data-holder-name="' + escapeHtml(hh.person_name || hh.email) +
-              '" aria-label="Remove ' + escapeHtml(hh.person_name || hh.email) + '">&times;</button>' +
+              removeBtn +
               '</span>';
           }).join(' ');
           h2 += '</span>';
         }
-        h2 += ' <button type="button" class="sc-btn roles-row-assign" data-role-id="' + r.id + '" aria-label="Assign holder for ' + escapeHtml(r.title) + '">Assign</button>';
+        if (canManageThisRow) {
+          h2 += ' <button type="button" class="sc-btn roles-row-assign" data-role-id="' + r.id + '" aria-label="Assign holder for ' + escapeHtml(r.title) + '">Assign</button>';
+        } else if (isBoardRow) {
+          h2 += ' <span class="roles-row-board-note" title="Board roles are tied to Google Workspace accounts and can only be changed by the Communications Director.">🔒 Comms-managed</span>';
+        }
         h2 += '</div>';
       }
       h2 += '<div class="roles-row-meta">';
@@ -14748,6 +15449,179 @@
       }
     }
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  // President + VP To Do item: "Set [year] session dates". Triggered
+  // once we're 2 weeks past the previous year's latest session end AND
+  // the upcoming year still has fewer than 5 sessions defined. Uses the
+  // _allCoopSessions cache populated by loadCoopSessions — no extra
+  // network hop. Count badge shows how many sessions are still needed.
+  function loadCoopCalendarTodoCount() {
+    var item = document.getElementById('ws-todo-coop-cal-item');
+    if (!item) return;
+    var pill = document.getElementById('ws-coop-cal-count');
+    var label = document.getElementById('ws-coop-cal-label');
+
+    var all = Array.isArray(_allCoopSessions) ? _allCoopSessions : [];
+    if (all.length === 0) {
+      item.hidden = true;
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      return;
+    }
+    var todayStr = new Date().toISOString().slice(0, 10);
+
+    // Group sessions by year, find the most recent completed year
+    // (year whose latest session end is in the past).
+    var byYear = {};
+    all.forEach(function (s) {
+      if (!byYear[s.school_year]) byYear[s.school_year] = [];
+      byYear[s.school_year].push(s);
+    });
+    var years = Object.keys(byYear).sort();
+    var previousYear = null;
+    var previousLatestEnd = null;
+    for (var i = years.length - 1; i >= 0; i--) {
+      var ends = byYear[years[i]].map(function (s) { return s.end_date; }).sort();
+      var maxEnd = ends[ends.length - 1];
+      if (todayStr > maxEnd) {
+        previousYear = years[i];
+        previousLatestEnd = maxEnd;
+        break;
+      }
+    }
+    if (!previousYear) {
+      // No completed year yet — nothing to nag about.
+      item.hidden = true;
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      return;
+    }
+
+    // Compute trigger date: previous year's latest session end + 14 days.
+    var triggerDt = new Date(previousLatestEnd + 'T00:00:00');
+    triggerDt.setDate(triggerDt.getDate() + 14);
+    var triggerStr = triggerDt.toISOString().slice(0, 10);
+
+    // Next year label = previousYear + 1.
+    var parts = previousYear.split('-');
+    var a = parseInt(parts[0], 10);
+    var b = parseInt(parts[1], 10);
+    var nextYear = (a + 1) + '-' + (b + 1);
+    var nextYearCount = (byYear[nextYear] || []).length;
+    var TARGET = 5;
+    var missing = Math.max(0, TARGET - nextYearCount);
+
+    if (todayStr >= triggerStr && missing > 0) {
+      if (pill)  pill.textContent  = String(missing);
+      if (label) label.textContent = 'Set ' + nextYear + ' session dates';
+      item.hidden = false;
+    } else {
+      item.hidden = true;
+    }
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  // Communications Director To Do: "Confirm role holders for [year]".
+  // Roles switch at the end of Field Day (the Wednesday after Session 5
+  // ends). After that, the active school year needs its holders
+  // reviewed. This nag fires when:
+  //   1. Today is past Field Day of the most recent completed year, AND
+  //   2. The active year does NOT have a row in role_holder_confirmations.
+  // Comms ticks "Mark as confirmed" in the Roles Assignments modal once
+  // she's done reviewing; that inserts the row and the nag goes away.
+  // The badge count shows how many holders are missing compared to last
+  // year (best-effort indicator of remaining work) — primary signal is
+  // the boolean confirmation, count is informational only.
+  function loadRoleHolderNagCount() {
+    var item = document.getElementById('ws-todo-role-holders-item');
+    if (!item) return;
+    var pill = document.getElementById('ws-role-holders-count');
+    var label = document.getElementById('ws-role-holders-label');
+
+    // Step 1: compute Field Day of the most recent completed school
+    // year, using _allCoopSessions if available, falling back to the
+    // current SESSION_DATES (always the year just ended in summer).
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var all = Array.isArray(_allCoopSessions) ? _allCoopSessions : [];
+    var byYear = {};
+    all.forEach(function (s) {
+      if (!byYear[s.school_year]) byYear[s.school_year] = [];
+      byYear[s.school_year].push(s);
+    });
+    var years = Object.keys(byYear).sort();
+    var previousYear = null;
+    var previousLatestEnd = null;
+    for (var i = years.length - 1; i >= 0; i--) {
+      var ends = byYear[years[i]].map(function (s) { return s.end_date; }).sort();
+      var maxEnd = ends[ends.length - 1];
+      if (todayStr > maxEnd) { previousYear = years[i]; previousLatestEnd = maxEnd; break; }
+    }
+    if (!previousYear) {
+      // Fall back to SESSION_DATES (last year ended, currently in
+      // summer). Year label is ACTIVE_SESSION_YEAR which the picker
+      // sets to the most-recent-completed year in summer.
+      var fbEnds = Object.keys(SESSION_DATES)
+        .map(function (k) { return SESSION_DATES[k] && SESSION_DATES[k].end; })
+        .filter(Boolean);
+      if (fbEnds.length === 0) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+      previousLatestEnd = fbEnds.sort().pop();
+      if (todayStr <= previousLatestEnd) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+      previousYear = ACTIVE_SESSION_YEAR;
+    }
+    // Field Day = Wednesday strictly after previousLatestEnd. Same
+    // snap-to-Wednesday rule as the summer-break detection.
+    var endDt = new Date(previousLatestEnd + 'T00:00:00');
+    var dow = endDt.getDay();
+    var daysToFieldDay = (3 - dow + 7) % 7;
+    if (daysToFieldDay === 0) daysToFieldDay = 7;
+    endDt.setDate(endDt.getDate() + daysToFieldDay);
+    var fieldDayStr = endDt.toISOString().slice(0, 10);
+    if (todayStr <= fieldDayStr) {
+      item.hidden = true;
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      return;
+    }
+
+    // Step 2: compare role-holder counts for previous vs active year.
+    // Active year per the April-1 pivot — that's what the Roles
+    // Assignments modal opens to by default, so the count we compare
+    // against is the one Comms would actually be editing.
+    var activeYear = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+
+    Promise.all([
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(activeYear), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(previousYear), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+    ])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) { return r.ok ? r.json() : null; }));
+      })
+      .then(function (results) {
+        var activeCount   = (results[0] && Array.isArray(results[0].holders)) ? results[0].holders.length : 0;
+        var previousCount = (results[1] && Array.isArray(results[1].holders)) ? results[1].holders.length : 0;
+        var confirms = (results[2] && Array.isArray(results[2].confirmations)) ? results[2].confirmations : [];
+        var isConfirmed = confirms.some(function (c) { return c.school_year === activeYear; });
+        if (!isConfirmed) {
+          // Count badge is informational — how many seats are still
+          // empty compared to last year. Always shows at least 1 so
+          // there's a visible badge even when previous-year data is
+          // sparse.
+          var diff = previousCount > activeCount
+            ? previousCount - activeCount
+            : Math.max(1, activeCount === 0 ? Math.max(1, previousCount) : 0);
+          if (diff < 1) diff = 1;
+          if (pill)  pill.textContent  = String(diff);
+          if (label) label.textContent = 'Confirm ' + activeYear + ' role holders';
+          item.hidden = false;
+        } else {
+          item.hidden = true;
+        }
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { /* silent — item stays hidden */ });
   }
 
   function loadTreasurerPendingCount() {

@@ -874,3 +874,73 @@ CREATE INDEX IF NOT EXISTS role_holders_v2_email_idx
 --
 -- The drop script is small and explicit so it can't accidentally fire
 -- on a run-migration.js sweep.
+
+-- ──────────────────────────────────────────────
+-- Co-op Calendar (Phase B of the SESSION_DATES migration)
+-- ──────────────────────────────────────────────
+-- Source of truth for which sessions exist in which school year, with
+-- their start + end dates. Replaces the hardcoded SESSION_DATES const
+-- in script.js + api/tour.js. President + Vice-President manage rows
+-- via the "Co-op Calendar" Workspace modal (api/cleaning.js
+-- action=sessions, gated through canEditAsRole).
+--
+-- school_year is the canonical "2025-2026" / "2026-2027" string; matches
+-- activeSchoolYear().label and role_holders_v2.school_year, so the same
+-- value joins across the schema.
+--
+-- session_number is 1..N within a year. Stored as INT (not bounded by a
+-- CHECK) so future years can extend past 5 sessions without a schema
+-- change.
+--
+-- Initial seed below replays the 2025-2026 SESSION_DATES so the read
+-- path has something to return on day one. Future-year rows land via the
+-- management modal — no further SQL edits required.
+CREATE TABLE IF NOT EXISTS co_op_sessions (
+  id              SERIAL PRIMARY KEY,
+  school_year     TEXT NOT NULL,
+  session_number  INTEGER NOT NULL,
+  name            TEXT NOT NULL,
+  start_date      DATE NOT NULL,
+  end_date        DATE NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by      TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS co_op_sessions_year_num_idx
+  ON co_op_sessions (school_year, session_number);
+CREATE INDEX IF NOT EXISTS co_op_sessions_year_idx
+  ON co_op_sessions (school_year);
+
+-- Seed the 2025-2026 sessions from the prior hardcoded SESSION_DATES.
+-- ON CONFLICT DO NOTHING — re-runs and prod backfills are no-ops once
+-- the row exists, and a President who later edits Session 3's dates
+-- through the UI won't have her edits clobbered by a re-run.
+INSERT INTO co_op_sessions (school_year, session_number, name, start_date, end_date) VALUES
+  ('2025-2026', 1, 'Fall Session 1',   '2025-09-03', '2025-10-01'),
+  ('2025-2026', 2, 'Fall Session 2',   '2025-10-15', '2025-11-12'),
+  ('2025-2026', 3, 'Winter Session 3', '2026-01-14', '2026-02-11'),
+  ('2025-2026', 4, 'Spring Session 4', '2026-03-04', '2026-04-01'),
+  ('2025-2026', 5, 'Spring Session 5', '2026-04-15', '2026-05-13')
+ON CONFLICT (school_year, session_number) DO NOTHING;
+
+-- ──────────────────────────────────────────────
+-- Role-holder confirmations (Phase B follow-up)
+-- ──────────────────────────────────────────────
+-- After Field Day every May, the Communications Director sees a "Confirm
+-- role holders" To Do until she explicitly marks the new school year as
+-- confirmed. This table holds that per-year tick. A simple key-by-year
+-- pattern; the existence of a row is the affirmative signal.
+-- Comms can un-confirm (DELETE row) if mid-year a re-review is needed.
+-- Confirmation is intentionally separate from role_holders_v2 so adding
+-- or removing a holder doesn't reset the year's confirmed status —
+-- Comms ticked the box, that's enough.
+CREATE TABLE IF NOT EXISTS role_holder_confirmations (
+  school_year         TEXT PRIMARY KEY,
+  confirmed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirmed_by_email  TEXT NOT NULL DEFAULT ''
+);
+-- Seed the 2025-2026 row so on prod / dev the previous (completed)
+-- year shows as confirmed by default. New years start unconfirmed.
+INSERT INTO role_holder_confirmations (school_year, confirmed_by_email)
+VALUES ('2025-2026', '')
+ON CONFLICT (school_year) DO NOTHING;

@@ -13,11 +13,17 @@
 // GET    /api/cleaning?action=role-holders       → holders for a school year
 // POST   /api/cleaning?action=role-holders       → assign a holder
 // DELETE /api/cleaning?action=role-holders&id=N → remove a holder
+// GET    /api/cleaning?action=sessions           → co-op calendar (current + next year)
+// POST   /api/cleaning?action=sessions           → upsert a session (President/VP)
+// DELETE /api/cleaning?action=sessions&id=N      → remove a session (President/VP)
+// GET    /api/cleaning?action=role-confirm       → confirmed years (Comms-controlled)
+// POST   /api/cleaning?action=role-confirm       → mark a year as confirmed (Comms gated)
+// DELETE /api/cleaning?action=role-confirm       → un-confirm a year (Comms gated)
 
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole, isSuperUser, canImpersonate } = require('./_permissions');
+const { canEditAsRole, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
 
 // Editing a role_descriptions row is gated by which bucket of fields
 // you're touching. Meta = title / hierarchy / lifecycle, reserved for
@@ -103,6 +109,24 @@ async function canEditRoleContent(userEmail, sql, roleId) {
   return false;
 }
 
+// Board roles are tied to Google Workspace accounts (`president@`,
+// `vp@`, etc.) — the role mailbox IS the role. Only the Communications
+// Director should be able to assign or remove a board-role holder
+// since she's also the one who owns the Workspace user/group setup
+// for those mailboxes. Committee-role assignments fall back to the
+// usual content-edit ladder (each chair can manage their own
+// committee). Returns true if (a) the role is a committee role and
+// the user passes canEditRoleContent, OR (b) the role is a board role
+// and the user is the Comms Director.
+async function canEditRoleHolders(userEmail, sql, roleId) {
+  const row = await sql`SELECT category FROM roles WHERE id = ${roleId}`;
+  const category = row[0] && row[0].category;
+  if (category === 'board') {
+    return await canEditAsRole(userEmail, 'Communications Director');
+  }
+  return await canEditRoleContent(userEmail, sql, roleId);
+}
+
 // Resolve a free-text committee name to a committees.id. Returns null if
 // the input is empty (clears the committee_id), or undefined if the name
 // doesn't match an existing committee (caller should 400). Committees
@@ -177,7 +201,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -572,6 +596,205 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ school_year: schoolYear, committees: tree });
     }
 
+    // ── Co-op Sessions (Phase B: DB-backed SESSION_DATES) ──
+    // GET returns rows for the active school year + the next school year
+    // (so the portal can show "upcoming" once next year is set up). Any
+    // signed-in @rootsandwingsindy.com user can read; the auth check at
+    // the top of the handler already enforced that.
+    //
+    // Date values come back as YYYY-MM-DD strings. Neon returns DATE as a
+    // JS Date object whose UTC ISO prefix happens to match the
+    // Indianapolis local date (DATE has no time/TZ; the driver synthesizes
+    // midnight-local then re-renders in UTC). Slicing the first 10 chars
+    // gives us a TZ-agnostic date string the client can compare against
+    // its local "today" without surprises — bitten by this before, see
+    // feedback_timezone_dates.md.
+    if (action === 'sessions') {
+      if (req.method === 'GET') {
+        // Return ALL co-op sessions across all school years. The client
+        // picks which year is "active" for SESSION_DATES purposes —
+        // having both the year-just-ending and the year-just-starting on
+        // hand keeps the spring-to-fall handoff working (e.g. in summer
+        // 2026 we still need 2025-26's Field Day to compute summer-break
+        // state even though activeSchoolYear() already says "2026-2027").
+        // The dataset is small (5 rows per year), so no need to slice.
+        const rows = await sql`
+          SELECT id, school_year, session_number, name, start_date, end_date,
+                 updated_at, updated_by
+          FROM co_op_sessions
+          ORDER BY school_year, session_number
+        `;
+        const sessions = rows.map(r => ({
+          id: r.id,
+          school_year: r.school_year,
+          session_number: r.session_number,
+          name: r.name,
+          start_date: r.start_date instanceof Date
+            ? r.start_date.toISOString().slice(0, 10)
+            : String(r.start_date).slice(0, 10),
+          end_date: r.end_date instanceof Date
+            ? r.end_date.toISOString().slice(0, 10)
+            : String(r.end_date).slice(0, 10),
+          updated_at: r.updated_at,
+          updated_by: r.updated_by
+        }));
+        return res.status(200).json({ sessions });
+      }
+
+      // Writes — gated to President OR Vice-President. canEditAsRole
+      // is checked twice (once per role) because there's no OR helper
+      // in _permissions.js. Past school years are read-only history:
+      // if the row's school_year is older than the active year, we
+      // reject the write so historical dates never get rewritten
+      // through the UI.
+      async function canManageCoopSessions(email) {
+        if (!email) return false;
+        if (await canEditAsRole(email, 'President')) return true;
+        if (await canEditAsRole(email, 'Vice-President')) return true;
+        return false;
+      }
+      function isReadOnlyYear(schoolYear) {
+        // String compare works because "YYYY-YYYY" sorts chronologically.
+        return String(schoolYear || '') < activeSchoolYear();
+      }
+
+      if (req.method === 'POST') {
+        if (!(await canManageCoopSessions(user.email))) {
+          return res.status(403).json({ error: 'Only the President or Vice-President can manage co-op sessions.' });
+        }
+        const body = req.body || {};
+        const schoolYear = String(body.school_year || '').trim();
+        const sessionNumber = parseInt(body.session_number, 10);
+        const name = String(body.name || '').trim();
+        const startDate = String(body.start_date || '').trim();
+        const endDate = String(body.end_date || '').trim();
+        // Format checks — keep them strict so a typo in the modal
+        // can't write a garbage date the client will then fail to parse.
+        if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+          return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
+        }
+        const yrA = parseInt(schoolYear.slice(0, 4), 10);
+        const yrB = parseInt(schoolYear.slice(5), 10);
+        if (yrB !== yrA + 1) {
+          return res.status(400).json({ error: 'school_year second half must be the year after the first half.' });
+        }
+        if (!Number.isInteger(sessionNumber) || sessionNumber < 1 || sessionNumber > 20) {
+          return res.status(400).json({ error: 'session_number must be a positive integer (1-20).' });
+        }
+        if (!name) return res.status(400).json({ error: 'name is required.' });
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+          return res.status(400).json({ error: 'start_date and end_date must be YYYY-MM-DD.' });
+        }
+        if (endDate < startDate) {
+          return res.status(400).json({ error: 'end_date must be on or after start_date.' });
+        }
+        if (isReadOnlyYear(schoolYear)) {
+          return res.status(400).json({ error: 'Past school years are read-only history.' });
+        }
+        const inserted = await sql`
+          INSERT INTO co_op_sessions
+            (school_year, session_number, name, start_date, end_date, updated_at, updated_by)
+          VALUES
+            (${schoolYear}, ${sessionNumber}, ${name}, ${startDate}, ${endDate}, NOW(), ${user.email})
+          ON CONFLICT (school_year, session_number) DO UPDATE
+            SET name = EXCLUDED.name,
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date,
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by
+          RETURNING id, school_year, session_number, name, start_date, end_date,
+                    updated_at, updated_by
+        `;
+        const r = inserted[0];
+        return res.status(200).json({
+          session: {
+            id: r.id,
+            school_year: r.school_year,
+            session_number: r.session_number,
+            name: r.name,
+            start_date: r.start_date instanceof Date
+              ? r.start_date.toISOString().slice(0, 10)
+              : String(r.start_date).slice(0, 10),
+            end_date: r.end_date instanceof Date
+              ? r.end_date.toISOString().slice(0, 10)
+              : String(r.end_date).slice(0, 10),
+            updated_at: r.updated_at,
+            updated_by: r.updated_by
+          }
+        });
+      }
+
+      if (req.method === 'DELETE') {
+        if (!(await canManageCoopSessions(user.email))) {
+          return res.status(403).json({ error: 'Only the President or Vice-President can manage co-op sessions.' });
+        }
+        const id = parseInt(req.query.id, 10);
+        if (!Number.isInteger(id) || id < 1) {
+          return res.status(400).json({ error: 'id query parameter is required.' });
+        }
+        // Look up the row first so we can enforce the past-year guard
+        // (and surface a 404 cleanly instead of a silent no-op delete).
+        const existing = await sql`SELECT school_year FROM co_op_sessions WHERE id = ${id}`;
+        if (existing.length === 0) {
+          return res.status(404).json({ error: 'Session not found.' });
+        }
+        if (isReadOnlyYear(existing[0].school_year)) {
+          return res.status(400).json({ error: 'Past school years are read-only history.' });
+        }
+        await sql`DELETE FROM co_op_sessions WHERE id = ${id}`;
+        return res.status(200).json({ ok: true });
+      }
+
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // ── Role-holder confirmations ──
+    // Per-year tick the Communications Director sets once she's done
+    // reviewing role holders for the new school year. Used by the To Do
+    // widget to stop nagging — the existence of a row IS the affirmative
+    // signal. Any signed-in @rootsandwingsindy.com user can read (the
+    // dashboard surfaces the state). Only the Comms Director (or a
+    // super user impersonating her via View-As) can write.
+    if (action === 'role-confirm') {
+      if (req.method === 'GET') {
+        const rows = await sql`
+          SELECT school_year, confirmed_at, confirmed_by_email
+          FROM role_holder_confirmations
+          ORDER BY school_year
+        `;
+        return res.status(200).json({ confirmations: rows });
+      }
+      const canConfirm = await canEditAsRole(user.email, 'Communications Director');
+      if (!canConfirm) {
+        return res.status(403).json({ error: 'Only the Communications Director can confirm role holders.' });
+      }
+      if (req.method === 'POST') {
+        const body = req.body || {};
+        const schoolYear = String(body.school_year || '').trim();
+        if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+          return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
+        }
+        const inserted = await sql`
+          INSERT INTO role_holder_confirmations (school_year, confirmed_at, confirmed_by_email)
+          VALUES (${schoolYear}, NOW(), ${user.email})
+          ON CONFLICT (school_year) DO UPDATE
+            SET confirmed_at = NOW(),
+                confirmed_by_email = EXCLUDED.confirmed_by_email
+          RETURNING school_year, confirmed_at, confirmed_by_email
+        `;
+        return res.status(200).json({ confirmation: inserted[0] });
+      }
+      if (req.method === 'DELETE') {
+        const schoolYear = String(req.query.school_year || '').trim();
+        if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+          return res.status(400).json({ error: 'school_year query parameter is required.' });
+        }
+        await sql`DELETE FROM role_holder_confirmations WHERE school_year = ${schoolYear}`;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     // ── Role Holders (v2) ──
     // Reads from role_holders_v2 + people. Response preserves the legacy
     // field names (`email`, `person_name`, `family_name`) so the existing
@@ -607,10 +830,12 @@ module.exports = async function handler(req, res) {
         }
         const yr = String(school_year || '2025-2026').trim();
         const personEmail = String(email).trim().toLowerCase();
-        // Same gate as content edits — President + super user always pass;
-        // an ancestor-role holder (e.g., VP for Programming Committee
-        // roles) can manage their own committee's assignments.
-        const allowed = await canEditRoleContent(user.email, sql, roleId);
+        // Board roles (President, VP, Treasurer, etc.) are gated to the
+        // Communications Director — she owns the Workspace mailbox /
+        // group memberships that back those roles. Committee roles fall
+        // back to the usual content-edit ladder so each chair can manage
+        // their own committee.
+        const allowed = await canEditRoleHolders(user.email, sql, roleId);
         if (!allowed) {
           return res.status(403).json({ error: 'Not authorized to assign holders for this role' });
         }
@@ -648,7 +873,7 @@ module.exports = async function handler(req, res) {
         if (!id) return res.status(400).json({ error: 'id required' });
         const row = await sql`SELECT role_id FROM role_holders_v2 WHERE id = ${id}`;
         if (row.length === 0) return res.status(404).json({ error: 'Not found' });
-        const allowed = await canEditRoleContent(user.email, sql, row[0].role_id);
+        const allowed = await canEditRoleHolders(user.email, sql, row[0].role_id);
         if (!allowed) {
           return res.status(403).json({ error: 'Not authorized to remove holders for this role' });
         }

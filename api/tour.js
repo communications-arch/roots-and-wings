@@ -26,17 +26,92 @@ const REGISTRATION_FEE = 40;
 const DEFAULT_SEASON = '2026-2027';
 const VALID_TRACKS = ['Morning Only', 'Afternoon Only', 'Both', 'Other'];
 
-// Session calendar — mirror of SESSION_DATES in script.js. Used server-side
-// to compute available tour Wednesdays + validate the date the family
-// picks on the public tour form. Update both copies in lockstep when a
-// new school year rolls. (Future: refactor to a single shared source.)
-const SESSION_DATES = {
+// Session calendar — DEFENSIVE FALLBACK only. Phase B moved the source
+// of truth to the co_op_sessions DB table (managed by President + VP
+// via the Co-op Calendar workspace modal). loadSessionDatesFromDb()
+// below queries that table at request time; this static block is the
+// last-resort fallback if the DB query fails, so the public tour form
+// never silently breaks on a transient outage.
+const SESSION_DATES_FALLBACK = {
   1: { name: 'Fall Session 1',   start: '2025-09-03', end: '2025-10-01' },
   2: { name: 'Fall Session 2',   start: '2025-10-15', end: '2025-11-12' },
   3: { name: 'Winter Session 3', start: '2026-01-14', end: '2026-02-11' },
   4: { name: 'Spring Session 4', start: '2026-03-04', end: '2026-04-01' },
   5: { name: 'Spring Session 5', start: '2026-04-15', end: '2026-05-13' }
 };
+
+// Pull every session row from co_op_sessions, group by school_year, and
+// pick the year that best represents "current" (matches the client's
+// picker logic in applyCoopSessionsData). Returns an object shaped like
+// SESSION_DATES_FALLBACK (keyed by session_number). Returns the fallback
+// if the table is empty or the query throws — every caller is wrapped
+// so a DB blip never bubbles up to the tour form.
+async function loadSessionDatesFromDb(sql) {
+  try {
+    const rows = await sql`
+      SELECT school_year, session_number, name, start_date, end_date
+      FROM co_op_sessions
+      ORDER BY school_year, session_number
+    `;
+    if (rows.length === 0) return SESSION_DATES_FALLBACK;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const byYear = {};
+    rows.forEach(r => {
+      const yr = r.school_year;
+      if (!byYear[yr]) byYear[yr] = [];
+      byYear[yr].push(r);
+    });
+    const years = Object.keys(byYear).sort();
+    function yearSpan(yr) {
+      const list = byYear[yr];
+      let minStart = null, maxEnd = null;
+      list.forEach(r => {
+        const start = r.start_date instanceof Date
+          ? r.start_date.toISOString().slice(0, 10)
+          : String(r.start_date).slice(0, 10);
+        const end = r.end_date instanceof Date
+          ? r.end_date.toISOString().slice(0, 10)
+          : String(r.end_date).slice(0, 10);
+        if (!minStart || start < minStart) minStart = start;
+        if (!maxEnd   || end   > maxEnd)   maxEnd   = end;
+      });
+      return { minStart, maxEnd };
+    }
+    let pick = null;
+    for (const yr of years) {
+      const sp = yearSpan(yr);
+      if (todayStr >= sp.minStart && todayStr <= sp.maxEnd) { pick = yr; break; }
+    }
+    if (!pick) {
+      // Prefer the NEXT scheduled year (so tour form picks future
+      // Wednesdays once the new year is set, even if no row spans today).
+      for (const yr of years) {
+        if (todayStr < yearSpan(yr).minStart) { pick = yr; break; }
+      }
+    }
+    if (!pick) {
+      // Fall back to the most recent year — tour form will show no
+      // upcoming Wednesdays, which is the correct summer-break state.
+      pick = years[years.length - 1];
+    }
+    const out = {};
+    byYear[pick].forEach(r => {
+      out[r.session_number] = {
+        name: r.name,
+        start: r.start_date instanceof Date
+          ? r.start_date.toISOString().slice(0, 10)
+          : String(r.start_date).slice(0, 10),
+        end: r.end_date instanceof Date
+          ? r.end_date.toISOString().slice(0, 10)
+          : String(r.end_date).slice(0, 10)
+      };
+    });
+    return out;
+  } catch (err) {
+    console.error('[tour] loadSessionDatesFromDb failed:', err);
+    return SESSION_DATES_FALLBACK;
+  }
+}
 
 // Tours run during co-op (Wednesdays only) so prospective families can
 // see the program in action. 30-minute start slots from 10:00 AM through
@@ -63,12 +138,17 @@ const VALID_TOUR_STATUSES = ['requested', 'scheduled', 'toured', 'joined', 'decl
 // range (inclusive). Returns chronological order. Today is excluded —
 // even if today is a Wednesday in-session, the form should only let
 // families pick a future date. Cap at end of last session.
-function getUpcomingTourDates() {
+// `sessions` is the active year's session map (loaded once per request
+// via loadSessionDatesFromDb so we don't hit the DB inside the inner
+// loop). Defaults to the static fallback for unauthenticated callers
+// that haven't loaded yet.
+function getUpcomingTourDates(sessions) {
+  sessions = sessions || SESSION_DATES_FALLBACK;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dates = [];
-  Object.keys(SESSION_DATES).sort().forEach(k => {
-    const s = SESSION_DATES[k];
+  Object.keys(sessions).sort().forEach(k => {
+    const s = sessions[k];
     const start = new Date(s.start + 'T00:00:00');
     const end = new Date(s.end + 'T00:00:00');
     // Walk from start to end, picking out Wednesdays (getDay() === 3).
@@ -93,10 +173,10 @@ function getUpcomingTourDates() {
 // Validate a (date, time) pair posted from the form: must be one of the
 // computed upcoming Wednesdays AND a known time slot. Returns null on
 // success or a string error message on failure.
-function validateTourSlot(date, time) {
+function validateTourSlot(date, time, sessions) {
   if (!date && !time) return null; // both optional — family may submit without picking
   if (!date || !time) return 'Please pick both a date and a time, or leave both blank.';
-  const slots = getUpcomingTourDates();
+  const slots = getUpcomingTourDates(sessions);
   if (!slots.some(s => s.date === date)) return 'That date is not an upcoming co-op Wednesday.';
   if (TOUR_TIME_VALUES.indexOf(time) === -1) return 'That time slot is not available.';
   return null;
@@ -157,7 +237,10 @@ async function handleTour(body, res) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Invalid email format.' });
   }
-  const slotErr = validateTourSlot(preferredDate, preferredTime);
+  // Load the active-year session calendar once per request so the slot
+  // validator + the date-row lookup below both see the same data.
+  const sessionsForTour = await loadSessionDatesFromDb(getSql());
+  const slotErr = validateTourSlot(preferredDate, preferredTime, sessionsForTour);
   if (slotErr) return res.status(400).json({ error: slotErr });
 
   const safeName = escapeHtml(name);
@@ -192,7 +275,7 @@ async function handleTour(body, res) {
   let slotRow = '';
   if (preferredDate && preferredTime) {
     const slot = TOUR_TIME_SLOTS.find(s => s.value === preferredTime);
-    const dateRow = getUpcomingTourDates().find(d => d.date === preferredDate);
+    const dateRow = getUpcomingTourDates(sessionsForTour).find(d => d.date === preferredDate);
     if (dateRow && slot) {
       slotRow = `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Preferred slot</td><td style="padding:8px 0;">${escapeHtml(dateRow.label)} at ${escapeHtml(slot.label)}</td></tr>`;
     }
@@ -893,10 +976,11 @@ async function handleReconcileCron(req, res) {
 // ── Public config (no secrets — just the public Maps key + the
 // tour-form's available date/time slots so the form doesn't have to
 // duplicate SESSION_DATES on the client). ──
-function handleConfig(res) {
+async function handleConfig(res) {
+  const sessions = await loadSessionDatesFromDb(getSql());
   return res.status(200).json({
     googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY || null,
-    tourDates: getUpcomingTourDates(),
+    tourDates: getUpcomingTourDates(sessions),
     tourTimes: TOUR_TIME_SLOTS
   });
 }
@@ -2656,11 +2740,15 @@ async function handleTourUpdate(body, req, res) {
     return res.status(400).json({ error: 'Unknown tour status: ' + newStatus });
   }
 
+  // Loaded once for both the slot validation below and the confirmation
+  // email's friendly slot label further down.
+  const sessionsForUpdate = await loadSessionDatesFromDb(getSql());
+
   // If a scheduled slot is being set, validate it the same way as the
   // public form — Wednesday in an active session, time in the 10-2:30
   // grid. Both required (or both blank to clear).
   if (scheduledDate !== undefined || scheduledTime !== undefined) {
-    const slotErr = validateTourSlot(scheduledDate || null, scheduledTime || null);
+    const slotErr = validateTourSlot(scheduledDate || null, scheduledTime || null, sessionsForUpdate);
     if (slotErr) return res.status(400).json({ error: slotErr });
   }
 
@@ -2710,7 +2798,7 @@ async function handleTourUpdate(body, req, res) {
     if (newStatus === 'scheduled' && existing.status !== 'scheduled' && targetScheduledDate && targetScheduledTime) {
       try {
         const slot = TOUR_TIME_SLOTS.find(s => s.value === String(targetScheduledTime));
-        const dateRow = getUpcomingTourDates().find(d => d.date === String(targetScheduledDate));
+        const dateRow = getUpcomingTourDates(sessionsForUpdate).find(d => d.date === String(targetScheduledDate));
         const slotLabel = (dateRow && slot)
           ? `${dateRow.label} at ${slot.label}`
           : `${String(targetScheduledDate)} at ${String(targetScheduledTime)}`;
