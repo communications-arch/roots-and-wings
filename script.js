@@ -506,46 +506,16 @@
   function applySheetsData(data) {
     if (!data || data.error) return false;
 
-        // ── Map board roles from volunteer committee chairs to families ──
-        var BOARD_EMAIL_MAP = {
-          'President': 'president', 'Vice President': 'vp',
-          'Treasurer': 'treasurer', 'Secretary': 'secretary',
-          'Membership Director': 'membership',
-          'Sustaining Director': 'sustaining',
-          'Communications Director': 'communications'
-        };
-        // Normalize abbreviated titles to full titles
-        var BOARD_TITLE_MAP = {
-          'Membership Dir.': 'Membership Director',
-          'Sustaining Dir.': 'Sustaining Director',
-          'Communications Dir.': 'Communications Director'
-        };
-        var boardByLastName = {}; // familyName -> { role, email }
-        if (data.volunteerCommittees) {
-          data.volunteerCommittees.forEach(function(c) {
-            if (c.chair && c.chair.person && c.chair.title) {
-              var parts = c.chair.person.trim().split(/\s+/);
-              var lastName = parts[parts.length - 1];
-              var fullTitle = BOARD_TITLE_MAP[c.chair.title] || c.chair.title;
-              var emailPrefix = BOARD_EMAIL_MAP[fullTitle] || fullTitle.toLowerCase().replace(/[^a-z]/g, '');
-              boardByLastName[lastName.toLowerCase()] = {
-                role: fullTitle,
-                email: emailPrefix + '@rootsandwingsindy.com'
-              };
-            }
-          });
-        }
-
         // ── Families ──
+        // Board tagging (fam.boardRole / fam.boardEmail) comes from the
+        // server overlay (api/sheets.js → applyMemberProfileOverlay), which
+        // reads role_holders_v2 scoped to MAX(school_year). The DB is the
+        // source of truth now; we no longer re-tag from the legacy Google
+        // Sheets "Volunteer Committees" tab here because that tab still
+        // listed the prior board after a rotation and re-tagged old
+        // holders' families on top of the new ones — Directory showed
+        // both old and new at the same time.
         if (data.families && data.families.length > 0) {
-          // Assign board roles to matching families
-          data.families.forEach(function(fam) {
-            var board = boardByLastName[fam.name.toLowerCase()];
-            if (board) {
-              fam.boardRole = board.role;
-              fam.boardEmail = board.email;
-            }
-          });
           FAMILIES = data.families;
           // Rebuild allPeople array used by directory (match original structure)
           allPeople = [];
