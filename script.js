@@ -5988,12 +5988,14 @@
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
           h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
           // Confirm role holders for the new school year. Fires after
-          // Field Day (roles switch then) when the active year has
-          // fewer holders recorded than the previous year — handles
-          // both the "nothing set up yet" and "started but stopped
-          // partway" cases. Click opens Roles Assignments pre-scoped
-          // to the active year via _rolesMgrState.schoolYear default.
-          h += '<li id="ws-todo-role-holders-item" hidden><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-pre-count" id="ws-role-holders-count">0</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">Confirm role holders</span></button></li>';
+          // Field Day until the active year is marked confirmed in
+          // role_holder_confirmations. Click opens the Confirm Role
+          // Holders modal — a list view of board roles + names.
+          // _roleHolderTodoState persists across workspace re-renders.
+          var rhHidden = !(_roleHolderTodoState && _roleHolderTodoState.visible);
+          var rhCount  = (_roleHolderTodoState && _roleHolderTodoState.count) || 0;
+          var rhLabel  = (_roleHolderTodoState && _roleHolderTodoState.label) || 'Confirm role holders';
+          h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-pre-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
         }
         if (role === 'Membership Director') {
           h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-pre-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
@@ -6013,7 +6015,12 @@
           // previous year's Session 5 AND the upcoming year still has
           // fewer than 5 sessions defined. Click opens the Co-op
           // Calendar modal pre-scoped to the missing year.
-          h += '<li id="ws-todo-coop-cal-item" hidden><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">0</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">Set co-op calendar</span></button></li>';
+          // _coopCalTodoState persists the last loader determination so
+          // workspace re-renders don't flicker hidden→visible.
+          var coopCalHidden = !(_coopCalTodoState && _coopCalTodoState.visible);
+          var coopCalCount  = (_coopCalTodoState && _coopCalTodoState.count) || 0;
+          var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
+          h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
@@ -15451,6 +15458,14 @@
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
+  // Persisted across workspace re-renders so the To Do items don't
+  // flicker hidden→visible every time something else triggers a
+  // renderWorkspaceTab. Each loader updates its slice and any
+  // subsequent render reads from here before deciding the initial
+  // visibility (instead of re-defaulting to hidden).
+  var _coopCalTodoState    = { visible: false, count: 0, label: 'Set co-op calendar' };
+  var _roleHolderTodoState = { visible: false, count: 0, label: 'Confirm role holders' };
+
   // President + VP To Do item: "Set [year] session dates". Triggered
   // once we're 2 weeks past the previous year's latest session end AND
   // the upcoming year still has fewer than 5 sessions defined. Uses the
@@ -15511,10 +15526,14 @@
     var missing = Math.max(0, TARGET - nextYearCount);
 
     if (todayStr >= triggerStr && missing > 0) {
+      _coopCalTodoState.visible = true;
+      _coopCalTodoState.count = missing;
+      _coopCalTodoState.label = 'Set ' + nextYear + ' session dates';
       if (pill)  pill.textContent  = String(missing);
-      if (label) label.textContent = 'Set ' + nextYear + ' session dates';
+      if (label) label.textContent = _coopCalTodoState.label;
       item.hidden = false;
     } else {
+      _coopCalTodoState.visible = false;
       item.hidden = true;
     }
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
@@ -15613,10 +15632,14 @@
             ? previousCount - activeCount
             : Math.max(1, activeCount === 0 ? Math.max(1, previousCount) : 0);
           if (diff < 1) diff = 1;
+          _roleHolderTodoState.visible = true;
+          _roleHolderTodoState.count = diff;
+          _roleHolderTodoState.label = 'Confirm ' + activeYear + ' role holders';
           if (pill)  pill.textContent  = String(diff);
-          if (label) label.textContent = 'Confirm ' + activeYear + ' role holders';
+          if (label) label.textContent = _roleHolderTodoState.label;
           item.hidden = false;
         } else {
+          _roleHolderTodoState.visible = false;
           item.hidden = true;
         }
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
