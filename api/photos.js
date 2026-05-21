@@ -250,8 +250,10 @@ function shapeBoardRows(rows) {
 async function handleBoardScope(req, res) {
   const sql = getSql();
   if (!sql) return res.status(200).json({ board: [] });
-  // 30-minute CDN cache; board membership changes once a year.
-  res.setHeader('Cache-Control', 'public, max-age=1800, s-maxage=1800');
+  // Short cache so board edits in the Roles Manager propagate to the
+  // public site within ~a minute. Board edits are rare but when they
+  // happen we want them visible now, not 30 minutes later.
+  res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300');
   try {
     // Pick the most recent school_year that actually has board holders.
     // Usually this is the current academic year, but tolerates the May
