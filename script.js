@@ -1895,11 +1895,13 @@
     }
   }
 
-  // Summer-break detection. True when today is past every session's end
-  // date — i.e. the loop above couldn't land on a current or future
-  // session. Auto-recovers as soon as SESSION_DATES gets the next year's
-  // dates: the loop lands on a future Session 1 and today <= latestEnd
-  // flips this back to false.
+  // Summer-break detection. The school year flips at the end of Field
+  // Day, which is the Wednesday AFTER Session 5 ends (Session 5 itself
+  // is always a Wednesday). So summer break starts the day after Field
+  // Day — i.e. today > (latestEnd + 1 week, snapped to Wednesday).
+  // Auto-recovers as soon as SESSION_DATES gets the next year's dates:
+  // the session-detect loop above lands on a future Session 1 and
+  // currentSession reflects the upcoming year.
   // Phase B (DB-backed co-op calendar managed by President + VP) will
   // replace SESSION_DATES with a server-managed table; this detection
   // logic stays.
@@ -1910,7 +1912,17 @@
       .filter(Boolean);
     if (ends.length === 0) return;
     var latestEnd = ends.sort().pop(); // YYYY-MM-DD sorts chronologically
-    if (today > latestEnd) isSummerBreak = true;
+    // Compute Field Day: the next Wednesday strictly after latestEnd.
+    // Session 5 always ends on a Wednesday, so this lands 7 days later;
+    // we still snap-to-Wednesday defensively in case a non-Wednesday
+    // end date ever gets entered.
+    var endDt = new Date(latestEnd + 'T00:00:00');
+    var dow = endDt.getDay(); // 0=Sun..3=Wed..6=Sat
+    var daysToFieldDay = (3 - dow + 7) % 7;
+    if (daysToFieldDay === 0) daysToFieldDay = 7; // strictly after
+    endDt.setDate(endDt.getDate() + daysToFieldDay);
+    var fieldDay = endDt.toISOString().slice(0, 10);
+    if (today > fieldDay) isSummerBreak = true;
   })();
 
   // ── Morning classes (by group, per session) ──
@@ -3977,7 +3989,12 @@
         html += '<div class="mf-kid-bar">';
         html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
         html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
-        html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + groupWithAge(kid.group) + ' (this past year)</span>';
+        // Returning members get a "(this past year)" reference; brand-new
+        // families whose kids have no prior group placement skip it so
+        // the line doesn't claim history that doesn't exist.
+        if (kid.group) {
+          html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + groupWithAge(kid.group) + ' (this past year)</span>';
+        }
         html += '</div>';
         html += '</div>';
       });
