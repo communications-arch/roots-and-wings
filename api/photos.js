@@ -141,7 +141,15 @@ async function upsertBoardPhotos(workspaceUsers, optedOut) {
 
   let roleToEmail;
   try {
-    roleToEmail = await getRoleHolderEmails(BOARD_ROLE_TITLES);
+    // Mirror handleBoardScope: use the most recent school_year that
+    // actually has board holders. Going through activeSchoolYear() bites
+    // us between its April 1 pivot and the moment next year's board is
+    // seeded — the public site reader sees the prior-year row, but the
+    // photo cache writer skipped it. Same MAX query keeps them aligned.
+    const yrRows = await sql`SELECT MAX(school_year) AS sy FROM role_holders_v2`;
+    const schoolYear = yrRows[0] && yrRows[0].sy;
+    if (!schoolYear) return;
+    roleToEmail = await getRoleHolderEmails(BOARD_ROLE_TITLES, schoolYear);
   } catch (_) {
     return;
   }

@@ -171,7 +171,14 @@ async function getRoleHolderEmail(roleTitle) {
 // Batch variant for endpoints that need several role holders at once
 // (e.g. workspace cards). Returns { [originalTitle]: email } only for
 // titles that resolved.
-async function getRoleHolderEmails(roleTitles) {
+//
+// `schoolYear` override: callers that need to match a specific year
+// (e.g. the public board photo cache, which mirrors handleBoardScope's
+// MAX(school_year) resolution) can pass it in. Default falls back to
+// activeSchoolYear() — note that function flips April 1, which can
+// diverge from the year that role_holders_v2 actually carries until
+// next year's board is seeded.
+async function getRoleHolderEmails(roleTitles, schoolYear) {
   if (!Array.isArray(roleTitles) || roleTitles.length === 0) return {};
   const out = {};
   try {
@@ -180,12 +187,13 @@ async function getRoleHolderEmails(roleTitles) {
     // join hits role_descriptions even when callers use the unhyphenated
     // alias.
     const canonicalLc = roleTitles.map(t => canonicalTitle(t).toLowerCase());
+    const yr = schoolYear || activeSchoolYear();
     const rows = await sql`
       SELECT LOWER(r.title) AS title, rhv.person_email AS email, rhv.id
       FROM role_holders_v2 rhv
       JOIN roles r ON r.id = rhv.role_id
       WHERE LOWER(r.title) = ANY(${canonicalLc}::text[])
-        AND rhv.school_year = ${activeSchoolYear()}
+        AND rhv.school_year = ${yr}
         AND rhv.ended_at IS NULL
       ORDER BY rhv.id ASC
     `;
