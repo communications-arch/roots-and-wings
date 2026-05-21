@@ -1331,7 +1331,15 @@ async function applyMemberProfileOverlay(families) {
   // We never fall back to family_name matching — it produced duplicate
   // assignments in dev (two "Family" families both claiming VP).
   try {
-    var boardRows = await sql`
+    // Scope to the most recent school_year that has board rows — same
+    // resolution handleBoardScope (api/photos.js) uses for the public
+    // site, so directory/workspace/responsibilities stay in sync with
+    // what the homepage advertises. Without this, transitioning to next
+    // year's board (rows for both 2025-2026 AND 2026-2027 exist
+    // simultaneously) tags BOTH old and new holders as board members.
+    var byrRows = await sql`SELECT MAX(school_year) AS sy FROM role_holders_v2`;
+    var boardSchoolYear = byrRows[0] && byrRows[0].sy;
+    var boardRows = boardSchoolYear ? await sql`
       SELECT rhv.person_email AS email,
              p.family_email AS holder_family_email,
              r.title
@@ -1340,8 +1348,9 @@ async function applyMemberProfileOverlay(families) {
       LEFT JOIN people p ON LOWER(p.email) = LOWER(rhv.person_email)
       WHERE r.status = 'active'
         AND rhv.ended_at IS NULL
+        AND rhv.school_year = ${boardSchoolYear}
         AND r.title ~* '(President|Treasurer|Secretary|Director|Class Liaison|Vice)'
-    `;
+    ` : [];
     var BOARD_TITLE_NORMALIZE = {
       'Vice-President': 'Vice President',
       'Membership Dir.': 'Membership Director',
