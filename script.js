@@ -8448,7 +8448,17 @@
       renderSortableTable(target, cols, rowsForFilter(), {
         initialSort: { key: 'item', dir: 'asc' }
       });
-      // If a row is in edit mode, swap it after the table is drawn.
+      // Tag each tbody row with its own inventory id, derived from the
+      // Edit button's data-inv-id in that row. This is the only reliable
+      // way to map tbody rows back to inventory rows after the sortable
+      // table reorders them — walking by index would give us the wrong
+      // row whenever the current sort doesn't match inv's natural order
+      // (which is most of the time, e.g. sorting by On hand).
+      target.querySelectorAll('tbody tr').forEach(function (tr) {
+        var btn = tr.querySelector('.merch-inv-edit-btn');
+        if (btn) tr.setAttribute('data-row-id', btn.getAttribute('data-inv-id'));
+      });
+      // If a row is in edit mode, swap it after tagging.
       if (_merchInventoryEditId != null) {
         var editRow = target.querySelector('tr[data-row-id="' + _merchInventoryEditId + '"]');
         if (!editRow) {
@@ -8460,6 +8470,8 @@
           if (src) renderInventoryEditRow(editRow, src);
         }
       }
+      // Wire Edit clicks AFTER the swap so we don't attach to a button
+      // that's about to be replaced by the editor.
       target.querySelectorAll('.merch-inv-edit-btn').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
@@ -8469,25 +8481,6 @@
         });
       });
     }
-
-    // renderSortableTable doesn't emit data-row-id by default, so we
-    // patch the tbody after each render to tag rows by their inventory
-    // id. Lets us find the right row to swap for inline editing without
-    // walking the table by index.
-    var origRender = renderTable;
-    renderTable = function () {
-      origRender();
-      var rows = target.querySelectorAll('tbody tr');
-      var visible = rowsForFilter();
-      rows.forEach(function (tr, i) {
-        if (visible[i]) tr.setAttribute('data-row-id', visible[i].id);
-      });
-      if (_merchInventoryEditId != null) {
-        var editRow = target.querySelector('tr[data-row-id="' + _merchInventoryEditId + '"]');
-        var src = inv.find(function (r) { return r.id === _merchInventoryEditId; });
-        if (editRow && src) renderInventoryEditRow(editRow, src);
-      }
-    };
     renderTable();
   }
 
