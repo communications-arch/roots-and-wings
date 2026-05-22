@@ -14,7 +14,7 @@ const { google } = require('googleapis');
 const { put } = require('@vercel/blob');
 const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
 const { canActAs } = require('./_family');
 const { fetchSheet, getAuth, parseBillingSheet } = require('./sheets');
 
@@ -260,7 +260,26 @@ function setCors(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-View-As');
+}
+
+// Resolve the effective identity for a role-gated request. Returns
+// null when the JWT is missing or invalid. When the request carries
+// an X-View-As header AND the real user is allowed to impersonate
+// (super user, or any @rootsandwingsindy.com on dev/preview), the
+// returned email is the view-as target so downstream canEditAsRole
+// checks see the role the user is acting as. `realEmail` is preserved
+// for audit fields (`updated_by`) so the action is still attributed
+// to the actual signed-in person. Mirrors the same pattern in
+// api/cleaning.js so View-As behaves consistently across the app.
+async function verifyWorkspaceAuthWithViewAs(req) {
+  const real = await verifyWorkspaceAuth(req);
+  if (!real) return null;
+  const viewAsRaw = String(req.headers['x-view-as'] || '').trim().toLowerCase();
+  if (viewAsRaw && canImpersonate(real.email)) {
+    return { email: viewAsRaw, realEmail: real.email, viewedBy: real.email };
+  }
+  return { email: real.email, realEmail: real.email };
 }
 
 // ── Tour request ──
@@ -3001,11 +3020,90 @@ async function handleMerchOrder(body, res) {
   return res.status(200).json({ ok: true, order_id: orderId });
 }
 
-async function handleMerchOrdersList(req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+// Manual order entry by the Merchandise Manager or Comms Director, for
+// in-person / cash / Venmo sales that bypass the public form. Differs
+// from handleMerchOrder in three ways:
+//   1. Auth-gated (canManageMerch) — public form is unauthenticated, so
+//      we can't reuse the same handler with a flag.
+//   2. Email + phone are optional. Cash sales at a market table won't
+//      have an email. We store '' rather than NULL to match the column's
+//      NOT NULL constraint.
+//   3. No customer confirmation email is sent — the manager is recording
+//      a transaction that already happened. Optional `paid` / `delivered`
+//      booleans let them stamp those timestamps in the same insert so
+//      they don't have to click the pills afterward.
+async function handleMerchManualOrder(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   if (!(await canManageMerch(auth.email))) {
-    return res.status(403).json({ error: 'Not authorized to view merch orders.' });
+    return res.status(403).json({
+      error: 'Not authorized to add merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim();
+  const phone = String(body.phone || '').trim();
+  const qty = parseInt(body.qty, 10);
+  const notes = String(body.notes || '').trim();
+
+  if (!name) return res.status(400).json({ error: 'Customer name is required.' });
+  if (name.length > 200 || email.length > 200 || phone.length > 50 || notes.length > 1000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+  if (!Number.isFinite(qty) || qty < 1 || qty > 999) {
+    return res.status(400).json({ error: 'Quantity must be between 1 and 999.' });
+  }
+
+  const itemErr = validateMerchOrder(body);
+  if (itemErr) return res.status(400).json({ error: itemErr });
+
+  const itemKey = String(body.item).toLowerCase().trim();
+  const itemDef = MERCH_CATALOG[itemKey];
+  const size = String(body.size || '').trim();
+  const color = String(body.color || '').trim();
+  const paid = !!body.paid;
+  const delivered = !!body.delivered;
+
+  try {
+    const sql = getSql();
+    const inserted = await sql`
+      INSERT INTO merch_orders (
+        customer_name, customer_email, customer_phone,
+        item, size, color, qty, notes,
+        paid_at, delivered_at, updated_by
+      ) VALUES (
+        ${name}, ${email.toLowerCase()}, ${phone},
+        ${itemDef.label}, ${size}, ${color}, ${qty}, ${notes},
+        ${paid ? new Date().toISOString() : null},
+        ${delivered ? new Date().toISOString() : null},
+        ${auth.realEmail}
+      )
+      RETURNING id, customer_name, customer_email, customer_phone,
+                item, size, color, qty, notes,
+                paid_at, delivered_at, created_at, updated_at, updated_by
+    `;
+    return res.status(200).json({ ok: true, order: inserted[0] });
+  } catch (dbErr) {
+    console.error('Merch manual insert error:', dbErr);
+    return res.status(500).json({ error: 'Could not save order.' });
+  }
+}
+
+async function handleMerchOrdersList(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to view merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
   }
   try {
     const sql = getSql();
@@ -3024,10 +3122,14 @@ async function handleMerchOrdersList(req, res) {
 }
 
 async function handleMerchUpdate(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   if (!(await canManageMerch(auth.email))) {
-    return res.status(403).json({ error: 'Not authorized to update merch orders.' });
+    return res.status(403).json({
+      error: 'Not authorized to update merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
   }
   const id = parseInt(body.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
@@ -3038,14 +3140,29 @@ async function handleMerchUpdate(body, req, res) {
   // Toggle semantics: client sends desired value (true = stamp now,
   // false = clear). Lets the report's pill click flip between states.
   const setOn = !!body.value;
-  const col = field === 'paid' ? 'paid_at' : 'delivered_at';
+  // Static SQL per column. The previous version used ${sql(col)} for
+  // dynamic identifier interpolation, but @neondatabase/serverless's
+  // tagged template doesn't escape identifiers that way — it parameterizes
+  // the value, which Postgres then rejects as a syntax error in column
+  // position. Field whitelist above already guarantees one of two paths,
+  // so duplicating the SQL is cheaper than reintroducing the bug.
+  const ts = new Date().toISOString();
   try {
     const sql = getSql();
-    const rows = setOn
-      ? await sql`UPDATE merch_orders SET ${sql(col)} = NOW(), updated_at = NOW(), updated_by = ${auth.email}
-                  WHERE id = ${id} RETURNING id, paid_at, delivered_at`
-      : await sql`UPDATE merch_orders SET ${sql(col)} = NULL, updated_at = NOW(), updated_by = ${auth.email}
-                  WHERE id = ${id} RETURNING id, paid_at, delivered_at`;
+    let rows;
+    if (field === 'paid') {
+      rows = setOn
+        ? await sql`UPDATE merch_orders SET paid_at = ${ts}, updated_at = NOW(), updated_by = ${auth.realEmail}
+                    WHERE id = ${id} RETURNING id, paid_at, delivered_at`
+        : await sql`UPDATE merch_orders SET paid_at = NULL, updated_at = NOW(), updated_by = ${auth.realEmail}
+                    WHERE id = ${id} RETURNING id, paid_at, delivered_at`;
+    } else {
+      rows = setOn
+        ? await sql`UPDATE merch_orders SET delivered_at = ${ts}, updated_at = NOW(), updated_by = ${auth.realEmail}
+                    WHERE id = ${id} RETURNING id, paid_at, delivered_at`
+        : await sql`UPDATE merch_orders SET delivered_at = NULL, updated_at = NOW(), updated_by = ${auth.realEmail}
+                    WHERE id = ${id} RETURNING id, paid_at, delivered_at`;
+    }
     if (rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
     return res.status(200).json({ order: rows[0] });
   } catch (err) {
@@ -3076,6 +3193,7 @@ module.exports = async function handler(req, res) {
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
     if (kind === 'merch-order') return handleMerchOrder(body, res);
+    if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);

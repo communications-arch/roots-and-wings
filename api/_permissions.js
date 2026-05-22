@@ -101,6 +101,22 @@ function getDb() {
   return neon(process.env.DATABASE_URL);
 }
 
+// Resolve the school_year that role_holders_v2 actually carries data
+// for, mirroring handleBoardScope (api/photos.js) and the board overlay
+// (api/sheets.js). activeSchoolYear() flips April 1, so from April
+// onward it returns next-year before role_holders_v2 has been seeded —
+// which silently breaks role-gated reads/writes for anyone signed in
+// as their personal Workspace email (the board-mailbox shortcut masks
+// it for treasurer@, communications@, etc.). Returns activeSchoolYear()
+// as a defensive fallback if the table is empty.
+async function effectiveSchoolYear(sql) {
+  try {
+    const rows = await sql`SELECT MAX(school_year) AS sy FROM role_holders_v2`;
+    if (rows.length > 0 && rows[0].sy) return rows[0].sy;
+  } catch (_) { /* fall through */ }
+  return activeSchoolYear();
+}
+
 // True if `userEmail` is authorized to act as `roleTitle`. Resolution
 // order:
 //   1. Canonical board mailbox for that role (treasurer@, etc.)
@@ -120,19 +136,20 @@ async function canEditAsRole(userEmail, roleTitle) {
   try {
     const sql = getDb();
     const canonical = canonicalTitle(roleTitle).toLowerCase();
+    const yr = await effectiveSchoolYear(sql);
     const rows = await sql`
       SELECT 1
       FROM role_holders_v2 rhv
       JOIN roles r ON r.id = rhv.role_id
       WHERE LOWER(rhv.person_email) = ${email}
         AND LOWER(r.title) = ${canonical}
-        AND rhv.school_year = ${activeSchoolYear()}
+        AND rhv.school_year = ${yr}
         AND rhv.ended_at IS NULL
       LIMIT 1
     `;
     if (rows.length > 0) return true;
     console.warn('[perms] canEditAsRole DENY user=' + email +
-      ' role=' + roleTitle + ' (no role_holders_v2 row for active year)');
+      ' role=' + roleTitle + ' year=' + yr + ' (no role_holders_v2 row)');
     return false;
   } catch (err) {
     console.error('[perms] canEditAsRole DB lookup failed for user=' + email +
@@ -150,12 +167,13 @@ async function getRoleHolderEmail(roleTitle) {
   try {
     const sql = getDb();
     const canonical = canonicalTitle(roleTitle).toLowerCase();
+    const yr = await effectiveSchoolYear(sql);
     const rows = await sql`
       SELECT rhv.person_email
       FROM role_holders_v2 rhv
       JOIN roles r ON r.id = rhv.role_id
       WHERE LOWER(r.title) = ${canonical}
-        AND rhv.school_year = ${activeSchoolYear()}
+        AND rhv.school_year = ${yr}
         AND rhv.ended_at IS NULL
       ORDER BY rhv.id ASC
       LIMIT 1
@@ -173,11 +191,12 @@ async function getRoleHolderEmail(roleTitle) {
 // titles that resolved.
 //
 // `schoolYear` override: callers that need to match a specific year
-// (e.g. the public board photo cache, which mirrors handleBoardScope's
-// MAX(school_year) resolution) can pass it in. Default falls back to
-// activeSchoolYear() — note that function flips April 1, which can
-// diverge from the year that role_holders_v2 actually carries until
-// next year's board is seeded.
+// can pass it in. Default uses effectiveSchoolYear(sql), which queries
+// MAX(school_year) from role_holders_v2 so we always read whichever
+// year actually has data (matching handleBoardScope / the sheets
+// overlay). Past defaults used activeSchoolYear() which broke role
+// gates between its April 1 pivot and the moment next year's holders
+// were seeded.
 async function getRoleHolderEmails(roleTitles, schoolYear) {
   if (!Array.isArray(roleTitles) || roleTitles.length === 0) return {};
   const out = {};
@@ -187,7 +206,7 @@ async function getRoleHolderEmails(roleTitles, schoolYear) {
     // join hits role_descriptions even when callers use the unhyphenated
     // alias.
     const canonicalLc = roleTitles.map(t => canonicalTitle(t).toLowerCase());
-    const yr = schoolYear || activeSchoolYear();
+    const yr = schoolYear || await effectiveSchoolYear(sql);
     const rows = await sql`
       SELECT LOWER(r.title) AS title, rhv.person_email AS email, rhv.id
       FROM role_holders_v2 rhv

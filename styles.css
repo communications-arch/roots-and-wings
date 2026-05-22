@@ -9682,6 +9682,103 @@ button.staff-role:hover {
   min-height: 1em;
 }
 .ws-wv-err { color: var(--color-error); font-weight: 600; }
+
+/* Manual merch order entry — inline form that drops in above the
+   Merchandise Orders table when the Merchandise Manager clicks "+ Add
+   Order". Inherits visual language from .ws-waiver-form (cream inputs,
+   uppercase labels) but uses a two-column grid so the customer/item/
+   variant fields lay out without overflowing the modal. */
+.ws-merch-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: rgba(var(--color-primary-rgb), 0.04);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.ws-merch-add-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  color: var(--color-primary);
+}
+.ws-merch-add-close {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-text-light);
+  padding: 0 4px;
+}
+.ws-merch-add-close:hover { color: var(--color-text); }
+.ws-merch-add-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.ws-merch-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ws-merch-add-field.ws-merch-add-notes { grid-column: 1 / -1; }
+.ws-required { color: var(--color-error); }
+.ws-merch-add-field input,
+.ws-merch-add-field select,
+.ws-merch-add-field textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.ws-merch-add-field input:focus,
+.ws-merch-add-field select:focus,
+.ws-merch-add-field textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-white);
+}
+.ws-merch-add-field textarea { resize: vertical; min-height: 48px; }
+.ws-merch-add-toggles {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+.ws-merch-add-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.ws-merch-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ws-merch-add-status {
+  font-size: 0.85rem;
+  min-height: 1em;
+}
 /* Status pills shared by Membership Report + Waivers Report (and any
    other table that needs Paid/Pending/Signed status cells). Same
    all-caps + tracking + bold treatment as .ws-part-status / .pmrep-status

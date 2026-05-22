@@ -506,6 +506,13 @@
   function applySheetsData(data) {
     if (!data || data.error) return false;
 
+        // Committee role-holder map (email → titles[]) from the server
+        // overlay. Replaces the legacy VOLUNTEER_COMMITTEES sheet lookup
+        // for new committee_role assignments (Merchandise Manager etc.)
+        // that aren't in the Volunteer Committees tab. Empty {} if the
+        // server didn't return one (older deploys).
+        COMMITTEE_ROLE_HOLDERS = (data && data.committeeRoleHolders) || {};
+
         // ── Families ──
         // Board tagging (fam.boardRole / fam.boardEmail) comes from the
         // server overlay (api/sheets.js → applyMemberProfileOverlay), which
@@ -2070,6 +2077,12 @@
   // Family data — populated from Google Sheets API
   var FAMILIES = [
   ];
+
+  // Committee role-holder map (email → [titles, ...]) populated from
+  // role_holders_v2 via the api/sheets overlay. Used by getWorkspaceRoles
+  // to surface committee_role assignments the legacy Volunteer
+  // Committees Sheet doesn't list (Merchandise Manager etc.).
+  var COMMITTEE_ROLE_HOLDERS = {};
 
   // Build flat list of all people (parents + kids) for the yearbook
   var allPeople = [];
@@ -5689,6 +5702,16 @@
     // Super-user shortcut, regardless of family match.
     if (lower === 'communications@rootsandwingsindy.com') addRole('Communications Director');
 
+    // Committee role assignments from role_holders_v2 (DB) — surfaced
+    // via the server overlay as a flat email → titles[] map. This is
+    // the path that lets new committee_role holders (Merchandise Manager,
+    // Welcome Coordinator, etc.) appear in the workspace UI without
+    // depending on the legacy Volunteer Committees Sheet, which would
+    // otherwise leave new roles invisible to the gate.
+    if (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[lower]) {
+      COMMITTEE_ROLE_HOLDERS[lower].forEach(function (t) { addRole(t); });
+    }
+
     if (fam) {
       // Build the set of person full names this email represents. When the
       // active user maps to a specific person row in fam.people, only that
@@ -6015,7 +6038,12 @@
     },
     'reports': {
       title: 'Reports',
-      roleGate: ['Communications Director', 'Membership Director', 'Vice President', 'Afternoon Class Liaison', 'Treasurer', 'Merchandise Manager'],
+      // roleGate is filled in below from Object.keys(ROLE_REPORTS) so
+      // the list of roles allowed to see Reports stays in sync with
+      // the list of roles that have reports configured. Placeholder
+      // empty array here keeps the widgetListFor check happy until the
+      // post-init assignment runs.
+      roleGate: [],
       render: function (prefs, roles, role) {
         var items = (ROLE_REPORTS[role] || []).slice();
         // Member Participation belongs to the VP + Afternoon Class Liaison
@@ -6048,7 +6076,9 @@
     },
     'forms': {
       title: 'Forms',
-      roleGate: ['Communications Director', 'Membership Director', 'Vice President'],
+      // Same derived-roleGate pattern as 'reports' — see ROLE_FORMS
+      // below. Placeholder; real value assigned after ROLE_FORMS exists.
+      roleGate: [],
       render: function (prefs, roles, role) {
         var items = (ROLE_FORMS[role] || []);
         var h = '<p class="ws-body-hint">Send a form or invite to someone outside the co-op.</p>';
@@ -6139,7 +6169,11 @@
     'Treasurer': [
       { key: 'membership', title: 'Membership Report' }
     ],
-    'Vice President': []
+    'Vice President': [],
+    // Listed with an empty array so the widget's roleGate (derived below)
+    // picks it up. Member Participation is injected dynamically inside
+    // the render fn for this role.
+    'Afternoon Class Liaison': []
   };
   var ROLE_FORMS = {
     'Communications Director': [
@@ -6150,6 +6184,15 @@
     ],
     'Vice President': []
   };
+
+  // Derive the Reports + Forms widget roleGates from the maps above so
+  // they can't drift. Adding a new entry to ROLE_REPORTS automatically
+  // surfaces the Reports widget for that role; no second edit to
+  // WORKSPACE_WIDGETS.reports.roleGate required. Mirrors the broader
+  // [[feedback_role_perms_pattern]] checklist item #8 — make the gate
+  // and the data the same source of truth so nothing silently hides.
+  if (WORKSPACE_WIDGETS.reports) WORKSPACE_WIDGETS.reports.roleGate = Object.keys(ROLE_REPORTS);
+  if (WORKSPACE_WIDGETS.forms)   WORKSPACE_WIDGETS.forms.roleGate   = Object.keys(ROLE_FORMS);
 
   // Each board chair now defaults to the 'roles' widget so they can
   // manage their own committee (server-side gate in api/cleaning.js
@@ -6165,6 +6208,7 @@
     'Secretary': ['roles', 'my-links', 'ways-to-help', 'resources'],
     'Sustaining Director': ['roles', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
+    'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
@@ -6207,12 +6251,29 @@
     // Split widgets into role-scoped and universal buckets. Each role section
     // gets its role-gated widgets; universal widgets (roleGate=null) end up in
     // a trailing "Shared" section regardless of role.
+    //
+    // Fallback for unknown roles: if WORKSPACE_DEFAULTS[role] is undefined
+    // (new committee role added via the Roles & Committees UI, no client
+    // edit), discover the widget list by scanning every role-gated widget.
+    // Without this, a role can be assigned in the DB, surface in
+    // getWorkspaceRoles, and still render zero widgets — the silent
+    // failure mode that hid Merchandise Manager from Lime Narwhal.
     function widgetListFor(role) {
-      var list = WORKSPACE_DEFAULTS[role] || [];
+      var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
-      list.forEach(function (type) {
+      if (explicit) {
+        explicit.forEach(function (type) {
+          var w = WORKSPACE_WIDGETS[type];
+          if (!w || !w.roleGate) return; // universal handled separately
+          if (w.roleGate.indexOf(role) === -1) return;
+          if (out.indexOf(type) === -1) out.push(type);
+        });
+        return out;
+      }
+      // No explicit ordering — include every widget gated for this role.
+      Object.keys(WORKSPACE_WIDGETS).forEach(function (type) {
         var w = WORKSPACE_WIDGETS[type];
-        if (!w || !w.roleGate) return; // universal handled separately
+        if (!w || !w.roleGate) return;
         if (w.roleGate.indexOf(role) === -1) return;
         if (out.indexOf(type) === -1) out.push(type);
       });
@@ -7883,13 +7944,41 @@
     }
   ];
 
+  // Catalog mirrors api/tour.js MERCH_CATALOG. Kept in sync by hand —
+  // small enough that DRYing via a /api/tour?config=1 round-trip on every
+  // modal open isn't worth the latency. If you edit one, edit the other.
+  var MERCH_CATALOG_CLIENT = {
+    tshirt: {
+      label: 'T-Shirt',
+      sizes: [
+        'Toddler 2T', 'Toddler 3T', 'Toddler 4T', 'Toddler 5T',
+        'Kids XS', 'Kids S', 'Kids M', 'Kids L', 'Kids XL',
+        'Adult S', 'Adult M', 'Adult L', 'Adult XL', 'Adult XXL'
+      ],
+      colors: ['Purple', 'Olive', 'Lime', 'Teal']
+    },
+    mug:     { label: 'Campfire Coffee Mug', sizes: [], colors: [] },
+    tumbler: { label: 'Stainless Tumbler',   sizes: [], colors: [] },
+    pin:     { label: 'Enamel Pin',          sizes: [], colors: [] },
+    patch:   { label: 'Woven Patch',         sizes: [], colors: [] },
+    tote:    {
+      label: 'Block-Printed Tote',
+      sizes: ['Small', 'Large'],
+      colors: ['Black', 'Brown', 'Purple']
+    }
+  };
+
   function showMerchOrdersModal() {
+    // Header chrome intentionally just exposes Add Order. Opening the
+    // modal already calls loadMerchOrdersReport, so an explicit
+    // Refresh button was redundant — and the missing ICON_SVG.refresh
+    // caused it to render as a gear, which read as "settings".
     var icons = [
-      { label: 'Refresh', icon: ICON_SVG.refresh || ICON_SVG.gear, aria: 'Reload from server', action: function () { _merchOrdersCache = null; loadMerchOrdersReport(null); } }
+      { label: 'Add Order', icon: ICON_SVG.add, aria: 'Record a manual order', action: function () { toggleMerchAddOrderForm(); } }
     ];
     var body = renderReportModal({
       title: 'Merchandise Orders',
-      subtitle: 'Customer orders from the public site. Click the Paid or Delivered pills to toggle.',
+      subtitle: 'Customer orders from the public site, plus manual entries for in-person sales. Click the Paid or Delivered pills to toggle.',
       meta: '',
       icons: icons,
       bodyId: 'ws-merch-orders-body',
@@ -7899,13 +7988,143 @@
     loadMerchOrdersReport(body);
   }
 
+  // Toggle the manual-entry form open/closed. Lives at the top of the
+  // modal body above the orders table; submitting it POSTs a manual
+  // order, refreshes the cache, and collapses the form.
+  function toggleMerchAddOrderForm() {
+    var body = document.getElementById('ws-merch-orders-body');
+    if (!body) return;
+    var existing = body.querySelector('#ws-merch-add-form');
+    if (existing) { existing.parentNode.removeChild(existing); return; }
+    var wrap = document.createElement('div');
+    wrap.id = 'ws-merch-add-form';
+    wrap.className = 'ws-merch-add-form';
+    wrap.innerHTML = renderMerchAddOrderForm();
+    body.insertBefore(wrap, body.firstChild);
+    wireMerchAddOrderForm(wrap);
+    var nameEl = wrap.querySelector('#ws-merch-add-name');
+    if (nameEl) nameEl.focus();
+  }
+
+  function renderMerchAddOrderForm() {
+    var itemOpts = Object.keys(MERCH_CATALOG_CLIENT).map(function (key) {
+      return '<option value="' + key + '">' + escapeHtml(MERCH_CATALOG_CLIENT[key].label) + '</option>';
+    }).join('');
+    var h = '';
+    h += '<div class="ws-merch-add-header">';
+    h += '<strong>Record a manual order</strong>';
+    h += '<button type="button" class="ws-merch-add-close" aria-label="Cancel">&times;</button>';
+    h += '</div>';
+    h += '<p class="ws-body-hint">Use this for in-person sales, cash, or Venmo orders that didn’t come through the public form. Email is optional.</p>';
+    h += '<div class="ws-merch-add-grid">';
+    h += '<label class="ws-merch-add-field"><span>Customer name <span class="ws-required">*</span></span><input type="text" id="ws-merch-add-name" maxlength="200" required></label>';
+    h += '<label class="ws-merch-add-field"><span>Email (optional)</span><input type="email" id="ws-merch-add-email" maxlength="200" placeholder="customer@example.com"></label>';
+    h += '<label class="ws-merch-add-field"><span>Phone (optional)</span><input type="tel" id="ws-merch-add-phone" maxlength="50"></label>';
+    h += '<label class="ws-merch-add-field"><span>Item <span class="ws-required">*</span></span><select id="ws-merch-add-item" required>' + itemOpts + '</select></label>';
+    h += '<label class="ws-merch-add-field" id="ws-merch-add-size-wrap"><span>Size</span><select id="ws-merch-add-size"></select></label>';
+    h += '<label class="ws-merch-add-field" id="ws-merch-add-color-wrap"><span>Color</span><select id="ws-merch-add-color"></select></label>';
+    h += '<label class="ws-merch-add-field"><span>Quantity</span><input type="number" id="ws-merch-add-qty" value="1" min="1" max="999"></label>';
+    h += '<label class="ws-merch-add-field ws-merch-add-notes"><span>Notes (optional)</span><textarea id="ws-merch-add-notes" maxlength="1000" rows="2"></textarea></label>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-toggles">';
+    h += '<label><input type="checkbox" id="ws-merch-add-paid"> Already paid</label>';
+    h += '<label><input type="checkbox" id="ws-merch-add-delivered"> Already delivered</label>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-actions">';
+    h += '<button type="button" class="btn-secondary ws-merch-add-cancel">Cancel</button>';
+    h += '<button type="button" class="btn-primary ws-merch-add-submit">Save order</button>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-status" id="ws-merch-add-status" role="status" aria-live="polite"></div>';
+    return h;
+  }
+
+  function wireMerchAddOrderForm(wrap) {
+    var itemSel = wrap.querySelector('#ws-merch-add-item');
+    var sizeSel = wrap.querySelector('#ws-merch-add-size');
+    var colorSel = wrap.querySelector('#ws-merch-add-color');
+    var sizeWrap = wrap.querySelector('#ws-merch-add-size-wrap');
+    var colorWrap = wrap.querySelector('#ws-merch-add-color-wrap');
+
+    function syncVariants() {
+      var def = MERCH_CATALOG_CLIENT[itemSel.value] || { sizes: [], colors: [] };
+      if (def.sizes.length === 0) {
+        sizeWrap.style.display = 'none';
+        sizeSel.innerHTML = '';
+      } else {
+        sizeWrap.style.display = '';
+        sizeSel.innerHTML = def.sizes.map(function (s) { return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>'; }).join('');
+      }
+      if (def.colors.length === 0) {
+        colorWrap.style.display = 'none';
+        colorSel.innerHTML = '';
+      } else {
+        colorWrap.style.display = '';
+        colorSel.innerHTML = def.colors.map(function (c) { return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>'; }).join('');
+      }
+    }
+    itemSel.addEventListener('change', syncVariants);
+    syncVariants();
+
+    function closeForm() {
+      var existing = document.getElementById('ws-merch-add-form');
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    }
+    wrap.querySelector('.ws-merch-add-close').addEventListener('click', closeForm);
+    wrap.querySelector('.ws-merch-add-cancel').addEventListener('click', closeForm);
+
+    wrap.querySelector('.ws-merch-add-submit').addEventListener('click', function () {
+      var status = wrap.querySelector('#ws-merch-add-status');
+      var btn = wrap.querySelector('.ws-merch-add-submit');
+      var payload = {
+        kind: 'merch-manual-order',
+        name: wrap.querySelector('#ws-merch-add-name').value.trim(),
+        email: wrap.querySelector('#ws-merch-add-email').value.trim(),
+        phone: wrap.querySelector('#ws-merch-add-phone').value.trim(),
+        item: itemSel.value,
+        size: sizeSel.value || '',
+        color: colorSel.value || '',
+        qty: parseInt(wrap.querySelector('#ws-merch-add-qty').value, 10) || 1,
+        notes: wrap.querySelector('#ws-merch-add-notes').value.trim(),
+        paid: wrap.querySelector('#ws-merch-add-paid').checked,
+        delivered: wrap.querySelector('#ws-merch-add-delivered').checked
+      };
+      if (!payload.name) {
+        status.textContent = 'Customer name is required.';
+        status.className = 'ws-merch-add-status ws-wv-err';
+        return;
+      }
+      btn.disabled = true;
+      status.textContent = 'Saving…';
+      status.className = 'ws-merch-add-status';
+
+      fetch('/api/tour', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+        // Prepend the new row so it appears at the top (matches desc sort).
+        if (res.data.order && Array.isArray(_merchOrdersCache)) {
+          _merchOrdersCache.unshift(res.data.order);
+        }
+        closeForm();
+        var body = document.getElementById('ws-merch-orders-body');
+        if (body) renderMerchOrdersBody(body);
+      }).catch(function (err) {
+        btn.disabled = false;
+        status.textContent = 'Could not save: ' + ((err && err.message) || 'unknown');
+        status.className = 'ws-merch-add-status ws-wv-err';
+      });
+    });
+  }
+
   function loadMerchOrdersReport(body) {
     if (!body) body = document.getElementById('ws-merch-orders-body');
     if (!body) return;
-    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/tour?list=merch_orders', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       if (!res.ok) {
@@ -7998,10 +8217,9 @@
           _merchOrdersCache[idx][col] = nextOn ? new Date().toISOString() : null;
           renderMerchOrdersBody(body);
 
-          var cred = localStorage.getItem('rw_google_credential');
           fetch('/api/tour', {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ kind: 'merch-update', id: id, field: field, value: nextOn })
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {

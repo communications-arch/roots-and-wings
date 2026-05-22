@@ -1382,6 +1382,42 @@ async function applyMemberProfileOverlay(families) {
   } catch (boardErr) {
     console.warn('[overlay] role_holders lookup failed (non-fatal):', boardErr.message);
   }
+
+  // ── Committee role holders from role_holders_v2 ──
+  // Mirror the board pattern above but for committee_role entries (e.g.
+  // Merchandise Manager, Welcome Coordinator). Returns a flat map keyed
+  // by lowercase email → array of role titles, so the client's
+  // getWorkspaceRoles can resolve per-person assignments without having
+  // to dip into the legacy Google Sheets "Volunteer Committees" tab.
+  // Same MAX(school_year) scoping so we stay aligned with handleBoardScope.
+  // Returned to the caller; caller is responsible for attaching to the
+  // outer response object (since JSON.stringify ignores non-index
+  // properties on the families array).
+  var committeeRoleHolders = {};
+  try {
+    var cryRows = await sql`SELECT MAX(school_year) AS sy FROM role_holders_v2`;
+    var commSchoolYear = cryRows[0] && cryRows[0].sy;
+    if (commSchoolYear) {
+      var commRows = await sql`
+        SELECT LOWER(rhv.person_email) AS email, r.title
+        FROM role_holders_v2 rhv
+        JOIN roles r ON r.id = rhv.role_id
+        WHERE r.category = 'committee_role'
+          AND r.status = 'active'
+          AND rhv.school_year = ${commSchoolYear}
+          AND rhv.ended_at IS NULL
+      `;
+      commRows.forEach(function (r) {
+        if (!committeeRoleHolders[r.email]) committeeRoleHolders[r.email] = [];
+        if (committeeRoleHolders[r.email].indexOf(r.title) === -1) {
+          committeeRoleHolders[r.email].push(r.title);
+        }
+      });
+    }
+  } catch (commErr) {
+    console.warn('[overlay] committee role lookup failed (non-fatal):', commErr.message);
+  }
+  return { committeeRoleHolders: committeeRoleHolders };
 }
 
 // ══════════════════════════════════════════════
@@ -2370,7 +2406,14 @@ module.exports = async function handler(req, res) {
     // role_holders_v2 (the board-role overlay block at line ~1318
     // is the only piece that's load-bearing).
     try {
-      await applyMemberProfileOverlay(result.families);
+      var overlayOut = await applyMemberProfileOverlay(result.families);
+      // Attach committee role holders (email → titles[]) to the top-level
+      // response so the client's getWorkspaceRoles can pick up new
+      // committee_role assignments (e.g. Merchandise Manager) without
+      // depending on the legacy Volunteer Committees Sheet.
+      if (overlayOut && overlayOut.committeeRoleHolders) {
+        result.committeeRoleHolders = overlayOut.committeeRoleHolders;
+      }
     } catch (overlayErr) {
       console.error('Member profile overlay failed:', overlayErr);
     }
