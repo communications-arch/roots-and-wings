@@ -40,6 +40,54 @@ const SESSION_DATES_FALLBACK = {
   5: { name: 'Spring Session 5', start: '2026-04-15', end: '2026-05-13' }
 };
 
+// ──────────────────────────────────────────────
+// Merchandise catalog — keyed by item slug. Used to validate POST bodies
+// against known item / size / color combinations so the public order
+// form can't be tricked into recording garbage in merch_orders.
+// Source of truth on prices is also here so the report can show a
+// running total if we ever want to. Sizes/colors arrays are exhaustive
+// — an empty array means the variant doesn't apply to that item.
+// ──────────────────────────────────────────────
+const MERCH_CATALOG = {
+  tshirt: {
+    label: 'T-Shirt',
+    sizes: [
+      'Toddler 2T', 'Toddler 3T', 'Toddler 4T', 'Toddler 5T',
+      'Kids XS', 'Kids S', 'Kids M', 'Kids L', 'Kids XL',
+      'Adult S', 'Adult M', 'Adult L', 'Adult XL', 'Adult XXL'
+    ],
+    colors: ['Purple', 'Olive', 'Lime', 'Teal']
+  },
+  mug:     { label: 'Campfire Coffee Mug', sizes: [], colors: [] },
+  tumbler: { label: 'Stainless Tumbler',   sizes: [], colors: [] },
+  pin:     { label: 'Enamel Pin',          sizes: [], colors: [] },
+  patch:   { label: 'Woven Patch',         sizes: [], colors: [] },
+  tote:    {
+    label: 'Block-Printed Tote',
+    sizes: ['Small', 'Large'],
+    colors: ['Black', 'Brown', 'Purple']
+  }
+};
+
+// Validate an order body against the catalog. Returns null on success
+// or an error string suitable for a 400 response.
+function validateMerchOrder(body) {
+  const item = String(body.item || '').toLowerCase().trim();
+  if (!MERCH_CATALOG[item]) return 'Unknown item.';
+  const def = MERCH_CATALOG[item];
+  const size = String(body.size || '').trim();
+  const color = String(body.color || '').trim();
+  if (def.sizes.length > 0 && def.sizes.indexOf(size) === -1) {
+    return 'Pick a size for ' + def.label + '.';
+  }
+  if (def.sizes.length === 0 && size) return 'Size does not apply to ' + def.label + '.';
+  if (def.colors.length > 0 && def.colors.indexOf(color) === -1) {
+    return 'Pick a color for ' + def.label + '.';
+  }
+  if (def.colors.length === 0 && color) return 'Color does not apply to ' + def.label + '.';
+  return null;
+}
+
 // Pull every session row from co_op_sessions, group by school_year, and
 // pick the year that best represents "current" (matches the client's
 // picker logic in applyCoopSessionsData). Returns an object shaped like
@@ -2834,6 +2882,178 @@ async function handleTourUpdate(body, req, res) {
   }
 }
 
+// ──────────────────────────────────────────────
+// Merchandise — public order intake + portal report
+// ──────────────────────────────────────────────
+// Bundled into tour.js because the Hobby tier caps us at 12 functions
+// and tour.js is already the "public intake" endpoint (tours,
+// registrations, waivers). Same Resend wrapper, same DB connection,
+// same role-gating helpers.
+
+// True if `email` may view or edit merch orders. Anyone in the role
+// chain that owns merch: Communications Director (parent) +
+// Merchandise Manager (the committee role). Super users pass through
+// canEditAsRole automatically.
+async function canManageMerch(email) {
+  if (!email) return false;
+  return (await canEditAsRole(email, 'Communications Director'))
+      || (await canEditAsRole(email, 'Merchandise Manager'));
+}
+
+async function handleMerchOrder(body, res) {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim();
+  const phone = String(body.phone || '').trim();
+  const qty = parseInt(body.qty, 10);
+  const notes = String(body.notes || '').trim();
+
+  if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
+  if (name.length > 200 || email.length > 200 || phone.length > 50 || notes.length > 1000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+  if (!Number.isFinite(qty) || qty < 1 || qty > 999) {
+    return res.status(400).json({ error: 'Quantity must be between 1 and 999.' });
+  }
+
+  const itemErr = validateMerchOrder(body);
+  if (itemErr) return res.status(400).json({ error: itemErr });
+
+  const itemKey = String(body.item).toLowerCase().trim();
+  const itemDef = MERCH_CATALOG[itemKey];
+  const size = String(body.size || '').trim();
+  const color = String(body.color || '').trim();
+
+  // DB insert is the source of truth — if the email below fails, the
+  // Merchandise Manager still sees the order in the portal report.
+  let orderId = null;
+  try {
+    const sql = getSql();
+    const inserted = await sql`
+      INSERT INTO merch_orders (
+        customer_name, customer_email, customer_phone,
+        item, size, color, qty, notes, updated_by
+      ) VALUES (
+        ${name}, ${email.toLowerCase()}, ${phone},
+        ${itemDef.label}, ${size}, ${color}, ${qty}, ${notes}, 'public-form'
+      )
+      RETURNING id
+    `;
+    orderId = inserted[0] && inserted[0].id;
+  } catch (dbErr) {
+    console.error('Merch DB insert error:', dbErr);
+    return res.status(500).json({ error: 'Could not save your order. Please try again.' });
+  }
+
+  // Email work runs in the background so the user gets a snappy ack.
+  // CC the Merchandise Manager (or Comms Director as fallback) so the
+  // team sees the order land in their inbox the moment it's submitted.
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone || '—');
+  const safeItem = escapeHtml(itemDef.label);
+  const safeSize = escapeHtml(size || '—');
+  const safeColor = escapeHtml(color || '—');
+  const safeQty = String(qty);
+  const safeNotes = notes ? escapeHtml(notes) : '';
+
+  // Try Merchandise Manager first; fall back to communications@ if no
+  // holder is assigned (getRoleHolderEmail returns null when the role
+  // isn't filled and isn't on the board mailbox shortcut list).
+  let merchCc = null;
+  try {
+    merchCc = await getRoleHolderEmail('Merchandise Manager');
+  } catch (_) { /* fall through */ }
+  if (!merchCc) merchCc = 'communications@rootsandwingsindy.com';
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const detailRows =
+    `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Item</td><td style="padding:8px 0;">${safeItem}</td></tr>` +
+    (size  ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Size</td><td style="padding:8px 0;">${safeSize}</td></tr>` : '') +
+    (color ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Color</td><td style="padding:8px 0;">${safeColor}</td></tr>` : '') +
+    `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Quantity</td><td style="padding:8px 0;">${safeQty}</td></tr>` +
+    (notes ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Notes</td><td style="padding:8px 0;white-space:pre-wrap;">${safeNotes}</td></tr>` : '');
+
+  const emailWork = resend.emails.send({
+    from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+    to: email,
+    cc: [merchCc],
+    replyTo: merchCc,
+    subject: emailSubject('Roots & Wings: We received your merch order'),
+    html: `
+      <h2>Thanks for your order!</h2>
+      <p>Hi ${safeName},</p>
+      <p>We've received your merchandise order. The Merchandise Manager will be in touch shortly with payment details (we accept Venmo) and fulfillment timing.</p>
+      <table style="border-collapse:collapse;font-family:sans-serif;margin:16px 0;">
+        ${detailRows}
+      </table>
+      <p>Reply to this email with any questions — it goes straight to our Merchandise Manager.</p>
+      <p>— Roots &amp; Wings Indy</p>
+    `
+  }).catch(err => { console.error('Merch email send error:', err); });
+
+  // waitUntil lets the function return immediately while Resend
+  // finishes in the background.
+  if (typeof waitUntil === 'function') waitUntil(emailWork);
+
+  return res.status(200).json({ ok: true, order_id: orderId });
+}
+
+async function handleMerchOrdersList(req, res) {
+  const auth = await verifyWorkspaceAuth(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({ error: 'Not authorized to view merch orders.' });
+  }
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, customer_name, customer_email, customer_phone,
+             item, size, color, qty, notes,
+             paid_at, delivered_at, created_at, updated_at, updated_by
+      FROM merch_orders
+      ORDER BY created_at DESC
+    `;
+    return res.status(200).json({ orders: rows });
+  } catch (err) {
+    console.error('Merch list error:', err);
+    return res.status(500).json({ error: 'Failed to load merch orders.' });
+  }
+}
+
+async function handleMerchUpdate(body, req, res) {
+  const auth = await verifyWorkspaceAuth(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({ error: 'Not authorized to update merch orders.' });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+  const field = String(body.field || '').toLowerCase();
+  if (field !== 'paid' && field !== 'delivered') {
+    return res.status(400).json({ error: 'field must be "paid" or "delivered"' });
+  }
+  // Toggle semantics: client sends desired value (true = stamp now,
+  // false = clear). Lets the report's pill click flip between states.
+  const setOn = !!body.value;
+  const col = field === 'paid' ? 'paid_at' : 'delivered_at';
+  try {
+    const sql = getSql();
+    const rows = setOn
+      ? await sql`UPDATE merch_orders SET ${sql(col)} = NOW(), updated_at = NOW(), updated_by = ${auth.email}
+                  WHERE id = ${id} RETURNING id, paid_at, delivered_at`
+      : await sql`UPDATE merch_orders SET ${sql(col)} = NULL, updated_at = NOW(), updated_by = ${auth.email}
+                  WHERE id = ${id} RETURNING id, paid_at, delivered_at`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
+    return res.status(200).json({ order: rows[0] });
+  } catch (err) {
+    console.error('Merch update error:', err);
+    return res.status(500).json({ error: 'Failed to update order.' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -2847,6 +3067,7 @@ module.exports = async function handler(req, res) {
     if (req.query.waivers_counts === '1') return handleWaiversCounts(req, res);
     if (req.query.action === 'profile') return handleProfileGet(req, res);
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
+    if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -2854,6 +3075,8 @@ module.exports = async function handler(req, res) {
     const body = req.body || {};
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
+    if (kind === 'merch-order') return handleMerchOrder(body, res);
+    if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);

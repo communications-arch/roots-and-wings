@@ -944,3 +944,69 @@ CREATE TABLE IF NOT EXISTS role_holder_confirmations (
 INSERT INTO role_holder_confirmations (school_year, confirmed_by_email)
 VALUES ('2025-2026', '')
 ON CONFLICT (school_year) DO NOTHING;
+
+-- ──────────────────────────────────────────────
+-- Merchandise (public order form + portal report)
+-- ──────────────────────────────────────────────
+-- Customers fill out a public form on the homepage Merch section; rows
+-- land here. The Merchandise Manager (a new role under Communications)
+-- and the Comms Director manage them via a portal report — Paid /
+-- Delivered are click-to-toggle pills. Venmo handle is communicated via
+-- a follow-up email; we don't store payment IDs here.
+CREATE TABLE IF NOT EXISTS merch_orders (
+  id              SERIAL PRIMARY KEY,
+  customer_name   TEXT NOT NULL,
+  customer_email  TEXT NOT NULL,
+  customer_phone  TEXT NOT NULL DEFAULT '',
+  item            TEXT NOT NULL,
+  size            TEXT NOT NULL DEFAULT '',
+  color           TEXT NOT NULL DEFAULT '',
+  qty             INTEGER NOT NULL DEFAULT 1,
+  notes           TEXT NOT NULL DEFAULT '',
+  paid_at         TIMESTAMPTZ,
+  delivered_at    TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS merch_orders_created_idx ON merch_orders (created_at DESC);
+CREATE INDEX IF NOT EXISTS merch_orders_paid_idx ON merch_orders (paid_at);
+CREATE INDEX IF NOT EXISTS merch_orders_delivered_idx ON merch_orders (delivered_at);
+
+-- Merchandise Manager role under the Communications Committee. Idempotent
+-- via ON CONFLICT(role_key). The committee_id + parent_role_id lookups
+-- resolve at insert time so this row stays linked even if those rows get
+-- renumbered.
+INSERT INTO roles (
+  role_key, title, category, committee_id, parent_role_id, display_order,
+  status, term_length, overview, duties, playbook,
+  icon_emoji, card_summary, role_email, updated_by
+)
+SELECT
+  'merchandise_manager',
+  'Merchandise Manager',
+  'committee_role',
+  (SELECT id FROM committees WHERE name = 'Communications Committee'),
+  (SELECT id FROM roles WHERE role_key = 'communications_director'),
+  71,
+  'active',
+  '1 year',
+  'Manages Roots & Wings merchandise — fulfilling orders submitted through the public site, coordinating with vendors on inventory, and keeping the Merchandise report up to date as orders are paid and delivered.',
+  ARRAY[
+    'Monitor the Merchandise Orders report for new submissions.',
+    'Reach out to customers via email with Venmo payment details.',
+    'Mark orders Paid in the report after Venmo confirmation.',
+    'Coordinate fulfillment (printing, pickup, delivery) and mark Delivered when handed off.',
+    'Track inventory and reorder timing for items with minimums (mug, tumbler, pin, patch).'
+  ],
+  '',
+  '🎁',
+  ARRAY['Fulfills orders', 'Tracks Paid / Delivered', 'Reports to Communications Director'],
+  '',
+  'migrate.sql'
+ON CONFLICT (role_key) DO UPDATE SET
+  committee_id   = EXCLUDED.committee_id,
+  parent_role_id = EXCLUDED.parent_role_id,
+  display_order  = EXCLUDED.display_order,
+  category       = EXCLUDED.category,
+  updated_at     = NOW();

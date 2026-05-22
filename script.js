@@ -6015,7 +6015,7 @@
     },
     'reports': {
       title: 'Reports',
-      roleGate: ['Communications Director', 'Membership Director', 'Vice President', 'Afternoon Class Liaison', 'Treasurer'],
+      roleGate: ['Communications Director', 'Membership Director', 'Vice President', 'Afternoon Class Liaison', 'Treasurer', 'Merchandise Manager'],
       render: function (prefs, roles, role) {
         var items = (ROLE_REPORTS[role] || []).slice();
         // Member Participation belongs to the VP + Afternoon Class Liaison
@@ -6126,7 +6126,11 @@
       // Membership Director's workspace only. Super users can still see it
       // by View-As'ing into Membership.
       { key: 'waivers', title: 'Waivers Report' },
-      { key: 'membership', title: 'Membership Report' }
+      { key: 'membership', title: 'Membership Report' },
+      { key: 'merch-orders', title: 'Merchandise Orders' }
+    ],
+    'Merchandise Manager': [
+      { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
     'Membership Director': [
       { key: 'tour-pipeline', title: 'Tour Pipeline' },
@@ -6434,6 +6438,7 @@
         else if (key === 'membership') showMembershipReportModal();
         else if (key === 'participation') showParticipationReportModal();
         else if (key === 'tour-pipeline') showTourPipelineModal();
+        else if (key === 'merch-orders') showMerchOrdersModal();
       });
     });
 
@@ -7818,6 +7823,205 @@
     });
     if (!body) return;
     loadWaiversReport(body);
+  }
+
+  // ─── Merchandise Orders Report ───
+  // Comms Director + Merchandise Manager. Each row shows the order
+  // details with click-to-toggle Paid / Delivered pills. Cache is per-
+  // session so the rate of GET hits stays modest even if the user
+  // reopens the report several times.
+  var _merchOrdersCache = null;
+  var _merchOrdersFilter = 'all'; // all | unpaid | unfulfilled | paid | delivered
+
+  var MERCH_ORDERS_TABLE_COLS = [
+    { key: 'customer_name', label: 'Name', type: 'string',
+      render: function (o) {
+        var lines = '<div>' + escapeHtmlWs(o.customer_name) + '</div>';
+        if (o.customer_email) lines += '<div class="ws-wv-context"><a href="mailto:' + escapeHtmlWs(o.customer_email) + '">' + escapeHtmlWs(o.customer_email) + '</a></div>';
+        if (o.customer_phone) lines += '<div class="ws-wv-context">' + escapeHtmlWs(o.customer_phone) + '</div>';
+        return lines;
+      }
+    },
+    { key: 'item', label: 'Order', type: 'string',
+      render: function (o) {
+        var qty = o.qty > 1 ? ' <span class="ws-wv-context">(×' + o.qty + ')</span>' : '';
+        var line = escapeHtmlWs(o.item) + qty;
+        if (o.notes) line += '<div class="ws-wv-context" style="font-style:italic;">' + escapeHtmlWs(o.notes) + '</div>';
+        return line;
+      }
+    },
+    { key: 'size', label: 'Size', type: 'string',
+      render: function (o) { return o.size ? escapeHtmlWs(o.size) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'color', label: 'Color', type: 'string',
+      render: function (o) { return o.color ? escapeHtmlWs(o.color) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'paid_at', label: 'Paid', type: 'string',
+      sortValue: function (o) { return o.paid_at ? 'a' : 'z'; },
+      render: function (o) {
+        var on = !!o.paid_at;
+        var label = on ? 'Paid' : 'Unpaid';
+        var stamp = on ? '<div class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.paid_at)) + '</div>' : '';
+        return '<button type="button" class="ws-wv-pill ' + (on ? 'ws-wv-ok' : 'ws-wv-pending') + ' merch-toggle-btn"'
+          + ' data-merch-id="' + o.id + '" data-merch-field="paid" data-merch-value="' + (on ? '1' : '0') + '"'
+          + ' title="Click to toggle">' + label + '</button>' + stamp;
+      }
+    },
+    { key: 'delivered_at', label: 'Delivered', type: 'string',
+      sortValue: function (o) { return o.delivered_at ? 'a' : 'z'; },
+      render: function (o) {
+        var on = !!o.delivered_at;
+        var label = on ? 'Delivered' : 'Not yet';
+        var stamp = on ? '<div class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.delivered_at)) + '</div>' : '';
+        return '<button type="button" class="ws-wv-pill ' + (on ? 'ws-wv-ok' : 'ws-wv-pending') + ' merch-toggle-btn"'
+          + ' data-merch-id="' + o.id + '" data-merch-field="delivered" data-merch-value="' + (on ? '1' : '0') + '"'
+          + ' title="Click to toggle">' + label + '</button>' + stamp;
+      }
+    },
+    { key: 'created_at', label: 'Ordered', type: 'date',
+      render: function (o) { return formatReportDate(o.created_at); }
+    }
+  ];
+
+  function showMerchOrdersModal() {
+    var icons = [
+      { label: 'Refresh', icon: ICON_SVG.refresh || ICON_SVG.gear, aria: 'Reload from server', action: function () { _merchOrdersCache = null; loadMerchOrdersReport(null); } }
+    ];
+    var body = renderReportModal({
+      title: 'Merchandise Orders',
+      subtitle: 'Customer orders from the public site. Click the Paid or Delivered pills to toggle.',
+      meta: '',
+      icons: icons,
+      bodyId: 'ws-merch-orders-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading orders…</p>'
+    });
+    if (!body) return;
+    loadMerchOrdersReport(body);
+  }
+
+  function loadMerchOrdersReport(body) {
+    if (!body) body = document.getElementById('ws-merch-orders-body');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/tour?list=merch_orders', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load orders: ' + escapeHtml((res.data && res.data.error) || 'error') + '</p>';
+        return;
+      }
+      _merchOrdersCache = Array.isArray(res.data.orders) ? res.data.orders : [];
+      renderMerchOrdersBody(body);
+    }).catch(function (err) {
+      body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtml((err && err.message) || 'unknown') + '</p>';
+    });
+  }
+
+  function renderMerchOrdersBody(body) {
+    var orders = _merchOrdersCache || [];
+    var total = orders.length;
+    var unpaid     = orders.filter(function (o) { return !o.paid_at; }).length;
+    var unfulfilled = orders.filter(function (o) { return !o.delivered_at; }).length;
+    var paid       = total - unpaid;
+    var delivered  = total - unfulfilled;
+
+    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+    if (metaEl) metaEl.textContent = total + ' order' + (total === 1 ? '' : 's');
+
+    var countsHtml = '<div class="rd-counts">';
+    countsHtml += '<span class="ws-wv-pending">' + unpaid + ' Unpaid</span>';
+    countsHtml += '<span class="ws-wv-ok">' + paid + ' Paid</span>';
+    countsHtml += '<span class="ws-wv-pending">' + unfulfilled + ' Awaiting delivery</span>';
+    countsHtml += '<span class="ws-wv-ok">' + delivered + ' Delivered</span>';
+    countsHtml += '</div>';
+
+    if (total === 0) {
+      body.innerHTML = countsHtml + '<p class="ws-empty">No orders yet — the public form is open and will land orders here.</p>';
+      return;
+    }
+    body.innerHTML = countsHtml + '<div id="ws-merch-orders-table-target"></div>';
+    var target = body.querySelector('#ws-merch-orders-table-target');
+
+    function rowsForFilter() {
+      if (_merchOrdersFilter === 'unpaid')      return orders.filter(function (o) { return !o.paid_at; });
+      if (_merchOrdersFilter === 'paid')        return orders.filter(function (o) { return !!o.paid_at; });
+      if (_merchOrdersFilter === 'unfulfilled') return orders.filter(function (o) { return !o.delivered_at; });
+      if (_merchOrdersFilter === 'delivered')   return orders.filter(function (o) { return !!o.delivered_at; });
+      return orders;
+    }
+
+    function renderTable() {
+      var cols = MERCH_ORDERS_TABLE_COLS.slice();
+      // Column funnel on Paid + Delivered
+      cols.forEach(function (col) {
+        if (col.key === 'paid_at') {
+          col.filter = {
+            options: [
+              { value: 'all',    label: 'Any',    count: total },
+              { value: 'unpaid', label: 'Unpaid', count: unpaid },
+              { value: 'paid',   label: 'Paid',   count: paid }
+            ],
+            current: (_merchOrdersFilter === 'unpaid' || _merchOrdersFilter === 'paid') ? _merchOrdersFilter : 'all',
+            onChange: function (v) { _merchOrdersFilter = v; renderTable(); }
+          };
+        }
+        if (col.key === 'delivered_at') {
+          col.filter = {
+            options: [
+              { value: 'all',         label: 'Any',         count: total },
+              { value: 'unfulfilled', label: 'Awaiting',    count: unfulfilled },
+              { value: 'delivered',   label: 'Delivered',   count: delivered }
+            ],
+            current: (_merchOrdersFilter === 'unfulfilled' || _merchOrdersFilter === 'delivered') ? _merchOrdersFilter : 'all',
+            onChange: function (v) { _merchOrdersFilter = v; renderTable(); }
+          };
+        }
+      });
+      renderSortableTable(target, cols, rowsForFilter(), {
+        initialSort: { key: 'created_at', dir: 'desc' }
+      });
+      // Wire pill click → optimistic toggle.
+      target.querySelectorAll('.merch-toggle-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var id = parseInt(btn.getAttribute('data-merch-id'), 10);
+          var field = btn.getAttribute('data-merch-field');
+          var currentlyOn = btn.getAttribute('data-merch-value') === '1';
+          var nextOn = !currentlyOn;
+          var col = field === 'paid' ? 'paid_at' : 'delivered_at';
+          var idx = (_merchOrdersCache || []).findIndex(function (o) { return o.id === id; });
+          if (idx === -1) return;
+          // Optimistic update so the UI feels instant.
+          var prevVal = _merchOrdersCache[idx][col];
+          _merchOrdersCache[idx][col] = nextOn ? new Date().toISOString() : null;
+          renderMerchOrdersBody(body);
+
+          var cred = localStorage.getItem('rw_google_credential');
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'merch-update', id: id, field: field, value: nextOn })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error((res.data && res.data.error) || 'update failed');
+            // Re-sync from server response so any normalization is reflected.
+            if (res.data.order) {
+              _merchOrdersCache[idx].paid_at = res.data.order.paid_at;
+              _merchOrdersCache[idx].delivered_at = res.data.order.delivered_at;
+              renderMerchOrdersBody(body);
+            }
+          }).catch(function (err) {
+            // Revert.
+            _merchOrdersCache[idx][col] = prevVal;
+            renderMerchOrdersBody(body);
+            alert('Could not update: ' + ((err && err.message) || 'unknown'));
+          });
+        });
+      });
+    }
+    renderTable();
   }
 
   function showSendWaiverModal() {
