@@ -9779,6 +9779,144 @@ button.staff-role:hover {
   font-size: 0.85rem;
   min-height: 1em;
 }
+
+/* Merch modal tab strip — borrows .portal-tab visual treatment but
+   sized down for an in-modal context (modal title carries the page-
+   level heading; tabs are a sub-scope, not a primary nav). */
+.merch-tab-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--color-border);
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+.merch-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.merch-tab-btn:hover {
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.04);
+}
+.merch-tab-btn.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+.merch-tab-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(var(--color-primary-rgb), 0.14);
+  color: var(--color-primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.5;
+}
+.merch-tab-badge-warn {
+  background: rgba(192, 57, 43, 0.14);
+  color: #b93a33;
+}
+
+/* Inventory stock pills — pair the green/yellow/red semantic with the
+   same pill shape used by .ws-wv-ok / .ws-wv-pending so the inventory
+   tab reads as the same family of badges as the orders tab. */
+.merch-stock-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  white-space: nowrap;
+  margin-left: 6px;
+}
+.merch-stock-low {
+  background: rgba(224, 181, 44, 0.2);
+  color: var(--color-accent-dark);
+}
+.merch-stock-out {
+  background: rgba(192, 57, 43, 0.15);
+  color: #b93a33;
+}
+
+/* Inventory edit row — takes over the row's full width via colspan.
+   Re-uses the add-order field styling for consistency. */
+.merch-inv-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 12px;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+.merch-inv-edit-title {
+  font-family: var(--font-heading);
+  font-size: 0.95rem;
+  color: var(--color-primary-dark);
+}
+.merch-inv-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.merch-inv-edit-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.merch-inv-edit-grid label.merch-inv-edit-notes { grid-column: 1 / -1; }
+.merch-inv-edit-grid input,
+.merch-inv-edit-grid textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-cream);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text);
+}
+.merch-inv-edit-grid input:focus,
+.merch-inv-edit-grid textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-white);
+}
+.merch-inv-edit-grid textarea { resize: vertical; min-height: 44px; }
+.merch-inv-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.merch-inv-status {
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+}
 /* Status pills shared by Membership Report + Waivers Report (and any
    other table that needs Paid/Pending/Signed status cells). Same
    all-caps + tracking + bold treatment as .ws-part-status / .pmrep-status
@@ -10177,6 +10315,18 @@ button.staff-role:hover {
 .mo-checklist label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .mo-checklist input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-primary); }
 .mo-step-stamp { color: var(--color-text-light); font-size: 0.8rem; }
+/* Inline destination link next to a checklist step (e.g. "admin.google.com ↗"
+   on the Workspace account creation step). De-emphasized weight so it
+   reads as an aid, not the action — the checkbox is the action. */
+.mo-step-link {
+  font-size: 0.8rem;
+  color: var(--color-primary);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(var(--color-primary-rgb), 0.35);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.mo-step-link:hover { border-bottom-color: var(--color-primary); }
 .mo-step-email { margin-top: 4px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mo-row-hint { color: var(--color-text-light); font-size: 0.82rem; font-style: italic; }
 .mo-email-composer {

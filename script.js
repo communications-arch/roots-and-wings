@@ -7893,6 +7893,10 @@
   // reopens the report several times.
   var _merchOrdersCache = null;
   var _merchOrdersFilter = 'all'; // all | unpaid | unfulfilled | paid | delivered
+  var _merchInventoryCache = null;
+  var _merchActiveTab = 'orders'; // 'orders' | 'inventory'
+  var _merchInventoryEditId = null;
+  var _merchInventoryItemFilter = 'all';
 
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'customer_name', label: 'Name', type: 'string',
@@ -7944,6 +7948,63 @@
     }
   ];
 
+  // Inventory table — one row per variant. on_hand is the editable
+  // count; Low / Out pills derive from low_threshold. Reorder min is
+  // shown as a hint so the manager knows the smallest order they'd
+  // place at restock time. Edit button swaps the row to an inline
+  // editor — full row replacement (not modal) so multiple edits in
+  // a row stay snappy.
+  var MERCH_INVENTORY_TABLE_COLS = [
+    { key: 'item', label: 'Item', type: 'string',
+      sortValue: function (r) { return (MERCH_CATALOG_CLIENT[r.item] && MERCH_CATALOG_CLIENT[r.item].label) || r.item; },
+      render: function (r) {
+        return escapeHtmlWs((MERCH_CATALOG_CLIENT[r.item] && MERCH_CATALOG_CLIENT[r.item].label) || r.item);
+      }
+    },
+    { key: 'variant', label: 'Variant', type: 'string',
+      sortValue: function (r) { return (r.size || '') + '|' + (r.color || ''); },
+      render: function (r) {
+        var parts = [];
+        if (r.size) parts.push(escapeHtmlWs(r.size));
+        if (r.color) parts.push(escapeHtmlWs(r.color));
+        return parts.length ? parts.join(' &middot; ') : '<span class="ws-srt-actions-empty">&mdash;</span>';
+      }
+    },
+    { key: 'on_hand', label: 'On hand', type: 'number',
+      sortValue: function (r) { return r.on_hand; },
+      render: function (r) {
+        var pill = '';
+        if (r.on_hand === 0) pill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
+        else if (r.low_threshold > 0 && r.on_hand <= r.low_threshold) pill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
+        return '<strong>' + r.on_hand + '</strong>' + pill;
+      }
+    },
+    { key: 'low_threshold', label: 'Low at', type: 'number',
+      sortValue: function (r) { return r.low_threshold; },
+      render: function (r) { return r.low_threshold > 0 ? r.low_threshold : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'reorder_minimum', label: 'Reorder min', type: 'number',
+      sortValue: function (r) { return r.reorder_minimum; },
+      render: function (r) { return r.reorder_minimum > 0 ? r.reorder_minimum : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'notes', label: 'Notes', type: 'string',
+      render: function (r) {
+        if (!r.notes) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        var t = String(r.notes);
+        var truncated = t.length > 60 ? t.slice(0, 57) + '…' : t;
+        return '<span title="' + escapeHtml(r.notes) + '">' + escapeHtmlWs(truncated) + '</span>';
+      }
+    },
+    { key: 'updated_at', label: 'Updated', type: 'date',
+      render: function (r) { return r.updated_at ? formatReportDate(r.updated_at) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'actions', label: '', type: 'string',
+      render: function (r) {
+        return '<button type="button" class="ws-wv-pill merch-inv-edit-btn" data-inv-id="' + r.id + '">Edit</button>';
+      }
+    }
+  ];
+
   // Catalog mirrors api/tour.js MERCH_CATALOG. Kept in sync by hand —
   // small enough that DRYing via a /api/tour?config=1 round-trip on every
   // modal open isn't worth the latency. If you edit one, edit the other.
@@ -7969,23 +8030,87 @@
   };
 
   function showMerchOrdersModal() {
-    // Header chrome intentionally just exposes Add Order. Opening the
-    // modal already calls loadMerchOrdersReport, so an explicit
-    // Refresh button was redundant — and the missing ICON_SVG.refresh
-    // caused it to render as a gear, which read as "settings".
+    // Header chrome: Add Order always available — if Inventory tab is
+    // active when it's clicked, we flip back to Orders first since the
+    // form lives in that tab's content area.
     var icons = [
-      { label: 'Add Order', icon: ICON_SVG.add, aria: 'Record a manual order', action: function () { toggleMerchAddOrderForm(); } }
+      { label: 'Add Order', icon: ICON_SVG.add, aria: 'Record a manual order', action: function () {
+          if (_merchActiveTab !== 'orders') { _merchActiveTab = 'orders'; renderMerchTabbedBody(); }
+          toggleMerchAddOrderForm();
+        }
+      }
     ];
-    var body = renderReportModal({
-      title: 'Merchandise Orders',
-      subtitle: 'Customer orders from the public site, plus manual entries for in-person sales. Click the Paid or Delivered pills to toggle.',
+    var outer = renderReportModal({
+      title: 'Merchandise',
+      subtitle: 'Customer orders from the public site plus on-hand inventory counts. Use the tabs to switch.',
       meta: '',
       icons: icons,
-      bodyId: 'ws-merch-orders-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading orders…</p>'
+      bodyId: 'ws-merch-modal-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
-    if (!body) return;
-    loadMerchOrdersReport(body);
+    if (!outer) return;
+    // Reset per-open state: tab to Orders, clear any stale edit.
+    _merchActiveTab = 'orders';
+    _merchInventoryEditId = null;
+    renderMerchTabbedBody();
+    // Kick off both loaders. Orders fills its tab; inventory loads in
+    // the background so the low-stock badge on the Inventory tab is
+    // accurate as soon as the count comes back.
+    var ordersBody = document.getElementById('ws-merch-orders-body');
+    if (ordersBody) loadMerchOrdersReport(ordersBody);
+    loadMerchInventory(function () {
+      // If user hasn't switched tabs yet, re-render to update the badge.
+      if (_merchActiveTab === 'orders') {
+        var nav = document.querySelector('.merch-tab-nav');
+        if (nav) renderMerchTabNav(nav);
+      }
+    });
+  }
+
+  // Renders the [tabs][content] structure into the modal body. Called
+  // on initial open and whenever the active tab changes.
+  function renderMerchTabbedBody() {
+    var modalBody = document.getElementById('ws-merch-modal-body');
+    if (!modalBody) return;
+    modalBody.innerHTML = ''
+      + '<div class="merch-tab-nav" role="tablist"></div>'
+      + (_merchActiveTab === 'orders'
+          ? '<div id="ws-merch-orders-body"><p class="ws-empty">Loading orders…</p></div>'
+          : '<div id="ws-merch-inventory-body"><p class="ws-empty">Loading inventory…</p></div>');
+    var nav = modalBody.querySelector('.merch-tab-nav');
+    renderMerchTabNav(nav);
+    if (_merchActiveTab === 'inventory') {
+      var invBody = document.getElementById('ws-merch-inventory-body');
+      if (_merchInventoryCache) renderMerchInventoryBody(invBody);
+      else loadMerchInventory(function () { renderMerchInventoryBody(document.getElementById('ws-merch-inventory-body')); });
+    } else {
+      var ordBody = document.getElementById('ws-merch-orders-body');
+      if (_merchOrdersCache) renderMerchOrdersBody(ordBody);
+      else loadMerchOrdersReport(ordBody);
+    }
+  }
+
+  function renderMerchTabNav(nav) {
+    if (!nav) return;
+    var lowCount = (_merchInventoryCache || []).filter(function (r) {
+      return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold);
+    }).length;
+    var ordersUnpaid = (_merchOrdersCache || []).filter(function (o) { return !o.paid_at; }).length;
+    nav.innerHTML = ''
+      + '<button type="button" class="portal-tab merch-tab-btn' + (_merchActiveTab === 'orders' ? ' active' : '') + '" data-merch-tab="orders" role="tab">'
+      +   'Orders' + (ordersUnpaid > 0 ? ' <span class="merch-tab-badge">' + ordersUnpaid + ' unpaid</span>' : '')
+      + '</button>'
+      + '<button type="button" class="portal-tab merch-tab-btn' + (_merchActiveTab === 'inventory' ? ' active' : '') + '" data-merch-tab="inventory" role="tab">'
+      +   'Inventory' + (lowCount > 0 ? ' <span class="merch-tab-badge merch-tab-badge-warn">' + lowCount + ' low</span>' : '')
+      + '</button>';
+    nav.querySelectorAll('.merch-tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.getAttribute('data-merch-tab');
+        if (tab === _merchActiveTab) return;
+        _merchActiveTab = tab;
+        renderMerchTabbedBody();
+      });
+    });
   }
 
   // Toggle the manual-entry form open/closed. Lives at the top of the
@@ -8240,6 +8365,197 @@
       });
     }
     renderTable();
+  }
+
+  // ── Inventory tab ─────────────────────────────
+  // Inventory is loaded lazily but cached for the rest of the session.
+  // The done callback fires whether the load succeeded or not so the
+  // tab badge re-renders to "—" instead of staying on stale data.
+  function loadMerchInventory(done) {
+    fetch('/api/tour?list=merch_inventory', {
+      method: 'GET',
+      headers: rwAuthHeaders()
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (res.ok && Array.isArray(res.data.inventory)) {
+        _merchInventoryCache = res.data.inventory;
+      } else {
+        // Cache an empty list on a 4xx so we don't spin forever; the
+        // error surfaces in the body via renderMerchInventoryBody if
+        // the user lands on the tab.
+        _merchInventoryCache = [];
+        console.warn('Merch inventory load failed:', res.data && res.data.error);
+      }
+      if (typeof done === 'function') done();
+    }).catch(function (err) {
+      _merchInventoryCache = [];
+      console.warn('Merch inventory network error:', err && err.message);
+      if (typeof done === 'function') done();
+    });
+  }
+
+  function renderMerchInventoryBody(body) {
+    if (!body) return;
+    var inv = _merchInventoryCache || [];
+    if (inv.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No inventory rows yet — run the migration to seed them.</p>';
+      return;
+    }
+    var lowCount = inv.filter(function (r) { return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold); }).length;
+    var outCount = inv.filter(function (r) { return r.on_hand === 0; }).length;
+    var total = inv.length;
+    var countsHtml = '<div class="rd-counts">'
+      + '<span class="ws-wv-ok">' + total + ' variants</span>'
+      + (outCount > 0  ? '<span class="merch-stock-pill merch-stock-out">' + outCount + ' out</span>' : '')
+      + (lowCount - outCount > 0 ? '<span class="merch-stock-pill merch-stock-low">' + (lowCount - outCount) + ' low</span>' : '')
+      + '</div>';
+    body.innerHTML = countsHtml
+      + '<p class="ws-body-hint">Adjust counts as you sell, restock, or take stock. Set <strong>Low at</strong> to get a Low pill when on-hand drops to that number. <strong>Reorder min</strong> is the smallest batch the supplier will print — useful when deciding to order extra for stock.</p>'
+      + '<div id="ws-merch-inventory-table-target"></div>';
+    var target = body.querySelector('#ws-merch-inventory-table-target');
+
+    function rowsForFilter() {
+      if (_merchInventoryItemFilter === 'all') return inv;
+      if (_merchInventoryItemFilter === 'low') {
+        return inv.filter(function (r) { return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold); });
+      }
+      return inv.filter(function (r) { return r.item === _merchInventoryItemFilter; });
+    }
+
+    function renderTable() {
+      var cols = MERCH_INVENTORY_TABLE_COLS.slice();
+      // Item-level filter on the Item column. Options include each
+      // distinct item plus a "Low or out" shortcut so the manager
+      // can jump straight to what needs attention.
+      var distinctItems = {};
+      inv.forEach(function (r) { distinctItems[r.item] = true; });
+      var itemOptions = [{ value: 'all', label: 'All items', count: inv.length }];
+      itemOptions.push({ value: 'low', label: 'Low or out', count: lowCount });
+      Object.keys(distinctItems).sort().forEach(function (key) {
+        var label = (MERCH_CATALOG_CLIENT[key] && MERCH_CATALOG_CLIENT[key].label) || key;
+        var count = inv.filter(function (r) { return r.item === key; }).length;
+        itemOptions.push({ value: key, label: label, count: count });
+      });
+      cols.forEach(function (col) {
+        if (col.key === 'item') {
+          col.filter = {
+            options: itemOptions,
+            current: _merchInventoryItemFilter,
+            onChange: function (v) { _merchInventoryItemFilter = v; renderTable(); }
+          };
+        }
+      });
+      renderSortableTable(target, cols, rowsForFilter(), {
+        initialSort: { key: 'item', dir: 'asc' }
+      });
+      // If a row is in edit mode, swap it after the table is drawn.
+      if (_merchInventoryEditId != null) {
+        var editRow = target.querySelector('tr[data-row-id="' + _merchInventoryEditId + '"]');
+        if (!editRow) {
+          // The filtered view doesn't contain the editing row anymore
+          // (e.g. user switched filter mid-edit). Cancel the edit.
+          _merchInventoryEditId = null;
+        } else {
+          var src = inv.find(function (r) { return r.id === _merchInventoryEditId; });
+          if (src) renderInventoryEditRow(editRow, src);
+        }
+      }
+      target.querySelectorAll('.merch-inv-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var id = parseInt(btn.getAttribute('data-inv-id'), 10);
+          _merchInventoryEditId = (_merchInventoryEditId === id) ? null : id;
+          renderTable();
+        });
+      });
+    }
+
+    // renderSortableTable doesn't emit data-row-id by default, so we
+    // patch the tbody after each render to tag rows by their inventory
+    // id. Lets us find the right row to swap for inline editing without
+    // walking the table by index.
+    var origRender = renderTable;
+    renderTable = function () {
+      origRender();
+      var rows = target.querySelectorAll('tbody tr');
+      var visible = rowsForFilter();
+      rows.forEach(function (tr, i) {
+        if (visible[i]) tr.setAttribute('data-row-id', visible[i].id);
+      });
+      if (_merchInventoryEditId != null) {
+        var editRow = target.querySelector('tr[data-row-id="' + _merchInventoryEditId + '"]');
+        var src = inv.find(function (r) { return r.id === _merchInventoryEditId; });
+        if (editRow && src) renderInventoryEditRow(editRow, src);
+      }
+    };
+    renderTable();
+  }
+
+  function renderInventoryEditRow(tr, row) {
+    var colspan = tr.children.length;
+    var label = (MERCH_CATALOG_CLIENT[row.item] && MERCH_CATALOG_CLIENT[row.item].label) || row.item;
+    var variantBits = [];
+    if (row.size) variantBits.push(escapeHtml(row.size));
+    if (row.color) variantBits.push(escapeHtml(row.color));
+    var variant = variantBits.length ? variantBits.join(' · ') : '';
+    tr.innerHTML = '<td colspan="' + colspan + '">'
+      + '<div class="merch-inv-edit">'
+      +   '<div class="merch-inv-edit-title"><strong>' + escapeHtml(label) + '</strong>' + (variant ? ' <span class="ws-wv-context">' + variant + '</span>' : '') + '</div>'
+      +   '<div class="merch-inv-edit-grid">'
+      +     '<label><span>On hand</span><input type="number" min="0" max="100000" id="merch-inv-onhand-' + row.id + '" value="' + row.on_hand + '"></label>'
+      +     '<label><span>Low at</span><input type="number" min="0" max="100000" id="merch-inv-low-' + row.id + '" value="' + row.low_threshold + '"></label>'
+      +     '<label><span>Reorder min</span><input type="number" min="0" max="100000" id="merch-inv-min-' + row.id + '" value="' + row.reorder_minimum + '"></label>'
+      +     '<label class="merch-inv-edit-notes"><span>Notes (optional)</span><textarea maxlength="1000" rows="2" id="merch-inv-notes-' + row.id + '" placeholder="e.g. ordered 24 from PrintCo 5/12">' + escapeHtml(row.notes || '') + '</textarea></label>'
+      +   '</div>'
+      +   '<div class="merch-inv-edit-actions">'
+      +     '<button type="button" class="btn-secondary merch-inv-cancel">Cancel</button>'
+      +     '<button type="button" class="btn-primary merch-inv-save">Save</button>'
+      +     '<span class="merch-inv-status" role="status" aria-live="polite"></span>'
+      +   '</div>'
+      + '</div>'
+      + '</td>';
+    var statusEl = tr.querySelector('.merch-inv-status');
+    tr.querySelector('.merch-inv-cancel').addEventListener('click', function () {
+      _merchInventoryEditId = null;
+      // Re-render the inventory body to drop the editor.
+      var ib = document.getElementById('ws-merch-inventory-body');
+      if (ib) renderMerchInventoryBody(ib);
+    });
+    tr.querySelector('.merch-inv-save').addEventListener('click', function () {
+      var btn = tr.querySelector('.merch-inv-save');
+      var payload = {
+        kind: 'merch-inventory-update',
+        id: row.id,
+        on_hand:         tr.querySelector('#merch-inv-onhand-' + row.id).value,
+        low_threshold:   tr.querySelector('#merch-inv-low-' + row.id).value,
+        reorder_minimum: tr.querySelector('#merch-inv-min-' + row.id).value,
+        notes:           tr.querySelector('#merch-inv-notes-' + row.id).value
+      };
+      btn.disabled = true;
+      statusEl.textContent = 'Saving…';
+      statusEl.className = 'merch-inv-status';
+      fetch('/api/tour', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+        // Replace the cached row so the next render reflects the new values.
+        var idx = _merchInventoryCache.findIndex(function (r) { return r.id === row.id; });
+        if (idx !== -1 && res.data.row) _merchInventoryCache[idx] = res.data.row;
+        _merchInventoryEditId = null;
+        var ib = document.getElementById('ws-merch-inventory-body');
+        if (ib) renderMerchInventoryBody(ib);
+        // Also refresh the tab nav so the "N low" badge updates.
+        var nav = document.querySelector('.merch-tab-nav');
+        if (nav) renderMerchTabNav(nav);
+      }).catch(function (err) {
+        btn.disabled = false;
+        statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown');
+        statusEl.className = 'merch-inv-status ws-wv-err';
+      });
+    });
   }
 
   function showSendWaiverModal() {
@@ -8782,6 +9098,7 @@
         h += '</div>';
         h += '<ul class="mo-checklist">';
         h += '  <li><label><input type="checkbox" class="mo-step-cb" data-step="workspace_account_created_at" data-reg-id="' + r.id + '"' + (step1Done ? ' checked' : '') + '> 1. Workspace account created</label>'
+          + ' <a class="mo-step-link" href="https://admin.google.com/ac/users" target="_blank" rel="noopener" title="Open Google Workspace Admin Console in a new tab">admin.google.com&nbsp;↗</a>'
           + (step1Done ? '<span class="mo-step-stamp"> · ' + escapeHtmlWs(new Date(r.workspace_account_created_at).toLocaleDateString()) + '</span>' : '') + '</li>';
         h += '  <li><label><input type="checkbox" class="mo-step-cb" data-step="distribution_list_added_at" data-reg-id="' + r.id + '"' + (step2Done ? ' checked' : '') + '> 2. Added to currentmembers distribution list</label>'
           + (step2Done ? '<span class="mo-step-stamp"> · ' + escapeHtmlWs(new Date(r.distribution_list_added_at).toLocaleDateString()) + '</span>' : '') + '</li>';

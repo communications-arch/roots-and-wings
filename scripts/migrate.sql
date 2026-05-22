@@ -1010,3 +1010,56 @@ ON CONFLICT (role_key) DO UPDATE SET
   display_order  = EXCLUDED.display_order,
   category       = EXCLUDED.category,
   updated_at     = NOW();
+
+-- ──────────────────────────────────────────────
+-- Merchandise inventory
+-- ──────────────────────────────────────────────
+-- One row per (item, size, color) variant. on_hand is what's physically
+-- on the shelf; low_threshold flags the variant on the Orders report
+-- when it dips at or below that count; reorder_minimum is the supplier's
+-- minimum batch (e.g. 24 mugs) so the manager knows the smallest order
+-- they can place when restocking. Keys must match MERCH_CATALOG in
+-- api/tour.js — the seed below mirrors that catalog exactly. Items with
+-- no variants (mug/tumbler/pin/patch) use empty strings for size/color,
+-- which matches how merch_orders also stores variant-less items.
+CREATE TABLE IF NOT EXISTS merch_inventory (
+  id              SERIAL PRIMARY KEY,
+  item            TEXT NOT NULL,
+  size            TEXT NOT NULL DEFAULT '',
+  color           TEXT NOT NULL DEFAULT '',
+  on_hand         INTEGER NOT NULL DEFAULT 0,
+  low_threshold   INTEGER NOT NULL DEFAULT 0,
+  reorder_minimum INTEGER NOT NULL DEFAULT 0,
+  notes           TEXT NOT NULL DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by      TEXT NOT NULL DEFAULT '',
+  UNIQUE (item, size, color)
+);
+CREATE INDEX IF NOT EXISTS merch_inventory_item_idx ON merch_inventory (item);
+
+-- Seed: every variant in MERCH_CATALOG, on_hand = 0. ON CONFLICT keeps
+-- this safe to re-run — adding a new size/color above and re-running
+-- migrate.sql backfills the missing variant without disturbing counts
+-- already entered for the existing ones.
+INSERT INTO merch_inventory (item, size, color)
+SELECT 'tshirt', s, c
+FROM unnest(ARRAY[
+  'Toddler 2T','Toddler 3T','Toddler 4T','Toddler 5T',
+  'Kids XS','Kids S','Kids M','Kids L','Kids XL',
+  'Adult S','Adult M','Adult L','Adult XL','Adult XXL'
+]) AS s
+CROSS JOIN unnest(ARRAY['Purple','Olive','Lime','Teal']) AS c
+ON CONFLICT (item, size, color) DO NOTHING;
+
+INSERT INTO merch_inventory (item, size, color)
+SELECT 'tote', s, c
+FROM unnest(ARRAY['Small','Large']) AS s
+CROSS JOIN unnest(ARRAY['Black','Brown','Purple']) AS c
+ON CONFLICT (item, size, color) DO NOTHING;
+
+INSERT INTO merch_inventory (item, size, color) VALUES
+  ('mug', '', ''),
+  ('tumbler', '', ''),
+  ('pin', '', ''),
+  ('patch', '', '')
+ON CONFLICT (item, size, color) DO NOTHING;

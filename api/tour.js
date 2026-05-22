@@ -3225,6 +3225,99 @@ async function handleMerchUpdate(body, req, res) {
   }
 }
 
+// Merch inventory — one row per (item, size, color). Counts are
+// maintained by hand by the Merchandise Manager; we intentionally do
+// NOT auto-decrement when an order is marked Delivered (would silently
+// double-count any manual adjustment the manager made for in-person
+// sales) — the Orders report carries undelivered counts separately so
+// the manager can reconcile by eye.
+async function handleMerchInventoryList(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to view merch inventory.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, item, size, color,
+             on_hand, low_threshold, reorder_minimum, notes,
+             updated_at, updated_by
+      FROM merch_inventory
+      ORDER BY item, size, color
+    `;
+    return res.status(200).json({ inventory: rows });
+  } catch (err) {
+    console.error('Merch inventory list error:', err);
+    return res.status(500).json({ error: 'Failed to load inventory.' });
+  }
+}
+
+async function handleMerchInventoryUpdate(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to update merch inventory.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+
+  // Clamp non-negative integers with a generous cap so a stray keystroke
+  // can't park 9 quadrillion mugs on the report.
+  function intField(name) {
+    if (body[name] === undefined || body[name] === null || body[name] === '') return null;
+    const n = parseInt(body[name], 10);
+    if (!Number.isFinite(n) || n < 0) throw new Error(name + ' must be a non-negative integer');
+    if (n > 100000) throw new Error(name + ' is unreasonably large');
+    return n;
+  }
+  let onHand, lowThreshold, reorderMin;
+  try {
+    onHand       = intField('on_hand');
+    lowThreshold = intField('low_threshold');
+    reorderMin   = intField('reorder_minimum');
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  const notes = body.notes === undefined ? null : String(body.notes).slice(0, 1000);
+
+  if (onHand === null && lowThreshold === null && reorderMin === null && notes === null) {
+    return res.status(400).json({ error: 'Nothing to update.' });
+  }
+
+  try {
+    const sql = getSql();
+    // COALESCE pattern lets the client send only the field(s) they're
+    // editing without us having to dynamically build SQL — Neon's tagged
+    // template doesn't parameterize identifiers, and we already burned
+    // ourselves on that with handleMerchUpdate (see comment there).
+    const rows = await sql`
+      UPDATE merch_inventory
+      SET on_hand         = COALESCE(${onHand},       on_hand),
+          low_threshold   = COALESCE(${lowThreshold}, low_threshold),
+          reorder_minimum = COALESCE(${reorderMin},   reorder_minimum),
+          notes           = COALESCE(${notes},        notes),
+          updated_at      = NOW(),
+          updated_by      = ${auth.realEmail}
+      WHERE id = ${id}
+      RETURNING id, item, size, color, on_hand, low_threshold, reorder_minimum, notes, updated_at, updated_by
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Inventory row not found.' });
+    return res.status(200).json({ row: rows[0] });
+  } catch (err) {
+    console.error('Merch inventory update error:', err);
+    return res.status(500).json({ error: 'Failed to update inventory.' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -3239,6 +3332,7 @@ module.exports = async function handler(req, res) {
     if (req.query.action === 'profile') return handleProfileGet(req, res);
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
+    if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -3249,6 +3343,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'merch-order') return handleMerchOrder(body, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
+    if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
