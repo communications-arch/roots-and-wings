@@ -8000,7 +8000,7 @@
     },
     { key: 'actions', label: '', type: 'string',
       render: function (r) {
-        return '<button type="button" class="ws-wv-pill merch-inv-edit-btn" data-inv-id="' + r.id + '">Edit</button>';
+        return '<button type="button" class="sc-btn merch-inv-edit-btn" data-inv-id="' + r.id + '">Edit</button>';
       }
     }
   ];
@@ -8156,8 +8156,8 @@
     h += '<label><input type="checkbox" id="ws-merch-add-delivered"> Already delivered</label>';
     h += '</div>';
     h += '<div class="ws-merch-add-actions">';
-    h += '<button type="button" class="btn-secondary ws-merch-add-cancel">Cancel</button>';
-    h += '<button type="button" class="btn-primary ws-merch-add-submit">Save order</button>';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm ws-merch-add-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm ws-merch-add-submit">Save order</button>';
     h += '</div>';
     h += '<div class="ws-merch-add-status" id="ws-merch-add-status" role="status" aria-live="polite"></div>';
     return h;
@@ -8501,8 +8501,8 @@
       +     '<label class="merch-inv-edit-notes"><span>Notes (optional)</span><textarea maxlength="1000" rows="2" id="merch-inv-notes-' + row.id + '" placeholder="e.g. ordered 24 from PrintCo 5/12">' + escapeHtml(row.notes || '') + '</textarea></label>'
       +   '</div>'
       +   '<div class="merch-inv-edit-actions">'
-      +     '<button type="button" class="btn-secondary merch-inv-cancel">Cancel</button>'
-      +     '<button type="button" class="btn-primary merch-inv-save">Save</button>'
+      +     '<button type="button" class="btn btn-outline-dark btn-sm merch-inv-cancel">Cancel</button>'
+      +     '<button type="button" class="btn btn-primary btn-sm merch-inv-save">Save</button>'
       +     '<span class="merch-inv-status" role="status" aria-live="polite"></span>'
       +   '</div>'
       + '</div>'
