@@ -26,6 +26,6 @@ function emailSubject(subject) {
 // at sign time. Bump this any time the text in waiver.html / register.html
 // changes materially, and snapshot the prior version into /waivers/<old>.html
 // so old signatures still resolve to the exact text that was agreed to.
-const WAIVER_VERSION = '2026-05-01';
+const WAIVER_VERSION = '2026-05-22';
 
 module.exports = { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION };
