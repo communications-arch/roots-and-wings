@@ -3246,6 +3246,7 @@ async function handleMerchInventoryList(req, res) {
     const rows = await sql`
       SELECT id, item, size, color,
              on_hand, low_threshold, reorder_minimum, notes,
+             vendor_name, vendor_url,
              updated_at, updated_by
       FROM merch_inventory
       ORDER BY item, size, color
@@ -3288,8 +3289,14 @@ async function handleMerchInventoryUpdate(body, req, res) {
     return res.status(400).json({ error: e.message });
   }
   const notes = body.notes === undefined ? null : String(body.notes).slice(0, 1000);
+  // Vendor name + URL: trim, cap at 200 chars each. URL gets a soft
+  // http:// prepend at render time if the manager enters a bare domain,
+  // so we don't reject "printco.com" here — keep storage as-typed.
+  const vendorName = body.vendor_name === undefined ? null : String(body.vendor_name).trim().slice(0, 200);
+  const vendorUrl  = body.vendor_url  === undefined ? null : String(body.vendor_url).trim().slice(0, 500);
 
-  if (onHand === null && lowThreshold === null && reorderMin === null && notes === null) {
+  if (onHand === null && lowThreshold === null && reorderMin === null
+      && notes === null && vendorName === null && vendorUrl === null) {
     return res.status(400).json({ error: 'Nothing to update.' });
   }
 
@@ -3305,10 +3312,12 @@ async function handleMerchInventoryUpdate(body, req, res) {
           low_threshold   = COALESCE(${lowThreshold}, low_threshold),
           reorder_minimum = COALESCE(${reorderMin},   reorder_minimum),
           notes           = COALESCE(${notes},        notes),
+          vendor_name     = COALESCE(${vendorName},   vendor_name),
+          vendor_url      = COALESCE(${vendorUrl},    vendor_url),
           updated_at      = NOW(),
           updated_by      = ${auth.realEmail}
       WHERE id = ${id}
-      RETURNING id, item, size, color, on_hand, low_threshold, reorder_minimum, notes, updated_at, updated_by
+      RETURNING id, item, size, color, on_hand, low_threshold, reorder_minimum, notes, vendor_name, vendor_url, updated_at, updated_by
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Inventory row not found.' });
     return res.status(200).json({ row: rows[0] });

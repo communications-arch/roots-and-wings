@@ -7987,6 +7987,23 @@
       sortValue: function (r) { return r.reorder_minimum; },
       render: function (r) { return r.reorder_minimum > 0 ? r.reorder_minimum : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
     },
+    { key: 'vendor_name', label: 'Vendor', type: 'string',
+      sortValue: function (r) { return (r.vendor_name || '').toLowerCase(); },
+      render: function (r) {
+        var name = r.vendor_name || '';
+        var url = r.vendor_url || '';
+        if (!name && !url) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Empty name + URL set → show the URL host as the visible label so
+        // the cell isn't blank. If only a name is set, render plain text.
+        if (url) {
+          var href = /^https?:\/\//i.test(url) ? url : 'http://' + url;
+          var label = name || url;
+          return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener" class="merch-inv-vendor-link">'
+            + escapeHtmlWs(label) + ' <span aria-hidden="true">&#8599;</span></a>';
+        }
+        return escapeHtmlWs(name);
+      }
+    },
     { key: 'notes', label: 'Notes', type: 'string',
       render: function (r) {
         if (!r.notes) return '<span class="ws-srt-actions-empty">&mdash;</span>';
@@ -8498,6 +8515,8 @@
       +     '<label><span>On hand</span><input type="number" min="0" max="100000" id="merch-inv-onhand-' + row.id + '" value="' + row.on_hand + '"></label>'
       +     '<label><span>Low at</span><input type="number" min="0" max="100000" id="merch-inv-low-' + row.id + '" value="' + row.low_threshold + '"></label>'
       +     '<label><span>Reorder min</span><input type="number" min="0" max="100000" id="merch-inv-min-' + row.id + '" value="' + row.reorder_minimum + '"></label>'
+      +     '<label><span>Vendor name</span><input type="text" maxlength="200" id="merch-inv-vname-' + row.id + '" value="' + escapeHtml(row.vendor_name || '') + '" placeholder="e.g. PrintCo"></label>'
+      +     '<label><span>Vendor website</span><input type="url" maxlength="500" id="merch-inv-vurl-' + row.id + '" value="' + escapeHtml(row.vendor_url || '') + '" placeholder="https://printco.com"></label>'
       +     '<label class="merch-inv-edit-notes"><span>Notes (optional)</span><textarea maxlength="1000" rows="2" id="merch-inv-notes-' + row.id + '" placeholder="e.g. ordered 24 from PrintCo 5/12">' + escapeHtml(row.notes || '') + '</textarea></label>'
       +   '</div>'
       +   '<div class="merch-inv-edit-actions">'
@@ -8522,6 +8541,8 @@
         on_hand:         tr.querySelector('#merch-inv-onhand-' + row.id).value,
         low_threshold:   tr.querySelector('#merch-inv-low-' + row.id).value,
         reorder_minimum: tr.querySelector('#merch-inv-min-' + row.id).value,
+        vendor_name:     tr.querySelector('#merch-inv-vname-' + row.id).value,
+        vendor_url:      tr.querySelector('#merch-inv-vurl-' + row.id).value,
         notes:           tr.querySelector('#merch-inv-notes-' + row.id).value
       };
       btn.disabled = true;

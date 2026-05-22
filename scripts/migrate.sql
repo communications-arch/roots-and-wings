@@ -1036,6 +1036,11 @@ CREATE TABLE IF NOT EXISTS merch_inventory (
   UNIQUE (item, size, color)
 );
 CREATE INDEX IF NOT EXISTS merch_inventory_item_idx ON merch_inventory (item);
+-- Vendor columns added 2026-05-22. Additive so re-running the migration
+-- against an existing prod table just tacks them on without touching
+-- any counts already entered.
+ALTER TABLE merch_inventory ADD COLUMN IF NOT EXISTS vendor_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_inventory ADD COLUMN IF NOT EXISTS vendor_url  TEXT NOT NULL DEFAULT '';
 
 -- Seed: every variant in MERCH_CATALOG, on_hand = 0. ON CONFLICT keeps
 -- this safe to re-run — adding a new size/color above and re-running

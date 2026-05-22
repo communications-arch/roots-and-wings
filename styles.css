@@ -9917,6 +9917,16 @@ button.staff-role:hover {
   font-size: 0.82rem;
   color: var(--color-text-light);
 }
+.merch-inv-vendor-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(var(--color-primary-rgb), 0.35);
+  white-space: nowrap;
+}
+.merch-inv-vendor-link:hover {
+  color: var(--color-primary-dark);
+  border-bottom-color: var(--color-primary);
+}
 /* Status pills shared by Membership Report + Waivers Report (and any
    other table that needs Paid/Pending/Signed status cells). Same
    all-caps + tracking + bold treatment as .ws-part-status / .pmrep-status
