@@ -8383,10 +8383,9 @@
       bodyPlaceholder: '<p class="ws-empty">Loading registrations\u2026</p>'
     });
     if (!body) return;
-    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/tour?list=registrations', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       if (!res.ok) {
@@ -8651,7 +8650,7 @@
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/tour?list=registrations', {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
@@ -8734,9 +8733,8 @@
     personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
 
     var body = personDetailCard.querySelector('#mo-body');
-    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/tour?list=registrations', {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) {
@@ -8774,7 +8772,9 @@
         var canSend = step1Done && step2Done;
         h += '<div class="mo-row" data-reg-id="' + r.id + '">';
         h += '<div class="mo-row-head">';
-        h += '<div class="mo-row-name"><strong>' + escapeHtmlWs(r.main_learning_coach || '') + '</strong></div>';
+        h += '<div class="mo-row-name"><strong>' + escapeHtmlWs(r.main_learning_coach || '') + '</strong>';
+        h += '<button type="button" class="mo-row-dismiss" data-reg-id="' + r.id + '" data-name="' + escapeHtmlWs(r.main_learning_coach || '') + '" title="Existing member — dismiss from the onboarding queue">Mark as existing member</button>';
+        h += '</div>';
         h += '<div class="mo-row-derived">Personal email: <a href="mailto:' + escapeHtmlWs(r.email || '') + '">' + escapeHtmlWs(r.email || '') + '</a>'
           + (r.phone ? ' &middot; Phone: <a href="tel:' + escapeHtmlWs(r.phone) + '">' + escapeHtmlWs(r.phone) + '</a>' : '')
           + '</div>';
@@ -8841,6 +8841,35 @@
   }
 
   function wireMemberOnboardingHandlers(body, commsDirectorName) {
+    body.querySelectorAll('.mo-row-dismiss').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-reg-id'), 10);
+        var name = this.getAttribute('data-name') || 'this family';
+        if (!window.confirm('Mark ' + name + ' as an existing member and remove from this queue? They’ll no longer appear here. Undo requires a database edit.')) return;
+        this.disabled = true;
+        fetch('/api/tour', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({ kind: 'onboarding-dismiss', id: id })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              var msg = (res.data && res.data.error) || 'Could not dismiss.';
+              if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+              alert(msg);
+              btn.disabled = false;
+              return;
+            }
+            if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
+            closeDetail();
+            showMemberOnboardingModal();
+          }).catch(function (err) {
+            alert('Network error: ' + ((err && err.message) || 'unknown'));
+            btn.disabled = false;
+          });
+      });
+    });
+
     body.querySelectorAll('.mo-step-cb').forEach(function (cb) {
       cb.addEventListener('change', function () {
         var id = parseInt(this.getAttribute('data-reg-id'), 10);
@@ -16050,7 +16079,7 @@
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/tour?list=registrations', {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })

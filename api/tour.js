@@ -853,12 +853,16 @@ async function handlePaypalError(body, req, res) {
 
 // ── List registrations (Workspace auth + Comms/Membership Director role) ──
 async function handleList(req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   // Membership / Comms / Treasurer all see the same Membership Report
   // (Treasurer to record cash/check payments, Comms to onboard new
   // members). Server-side gate matches the report's UI gating.
+  // View-As-aware: when a super user / dev tester is impersonating one
+  // of those roles, auth.email is the effective email so the gate
+  // matches the role they're acting as. realEmail is preserved for
+  // audit + the youAre field below.
   const isMembership = await canEditAsRole(auth.email, 'Membership Director');
   const isComms      = !isMembership && await canEditAsRole(auth.email, 'Communications Director');
   const isTreasurer  = !isMembership && !isComms && await canEditAsRole(auth.email, 'Treasurer');
@@ -868,7 +872,7 @@ async function handleList(req, res) {
     const expectedT = await getRoleHolderEmail('Treasurer');
     return res.status(403).json({
       error: 'Only the Membership Director, Communications Director, or Treasurer can view registrations.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: (expectedM || expectedC || expectedT || '(unknown — sheet lookup failed)')
     });
   }
@@ -1502,6 +1506,56 @@ async function handleOnboardingStep(body, req, res) {
   } catch (err) {
     console.error('Onboarding step update error:', err);
     return res.status(500).json({ error: 'Could not update onboarding step.' });
+  }
+}
+
+// ── Comms Workspace: dismiss a registration from the onboarding queue ──
+// Used when an existing member registers without filling in the
+// "existing family name" field on the registration form — the row
+// classifies them as a brand-new family and they show up in
+// Member Onboarding by mistake. Dismissing sets existing_family_name
+// to the derived last name (same value deriveFamilyName would produce
+// downstream), which makes isReadyToOnboard treat them as returning
+// and drops them off the list without touching welcome_email_sent_at.
+async function handleOnboardingDismiss(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+
+  const isComms = isSuperUser(auth.email) ||
+    await canEditAsRole(auth.email, 'Communications Director');
+  if (!isComms) {
+    const expected = await getRoleHolderEmail('Communications Director');
+    return res.status(403).json({
+      error: 'Only the Communications Director can dismiss onboarding rows.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+
+  const id = parseInt(body.id, 10);
+  if (!id) return res.status(400).json({ error: 'Registration id required.' });
+
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT id, main_learning_coach, existing_family_name
+      FROM registrations WHERE id = ${id}
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
+    if (rows[0].existing_family_name) {
+      return res.status(200).json({ ok: true, already: true });
+    }
+    const familyName = deriveFamilyName(rows[0].main_learning_coach, '');
+    if (!familyName) return res.status(400).json({ error: 'Could not derive family name from registration.' });
+    await sql`
+      UPDATE registrations
+      SET existing_family_name = ${familyName}, updated_at = NOW()
+      WHERE id = ${id}
+    `;
+    return res.status(200).json({ ok: true, existing_family_name: familyName });
+  } catch (err) {
+    console.error('Onboarding dismiss error:', err);
+    return res.status(500).json({ error: 'Could not dismiss row.' });
   }
 }
 
@@ -3201,6 +3255,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'registration-decline') return handleRegistrationDecline(body, req, res);
     if (kind === 'registration-mark-paid') return handleRegistrationMarkPaid(body, req, res);
     if (kind === 'onboarding-step') return handleOnboardingStep(body, req, res);
+    if (kind === 'onboarding-dismiss') return handleOnboardingDismiss(body, req, res);
     if (kind === 'send-welcome-email') return handleSendWelcomeEmail(body, req, res);
     if (kind === 'backup-waiver-sign') return handleBackupWaiverSign(body, req, res);
     if (kind === 'waiver-send') return handleWaiverSend(body, req, res);

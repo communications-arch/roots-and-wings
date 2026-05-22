@@ -10128,7 +10128,34 @@ button.staff-role:hover {
   background: #fff;
 }
 .mo-row-head { margin-bottom: 8px; }
-.mo-row-name { font-size: 0.98rem; }
+.mo-row-name {
+  font-size: 0.98rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Inline secondary action for dismissing an existing member who
+   accidentally landed in the new-family queue. Visually
+   de-emphasized — the primary action on each row is still the
+   3-step welcome flow. */
+.mo-row-dismiss {
+  background: none;
+  border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.mo-row-dismiss:hover { background: rgba(var(--color-primary-rgb), 0.08); }
+.mo-row-dismiss:disabled { opacity: 0.5; cursor: wait; }
 .mo-row-sub { color: var(--color-text-light); font-weight: normal; }
 .mo-row-derived { font-size: 0.84rem; color: var(--color-text-light); margin-top: 2px; }
 .mo-row-derived code {
