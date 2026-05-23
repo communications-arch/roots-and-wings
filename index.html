@@ -903,6 +903,11 @@
         <div id="merch-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
         <button type="submit" id="merch-modal-btn" class="btn btn-primary tour-form-submit">Place Order</button>
       </form>
+      <div id="merch-modal-success" style="display:none;">
+        <h2 class="tour-modal-title">Order received!</h2>
+        <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Our Merchandise Manager will reach out with Venmo payment details and pickup info.</p>
+        <button type="button" id="merch-modal-order-another" class="btn btn-primary tour-form-submit" style="margin-top: 8px;">Order Another Item</button>
+      </div>
       <script>
         (function () {
           // Catalog mirrors api/tour.js MERCH_CATALOG. Keep in sync if
@@ -923,8 +928,12 @@
 
           function applyVariants() {
             var def = CATALOG[itemSel.value] || { sizes: [], colors: [] };
-            sizeSel.innerHTML  = def.sizes.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
-            colorSel.innerHTML = def.colors.map(function (c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
+            sizeSel.innerHTML  = def.sizes.map(function (s, i) { return '<option value="' + s + '"' + (i === 0 ? ' selected' : '') + '>' + s + '</option>'; }).join('');
+            colorSel.innerHTML = def.colors.map(function (c, i) { return '<option value="' + c + '"' + (i === 0 ? ' selected' : '') + '>' + c + '</option>'; }).join('');
+            // iOS Safari sometimes reports .value as '' after innerHTML replace
+            // until an option is explicitly selected — force selectedIndex.
+            if (def.sizes.length)  sizeSel.selectedIndex  = 0;
+            if (def.colors.length) colorSel.selectedIndex = 0;
             sizeField.style.display  = def.sizes.length  ? '' : 'none';
             colorField.style.display = def.colors.length ? '' : 'none';
             sizeSel.required  = def.sizes.length  > 0;
@@ -933,26 +942,47 @@
           itemSel.addEventListener('change', applyVariants);
           applyVariants();
 
+          var modalEl    = document.getElementById('merch-modal');
+          var titleEl    = modalEl.querySelector('.tour-modal-title');
+          var subtitleEl = modalEl.querySelector('.tour-modal-subtitle');
+          var formEl     = document.getElementById('merch-modal-form');
+          var successEl  = document.getElementById('merch-modal-success');
+          var submitBtn  = document.getElementById('merch-modal-btn');
+          var errEl      = document.getElementById('merch-modal-error');
+
+          function resetMerchModal() {
+            formEl.reset();
+            applyVariants();
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Place Order';
+            errEl.style.display = 'none';
+            successEl.style.display = 'none';
+            titleEl.style.display = '';
+            subtitleEl.style.display = '';
+            formEl.style.display = '';
+          }
+
+          document.getElementById('merch-modal-order-another').addEventListener('click', resetMerchModal);
+
           // Open from .merch-card click — preselect the clicked item.
           document.querySelectorAll('.merch-card').forEach(function (card) {
             card.addEventListener('click', function () {
+              resetMerchModal();
               var item = card.getAttribute('data-merch-item');
               if (item && CATALOG[item]) {
                 itemSel.value = item;
                 applyVariants();
               }
-              document.getElementById('merch-modal').classList.add('active');
+              modalEl.classList.add('active');
               document.body.style.overflow = 'hidden';
             });
           });
 
-          document.getElementById('merch-modal-form').addEventListener('submit', async function (e) {
+          formEl.addEventListener('submit', async function (e) {
             e.preventDefault();
-            var btn = document.getElementById('merch-modal-btn');
-            var errEl = document.getElementById('merch-modal-error');
             errEl.style.display = 'none';
-            btn.disabled = true;
-            btn.textContent = 'Submitting…';
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting…';
             try {
               var res = await fetch('/api/tour', {
                 method: 'POST',
@@ -974,17 +1004,17 @@
                 try { data = await res.json(); } catch (_) {}
                 throw new Error((data && data.error) || 'request failed');
               }
-              var modal = document.querySelector('#merch-modal .tour-modal');
-              modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'merch-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
-                + '<h2 class="tour-modal-title">Order received!</h2>'
-                + '<p class="tour-modal-subtitle">Thanks! You\'ll get a confirmation email shortly. Our Merchandise Manager will reach out with Venmo payment details and pickup info.</p>';
+              titleEl.style.display = 'none';
+              subtitleEl.style.display = 'none';
+              formEl.style.display = 'none';
+              successEl.style.display = 'block';
             } catch (err) {
               errEl.textContent = (err && err.message)
                 ? ('We couldn\'t place your order: ' + err.message + '. Please email communications@rootsandwingsindy.com.')
                 : 'Something went wrong. Please email communications@rootsandwingsindy.com.';
               errEl.style.display = 'block';
-              btn.disabled = false;
-              btn.textContent = 'Place Order';
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Place Order';
             }
           });
         })();
