@@ -906,7 +906,7 @@
       <div id="merch-modal-success" style="display:none;">
         <h2 class="tour-modal-title">Order received!</h2>
         <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Our Merchandise Manager will reach out with Venmo payment details and pickup info.</p>
-        <button type="button" id="merch-modal-order-another" class="btn btn-primary tour-form-submit" style="margin-top: 8px;">Order Another Item</button>
+        <button type="button" id="merch-modal-done" class="btn btn-primary tour-form-submit" style="margin-top: 8px;">Back to Merch</button>
       </div>
       <script>
         (function () {
@@ -962,7 +962,13 @@
             formEl.style.display = '';
           }
 
-          document.getElementById('merch-modal-order-another').addEventListener('click', resetMerchModal);
+          function closeMerchModal() {
+            modalEl.classList.remove('active');
+            document.body.style.overflow = '';
+            resetMerchModal();
+          }
+
+          document.getElementById('merch-modal-done').addEventListener('click', closeMerchModal);
 
           // Open from .merch-card click — preselect the clicked item.
           document.querySelectorAll('.merch-card').forEach(function (card) {
