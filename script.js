@@ -813,6 +813,17 @@
     // Check for Leading/Assisting patterns
     if (dutyText.indexOf('Leading') !== -1) return 'classroom_instructor';
     if (dutyText.indexOf('Assisting') !== -1) return 'classroom_assistant';
+    // Fallback: match the duty text against a loaded role-description
+    // title (case-insensitive, exact). This lets committee roles assigned
+    // through the Roles UI — which aren't in the hardcoded DUTY_TO_ROLE_KEY
+    // map — still resolve to their Role Details popup.
+    for (var ri = 0; ri < roleDescriptions.length; ri++) {
+      var rt = String(roleDescriptions[ri].title || '').trim().toLowerCase();
+      if (!rt) continue;
+      if (rt === base.toLowerCase() || rt === String(dutyText).trim().toLowerCase()) {
+        return roleDescriptions[ri].role_key;
+      }
+    }
     return null;
   }
 
@@ -3088,6 +3099,18 @@
       }
     }
 
+    else if (p.type === 'role') {
+      // Generic role popup for committee roles assigned via the Roles UI
+      // that have no VOLUNTEER_COMMITTEES sheet entry. Renders a simple
+      // header; the Role Description section is appended below via
+      // getRoleKeyForDuty(duty.text), which now resolves DB roles by title.
+      html += '<h3>' + escapeHtml(p.title || duty.text) + '</h3>';
+      var roleSub = [];
+      if (p.committee) roleSub.push(p.committee);
+      roleSub.push(p.term ? p.term : 'Year-long');
+      html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">' + escapeHtml(roleSub.join(' · ')) + '</p>';
+    }
+
     // Append role description if available
     var popupRoleKey = getRoleKeyForDuty(duty.text);
     if (popupRoleKey) html += renderRoleDescriptionSection(popupRoleKey);
@@ -3974,6 +3997,35 @@
         duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>', popup: {type: 'event', name: ev.name}});
       }
     });
+
+    // ── Committee roles from role_holders (DB) ──
+    // Committee_role assignments made through the Roles UI (Merchandise
+    // Manager, coordinators, etc.) arrive as a flat email→titles[] map from
+    // the api/sheets overlay — the same source getWorkspaceRoles uses. The
+    // legacy VOLUNTEER_COMMITTEES block above only covers roles listed on
+    // the Google Sheet, so without this a role assigned in the Roles UI
+    // shows up in My Workspace but never in My Family. Key strictly on the
+    // active person's email (the map is keyed by holder person_email),
+    // mirroring getWorkspaceRoles so co-parents don't inherit each other's
+    // person-scoped roles.
+    (function () {
+      var emailLc = String(email || '').toLowerCase();
+      var titles = (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[emailLc]) || [];
+      titles.forEach(function (title) {
+        // Skip anything the legacy sheet block (or board role) already listed.
+        if (duties.some(function (d) { return nameMatch(d.text, title); })) return;
+        var rd = null;
+        for (var ri = 0; ri < roleDescriptions.length; ri++) {
+          if (nameMatch(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
+        }
+        var committeeName = (rd && rd.committee) || 'Committee';
+        duties.push({
+          block: 'annual', icon: 'volunteer', text: title,
+          detail: committeeName + ' &middot; Year-long',
+          popup: { type: 'role', title: title, committee: (rd && rd.committee) || '', term: (rd && rd.job_length) || '' }
+        });
+      });
+    })();
 
     // ── Personalized hero subtitle ──
     // Surface the most actionable thing for this family in plain English so
