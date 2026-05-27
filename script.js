@@ -456,6 +456,7 @@
         if (typeof loadNotifications === 'function') loadNotifications();
         if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
         if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+        requestAnimationFrame(syncPortalHeaderHeight);
       });
       select._rwWired = true;
     }
@@ -1737,9 +1738,35 @@
 
   // Live data is loaded after authentication (see showDashboard)
 
+  // Measure the fixed portal header and publish its height as CSS vars so the
+  // dashboard's top padding always clears it. The header wraps taller on
+  // mobile (greeting + subtitle + view-as + pills + icon row); the static
+  // fallbacks (108/168px) were too short, tucking "My Responsibilities" under
+  // it. Re-run on load, after fonts settle, and on resize.
+  function syncPortalHeaderHeight() {
+    var header = document.querySelector('.portal-header');
+    if (!header) return;
+    var h = header.offsetHeight;
+    if (!h) return;
+    var root = document.documentElement;
+    root.style.setProperty('--portal-header-height', h + 'px');
+    root.style.setProperty('--portal-header-height-mobile', h + 'px');
+  }
+  var _portalHeaderResizeWired = false;
+  function wirePortalHeaderResize() {
+    if (_portalHeaderResizeWired) return;
+    _portalHeaderResizeWired = true;
+    window.addEventListener('resize', function () { requestAnimationFrame(syncPortalHeaderHeight); });
+    if (document.fonts && document.fonts.ready && document.fonts.ready.then) {
+      document.fonts.ready.then(function () { requestAnimationFrame(syncPortalHeaderHeight); });
+    }
+  }
+
   function showDashboard() {
     if (loginSection) loginSection.style.display = 'none';
     if (dashboard) dashboard.classList.add('visible');
+    wirePortalHeaderResize();
+    requestAnimationFrame(syncPortalHeaderHeight);
     // Load live data, profile photos, and calendar now that user is authenticated
     loadLiveData();
     loadPhotos();
@@ -1751,6 +1778,7 @@
     setTimeout(function () {
       if (typeof renderMyFamily === 'function') renderMyFamily();
       if (typeof initAbsenceCoverageSystem === 'function') initAbsenceCoverageSystem();
+      requestAnimationFrame(syncPortalHeaderHeight);
     }, 0);
     // Re-trigger fade-in observer for dashboard elements
     var dashFades = dashboard ? dashboard.querySelectorAll('.fade-in') : [];
