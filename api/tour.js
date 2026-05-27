@@ -2605,6 +2605,20 @@ async function handleProfileUpdate(body, req, res) {
     // Replace the family's people + kids wholesale. The EMI form sends
     // the full set every save, so DELETE + INSERT is the simplest correct
     // semantics — anything the user removed from the form goes away.
+    //
+    // EXCEPTION: class_group is assigned by the VP / at registration, NOT by
+    // this form. Snapshot each kid's class_group before the delete and carry
+    // it forward (matched by first name) on re-insert. Without this, every
+    // profile save silently wiped class_group, dropping the kid out of the
+    // directory's class/group sections (their card vanished entirely).
+    const priorKidGroups = {};
+    try {
+      const priorKids = await sql`SELECT first_name, class_group FROM kids WHERE family_email = ${familyEmail}`;
+      priorKids.forEach(r => {
+        const key = String(r.first_name || '').trim().toLowerCase();
+        if (key && r.class_group) priorKidGroups[key] = r.class_group;
+      });
+    } catch (e) { /* non-fatal — worst case the group is blank, same as before */ }
     await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
     await sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`;
 
@@ -2625,16 +2639,19 @@ async function handleProfileUpdate(body, req, res) {
     }
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
+      // Carry forward the VP-assigned class group (preserved above). A
+      // brand-new kid with no prior row gets '' — the VP assigns it later.
+      const kidGroup = priorKidGroups[String(k.name || '').trim().toLowerCase()] || '';
       await sql`
         INSERT INTO kids (
           family_email, first_name, last_name, birth_date,
           pronouns, allergies, schedule, photo_url, photo_consent,
-          sort_order
+          sort_order, class_group
         ) VALUES (
           ${familyEmail}, ${k.name}, ${k.last_name || ''},
           ${k.birth_date || null}, ${k.pronouns || ''}, ${k.allergies || ''},
           ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
-          ${i}
+          ${i}, ${kidGroup}
         )
       `;
     }
