@@ -17896,10 +17896,10 @@
       var roleLabel = roleLabels[p.role] || 'Parent';
       var emailIsPrimary = (p.role === 'mlc');
       var h = '<div class="emi-row" data-parent-idx="' + idx + '">';
-      h += '<div class="emi-photo-thumb">' + thumbHtml(p, p.name, { wsFallback: true }) +
-           '<button type="button" class="emi-photo-btn" data-role="upload-parent" data-idx="' + idx + '" aria-label="Upload photo">' +
+      h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-parent" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this adult">' + thumbHtml(p, p.name, { wsFallback: true }) +
+           '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-           '</button></div>';
+           '</span></div>';
       h += '<div class="emi-fields">';
       // Full-width header so the inputs below line up cleanly in the
        // 2-col grid, instead of the role label sharing a row with first-name.
@@ -17961,10 +17961,10 @@
 
     function kidRowHtml(k, idx) {
       var h = '<div class="emi-row emi-kid-row" data-kid-idx="' + idx + '">';
-      h += '<div class="emi-photo-thumb">' + thumbHtml(k, k.name, { wsFallback: true }) +
-           '<button type="button" class="emi-photo-btn" data-role="upload-kid" data-idx="' + idx + '" aria-label="Upload photo">' +
+      h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-kid" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this child">' + thumbHtml(k, k.name, { wsFallback: true }) +
+           '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-           '</button></div>';
+           '</span></div>';
       // 2-col emi-fields grid matching the adult layout. Row 1 packs
       // first + last + pronouns into a flex group (pronouns is short
       // enough to share the line). Row 2 pairs Birthday + Schedule.
@@ -18041,7 +18041,10 @@
       wire();
     }
 
-    function readAndResize(file, cb) {
+    // Read an image file to a data URL, downscaled to <=1600px on the long
+    // edge so the cropper has detail to work with without holding a giant
+    // base64 string in memory. The cropper produces the final 512px square.
+    function readImageForCrop(file, cb) {
       if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
         return cb(new Error('Photo must be PNG, JPEG, or WebP.'));
       }
@@ -18049,21 +18052,110 @@
       reader.onload = function (e) {
         var img = new Image();
         img.onload = function () {
-          var max = 512;
+          var max = 1600;
           var w = img.width, h = img.height;
-          if (w > h) { if (w > max) { h = Math.round(h * max / w); w = max; } }
-          else { if (h > max) { w = Math.round(w * max / h); h = max; } }
+          if (w <= max && h <= max) { cb(null, e.target.result); return; }
+          if (w > h) { h = Math.round(h * max / w); w = max; }
+          else { w = Math.round(w * max / h); h = max; }
           var canvas = document.createElement('canvas');
           canvas.width = w; canvas.height = h;
-          var ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          cb(null, canvas.toDataURL('image/jpeg', 0.82));
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          cb(null, canvas.toDataURL('image/jpeg', 0.9));
         };
         img.onerror = function () { cb(new Error('Could not decode image.')); };
         img.src = e.target.result;
       };
       reader.onerror = function () { cb(new Error('Could not read file.')); };
       reader.readAsDataURL(file);
+    }
+
+    // Square crop UI: drag to reposition, slider to zoom. Exports a 512px
+    // square JPEG data URL via onConfirm. Avatars render circular, so the
+    // viewport shows a circular guide ring; we still export the full square.
+    function openPhotoCropper(srcDataUrl, onConfirm) {
+      var img = new Image();
+      img.onerror = function () { showError('Could not load image for cropping.'); };
+      img.onload = function () {
+        var natW = img.naturalWidth, natH = img.naturalHeight;
+        var overlay = document.createElement('div');
+        overlay.className = 'crop-overlay';
+        overlay.innerHTML =
+          '<div class="crop-card" role="dialog" aria-modal="true" aria-label="Crop photo">' +
+            '<h3 class="crop-title">Position &amp; Crop</h3>' +
+            '<p class="crop-hint">Drag to reposition · slider to zoom</p>' +
+            '<div class="crop-viewport" id="cropVp"><img class="crop-img" id="cropImg" alt=""><div class="crop-ring" aria-hidden="true"></div></div>' +
+            '<input type="range" class="crop-zoom" id="cropZoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom">' +
+            '<div class="crop-actions"><button type="button" class="rd-cancel-btn" id="cropCancel">Cancel</button><button type="button" class="btn btn-primary" id="cropConfirm">Use photo</button></div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+
+        var vpEl = overlay.querySelector('#cropVp');
+        var imgEl = overlay.querySelector('#cropImg');
+        var zoomEl = overlay.querySelector('#cropZoom');
+        imgEl.src = srcDataUrl;
+
+        var VP = Math.round(vpEl.getBoundingClientRect().width) || 280;
+        var coverScale = Math.max(VP / natW, VP / natH);
+        var scale = coverScale;
+        var tx = (VP - natW * scale) / 2;
+        var ty = (VP - natH * scale) / 2;
+
+        function clamp() {
+          var dw = natW * scale, dh = natH * scale;
+          tx = Math.min(0, Math.max(VP - dw, tx));
+          ty = Math.min(0, Math.max(VP - dh, ty));
+        }
+        function apply() {
+          clamp();
+          imgEl.style.width = (natW * scale) + 'px';
+          imgEl.style.height = (natH * scale) + 'px';
+          imgEl.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
+        }
+        apply();
+
+        zoomEl.addEventListener('input', function () {
+          var z = parseFloat(zoomEl.value) || 1;
+          var cx = (VP / 2 - tx) / scale;
+          var cy = (VP / 2 - ty) / scale;
+          scale = coverScale * z;
+          tx = VP / 2 - cx * scale;
+          ty = VP / 2 - cy * scale;
+          apply();
+        });
+
+        var dragging = false, lastX = 0, lastY = 0;
+        vpEl.addEventListener('pointerdown', function (e) {
+          dragging = true; lastX = e.clientX; lastY = e.clientY;
+          try { vpEl.setPointerCapture(e.pointerId); } catch (_) {}
+        });
+        vpEl.addEventListener('pointermove', function (e) {
+          if (!dragging) return;
+          tx += e.clientX - lastX; ty += e.clientY - lastY;
+          lastX = e.clientX; lastY = e.clientY;
+          apply();
+        });
+        function endDrag(e) { dragging = false; try { vpEl.releasePointerCapture(e.pointerId); } catch (_) {} }
+        vpEl.addEventListener('pointerup', endDrag);
+        vpEl.addEventListener('pointercancel', endDrag);
+
+        function close() { overlay.remove(); }
+        overlay.querySelector('#cropCancel').addEventListener('click', close);
+        overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+        overlay.querySelector('#cropConfirm').addEventListener('click', function () {
+          var OUT = 512;
+          var srcX = (0 - tx) / scale;
+          var srcY = (0 - ty) / scale;
+          var srcSize = VP / scale;
+          var canvas = document.createElement('canvas');
+          canvas.width = OUT; canvas.height = OUT;
+          canvas.getContext('2d').drawImage(img, srcX, srcY, srcSize, srcSize, 0, 0, OUT, OUT);
+          var out = canvas.toDataURL('image/jpeg', 0.85);
+          close();
+          onConfirm(out);
+        });
+      };
+      img.src = srcDataUrl;
     }
 
     function syncStateFromDom() {
@@ -18137,12 +18229,16 @@
           var f = fileInput.files && fileInput.files[0];
           if (!f) return;
           if (f.size > 12 * 1024 * 1024) { showError('Photo is too large (max 12 MB before resize).'); return; }
-          readAndResize(f, function (err, dataUrl) {
+          readImageForCrop(f, function (err, srcDataUrl) {
             if (err) { showError(err.message || 'Could not load image.'); return; }
+            // Capture in-progress form edits before the crop round-trip so the
+            // re-render after confirming doesn't drop them.
             syncStateFromDom();
-            if (role === 'upload-parent' && state.parents[idx]) state.parents[idx]._queuedPhoto = dataUrl;
-            if (role === 'upload-kid' && state.kids[idx]) state.kids[idx]._queuedPhoto = dataUrl;
-            render();
+            openPhotoCropper(srcDataUrl, function (cropped) {
+              if (role === 'upload-parent' && state.parents[idx]) state.parents[idx]._queuedPhoto = cropped;
+              if (role === 'upload-kid' && state.kids[idx]) state.kids[idx]._queuedPhoto = cropped;
+              render();
+            });
           });
         });
         fileInput.click();
@@ -18206,6 +18302,15 @@
       personDetail._emiOverlayHandler = overlayClickHandler;
       personDetailCard.addEventListener('click', cardClickHandler);
       personDetail.addEventListener('click', overlayClickHandler);
+      // The photo avatars are role="button" tabindex="0" — let Enter/Space
+      // trigger the same upload click so keyboard users aren't stuck.
+      if (personDetailCard._emiKeyHandler) personDetailCard.removeEventListener('keydown', personDetailCard._emiKeyHandler);
+      personDetailCard._emiKeyHandler = function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var t = e.target.closest && e.target.closest('.emi-photo-thumb-btn');
+        if (t) { e.preventDefault(); t.click(); }
+      };
+      personDetailCard.addEventListener('keydown', personDetailCard._emiKeyHandler);
     }
 
     function teardownModalListeners() {
@@ -18216,6 +18321,10 @@
       if (personDetail._emiOverlayHandler) {
         personDetail.removeEventListener('click', personDetail._emiOverlayHandler);
         personDetail._emiOverlayHandler = null;
+      }
+      if (personDetailCard._emiKeyHandler) {
+        personDetailCard.removeEventListener('keydown', personDetailCard._emiKeyHandler);
+        personDetailCard._emiKeyHandler = null;
       }
     }
 
@@ -18265,7 +18374,7 @@
       function uploadPhoto(item) {
         return fetch('/api/tour', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify({
             kind: 'profile-photo',
             family_email: state.family_email,
@@ -18323,7 +18432,7 @@
         };
         return fetch('/api/tour', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify(payload)
         }).then(function (r) { return r.json().then(function (body) { return { status: r.status, body: body }; }); })
           .then(function (resp) {
@@ -18334,12 +18443,16 @@
             // the unique index on waiver_signatures).
             var blcSent = (resp.body && resp.body.blc_waivers_sent) || [];
             var blcSkipped = (resp.body && resp.body.blc_waivers_skipped) || [];
-            if (blcSent.length || blcSkipped.length) {
+            // Only interrupt with an alert when a waiver email actually went
+            // out (a real, new action). The server re-checks every BLC on each
+            // save, so a "skipped" result alone just means an existing BLC
+            // already has a waiver on file — a no-op that shouldn't pop an
+            // alert on an unrelated edit (e.g. just changing a photo). When we
+            // DO surface sent ones, list any skipped alongside for context.
+            if (blcSent.length) {
               var lines = [];
-              if (blcSent.length) {
-                lines.push('Backup Learning Coach waiver email sent to:\n  - ' +
-                  blcSent.map(function (b) { return b.name + ' (' + b.email + ')'; }).join('\n  - '));
-              }
+              lines.push('Backup Learning Coach waiver email sent to:\n  - ' +
+                blcSent.map(function (b) { return b.name + ' (' + b.email + ')'; }).join('\n  - '));
               if (blcSkipped.length) {
                 lines.push('Already has a waiver on file this year (no new email sent):\n  - ' +
                   blcSkipped.map(function (b) {

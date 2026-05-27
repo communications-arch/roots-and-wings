@@ -2463,7 +2463,9 @@ async function canEditFamily(sql, userEmail, familyEmail) {
 }
 
 async function handleProfileGet(req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware: user.email is the effective family identity (the
+  // impersonated family for a super user / dev tester).
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   const familyEmail = normalizeEmail(req.query.family_email);
@@ -2512,7 +2514,11 @@ async function handleProfileGet(req, res) {
 }
 
 async function handleProfileUpdate(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware: user.email is the EFFECTIVE family identity (the
+  // impersonated family for a super user / dev tester), used for the
+  // canEditFamily gate. user.realEmail is the actual signed-in user,
+  // used for the updated_by / sent_by audit columns below.
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   const familyEmail = normalizeEmail(body.family_email);
@@ -2585,7 +2591,7 @@ async function handleProfileUpdate(body, req, res) {
       ) VALUES (
         ${familyEmail}, ${familyName}, ${phone}, ${address},
         '[]'::jsonb, '[]'::jsonb,
-        ${additionalEmails}::text[], ${user.email}
+        ${additionalEmails}::text[], ${user.realEmail || user.email}
       )
       ON CONFLICT (family_email) DO UPDATE SET
         family_name = EXCLUDED.family_name,
@@ -2613,7 +2619,7 @@ async function handleProfileUpdate(body, req, res) {
           ${pp.email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name}, ${pp.role || 'parent'},
           ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
           ${pp.photo_url || ''}, ${pp.photo_consent !== false},
-          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i}, ${user.email}
+          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i}, ${user.realEmail || user.email}
         )
       `;
     }
@@ -2678,7 +2684,7 @@ async function handleProfileUpdate(body, req, res) {
           ) VALUES (
             ${DEFAULT_SEASON}, 'backup_coach',
             ${blc.name}, ${blc.personal_email}, ${familyEmail}, ${registrationId},
-            ${token}, NOW(), ${user.email}
+            ${token}, NOW(), ${user.realEmail || user.email}
           )
           ON CONFLICT DO NOTHING
         `;
@@ -2741,7 +2747,9 @@ async function handleProfileUpdate(body, req, res) {
 // base64-encoded image (data:image/...;base64,XXX). The client is expected to
 // resize to ~512x512 before uploading, keeping payload well under 1 MB.
 async function handleProfilePhoto(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware: user.email is the effective family identity, so a super
+  // user / dev tester can upload photos for a family they're viewing as.
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
