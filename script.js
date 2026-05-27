@@ -2829,6 +2829,10 @@
   function showDutyDetail(duty) {
     if (!duty.popup || !personDetail || !personDetailCard) return;
     var p = duty.popup;
+    // Board committee roster is built here but appended AFTER the role
+    // description (below), so the description reads as the chair's — not the
+    // committee's. Empty for non-board popups.
+    var boardRosterHtml = '';
     // Unified modal header: Print button sits as a sibling of the close X
     // in the top-right corner (see `.detail-actions` in styles.css). This
     // is the shared navigation pattern used across all modals with actions.
@@ -3077,25 +3081,60 @@
     }
 
     else if (p.type === 'board') {
-      // Find the committee this board member chairs
-      var committee = null;
-      var normalizeTitle = function(t) { return (t || '').trim().replace(/\bDir\.\s*$/, 'Director').toLowerCase(); };
-      VOLUNTEER_COMMITTEES.forEach(function(c) {
-        if (c.chair && c.chair.title && p.role && normalizeTitle(c.chair.title) === normalizeTitle(p.role)) committee = c;
-      });
       html += '<h3>' + p.role + '</h3>';
       html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Board of Directors &middot; 2-year term</p>';
-      if (committee) {
-        html += '<h4 style="margin-bottom:0.5rem;">' + committee.name + '</h4>';
-        html += '<div class="elective-staff-list">';
-        committee.roles.forEach(function(r) {
-          var person = r.person || 'Open';
-          html += '<div class="elective-teacher">';
-          html += '<div class="staff-dot" style="background:' + (r.person ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
-          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + r.title + '</small></div>';
-          html += '</div>';
+
+      // Committee roster, sourced entirely from the DB roles table
+      // (roleDescriptions + committee-role holders): list the committee
+      // roles whose parent is this board chair, with their holders. The
+      // legacy Volunteer Committees sheet is retired — the DB is the source
+      // of truth.
+      var boardRoleRec = null;
+      for (var bri = 0; bri < roleDescriptions.length; bri++) {
+        if (roleDescriptions[bri].category === 'board'
+          && String(roleDescriptions[bri].title || '').trim().toLowerCase() === String(p.role || '').trim().toLowerCase()) {
+          boardRoleRec = roleDescriptions[bri];
+          break;
+        }
+      }
+      var dbKids = boardRoleRec ? roleDescriptions.filter(function (r) {
+        return r.category === 'committee_role' && r.status !== 'archived'
+          && String(r.parent_role_id) === String(boardRoleRec.id);
+      }) : [];
+
+      if (dbKids.length) {
+        // Invert COMMITTEE_ROLE_HOLDERS (email -> titles[]) into a
+        // title -> holder display names map. buildParentPickerOptions gives
+        // us the email -> person name resolution.
+        var emailToName = {};
+        try {
+          buildParentPickerOptions().forEach(function (o) {
+            emailToName[String(o.email).toLowerCase()] = o.person_name || o.displayName;
+          });
+        } catch (e) { /* picker unavailable — fall back to raw email */ }
+        var titleToHolders = {};
+        Object.keys(COMMITTEE_ROLE_HOLDERS || {}).forEach(function (em) {
+          (COMMITTEE_ROLE_HOLDERS[em] || []).forEach(function (t) {
+            var hk = String(t).toLowerCase();
+            (titleToHolders[hk] = titleToHolders[hk] || []).push(emailToName[String(em).toLowerCase()] || em);
+          });
         });
-        html += '</div>';
+        dbKids.sort(function (a, b) {
+          return (a.display_order || 0) - (b.display_order || 0) || String(a.title).localeCompare(String(b.title));
+        });
+        boardRosterHtml += '<div class="rd-section">';
+        boardRosterHtml += '<div class="rd-section-divider"></div>';
+        boardRosterHtml += '<h4 class="rd-committee-title">' + escapeHtml(boardRoleRec.committee || 'Committee') + '</h4>';
+        boardRosterHtml += '<div class="committee-roster">';
+        dbKids.forEach(function (r) {
+          var holders = titleToHolders[String(r.title).toLowerCase()] || [];
+          var who = holders.length ? holders.join(', ') : 'Open';
+          boardRosterHtml += '<div class="elective-teacher">';
+          boardRosterHtml += '<div class="staff-dot" style="background:' + (holders.length ? faceColor(who) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + escapeHtml(who.charAt(0)) + '</span></div>';
+          boardRosterHtml += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + escapeHtml(who) + '</strong><small style="color:var(--color-text-light);">' + escapeHtml(r.title) + '</small></div>';
+          boardRosterHtml += '</div>';
+        });
+        boardRosterHtml += '</div></div>';
       }
     }
 
@@ -3114,6 +3153,10 @@
     // Append role description if available
     var popupRoleKey = getRoleKeyForDuty(duty.text);
     if (popupRoleKey) html += renderRoleDescriptionSection(popupRoleKey);
+
+    // Committee roster (board chairs) comes AFTER the role description so the
+    // description clearly belongs to the chair, not the committee below it.
+    if (boardRosterHtml) html += boardRosterHtml;
 
     html += '</div>';
     personDetailCard.innerHTML = html;

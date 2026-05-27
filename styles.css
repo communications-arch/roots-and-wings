@@ -8748,6 +8748,29 @@ button.staff-role:hover {
   letter-spacing: 0.04em;
   margin: 0 0 8px;
 }
+/* Committee roster inside a board chair's Role Details popup. A clean
+   equal-width 2-col grid with no per-item rule lines (the .elective-teacher
+   bottom border is meant for a vertical list and looked misaligned here). */
+.rd-committee-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+  margin: 0 0 8px;
+}
+.committee-roster {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin: 8px 0 4px;
+}
+.committee-roster .elective-teacher {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding: 8px 0;
+}
+@media (max-width: 520px) {
+  .committee-roster { grid-template-columns: 1fr; }
+}
 .rd-info-icon {
   font-family: Georgia, 'Times New Roman', serif;
   font-style: italic;
