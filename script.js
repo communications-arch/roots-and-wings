@@ -17196,18 +17196,12 @@
           && s.scheduled_session === sess;
     });
 
-    // Session workflow bar — combined Scheduled count (drafted + scheduled
-    // both display as Scheduled now) plus inbox count. "Approve Session"
-    // remains as the session-finalize gesture: it normalizes any legacy
-    // drafted rows to scheduled and is the future hook for notifying class
-    // leaders that their session is final.
+    // Session workflow bar — just the Approve action. Counts are redundant
+    // since the grid below and the palette aside both visualize "placed" vs
+    // "in inbox" directly. "Approve Session" stays as the session-finalize
+    // gesture + future hook for notifying class leaders.
     var placedCount = classesInSession.length;
-    var inboxCount = scheduleBuilderState.submissions.filter(function (s) { return s.status === 'submitted'; }).length;
-    html += '<div class="sb-workflow">';
-    html += '<div class="sb-workflow-counts">';
-    html += '<span class="sb-status-chip sb-status-scheduled">' + placedCount + ' Scheduled</span>';
-    html += '<span class="sb-status-chip sb-status-submitted">' + inboxCount + ' in inbox</span>';
-    html += '</div>';
+    html += '<div class="sb-workflow sb-workflow-action-only">';
     html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Finalizes the session. Class leaders will be notified (notifications coming in a future update).">Approve Session ' + sess + '</button>';
     html += '</div>';
 
@@ -17231,14 +17225,12 @@
       s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
       list.forEach(function (c) {
         var ages = prettyAgesClient(c.age_groups, c.age_groups_other);
-        var statusLabel = SB_STATUS_LABELS[c.status] || c.status || '';
         s += '<div class="sb-cell-class" draggable="true" data-sub-id="' + c.id + '">';
-        // Age groups lead the card (most-prominent pill), with the status
-        // chip and any "Both" badge inline on the same top row. Class name
-        // and teacher follow as secondary lines.
+        // Age groups lead the card. Status chip is omitted — being in the
+        // grid means "Scheduled," no need to restate it. Only the "Both"
+        // badge stays (it's actual placement info, not status).
         s += '<div class="sb-class-top">';
         if (ages) s += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
-        s += '<span class="sb-status-chip sb-status-' + escClsHtml(c.status || '') + '">' + escClsHtml(statusLabel) + '</span>';
         if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
         s += '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
@@ -17287,7 +17279,6 @@
       palette.forEach(function (s) {
         var ages = prettyAgesClient(s.age_groups, s.age_groups_other);
         var hourPrefs = (s.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ');
-        var statusLabel = SB_STATUS_LABELS[s.status] || s.status || '';
         // Requested-session chips; the session currently being built is
         // highlighted so its fit is obvious at a glance.
         var sessChips = (s.session_preferences || []).map(function (x) {
@@ -17297,10 +17288,10 @@
         }).join('');
         if (!sessChips) sessChips = '<span class="sb-sess-chip sb-sess-none">no pref</span>';
         paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
-        // Same lead-with-ages + status-chip pattern as the scheduled cards.
+        // Lead with ages. Status chip omitted — palette = inbox by
+        // definition, so "Submitted" is implicit.
         paletteHtml += '<div class="sb-class-top">';
         if (ages) paletteHtml += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
-        paletteHtml += '<span class="sb-status-chip sb-status-' + escClsHtml(s.status || '') + '">' + escClsHtml(statusLabel) + '</span>';
         paletteHtml += '</div>';
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
