@@ -1068,3 +1068,56 @@ INSERT INTO merch_inventory (item, size, color) VALUES
   ('pin', '', ''),
   ('patch', '', '')
 ON CONFLICT (item, size, color) DO NOTHING;
+
+-- ──────────────────────────────────────────────
+-- Afternoon class sign-ups (student-side selection + lottery).
+-- Kids rank scheduled afternoon classes separately for PM1 and PM2; the VP /
+-- Afternoon Class Liaison open the window, review fullness, run a lottery on
+-- over-full classes (auto-cascading bumped kids to their next pick), then lock
+-- to publish rosters. Available classes come from class_submissions
+-- (status='scheduled') for the session + school_year.
+--
+-- Kids are identified by family_email + first name (lower-cased on match), NOT
+-- kids.id — the EMI profile save deletes + re-inserts kids, so kids.id is not
+-- stable and a FK would cascade-delete picks on every profile edit.
+-- ──────────────────────────────────────────────
+
+-- One control row per (school_year, session). Gates whether parents can edit
+-- their kids' picks. open = parents rank; closed = parents locked out, VP /
+-- Liaison still adjust; locked = final, rosters published.
+CREATE TABLE IF NOT EXISTS class_signup_windows (
+  id              SERIAL PRIMARY KEY,
+  school_year     TEXT NOT NULL,
+  session_number  INTEGER NOT NULL,            -- 1..5
+  status          TEXT NOT NULL DEFAULT 'open'
+                  CHECK (status IN ('open','closed','locked')),
+  opened_by       TEXT,
+  opened_at       TIMESTAMPTZ,
+  closed_at       TIMESTAMPTZ,
+  locked_at       TIMESTAMPTZ,
+  updated_by      TEXT,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, session_number)
+);
+
+-- A kid's ranked picks: one row per (kid, hour, rank). class_submission_id
+-- references the scheduled class. A 2-hour class is ranked under PM1 and fills
+-- both slots when assigned (no separate PM2 pick for that kid).
+CREATE TABLE IF NOT EXISTS class_signup_picks (
+  id                  SERIAL PRIMARY KEY,
+  school_year         TEXT NOT NULL,
+  session_number      INTEGER NOT NULL,
+  family_email        TEXT NOT NULL,
+  kid_first_name      TEXT NOT NULL,
+  hour                TEXT NOT NULL CHECK (hour IN ('PM1','PM2')),
+  rank                INTEGER NOT NULL CHECK (rank BETWEEN 1 AND 8),
+  class_submission_id INTEGER NOT NULL REFERENCES class_submissions(id) ON DELETE CASCADE,
+  created_by_email    TEXT,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, session_number, family_email, kid_first_name, hour, rank),
+  UNIQUE (school_year, session_number, family_email, kid_first_name, hour, class_submission_id)
+);
+CREATE INDEX IF NOT EXISTS class_signup_picks_class_idx
+  ON class_signup_picks (school_year, session_number, hour, class_submission_id);
+CREATE INDEX IF NOT EXISTS class_signup_picks_kid_idx
+  ON class_signup_picks (school_year, session_number, LOWER(family_email), LOWER(kid_first_name));

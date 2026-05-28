@@ -15,7 +15,8 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { Resend } = require('./_resend');
 const { ALLOWED_ORIGINS, emailSubject } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail, isSuperUser } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImpersonate } = require('./_permissions');
+const { resolveFamily, canActAs } = require('./_family');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -26,7 +27,10 @@ const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 // the scope=mine query filters by the impersonated identity. Mirrors
 // resolveRecipient() in api/notifications.js.
 function resolveSubmitterEmail(user, viewAsQuery) {
-  if (!isSuperUser(user.email)) return user.email;
+  // canImpersonate, not isSuperUser, so dev/preview testers (any signed-in
+  // @rootsandwingsindy.com member) can View-As too — matches the server's
+  // impersonation model. On prod canImpersonate === super user, so unchanged.
+  if (!canImpersonate(user.email)) return user.email;
   const va = (viewAsQuery || '').toString().trim().toLowerCase();
   if (!va) return user.email;
   if ((va.split('@')[1] || '') !== ALLOWED_DOMAIN) return user.email;
@@ -399,6 +403,22 @@ async function canReviewSubmissions(email) {
   return false;
 }
 
+// View-As aware reviewer gate. True when the real caller is a reviewer
+// (super / VP / Afternoon Class Liaison), OR they can impersonate (super on
+// prod; any signed-in @rootsandwingsindy.com on dev/preview) AND are
+// viewing-as an email that is itself a reviewer. Lets testers exercise the
+// reviewer flows via View-As; no prod behavior change (real reviewers and
+// super users already pass the first check). view_as comes from the query
+// (GET) or body (POST), matching resolveSubmitterEmail's mechanism.
+async function isReviewerReq(user, req) {
+  const realEmail = user && user.email;
+  if (await canReviewSubmissions(realEmail)) return true;
+  if (!canImpersonate(realEmail)) return false;
+  const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
+  if (!va || (va.split('@')[1] || '') !== ALLOWED_DOMAIN) return false;
+  return await canReviewSubmissions(va);
+}
+
 // Resolve the PM Assistant's current email from the volunteer sheet. Returns
 // null if the role isn't filled or the lookup fails — caller should handle.
 async function getPmAssistantEmail() {
@@ -555,7 +575,7 @@ module.exports = async function handler(req, res) {
       if (action === 'class-submissions') {
         const scope = (req.query.scope || 'mine').toLowerCase();
         if (scope === 'all') {
-          if (!(await canReviewSubmissions(user.email))) {
+          if (!(await isReviewerReq(user, req))) {
             return res.status(403).json({ error: 'Reviewer access only' });
           }
           const rows = await sql`
@@ -576,7 +596,7 @@ module.exports = async function handler(req, res) {
           sql`SELECT * FROM class_submissions
               WHERE LOWER(submitted_by_email) = LOWER(${filterEmail})
               ORDER BY created_at DESC`,
-          canReviewSubmissions(user.email)
+          isReviewerReq(user, req)
         ]);
         return res.status(200).json({
           submissions: rows.map(serializeSubmission),
@@ -591,7 +611,7 @@ module.exports = async function handler(req, res) {
         if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const r = rows[0];
         const isOwner = String(r.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
-        if (!isOwner && !(await canReviewSubmissions(user.email))) {
+        if (!isOwner && !(await isReviewerReq(user, req))) {
           return res.status(403).json({ error: 'Not allowed to view this submission' });
         }
         return res.status(200).json({ submission: serializeSubmission(r) });
@@ -624,6 +644,85 @@ module.exports = async function handler(req, res) {
           ORDER BY ccl.class_key
         `;
         return res.status(200).json({ links });
+      }
+
+      // ── Class sign-ups (student-side afternoon selection) ──
+      // Window status + the scheduled afternoon classes split into PM1/PM2
+      // ranking pools + the caller's family's kids and their current picks.
+      // Any authed member can read; picks come back only for the family the
+      // caller resolves to (their own, or a View-As'd family for super users).
+      if (action === 'class-signup') {
+        const sy = activeSchoolYear(new Date());
+        const reviewer = await isReviewerReq(user, req);
+        // session is optional: with none, fall back to whichever session has an
+        // OPEN window (most recent) so the parent card auto-shows the active
+        // sign-up. Reviewers pass an explicit session to manage any of them.
+        let session = parseInt(req.query.session, 10) || null;
+        if (!session) {
+          const openWin = await sql`
+            SELECT session_number FROM class_signup_windows
+            WHERE school_year = ${sy} AND status = 'open'
+            ORDER BY session_number DESC LIMIT 1
+          `;
+          session = openWin[0] ? openWin[0].session_number : null;
+        }
+        if (!session) {
+          return res.status(200).json({
+            school_year: sy, session: null, window: { status: null },
+            classes: { PM1: [], PM2: [] }, kids: [], picks: {}, is_reviewer: reviewer
+          });
+        }
+        const winRows = await sql`
+          SELECT status, opened_at, closed_at, locked_at
+          FROM class_signup_windows
+          WHERE school_year = ${sy} AND session_number = ${session} LIMIT 1
+        `;
+        const classRows = await sql`
+          SELECT id, class_name, scheduled_hour, scheduled_age_range, scheduled_room,
+                 submitted_by_name, max_students
+          FROM class_submissions
+          WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
+          ORDER BY class_name
+        `;
+        const ser = (r) => ({
+          id: r.id, name: r.class_name, hour: r.scheduled_hour,
+          ageRange: r.scheduled_age_range || '', room: r.scheduled_room || '',
+          leader: r.submitted_by_name || '', max: r.max_students || 0
+        });
+        // A 2-hour ('both') class is ranked under PM1 only and fills both slots.
+        const classes = {
+          PM1: classRows.filter(r => r.scheduled_hour === 'PM1' || r.scheduled_hour === 'both').map(ser),
+          PM2: classRows.filter(r => r.scheduled_hour === 'PM2').map(ser)
+        };
+        const effEmail = resolveSubmitterEmail(user, req.query.view_as);
+        const fam = await resolveFamily(sql, effEmail);
+        let kids = [];
+        const picks = {};
+        if (fam && fam.family_email) {
+          const kidRows = await sql`
+            SELECT first_name FROM kids
+            WHERE LOWER(family_email) = LOWER(${fam.family_email})
+            ORDER BY sort_order, first_name
+          `;
+          kids = kidRows.map(k => k.first_name).filter(Boolean);
+          const pickRows = await sql`
+            SELECT kid_first_name, hour, class_submission_id
+            FROM class_signup_picks
+            WHERE school_year = ${sy} AND session_number = ${session}
+              AND LOWER(family_email) = LOWER(${fam.family_email})
+            ORDER BY kid_first_name, hour, rank
+          `;
+          pickRows.forEach(p => {
+            if (!picks[p.kid_first_name]) picks[p.kid_first_name] = { PM1: [], PM2: [] };
+            (picks[p.kid_first_name][p.hour] || (picks[p.kid_first_name][p.hour] = [])).push(p.class_submission_id);
+          });
+        }
+        return res.status(200).json({
+          school_year: sy, session,
+          window: winRows[0] || { status: null },
+          classes, kids, picks,
+          is_reviewer: reviewer
+        });
       }
 
       if (id) {
@@ -692,6 +791,119 @@ module.exports = async function handler(req, res) {
         return res.status(201).json({ link: inserted[0] });
       }
 
+      // VP / Afternoon Class Liaison open/close/lock a session's sign-up window.
+      if (action === 'class-signup-window') {
+        if (!(await isReviewerReq(user, req))) {
+          return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can manage sign-ups.', youAre: user.email });
+        }
+        const body = req.body || {};
+        const session = parseInt(body.session, 10);
+        const status = String(body.status || '').trim();
+        if (!session) return res.status(400).json({ error: 'session required' });
+        if (['open', 'closed', 'locked'].indexOf(status) === -1) {
+          return res.status(400).json({ error: 'status must be open, closed, or locked' });
+        }
+        const sy = activeSchoolYear(new Date());
+        const now = new Date();
+        const openedAt = status === 'open' ? now : null;
+        const closedAt = status === 'closed' ? now : null;
+        const lockedAt = status === 'locked' ? now : null;
+        const openedBy = status === 'open' ? user.email : null;
+        await sql`
+          INSERT INTO class_signup_windows
+            (school_year, session_number, status, opened_by, opened_at, closed_at, locked_at, updated_by, updated_at)
+          VALUES (${sy}, ${session}, ${status}, ${openedBy}, ${openedAt}, ${closedAt}, ${lockedAt}, ${user.email}, ${now})
+          ON CONFLICT (school_year, session_number) DO UPDATE SET
+            status     = EXCLUDED.status,
+            opened_by  = COALESCE(EXCLUDED.opened_by, class_signup_windows.opened_by),
+            opened_at  = COALESCE(EXCLUDED.opened_at, class_signup_windows.opened_at),
+            closed_at  = COALESCE(EXCLUDED.closed_at, class_signup_windows.closed_at),
+            locked_at  = COALESCE(EXCLUDED.locked_at, class_signup_windows.locked_at),
+            updated_by = EXCLUDED.updated_by,
+            updated_at = EXCLUDED.updated_at
+        `;
+        return res.status(200).json({ ok: true, status });
+      }
+
+      // Save a kid's ranked picks for one hour. Parents may edit only while the
+      // window is 'open'; reviewers may also edit while 'closed' (never once
+      // 'locked'). Picks are scoped to the caller's resolved family.
+      if (action === 'class-signup-picks') {
+        const body = req.body || {};
+        const session = parseInt(body.session, 10);
+        const hour = String(body.hour || '').trim();
+        const kidFirst = String(body.kid_first_name || '').trim();
+        const ranked = (Array.isArray(body.ranked_class_ids) ? body.ranked_class_ids : [])
+          .map(x => parseInt(x, 10)).filter(Boolean);
+        if (!session || (hour !== 'PM1' && hour !== 'PM2') || !kidFirst) {
+          return res.status(400).json({ error: 'session, hour (PM1/PM2), and kid_first_name required' });
+        }
+        if (ranked.length > 8) return res.status(400).json({ error: 'Too many picks (max 8).' });
+        const sy = activeSchoolYear(new Date());
+        const isReviewer = await isReviewerReq(user, req);
+
+        const winRows = await sql`
+          SELECT status FROM class_signup_windows
+          WHERE school_year = ${sy} AND session_number = ${session} LIMIT 1
+        `;
+        const wstatus = winRows[0] ? winRows[0].status : null;
+        if (wstatus === 'locked') return res.status(409).json({ error: 'Sign-ups are locked for this session.' });
+        if (wstatus !== 'open' && !isReviewer) return res.status(409).json({ error: 'Sign-ups are not open right now.' });
+
+        const effEmail = resolveSubmitterEmail(user, body.view_as);
+        const fam = await resolveFamily(sql, effEmail);
+        if (!fam || !fam.family_email) return res.status(403).json({ error: 'No family found for your account.' });
+        const familyEmail = fam.family_email;
+        if (!isReviewer && !isSuperUser(user.email)) {
+          if (!(await canActAs(sql, user.email, familyEmail))) {
+            return res.status(403).json({ error: 'Not allowed to edit this family.' });
+          }
+        }
+        const kidOk = await sql`
+          SELECT 1 FROM kids WHERE LOWER(family_email) = LOWER(${familyEmail})
+            AND LOWER(first_name) = LOWER(${kidFirst}) LIMIT 1
+        `;
+        if (kidOk.length === 0) return res.status(400).json({ error: 'That child is not in your family.' });
+
+        // Keep only ids that are scheduled classes valid for this hour, in the
+        // submitted rank order, de-duplicated.
+        let validRows = [];
+        if (ranked.length) {
+          validRows = await sql`
+            SELECT id, scheduled_hour FROM class_submissions
+            WHERE status='scheduled' AND school_year=${sy} AND scheduled_session=${session}
+              AND id = ANY(${ranked}::int[])
+          `;
+        }
+        const hourById = {};
+        validRows.forEach(r => { hourById[r.id] = r.scheduled_hour; });
+        const cleanIds = [];
+        const seen = {};
+        for (const cid of ranked) {
+          if (seen[cid]) continue;
+          const h = hourById[cid];
+          if (!h) continue;
+          if ((hour === 'PM1' && (h === 'PM1' || h === 'both')) || (hour === 'PM2' && h === 'PM2')) {
+            cleanIds.push(cid); seen[cid] = true;
+          }
+        }
+
+        await sql`
+          DELETE FROM class_signup_picks
+          WHERE school_year=${sy} AND session_number=${session}
+            AND LOWER(family_email)=LOWER(${familyEmail})
+            AND LOWER(kid_first_name)=LOWER(${kidFirst}) AND hour=${hour}
+        `;
+        for (let i = 0; i < cleanIds.length; i++) {
+          await sql`
+            INSERT INTO class_signup_picks
+              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, created_by_email)
+            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${user.email})
+          `;
+        }
+        return res.status(200).json({ ok: true, saved: cleanIds.length });
+      }
+
       if (action === 'copy' && id) {
         const source = await getFullCurriculum(sql, id);
         if (!source) return res.status(404).json({ error: 'Source not found' });
@@ -735,7 +947,7 @@ module.exports = async function handler(req, res) {
       // touching the submitter's 13 form fields.
       if (action === 'class-submission' && req.query.review === '1') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
-        if (!(await canReviewSubmissions(user.email))) {
+        if (!(await isReviewerReq(user, req))) {
           return res.status(403).json({ error: 'Reviewer access only' });
         }
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
@@ -773,8 +985,12 @@ module.exports = async function handler(req, res) {
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
         const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
-        if (!isOwner) return res.status(403).json({ error: 'Only the submitter can edit this submission.' });
-        if (row.status !== 'submitted') {
+        const isReviewer = await isReviewerReq(user, req);
+        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer can edit this submission.' });
+        // Owners can edit only before the VP/PMA approves (keeps the inbox
+        // stable). Reviewers can edit at any status so they can correct
+        // details on already-placed classes from the Schedule Builder.
+        if (isOwner && !isReviewer && row.status !== 'submitted') {
           return res.status(409).json({ error: 'This submission has already been drafted by the VP/PM Assistant. Contact them to request changes.' });
         }
         let clean;
@@ -813,7 +1029,7 @@ module.exports = async function handler(req, res) {
       // super user gate.
       if (action === 'favorite') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
-        if (!(await canReviewSubmissions(user.email))) {
+        if (!(await isReviewerReq(user, req))) {
           return res.status(403).json({ error: 'Reviewer access only' });
         }
         const desired = !!(req.body && req.body.is_favorite);
@@ -871,7 +1087,15 @@ module.exports = async function handler(req, res) {
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
         const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
-        if (!isOwner) return res.status(403).json({ error: 'Only the submitter can withdraw this submission.' });
+        const isReviewer = await isReviewerReq(user, req);
+        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer can remove this submission.' });
+        if (isReviewer) {
+          // Reviewer "Delete Class": hard-delete from the system entirely.
+          // Cascades wipe any class_signup_picks referencing this submission.
+          await sql`DELETE FROM class_submissions WHERE id = ${id}`;
+          return res.status(200).json({ ok: true, id, deleted: true });
+        }
+        // Owner soft-withdraw — only before VP/PMA places it.
         if (row.status !== 'submitted') {
           return res.status(409).json({ error: 'This submission has already been drafted. Contact the VP to cancel.' });
         }

@@ -3718,6 +3718,192 @@
     return '1:00\u20132:55';
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Afternoon Class Sign-ups (student-side selection)
+  // Parents rank PM1 + PM2 classes per kid while a session's window is open;
+  // VP / Afternoon Class Liaison open/close/lock the window. Backed by
+  // /api/curriculum?action=class-signup* and the class_signup_* tables.
+  // ─────────────────────────────────────────────────────────────
+  var _signup = null; // { session, window, classes, kids, picks, is_reviewer, working }
+
+  function loadClassSignupCard(fam, sessionOverride) {
+    var grid = document.getElementById('myFamilyGrid');
+    if (!grid) return;
+    var card = document.getElementById('classSignupCard');
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'mf-card mf-card-full';
+      card.id = 'classSignupCard';
+      card.style.display = 'none';
+      grid.appendChild(card);
+    }
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { card.style.display = 'none'; return; }
+    var qs = '?action=class-signup';
+    if (sessionOverride) qs += '&session=' + encodeURIComponent(sessionOverride);
+    var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
+    if (active) qs += '&view_as=' + encodeURIComponent(active);
+    fetch('/api/curriculum' + qs, { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || data.error) { card.style.display = 'none'; return; }
+        _signup = data;
+        // Working copy of picks (kid -> {PM1:[],PM2:[]}) seeded from saved.
+        _signup.working = {};
+        (data.kids || []).forEach(function (k) {
+          var src = (data.picks && data.picks[k]) || {};
+          _signup.working[k] = { PM1: (src.PM1 || []).slice(), PM2: (src.PM2 || []).slice() };
+        });
+        renderClassSignupCard();
+      })
+      .catch(function () { card.style.display = 'none'; });
+  }
+
+  function renderClassSignupCard() {
+    var card = document.getElementById('classSignupCard');
+    if (!card || !_signup) return;
+    var s = _signup;
+    var status = (s.window && s.window.status) || null;
+    var reviewer = !!s.is_reviewer;
+    // Non-reviewers only see the card when a session is actively open.
+    if (!reviewer && status !== 'open') { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    var h = '<h3 class="mf-card-title">Afternoon Class Sign-ups</h3>';
+
+    if (reviewer) {
+      h += '<div class="signup-admin">';
+      h += '<label class="signup-admin-sess">Session <select id="signupSessionSel">';
+      for (var n = 1; n <= 5; n++) {
+        h += '<option value="' + n + '"' + (String(s.session) === String(n) ? ' selected' : '') + '>' + n + '</option>';
+      }
+      h += '</select></label>';
+      h += '<span class="signup-status signup-status-' + (status || 'none') + '">' + (status ? status.toUpperCase() : 'NOT OPEN') + '</span>';
+      h += '<div class="signup-admin-btns">';
+      h += '<button type="button" class="sc-btn" data-signup-win="open"' + (status === 'open' ? ' disabled' : '') + '>Open</button>';
+      h += '<button type="button" class="sc-btn" data-signup-win="closed"' + (status !== 'open' ? ' disabled' : '') + '>Close</button>';
+      h += '<button type="button" class="sc-btn sc-btn-del" data-signup-win="locked"' + ((status === 'locked' || !status) ? ' disabled' : '') + '>Lock</button>';
+      h += '</div></div>';
+    }
+
+    if (!s.session) {
+      h += '<p class="mf-empty">No session is open for sign-ups yet.</p>';
+      card.innerHTML = h;
+      wireSignupCard();
+      return;
+    }
+
+    var locked = status === 'locked';
+    var canEdit = (status === 'open') || (reviewer && status === 'closed');
+    if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
+    else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
+    else if (status === 'open') h += '<p class="signup-note">Tap classes in order of preference (1 = first choice), up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately.</p>';
+
+    var kids = s.kids || [];
+    if (kids.length === 0) {
+      h += '<p class="mf-empty">No children on this family to sign up.</p>';
+    } else {
+      kids.forEach(function (kid) {
+        h += '<div class="signup-kid">';
+        h += '<div class="signup-kid-name">' + escapeHtml(kid) + '</div>';
+        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit);
+        if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kid) + '’s picks</button>';
+        h += '</div>';
+      });
+    }
+    card.innerHTML = h;
+    wireSignupCard();
+  }
+
+  function signupHourHtml(kid, hour, classes, canEdit) {
+    var ranked = (_signup.working[kid] && _signup.working[kid][hour]) || [];
+    var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
+    if (classes.length === 0) {
+      h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
+    } else {
+      h += '<div class="signup-classes">';
+      classes.forEach(function (c) {
+        var idx = ranked.indexOf(c.id);
+        var sel = idx !== -1;
+        var bits = [c.ageRange, c.room, c.leader ? ('led by ' + c.leader) : ''];
+        if (c.hour === 'both') bits.push('fills both hours');
+        var meta = bits.filter(Boolean).join(' · ');
+        h += '<button type="button" class="signup-class' + (sel ? ' signup-class-sel' : '') + '"' +
+             ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
+        h += '<span class="signup-rank">' + (sel ? (idx + 1) : '+') + '</span>';
+        h += '<span class="signup-class-body"><span class="signup-class-name">' + escapeHtml(c.name) + '</span>';
+        if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
+        h += '</span></button>';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function wireSignupCard() {
+    var card = document.getElementById('classSignupCard');
+    if (!card) return;
+    card.querySelectorAll('[data-signup-win]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var status = this.getAttribute('data-signup-win');
+        var sel = document.getElementById('signupSessionSel');
+        var session = sel ? parseInt(sel.value, 10) : _signup.session;
+        if (status === 'locked' && !confirm('Lock sign-ups for Session ' + session + '? No one can change picks after this.')) return;
+        setSignupWindow(session, status);
+      });
+    });
+    var sessSel = document.getElementById('signupSessionSel');
+    if (sessSel) sessSel.addEventListener('change', function () { loadClassSignupCard(null, parseInt(this.value, 10)); });
+    card.querySelectorAll('.signup-class').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (this.disabled) return;
+        var kid = this.getAttribute('data-kid');
+        var hour = this.getAttribute('data-hour');
+        var cid = parseInt(this.getAttribute('data-class'), 10);
+        var arr = _signup.working[kid][hour];
+        var i = arr.indexOf(cid);
+        if (i !== -1) arr.splice(i, 1);
+        else if (arr.length >= 4) { alert('You can rank up to 4 choices per hour.'); return; }
+        else arr.push(cid);
+        renderClassSignupCard();
+      });
+    });
+    card.querySelectorAll('.signup-save').forEach(function (btn) {
+      btn.addEventListener('click', function () { saveSignupKid(this.getAttribute('data-kid'), this); });
+    });
+  }
+
+  function setSignupWindow(session, status) {
+    var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
+    fetch('/api/curriculum?action=class-signup-window', {
+      method: 'POST', headers: rwAuthHeaders(true),
+      body: JSON.stringify({ session: session, status: status, view_as: active })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.d && res.d.error) || 'Could not update sign-ups.'); return; }
+        loadClassSignupCard(null, session);
+      }).catch(function (e) { alert('Network error: ' + (e.message || 'unknown')); });
+  }
+
+  function saveSignupKid(kid, btn) {
+    if (!_signup || !_signup.working[kid]) return;
+    var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
+    var session = _signup.session;
+    var w = _signup.working[kid];
+    btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Saving…';
+    function postHour(hour) {
+      return fetch('/api/curriculum?action=class-signup-picks', {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: w[hour], view_as: active })
+      }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
+    }
+    postHour('PM1').then(function () { return postHour('PM2'); })
+      .then(function () { btn.textContent = 'Saved ✓'; setTimeout(function () { btn.disabled = false; btn.textContent = orig; }, 1500); })
+      .catch(function (e) { alert(e.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = orig; });
+  }
+
   function renderMyFamily() {
     var email = getActiveEmail();
     var section = document.getElementById('myFamily');
@@ -4484,6 +4670,10 @@
 
     grid.innerHTML = html;
     section.style.display = '';
+
+    // Afternoon class sign-ups card — loads async; hides itself when nothing
+    // is open for sign-ups and the viewer isn't a reviewer (VP/Liaison).
+    if (typeof loadClassSignupCard === 'function') loadClassSignupCard(fam);
 
     // Keep the header picker in sync with the active family.
     renderHeaderViewAs();
@@ -12909,7 +13099,7 @@
         var desired = !isFav;
         favBtn.disabled = true;
         favBtn.textContent = desired ? 'Starring…' : 'Removing star…';
-        curriculumFetch('/api/curriculum?action=favorite&id=' + encodeURIComponent(id), {
+        curriculumFetch('/api/curriculum?action=favorite&id=' + encodeURIComponent(id) + notifViewAsSuffix(), {
           method: 'PATCH',
           body: JSON.stringify({ is_favorite: desired })
         }).then(function (res) {
@@ -14206,10 +14396,12 @@
   // inbox instead of the super user's own. Lets them triage on behalf
   // of whoever they're helping.
   function notifViewAsSuffix() {
-    var realEmail = localStorage.getItem('rw_user_email');
-    if (!isSuperUserEmail(realEmail)) return '';
     var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
     if (!viewAs) return '';
+    var realEmail = localStorage.getItem('rw_user_email');
+    // Send view_as whenever the caller may impersonate: real super users on
+    // prod, or any signed-in member on dev/preview (mirrors server canImpersonate).
+    if (!isSuperUserEmail(realEmail) && !(typeof isDevHost === 'function' && isDevHost())) return '';
     return '&view_as=' + encodeURIComponent(viewAs);
   }
 
@@ -14554,7 +14746,8 @@
 
   // Builds the submission modal (all 13 form fields). `existing` is either
   // null (new submission) or a submission row (edit mode).
-  function showClassSubmissionModal(existing) {
+  function showClassSubmissionModal(existing, opts) {
+    opts = opts || {};
     if (document.getElementById('classSubOverlay')) return;
     var isEdit = !!existing;
     var cur = existing || {
@@ -14758,7 +14951,9 @@
       submitBtn.textContent = isEdit ? 'Saving…' : 'Submitting…';
 
       var cred = localStorage.getItem('rw_google_credential');
-      var url = '/api/curriculum?action=class-submission' + (isEdit ? '&id=' + existing.id : '');
+      // On edit, send view_as so reviewer-via-impersonation passes the server's
+      // isReviewerReq gate (dev testers can now edit any class' details).
+      var url = '/api/curriculum?action=class-submission' + (isEdit ? '&id=' + existing.id + notifViewAsSuffix() : '');
       var method = isEdit ? 'PATCH' : 'POST';
       fetch(url, {
         method: method,
@@ -14776,6 +14971,7 @@
         }
         closeCls();
         loadMyClassSubmissions();
+        if (typeof opts.onSaved === 'function') opts.onSaved();
       })
       .catch(function () {
         errEl.textContent = 'Network error — please try again.';
@@ -14909,6 +15105,44 @@
       matches: ['cedars', 'pigeons', 'mixed-older', 'all-ages'] }
   ];
   var SCHEDULE_HOURS = ['PM1', 'PM2'];
+
+  // Display labels for class_submissions.status, surfaced as colored chips on
+  // every card so the planner always sees where a class stands at a glance.
+  // Simplified workflow (2026-05-28): Submitted (in inbox) → Scheduled (placed
+  // in a session). The legacy DB 'drafted' value still exists from the old
+  // Submissions Report "Approve" button — we alias it to 'Scheduled' for
+  // display so the user only sees two states. Removing a class = Delete
+  // (hard-delete), not Decline. Session-level Approve still exists as a hook
+  // for future class-leader notifications.
+  var SB_STATUS_LABELS = {
+    submitted: 'Submitted',
+    drafted:   'Scheduled',
+    scheduled: 'Scheduled',
+    declined:  'Declined',
+    withdrawn: 'Withdrawn'
+  };
+
+  // Age-group ordering for sorting classes inside the open PM blocks
+  // (youngest → oldest). Mixed / all-ages groups sit at their approximate
+  // midpoint; unknown groups fall to the bottom.
+  var AGE_ORDER = {
+    'saplings': 1, 'sassafras': 2,
+    'mixed-younger': 3,
+    'oaks': 4, 'maples': 5,
+    'mixed-elementary': 6,
+    'birch': 7, 'willows': 8,
+    'mixed-older': 9,
+    'cedars': 10, 'pigeons': 11,
+    'all-ages': 12
+  };
+  function minAgeOrder(ageGroups) {
+    var min = Infinity;
+    (ageGroups || []).forEach(function (g) {
+      var v = AGE_ORDER[g];
+      if (v && v < min) min = v;
+    });
+    return min === Infinity ? 99 : min;
+  }
 
   var scheduleBuilderState = {
     schoolYear: '2026-2027',
@@ -16569,7 +16803,7 @@
     if (!pill) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    fetch('/api/curriculum?action=class-submissions&scope=all', {
+    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -16603,7 +16837,7 @@
       renderPmSubmissionsReport();
       return;
     }
-    fetch('/api/curriculum?action=class-submissions&scope=all', {
+    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
       .then(function (r) {
@@ -16855,7 +17089,7 @@
   function pmReportAction(subId, newStatus, actionLabel) {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    fetch('/api/curriculum?action=class-submission&review=1&id=' + subId, {
+    fetch('/api/curriculum?action=class-submission&review=1&id=' + subId + notifViewAsSuffix(), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
@@ -16916,7 +17150,7 @@
     if (!cred) return;
     var body = document.getElementById('sbBody');
     if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading submissions…</em>';
-    fetch('/api/curriculum?action=class-submissions&scope=all', {
+    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
     .then(function (r) {
@@ -16962,53 +17196,127 @@
           && s.scheduled_session === sess;
     });
 
-    // Grid header
-    html += '<div class="sb-grid">';
-    html += '<div class="sb-grid-head sb-grid-rowhead"></div>';
-    SCHEDULE_HOURS.forEach(function (h) {
-      var label = h === 'PM1' ? 'PM1 · 1:00–1:55' : 'PM2 · 2:00–2:55';
-      html += '<div class="sb-grid-head">' + label + '</div>';
-    });
+    // Session workflow bar — combined Scheduled count (drafted + scheduled
+    // both display as Scheduled now) plus inbox count. "Approve Session"
+    // remains as the session-finalize gesture: it normalizes any legacy
+    // drafted rows to scheduled and is the future hook for notifying class
+    // leaders that their session is final.
+    var placedCount = classesInSession.length;
+    var inboxCount = scheduleBuilderState.submissions.filter(function (s) { return s.status === 'submitted'; }).length;
+    html += '<div class="sb-workflow">';
+    html += '<div class="sb-workflow-counts">';
+    html += '<span class="sb-status-chip sb-status-scheduled">' + placedCount + ' Scheduled</span>';
+    html += '<span class="sb-status-chip sb-status-submitted">' + inboxCount + ' in inbox</span>';
+    html += '</div>';
+    html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Finalizes the session. Class leaders will be notified (notifications coming in a future update).">Approve Session ' + sess + '</button>';
+    html += '</div>';
 
-    // Grid body
-    SCHEDULE_SECTIONS.forEach(function (section) {
-      html += '<div class="sb-grid-rowhead"><strong>' + escClsHtml(section.label) + '</strong>';
-      html += '<div class="sb-grid-rowhead-groups">' + section.groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).join(' · ') + '</div>';
-      html += '</div>';
+    // Open blocks for PM1 and PM2 — classes get dropped in and sort by age
+    // (youngest first). 'both' (2-hour) classes appear in the PM1 column with
+    // a "Both hours" badge, since they start at PM1 and occupy PM2 implicitly.
+    function sortByAgeThenName(a, b) {
+      var ax = minAgeOrder(a.age_groups), bx = minAgeOrder(b.age_groups);
+      if (ax !== bx) return ax - bx;
+      return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+    }
+    var pm1List = classesInSession.filter(function (c) { return c.scheduled_hour === 'PM1' || c.scheduled_hour === 'both'; });
+    var pm2List = classesInSession.filter(function (c) { return c.scheduled_hour === 'PM2'; });
+    pm1List.sort(sortByAgeThenName);
+    pm2List.sort(sortByAgeThenName);
 
-      SCHEDULE_HOURS.forEach(function (hour) {
-        var inCell = classesInSession.filter(function (c) {
-          if (c.scheduled_age_range !== section.label) return false;
-          if (c.scheduled_hour === 'both') return true;
-          return c.scheduled_hour === hour;
-        });
-        var count = inCell.length;
-        var marker = count >= 3 ? '🟢' : count === 2 ? '🟡' : '🔴';
-        html += '<div class="sb-cell" data-section="' + section.id + '" data-hour="' + hour + '">';
-        html += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
-        inCell.forEach(function (c) {
-          var bothBadge = c.scheduled_hour === 'both' ? ' <span class="sb-both-badge">Both</span>' : '';
-          var draftBadge = c.status === 'drafted' ? ' <span class="sb-draft-badge">Draft</span>' : '';
-          html += '<div class="sb-cell-class" data-sub-id="' + c.id + '">';
-          html += '<strong>' + escClsHtml(c.class_name) + '</strong>' + bothBadge + draftBadge;
-          html += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
-          html += '</div>';
-        });
-        html += '<button class="sb-cell-add" data-section="' + section.id + '" data-hour="' + hour + '">+ Add</button>';
-        html += '</div>';
+    function renderBlock(hour, label, list) {
+      var count = list.length;
+      var marker = count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴';
+      var s = '<div class="sb-cell" data-hour="' + hour + '">';
+      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
+      list.forEach(function (c) {
+        var ages = prettyAgesClient(c.age_groups, c.age_groups_other);
+        var statusLabel = SB_STATUS_LABELS[c.status] || c.status || '';
+        s += '<div class="sb-cell-class" draggable="true" data-sub-id="' + c.id + '">';
+        // Age groups lead the card (most-prominent pill), with the status
+        // chip and any "Both" badge inline on the same top row. Class name
+        // and teacher follow as secondary lines.
+        s += '<div class="sb-class-top">';
+        if (ages) s += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
+        s += '<span class="sb-status-chip sb-status-' + escClsHtml(c.status || '') + '">' + escClsHtml(statusLabel) + '</span>';
+        if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
+        s += '</div>';
+        s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
+        s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
+        s += '</div>';
       });
-    });
+      s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      s += '</div>';
+      return s;
+    }
+
+    html += '<div class="sb-grid sb-grid-open">';
+    html += renderBlock('PM1', 'PM Hour 1 · 1:00–1:55', pm1List);
+    html += renderBlock('PM2', 'PM Hour 2 · 2:00–2:55', pm2List);
     html += '</div>';
 
-    // Footer — unscheduled queue
-    var unscheduled = scheduleBuilderState.submissions.filter(function (s) {
-      return s.status === 'submitted';
+    // Available-classes palette: submitted + approved-but-unplaced, excluding
+    // anything already placed in this session's grid. Cards drag onto any slot
+    // (the "+ Add" picker stays as a tap fallback), and a placed class dragged
+    // back here is unscheduled.
+    var placedIds = {};
+    classesInSession.forEach(function (c) { placedIds[c.id] = true; });
+    var palette = scheduleBuilderState.submissions.filter(function (s) {
+      if (placedIds[s.id]) return false;
+      return s.status === 'submitted' || s.status === 'drafted';
     });
-    html += '<div class="sb-inbox-note">';
-    html += '<strong>Inbox:</strong> ' + unscheduled.length + ' submission' + (unscheduled.length === 1 ? '' : 's') + ' waiting to be drafted / scheduled. Click + Add in any cell to pull from the inbox.';
-    html += '</div>';
+    // Requested session is a key placement consideration, so float classes
+    // that want THIS session (or are flexible) to the top, then alphabetical.
+    function wantsThisSession(s) {
+      var prefs = s.session_preferences || [];
+      return prefs.indexOf(String(sess)) !== -1 || prefs.indexOf('flexible') !== -1;
+    }
+    palette.sort(function (a, b) {
+      var am = wantsThisSession(a) ? 0 : 1;
+      var bm = wantsThisSession(b) ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+    });
+    var paletteHtml = '<div class="sb-palette" id="sbPalette">';
+    paletteHtml += '<div class="sb-palette-title">Available classes (' + palette.length + ')</div>';
+    paletteHtml += '<div class="sb-palette-hint">Drag onto a slot · drag a placed class here to unschedule · or use “+ Add”. <strong>Requested session</strong> is shown on each card.</div>';
+    if (palette.length === 0) {
+      paletteHtml += '<p class="sb-palette-empty">No submissions waiting — they’ll appear here as members submit classes.</p>';
+    } else {
+      paletteHtml += '<div class="sb-palette-cards">';
+      palette.forEach(function (s) {
+        var ages = prettyAgesClient(s.age_groups, s.age_groups_other);
+        var hourPrefs = (s.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ');
+        var statusLabel = SB_STATUS_LABELS[s.status] || s.status || '';
+        // Requested-session chips; the session currently being built is
+        // highlighted so its fit is obvious at a glance.
+        var sessChips = (s.session_preferences || []).map(function (x) {
+          if (x === 'flexible') return '<span class="sb-sess-chip sb-sess-flex">Flexible</span>';
+          var match = String(x) === String(sess);
+          return '<span class="sb-sess-chip' + (match ? ' sb-sess-match' : '') + '">S' + escClsHtml(x) + '</span>';
+        }).join('');
+        if (!sessChips) sessChips = '<span class="sb-sess-chip sb-sess-none">no pref</span>';
+        paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
+        // Same lead-with-ages + status-chip pattern as the scheduled cards.
+        paletteHtml += '<div class="sb-class-top">';
+        if (ages) paletteHtml += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
+        paletteHtml += '<span class="sb-status-chip sb-status-' + escClsHtml(s.status || '') + '">' + escClsHtml(statusLabel) + '</span>';
+        paletteHtml += '</div>';
+        paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
+        paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
+        paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
+        paletteHtml += '</div>';
+      });
+      paletteHtml += '</div>';
+    }
+    paletteHtml += '</div>';
 
-    body.innerHTML = html;
+    // Docked side palette (left) + grid (right) so the available classes stay
+    // in view while dragging onto slots. Stacks on narrow screens.
+    body.innerHTML = '<div class="sb-layout">' +
+      '<aside class="sb-side">' + paletteHtml + '</aside>' +
+      '<div class="sb-main">' + html + '</div>' +
+      '</div>';
 
     // Wire pager
     body.querySelectorAll('.sb-sess-btn').forEach(function (btn) {
@@ -17018,13 +17326,15 @@
       });
     });
 
+    // Wire session workflow: Approve Session = batch flip Approved → Scheduled.
+    var approveBtn = document.getElementById('sbApproveSession');
+    if (approveBtn) approveBtn.addEventListener('click', approveScheduledSession);
+
     // Wire + Add buttons
     body.querySelectorAll('.sb-cell-add').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var sectionId = btn.getAttribute('data-section');
-        var hour = btn.getAttribute('data-hour');
-        showSchedulePicker(sectionId, hour);
+        showSchedulePicker(btn.getAttribute('data-hour'));
       });
     });
 
@@ -17035,23 +17345,114 @@
         showScheduleEntryEditor(subId);
       });
     });
+
+    // ── Drag-and-drop (desktop): palette cards + placed classes drag onto
+    // slots; placed classes drag back to the palette to unschedule. The tap
+    // "+ Add" / click-to-edit flows above remain for touch / as a fallback.
+    function sbDragStart(e) {
+      var id = this.getAttribute('data-sub-id');
+      _sbDragId = parseInt(id, 10);
+      if (e.dataTransfer) { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; }
+      this.classList.add('sb-dragging');
+    }
+    function sbDragEnd() { this.classList.remove('sb-dragging'); }
+    body.querySelectorAll('.sb-palette-card, .sb-cell-class').forEach(function (el) {
+      el.addEventListener('dragstart', sbDragStart);
+      el.addEventListener('dragend', sbDragEnd);
+    });
+    body.querySelectorAll('.sb-cell').forEach(function (cell) {
+      cell.addEventListener('dragover', function (e) { e.preventDefault(); cell.classList.add('sb-cell-drop'); });
+      cell.addEventListener('dragleave', function () { cell.classList.remove('sb-cell-drop'); });
+      cell.addEventListener('drop', function (e) {
+        e.preventDefault(); cell.classList.remove('sb-cell-drop');
+        var id = (e.dataTransfer && parseInt(e.dataTransfer.getData('text/plain'), 10)) || _sbDragId;
+        if (id) assignDroppedSub(id, cell.getAttribute('data-hour'));
+      });
+    });
+    var paletteEl = document.getElementById('sbPalette');
+    if (paletteEl) {
+      paletteEl.addEventListener('dragover', function (e) { e.preventDefault(); paletteEl.classList.add('sb-palette-drop'); });
+      paletteEl.addEventListener('dragleave', function (e) { if (e.target === paletteEl) paletteEl.classList.remove('sb-palette-drop'); });
+      paletteEl.addEventListener('drop', function (e) {
+        e.preventDefault(); paletteEl.classList.remove('sb-palette-drop');
+        var id = (e.dataTransfer && parseInt(e.dataTransfer.getData('text/plain'), 10)) || _sbDragId;
+        if (id) unscheduleDroppedSub(id);
+      });
+    }
+  }
+
+  var _sbDragId = null;
+
+  // Drop a submission into a PM block → schedule it for the active session.
+  // The grid is now hour-based open blocks (no preset age sections), so the
+  // age range comes from the submission's own age_groups. 2-hour-required
+  // classes auto-set hour='both'.
+  function assignDroppedSub(subId, hour) {
+    var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+    if (!sub) return;
+    var scheduledHour = hour;
+    if ((sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+    var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
+    patchReviewAction(subId, {
+      status: 'scheduled',
+      scheduled_session: scheduleBuilderState.session,
+      scheduled_hour: scheduledHour,
+      scheduled_age_range: ageRange,
+      scheduled_room: sub.scheduled_room || '',
+      reviewer_notes: sub.reviewer_notes || ''
+    }).then(function () { loadScheduleBuilder(); })
+      .catch(function (err) { alert('Could not place class: ' + (err.message || 'error')); });
+  }
+
+  // "Approve Session" workflow action: flip every Approved (DB-'drafted')
+  // class in the current session to Scheduled (final). Confirms first, runs
+  // the per-submission PATCHes in parallel, then reloads.
+  function approveScheduledSession() {
+    var sess = scheduleBuilderState.session;
+    var drafted = scheduleBuilderState.submissions.filter(function (s) {
+      return s.status === 'drafted' && s.scheduled_session === sess;
+    });
+    if (drafted.length === 0) return;
+    var label = drafted.length + ' Approved class' + (drafted.length === 1 ? '' : 'es');
+    if (!confirm('Approve Session ' + sess + ' as final?\n' + label + ' will be marked Scheduled (the published schedule).')) return;
+    var btn = document.getElementById('sbApproveSession');
+    if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+    Promise.all(drafted.map(function (d) {
+      return patchReviewAction(d.id, {
+        status: 'scheduled',
+        scheduled_session: d.scheduled_session,
+        scheduled_hour: d.scheduled_hour,
+        scheduled_age_range: d.scheduled_age_range || '',
+        scheduled_room: d.scheduled_room || '',
+        reviewer_notes: d.reviewer_notes || ''
+      });
+    })).then(function () { loadScheduleBuilder(); })
+      .catch(function (err) { alert('Some approvals failed: ' + (err.message || 'error')); loadScheduleBuilder(); });
+  }
+
+  // Drop a placed class back on the palette → unschedule (back to the inbox).
+  function unscheduleDroppedSub(subId) {
+    var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+    if (!sub) return;
+    if (sub.status === 'submitted' && !sub.scheduled_session) return; // already in the inbox
+    patchReviewAction(subId, {
+      status: 'submitted',
+      scheduled_session: null, scheduled_hour: null, scheduled_age_range: null,
+      scheduled_room: '', reviewer_notes: sub.reviewer_notes || ''
+    }).then(function () { loadScheduleBuilder(); })
+      .catch(function (err) { alert('Could not unschedule: ' + (err.message || 'error')); });
   }
 
   // Picker modal: lists submissions that match the cell's age section, plus
-  // an "All other submissions" expander. Clicking "Assign here" PATCHes the
+  // an "All other submissions" expander. Clicking "Select" PATCHes the
   // submission into this cell with status='scheduled'.
-  function showSchedulePicker(sectionId, hour) {
-    var section = SCHEDULE_SECTIONS.filter(function (s) { return s.id === sectionId; })[0];
-    if (!section) return;
+  function showSchedulePicker(hour) {
     if (document.getElementById('sbPickerOverlay')) return;
 
     var sess = scheduleBuilderState.session;
     var pool = scheduleBuilderState.submissions.filter(function (s) {
       return s.status === 'submitted';
     });
-    function matchesSection(s) {
-      return (s.age_groups || []).some(function (g) { return section.matches.indexOf(g) !== -1; });
-    }
     function matchesSession(s) {
       var prefs = s.session_preferences || [];
       return prefs.indexOf(String(sess)) !== -1 || prefs.indexOf('flexible') !== -1;
@@ -17065,7 +17466,7 @@
       return false;
     }
 
-    var matched = pool.filter(function (s) { return matchesSection(s) && matchesSession(s) && matchesHour(s); });
+    var matched = pool.filter(function (s) { return matchesSession(s) && matchesHour(s); });
     var others  = pool.filter(function (s) { return matched.indexOf(s) === -1; });
 
     function renderSubRow(s) {
@@ -17084,7 +17485,7 @@
         +   '<p class="sb-pick-row-desc">' + escClsHtml((s.description || '').slice(0, 200)) + (s.description && s.description.length > 200 ? '…' : '') + '</p>'
         + '</div>'
         + '<div class="sb-pick-row-actions">'
-        +   '<button class="btn btn-primary sb-pick-assign" data-sub-id="' + s.id + '" style="padding:6px 14px;font-size:0.85rem;">Assign here</button>'
+        +   '<button class="btn btn-primary sb-pick-assign" data-sub-id="' + s.id + '" style="padding:6px 14px;font-size:0.85rem;">Select</button>'
         + '</div>'
         + '</li>';
     }
@@ -17092,8 +17493,9 @@
     var html = '<div class="sb-overlay" id="sbPickerOverlay" style="z-index:10000;">';
     html += '<div class="sb-panel sb-panel-picker" role="dialog" aria-modal="true">';
     html += '<button class="detail-close" id="sbPickerCloseBtn" aria-label="Close">&times;</button>';
-    html += '<h3 style="margin:0 0 0.25rem;">Assign to ' + escClsHtml(section.label) + ' · ' + hour + ' · Session ' + sess + '</h3>';
-    html += '<p class="cls-help" style="margin:0 0 1rem;">Showing submissions that fit this age section + session + hour. Expand "Other submissions" to broaden.</p>';
+    var hourLabel = hour === 'PM1' ? 'PM Hour 1' : hour === 'PM2' ? 'PM Hour 2' : 'Both Hours';
+    html += '<h3 style="margin:0 0 0.25rem;">Assign to ' + hourLabel + ' · Session ' + sess + '</h3>';
+    html += '<p class="cls-help" style="margin:0 0 1rem;">Showing submissions that fit this session + hour preference. Expand "Other submissions" to broaden.</p>';
 
     if (matched.length === 0 && others.length === 0) {
       html += '<p style="color:var(--color-text-light);">No submissions in the inbox yet. Check back after members submit.</p>';
@@ -17132,14 +17534,14 @@
           status: 'scheduled',
           scheduled_session: scheduleBuilderState.session,
           scheduled_hour: scheduledHour,
-          scheduled_age_range: section.label,
+          scheduled_age_range: prettyAgesClient(sub ? sub.age_groups : [], sub ? sub.age_groups_other : '') || '',
           scheduled_room: sub ? (sub.scheduled_room || '') : '',
           reviewer_notes: sub ? (sub.reviewer_notes || '') : ''
         }).then(function () {
           close();
           loadScheduleBuilder();
         }).catch(function (err) {
-          btn.disabled = false; btn.textContent = 'Assign here';
+          btn.disabled = false; btn.textContent = 'Select';
           alert('Could not assign: ' + (err.message || 'unknown error'));
         });
       });
@@ -17160,10 +17562,11 @@
     if (!sub) return;
     if (document.getElementById('sbEditOverlay')) return;
 
-    var sectionOptions = SCHEDULE_SECTIONS.map(function (sec) {
-      var sel = sub.scheduled_age_range === sec.label ? ' selected' : '';
-      return '<option value="' + escClsAttr(sec.label) + '"' + sel + '>' + escClsHtml(sec.label) + '</option>';
-    }).join('');
+    // Age range comes from the submission's own age_groups under the open-
+    // blocks model — no preset section dropdown to pick from. Shown read-only
+    // and written through on save so existing consumers of scheduled_age_range
+    // stay populated.
+    var derivedAges = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     var hourOptions = ['PM1', 'PM2', 'both'].map(function (h) {
       return '<option value="' + h + '"' + (sub.scheduled_hour === h ? ' selected' : '') + '>' + h + '</option>';
     }).join('');
@@ -17175,11 +17578,16 @@
     html += '<div class="sb-panel sb-panel-edit" role="dialog" aria-modal="true">';
     html += '<button class="detail-close" id="sbEditCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(sub.class_name) + '</h3>';
-    html += '<p class="cls-help" style="margin:0 0 1rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + ' · Current status: <strong>' + escClsHtml(sub.status) + '</strong></p>';
+    html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + ' · Current status: <strong>' + escClsHtml(SB_STATUS_LABELS[sub.status] || sub.status) + '</strong></p>';
+
+    // Reviewers can edit ANY field (name, description, ages, max, hour pref,
+    // etc.) via the full submission modal — opens it pre-filled with this
+    // submission and reloads the Schedule Builder on save.
+    html += '<button type="button" class="sc-btn" id="sbEditDetailsBtn" style="margin:0 0 1rem;">Edit class details (name, description, ages, max, prefs…)</button>';
 
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess">' + sessOptions + '</select></div>';
     html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour">' + hourOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Age section</label><select class="cl-input" id="sbEditAge">' + sectionOptions + '</select></div>';
+    html += '<div class="cls-field"><label class="cls-label">Ages</label><div style="padding:7px 10px;background:#f6f5f1;border-radius:6px;color:var(--color-text);font-size:0.9rem;">' + (derivedAges ? escClsHtml(derivedAges) : '<em style="color:var(--color-text-light);">—</em>') + '</div></div>';
     html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"></div>';
     html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000">' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
 
@@ -17188,12 +17596,11 @@
     html += '<div class="cls-actions" style="justify-content:space-between;flex-wrap:wrap;">';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
     html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditUnschedBtn">Send back to Inbox</button>';
-    html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditDeclineBtn">Decline</button>';
+    html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditDeleteBtn">Delete Class</button>';
     html += '</div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
     html += '<button type="button" class="sc-btn" id="sbEditCancelBtn">Cancel</button>';
-    html += '<button type="button" class="sc-btn" id="sbEditDraftBtn">Save as Draft</button>';
-    html += '<button type="button" class="btn btn-primary" id="sbEditScheduleBtn" style="padding:8px 16px;font-size:0.9rem;">Save as Scheduled</button>';
+    html += '<button type="button" class="btn btn-primary" id="sbEditScheduleBtn" style="padding:8px 16px;font-size:0.9rem;">Save Changes</button>';
     html += '</div>';
     html += '</div>';
 
@@ -17210,7 +17617,7 @@
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
         scheduled_hour: document.getElementById('sbEditHour').value,
-        scheduled_age_range: document.getElementById('sbEditAge').value,
+        scheduled_age_range: derivedAges,
         scheduled_room: document.getElementById('sbEditRoom').value.trim(),
         reviewer_notes: document.getElementById('sbEditNotes').value
       };
@@ -17229,24 +17636,47 @@
     }
 
     document.getElementById('sbEditScheduleBtn').addEventListener('click', function () {
-      runPatch({ status: 'scheduled' }, 'schedule');
-    });
-    document.getElementById('sbEditDraftBtn').addEventListener('click', function () {
-      runPatch({ status: 'drafted' }, 'save draft');
+      runPatch({ status: 'scheduled' }, 'save');
     });
     document.getElementById('sbEditUnschedBtn').addEventListener('click', function () {
       if (!confirm('Send this back to the inbox? It becomes unscheduled until you re-assign it.')) return;
       runPatch({ status: 'submitted', scheduled_session: null, scheduled_hour: null, scheduled_age_range: '', scheduled_room: '' }, 'unschedule');
     });
-    document.getElementById('sbEditDeclineBtn').addEventListener('click', function () {
-      if (!confirm('Decline this submission? The submitter will see "Declined" on their dashboard.')) return;
-      runPatch({ status: 'declined' }, 'decline');
+    document.getElementById('sbEditDeleteBtn').addEventListener('click', function () {
+      if (!confirm('Delete this class entirely? This removes "' + (sub.class_name || '') + '" from the system. This cannot be undone.')) return;
+      var errEl = document.getElementById('sbEditError');
+      errEl.style.display = 'none';
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/curriculum?action=class-submission&id=' + subId + notifViewAsSuffix(), {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + cred }
+      }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      }).then(function (res) {
+        if (!res.ok) {
+          errEl.textContent = (res.data && res.data.error) || 'Could not delete.';
+          errEl.style.display = '';
+          return;
+        }
+        close();
+        loadScheduleBuilder();
+      }).catch(function (err) {
+        errEl.textContent = err.message || 'Could not delete.';
+        errEl.style.display = '';
+      });
+    });
+    // "Edit class details" — open the full submission modal pre-filled with
+    // this row so reviewers can change name/description/ages/max/prefs/etc.
+    // On save the Schedule Builder reloads so the card reflects the changes.
+    document.getElementById('sbEditDetailsBtn').addEventListener('click', function () {
+      close();
+      showClassSubmissionModal(sub, { onSaved: loadScheduleBuilder });
     });
   }
 
   function patchReviewAction(subId, payload) {
     var cred = localStorage.getItem('rw_google_credential');
-    return fetch('/api/curriculum?action=class-submission&review=1&id=' + subId, {
+    return fetch('/api/curriculum?action=class-submission&review=1&id=' + subId + notifViewAsSuffix(), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
