@@ -15348,7 +15348,11 @@
   var _coopCalState = {
     schoolYear: '',     // active school year picker value
     sessions: [],       // full payload from /api/cleaning?action=sessions
-    isLoading: false
+    isLoading: false,
+    // Inline "add session" draft. When set, an editable row is appended
+    // to the table for the active year so the President fills it in like
+    // any other row instead of going through three browser prompts.
+    draft: null         // null | { session_number, name, start_date, end_date }
   };
 
   // Default the picker to the active school year per activeSchoolYear()
@@ -15616,7 +15620,10 @@
     }
     h += '</div>';
 
-    if (rowsForYear.length === 0) {
+    var draft = (!readOnly && _coopCalState.draft) ? _coopCalState.draft : null;
+    var hasContent = rowsForYear.length > 0 || draft;
+
+    if (!hasContent) {
       h += '<p class="ws-empty" style="margin-top:12px;">No sessions yet for ' + escapeHtml(_coopCalState.schoolYear) + '.</p>';
     } else {
       h += '<div class="coop-cal-table-wrap">';
@@ -15642,18 +15649,38 @@
         }
         h += '</tr>';
       });
+      if (draft) {
+        // Editable draft row — same shape as other rows, but Save creates a
+        // new session instead of updating, and Cancel discards.
+        h += '<tr class="coop-cal-draft-row" data-draft="1" data-num="' + draft.session_number + '">';
+        h += '<td>' + draft.session_number + '</td>';
+        h += '<td><input type="text" class="coop-cal-input" data-f="name" value="' + escapeHtml(draft.name) + '" placeholder="e.g. Fall Session ' + draft.session_number + '" /></td>';
+        h += '<td><input type="date" class="coop-cal-input" data-f="start_date" value="' + escapeHtml(draft.start_date) + '" /></td>';
+        h += '<td><input type="date" class="coop-cal-input" data-f="end_date" value="' + escapeHtml(draft.end_date) + '" /></td>';
+        h += '<td class="coop-cal-actions">';
+        h += '<button class="btn btn-primary btn-sm coop-cal-draft-save">Save</button>';
+        h += '<button class="btn btn-outline-dark btn-sm coop-cal-draft-cancel">Cancel</button>';
+        h += '</td>';
+        h += '</tr>';
+      }
       h += '</tbody></table></div>';
     }
 
-    if (!readOnly) {
-      // "+ Add Session" — defaults to the next session_number and
-      // empty name/dates. President fills in and clicks Save.
+    if (!readOnly && !draft) {
+      // "+ Add Session" — appends an inline editable draft row scoped to
+      // this school year. President fills it in like any other row.
       var nextNum = rowsForYear.length > 0
         ? Math.max.apply(null, rowsForYear.map(function (r) { return r.session_number; })) + 1
         : 1;
       h += '<div class="coop-cal-add-row">';
       h += '<button id="coop-cal-add" class="btn btn-outline-dark btn-sm" data-next="' + nextNum + '">+ Add session</button>';
       h += '</div>';
+    }
+
+    if (!readOnly) {
+      // Inline error row used by the draft save + delete + edit-save handlers
+      // in place of browser alerts.
+      h += '<div class="coop-cal-msg cls-error" id="coop-cal-msg" style="display:none;"></div>';
     }
 
     body.innerHTML = h;
@@ -15692,11 +15719,16 @@
           end_date: tr.querySelector('[data-f="end_date"]').value
         };
         if (!payload.name || !payload.start_date || !payload.end_date) {
-          alert('Name, start date, and end date are required.');
+          coopCalShowMsg('Name, start date, and end date are required.');
+          return;
+        }
+        if (payload.end_date < payload.start_date) {
+          coopCalShowMsg('End date must be on or after start date.');
           return;
         }
         btn.disabled = true;
         btn.textContent = 'Saving…';
+        coopCalShowMsg('');
         fetch('/api/cleaning?action=sessions', {
           method: 'POST',
           headers: rwAuthHeaders(true),
@@ -15705,7 +15737,7 @@
           .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
           .then(function (r) {
             if (!r.ok) {
-              alert(r.data && r.data.error ? r.data.error : 'Save failed.');
+              coopCalShowMsg((r.data && r.data.error) || 'Save failed.');
               btn.disabled = false;
               btn.textContent = 'Save';
               return;
@@ -15719,18 +15751,34 @@
             if (typeof loadCoopSessions === 'function') loadCoopSessions();
           })
           .catch(function (err) {
-            alert('Network error: ' + (err.message || 'unknown'));
+            coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
             btn.disabled = false;
             btn.textContent = 'Save';
           });
       });
     });
-    // Delete row.
+    // Delete row — two-step inline confirm so a misclick can't drop a
+    // session. First click swaps the button to "Confirm delete" (red);
+    // second click actually deletes. Any other click on the body resets.
     body.querySelectorAll('.coop-cal-delete').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = this.getAttribute('data-id');
-        if (!confirm('Remove this session from the calendar?')) return;
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (btn.getAttribute('data-confirming') !== '1') {
+          // Reset any other row's pending confirm so only one is armed.
+          body.querySelectorAll('.coop-cal-delete[data-confirming="1"]').forEach(function (other) {
+            if (other !== btn) {
+              other.removeAttribute('data-confirming');
+              other.textContent = 'Delete';
+            }
+          });
+          btn.setAttribute('data-confirming', '1');
+          btn.textContent = 'Confirm delete';
+          return;
+        }
+        var id = btn.getAttribute('data-id');
         btn.disabled = true;
+        btn.textContent = 'Deleting…';
+        coopCalShowMsg('');
         fetch('/api/cleaning?action=sessions&id=' + encodeURIComponent(id), {
           method: 'DELETE',
           headers: rwAuthHeaders()
@@ -15738,8 +15786,10 @@
           .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
           .then(function (r) {
             if (!r.ok) {
-              alert(r.data && r.data.error ? r.data.error : 'Delete failed.');
+              coopCalShowMsg((r.data && r.data.error) || 'Delete failed.');
               btn.disabled = false;
+              btn.removeAttribute('data-confirming');
+              btn.textContent = 'Delete';
               return;
             }
             localStorage.removeItem(CACHE_SESSIONS_KEY);
@@ -15747,49 +15797,119 @@
             if (typeof loadCoopSessions === 'function') loadCoopSessions();
           })
           .catch(function (err) {
-            alert('Network error: ' + (err.message || 'unknown'));
+            coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
             btn.disabled = false;
+            btn.removeAttribute('data-confirming');
+            btn.textContent = 'Delete';
           });
       });
     });
-    // "+ Add Session" — opens a tiny prompt-driven flow. Could become
-    // an inline new-row in a follow-up; keeping minimal for v1.
+    // Click anywhere else in the modal body disarms any pending delete confirm.
+    body.addEventListener('click', function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains('coop-cal-delete')) return;
+      body.querySelectorAll('.coop-cal-delete[data-confirming="1"]').forEach(function (btn) {
+        btn.removeAttribute('data-confirming');
+        btn.textContent = 'Delete';
+      });
+    });
+    // "+ Add Session" — opens an inline editable draft row inside the
+    // table so the President fills it in like any other row, instead of
+    // chaining three browser prompts.
     var addBtn = document.getElementById('coop-cal-add');
     if (addBtn) {
       addBtn.addEventListener('click', function () {
         var next = parseInt(this.getAttribute('data-next'), 10) || 1;
-        var name = prompt('Session name (e.g. "Fall Session 1"):', 'Session ' + next);
-        if (!name) return;
-        var start = prompt('Start date (YYYY-MM-DD):', '');
-        if (!start) return;
-        var end = prompt('End date (YYYY-MM-DD):', '');
-        if (!end) return;
-        fetch('/api/cleaning?action=sessions', {
-          method: 'POST',
-          headers: rwAuthHeaders(true),
-          body: JSON.stringify({
-            school_year: _coopCalState.schoolYear,
-            session_number: next,
-            name: name.trim(),
-            start_date: start.trim(),
-            end_date: end.trim()
-          })
-        })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-          .then(function (r) {
-            if (!r.ok) {
-              alert(r.data && r.data.error ? r.data.error : 'Could not add session.');
-              return;
-            }
-            localStorage.removeItem(CACHE_SESSIONS_KEY);
-            loadCoopCalendar();
-            if (typeof loadCoopSessions === 'function') loadCoopSessions();
-          })
-          .catch(function (err) {
-            alert('Network error: ' + (err.message || 'unknown'));
-          });
+        _coopCalState.draft = {
+          session_number: next,
+          name: '',
+          start_date: '',
+          end_date: ''
+        };
+        renderCoopCalendarBody();
+        // Focus the new name field so the President can start typing.
+        var nameInp = document.querySelector('.coop-cal-draft-row [data-f="name"]');
+        if (nameInp) nameInp.focus();
       });
     }
+
+    // Draft row Save — POST a new session. Re-renders on success / shows the
+    // inline message row on error (no browser alerts).
+    var draftSaveBtn = body.querySelector('.coop-cal-draft-save');
+    if (draftSaveBtn) draftSaveBtn.addEventListener('click', function () {
+      var row = body.querySelector('.coop-cal-draft-row');
+      if (!row) return;
+      var payload = {
+        school_year: _coopCalState.schoolYear,
+        session_number: parseInt(row.getAttribute('data-num'), 10),
+        name: row.querySelector('[data-f="name"]').value.trim(),
+        start_date: row.querySelector('[data-f="start_date"]').value,
+        end_date: row.querySelector('[data-f="end_date"]').value
+      };
+      // Keep the draft state in sync so we don't lose typing if the save
+      // fails and the user tweaks one field.
+      _coopCalState.draft.name = payload.name;
+      _coopCalState.draft.start_date = payload.start_date;
+      _coopCalState.draft.end_date = payload.end_date;
+      if (!payload.name || !payload.start_date || !payload.end_date) {
+        coopCalShowMsg('Name, start date, and end date are required.');
+        return;
+      }
+      if (payload.end_date < payload.start_date) {
+        coopCalShowMsg('End date must be on or after start date.');
+        return;
+      }
+      draftSaveBtn.disabled = true;
+      draftSaveBtn.textContent = 'Saving…';
+      coopCalShowMsg('');
+      fetch('/api/cleaning?action=sessions', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify(payload)
+      })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+        .then(function (r) {
+          if (!r.ok) {
+            coopCalShowMsg((r.data && r.data.error) || 'Could not add session.');
+            draftSaveBtn.disabled = false;
+            draftSaveBtn.textContent = 'Save';
+            return;
+          }
+          _coopCalState.draft = null;
+          localStorage.removeItem(CACHE_SESSIONS_KEY);
+          loadCoopCalendar();
+          if (typeof loadCoopSessions === 'function') loadCoopSessions();
+        })
+        .catch(function (err) {
+          coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
+          draftSaveBtn.disabled = false;
+          draftSaveBtn.textContent = 'Save';
+        });
+    });
+    var draftCancelBtn = body.querySelector('.coop-cal-draft-cancel');
+    if (draftCancelBtn) draftCancelBtn.addEventListener('click', function () {
+      _coopCalState.draft = null;
+      coopCalShowMsg('');
+      renderCoopCalendarBody();
+    });
+    // Mirror draft inputs back to state on every keystroke so the typed
+    // value survives any re-render (year picker change, etc.).
+    body.querySelectorAll('.coop-cal-draft-row .coop-cal-input').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        if (!_coopCalState.draft) return;
+        var field = this.getAttribute('data-f');
+        if (field) _coopCalState.draft[field] = this.value;
+      });
+    });
+  }
+
+  // Inline message row used by the Session Dates flows (draft save errors,
+  // etc.). Replaces window.alert so feedback stays inside the modal.
+  function coopCalShowMsg(text) {
+    var el = document.getElementById('coop-cal-msg');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = text;
+    el.style.display = '';
   }
 
   // Export current-year role holders as a CSV. One row per holder; roles
