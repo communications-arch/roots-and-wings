@@ -3781,9 +3781,11 @@
       todayStr = new Date().toISOString().slice(0, 10);
     }
     var withinDates = startDate && endDate && todayStr >= startDate && todayStr <= endDate;
-    // Non-reviewers only see the card when the session is open AND we're
-    // inside the VP-chosen date window.
-    if (!reviewer && (status !== 'open' || !withinDates)) { card.style.display = 'none'; return; }
+    // Card only appears on My Family when a session is currently open for
+    // sign-ups (status='open' AND today is inside the VP-chosen date window).
+    // Reviewers manage non-open sessions from the Schedule Builder's
+    // "Afternoon Class Sign-Ups" panel under the Approved badge.
+    if (status !== 'open' || !withinDates) { card.style.display = 'none'; return; }
     card.style.display = '';
 
     var h = '<h3 class="mf-card-title">Afternoon Class Sign-ups</h3>';
