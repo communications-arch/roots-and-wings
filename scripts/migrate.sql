@@ -1121,3 +1121,14 @@ CREATE INDEX IF NOT EXISTS class_signup_picks_class_idx
   ON class_signup_picks (school_year, session_number, hour, class_submission_id);
 CREATE INDEX IF NOT EXISTS class_signup_picks_kid_idx
   ON class_signup_picks (school_year, session_number, LOWER(family_email), LOWER(kid_first_name));
+
+-- ──────────────────────────────────────────────
+-- Schedule Builder: per-session approval lock
+-- ──────────────────────────────────────────────
+-- When a session is "Approved" in the Schedule Builder, approved_at gets
+-- stamped and the builder UI goes read-only for that session so accidental
+-- drag/drop / +Add / edits can't change a finalized schedule. Clearing
+-- approved_at via the "Reopen for editing" toggle re-enables editing.
+ALTER TABLE co_op_sessions
+  ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS approved_by TEXT;

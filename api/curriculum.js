@@ -578,12 +578,26 @@ module.exports = async function handler(req, res) {
           if (!(await isReviewerReq(user, req))) {
             return res.status(403).json({ error: 'Reviewer access only' });
           }
-          const rows = await sql`
-            SELECT * FROM class_submissions
-            ORDER BY created_at DESC
-          `;
+          // Schedule Builder needs per-session approval state to lock the UI
+          // for finalized sessions. Returned alongside submissions in one
+          // round trip — keyed by `${school_year}|${session_number}` to keep
+          // the payload tiny even across multiple years.
+          const [rows, approvalRows] = await Promise.all([
+            sql`SELECT * FROM class_submissions ORDER BY created_at DESC`,
+            sql`SELECT school_year, session_number, approved_at, approved_by
+                FROM co_op_sessions
+                WHERE approved_at IS NOT NULL`
+          ]);
+          const session_approvals = {};
+          approvalRows.forEach(r => {
+            session_approvals[r.school_year + '|' + r.session_number] = {
+              approved_at: r.approved_at,
+              approved_by: r.approved_by || ''
+            };
+          });
           return res.status(200).json({
             submissions: rows.map(serializeSubmission),
+            session_approvals,
             is_reviewer: true
           });
         }
@@ -789,6 +803,36 @@ module.exports = async function handler(req, res) {
           RETURNING id, session_number, class_key, curriculum_id, attached_by, attached_at
         `;
         return res.status(201).json({ link: inserted[0] });
+      }
+
+      // VP / Afternoon Class Liaison toggle a Schedule Builder session's
+      // "Approved" lock. Sets approved_at/approved_by on the matching
+      // co_op_sessions row when body.approved is true; clears them when
+      // false. The Schedule Builder reads this state via the
+      // class-submissions response and uses it to make the grid read-only.
+      if (action === 'session-approval') {
+        if (!(await isReviewerReq(user, req))) {
+          return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can approve a session.', youAre: user.email });
+        }
+        const body = req.body || {};
+        const school_year = String(body.school_year || '').trim();
+        const session = parseInt(body.session, 10);
+        const approved = !!body.approved;
+        if (!school_year) return res.status(400).json({ error: 'school_year required' });
+        if (!session || session < 1 || session > 5) return res.status(400).json({ error: 'session must be 1–5' });
+        const updated = await sql`
+          UPDATE co_op_sessions
+          SET approved_at = ${approved ? new Date() : null},
+              approved_by = ${approved ? user.email : null},
+              updated_at  = NOW(),
+              updated_by  = ${user.email}
+          WHERE school_year = ${school_year} AND session_number = ${session}
+          RETURNING school_year, session_number, approved_at, approved_by
+        `;
+        if (updated.length === 0) {
+          return res.status(404).json({ error: 'No session row for ' + school_year + ' / Session ' + session + '. Add session dates first.' });
+        }
+        return res.status(200).json({ ok: true, ...updated[0] });
       }
 
       // VP / Afternoon Class Liaison open/close/lock a session's sign-up window.

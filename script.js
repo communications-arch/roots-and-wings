@@ -15132,8 +15132,13 @@
     schoolYear: '2026-2027',
     session: 1,
     submissions: [],  // all submissions for the school year
+    approvals: {},    // { "YYYY-YYYY|N": { approved_at, approved_by } }
     loaded: false
   };
+  function sbApprovalFor(sess) {
+    return scheduleBuilderState.approvals[scheduleBuilderState.schoolYear + '|' + sess] || null;
+  }
+  function sbIsSessionApproved(sess) { return !!sbApprovalFor(sess); }
 
   // ══════════════════════════════════════════════
   // PM Submissions Report (in the PM Class Scheduling workspace card)
@@ -17146,6 +17151,7 @@
       scheduleBuilderState.submissions = all.filter(function (s) {
         return s.school_year === scheduleBuilderState.schoolYear;
       });
+      scheduleBuilderState.approvals = (data && data.session_approvals) || {};
       scheduleBuilderState.loaded = true;
       renderScheduleBuilder();
     })
@@ -17180,13 +17186,25 @@
           && s.scheduled_session === sess;
     });
 
-    // Session workflow bar — just the Approve action. Counts are redundant
-    // since the grid below and the palette aside both visualize "placed" vs
-    // "in inbox" directly. "Approve Session" stays as the session-finalize
-    // gesture + future hook for notifying class leaders.
+    // Session workflow bar. "Approve Session" locks the grid for that session
+    // so accidental drag/drop, +Add, and class edits can't change a finalized
+    // schedule. While locked, the same button flips to "Reopen Session N for
+    // editing" and an Approved badge surfaces who locked it + when.
     var placedCount = classesInSession.length;
+    var approval = sbApprovalFor(sess);
+    var isApproved = !!approval;
     html += '<div class="sb-workflow sb-workflow-action-only">';
-    html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Finalizes the session. Class leaders will be notified (notifications coming in a future update).">Approve Session ' + sess + '</button>';
+    if (isApproved) {
+      var when = '';
+      try {
+        var d = new Date(approval.approved_at);
+        when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } catch (e) { /* ignore */ }
+      html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
+      html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable editing for Session ' + sess + '.">Reopen Session ' + sess + ' for editing</button>';
+    } else {
+      html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + '</button>';
+    }
     html += '</div>';
 
     // Open blocks for PM1 and PM2 — classes get dropped in and sort by age
@@ -17247,7 +17265,7 @@
         var hourOff = !hourMatches();
         var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
 
-        s += '<div class="sb-cell-class" draggable="true" data-sub-id="' + c.id + '">';
+        s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
         s += '<div class="sb-class-top">';
         if (schedAges) s += '<div class="sb-class-ages">' + escClsHtml(schedAges) + '</div>';
         if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
@@ -17263,12 +17281,12 @@
         s += '</div>';
         s += '</div>';
       });
-      s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      if (!isApproved) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       s += '</div>';
       return s;
     }
 
-    html += '<div class="sb-grid sb-grid-open">';
+    html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
     html += renderBlock('PM1', 'PM Hour 1 · 1:00–1:55', pm1List);
     html += renderBlock('PM2', 'PM Hour 2 · 2:00–2:55', pm2List);
     html += '</div>';
@@ -17343,9 +17361,14 @@
       });
     });
 
-    // Wire session workflow: Approve Session = batch flip Approved → Scheduled.
+    // Wire session workflow: Approve toggles the lock — sets approved_at +
+    // approved_by on the co_op_sessions row (or clears them when already
+    // approved). The grid re-renders read-only / editable based on the new
+    // state.
     var approveBtn = document.getElementById('sbApproveSession');
-    if (approveBtn) approveBtn.addEventListener('click', approveScheduledSession);
+    if (approveBtn) approveBtn.addEventListener('click', function () {
+      toggleSessionApproval(sess, !isApproved);
+    });
 
     // Wire + Add buttons
     body.querySelectorAll('.sb-cell-add').forEach(function (btn) {
@@ -17407,6 +17430,10 @@
   function assignDroppedSub(subId, hour) {
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
+    if (sbIsSessionApproved(scheduleBuilderState.session)) {
+      alert('Session ' + scheduleBuilderState.session + ' is approved. Reopen it for editing first.');
+      return;
+    }
     var scheduledHour = hour;
     if ((sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
@@ -17421,30 +17448,33 @@
       .catch(function (err) { alert('Could not place class: ' + (err.message || 'error')); });
   }
 
-  // "Approve Session" workflow action: flip every Approved (DB-'drafted')
-  // class in the current session to Scheduled (final). Confirms first, runs
-  // the per-submission PATCHes in parallel, then reloads.
-  function approveScheduledSession() {
-    var sess = scheduleBuilderState.session;
-    var drafted = scheduleBuilderState.submissions.filter(function (s) {
-      return s.status === 'drafted' && s.scheduled_session === sess;
-    });
-    if (drafted.length === 0) return;
-    var label = drafted.length + ' Approved class' + (drafted.length === 1 ? '' : 'es');
-    if (!confirm('Approve Session ' + sess + ' as final?\n' + label + ' will be marked Scheduled (the published schedule).')) return;
+  // Approve / Reopen toggle. Approving locks the session (Schedule Builder
+  // goes read-only for that session). Reopening clears the lock so the VP
+  // can drag/drop and edit again. Backed by approved_at / approved_by on
+  // the co_op_sessions row.
+  function toggleSessionApproval(sess, approved) {
+    var year = scheduleBuilderState.schoolYear;
+    if (approved) {
+      if (!confirm('Approve Session ' + sess + '?\nThe placed classes become read-only so they can\'t be modified accidentally. You can reopen for editing any time.')) return;
+    } else {
+      if (!confirm('Reopen Session ' + sess + ' for editing?\nThe lock comes off — drag/drop and edits will work again.')) return;
+    }
     var btn = document.getElementById('sbApproveSession');
-    if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
-    Promise.all(drafted.map(function (d) {
-      return patchReviewAction(d.id, {
-        status: 'scheduled',
-        scheduled_session: d.scheduled_session,
-        scheduled_hour: d.scheduled_hour,
-        scheduled_age_range: d.scheduled_age_range || '',
-        scheduled_room: d.scheduled_room || '',
-        reviewer_notes: d.reviewer_notes || ''
-      });
-    })).then(function () { loadScheduleBuilder(); })
-      .catch(function (err) { alert('Some approvals failed: ' + (err.message || 'error')); loadScheduleBuilder(); });
+    if (btn) { btn.disabled = true; btn.textContent = approved ? 'Approving…' : 'Reopening…'; }
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?action=session-approval' + notifViewAsSuffix(), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_year: year, session: sess, approved: !!approved })
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+    }).then(function (res) {
+      if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not update approval.');
+      loadScheduleBuilder();
+    }).catch(function (err) {
+      alert(err.message || 'Could not update approval.');
+      loadScheduleBuilder();
+    });
   }
 
   // Drop a placed class back on the palette → unschedule (back to the inbox).
@@ -17452,6 +17482,10 @@
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (sub.status === 'submitted' && !sub.scheduled_session) return; // already in the inbox
+    if (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session)) {
+      alert('Session ' + sub.scheduled_session + ' is approved. Reopen it for editing first.');
+      return;
+    }
     patchReviewAction(subId, {
       status: 'submitted',
       scheduled_session: null, scheduled_hour: null, scheduled_age_range: null,
@@ -17578,6 +17612,9 @@
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (document.getElementById('sbEditOverlay')) return;
+    // Read-only when this class's session is approved — editing requires
+    // reopening the session from the Schedule Builder header.
+    var locked = sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session);
 
     // Preference values come straight from the submission (what the teacher
     // asked for). The "Scheduled" values are what the VP placed and may
@@ -17603,10 +17640,14 @@
     html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(sub.class_name) + '</h3>';
     html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + '</p>';
 
+    if (locked) {
+      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Schedule Builder header to make changes.</div>';
+    }
+
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,
     // etc.) via the full submission modal — opens it pre-filled with this
     // submission and reloads the Schedule Builder on save.
-    html += '<button type="button" class="sc-btn" id="sbEditDetailsBtn" style="margin:0 0 1rem;">Edit class details (name, description, ages, max, prefs…)</button>';
+    if (!locked) html += '<button type="button" class="sc-btn" id="sbEditDetailsBtn" style="margin:0 0 1rem;">Edit class details (name, description, ages, max, prefs…)</button>';
 
     // Teacher's preferences (read-only). The "Scheduled" block below is what
     // the VP controls; this block stays for context so it's obvious when a
@@ -17620,23 +17661,28 @@
     html += '</dl>';
     html += '</div>';
 
+    var disAttr = locked ? ' disabled' : '';
     html += '<div class="sb-sched-block-title">Scheduled</div>';
-    html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess">' + sessOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour">' + hourOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Ages</label><input class="cl-input" id="sbEditAges" type="text" maxlength="100" value="' + escClsAttr(schedAgesInit) + '" placeholder="' + escClsAttr(prefAges === '—' ? '' : prefAges) + '"><div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Override for this placement — leave blank to fall back to the preferred ages.</div></div>';
-    html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"></div>';
-    html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000">' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
+    html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess"' + disAttr + '>' + sessOptions + '</select></div>';
+    html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
+    html += '<div class="cls-field"><label class="cls-label">Ages</label><input class="cl-input" id="sbEditAges" type="text" maxlength="100" value="' + escClsAttr(schedAgesInit) + '" placeholder="' + escClsAttr(prefAges === '—' ? '' : prefAges) + '"' + disAttr + '>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Override for this placement — leave blank to fall back to the preferred ages.</div>') + '</div>';
+    html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
+    html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000"' + disAttr + '>' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
 
     html += '<div id="sbEditError" class="cls-error" style="display:none;"></div>';
 
     html += '<div class="cls-actions" style="justify-content:space-between;flex-wrap:wrap;">';
+    if (!locked) {
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+      html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditUnschedBtn">Send back to Inbox</button>';
+      html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditDeleteBtn">Delete Class</button>';
+      html += '</div>';
+    } else {
+      html += '<div></div>';
+    }
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditUnschedBtn">Send back to Inbox</button>';
-    html += '<button type="button" class="sc-btn sc-btn-del" id="sbEditDeleteBtn">Delete Class</button>';
-    html += '</div>';
-    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    html += '<button type="button" class="sc-btn" id="sbEditCancelBtn">Cancel</button>';
-    html += '<button type="button" class="btn btn-primary" id="sbEditScheduleBtn" style="padding:8px 16px;font-size:0.9rem;">Save Changes</button>';
+    html += '<button type="button" class="sc-btn" id="sbEditCancelBtn">' + (locked ? 'Close' : 'Cancel') + '</button>';
+    if (!locked) html += '<button type="button" class="btn btn-primary" id="sbEditScheduleBtn" style="padding:8px 16px;font-size:0.9rem;">Save Changes</button>';
     html += '</div>';
     html += '</div>';
 
@@ -17676,14 +17722,17 @@
       });
     }
 
-    document.getElementById('sbEditScheduleBtn').addEventListener('click', function () {
+    var schedBtn = document.getElementById('sbEditScheduleBtn');
+    if (schedBtn) schedBtn.addEventListener('click', function () {
       runPatch({ status: 'scheduled' }, 'save');
     });
-    document.getElementById('sbEditUnschedBtn').addEventListener('click', function () {
+    var unschedBtn = document.getElementById('sbEditUnschedBtn');
+    if (unschedBtn) unschedBtn.addEventListener('click', function () {
       if (!confirm('Send this back to the inbox? It becomes unscheduled until you re-assign it.')) return;
       runPatch({ status: 'submitted', scheduled_session: null, scheduled_hour: null, scheduled_age_range: '', scheduled_room: '' }, 'unschedule');
     });
-    document.getElementById('sbEditDeleteBtn').addEventListener('click', function () {
+    var delBtn = document.getElementById('sbEditDeleteBtn');
+    if (delBtn) delBtn.addEventListener('click', function () {
       if (!confirm('Delete this class entirely? This removes "' + (sub.class_name || '') + '" from the system. This cannot be undone.')) return;
       var errEl = document.getElementById('sbEditError');
       errEl.style.display = 'none';
@@ -17709,7 +17758,8 @@
     // "Edit class details" — open the full submission modal pre-filled with
     // this row so reviewers can change name/description/ages/max/prefs/etc.
     // On save the Schedule Builder reloads so the card reflects the changes.
-    document.getElementById('sbEditDetailsBtn').addEventListener('click', function () {
+    var detailsBtn = document.getElementById('sbEditDetailsBtn');
+    if (detailsBtn) detailsBtn.addEventListener('click', function () {
       close();
       showClassSubmissionModal(sub, { onSaved: loadScheduleBuilder });
     });

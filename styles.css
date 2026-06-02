@@ -8003,6 +8003,33 @@ button.staff-role:hover {
   font-weight: 700;
   margin: 0 0 8px;
 }
+/* Session approval lock. Approved badge shows in the workflow bar; placed-
+   class tiles get a subtle locked outline, and the grid loses hover affordances
+   so users intuit it's read-only. The Edit modal still opens (for viewing
+   details) — its callout calls out the lock + how to reopen. */
+.sb-approved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #dff0e0;
+  color: #256b3f;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.sb-grid-locked .sb-cell { background: #fafaf6; }
+.sb-cell-class-locked { cursor: pointer; border-style: dashed; opacity: 0.92; }
+.sb-cell-class-locked:hover { box-shadow: none; }
+.sb-locked-callout {
+  background: #fff7e0;
+  border-left: 3px solid #d6a93e;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #6b4f0e;
+  margin: 0 0 12px;
+}
 @media (max-width: 820px) {
   .sb-layout { flex-direction: column; }
   .sb-side { position: static; flex: none; width: 100%; max-height: none; }
