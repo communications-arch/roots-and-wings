@@ -15106,22 +15106,6 @@
   ];
   var SCHEDULE_HOURS = ['PM1', 'PM2'];
 
-  // Display labels for class_submissions.status, surfaced as colored chips on
-  // every card so the planner always sees where a class stands at a glance.
-  // Simplified workflow (2026-05-28): Submitted (in inbox) → Scheduled (placed
-  // in a session). The legacy DB 'drafted' value still exists from the old
-  // Submissions Report "Approve" button — we alias it to 'Scheduled' for
-  // display so the user only sees two states. Removing a class = Delete
-  // (hard-delete), not Decline. Session-level Approve still exists as a hook
-  // for future class-leader notifications.
-  var SB_STATUS_LABELS = {
-    submitted: 'Submitted',
-    drafted:   'Scheduled',
-    scheduled: 'Scheduled',
-    declined:  'Declined',
-    withdrawn: 'Withdrawn'
-  };
-
   // Age-group ordering for sorting classes inside the open PM blocks
   // (youngest → oldest). Mixed / all-ages groups sit at their approximate
   // midpoint; unknown groups fall to the bottom.
@@ -17224,17 +17208,59 @@
       var s = '<div class="sb-cell" data-hour="' + hour + '">';
       s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
       list.forEach(function (c) {
-        var ages = prettyAgesClient(c.age_groups, c.age_groups_other);
+        // Scheduled age range can be a VP override (scheduled_age_range);
+        // fall back to the teacher's submitted age_groups when not set.
+        var schedAges = c.scheduled_age_range || prettyAgesClient(c.age_groups, c.age_groups_other);
+        var prefAges = prettyAgesClient(c.age_groups, c.age_groups_other);
+        // Preference summary: session prefs + hour pref. Used to flag
+        // mismatches at a glance so the VP can spot off-preference placements.
+        var prefSessChips = (c.session_preferences || []).map(function (x) {
+          if (x === 'flexible') return '<span class="sb-sess-chip sb-sess-flex">Flex</span>';
+          var match = parseInt(x, 10) === sess;
+          return '<span class="sb-sess-chip' + (match ? ' sb-sess-match' : '') + '">S' + escClsHtml(x) + '</span>';
+        }).join('');
+        if (!prefSessChips) prefSessChips = '<span class="sb-sess-chip sb-sess-none">any</span>';
+        var hourPrefShort = (c.hour_preference || []).map(function (h) {
+          if (h === 'first') return 'PM1';
+          if (h === 'last') return 'PM2';
+          if (h === 'flexible') return 'Either';
+          if (h === '2hr-required') return '2hr req';
+          if (h === '2hr-optional') return '2hr opt';
+          return h;
+        }).join(', ');
+        function hourMatches() {
+          var prefs = c.hour_preference || [];
+          if (prefs.indexOf('flexible') !== -1) return true;
+          if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
+          if (c.scheduled_hour === 'both') return prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1;
+          if (c.scheduled_hour === 'PM1') return prefs.indexOf('first') !== -1;
+          if (c.scheduled_hour === 'PM2') return prefs.indexOf('last') !== -1;
+          return false;
+        }
+        function sessionMatches() {
+          var prefs = c.session_preferences || [];
+          if (!prefs.length) return true;
+          if (prefs.indexOf('flexible') !== -1) return true;
+          return prefs.indexOf(String(c.scheduled_session)) !== -1;
+        }
+        var sessOff = !sessionMatches();
+        var hourOff = !hourMatches();
+        var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
+
         s += '<div class="sb-cell-class" draggable="true" data-sub-id="' + c.id + '">';
-        // Age groups lead the card. Status chip is omitted — being in the
-        // grid means "Scheduled," no need to restate it. Only the "Both"
-        // badge stays (it's actual placement info, not status).
         s += '<div class="sb-class-top">';
-        if (ages) s += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
+        if (schedAges) s += '<div class="sb-class-ages">' + escClsHtml(schedAges) + '</div>';
         if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
         s += '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
+        s += '<div class="sb-pref-line">';
+        s += '<span class="sb-pref-label">Pref:</span> ';
+        s += prefSessChips;
+        if (hourPrefShort) s += ' <span class="sb-pref-hour' + (hourOff ? ' sb-pref-off' : '') + '">' + escClsHtml(hourPrefShort) + '</span>';
+        if (prefAges && prefAges !== schedAges) s += ' <span class="sb-pref-ages">Ages: ' + escClsHtml(prefAges) + '</span>';
+        s += warnMark;
+        s += '</div>';
         s += '</div>';
       });
       s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
@@ -17553,11 +17579,17 @@
     if (!sub) return;
     if (document.getElementById('sbEditOverlay')) return;
 
-    // Age range comes from the submission's own age_groups under the open-
-    // blocks model — no preset section dropdown to pick from. Shown read-only
-    // and written through on save so existing consumers of scheduled_age_range
-    // stay populated.
-    var derivedAges = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
+    // Preference values come straight from the submission (what the teacher
+    // asked for). The "Scheduled" values are what the VP placed and may
+    // differ — scheduled_age_range is a free-text override the VP can edit
+    // here without rewriting the teacher's submitted age_groups.
+    var prefAges = prettyAgesClient(sub.age_groups, sub.age_groups_other) || '—';
+    var schedAgesInit = sub.scheduled_age_range || '';
+    var prefSessText = (sub.session_preferences || []).map(function (x) {
+      return x === 'flexible' ? 'Flexible' : 'S' + x;
+    }).join(', ') || '—';
+    var prefHourText = (sub.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ') || '—';
+
     var hourOptions = ['PM1', 'PM2', 'both'].map(function (h) {
       return '<option value="' + h + '"' + (sub.scheduled_hour === h ? ' selected' : '') + '>' + h + '</option>';
     }).join('');
@@ -17569,16 +17601,29 @@
     html += '<div class="sb-panel sb-panel-edit" role="dialog" aria-modal="true">';
     html += '<button class="detail-close" id="sbEditCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(sub.class_name) + '</h3>';
-    html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + ' · Current status: <strong>' + escClsHtml(SB_STATUS_LABELS[sub.status] || sub.status) + '</strong></p>';
+    html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + '</p>';
 
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,
     // etc.) via the full submission modal — opens it pre-filled with this
     // submission and reloads the Schedule Builder on save.
     html += '<button type="button" class="sc-btn" id="sbEditDetailsBtn" style="margin:0 0 1rem;">Edit class details (name, description, ages, max, prefs…)</button>';
 
+    // Teacher's preferences (read-only). The "Scheduled" block below is what
+    // the VP controls; this block stays for context so it's obvious when a
+    // placement is off-preference.
+    html += '<div class="sb-pref-block">';
+    html += '<div class="sb-pref-block-title">Preferred</div>';
+    html += '<dl class="sb-pref-grid">';
+    html += '<dt>Session</dt><dd>' + escClsHtml(prefSessText) + '</dd>';
+    html += '<dt>Hour</dt><dd>' + escClsHtml(prefHourText) + '</dd>';
+    html += '<dt>Ages</dt><dd>' + escClsHtml(prefAges) + '</dd>';
+    html += '</dl>';
+    html += '</div>';
+
+    html += '<div class="sb-sched-block-title">Scheduled</div>';
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess">' + sessOptions + '</select></div>';
     html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour">' + hourOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Ages</label><div style="padding:7px 10px;background:#f6f5f1;border-radius:6px;color:var(--color-text);font-size:0.9rem;">' + (derivedAges ? escClsHtml(derivedAges) : '<em style="color:var(--color-text-light);">—</em>') + '</div></div>';
+    html += '<div class="cls-field"><label class="cls-label">Ages</label><input class="cl-input" id="sbEditAges" type="text" maxlength="100" value="' + escClsAttr(schedAgesInit) + '" placeholder="' + escClsAttr(prefAges === '—' ? '' : prefAges) + '"><div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Override for this placement — leave blank to fall back to the preferred ages.</div></div>';
     html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"></div>';
     html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000">' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
 
@@ -17605,10 +17650,15 @@
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
 
     function currentForm() {
+      // Empty Ages field → fall back to the teacher's submitted ages so the
+      // column never goes blank in downstream consumers (the published
+      // schedule, the class roster). VP can still override with any string.
+      var agesInput = document.getElementById('sbEditAges').value.trim();
+      var agesOut = agesInput || (prefAges === '—' ? '' : prefAges);
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
         scheduled_hour: document.getElementById('sbEditHour').value,
-        scheduled_age_range: derivedAges,
+        scheduled_age_range: agesOut,
         scheduled_room: document.getElementById('sbEditRoom').value.trim(),
         reviewer_notes: document.getElementById('sbEditNotes').value
       };
