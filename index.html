@@ -26,6 +26,16 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <link rel="manifest" href="manifest-public.json?v=20260430g">
   <meta name="apple-mobile-web-app-title" content="Roots & Wings">
+  <script>
+    // Register the service worker so Chrome on Android installs the site as a
+    // real WebAPK (sticks in the app drawer) instead of a launcher shortcut
+    // (gets cleaned up after a few days).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
+  </script>
 </head>
 <body>
 

@@ -1,4 +1,10 @@
-// Service Worker for Roots & Wings push notifications
+// Service Worker for Roots & Wings push notifications + PWA installability
+
+// Empty fetch listener is required for Chrome on Android to qualify the site
+// as an installable PWA (real WebAPK in the app drawer). Without it, "Install"
+// silently downgrades to a launcher shortcut that gets cleaned up after a few
+// days. We do not intercept or cache anything — purely pass-through.
+self.addEventListener('fetch', function () {});
 
 self.addEventListener('push', function (event) {
   var data = {};

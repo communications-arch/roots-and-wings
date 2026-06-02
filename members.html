@@ -13,6 +13,15 @@
   <meta name="apple-mobile-web-app-title" content="R&W Members">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <meta name="vapid-public-key" content="BLKvH-nXiUoXkB43VArPa_4Smlm98Crh_3kvWBup3k0F2-9gQz0UZbzNiKvQqOeJySoVhkAzA2QDg5e5fMjGKwE">
+  <script>
+    // Register the service worker before sign-in so Chrome on Android installs
+    // the portal as a real WebAPK (script.js only registered after login).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
+  </script>
   <title>Members Portal — Roots & Wings Indy</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
