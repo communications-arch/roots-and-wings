@@ -579,14 +579,18 @@ module.exports = async function handler(req, res) {
             return res.status(403).json({ error: 'Reviewer access only' });
           }
           // Schedule Builder needs per-session approval state to lock the UI
-          // for finalized sessions. Returned alongside submissions in one
-          // round trip — keyed by `${school_year}|${session_number}` to keep
-          // the payload tiny even across multiple years.
-          const [rows, approvalRows] = await Promise.all([
+          // for finalized sessions. Also returns the sign-up window per
+          // session so the builder can surface the "Open Sign-Ups" date
+          // panel inline. Both maps keyed by `${school_year}|${session_number}`
+          // to keep the payload tiny even across multiple years.
+          const [rows, approvalRows, windowRows] = await Promise.all([
             sql`SELECT * FROM class_submissions ORDER BY created_at DESC`,
             sql`SELECT school_year, session_number, approved_at, approved_by
                 FROM co_op_sessions
-                WHERE approved_at IS NOT NULL`
+                WHERE approved_at IS NOT NULL`,
+            sql`SELECT school_year, session_number, status,
+                       signup_start_date, signup_end_date
+                FROM class_signup_windows`
           ]);
           const session_approvals = {};
           approvalRows.forEach(r => {
@@ -595,9 +599,26 @@ module.exports = async function handler(req, res) {
               approved_by: r.approved_by || ''
             };
           });
+          const signup_windows = {};
+          windowRows.forEach(r => {
+            signup_windows[r.school_year + '|' + r.session_number] = {
+              status: r.status || null,
+              signup_start_date: r.signup_start_date
+                ? (r.signup_start_date instanceof Date
+                    ? r.signup_start_date.toISOString().slice(0, 10)
+                    : String(r.signup_start_date).slice(0, 10))
+                : null,
+              signup_end_date: r.signup_end_date
+                ? (r.signup_end_date instanceof Date
+                    ? r.signup_end_date.toISOString().slice(0, 10)
+                    : String(r.signup_end_date).slice(0, 10))
+                : null
+            };
+          });
           return res.status(200).json({
             submissions: rows.map(serializeSubmission),
             session_approvals,
+            signup_windows,
             is_reviewer: true
           });
         }
@@ -687,7 +708,8 @@ module.exports = async function handler(req, res) {
           });
         }
         const winRows = await sql`
-          SELECT status, opened_at, closed_at, locked_at
+          SELECT status, opened_at, closed_at, locked_at,
+                 signup_start_date, signup_end_date
           FROM class_signup_windows
           WHERE school_year = ${sy} AND session_number = ${session} LIMIT 1
         `;
@@ -836,6 +858,9 @@ module.exports = async function handler(req, res) {
       }
 
       // VP / Afternoon Class Liaison open/close/lock a session's sign-up window.
+      // Opening requires the session's Schedule Builder to be Approved first
+      // and a (start, end) date range so the parent My Family widget knows
+      // when to show itself.
       if (action === 'class-signup-window') {
         if (!(await isReviewerReq(user, req))) {
           return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can manage sign-ups.', youAre: user.email });
@@ -848,6 +873,31 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'status must be open, closed, or locked' });
         }
         const sy = activeSchoolYear(new Date());
+        // Date range. Strict YYYY-MM-DD; end >= start. Required when opening
+        // (so parents see a deterministic window); optional when closing /
+        // locking (preserves whatever range the VP last set).
+        const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+        const rawStart = String(body.signup_start_date || '').trim();
+        const rawEnd   = String(body.signup_end_date || '').trim();
+        if (rawStart && !dateRe.test(rawStart)) return res.status(400).json({ error: 'signup_start_date must be YYYY-MM-DD' });
+        if (rawEnd && !dateRe.test(rawEnd))     return res.status(400).json({ error: 'signup_end_date must be YYYY-MM-DD' });
+        if (rawStart && rawEnd && rawEnd < rawStart) {
+          return res.status(400).json({ error: 'signup_end_date must be on or after signup_start_date' });
+        }
+        // Gate: opening requires the Schedule Builder session to be Approved.
+        if (status === 'open') {
+          if (!rawStart || !rawEnd) return res.status(400).json({ error: 'Pick a start and end date for sign-ups.' });
+          const approvedRows = await sql`
+            SELECT approved_at FROM co_op_sessions
+            WHERE school_year = ${sy} AND session_number = ${session} AND approved_at IS NOT NULL
+            LIMIT 1
+          `;
+          if (approvedRows.length === 0) {
+            return res.status(400).json({ error: 'Approve Session ' + session + ' in the Schedule Builder before opening sign-ups.' });
+          }
+        }
+        const startDate = rawStart || null;
+        const endDate   = rawEnd   || null;
         const now = new Date();
         const openedAt = status === 'open' ? now : null;
         const closedAt = status === 'closed' ? now : null;
@@ -855,16 +905,20 @@ module.exports = async function handler(req, res) {
         const openedBy = status === 'open' ? user.email : null;
         await sql`
           INSERT INTO class_signup_windows
-            (school_year, session_number, status, opened_by, opened_at, closed_at, locked_at, updated_by, updated_at)
-          VALUES (${sy}, ${session}, ${status}, ${openedBy}, ${openedAt}, ${closedAt}, ${lockedAt}, ${user.email}, ${now})
+            (school_year, session_number, status, opened_by, opened_at, closed_at, locked_at,
+             signup_start_date, signup_end_date, updated_by, updated_at)
+          VALUES (${sy}, ${session}, ${status}, ${openedBy}, ${openedAt}, ${closedAt}, ${lockedAt},
+             ${startDate}, ${endDate}, ${user.email}, ${now})
           ON CONFLICT (school_year, session_number) DO UPDATE SET
-            status     = EXCLUDED.status,
-            opened_by  = COALESCE(EXCLUDED.opened_by, class_signup_windows.opened_by),
-            opened_at  = COALESCE(EXCLUDED.opened_at, class_signup_windows.opened_at),
-            closed_at  = COALESCE(EXCLUDED.closed_at, class_signup_windows.closed_at),
-            locked_at  = COALESCE(EXCLUDED.locked_at, class_signup_windows.locked_at),
-            updated_by = EXCLUDED.updated_by,
-            updated_at = EXCLUDED.updated_at
+            status            = EXCLUDED.status,
+            opened_by         = COALESCE(EXCLUDED.opened_by, class_signup_windows.opened_by),
+            opened_at         = COALESCE(EXCLUDED.opened_at, class_signup_windows.opened_at),
+            closed_at         = COALESCE(EXCLUDED.closed_at, class_signup_windows.closed_at),
+            locked_at         = COALESCE(EXCLUDED.locked_at, class_signup_windows.locked_at),
+            signup_start_date = COALESCE(EXCLUDED.signup_start_date, class_signup_windows.signup_start_date),
+            signup_end_date   = COALESCE(EXCLUDED.signup_end_date,   class_signup_windows.signup_end_date),
+            updated_by        = EXCLUDED.updated_by,
+            updated_at        = EXCLUDED.updated_at
         `;
         return res.status(200).json({ ok: true, status });
       }

@@ -3764,9 +3764,26 @@
     if (!card || !_signup) return;
     var s = _signup;
     var status = (s.window && s.window.status) || null;
+    var startDate = (s.window && s.window.signup_start_date) || null;
+    var endDate = (s.window && s.window.signup_end_date) || null;
     var reviewer = !!s.is_reviewer;
-    // Non-reviewers only see the card when a session is actively open.
-    if (!reviewer && status !== 'open') { card.style.display = 'none'; return; }
+    // "Today" pinned to Indianapolis local so the date window doesn't flip
+    // a day early/late for parents in adjacent timezones.
+    var todayStr = '';
+    try {
+      var parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).formatToParts(new Date());
+      var lookup = {};
+      parts.forEach(function (p) { lookup[p.type] = p.value; });
+      todayStr = lookup.year + '-' + lookup.month + '-' + lookup.day;
+    } catch (e) {
+      todayStr = new Date().toISOString().slice(0, 10);
+    }
+    var withinDates = startDate && endDate && todayStr >= startDate && todayStr <= endDate;
+    // Non-reviewers only see the card when the session is open AND we're
+    // inside the VP-chosen date window.
+    if (!reviewer && (status !== 'open' || !withinDates)) { card.style.display = 'none'; return; }
     card.style.display = '';
 
     var h = '<h3 class="mf-card-title">Afternoon Class Sign-ups</h3>';
@@ -3779,11 +3796,14 @@
       }
       h += '</select></label>';
       h += '<span class="signup-status signup-status-' + (status || 'none') + '">' + (status ? status.toUpperCase() : 'NOT OPEN') + '</span>';
+      if (startDate && endDate) {
+        h += '<span class="signup-dates">' + escapeHtml(formatDateLabel(startDate)) + ' → ' + escapeHtml(formatDateLabel(endDate)) + '</span>';
+      }
       h += '<div class="signup-admin-btns">';
-      h += '<button type="button" class="sc-btn" data-signup-win="open"' + (status === 'open' ? ' disabled' : '') + '>Open</button>';
       h += '<button type="button" class="sc-btn" data-signup-win="closed"' + (status !== 'open' ? ' disabled' : '') + '>Close</button>';
       h += '<button type="button" class="sc-btn sc-btn-del" data-signup-win="locked"' + ((status === 'locked' || !status) ? ' disabled' : '') + '>Lock</button>';
       h += '</div></div>';
+      h += '<p class="signup-note">Set sign-up dates from the Schedule Builder under the Approved badge.</p>';
     }
 
     if (!s.session) {
@@ -15131,14 +15151,18 @@
   var scheduleBuilderState = {
     schoolYear: '2026-2027',
     session: 1,
-    submissions: [],  // all submissions for the school year
-    approvals: {},    // { "YYYY-YYYY|N": { approved_at, approved_by } }
+    submissions: [],   // all submissions for the school year
+    approvals: {},     // { "YYYY-YYYY|N": { approved_at, approved_by } }
+    signupWindows: {}, // { "YYYY-YYYY|N": { status, signup_start_date, signup_end_date } }
     loaded: false
   };
   function sbApprovalFor(sess) {
     return scheduleBuilderState.approvals[scheduleBuilderState.schoolYear + '|' + sess] || null;
   }
   function sbIsSessionApproved(sess) { return !!sbApprovalFor(sess); }
+  function sbSignupWindowFor(sess) {
+    return scheduleBuilderState.signupWindows[scheduleBuilderState.schoolYear + '|' + sess] || null;
+  }
 
   // ══════════════════════════════════════════════
   // PM Submissions Report (in the PM Class Scheduling workspace card)
@@ -17152,6 +17176,7 @@
         return s.school_year === scheduleBuilderState.schoolYear;
       });
       scheduleBuilderState.approvals = (data && data.session_approvals) || {};
+      scheduleBuilderState.signupWindows = (data && data.signup_windows) || {};
       scheduleBuilderState.loaded = true;
       renderScheduleBuilder();
     })
@@ -17206,6 +17231,40 @@
       html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + '</button>';
     }
     html += '</div>';
+
+    // Sign-ups panel — only meaningful once the session is approved. Lets the
+    // VP / Afternoon Liaison set the window dates that drive when the parent
+    // My Family widget appears. While the window is open, shows the dates +
+    // a Close button; before that, shows two date inputs + Open.
+    if (isApproved) {
+      var win = sbSignupWindowFor(sess);
+      var winStatus = win && win.status;
+      var winStart = (win && win.signup_start_date) || '';
+      var winEnd = (win && win.signup_end_date) || '';
+      html += '<div class="sb-signup-panel">';
+      html += '<div class="sb-signup-panel-title">Afternoon Class Sign-Ups</div>';
+      if (winStatus === 'open' && winStart && winEnd) {
+        html += '<div class="sb-signup-panel-state sb-signup-panel-state-open">Open <strong>' + escClsHtml(formatDateLabel(winStart)) + '</strong> → <strong>' + escClsHtml(formatDateLabel(winEnd)) + '</strong></div>';
+        html += '<div class="sb-signup-panel-actions">';
+        html += '<button type="button" class="sc-btn" id="sbSignupEdit">Edit dates</button>';
+        html += '<button type="button" class="sc-btn sc-btn-del" id="sbSignupClose">Close sign-ups</button>';
+        html += '</div>';
+        html += '<div class="sb-signup-edit-row" id="sbSignupEditRow" style="display:none;">';
+        html += '<label>Start <input type="date" id="sbSignupStart" value="' + escClsAttr(winStart) + '"></label>';
+        html += '<label>End <input type="date" id="sbSignupEnd" value="' + escClsAttr(winEnd) + '"></label>';
+        html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupSave">Save dates</button>';
+        html += '</div>';
+      } else {
+        html += '<div class="sb-signup-panel-state">Sign-ups not yet open. Pick a start and end date so parents can rank classes during that window.</div>';
+        html += '<div class="sb-signup-edit-row">';
+        html += '<label>Start <input type="date" id="sbSignupStart" value="' + escClsAttr(winStart) + '"></label>';
+        html += '<label>End <input type="date" id="sbSignupEnd" value="' + escClsAttr(winEnd) + '"></label>';
+        html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupOpen">Open sign-ups</button>';
+        html += '</div>';
+      }
+      html += '<div class="sb-signup-error cls-error" id="sbSignupError" style="display:none;"></div>';
+      html += '</div>';
+    }
 
     // Open blocks for PM1 and PM2 — classes get dropped in and sort by age
     // (youngest first). 'both' (2-hour) classes appear in the PM1 column with
@@ -17370,6 +17429,22 @@
       toggleSessionApproval(sess, !isApproved);
     });
 
+    // Wire sign-ups panel buttons (rendered only when session is approved).
+    var openBtn = document.getElementById('sbSignupOpen');
+    if (openBtn) openBtn.addEventListener('click', function () { saveSignupWindow(sess, 'open'); });
+    var closeBtn = document.getElementById('sbSignupClose');
+    if (closeBtn) closeBtn.addEventListener('click', function () {
+      if (!confirm('Close sign-ups for Session ' + sess + '?\nParents will no longer see the sign-up card on My Family. You can reopen any time.')) return;
+      saveSignupWindow(sess, 'closed');
+    });
+    var editBtn = document.getElementById('sbSignupEdit');
+    var saveBtn = document.getElementById('sbSignupSave');
+    if (editBtn) editBtn.addEventListener('click', function () {
+      var row = document.getElementById('sbSignupEditRow');
+      if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    });
+    if (saveBtn) saveBtn.addEventListener('click', function () { saveSignupWindow(sess, 'open'); });
+
     // Wire + Add buttons
     body.querySelectorAll('.sb-cell-add').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
@@ -17446,6 +17521,47 @@
       reviewer_notes: sub.reviewer_notes || ''
     }).then(function () { loadScheduleBuilder(); })
       .catch(function (err) { alert('Could not place class: ' + (err.message || 'error')); });
+  }
+
+  // POST a sign-up window change (open with dates, or close). The API gates
+  // status='open' on the session being Approved; we surface its error
+  // verbatim in the panel's error row so the VP gets a clear next step.
+  function saveSignupWindow(sess, status) {
+    var startEl = document.getElementById('sbSignupStart');
+    var endEl = document.getElementById('sbSignupEnd');
+    var errEl = document.getElementById('sbSignupError');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    var body = { session: sess, status: status };
+    if (status === 'open') {
+      var start = startEl ? startEl.value : '';
+      var end = endEl ? endEl.value : '';
+      if (!start || !end) {
+        if (errEl) { errEl.textContent = 'Pick a start and end date.'; errEl.style.display = ''; }
+        return;
+      }
+      if (end < start) {
+        if (errEl) { errEl.textContent = 'End date must be on or after start date.'; errEl.style.display = ''; }
+        return;
+      }
+      body.signup_start_date = start;
+      body.signup_end_date = end;
+    }
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?action=class-signup-window' + notifViewAsSuffix(), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+    }).then(function (res) {
+      if (!res.ok) {
+        if (errEl) { errEl.textContent = (res.data && res.data.error) || 'Could not save sign-ups.'; errEl.style.display = ''; }
+        return;
+      }
+      loadScheduleBuilder();
+    }).catch(function (err) {
+      if (errEl) { errEl.textContent = err.message || 'Network error.'; errEl.style.display = ''; }
+    });
   }
 
   // Approve / Reopen toggle. Approving locks the session (Schedule Builder

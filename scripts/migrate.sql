@@ -1132,3 +1132,13 @@ CREATE INDEX IF NOT EXISTS class_signup_picks_kid_idx
 ALTER TABLE co_op_sessions
   ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS approved_by TEXT;
+
+-- Sign-up window date range: VP / Afternoon Liaison sets start + end dates
+-- when opening sign-ups. The parent My Family widget appears only between
+-- those dates (in addition to the existing status='open' gate). Distinct
+-- from opened_at/closed_at, which are the audit timestamps of when an
+-- admin clicked the buttons — these are the intentional date range the
+-- VP chose for parents to make their picks.
+ALTER TABLE class_signup_windows
+  ADD COLUMN IF NOT EXISTS signup_start_date DATE,
+  ADD COLUMN IF NOT EXISTS signup_end_date   DATE;
