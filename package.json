@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "test": "node scripts/regression.js",
-    "deploy:dev": "node scripts/deploy-dev.js"
+    "deploy:dev": "node scripts/deploy-dev.js",
+    "vercel-build": "node scripts/run-migration.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
