@@ -15350,11 +15350,10 @@
   var _coopCalState = {
     schoolYear: '',     // active school year picker value
     sessions: [],       // full payload from /api/cleaning?action=sessions
-    isLoading: false,
-    // Inline "add session" draft. When set, an editable row is appended
-    // to the table for the active year so the President fills it in like
-    // any other row instead of going through three browser prompts.
-    draft: null         // null | { session_number, name, start_date, end_date }
+    isLoading: false
+    // No draft / edits state — the DOM is the source of truth during editing.
+    // The bottom Save bar collects dirty existing rows + draft rows from the
+    // table at click time and POSTs them sequentially.
   };
 
   // Default the picker to the active school year per activeSchoolYear()
@@ -15622,10 +15621,7 @@
     }
     h += '</div>';
 
-    var draft = (!readOnly && _coopCalState.draft) ? _coopCalState.draft : null;
-    var hasContent = rowsForYear.length > 0 || draft;
-
-    if (!hasContent) {
+    if (rowsForYear.length === 0) {
       h += '<p class="ws-empty" style="margin-top:12px;">No sessions yet for ' + escapeHtml(_coopCalState.schoolYear) + '.</p>';
     } else {
       h += '<div class="coop-cal-table-wrap">';
@@ -15641,48 +15637,33 @@
           h += '<td>' + escapeHtml(s.start_date) + '</td>';
           h += '<td>' + escapeHtml(s.end_date) + '</td>';
         } else {
-          h += '<td><input type="text" class="coop-cal-input" data-f="name" value="' + escapeHtml(s.name) + '" /></td>';
-          h += '<td><input type="date" class="coop-cal-input" data-f="start_date" value="' + escapeHtml(s.start_date) + '" /></td>';
-          h += '<td><input type="date" class="coop-cal-input" data-f="end_date" value="' + escapeHtml(s.end_date) + '" /></td>';
+          h += '<td><input type="text" class="coop-cal-input" data-f="name" data-orig="' + escapeHtml(s.name) + '" value="' + escapeHtml(s.name) + '" /></td>';
+          h += '<td><input type="date" class="coop-cal-input" data-f="start_date" data-orig="' + escapeHtml(s.start_date) + '" value="' + escapeHtml(s.start_date) + '" /></td>';
+          h += '<td><input type="date" class="coop-cal-input" data-f="end_date" data-orig="' + escapeHtml(s.end_date) + '" value="' + escapeHtml(s.end_date) + '" /></td>';
           h += '<td class="coop-cal-actions">';
-          h += '<button class="btn btn-primary btn-sm coop-cal-save" data-id="' + s.id + '" disabled>Save</button>';
           h += '<button class="btn btn-danger btn-sm coop-cal-delete" data-id="' + s.id + '" title="Remove this session">Delete</button>';
           h += '</td>';
         }
         h += '</tr>';
       });
-      if (draft) {
-        // Editable draft row — same shape as other rows, but Save creates a
-        // new session instead of updating, and Cancel discards.
-        h += '<tr class="coop-cal-draft-row" data-draft="1" data-num="' + draft.session_number + '">';
-        h += '<td>' + draft.session_number + '</td>';
-        h += '<td><input type="text" class="coop-cal-input" data-f="name" value="' + escapeHtml(draft.name) + '" placeholder="e.g. Fall Session ' + draft.session_number + '" /></td>';
-        h += '<td><input type="date" class="coop-cal-input" data-f="start_date" value="' + escapeHtml(draft.start_date) + '" /></td>';
-        h += '<td><input type="date" class="coop-cal-input" data-f="end_date" value="' + escapeHtml(draft.end_date) + '" /></td>';
-        h += '<td class="coop-cal-actions">';
-        h += '<button class="btn btn-primary btn-sm coop-cal-draft-save">Save</button>';
-        h += '<button class="btn btn-outline-dark btn-sm coop-cal-draft-cancel">Cancel</button>';
-        h += '</td>';
-        h += '</tr>';
-      }
       h += '</tbody></table></div>';
     }
 
-    if (!readOnly && !draft) {
-      // "+ Add Session" — appends an inline editable draft row scoped to
-      // this school year. President fills it in like any other row.
+    if (!readOnly) {
       var nextNum = rowsForYear.length > 0
         ? Math.max.apply(null, rowsForYear.map(function (r) { return r.session_number; })) + 1
         : 1;
       h += '<div class="coop-cal-add-row">';
       h += '<button id="coop-cal-add" class="btn btn-outline-dark btn-sm" data-next="' + nextNum + '">+ Add session</button>';
       h += '</div>';
-    }
-
-    if (!readOnly) {
-      // Inline error row used by the draft save + delete + edit-save handlers
-      // in place of browser alerts.
+      // Inline error row + bottom save bar. Save batches every dirty existing
+      // row + every draft row in one click so the President can fill in all
+      // five sessions and save once.
       h += '<div class="coop-cal-msg cls-error" id="coop-cal-msg" style="display:none;"></div>';
+      h += '<div class="coop-cal-save-bar">';
+      h += '<button id="coop-cal-discard" class="btn btn-outline-dark btn-sm" disabled>Discard changes</button>';
+      h += '<button id="coop-cal-save-all" class="btn btn-primary btn-sm" disabled>Save changes</button>';
+      h += '</div>';
     }
 
     body.innerHTML = h;
@@ -15695,78 +15676,33 @@
     var picker = document.getElementById('coop-cal-year');
     if (picker) {
       picker.addEventListener('change', function () {
+        if (coopCalHasUnsavedChanges() && !confirm('Discard unsaved changes and switch years?')) {
+          this.value = _coopCalState.schoolYear;
+          return;
+        }
         _coopCalState.schoolYear = this.value;
         renderCoopCalendarBody();
       });
     }
-    // Inputs: enable Save when any field changes.
-    body.querySelectorAll('tr[data-id]').forEach(function (tr) {
-      var saveBtn = tr.querySelector('.coop-cal-save');
-      tr.querySelectorAll('.coop-cal-input').forEach(function (inp) {
-        inp.addEventListener('input', function () {
-          if (saveBtn) saveBtn.disabled = false;
-        });
-      });
-    });
-    // Save row.
-    body.querySelectorAll('.coop-cal-save').forEach(function (btn) {
-      btn.addEventListener('click', function () {
+    // Existing row inputs: flip the row's dirty class on edit and refresh the
+    // bottom Save bar's enabled state. No per-row save anymore.
+    body.querySelectorAll('tr[data-id] .coop-cal-input').forEach(function (inp) {
+      inp.addEventListener('input', function () {
         var tr = this.closest('tr');
         if (!tr) return;
-        var payload = {
-          school_year: _coopCalState.schoolYear,
-          session_number: parseInt(tr.getAttribute('data-num'), 10),
-          name: tr.querySelector('[data-f="name"]').value.trim(),
-          start_date: tr.querySelector('[data-f="start_date"]').value,
-          end_date: tr.querySelector('[data-f="end_date"]').value
-        };
-        if (!payload.name || !payload.start_date || !payload.end_date) {
-          coopCalShowMsg('Name, start date, and end date are required.');
-          return;
-        }
-        if (payload.end_date < payload.start_date) {
-          coopCalShowMsg('End date must be on or after start date.');
-          return;
-        }
-        btn.disabled = true;
-        btn.textContent = 'Saving…';
-        coopCalShowMsg('');
-        fetch('/api/cleaning?action=sessions', {
-          method: 'POST',
-          headers: rwAuthHeaders(true),
-          body: JSON.stringify(payload)
-        })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-          .then(function (r) {
-            if (!r.ok) {
-              coopCalShowMsg((r.data && r.data.error) || 'Save failed.');
-              btn.disabled = false;
-              btn.textContent = 'Save';
-              return;
-            }
-            // Refresh sessions list + invalidate dashboard cache so the
-            // next dashboard load picks up the new dates.
-            localStorage.removeItem(CACHE_SESSIONS_KEY);
-            loadCoopCalendar();
-            // Foreground refresh the dashboard's SESSION_DATES too —
-            // user might pop back to My Family next.
-            if (typeof loadCoopSessions === 'function') loadCoopSessions();
-          })
-          .catch(function (err) {
-            coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
-            btn.disabled = false;
-            btn.textContent = 'Save';
-          });
+        var dirty = false;
+        tr.querySelectorAll('.coop-cal-input').forEach(function (i) {
+          if (i.value !== (i.getAttribute('data-orig') || '')) dirty = true;
+        });
+        tr.classList.toggle('is-dirty', dirty);
+        coopCalRefreshSaveBar();
       });
     });
-    // Delete row — two-step inline confirm so a misclick can't drop a
-    // session. First click swaps the button to "Confirm delete" (red);
-    // second click actually deletes. Any other click on the body resets.
+    // Delete row — two-step inline confirm so a misclick can't drop a session.
     body.querySelectorAll('.coop-cal-delete').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         if (btn.getAttribute('data-confirming') !== '1') {
-          // Reset any other row's pending confirm so only one is armed.
           body.querySelectorAll('.coop-cal-delete[data-confirming="1"]').forEach(function (other) {
             if (other !== btn) {
               other.removeAttribute('data-confirming');
@@ -15814,94 +15750,204 @@
         btn.textContent = 'Delete';
       });
     });
-    // "+ Add Session" — opens an inline editable draft row inside the
-    // table so the President fills it in like any other row, instead of
-    // chaining three browser prompts.
+    // "+ Add session" — imperatively append a new draft row to the tbody so
+    // any in-progress edits on existing rows survive. Multiple drafts can be
+    // stacked; the bottom Save bar persists them all in one click.
     var addBtn = document.getElementById('coop-cal-add');
     if (addBtn) {
       addBtn.addEventListener('click', function () {
-        var next = parseInt(this.getAttribute('data-next'), 10) || 1;
-        _coopCalState.draft = {
-          session_number: next,
-          name: '',
-          start_date: '',
-          end_date: ''
-        };
-        renderCoopCalendarBody();
-        // Focus the new name field so the President can start typing.
-        var nameInp = document.querySelector('.coop-cal-draft-row [data-f="name"]');
-        if (nameInp) nameInp.focus();
+        coopCalAppendDraftRow();
       });
     }
-
-    // Draft row Save — POST a new session. Re-renders on success / shows the
-    // inline message row on error (no browser alerts).
-    var draftSaveBtn = body.querySelector('.coop-cal-draft-save');
-    if (draftSaveBtn) draftSaveBtn.addEventListener('click', function () {
-      var row = body.querySelector('.coop-cal-draft-row');
-      if (!row) return;
-      var payload = {
-        school_year: _coopCalState.schoolYear,
-        session_number: parseInt(row.getAttribute('data-num'), 10),
-        name: row.querySelector('[data-f="name"]').value.trim(),
-        start_date: row.querySelector('[data-f="start_date"]').value,
-        end_date: row.querySelector('[data-f="end_date"]').value
-      };
-      // Keep the draft state in sync so we don't lose typing if the save
-      // fails and the user tweaks one field.
-      _coopCalState.draft.name = payload.name;
-      _coopCalState.draft.start_date = payload.start_date;
-      _coopCalState.draft.end_date = payload.end_date;
-      if (!payload.name || !payload.start_date || !payload.end_date) {
-        coopCalShowMsg('Name, start date, and end date are required.');
-        return;
-      }
-      if (payload.end_date < payload.start_date) {
-        coopCalShowMsg('End date must be on or after start date.');
-        return;
-      }
-      draftSaveBtn.disabled = true;
-      draftSaveBtn.textContent = 'Saving…';
+    // Bottom save bar.
+    var saveAllBtn = document.getElementById('coop-cal-save-all');
+    if (saveAllBtn) saveAllBtn.addEventListener('click', coopCalSaveAll);
+    var discardBtn = document.getElementById('coop-cal-discard');
+    if (discardBtn) discardBtn.addEventListener('click', function () {
+      if (!coopCalHasUnsavedChanges()) return;
+      if (!confirm('Discard all unsaved session edits?')) return;
       coopCalShowMsg('');
-      fetch('/api/cleaning?action=sessions', {
-        method: 'POST',
-        headers: rwAuthHeaders(true),
-        body: JSON.stringify(payload)
-      })
-        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-        .then(function (r) {
-          if (!r.ok) {
-            coopCalShowMsg((r.data && r.data.error) || 'Could not add session.');
-            draftSaveBtn.disabled = false;
-            draftSaveBtn.textContent = 'Save';
-            return;
-          }
-          _coopCalState.draft = null;
+      loadCoopCalendar();
+    });
+    coopCalRefreshSaveBar();
+  }
+
+  // Append a fresh draft row to the tbody (or create the tbody if the year
+  // had no existing sessions). Numbering picks up where the existing rows +
+  // already-pending drafts leave off.
+  function coopCalAppendDraftRow() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return;
+    var wrap = body.querySelector('.coop-cal-table-wrap');
+    var tbody;
+    if (!wrap) {
+      // First session for this year — table doesn't exist yet. Re-render in
+      // table mode so the header chrome appears, then append the draft.
+      var empty = body.querySelector('.ws-empty');
+      if (empty) empty.remove();
+      var addRow = body.querySelector('.coop-cal-add-row');
+      wrap = document.createElement('div');
+      wrap.className = 'coop-cal-table-wrap';
+      wrap.innerHTML = '<table class="coop-cal-table"><thead><tr>' +
+        '<th>#</th><th>Name</th><th>Start</th><th>End</th><th></th>' +
+        '</tr></thead><tbody></tbody></table>';
+      body.insertBefore(wrap, addRow);
+      tbody = wrap.querySelector('tbody');
+    } else {
+      tbody = wrap.querySelector('tbody');
+    }
+    var existingNums = Array.prototype.map.call(
+      tbody.querySelectorAll('tr'),
+      function (tr) { return parseInt(tr.getAttribute('data-num'), 10) || 0; }
+    );
+    var next = existingNums.length > 0 ? Math.max.apply(null, existingNums) + 1 : 1;
+    var tr = document.createElement('tr');
+    tr.className = 'coop-cal-draft-row';
+    tr.setAttribute('data-draft', '1');
+    tr.setAttribute('data-num', String(next));
+    tr.innerHTML =
+      '<td>' + next + '</td>' +
+      '<td><input type="text" class="coop-cal-input" data-f="name" value="" placeholder="e.g. Fall Session ' + next + '" /></td>' +
+      '<td><input type="date" class="coop-cal-input" data-f="start_date" value="" /></td>' +
+      '<td><input type="date" class="coop-cal-input" data-f="end_date" value="" /></td>' +
+      '<td class="coop-cal-actions">' +
+      '<button class="btn btn-outline-dark btn-sm coop-cal-draft-remove" title="Remove this draft">✕</button>' +
+      '</td>';
+    tbody.appendChild(tr);
+    var removeBtn = tr.querySelector('.coop-cal-draft-remove');
+    if (removeBtn) removeBtn.addEventListener('click', function () {
+      tr.remove();
+      coopCalRefreshSaveBar();
+    });
+    var nameInp = tr.querySelector('[data-f="name"]');
+    if (nameInp) nameInp.focus();
+    // Bump the "+ Add session" button's nextNum for any future click (cosmetic
+    // — the actual numbering recomputes from the DOM each time).
+    var addBtn = document.getElementById('coop-cal-add');
+    if (addBtn) addBtn.setAttribute('data-next', String(next + 1));
+    coopCalRefreshSaveBar();
+  }
+
+  function coopCalHasUnsavedChanges() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return false;
+    if (body.querySelector('tr[data-draft="1"]')) return true;
+    if (body.querySelector('tr[data-id].is-dirty')) return true;
+    return false;
+  }
+
+  function coopCalRefreshSaveBar() {
+    var save = document.getElementById('coop-cal-save-all');
+    var discard = document.getElementById('coop-cal-discard');
+    var dirty = coopCalHasUnsavedChanges();
+    if (save) save.disabled = !dirty;
+    if (discard) discard.disabled = !dirty;
+  }
+
+  // Collect every dirty existing row + every draft row, validate them all,
+  // then POST sequentially. On the first failure the bar shows which session
+  // failed and stops so the user can fix that row and click Save again
+  // (already-saved rows in the same batch stay saved — that's fine, the
+  // session endpoint is upsert).
+  function coopCalSaveAll() {
+    var body = document.getElementById('coop-cal-body');
+    if (!body) return;
+    coopCalShowMsg('');
+    var payloads = [];
+    body.querySelectorAll('tr[data-id].is-dirty').forEach(function (tr) {
+      payloads.push(coopCalReadRow(tr, false));
+    });
+    body.querySelectorAll('tr[data-draft="1"]').forEach(function (tr) {
+      payloads.push(coopCalReadRow(tr, true));
+    });
+    if (payloads.length === 0) return;
+    // Validate everything up front so the user sees all problems before any
+    // network request fires.
+    for (var i = 0; i < payloads.length; i++) {
+      var p = payloads[i];
+      if (!p.name || !p.start_date || !p.end_date) {
+        coopCalShowMsg('Session ' + p.session_number + ': name, start date, and end date are required.');
+        return;
+      }
+      if (p.end_date < p.start_date) {
+        coopCalShowMsg('Session ' + p.session_number + ': end date must be on or after start date.');
+        return;
+      }
+    }
+    // Reject duplicate session numbers across drafts + existing edits — the
+    // upsert key is (school_year, session_number) so a clash would silently
+    // overwrite a row the user didn't mean to touch.
+    var seen = {};
+    for (var j = 0; j < payloads.length; j++) {
+      var n = payloads[j].session_number;
+      if (seen[n]) {
+        coopCalShowMsg('Two rows are using session number ' + n + '. Fix the numbering before saving.');
+        return;
+      }
+      seen[n] = true;
+    }
+    var saveBtn = document.getElementById('coop-cal-save-all');
+    var discardBtn = document.getElementById('coop-cal-discard');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    if (discardBtn) discardBtn.disabled = true;
+    coopCalPostSequential(payloads, 0, function (err, doneCount) {
+      if (err) {
+        coopCalShowMsg(err);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; }
+        if (discardBtn) discardBtn.disabled = false;
+        if (doneCount > 0) {
+          // Some rows landed; pull a fresh list so the saved ones show as
+          // clean and the failing one (and any after it) stay as pending.
           localStorage.removeItem(CACHE_SESSIONS_KEY);
           loadCoopCalendar();
           if (typeof loadCoopSessions === 'function') loadCoopSessions();
-        })
-        .catch(function (err) {
-          coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
-          draftSaveBtn.disabled = false;
-          draftSaveBtn.textContent = 'Save';
-        });
+        }
+        return;
+      }
+      // Full success — close the modal (matches the rest of the portal's
+      // save-then-dismiss flow) and refresh the dashboard's SESSION_DATES.
+      localStorage.removeItem(CACHE_SESSIONS_KEY);
+      if (typeof loadCoopSessions === 'function') loadCoopSessions();
+      if (typeof closeDetail === 'function') closeDetail();
     });
-    var draftCancelBtn = body.querySelector('.coop-cal-draft-cancel');
-    if (draftCancelBtn) draftCancelBtn.addEventListener('click', function () {
-      _coopCalState.draft = null;
-      coopCalShowMsg('');
-      renderCoopCalendarBody();
-    });
-    // Mirror draft inputs back to state on every keystroke so the typed
-    // value survives any re-render (year picker change, etc.).
-    body.querySelectorAll('.coop-cal-draft-row .coop-cal-input').forEach(function (inp) {
-      inp.addEventListener('input', function () {
-        if (!_coopCalState.draft) return;
-        var field = this.getAttribute('data-f');
-        if (field) _coopCalState.draft[field] = this.value;
+  }
+
+  function coopCalReadRow(tr, isDraft) {
+    return {
+      school_year: _coopCalState.schoolYear,
+      session_number: parseInt(tr.getAttribute('data-num'), 10),
+      name: tr.querySelector('[data-f="name"]').value.trim(),
+      start_date: tr.querySelector('[data-f="start_date"]').value,
+      end_date: tr.querySelector('[data-f="end_date"]').value,
+      _isDraft: !!isDraft
+    };
+  }
+
+  function coopCalPostSequential(payloads, idx, done) {
+    if (idx >= payloads.length) return done(null, idx);
+    var p = payloads[idx];
+    fetch('/api/cleaning?action=sessions', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({
+        school_year: p.school_year,
+        session_number: p.session_number,
+        name: p.name,
+        start_date: p.start_date,
+        end_date: p.end_date
+      })
+    })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          var msg = (r.data && r.data.error) || 'Save failed.';
+          return done('Session ' + p.session_number + ': ' + msg, idx);
+        }
+        coopCalPostSequential(payloads, idx + 1, done);
+      })
+      .catch(function (err) {
+        done('Session ' + p.session_number + ': network error — ' + (err.message || 'unknown'), idx);
       });
-    });
   }
 
   // Inline message row used by the Session Dates flows (draft save errors,
