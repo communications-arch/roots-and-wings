@@ -2235,8 +2235,10 @@
   // completes at the end of Field Day (the isSummerBreak boundary), so:
   //   - during the school year, the last COMPLETED year is the prior one;
   //   - during summer break, the year that just ended counts as completed.
-  // person.firstSeason is the family's first portal registration year
-  // ('2026-2027' form, '' for pre-portal/returning families — never new).
+  // person.firstSeason is the family's first FULL membership year
+  // ('2026-2027' form; mid-year sign-ups roll to the next season — same
+  // rule the participation report uses for reduced points expectations;
+  // '' for pre-portal/returning families — never new).
   // Labels compare lexicographically, so "first season is later than the
   // last completed year" is a plain string compare.
   function lastCompletedYearLabel() {

@@ -1545,39 +1545,93 @@ function seasonToYearLabel(season) {
   return '';
 }
 
-// Earliest registration per family email → '2026-2027' label, used for
-// new-member detection (Directory indicator + membership report). A family
-// whose EARLIEST registration declared an existing_family_name is a
-// pre-portal family re-registering — returning, not new — so they're
-// omitted, as are families with no registration rows at all. Returns
-// {} on query failure so callers degrade gracefully (no indicator).
-async function firstSeasonByEmail(sql) {
+function nextYearLabel(label) {
+  var m = /^(\d{4})-(\d{4})$/.exec(label || '');
+  if (!m) return '';
+  return (parseInt(m[1], 10) + 1) + '-' + (parseInt(m[2], 10) + 1);
+}
+
+// Pure core of firstSeasonByEmail — exported for unit tests.
+//
+// Maps each family to the FIRST FULL school year of their membership
+// ('2026-2027' form). "New member" = that year hasn't completed yet; the
+// same rule drives the Directory's First Year badge and the participation
+// report's reduced points expectation, per Membership's definition: a
+// family counts as new until they have completed a full co-op year, and
+// members can sign up any time. So the family's earliest registration
+// (by created_at) decides:
+//   - registered on/before Sept 1 of the season's start year → that
+//     season is their first full year;
+//   - registered after (mid-year join) → their first full year is the
+//     NEXT season;
+//   - earliest registration declared existing_family_name → pre-portal
+//     family re-registering, returning not new → omitted entirely.
+//
+// Each family's label is emitted under EVERY identity seen on its rows:
+// the raw registration email (personal) AND the derived Workspace family
+// email — registrations store the personal email while member_profiles
+// is keyed by deriveFamilyEmail's output, so callers can join on
+// whichever identity they hold (family-identity-by-email rule).
+function firstSeasonFromRows(rows) {
+  // Lazy require: tour.js requires sheets.js at module load, so a
+  // top-level require here would create a cycle and import {}.
+  var tour = require('./tour.js');
+  var groups = {}; // canonical family key → { keys:{}, earliest }
+  (rows || []).forEach(function (r) {
+    var label = seasonToYearLabel(r.season);
+    if (!label) return;
+    var rawEmail = String(r.email || '').toLowerCase().trim();
+    var famName = tour.deriveFamilyName(r.main_learning_coach, r.existing_family_name);
+    var famEmail = String(tour.deriveFamilyEmail(r.main_learning_coach, famName) || '').toLowerCase();
+    var groupKey = famEmail || rawEmail;
+    if (!groupKey) return;
+
+    // Mid-year join: registered after the season already started → the
+    // next season is the first one they're present for in full.
+    var createdIso = '';
+    if (r.created_at) {
+      try { createdIso = new Date(r.created_at).toISOString().slice(0, 10); } catch (e) { /* keep '' */ }
+    }
+    var seasonStart = label.slice(0, 4) + '-09-01';
+    var fullLabel = (createdIso && createdIso > seasonStart) ? nextYearLabel(label) : label;
+    if (!fullLabel) return;
+
+    if (!groups[groupKey]) groups[groupKey] = { keys: {}, earliest: null };
+    var g = groups[groupKey];
+    if (rawEmail) g.keys[rawEmail] = true;
+    if (famEmail) g.keys[famEmail] = true;
+    var sortKey = (createdIso || '9999-99-99') + '|' + label;
+    if (!g.earliest || sortKey < g.earliest.sortKey) {
+      g.earliest = {
+        sortKey: sortKey,
+        fullLabel: fullLabel,
+        wasExisting: String(r.existing_family_name || '').trim() !== ''
+      };
+    }
+  });
+
   var out = {};
+  Object.keys(groups).forEach(function (gk) {
+    var g = groups[gk];
+    if (!g.earliest || g.earliest.wasExisting) return;
+    Object.keys(g.keys).forEach(function (k) { out[k] = g.earliest.fullLabel; });
+  });
+  return out;
+}
+
+// DB wrapper — returns {} on query failure so callers degrade gracefully
+// (no indicator, no reduced expectation).
+async function firstSeasonByEmail(sql) {
   try {
     var regRows = await sql`
-      SELECT LOWER(email) AS e,
-             ARRAY_AGG(season) AS seasons,
-             ARRAY_AGG(COALESCE(existing_family_name, '')) AS existing_flags
+      SELECT email, season, created_at, main_learning_coach, existing_family_name
       FROM registrations
-      GROUP BY LOWER(email)
     `;
-    regRows.forEach(function (r) {
-      var seasons = r.seasons || [];
-      var flags = r.existing_flags || [];
-      var best = null;
-      for (var i = 0; i < seasons.length; i++) {
-        var label = seasonToYearLabel(seasons[i]);
-        if (!label) continue;
-        if (!best || label < best.label) {
-          best = { label: label, wasExisting: String(flags[i] || '').trim() !== '' };
-        }
-      }
-      if (best && !best.wasExisting) out[r.e] = best.label;
-    });
+    return firstSeasonFromRows(regRows);
   } catch (e) {
     console.error('Registrations first-season query failed:', e.message);
+    return {};
   }
-  return out;
 }
 
 function participationBuildNameIndex(families) {
@@ -1753,9 +1807,10 @@ async function loadFamiliesFromProfiles(sql) {
       phone: String(r.phone || ''),
       parentInfo: parentInfo,
       kids: kids,
-      // First school year this family registered through the portal,
-      // long '2026-2027' form. '' when they predate the portal or
-      // their earliest registration was an existing-family one.
+      // First FULL school year of this family's membership, long
+      // '2026-2027' form (mid-year joins roll to the next season).
+      // '' when they predate the portal or their earliest registration
+      // was an existing-family one — never new.
       firstSeason: regByEmail[key] || '',
       // Full normalized roster for downstream consumers that want every
       // person (e.g. dev-mode renderMyFamily / View As).
@@ -2013,19 +2068,20 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation absences query failed:', e.message);
   }
 
-  // New-member detection: first registration season is the current season.
-  // Seasons are compared as normalized long labels — registrations store
+  // New-member detection — same rule as the Directory's First Year badge:
+  // a family is new until they've completed a full co-op year, so they're
+  // flagged while their first FULL season (firstSeasonByEmail; mid-year
+  // joins roll to the next season) is the current report season or later.
+  // Seasons compare as normalized long labels — registrations store
   // '2026-2027' while participationCurrentSeason() returns '25_26', so the
-  // raw comparison this used to do never matched. Re-registrations that
-  // declared an existing family don't count as a first season (handled
-  // inside firstSeasonByEmail).
+  // raw equality this used to do never matched.
   var seasonLabel = seasonToYearLabel(participationCurrentSeason());
   var firstSeasons = await firstSeasonByEmail(sql);
   Object.keys(members).forEach(function (k) {
     var m = members[k];
     var emailLc = String(m.email || '').toLowerCase();
     var firstSeason = firstSeasons[emailLc];
-    if (firstSeason && firstSeason === seasonLabel) m.isNewMember = true;
+    if (firstSeason && seasonLabel && firstSeason >= seasonLabel) m.isNewMember = true;
   });
 
   // Active exemptions
@@ -2559,3 +2615,4 @@ module.exports.applyMemberProfileOverlay = applyMemberProfileOverlay;
 module.exports.loadFamiliesFromProfiles = loadFamiliesFromProfiles;
 module.exports.seasonToYearLabel = seasonToYearLabel;
 module.exports.firstSeasonByEmail = firstSeasonByEmail;
+module.exports.firstSeasonFromRows = firstSeasonFromRows;

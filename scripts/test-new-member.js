@@ -20,7 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
-const { seasonToYearLabel } = require('../api/sheets.js');
+const { seasonToYearLabel, firstSeasonFromRows } = require('../api/sheets.js');
 
 let passed = 0;
 let failed = 0;
@@ -48,6 +48,68 @@ t("returns '' for garbage, null, undefined", () => {
   assert.strictEqual(seasonToYearLabel(''), '');
   assert.strictEqual(seasonToYearLabel(null), '');
   assert.strictEqual(seasonToYearLabel(undefined), '');
+});
+
+console.log('\nfirstSeasonFromRows (api/sheets.js)');
+
+t('keys the label under BOTH the raw registration email and the derived family email', () => {
+  const out = firstSeasonFromRows([{
+    email: 'Erin.Personal@Gmail.com', season: '2026-2027',
+    created_at: '2026-04-20T12:00:00Z',
+    main_learning_coach: 'Erin Lee', existing_family_name: ''
+  }]);
+  // Registered April for a year starting in September → that year is full.
+  assert.strictEqual(out['erin.personal@gmail.com'], '2026-2027');
+  assert.strictEqual(out['erinl@rootsandwingsindy.com'], '2026-2027');
+});
+
+t('mid-year sign-up rolls the first FULL year to the next season', () => {
+  const out = firstSeasonFromRows([{
+    email: 'jane@gmail.com', season: '2025-2026',
+    created_at: '2026-01-15T12:00:00Z', // joined in January, year started Sept
+    main_learning_coach: 'Jane Doe', existing_family_name: ''
+  }]);
+  assert.strictEqual(out['jane@gmail.com'], '2026-2027');
+  assert.strictEqual(out['janed@rootsandwingsindy.com'], '2026-2027');
+});
+
+t('registration on/before Sept 1 of the start year counts that season as full', () => {
+  const out = firstSeasonFromRows([{
+    email: 'jane@gmail.com', season: '2025-2026',
+    created_at: '2025-08-30T12:00:00Z',
+    main_learning_coach: 'Jane Doe', existing_family_name: ''
+  }]);
+  assert.strictEqual(out['jane@gmail.com'], '2025-2026');
+});
+
+t('earliest registration declaring existing_family_name → family omitted (returning)', () => {
+  const out = firstSeasonFromRows([{
+    email: 'old@gmail.com', season: '2026-2027',
+    created_at: '2026-04-20T12:00:00Z',
+    main_learning_coach: 'Old Timer', existing_family_name: 'Timer'
+  }]);
+  assert.deepStrictEqual(out, {});
+});
+
+t('later existing-family re-registration does not erase a genuinely new family', () => {
+  const out = firstSeasonFromRows([
+    { email: 'new@gmail.com', season: '2026-2027', created_at: '2026-04-01T12:00:00Z',
+      main_learning_coach: 'Newbie Fam', existing_family_name: '' },
+    { email: 'new@gmail.com', season: '2027-2028', created_at: '2027-04-01T12:00:00Z',
+      main_learning_coach: 'Newbie Fam', existing_family_name: 'Fam' }
+  ]);
+  assert.strictEqual(out['new@gmail.com'], '2026-2027');
+});
+
+t('rows with unparseable seasons are skipped; missing created_at = no roll', () => {
+  const out = firstSeasonFromRows([
+    { email: 'a@gmail.com', season: 'garbage', created_at: '2026-04-01T12:00:00Z',
+      main_learning_coach: 'A Aa', existing_family_name: '' },
+    { email: 'b@gmail.com', season: '2026-2027', created_at: null,
+      main_learning_coach: 'B Bb', existing_family_name: '' }
+  ]);
+  assert.strictEqual(out['a@gmail.com'], undefined);
+  assert.strictEqual(out['b@gmail.com'], '2026-2027');
 });
 
 // ── Extract the client-side helpers from script.js ─────────────────────────
