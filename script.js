@@ -599,7 +599,8 @@
                 kidNames: (fam.kids || []).map(function(k) { return k.name + ' ' + (k.lastName || fam.name); }),
                 boardRole: (isPrimaryParent && fam.boardRole) ? fam.boardRole : null,
                 boardEmail: (isPrimaryParent && fam.boardRole) ? (fam.boardEmail || null) : null,
-                role: piHit.role || null
+                role: piHit.role || null,
+                firstSeason: fam.firstSeason || ''
               });
             });
             (fam.kids || []).forEach(function (kid) {
@@ -618,7 +619,8 @@
                 allergies: normalizeAllergies(kid.allergies),
                 schedule: kid.schedule || 'all-day',
                 photoConsent: kid.photo_consent !== false,
-                parentNames: fam.parents
+                parentNames: fam.parents,
+                firstSeason: fam.firstSeason || ''
               });
             });
           });
@@ -2228,6 +2230,28 @@
     return f === 'Teens'; // legacy alias for Pigeons
   }
 
+  // ── New-member detection ──
+  // A family is "new" until it has completed a full co-op year. A year
+  // completes at the end of Field Day (the isSummerBreak boundary), so:
+  //   - during the school year, the last COMPLETED year is the prior one;
+  //   - during summer break, the year that just ended counts as completed.
+  // person.firstSeason is the family's first portal registration year
+  // ('2026-2027' form, '' for pre-portal/returning families — never new).
+  // Labels compare lexicographically, so "first season is later than the
+  // last completed year" is a plain string compare.
+  function lastCompletedYearLabel() {
+    var m = /^(\d{4})-(\d{4})$/.exec(ACTIVE_SESSION_YEAR || '');
+    if (!m) return '';
+    if (isSummerBreak) return ACTIVE_SESSION_YEAR;
+    return (parseInt(m[1], 10) - 1) + '-' + (parseInt(m[2], 10) - 1);
+  }
+  function isNewMemberPerson(person) {
+    var firstSeason = person && person.firstSeason;
+    if (!firstSeason) return false;
+    var completed = lastCompletedYearLabel();
+    return !!completed && firstSeason > completed;
+  }
+
   // Nearest upcoming co-op day — returns today's date if today is co-op day,
   // else the next one. Formatted YYYY-MM-DD.
   function getNextCoopDate() {
@@ -2328,6 +2352,7 @@
           : person.name;
         var bgStyle = faceColor(person.name);
         var extras = '';
+        if (isNewMemberPerson(person)) extras += '<div class="yb-new-badge">\u{1F331} New Member</div>';
         if (person.pronouns) extras += '<div class="yb-pronouns">' + person.pronouns + '</div>';
         if (person.allergies) extras += '<div class="yb-allergy">' + person.allergies + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
@@ -2366,6 +2391,9 @@
         }
         if (activeFilter === 'noPhotos') {
           if (person.photoConsent !== false) return;
+        }
+        if (activeFilter === 'newMembers') {
+          if (!isNewMemberPerson(person)) return;
         }
 
         if (query) {
@@ -2424,11 +2452,16 @@
           ? '<div class="yb-allergy">' + person.allergies + '</div>'
           : '';
 
+        var newMemberTag = isNewMemberPerson(person)
+          ? '<div class="yb-new-badge" title="This family hasn\'t completed a full co-op year yet.">\u{1F331} New Member</div>'
+          : '';
+
         html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
           boardTag +
+          newMemberTag +
           pronounTag +
           '<div class="yb-family">' + (person.familyDisplay || person.family) + ' Family</div>' +
           parentOfTag +
@@ -2704,6 +2737,9 @@
       if (person.pronouns) html += '<p class="detail-pronouns">' + person.pronouns + '</p>';
       if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — opted out of photo and film use.</p>';
       // Kids shown in family grid below
+    }
+    if (isNewMemberPerson(person)) {
+      html += '<p class="detail-new-member">\u{1F331} New member family — hasn\'t completed a full co-op year yet</p>';
     }
     html += '</div></div>';
 

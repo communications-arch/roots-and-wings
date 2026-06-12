@@ -1532,6 +1532,54 @@ function participationYearBounds() {
   };
 }
 
+// Normalize a school-year/season string to the long '2025-2026' form.
+// Two formats coexist: participationCurrentSeason() produces '25_26'
+// while register.html writes season '2026-2027' into registrations.
+// Returns '' for anything unrecognizable so callers fail safe.
+function seasonToYearLabel(season) {
+  var s = String(season || '').trim();
+  var long = /^(\d{4})-(\d{4})$/.exec(s);
+  if (long) return s;
+  var short = /^(\d{2})_(\d{2})$/.exec(s);
+  if (short) return '20' + short[1] + '-20' + short[2];
+  return '';
+}
+
+// Earliest registration per family email → '2026-2027' label, used for
+// new-member detection (Directory indicator + membership report). A family
+// whose EARLIEST registration declared an existing_family_name is a
+// pre-portal family re-registering — returning, not new — so they're
+// omitted, as are families with no registration rows at all. Returns
+// {} on query failure so callers degrade gracefully (no indicator).
+async function firstSeasonByEmail(sql) {
+  var out = {};
+  try {
+    var regRows = await sql`
+      SELECT LOWER(email) AS e,
+             ARRAY_AGG(season) AS seasons,
+             ARRAY_AGG(COALESCE(existing_family_name, '')) AS existing_flags
+      FROM registrations
+      GROUP BY LOWER(email)
+    `;
+    regRows.forEach(function (r) {
+      var seasons = r.seasons || [];
+      var flags = r.existing_flags || [];
+      var best = null;
+      for (var i = 0; i < seasons.length; i++) {
+        var label = seasonToYearLabel(seasons[i]);
+        if (!label) continue;
+        if (!best || label < best.label) {
+          best = { label: label, wasExisting: String(flags[i] || '').trim() !== '' };
+        }
+      }
+      if (best && !best.wasExisting) out[r.e] = best.label;
+    });
+  } catch (e) {
+    console.error('Registrations first-season query failed:', e.message);
+  }
+  return out;
+}
+
 function participationBuildNameIndex(families) {
   var idx = {};
   // Build a per-parent nickname lookup keyed by canonical first name +
@@ -1653,6 +1701,10 @@ async function loadFamiliesFromProfiles(sql) {
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
   `;
+  // First registration per family — drives the Directory's "new member"
+  // indicator (family hasn't completed a full co-op year yet). The client
+  // derives newness from firstSeason against the Field-Day year boundary.
+  var regByEmail = await firstSeasonByEmail(sql);
   var byFamily = {};
   peopleRows.forEach(function (pr) {
     var k = String(pr.family_email || '').toLowerCase();
@@ -1701,6 +1753,10 @@ async function loadFamiliesFromProfiles(sql) {
       phone: String(r.phone || ''),
       parentInfo: parentInfo,
       kids: kids,
+      // First school year this family registered through the portal,
+      // long '2026-2027' form. '' when they predate the portal or
+      // their earliest registration was an existing-family one.
+      firstSeason: regByEmail[key] || '',
       // Full normalized roster for downstream consumers that want every
       // person (e.g. dev-mode renderMyFamily / View As).
       people: people
@@ -1957,25 +2013,20 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation absences query failed:', e.message);
   }
 
-  // New-member detection: first registration season is the current season
-  var season = participationCurrentSeason();
-  try {
-    var regRows = await sql`
-      SELECT LOWER(email) AS e, MIN(season) AS first_season
-      FROM registrations
-      GROUP BY LOWER(email)
-    `;
-    var regByEmail = {};
-    regRows.forEach(function (r) { regByEmail[r.e] = r.first_season; });
-    Object.keys(members).forEach(function (k) {
-      var m = members[k];
-      var emailLc = String(m.email || '').toLowerCase();
-      var firstSeason = regByEmail[emailLc];
-      if (firstSeason && firstSeason === season) m.isNewMember = true;
-    });
-  } catch (e) {
-    console.error('Participation registrations query failed:', e.message);
-  }
+  // New-member detection: first registration season is the current season.
+  // Seasons are compared as normalized long labels — registrations store
+  // '2026-2027' while participationCurrentSeason() returns '25_26', so the
+  // raw comparison this used to do never matched. Re-registrations that
+  // declared an existing family don't count as a first season (handled
+  // inside firstSeasonByEmail).
+  var seasonLabel = seasonToYearLabel(participationCurrentSeason());
+  var firstSeasons = await firstSeasonByEmail(sql);
+  Object.keys(members).forEach(function (k) {
+    var m = members[k];
+    var emailLc = String(m.email || '').toLowerCase();
+    var firstSeason = firstSeasons[emailLc];
+    if (firstSeason && firstSeason === seasonLabel) m.isNewMember = true;
+  });
 
   // Active exemptions
   var today = new Date().toISOString().slice(0, 10);
@@ -2506,3 +2557,5 @@ module.exports.fetchSheet = fetchSheet;
 module.exports.getAuth = getAuth;
 module.exports.applyMemberProfileOverlay = applyMemberProfileOverlay;
 module.exports.loadFamiliesFromProfiles = loadFamiliesFromProfiles;
+module.exports.seasonToYearLabel = seasonToYearLabel;
+module.exports.firstSeasonByEmail = firstSeasonByEmail;

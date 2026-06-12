@@ -3480,6 +3480,25 @@ p + p { margin-top: 1rem; }
   line-height: 1;
 }
 
+/* New-member indicator — family hasn't completed a full co-op year yet.
+   Chartreuse "new growth" tint with olive text, same pill anatomy as
+   .yb-board-badge. */
+.yb-new-badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: var(--color-leaf);
+  background: rgba(var(--color-chartreuse-rgb), 0.18);
+  padding: 2px 6px;
+  border-radius: 8px;
+  margin-top: 5px;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+
 /* Extra info shown on class-view cards */
 .yb-allergy {
   font-size: 0.65rem;
@@ -4338,6 +4357,17 @@ button.staff-role:hover {
   font-weight: 600;
   color: #374151;
   background: rgba(75, 85, 99, 0.1);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+}
+
+/* New-member line on the person detail card — pairs with .yb-new-badge */
+.detail-new-member {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-leaf);
+  background: rgba(var(--color-chartreuse-rgb), 0.15);
   padding: 6px 12px;
   border-radius: var(--radius-sm);
   margin-top: 4px;

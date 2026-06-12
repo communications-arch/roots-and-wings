@@ -219,6 +219,7 @@ const unitTests = [
   'scripts/test-responsibilities.js',
   'scripts/test-board-scope.js',
   'scripts/test-waiver-access.js',
+  'scripts/test-new-member.js',
 ];
 
 for (const rel of unitTests) {
