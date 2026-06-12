@@ -2352,7 +2352,7 @@
           : person.name;
         var bgStyle = faceColor(person.name);
         var extras = '';
-        if (isNewMemberPerson(person)) extras += '<div class="yb-new-badge">\u{1F331} New Member</div>';
+        if (isNewMemberPerson(person)) extras += '<div class="yb-new-badge">\u{1F331} First Year</div>';
         if (person.pronouns) extras += '<div class="yb-pronouns">' + person.pronouns + '</div>';
         if (person.allergies) extras += '<div class="yb-allergy">' + person.allergies + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
@@ -2453,7 +2453,7 @@
           : '';
 
         var newMemberTag = isNewMemberPerson(person)
-          ? '<div class="yb-new-badge" title="This family hasn\'t completed a full co-op year yet.">\u{1F331} New Member</div>'
+          ? '<div class="yb-new-badge" title="This family is in their first co-op year.">\u{1F331} First Year</div>'
           : '';
 
         html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
@@ -2739,7 +2739,7 @@
       // Kids shown in family grid below
     }
     if (isNewMemberPerson(person)) {
-      html += '<p class="detail-new-member">\u{1F331} New member family — hasn\'t completed a full co-op year yet</p>';
+      html += '<p class="detail-new-member">\u{1F331} First-year family</p>';
     }
     html += '</div></div>';
 
