@@ -14,9 +14,9 @@ const { google } = require('googleapis');
 const { put } = require('@vercel/blob');
 const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { canActAs } = require('./_family');
-const { fetchSheet, getAuth, parseBillingSheet } = require('./sheets');
+const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -856,9 +856,13 @@ async function handleList(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
-  // Membership / Comms / Treasurer all see the same Membership Report
+  // Membership / Comms / Treasurer get the acting Membership Report
   // (Treasurer to record cash/check payments, Comms to onboard new
-  // members). Server-side gate matches the report's UI gating.
+  // members, Membership to decline). Every OTHER board member gets the
+  // same data read-only — viewerCanAct=false in the response tells the
+  // client to hide the Actions column and source-sheet link. Write
+  // endpoints (registration-decline, onboarding-dismiss, …) keep their
+  // own narrower gates, so read-only is enforced server-side too.
   // View-As-aware: when a super user / dev tester is impersonating one
   // of those roles, auth.email is the effective email so the gate
   // matches the role they're acting as. realEmail is preserved for
@@ -866,12 +870,14 @@ async function handleList(req, res) {
   const isMembership = await canEditAsRole(auth.email, 'Membership Director');
   const isComms      = !isMembership && await canEditAsRole(auth.email, 'Communications Director');
   const isTreasurer  = !isMembership && !isComms && await canEditAsRole(auth.email, 'Treasurer');
-  if (!isMembership && !isComms && !isTreasurer) {
+  const viewerCanAct = isMembership || isComms || isTreasurer;
+  const isBoard      = viewerCanAct || await isBoardMember(auth.email);
+  if (!isBoard) {
     const expectedM = await getRoleHolderEmail('Membership Director');
     const expectedC = await getRoleHolderEmail('Communications Director');
     const expectedT = await getRoleHolderEmail('Treasurer');
     return res.status(403).json({
-      error: 'Only the Membership Director, Communications Director, or Treasurer can view registrations.',
+      error: 'Only board members can view the Membership Report.',
       youAre: auth.realEmail,
       expected: (expectedM || expectedC || expectedT || '(unknown — sheet lookup failed)')
     });
@@ -967,7 +973,24 @@ async function handleList(req, res) {
       console.error('Comms Director name lookup failed (non-fatal):', cdErr);
     }
 
-    return res.status(200).json({ registrations: rows, comms_director_name: commsDirectorName });
+    // New-member flag per row — reuse the canonical first-season map (same
+    // rule as the Directory's First Year badge + the participation report: a
+    // family is "new" until they complete a full co-op year). The map is keyed
+    // by personal AND derived Workspace email, so the registration's personal
+    // email resolves. Degrades to not-new if the query fails (non-fatal).
+    try {
+      const firstSeasons = await firstSeasonByEmail(sql);
+      const seasonLabel = seasonToYearLabel(season);
+      rows.forEach(r => {
+        const fs = firstSeasons[String(r.email || '').toLowerCase().trim()] || '';
+        r.firstSeason = fs;
+        r.isNewMember = !!(fs && seasonLabel && fs >= seasonLabel);
+      });
+    } catch (nmErr) {
+      console.error('New-member flag computation failed (non-fatal):', nmErr);
+    }
+
+    return res.status(200).json({ registrations: rows, comms_director_name: commsDirectorName, viewerCanAct });
   } catch (err) {
     console.error('Registration list error:', err);
     return res.status(500).json({ error: 'Could not load registrations.' });

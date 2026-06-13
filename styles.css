@@ -10266,7 +10266,8 @@ button.staff-role:hover {
    so every report's status column reads as the same kind of badge. */
 .ws-wv-ok,
 .ws-wv-pending,
-.ws-wv-resent {
+.ws-wv-resent,
+.ws-wv-new {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 999px;
@@ -10280,6 +10281,7 @@ button.staff-role:hover {
 .ws-wv-ok      { background: rgba(90, 107, 57, 0.14);   color: var(--color-leaf); }
 .ws-wv-pending { background: rgba(224, 181, 44, 0.18);  color: var(--color-accent-dark); }
 .ws-wv-resent  { background: rgba(196, 80, 65, 0.14);   color: #b3381a; }
+.ws-wv-new     { background: rgba(82, 58, 121, 0.12);   color: var(--color-primary-dark, #3d2a5c); }
 /* Photos column pills — same shape as the status pills above so the
    Waivers Report reads as one consistent badge style. Allowed = leaf
    green (matches "signed"); opted out = slate so it stands apart from
@@ -10374,6 +10376,17 @@ button.staff-role:hover {
   overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile: hide columns flagged mobileHide (still shown in the expanded
+   row detail), and tighten cell padding/size so more fits without a wide
+   horizontal scroll. */
+@media (max-width: 640px) {
+  .ws-srt-hide-sm { display: none !important; }
+  .ws-waivers-table { font-size: 0.8rem; }
+  .ws-waivers-table th,
+  .ws-waivers-table td { padding: 7px 7px; }
 }
 .ws-waivers-table {
   width: 100%;

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="How to install the Roots & Wings Indy member portal as an app on your phone.">
+  <meta name="theme-color" content="#523A79">
+  <title>Install the Members App — Roots & Wings Indy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet">
+  <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
+  <link rel="stylesheet" href="styles.css?v=20260612d">
+
+  <style>
+    /* Standalone handout, styled to match the in-app install modal:
+       light surface, Playfair purple headings, circular step badges. */
+    .in-page { background: linear-gradient(160deg, #f5f0ff 0%, #ffffff 70%); min-height: 100vh; padding: 32px 16px 56px; font-family: 'Nunito Sans', sans-serif; }
+    .in-sheet { max-width: 680px; margin: 0 auto; background: #fff; border-radius: 20px; box-shadow: 0 20px 60px rgba(82, 58, 121, 0.16); padding: 28px 30px 24px; position: relative; }
+
+    .in-print { position: absolute; top: 16px; right: 16px; display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 1px solid rgba(82,58,121,0.3); color: var(--color-primary); border-radius: 999px; padding: 6px 13px; font: inherit; font-size: 0.85rem; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }
+    .in-print:hover { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+    .in-head { text-align: center; margin: 0 40px 14px; }
+    .in-logo { height: 44px; width: auto; margin: 0 auto 8px; display: block; }
+    .in-head h1 { font-family: 'Playfair Display', serif; color: var(--color-primary-dark); font-size: clamp(1.4rem, 3.5vw, 1.8rem); margin: 0; }
+
+    /* QR */
+    .in-qr-row { display: flex; justify-content: center; background: rgba(82,58,121,0.04); border-radius: 14px; padding: 14px; margin-bottom: 18px; }
+    .in-qr { width: 200px; height: 200px; max-width: 100%; border: 1px solid rgba(82,58,121,0.15); border-radius: 12px; padding: 10px; background: #fff; }
+    .in-qr svg { width: 100%; height: 100%; display: block; }
+
+    /* Platforms — two columns, each top-aligned and independent. */
+    .in-platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; align-items: start; }
+    @media (max-width: 600px) { .in-platforms { grid-template-columns: 1fr; gap: 0; } }
+    .in-block { padding: 14px 0; border-top: 1px solid #eee; }
+    .in-platforms .in-block { border-top: none; padding: 0; }
+    @media (max-width: 600px) { .in-platforms .in-block + .in-block { border-top: 1px solid #eee; padding-top: 16px; margin-top: 4px; } }
+    .in-block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .in-block-head .ico { font-size: 1.25rem; }
+    .in-block-head h2 { font-family: 'Playfair Display', serif; color: var(--color-primary-dark); font-size: 1.1rem; margin: 0; }
+    .in-block-sub { color: #777; font-size: 0.88rem; margin: 0 0 10px 0; }
+    ol.in-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+    ol.in-steps li { position: relative; padding: 0 0 9px 38px; line-height: 1.45; color: #333; font-size: 0.93rem; }
+    ol.in-steps li:last-child { padding-bottom: 0; }
+    ol.in-steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: -1px; width: 26px; height: 26px; border-radius: 50%; background: var(--color-primary); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+    ol.in-steps li strong { color: #222; }
+
+    /* Compatibility table */
+    .in-block h2.in-plain { font-family: 'Playfair Display', serif; color: var(--color-primary-dark); font-size: 1.1rem; margin: 0 0 8px; }
+    table.in-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    table.in-table th, table.in-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #eee; }
+    table.in-table th { color: var(--color-primary-dark); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    table.in-table td.in-yes { color: #2f7d3b; font-weight: 700; white-space: nowrap; }
+    table.in-table td.in-no { color: #c0392b; font-weight: 700; white-space: nowrap; }
+    table.in-table td.in-warn { color: #b8860b; font-weight: 700; white-space: nowrap; }
+    .in-note { background: rgba(255, 248, 225, 0.7); border-left: 4px solid #d4a017; padding: 10px 13px; border-radius: 0 8px 8px 0; margin-top: 12px; color: #5a4a1a; font-size: 0.88rem; line-height: 1.5; }
+    .in-note-alt { background: rgba(82,58,121,0.05); border-left-color: var(--color-primary); color: #4a3a63; }
+
+    .in-foot { text-align: center; color: #999; font-size: 0.83rem; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eee; }
+    .in-foot a { color: var(--color-primary); }
+
+    /* Print: guarantee a single page */
+    @page { size: letter portrait; margin: 0.35in; }
+    @media print {
+      .in-print { display: none !important; }
+      html, body { height: auto; }
+      .in-page { background: #fff; padding: 0; min-height: 0; }
+      .in-sheet { box-shadow: none; border: none; max-width: 100%; padding: 0; }
+      .in-head { margin-bottom: 10px; }
+      .in-logo { height: 38px; }
+      .in-qr-row { background: none; padding: 4px 0 10px; margin-bottom: 8px; }
+      .in-qr { width: 150px; height: 150px; border: none; padding: 0; }
+      .in-platforms { gap: 0 24px; }
+      .in-block { padding: 8px 0; }
+      ol.in-steps li { padding-bottom: 6px; }
+      a[href]::after { content: ""; }
+      .in-block, .in-qr-row, table.in-table, .in-note, .in-platforms { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body class="in-page">
+
+  <main class="in-sheet">
+    <button type="button" class="in-print" onclick="window.print()" aria-label="Print this guide">🖨 Print</button>
+
+    <div class="in-head">
+      <img class="in-logo" src="logo-combined.svg?v=20260430g" alt="Roots & Wings Indianapolis" onerror="this.style.display='none'">
+      <h1>Install the Members App</h1>
+    </div>
+
+    <!-- QR -->
+    <div class="in-qr-row">
+      <div class="in-qr" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 41 41" shape-rendering="crispEdges"><path fill="#ffffff" d="M0 0h41v41H0z"/><path stroke="#000000" d="M4 4.5h7m2 0h3m1 0h1m3 0h4m2 0h1m2 0h7M4 5.5h1m5 0h1m3 0h7m3 0h3m1 0h1m1 0h1m5 0h1M4 6.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1m2 0h7m1 0h1m1 0h3m1 0h1M4 7.5h1m1 0h3m1 0h1m1 0h1m5 0h1m1 0h2m4 0h1m1 0h1m1 0h1m1 0h3m1 0h1M4 8.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h4m2 0h1m2 0h1m1 0h3m1 0h1M4 9.5h1m5 0h1m1 0h2m1 0h6m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m5 0h1M4 10.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M12 11.5h1m2 0h1m3 0h1m5 0h2M4 12.5h1m1 0h5m3 0h2m1 0h5m2 0h1m1 0h1m3 0h5M4 13.5h6m1 0h3m2 0h1m3 0h5m2 0h1m2 0h2m1 0h2m1 0h1M5 14.5h1m2 0h6m1 0h2m2 0h1m5 0h2m1 0h2m2 0h1m1 0h1M4 15.5h1m3 0h2m3 0h1m1 0h2m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h4M5 16.5h2m1 0h4m1 0h1m5 0h1m2 0h1m4 0h1m1 0h1m1 0h3m1 0h2M4 17.5h1m1 0h2m1 0h1m7 0h8m2 0h1m1 0h2m2 0h1m1 0h2M5 18.5h8m1 0h1m1 0h3m2 0h1m4 0h1m1 0h6m1 0h1M4 19.5h1m2 0h1m3 0h1m1 0h6m1 0h1m1 0h1m1 0h3m1 0h4m1 0h2M5 20.5h2m3 0h2m3 0h1m5 0h1m4 0h4m1 0h2m3 0h1M5 21.5h3m3 0h1m6 0h1m1 0h12m1 0h2m1 0h1M7 22.5h1m1 0h2m1 0h2m3 0h3m1 0h1m9 0h2m1 0h2M4 23.5h1m2 0h2m2 0h1m1 0h2m1 0h2m2 0h8m2 0h7M5 24.5h3m1 0h6m2 0h1m2 0h1m2 0h2m1 0h1m1 0h2m1 0h3m1 0h2M4 25.5h1m1 0h3m3 0h1m1 0h2m2 0h2m2 0h4m1 0h1m1 0h2m2 0h1m2 0h1M4 26.5h1m1 0h2m2 0h1m1 0h2m1 0h1m1 0h5m2 0h3m1 0h2m3 0h3M4 27.5h1m3 0h2m1 0h3m2 0h1m1 0h2m3 0h1m1 0h1m1 0h1m1 0h2m1 0h3m1 0h1M4 28.5h1m1 0h2m2 0h6m2 0h2m1 0h1m4 0h7m2 0h1M12 29.5h1m1 0h1m3 0h1m1 0h1m2 0h2m1 0h3m3 0h1m1 0h1m1 0h1M4 30.5h7m2 0h2m1 0h1m2 0h2m1 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h2M4 31.5h1m5 0h1m1 0h1m1 0h1m1 0h2m1 0h1m5 0h4m3 0h5M4 32.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h2m4 0h1m1 0h1m1 0h1m1 0h6M4 33.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2m2 0h3m1 0h1m1 0h1m2 0h5M4 34.5h1m1 0h3m1 0h1m1 0h1m2 0h3m3 0h2m4 0h5m1 0h2M4 35.5h1m5 0h1m4 0h3m2 0h1m2 0h4m5 0h3M4 36.5h7m1 0h1m4 0h1m3 0h1m1 0h1m2 0h1m1 0h4m3 0h1"/></svg></div>
+    </div>
+
+    <!-- Platforms side by side -->
+    <div class="in-platforms">
+      <div class="in-block">
+        <div class="in-block-head">
+          <span class="ico" aria-hidden="true">📱</span>
+          <h2>iPhone &amp; iPad</h2>
+        </div>
+        <ol class="in-steps">
+          <li>Open the portal in <strong>Safari</strong> and sign in with your Roots &amp; Wings Google (Gmail) account.</li>
+          <li>Tap the <strong>Share</strong> button — the square with an up-arrow <strong>⬆️</strong> at the bottom of the screen.</li>
+          <li>In the menu that slides up, scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong> in the top corner. The Roots &amp; Wings icon appears on your home screen.</li>
+        </ol>
+      </div>
+
+      <div class="in-block">
+        <div class="in-block-head">
+          <span class="ico" aria-hidden="true">🤖</span>
+          <h2>Android</h2>
+        </div>
+        <ol class="in-steps">
+          <li>Open the portal in <strong>Chrome</strong> and sign in with your Roots &amp; Wings Google (Gmail) account.</li>
+          <li>Tap the <strong>⋮</strong> menu in the top-right corner.</li>
+          <li>Tap <strong>Install app</strong>, then tap <strong>Install</strong> to confirm.</li>
+          <li>The app installs to your apps list. See <em>“Putting it on your home screen”</em> below.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Home screen note -->
+    <div class="in-note">
+      <strong>🏠 Putting it on your home screen (Android):</strong> After installing, the app lands in your <strong>app drawer</strong> — your full list of apps — and may not jump onto your home screen automatically. That's an Android setting, not a problem with the app. To add it: open your app drawer, press and hold the <strong>Roots &amp; Wings</strong> icon, then drag it onto your home screen. (On iPhone, it goes straight to your home screen.)
+    </div>
+
+    <!-- Browser note -->
+    <div class="in-note in-note-alt">
+      <strong>⚠️ A note on browsers:</strong> Use <strong>Chrome</strong> on Android and <strong>Safari</strong> on iPhone. Avoid <strong>Brave</strong> on Android — it only creates a temporary shortcut that can disappear, instead of a real app.
+    </div>
+
+    <p class="in-foot">Roots &amp; Wings Indy · Need help? <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a></p>
+
+  </main>
+
+</body>
+</html>

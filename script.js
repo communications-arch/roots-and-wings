@@ -6149,6 +6149,7 @@
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="class-ideas"><span class="ws-link-icon">\uD83D\uDCA1</span>Class Ideas</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
         h += '</ul>';
         return h;
       }
@@ -6543,7 +6544,22 @@
     'Treasurer': [
       { key: 'membership', title: 'Membership Report' }
     ],
-    'Vice President': [],
+    // Every remaining board role gets the Membership Report read-only —
+    // the server (handleList) allows any board member to view and
+    // returns viewerCanAct=false, which hides the Actions column +
+    // source-sheet link in the modal.
+    'President': [
+      { key: 'membership', title: 'Membership Report' }
+    ],
+    'Vice President': [
+      { key: 'membership', title: 'Membership Report' }
+    ],
+    'Secretary': [
+      { key: 'membership', title: 'Membership Report' }
+    ],
+    'Sustaining Director': [
+      { key: 'membership', title: 'Membership Report' }
+    ],
     // Listed with an empty array so the widget's roleGate (derived below)
     // picks it up. Member Participation is injected dynamically inside
     // the render fn for this role.
@@ -6574,13 +6590,13 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
-    'President': ['todos', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['todos', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['todos', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Secretary': ['roles', 'my-links', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['roles', 'my-links', 'ways-to-help', 'resources'],
+    'Secretary': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
@@ -8138,13 +8154,14 @@
             + ' aria-label="Filter ' + escapeHtmlWs(col.label) + '"'
             + '>' + FUNNEL_SVG + '</button>';
         }
+        var hideCls = col.mobileHide ? ' ws-srt-hide-sm' : '';
         if (sortable) {
-          h += '<th class="ws-sort" data-sort-key="' + escapeHtmlWs(col.key) + '">'
+          h += '<th class="ws-sort' + hideCls + '" data-sort-key="' + escapeHtmlWs(col.key) + '">'
             + '<span class="ws-sort-label">' + escapeHtmlWs(col.label) + '</span>'
             + '<span class="ws-sort-arrow">' + arrow + '</span>'
             + funnel + '</th>';
         } else {
-          h += '<th>' + escapeHtmlWs(col.label) + funnel + '</th>';
+          h += '<th' + (hideCls ? ' class="' + hideCls.trim() + '"' : '') + '>' + escapeHtmlWs(col.label) + funnel + '</th>';
         }
       });
       h += '</tr>';
@@ -8164,7 +8181,7 @@
           h += '<td class="ws-srt-caret">' + (expanded ? '\u25BC' : '\u25B6') + '</td>';
         }
         columns.forEach(function (col) {
-          h += '<td>' + (typeof col.render === 'function' ? col.render(row) : escapeHtmlWs(row[col.key])) + '</td>';
+          h += '<td' + (col.mobileHide ? ' class="ws-srt-hide-sm"' : '') + '>' + (typeof col.render === 'function' ? col.render(row) : escapeHtmlWs(row[col.key])) + '</td>';
         });
         h += '</tr>';
         if (opts.expandable && expanded && typeof opts.renderDetail === 'function') {
@@ -9024,6 +9041,14 @@
         return renderStatusPill(ok ? 'signed' : 'pending', r.signature_date);
       }
     },
+    { key: 'isNewMember', label: 'New', type: 'string',
+      sortValue: function (r) { return r.isNewMember ? 'z' : 'a'; },
+      render: function (r) {
+        return r.isNewMember
+          ? '<span class="ws-wv-new">\u{1F331} New</span>'
+          : '<span class="ws-srt-actions-empty">&mdash;</span>';
+      }
+    },
     { key: 'track', label: 'Track', type: 'string',
       sortValue: function (r) { return r.track || ''; },
       render: function (r) {
@@ -9036,10 +9061,10 @@
       sortValue: function (r) { return (r.kids || []).length; },
       render: function (r) { return String((r.kids || []).length); }
     },
-    { key: 'email', label: 'Email', type: 'string',
+    { key: 'email', label: 'Email', type: 'string', mobileHide: true,
       render: function (r) { return escapeHtmlWs(r.email); }
     },
-    { key: 'created_at', label: 'Registered', type: 'date',
+    { key: 'created_at', label: 'Registered', type: 'date', mobileHide: true,
       render: function (r) { return formatReportDate(r.created_at); }
     },
     // Actions column trailing — Membership Director's Decline only.
@@ -9062,6 +9087,7 @@
   // post-mark-paid reload) don't re-fetch and don't lose user scroll.
   var _membershipRegs = null;
   var _membershipFilter = 'all';
+  var _membershipNewFilter = 'all'; // 'all' | 'new' | 'returning'
   // Pending row-action state — set when the Treasurer/Membership clicks
   // a row's Actions button, cleared on confirm/cancel. Drives the
   // confirm UI at the top of the expansion panel for that row.
@@ -9098,6 +9124,18 @@
         body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load registrations: ' + msg + '</p>';
         return;
       }
+      // Read-only viewers (board members outside Membership/Comms/
+      // Treasurer): the server flags viewerCanAct=false. Hide the
+      // Actions column and the source-sheet link — the data itself is
+      // identical, and the write endpoints stay role-gated server-side.
+      // Older servers don't send the flag; absence means the viewer
+      // passed the old acting-roles-only gate, so default to acting.
+      var canAct = res.data.viewerCanAct !== false;
+      if (!canAct) {
+        var sheetIcon = personDetailCard && personDetailCard.querySelector('.rd-chrome a.rd-icon[href*="docs.google.com"]');
+        if (sheetIcon) sheetIcon.remove();
+      }
+
       var regs = (res.data.registrations || []).map(function (r) {
         // Normalise kids into a consistent array regardless of whether the
         // column came back as JSON string or native JSON.
@@ -9115,6 +9153,7 @@
       var total = regs.length;
       var paidCount = regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; }).length;
       var pendingCount = total - paidCount;
+      var newCount = regs.filter(function (r) { return !!r.isNewMember; }).length;
       // Per-track kid counts. Track is family-level (one value per
       // registration), so each kid inherits their family's bucket.
       var kidsAm = 0, kidsPm = 0, kidsBoth = 0;
@@ -9135,6 +9174,7 @@
       var countsHtml = '<div class="rd-counts">';
       countsHtml += '<span class="ws-wv-ok">' + paidCount + ' Paid</span>';
       countsHtml += '<span class="ws-wv-pending">' + pendingCount + ' Pending</span>';
+      countsHtml += '<span class="ws-wv-new">' + newCount + ' New</span>';
       countsHtml += '<span class="ws-track-count">' + kidsAm   + ' Kids AM only</span>';
       countsHtml += '<span class="ws-track-count">' + kidsPm   + ' Kids PM only</span>';
       countsHtml += '<span class="ws-track-count">' + kidsBoth + ' Kids Both</span>';
@@ -9148,9 +9188,14 @@
       var tableTarget = body.querySelector('#ws-membership-table-target');
 
       function regsForFilter() {
-        if (_membershipFilter === 'paid') return regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; });
-        if (_membershipFilter === 'pending') return regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() !== 'paid'; });
-        return regs;
+        return regs.filter(function (r) {
+          var paid = String(r.payment_status || '').toLowerCase() === 'paid';
+          if (_membershipFilter === 'paid' && !paid) return false;
+          if (_membershipFilter === 'pending' && paid) return false;
+          if (_membershipNewFilter === 'new' && !r.isNewMember) return false;
+          if (_membershipNewFilter === 'returning' && r.isNewMember) return false;
+          return true;
+        });
       }
       function renderTable() {
         // Attach a column-header funnel filter to the Paid column \u2014
@@ -9169,6 +9214,17 @@
               onChange: function (v) { _membershipFilter = v; renderTable(); }
             };
           }
+          if (col.key === 'isNewMember') {
+            col.filter = {
+              options: [
+                { value: 'all',       label: 'Any',       count: total },
+                { value: 'new',       label: 'New',       count: newCount },
+                { value: 'returning', label: 'Returning', count: total - newCount }
+              ],
+              current: _membershipNewFilter,
+              onChange: function (v) { _membershipNewFilter = v; renderTable(); }
+            };
+          }
         });
         renderSortableTable(tableTarget, cols, regsForFilter(), {
           initialSort: { key: 'created_at', dir: 'desc' },
@@ -9185,6 +9241,7 @@
       body.addEventListener('click', function (e) {
         var declineBtn = e.target.closest('.ws-decline-btn');
         if (declineBtn) {
+          if (!canAct) return;
           var dId = parseInt(declineBtn.getAttribute('data-decline-id'), 10);
           _membershipPendingAction = { regId: dId, type: 'decline' };
           var dRow = declineBtn.closest('tr');
@@ -9684,7 +9741,7 @@
 
   function exportMembershipCSV() {
     var regs = membershipFilteredRegs();
-    var headers = ['Main Learning Coach', 'Paid', 'Waiver', 'Track', 'Kids', 'Email', 'Phone', 'Address', 'Registered', 'Returning family'];
+    var headers = ['Main Learning Coach', 'Paid', 'Waiver', 'New member', 'Track', 'Kids', 'Email', 'Phone', 'Address', 'Registered', 'Returning family'];
     function esc(v) {
       var s = String(v == null ? '' : v);
       if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
@@ -9700,6 +9757,7 @@
         esc(r.main_learning_coach),
         esc(paid),
         esc(waiver),
+        esc(r.isNewMember ? 'New' : ''),
         esc(track),
         esc((r.kids || []).length),
         esc(r.email),
@@ -9727,7 +9785,7 @@
     doc += '</head><body>';
     doc += '<h1>Membership Report</h1>';
     doc += '<p class="meta">' + regs.length + ' registration' + (regs.length === 1 ? '' : 's') + ' · printed ' + new Date().toLocaleDateString() + '</p>';
-    doc += '<table><thead><tr><th>Main Learning Coach</th><th>Paid</th><th>Waiver</th><th>Track</th><th>Kids</th><th>Email</th><th>Registered</th></tr></thead><tbody>';
+    doc += '<table><thead><tr><th>Main Learning Coach</th><th>Paid</th><th>Waiver</th><th>New</th><th>Track</th><th>Kids</th><th>Email</th><th>Registered</th></tr></thead><tbody>';
     regs.forEach(function (r) {
       var paid = String(r.payment_status || '').toLowerCase() === 'paid' ? 'PAID' : 'PENDING';
       var waiver = (!!r.waiver_member_agreement && !!r.signature_name) ? 'SIGNED' : 'PENDING';
@@ -9739,6 +9797,7 @@
       doc += '</td>';
       doc += '<td>' + paid + '</td>';
       doc += '<td>' + waiver + '</td>';
+      doc += '<td>' + (r.isNewMember ? 'NEW' : '') + '</td>';
       doc += '<td>' + escapeHtml(track) + '</td>';
       doc += '<td>' + (r.kids || []).length + '</td>';
       doc += '<td>' + escapeHtml(r.email || '') + '</td>';
@@ -13462,6 +13521,7 @@
     if (!btn) return;
     var action = btn.getAttribute('data-resource-action');
     if (action === 'waiver') showWaiverModal();
+    else if (action === 'install-app' && typeof showInstallHelpModal === 'function') showInstallHelpModal();
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
@@ -13592,12 +13652,151 @@
   }
 
   // ──────────────────────────────────────────────
-  // 9. PWA Install Prompt
+  // 9. PWA Install Prompt + cross-browser install help
   // ──────────────────────────────────────────────
+  // The Chromium `beforeinstallprompt` API (the one-tap native install) only
+  // fires in Chrome/Edge/Samsung Internet on Android. It never fires on iOS
+  // Safari (install is manual via Share → Add to Home Screen) and produces only
+  // a throwaway shortcut in Brave (no WebAPK minting server). So the banner
+  // alone leaves iPhone and Brave users stuck. showInstallHelpModal() detects
+  // the environment and gives the right steps; it's also reachable any time from
+  // the Resources widget ("📲 Install the App").
   var deferredPrompt = null;
   var installSection = document.getElementById('install-prompt');
   var installBtn = document.getElementById('installBtn');
   var dismissBtn = document.getElementById('dismissInstall');
+
+  function rwInstallEnv() {
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/.test(ua);
+    // iOS only lets Safari add a standalone home-screen app; CriOS/FxiOS/EdgiOS
+    // (Chrome/Firefox/Edge on iOS) and in-app webviews cannot.
+    var isIOSSafari = isIOS && /Safari/.test(ua) &&
+      !/CriOS|FxiOS|EdgiOS|OPiOS|GSA|FBAN|FBAV|Instagram/.test(ua);
+    var isStandalone = (window.matchMedia &&
+      window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone === true;
+    // navigator.brave exists in Brave; treat its presence as Brave.
+    var isBrave = !!(navigator.brave);
+    return {
+      isIOS: isIOS, isAndroid: isAndroid, isIOSSafari: isIOSSafari,
+      isStandalone: isStandalone, isBrave: isBrave
+    };
+  }
+
+  function showInstallHelpModal() {
+    if (!personDetail || !personDetailCard) return;
+    var env = rwInstallEnv();
+
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<span id="rwInstallModalMark" hidden></span>';
+    html += '<div class="elective-detail" style="max-width:560px;">';
+    html += '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 6px;">Install the App</h2>';
+    html += '<p style="color:#555;margin:0 0 18px;">Add the member portal to your phone for one-tap access — it opens full-screen like a real app, and push notifications for coverage requests work once installed.</p>';
+
+    var body = '';
+    if (env.isStandalone) {
+      body += stepCard('✅', 'You\'re all set',
+        'You\'re already using the installed app right now. Look for the Roots &amp; Wings icon on your home screen or app drawer.');
+    } else if (deferredPrompt) {
+      // Chromium with native install support (Chrome / Edge / Samsung).
+      body += '<button type="button" id="rwInstallNowBtn" class="btn btn-primary" style="width:100%;margin-bottom:14px;">Install now</button>';
+      if (env.isBrave) {
+        body += stepCard('⚠️', 'Using Brave?',
+          'Brave can only add a basic shortcut that may disappear after a while. For a real, permanent app icon, open <strong>www.rootsandwingsindy.com/members.html</strong> in <strong>Chrome</strong> and tap Install there.');
+      } else {
+        body += '<p style="color:#777;font-size:0.92em;margin:0;">Tap “Install now,” then confirm. The app appears in your app drawer.</p>';
+      }
+    } else if (env.isIOSSafari) {
+      body += stepCard('1', 'Tap the Share button',
+        'It\'s the square with an upward arrow ⬆️ — at the bottom of Safari on iPhone, or the top on iPad.');
+      body += stepCard('2', 'Choose “Add to Home Screen”',
+        'Scroll down the share menu if you don\'t see it right away.');
+      body += stepCard('3', 'Tap “Add”',
+        'The Roots &amp; Wings icon lands on your home screen and opens full-screen.');
+    } else if (env.isIOS) {
+      // Chrome/Brave/etc. on iOS — only Safari can install.
+      body += stepCard('🧭', 'Open this page in Safari',
+        'On iPhone &amp; iPad, only Safari can install the app. Open <strong>www.rootsandwingsindy.com/members.html</strong> in Safari.');
+      body += stepCard('➕', 'Then add it',
+        'In Safari, tap the Share button ⬆️ → <strong>Add to Home Screen</strong> → <strong>Add</strong>.');
+    } else if (env.isAndroid) {
+      // Android without a fired prompt — usually Brave/Firefox, or Chrome before
+      // the prompt is ready.
+      if (env.isBrave) {
+        body += stepCard('⚠️', 'Brave makes a shortcut, not an app',
+          'For a real app icon that stays put, open <strong>www.rootsandwingsindy.com/members.html</strong> in <strong>Chrome</strong>.');
+      }
+      body += stepCard('⋮', 'Open Chrome\'s menu',
+        'In <strong>Chrome</strong>, tap the three-dot menu in the top-right corner.');
+      body += stepCard('📲', 'Tap “Install app”',
+        'Choose <strong>Install app</strong> (or “Add to Home screen”), then confirm. It appears in your app drawer like any other app.');
+      body += stepCard('❓', 'Don\'t see “Install app”?',
+        'The app may already be installed — check your app drawer for the Roots &amp; Wings icon. If you\'re in Brave, switch to Chrome.');
+    } else {
+      // Desktop fallback.
+      body += stepCard('🖥️', 'On a computer',
+        'In Chrome or Edge, click the install icon (a monitor with a down-arrow) at the right end of the address bar, then choose Install.');
+    }
+
+    html += body;
+
+    // "Where it works" compatibility table — same guidance as the printable
+    // guide, so members know to avoid Brave (Android) and to use Safari (iOS).
+    html += '<div style="margin-top:20px;padding-top:6px;border-top:1px solid #eee;">';
+    html += '<p style="font-weight:700;color:var(--color-primary-dark,#3d2a5c);margin:14px 0 8px;">Which browser works?</p>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em;">';
+    html += '<thead><tr>' +
+      '<th style="text-align:left;padding:7px 8px;background:rgba(82,58,121,0.06);color:#3d2a5c;">Device</th>' +
+      '<th style="text-align:left;padding:7px 8px;background:rgba(82,58,121,0.06);color:#3d2a5c;">Browser</th>' +
+      '<th style="text-align:left;padding:7px 8px;background:rgba(82,58,121,0.06);color:#3d2a5c;">Works?</th></tr></thead><tbody>';
+    function compatRow(device, browser, mark, cls) {
+      var color = cls === 'yes' ? '#2f7d3b' : (cls === 'no' ? '#c0392b' : '#b8860b');
+      return '<tr>' +
+        '<td style="padding:7px 8px;border-top:1px solid #eee;">' + device + '</td>' +
+        '<td style="padding:7px 8px;border-top:1px solid #eee;color:#555;">' + browser + '</td>' +
+        '<td style="padding:7px 8px;border-top:1px solid #eee;color:' + color + ';font-weight:700;white-space:nowrap;">' + mark + '</td></tr>';
+    }
+    html += compatRow('Android', 'Chrome / Samsung', '✓ Real app', 'yes');
+    html += compatRow('Android', 'Brave, Firefox, Edge', '⚠ Shortcut', 'warn');
+    html += compatRow('iPhone / iPad', 'Safari', '✓ Real app', 'yes');
+    html += compatRow('iPhone / iPad', 'Chrome, Brave', '✗ Link only', 'no');
+    html += '</tbody></table>';
+    html += '<p style="margin:14px 0 0;"><a href="/install.html" target="_blank" rel="noopener" style="color:var(--color-primary,#523A79);font-weight:600;">📄 Open the printable guide (with QR code) →</a></p>';
+    html += '</div>';
+
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+
+    var nowBtn = document.getElementById('rwInstallNowBtn');
+    if (nowBtn) {
+      nowBtn.addEventListener('click', function () {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function () {
+          deferredPrompt = null;
+          closeDetail();
+          if (installSection) installSection.style.display = 'none';
+        });
+      });
+    }
+  }
+  // Expose for the delegated Resources-widget handler.
+  window.showInstallHelpModal = showInstallHelpModal;
+
+  function stepCard(badge, title, text) {
+    return '<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid #eee;">' +
+      '<span style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:30px;border-radius:50%;background:var(--color-primary,#523A79);color:#fff;font-weight:700;font-size:0.95em;">' + badge + '</span>' +
+      '<span style="flex:1 1 auto;"><strong style="display:block;color:#333;">' + title + '</strong>' +
+      '<span style="color:#666;font-size:0.94em;">' + text + '</span></span>' +
+      '</div>';
+  }
 
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
@@ -13605,16 +13804,46 @@
     if (installSection && !localStorage.getItem('rw_install_dismissed')) {
       installSection.style.display = '';
     }
+    // If the install helper is already open (e.g. opened via the QR deep-link
+    // before Chrome armed the prompt), re-render it so the one-tap "Install
+    // now" button appears instead of the manual steps.
+    if (document.getElementById('rwInstallModalMark')) {
+      showInstallHelpModal();
+    }
   });
+
+  // Deep-link: the printed QR code points at /members#install, so scanning it
+  // opens the install helper straight away — one tap on Chrome once the prompt
+  // is armed, clear steps on iPhone. Re-checked on hashchange too.
+  function maybeOpenInstallFromHash() {
+    if (/install/i.test(location.hash || '')) {
+      setTimeout(function () { try { showInstallHelpModal(); } catch (e) { /* ignore */ } }, 600);
+    }
+  }
+  window.addEventListener('hashchange', maybeOpenInstallFromHash);
+  maybeOpenInstallFromHash();
+
+  // iOS Safari never fires beforeinstallprompt, so the banner would otherwise
+  // never show for iPhone users. Surface it ourselves when they could install.
+  (function surfaceIOSInstallBanner() {
+    var env = rwInstallEnv();
+    if (env.isIOSSafari && !env.isStandalone && installSection &&
+        !localStorage.getItem('rw_install_dismissed')) {
+      installSection.style.display = '';
+    }
+  })();
 
   if (installBtn) {
     installBtn.addEventListener('click', function () {
+      // Native one-tap when available; otherwise the guided modal.
       if (deferredPrompt) {
         deferredPrompt.prompt();
         deferredPrompt.userChoice.then(function () {
           deferredPrompt = null;
           if (installSection) installSection.style.display = 'none';
         });
+      } else {
+        showInstallHelpModal();
       }
     });
   }

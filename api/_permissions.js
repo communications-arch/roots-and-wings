@@ -159,6 +159,37 @@ async function canEditAsRole(userEmail, roleTitle) {
   }
 }
 
+// True if `userEmail` holds ANY board role for the effective school
+// year — board mailboxes first (treasurer@ etc.), then role_holders_v2
+// joined to roles.category='board'. Used for read-only board surfaces
+// (e.g. the Membership Report) where any board member may view but
+// only specific roles may act. Fails closed on DB errors.
+async function isBoardMember(userEmail) {
+  if (!userEmail) return false;
+  const email = String(userEmail).toLowerCase();
+  for (const title in BOARD_ROLE_EMAILS) {
+    if (BOARD_ROLE_EMAILS[title].indexOf(email) !== -1) return true;
+  }
+  try {
+    const sql = getDb();
+    const yr = await effectiveSchoolYear(sql);
+    const rows = await sql`
+      SELECT 1
+      FROM role_holders_v2 rhv
+      JOIN roles r ON r.id = rhv.role_id
+      WHERE LOWER(rhv.person_email) = ${email}
+        AND r.category = 'board'
+        AND rhv.school_year = ${yr}
+        AND rhv.ended_at IS NULL
+      LIMIT 1
+    `;
+    return rows.length > 0;
+  } catch (err) {
+    console.error('[perms] isBoardMember DB lookup failed for user=' + email + ':', err);
+    return false;
+  }
+}
+
 // Look up the email of whoever holds `roleTitle` for the active year.
 // Returns the canonical board mailbox as a fallback so 403 responses
 // always surface an actionable address.
@@ -236,6 +267,7 @@ module.exports = {
   isSuperUser,
   canImpersonate,
   canEditAsRole,
+  isBoardMember,
   getRoleHolderEmail,
   getRoleHolderEmails,
   activeSchoolYear,

@@ -2,7 +2,7 @@
   "name": "Roots & Wings Members",
   "short_name": "R&W Members",
   "description": "Member portal for Roots & Wings Indy homeschool co-op",
-  "start_url": "/members.html",
+  "start_url": "/members",
   "display": "standalone",
   "background_color": "#F5F5F0",
   "theme_color": "#523A79",
