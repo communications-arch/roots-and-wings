@@ -6142,6 +6142,7 @@
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">\uD83C\uDF33</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">\u270D</span>Member Agreement &amp; Waivers</button></li>';
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
         h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCB5</span>Reimbursement Form</a></li>';
@@ -13461,6 +13462,7 @@
     if (!btn) return;
     var action = btn.getAttribute('data-resource-action');
     if (action === 'waiver') showWaiverModal();
+    else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
@@ -15410,6 +15412,191 @@
       ? activeSchoolYear().label
       : ACTIVE_SESSION_YEAR;
     return String(yr || '') < active;
+  }
+
+  // ── Organization & Roles (all members) ──
+  // Member-facing org chart opened from the Resources widget: every
+  // board role at the top of its branch, committee roles beneath their
+  // board parent (parent_role_id), current-year holders or an "Open"
+  // pill on each row, and tap-to-expand descriptions (overview + duties)
+  // inline — no stacked modal, so Close always returns to the chart.
+  // Read-only: assignments are managed in Roles Assignments, wording in
+  // the role description editor. Uses the same two GETs as Roles
+  // Manager, which any signed-in Workspace member may read.
+
+  // Pure HTML builder — exported-by-extraction for the regression test
+  // (scripts/test-org-structure.js), so keep it DOM-free.
+  function buildOrgTreeHtml(year, allRoles, holders, note) {
+    var active = (allRoles || []).filter(function (r) { return r.status === 'active'; });
+    var holdersByRole = {};
+    (holders || []).forEach(function (hh) {
+      if (!holdersByRole[hh.role_id]) holdersByRole[hh.role_id] = [];
+      holdersByRole[hh.role_id].push(hh);
+    });
+    var byId = {};
+    active.forEach(function (r) { byId[r.id] = r; });
+    function roleSort(a, b) {
+      return (a.display_order || 0) - (b.display_order || 0) || a.title.localeCompare(b.title);
+    }
+    var boards = active.filter(function (r) { return r.category === 'board'; }).sort(roleSort);
+    var childrenOf = {};
+    active.forEach(function (r) {
+      if (r.category !== 'board' && r.parent_role_id && byId[r.parent_role_id]) {
+        (childrenOf[r.parent_role_id] = childrenOf[r.parent_role_id] || []).push(r);
+      }
+    });
+    Object.keys(childrenOf).forEach(function (k) { childrenOf[k].sort(roleSort); });
+    var orphans = active.filter(function (r) {
+      return r.category !== 'board' && !(r.parent_role_id && byId[r.parent_role_id]);
+    }).sort(roleSort);
+
+    var filled = active.filter(function (r) { return (holdersByRole[r.id] || []).length > 0; }).length;
+    var openCount = active.length - filled;
+
+    var h = '';
+    if (note) h += '<p class="org-note">' + escapeHtml(note) + '</p>';
+    h += '<div class="org-summary">School year <strong>' + escapeHtml(year) + '</strong>';
+    h += ' &middot; ' + filled + ' of ' + active.length + ' roles filled';
+    if (openCount > 0) h += ' &middot; <span class="org-open-count">' + openCount + ' open</span>';
+    h += '</div>';
+
+    function rowHtml(r, depth) {
+      var held = holdersByRole[r.id] || [];
+      var isOpen = held.length === 0;
+      var emoji = r.icon_emoji || (r.category === 'board' ? '\u{1F333}' : '\u{1F33F}');
+      var h2 = '<div class="org-row org-row-depth-' + depth + (isOpen ? ' org-row-vacant' : '') + '">';
+      h2 += '<button type="button" class="org-row-head" data-org-role="' + r.id + '" aria-expanded="false">';
+      h2 += '<span class="org-row-emoji" aria-hidden="true">' + emoji + '</span>';
+      h2 += '<span class="org-row-title">' + escapeHtml(r.title) + '</span>';
+      if (r.job_length) h2 += '<span class="roles-pill roles-pill-term">' + escapeHtml(r.job_length) + '</span>';
+      h2 += '<span class="org-row-holders">';
+      if (isOpen) {
+        h2 += '<span class="org-open-pill">Open &mdash; volunteer!</span>';
+      } else {
+        held.forEach(function (hh) {
+          h2 += '<span class="confirm-roles-chip">' + escapeHtml(hh.person_name || hh.email || '') + '</span>';
+        });
+      }
+      h2 += '</span>';
+      h2 += '<span class="org-row-caret" aria-hidden="true">▾</span>';
+      h2 += '</button>';
+      h2 += '<div class="org-row-detail" hidden>';
+      if (r.overview) h2 += '<p class="rd-overview">' + escapeHtml(r.overview) + '</p>';
+      if (r.duties && r.duties.length > 0) {
+        h2 += '<ul class="rd-duties">';
+        r.duties.forEach(function (d) { h2 += '<li>' + escapeHtml(d) + '</li>'; });
+        h2 += '</ul>';
+      }
+      if (!r.overview && !(r.duties && r.duties.length > 0)) {
+        h2 += '<p class="ws-empty">No description written for this role yet.</p>';
+      }
+      h2 += '</div></div>';
+      return h2;
+    }
+
+    h += '<div class="org-tree">';
+    boards.forEach(function (b) {
+      h += '<section class="org-branch">';
+      h += rowHtml(b, 0);
+      var kids = childrenOf[b.id] || [];
+      if (kids.length > 0) {
+        var named = null;
+        for (var i = 0; i < kids.length; i++) { if (kids[i].committee) { named = kids[i].committee; break; } }
+        if (named) h += '<h5 class="org-branch-head">' + escapeHtml(named) + '</h5>';
+        kids.forEach(function (k) { h += rowHtml(k, 1); });
+      }
+      h += '</section>';
+    });
+    if (orphans.length > 0) {
+      h += '<section class="org-branch"><h5 class="org-branch-head">Other Volunteer Roles</h5>';
+      orphans.forEach(function (k) { h += rowHtml(k, 1); });
+      h += '</section>';
+    }
+    h += '</div>';
+    h += '<p class="org-foot">Interested in an open role? Reach out to the board member it sits under &mdash; or any board member. They’d love the help. \u{1F49A}</p>';
+    return h;
+  }
+
+  function showOrgStructureModal() {
+    var year = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var body = renderReportModal({
+      title: 'Co-op Organization & Roles',
+      subtitle: 'How the co-op is organized — the board, committees, and volunteer roles; who holds each one, and which are open. Tap any role to read what it involves.',
+      meta: '',
+      icons: [],
+      bodyId: 'org-structure-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading organization…</p>'
+    });
+    if (!body) return;
+    loadOrgStructure(year, false);
+  }
+
+  function loadOrgStructure(year, isFallback) {
+    var body = document.getElementById('org-structure-body');
+    if (!body) return;
+    Promise.all([
+      fetch('/api/cleaning?action=roles&includeArchived=0', { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(year), { headers: rwAuthHeaders() })
+    ])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }));
+      })
+      .then(function (results) {
+        if (!results[0].ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((results[0].data && results[0].data.error) || 'Could not load roles.') + '</p>';
+          return;
+        }
+        var roles = Array.isArray(results[0].data.roles) ? results[0].data.roles : [];
+        var holders = (results[1].ok && Array.isArray(results[1].data.holders)) ? results[1].data.holders : [];
+        // Early-summer gap: the April-1 pivot can point at a year whose
+        // assignments haven't been entered yet. Fall back to the prior
+        // year's holders (once) so the chart shows the real org instead
+        // of everything Open.
+        if (holders.length === 0 && !isFallback) {
+          var m = /^(\d{4})-(\d{4})$/.exec(year);
+          if (m) {
+            var prev = (parseInt(m[1], 10) - 1) + '-' + (parseInt(m[2], 10) - 1);
+            fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(prev), { headers: rwAuthHeaders() })
+              .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (prevRes) {
+                var prevHolders = (prevRes.ok && Array.isArray(prevRes.data.holders)) ? prevRes.data.holders : [];
+                if (prevHolders.length > 0) {
+                  renderOrgStructureBody(prev, roles, prevHolders,
+                    'Assignments for ' + year + ' haven’t been entered yet — showing ' + prev + '.');
+                } else {
+                  renderOrgStructureBody(year, roles, [], 'No role assignments have been entered for ' + year + ' yet.');
+                }
+              })
+              .catch(function () { renderOrgStructureBody(year, roles, [], null); });
+            return;
+          }
+        }
+        renderOrgStructureBody(year, roles, holders, null);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderOrgStructureBody(year, roles, holders, note) {
+    var body = document.getElementById('org-structure-body');
+    if (!body) return;
+    body.innerHTML = buildOrgTreeHtml(year, roles, holders, note);
+    body.querySelectorAll('.org-row-head').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var detail = btn.parentElement.querySelector('.org-row-detail');
+        if (!detail) return;
+        var nowOpen = detail.hasAttribute('hidden');
+        if (nowOpen) detail.removeAttribute('hidden');
+        else detail.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+        btn.classList.toggle('org-row-head-expanded', nowOpen);
+      });
+    });
   }
 
   // Confirm Role Holders modal — purpose-built view that lists the 7
