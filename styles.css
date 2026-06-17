@@ -10388,6 +10388,45 @@ button.staff-role:hover {
   .ws-waivers-table th,
   .ws-waivers-table td { padding: 7px 7px; }
 }
+
+/* ── Members summary card (My Workspace, board members) ──────────────
+   At-a-glance stat tiles painted by loadMembersSummary(). Tiles use the
+   shared design tokens (border/radius/heading font/plum); the track row
+   reuses the global count-strip pills (.rd-counts + .ws-track-count), and
+   the action uses the global .ws-link-btn — so the card reads as part of
+   the same system as the Membership Report it links to. */
+.ws-msum-loading { font-style: italic; color: var(--color-text-light); }
+.ws-msum-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.ws-msum-stat {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-msum-stat-new {
+  background: rgba(var(--color-primary-rgb), 0.06);
+  border-color: rgba(var(--color-primary-rgb), 0.22);
+}
+.ws-msum-num {
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-primary-dark);
+}
+.ws-msum-lab {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
 .ws-waivers-table {
   width: 100%;
   border-collapse: collapse;

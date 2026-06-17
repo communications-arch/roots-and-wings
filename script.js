@@ -3495,6 +3495,17 @@
   }
   var ACTIVE_YEAR = activeSchoolYear();
 
+  // Short season label for headings: '2026-2027' → '26/27'. Falls back to
+  // the raw label if it isn't the long YYYY-YYYY form. Used by the board
+  // "26/27 Members" summary card + snapshot title so the season rolls over
+  // automatically each year (and can be re-derived from live data).
+  function seasonShortLabel(label) {
+    var m = String(label || '').match(/^(\d{4})-(\d{4})$/);
+    if (m) return m[1].slice(2) + '/' + m[2].slice(2);
+    return String(label || '');
+  }
+  var SEASON_SHORT = seasonShortLabel(ACTIVE_YEAR.label);
+
   // 2026-2027 deposit-only: the board decided this year's My Family
   // billing card shows only the membership/deposit fee — no per-session
   // class fees.
@@ -6411,6 +6422,32 @@
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
       }
     },
+    'members-summary': {
+      // At-a-glance card of this season's registered families for the whole
+      // board. Headline counts (returning/new families, kids by track) are
+      // painted by loadMembersSummary() in afterRender from /api/tour?list=
+      // registrations — so it reflects new sign-ups on each workspace load
+      // and rolls the season label/data over automatically when next year's
+      // registration reopens (the endpoint is scoped to the active season).
+      // "View family details" opens the Membership Report (the operational
+      // table for acting roles; read-only — Actions hidden — for the rest,
+      // via viewerCanAct).
+      title: SEASON_SHORT + ' Members',
+      roleGate: ['President', 'Vice President', 'Secretary', 'Sustaining Director', 'Treasurer', 'Communications Director', 'Membership Director'],
+      render: function () {
+        var h = '<p class="ws-body-hint">A live snapshot of this season’s registered families.</p>';
+        h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
+        h += '<p class="ws-part-meter-caption ws-msum-loading">Loading members…</p>';
+        h += '</div>';
+        // Same list-wrapped link as the Reports widget, so it picks up the
+        // global .ws-link-list li .ws-link-btn styling (plum, icon, hover).
+        h += '<ul class="ws-link-list"><li><button type="button" class="ws-link-btn" data-report-key="membership"><span class="ws-link-icon">📊</span>View family details</button></li></ul>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadMembersSummary === 'function') loadMembersSummary();
+      }
+    },
     'reports': {
       title: 'Reports',
       // roleGate is filled in below from Object.keys(ROLE_REPORTS) so
@@ -6544,22 +6581,16 @@
     'Treasurer': [
       { key: 'membership', title: 'Membership Report' }
     ],
-    // Every remaining board role gets the Membership Report read-only —
-    // the server (handleList) allows any board member to view and
-    // returns viewerCanAct=false, which hides the Actions column +
-    // source-sheet link in the modal.
-    'President': [
-      { key: 'membership', title: 'Membership Report' }
-    ],
-    'Vice President': [
-      { key: 'membership', title: 'Membership Report' }
-    ],
-    'Secretary': [
-      { key: 'membership', title: 'Membership Report' }
-    ],
-    'Sustaining Director': [
-      { key: 'membership', title: 'Membership Report' }
-    ],
+    // President, Secretary, and Sustaining Director no longer get the
+    // operational Membership Report. Board members now see the read-only
+    // "26/27 Members" summary card + snapshot (the members-summary widget)
+    // instead; the Membership Report stays scoped to the acting roles
+    // (Treasurer, Membership Director, Communications Director).
+    //
+    // Vice President keeps a Reports widget for Member Participation
+    // (injected in the render fn below); the empty array keeps the derived
+    // roleGate picking VP up without re-adding the Membership Report.
+    'Vice President': [],
     // Listed with an empty array so the widget's roleGate (derived below)
     // picks it up. Member Participation is injected dynamically inside
     // the render fn for this role.
@@ -6590,13 +6621,13 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
-    'President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Secretary': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'President': ['todos', 'members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Secretary': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
@@ -9168,6 +9199,12 @@
       // Modal meta line \u2014 total registrations.
       var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
       if (metaEl) metaEl.textContent = total + ' registration' + (total === 1 ? '' : 's');
+
+      // Board members (read-only, viewerCanAct=false) see the same
+      // Membership Report table as the acting roles, minus the Actions
+      // column + source-sheet link (handled above + in the column spec).
+      // The "26/27 Members" workspace card is the board's at-a-glance
+      // entry point; its "View family details" opens this report.
 
       // Always-visible counts strip \u2014 same pill shape as the in-row
       // Paid / Signed badges so the summary maps onto the columns.
@@ -17431,6 +17468,82 @@
         recomputeTodoEmptyState();
       })
       .catch(function (err) { console.warn('[loadTreasurerPendingCount] network error:', err); });
+  }
+
+  // Paints the board "26/27 Members" summary card. Fetches the active
+  // season's registrations and tallies returning/new families + kids by
+  // track. Re-derives the season label from the data the server actually
+  // returns, so when next year's registration opens (DEFAULT_SEASON bumps)
+  // the card heading + counts roll over on the next workspace render. Each
+  // workspace render re-runs this, so new sign-ups appear without a reload.
+  function loadMembersSummary() {
+    var body = document.getElementById('ws-msum-body');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { body.innerHTML = '<p class="ws-empty">Sign in to see member counts.</p>'; return; }
+    fetch('/api/tour?list=registrations', { headers: rwAuthHeaders() })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
+          .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .then(function (res) {
+        var el = document.getElementById('ws-msum-body');
+        if (!el) return;
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
+          el.innerHTML = '<p class="ws-empty ws-wv-err">Could not load members: ' + escapeHtmlWs(msg) + '</p>';
+          return;
+        }
+        var regs = Array.isArray(res.data && res.data.registrations) ? res.data.registrations : [];
+
+        // Roll the card title to whatever season the server is serving.
+        var dataSeason = (regs.length && regs[0].season) ? regs[0].season : ACTIVE_YEAR.label;
+        var titleEl = document.querySelector('[data-widget-type="members-summary"] .workspace-card-header h4');
+        if (titleEl) titleEl.textContent = seasonShortLabel(dataSeason) + ' Members';
+
+        if (regs.length === 0) {
+          el.innerHTML = '<p class="ws-empty">No registrations yet this season.</p>';
+          return;
+        }
+
+        var total = regs.length;
+        var newFams = regs.filter(function (r) { return !!r.isNewMember; }).length;
+        var returningFams = total - newFams;
+        var kidsAm = 0, kidsPm = 0, kidsBoth = 0, kidsOther = 0, totalKids = 0;
+        regs.forEach(function (r) {
+          var kids = [];
+          try { kids = Array.isArray(r.kids) ? r.kids : (typeof r.kids === 'string' ? JSON.parse(r.kids) : []); } catch (e) { kids = []; }
+          var n = kids.length;
+          totalKids += n;
+          var t = String(r.track || '');
+          if      (t === 'Morning Only')   kidsAm   += n;
+          else if (t === 'Afternoon Only') kidsPm   += n;
+          else if (t === 'Both')           kidsBoth += n;
+          else                             kidsOther += n;
+        });
+
+        var h = '<div class="ws-msum-grid">';
+        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + returningFams + '</span><span class="ws-msum-lab">Returning ' + (returningFams === 1 ? 'family' : 'families') + '</span></div>';
+        h += '<div class="ws-msum-stat ws-msum-stat-new"><span class="ws-msum-num">' + newFams + '</span><span class="ws-msum-lab">🌱 New ' + (newFams === 1 ? 'family' : 'families') + '</span></div>';
+        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + total + '</span><span class="ws-msum-lab">Total ' + (total === 1 ? 'family' : 'families') + '</span></div>';
+        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + totalKids + '</span><span class="ws-msum-lab">' + (totalKids === 1 ? 'Child' : 'Children') + '</span></div>';
+        h += '</div>';
+        // Track row reuses the global count-strip pills (.rd-counts +
+        // .ws-track-count) — the exact treatment the Membership Report's
+        // own "Kids AM only" strip uses, so the two read as one system.
+        h += '<div class="rd-counts" aria-label="Children by track">';
+        h += '<span class="ws-track-count">' + kidsAm + ' Kids AM only</span>';
+        h += '<span class="ws-track-count">' + kidsPm + ' Kids PM only</span>';
+        h += '<span class="ws-track-count">' + kidsBoth + ' Kids Both</span>';
+        if (kidsOther) h += '<span class="ws-track-count">' + kidsOther + ' Kids Other</span>';
+        h += '</div>';
+        el.innerHTML = h;
+      })
+      .catch(function (err) {
+        console.warn('[loadMembersSummary] network error:', err);
+        var el = document.getElementById('ws-msum-body');
+        if (el) el.innerHTML = '<p class="ws-empty">Could not load members right now.</p>';
+      });
   }
 
   function loadPmSubmissionsPendingCount() {

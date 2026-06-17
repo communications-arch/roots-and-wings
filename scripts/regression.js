@@ -221,6 +221,7 @@ const unitTests = [
   'scripts/test-waiver-access.js',
   'scripts/test-new-member.js',
   'scripts/test-org-structure.js',
+  'scripts/test-members-summary.js',
 ];
 
 for (const rel of unitTests) {
