@@ -8153,6 +8153,19 @@
       return columns[0];
     }
 
+    // Nearest scrollable ancestor (the report modal's .person-detail-card),
+    // used to preserve scroll position across re-renders.
+    function findScrollableAncestor(el) {
+      var p = el && el.parentElement;
+      while (p) {
+        var oy = '';
+        try { oy = getComputedStyle(p).overflowY; } catch (e) {}
+        if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+        p = p.parentElement;
+      }
+      return null;
+    }
+
     function sortedIndexes() {
       var col = currentColumn();
       var type = col.type || 'string';
@@ -8220,7 +8233,15 @@
         }
       });
       h += '</tbody></table></div>';
+      // Preserve the modal's scroll position across re-renders. Replacing
+      // the table's innerHTML momentarily collapses its height, so the
+      // browser clamps the scroll container's scrollTop to 0 (the "jumps to
+      // top" bug when expanding a row). Snapshot before, restore after — so
+      // the clicked row stays under the cursor.
+      var _scroller = findScrollableAncestor(containerEl);
+      var _savedScrollTop = _scroller ? _scroller.scrollTop : 0;
       containerEl.innerHTML = h;
+      if (_scroller) _scroller.scrollTop = _savedScrollTop;
 
       // Funnel button → filter popover. Wired BEFORE the th-click sort
       // handler with stopPropagation so clicking the funnel doesn't
@@ -9069,7 +9090,9 @@
       sortValue: function (r) { return (!!r.waiver_member_agreement && !!r.signature_name) ? 'z' : 'a'; },
       render: function (r) {
         var ok = !!r.waiver_member_agreement && !!r.signature_name;
-        return renderStatusPill(ok ? 'signed' : 'pending', r.signature_date);
+        // The signed date is the registration timestamp (created_at), not
+        // the formerly hand-typed signature_date which could be any value.
+        return renderStatusPill(ok ? 'signed' : 'pending', r.created_at);
       }
     },
     { key: 'isNewMember', label: 'New', type: 'string',
@@ -9956,7 +9979,7 @@
     h += fld('Member Agreement', yn(r.waiver_member_agreement));
     h += fld('Liability Waiver', yn(r.waiver_liability));
     h += fld('Photo Consent', r.waiver_photo_consent ? escapeHtmlWs(r.waiver_photo_consent) : '<em>\u2014</em>');
-    h += fld('Signature', escapeHtmlWs(r.signature_name) + (r.signature_date ? ' on ' + escapeHtmlWs(r.signature_date) : ''));
+    h += fld('Signature', escapeHtmlWs(r.signature_name) + (r.created_at ? ' on ' + escapeHtmlWs(formatReportDate(r.created_at)) : ''));
     if (r.student_signature) h += fld('Adult student signatures', escapeHtmlWs(r.student_signature));
     h += fld('Payment status', escapeHtmlWs(r.payment_status));
     h += fld('Payment amount', r.payment_amount != null ? '$' + escapeHtmlWs(r.payment_amount) : '<em>\u2014</em>');

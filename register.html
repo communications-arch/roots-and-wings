@@ -294,11 +294,7 @@
         <div class="reg-field">
           <label for="reg-signature">Main Learning Coach Signature <span class="reg-req" aria-hidden="true">*</span></label>
           <input type="text" id="reg-signature" placeholder="Type your full legal name as your electronic signature" aria-required="true">
-          <p class="reg-field-hint">The Main Learning Coach — the adult who attends co-op with your student(s) each week — should type their name here.</p>
-        </div>
-        <div class="reg-field" style="max-width: 240px;">
-          <label for="reg-sig-date">Date <span class="reg-req" aria-hidden="true">*</span></label>
-          <input type="date" id="reg-sig-date" aria-required="true">
+          <p class="reg-field-hint">The Main Learning Coach — the adult who attends co-op with your student(s) each week — should type their name here. The date is recorded automatically when you submit.</p>
         </div>
 
         <div class="reg-field" id="reg-student-sig-wrap" style="display:none;">
@@ -866,7 +862,6 @@
       var notes = document.getElementById('reg-notes').value.trim();
       var kids = getKids();
       var sig = document.getElementById('reg-signature').value.trim();
-      var sigDate = document.getElementById('reg-sig-date').value.trim();
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('reg-form-error', 'Please enter a valid email.'); markInvalid('reg-email'); return; }
       if (!coach) { showError('reg-form-error', 'Main Learning Coach is required.'); markInvalid('reg-coach'); return; }
@@ -881,7 +876,6 @@
         if (!kids[i].birth_date) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a birth date.'); return; }
       }
       if (!sig) { showError('reg-form-error', 'Please type your name to sign the agreement.'); markInvalid('reg-signature'); return; }
-      if (!sigDate) { showError('reg-form-error', 'Signature date is required.'); markInvalid('reg-sig-date'); return; }
 
       var backupCoaches = getBackupCoaches();
       for (var b = 0; b < backupCoaches.length; b++) {
@@ -922,7 +916,6 @@
         waiver_data_storage: true,
         waiver_liability: true,
         signature_name: sig,
-        signature_date: sigDate,
         student_signature: studentSig
       };
 
@@ -1106,11 +1099,6 @@
         return r.json().then(function (d) { return d; }).catch(function () { return null; });
       }).catch(function () { return null; });
     }
-
-    // Default signature date to today
-    var todayStr = new Date().toISOString().slice(0, 10);
-    var sigDateEl = document.getElementById('reg-sig-date');
-    if (sigDateEl && !sigDateEl.value) sigDateEl.value = todayStr;
 
     // Initialize step 1
     showStep(1);

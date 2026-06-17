@@ -145,15 +145,10 @@
           <input type="checkbox" id="wv-photo-optout" style="width:18px;height:18px;accent-color:var(--color-primary);flex-shrink:0;margin-top:2px;">
           <span><strong>Opt out of photo and film.</strong> Check this box and Roots and Wings will not use my photo, video, or quote in any co-op material.</span>
         </label>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
-          <div style="flex:1 1 260px;min-width:0;">
-            <label for="wv-sig-name" style="display:block;font-weight:600;color:var(--color-primary-dark);margin-bottom:6px;">Signature <span aria-hidden="true" style="color:var(--color-error,#c0392b);">*</span></label>
-            <input type="text" id="wv-sig-name" placeholder="Type your full legal name as your electronic signature" required style="width:100%;padding:10px 12px;border:1px solid #ccc;border-radius:8px;font-size:1rem;box-sizing:border-box;">
-          </div>
-          <div style="flex:0 0 200px;">
-            <label for="wv-sig-date" style="display:block;font-weight:600;color:var(--color-primary-dark);margin-bottom:6px;">Date <span aria-hidden="true" style="color:var(--color-error,#c0392b);">*</span></label>
-            <input type="date" id="wv-sig-date" required style="width:100%;padding:10px 12px;border:1px solid #ccc;border-radius:8px;font-size:1rem;box-sizing:border-box;">
-          </div>
+        <div style="margin-bottom:14px;">
+          <label for="wv-sig-name" style="display:block;font-weight:600;color:var(--color-primary-dark);margin-bottom:6px;">Signature <span aria-hidden="true" style="color:var(--color-error,#c0392b);">*</span></label>
+          <input type="text" id="wv-sig-name" placeholder="Type your full legal name as your electronic signature" required style="width:100%;padding:10px 12px;border:1px solid #ccc;border-radius:8px;font-size:1rem;box-sizing:border-box;">
+          <p style="margin:6px 0 0;font-size:0.85rem;color:#666;">Signing today — the date is recorded automatically.</p>
         </div>
         <button type="submit" class="btn btn-primary">Sign &amp; Submit</button>
       </form>
@@ -242,7 +237,6 @@
       var status = document.getElementById('wv-sign-status');
       var form = document.getElementById('wv-sign-form');
       var nameInput = document.getElementById('wv-sig-name');
-      var dateInput = document.getElementById('wv-sig-date');
       var heroTitle = document.getElementById('wv-hero-title');
       var heroSub = document.getElementById('wv-hero-sub');
 
@@ -282,8 +276,7 @@
           }
           // Don't prefill the signature field — the BLC must type their
           // own name as the electronic signature for it to actually count
-          // as a signature.
-          dateInput.value = new Date().toISOString().slice(0, 10);
+          // as a signature. The sign date is stamped server-side.
           status.style.display = 'none';
         })
         .catch(function () {
@@ -294,9 +287,7 @@
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         var sig = (nameInput.value || '').trim();
-        var date = (dateInput.value || '').trim();
         if (!sig) { showStatus('err', 'Please type your name to sign.'); nameInput.focus(); return; }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showStatus('err', 'Please enter a signature date.'); dateInput.focus(); return; }
         showStatus('info', 'Submitting…');
         var photoOptOut = !!(document.getElementById('wv-photo-optout') || {}).checked;
         fetch('/api/tour', {
@@ -306,7 +297,6 @@
             kind: 'backup-waiver-sign',
             token: token,
             signature_name: sig,
-            signature_date: date,
             photo_consent: !photoOptOut
           })
         }).then(function (r) {

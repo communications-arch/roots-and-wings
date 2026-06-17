@@ -26,6 +26,15 @@ const REGISTRATION_FEE = 40;
 const DEFAULT_SEASON = '2026-2027';
 const VALID_TRACKS = ['Morning Only', 'Afternoon Only', 'Both', 'Other'];
 
+// "Today" as YYYY-MM-DD in America/Indianapolis. The waiver/registration
+// sign date is stamped server-side from this (the forms no longer collect
+// a date field), so a signer can't enter a stray date. en-CA → YYYY-MM-DD.
+function indySignDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
 // Session calendar — DEFENSIVE FALLBACK only. Phase B moved the source
 // of truth to the co_op_sessions DB table (managed by President + VP
 // via the Co-op Calendar workspace modal). loadSessionDatesFromDb()
@@ -473,7 +482,9 @@ async function handleRegistration(body, req, res) {
   // Default 'yes' keeps the pre-opt-out behavior for legacy clients.
   const waiver_photo_consent = body.waiver_photo_consent === 'no' ? 'no' : 'yes';
   const signature_name = String(body.signature_name || '').trim();
-  const signature_date = String(body.signature_date || '').trim();
+  // Stamped server-side (the form no longer asks for a date) so the signed
+  // date is always the real day of signing, never a value a signer typed.
+  const signature_date = indySignDate();
   const student_signature = String(body.student_signature || '').trim();
   const season = String(body.season || DEFAULT_SEASON).trim();
   const kids = Array.isArray(body.kids) ? body.kids : [];
@@ -520,7 +531,6 @@ async function handleRegistration(body, req, res) {
   if (!waiver_member_agreement) return res.status(400).json({ error: 'Member agreement acknowledgment required.' });
   if (!waiver_liability) return res.status(400).json({ error: 'Liability waiver acknowledgment required.' });
   if (!signature_name) return res.status(400).json({ error: 'Signature required.' });
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(signature_date)) return res.status(400).json({ error: 'Signature date required.' });
   if (!isCashCheck && !paypal_transaction_id) return res.status(400).json({ error: 'Payment transaction ID required.' });
 
   if (email.length > 200 || main_learning_coach.length > 200 || address.length > 500 ||
@@ -1145,13 +1155,14 @@ async function handleBackupWaiverInfo(req, res) {
 async function handleBackupWaiverSign(body, req, res) {
   const token = String(body.token || '').trim();
   const signature_name = String(body.signature_name || '').trim();
-  const signature_date = String(body.signature_date || '').trim();
+  // Stamped server-side (form no longer collects a date) — always the real
+  // day of signing, never a value the signer typed.
+  const signature_date = indySignDate();
   // Default to consent=true if the client didn't send the field (older clients).
   const photo_consent = body.photo_consent !== false;
   if (!token || !/^[a-f0-9]{8,64}$/i.test(token)) return res.status(400).json({ error: 'Invalid token.' });
   if (!signature_name) return res.status(400).json({ error: 'Please type your name to sign.' });
   if (signature_name.length > 200) return res.status(400).json({ error: 'Signature too long.' });
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(signature_date)) return res.status(400).json({ error: 'Signature date required (YYYY-MM-DD).' });
 
   const sql = getSql();
   try {
@@ -1690,6 +1701,11 @@ async function handleWaiversReport(req, res) {
   }
   try {
     const sql = getSql();
+    // Scope to one school year (default = active season) so a prior-year
+    // signature doesn't count as "signed" for the new year — a family that
+    // signed mid-2025-2026 must re-sign for 2026-2027. Matches how the
+    // Membership Report is season-scoped.
+    const season = String(req.query.season || DEFAULT_SEASON);
     // Single query against waiver_signatures. sent_at uses COALESCE so the
     // Resend action surfaces the latest send timestamp instead of the
     // original insert date — matters when Comms is prioritizing pending rows.
@@ -1706,6 +1722,7 @@ async function handleWaiversReport(req, res) {
              r.main_learning_coach
       FROM waiver_signatures ws
       LEFT JOIN registrations r ON r.id = ws.registration_id
+      WHERE ws.season = ${season}
       ORDER BY COALESCE(ws.last_sent_at, ws.sent_at, ws.signed_at, ws.created_at) DESC
     `;
     // Re-shape into the three buckets the Waivers Report renderer
@@ -1737,7 +1754,10 @@ async function handleWaiversReport(req, res) {
         registration.push({
           source: 'registration', id: ws.id,
           name: ws.signature_name || ws.name, email: ws.email,
-          signed_at: ws.signature_date || ws.signed_at,
+          // Use the real server sign timestamp, not the (formerly
+          // hand-typed) signature_date — the latter could be any date the
+          // signer entered (e.g. a stray 2020). signed_at = NOW() at sign.
+          signed_at: ws.signed_at,
           sent_at: ws.signed_at,
           sent_by: ws.main_learning_coach || ws.name,
           season: ws.season, context: 'Main Learning Coach',
@@ -1756,6 +1776,7 @@ async function handleWaiversReport(req, res) {
              student_signature, waiver_photo_consent, created_at
       FROM registrations
       WHERE student_signature IS NOT NULL AND student_signature <> ''
+        AND season = ${season}
     `;
     regsForStudents.forEach(r => {
       const ss = String(r.student_signature || '').trim();
@@ -1772,7 +1793,9 @@ async function handleWaiversReport(req, res) {
           id: r.id + '-' + kidName,
           name: signedName,
           email: r.email,
-          signed_at: r.signature_date || r.created_at,
+          // Real registration timestamp, not the (formerly hand-typed)
+          // signature_date — see the main_lc note above.
+          signed_at: r.created_at,
           sent_at: r.created_at,
           sent_by: r.main_learning_coach,
           season: r.season,
@@ -1816,13 +1839,12 @@ async function handleWaiverSend(body, req, res) {
     const sql = getSql();
     const token = crypto.randomUUID().replace(/-/g, '');
 
-    // One-offs aren't tied to a registration. Derive a season from "now"
-    // (Aug-May = same year; Jun-Jul rolls into upcoming year) so the
-    // unique (person_email, season) index stays meaningful.
-    const now = new Date();
-    const yr = now.getUTCFullYear();
-    const mo = now.getUTCMonth() + 1;
-    const season = mo >= 8 ? `${yr}-${yr + 1}` : `${yr - 1}-${yr}`;
+    // One-offs aren't tied to a registration, so tag them to the active
+    // registration season (DEFAULT_SEASON) — same year registrations use.
+    // The old calendar-derived season mis-tagged spring sends: a waiver
+    // sent in April 2026 (for the upcoming 2026-2027 year) landed in
+    // 2025-2026 and never surfaced in the new year's Waivers Report.
+    const season = DEFAULT_SEASON;
 
     await sql`
       INSERT INTO waiver_signatures (
