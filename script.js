@@ -8152,9 +8152,13 @@
       return columns[0];
     }
 
-    // Nearest scrollable ancestor (the report modal's .person-detail-card),
-    // used to preserve scroll position across re-renders.
+    // The scroll container to preserve across re-renders. Prefer the known
+    // modal scroll containers by class (definitive — the report modal always
+    // scrolls inside .person-detail-card); fall back to the first
+    // scrollable-by-computed-style ancestor for any other host.
     function findScrollableAncestor(el) {
+      var known = el && el.closest && el.closest('.person-detail-card, .directory-modal-card');
+      if (known) return known;
       var p = el && el.parentElement;
       while (p) {
         var oy = '';
@@ -8288,8 +8292,28 @@
           tr.addEventListener('click', function (e) {
             if (e.target.closest('button, a, input, label, select, textarea, .ws-srt-actions')) return;
             var idx = this.getAttribute('data-row-idx');
-            state.expanded[idx] = !state.expanded[idx];
-            render();
+            var willExpand = !state.expanded[idx];
+            state.expanded[idx] = willExpand;
+            // Toggle just THIS row's detail in place rather than calling
+            // render(). A full re-render replaces the table's innerHTML,
+            // which makes the browser reset the modal scroll container to
+            // the top — the "jumps to top when I expand a scrolled row"
+            // bug. Surgical insert/remove leaves the scroll untouched.
+            var caret = this.querySelector('.ws-srt-caret');
+            var next = this.nextElementSibling;
+            var hasDetail = !!(next && next.classList && next.classList.contains('ws-srt-detail-row'));
+            if (willExpand) {
+              if (caret) caret.textContent = '▼';
+              if (!hasDetail && typeof opts.renderDetail === 'function') {
+                var cc = columns.length + (opts.expandable ? 1 : 0);
+                this.insertAdjacentHTML('afterend',
+                  '<tr class="ws-srt-detail-row"><td colspan="' + cc + '"><div class="ws-srt-detail">' +
+                  opts.renderDetail(rows[idx]) + '</div></td></tr>');
+              }
+            } else {
+              if (caret) caret.textContent = '▶';
+              if (hasDetail) next.parentNode.removeChild(next);
+            }
           });
         });
       }
