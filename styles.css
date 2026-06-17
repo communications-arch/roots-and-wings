@@ -3771,6 +3771,20 @@ p + p { margin-top: 1rem; }
   align-items: center;
 }
 
+/* Count-strip pills that double as one-tap filter toggles (Membership
+   Report). Layered onto the existing .ws-wv-* / .ws-track-count pill
+   colors — this only resets the native button chrome and adds the
+   hover/active affordance. Active = plum ring; click again to clear. */
+.rd-count-pill {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+.rd-count-pill:hover { filter: brightness(0.94); }
+.rd-count-pill:focus-visible,
+.rd-count-pill.is-active { box-shadow: 0 0 0 2px var(--color-primary); }
+
 /* Per-column filter funnel + its popover. Replaces the prior
    in-thead filter <tr> (which didn't dock cleanly under the column-
    label row). Funnel sits inline next to the column label; click

@@ -6441,7 +6441,7 @@
         h += '</div>';
         // Same list-wrapped link as the Reports widget, so it picks up the
         // global .ws-link-list li .ws-link-btn styling (plum, icon, hover).
-        h += '<ul class="ws-link-list"><li><button type="button" class="ws-link-btn" data-report-key="membership"><span class="ws-link-icon">📊</span>View family details</button></li></ul>';
+        h += '<ul class="ws-link-list"><li><button type="button" class="ws-link-btn" data-report-key="membership"><span class="ws-link-icon">📊</span>View Family Details</button></li></ul>';
         return h;
       },
       afterRender: function () {
@@ -9119,6 +9119,7 @@
   var _membershipRegs = null;
   var _membershipFilter = 'all';
   var _membershipNewFilter = 'all'; // 'all' | 'new' | 'returning'
+  var _membershipTrackFilter = 'all'; // 'all' | 'am' | 'pm' | 'both' — set by the count-strip track pills
   // Pending row-action state — set when the Treasurer/Membership clicks
   // a row's Actions button, cleared on confirm/cancel. Drives the
   // confirm UI at the top of the expansion panel for that row.
@@ -9207,23 +9208,54 @@
       // entry point; its "View family details" opens this report.
 
       // Always-visible counts strip \u2014 same pill shape as the in-row
-      // Paid / Signed badges so the summary maps onto the columns.
-      var countsHtml = '<div class="rd-counts">';
-      countsHtml += '<span class="ws-wv-ok">' + paidCount + ' Paid</span>';
-      countsHtml += '<span class="ws-wv-pending">' + pendingCount + ' Pending</span>';
-      countsHtml += '<span class="ws-wv-new">' + newCount + ' New</span>';
-      countsHtml += '<span class="ws-track-count">' + kidsAm   + ' Kids AM only</span>';
-      countsHtml += '<span class="ws-track-count">' + kidsPm   + ' Kids PM only</span>';
-      countsHtml += '<span class="ws-track-count">' + kidsBoth + ' Kids Both</span>';
-      countsHtml += '</div>';
-
-      if (regs.length === 0) {
-        body.innerHTML = countsHtml + '<p class="ws-empty">No registrations yet for this season.</p>';
-        return;
+      // Paid / Signed badges so the summary maps onto the columns. Each
+      // pill is also a one-tap filter toggle: clicking "Paid"/"Pending"
+      // drives _membershipFilter, "New" drives _membershipNewFilter, and
+      // the track pills drive _membershipTrackFilter. Active pills carry a
+      // plum ring; clicking an active pill clears that filter. The shared
+      // state keeps the pills in sync with the column-header funnels.
+      function countPill(val, active, cls, label, title) {
+        return '<button type="button" class="rd-count-pill ' + cls + (active ? ' is-active' : '') +
+          '" data-mfilter="' + val + '" aria-pressed="' + (active ? 'true' : 'false') +
+          '" title="' + title + '">' + label + '</button>';
       }
-      body.innerHTML = countsHtml + '<div id="ws-membership-table-target"></div>';
+      function buildCountsPills() {
+        var h = '';
+        h += countPill('paid',    _membershipFilter === 'paid',      'ws-wv-ok',       paidCount + ' Paid',         'Show only paid registrations');
+        h += countPill('pending', _membershipFilter === 'pending',   'ws-wv-pending',  pendingCount + ' Pending',   'Show only pending registrations');
+        h += countPill('new',     _membershipNewFilter === 'new',    'ws-wv-new',      newCount + ' New',           'Show only new families');
+        h += countPill('am',      _membershipTrackFilter === 'am',   'ws-track-count', kidsAm + ' Kids AM only',    'Show only AM-only families');
+        h += countPill('pm',      _membershipTrackFilter === 'pm',   'ws-track-count', kidsPm + ' Kids PM only',    'Show only PM-only families');
+        h += countPill('both',    _membershipTrackFilter === 'both', 'ws-track-count', kidsBoth + ' Kids Both',     'Show only AM + PM families');
+        return h;
+      }
+
+      body.innerHTML = '<div class="rd-counts" id="ws-membership-counts"></div>' +
+        (regs.length === 0
+          ? '<p class="ws-empty">No registrations yet for this season.</p>'
+          : '<div id="ws-membership-table-target"></div>');
+      var countsEl = body.querySelector('#ws-membership-counts');
+      function renderCounts() { countsEl.innerHTML = buildCountsPills(); }
+      renderCounts();
+      if (regs.length === 0) return;
       var tableTarget = body.querySelector('#ws-membership-table-target');
 
+      // Count-strip pills as filter toggles (sibling to the column funnels).
+      countsEl.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-mfilter]');
+        if (!btn) return;
+        var f = btn.getAttribute('data-mfilter');
+        if (f === 'paid' || f === 'pending') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
+        else if (f === 'new')               _membershipNewFilter = (_membershipNewFilter === 'new') ? 'all' : 'new';
+        else                                _membershipTrackFilter = (_membershipTrackFilter === f) ? 'all' : f;
+        renderCounts();
+        renderTable();
+      });
+
+      function trackBucketOf(r) {
+        var t = String(r.track || '');
+        return t === 'Morning Only' ? 'am' : t === 'Afternoon Only' ? 'pm' : t === 'Both' ? 'both' : 'other';
+      }
       function regsForFilter() {
         return regs.filter(function (r) {
           var paid = String(r.payment_status || '').toLowerCase() === 'paid';
@@ -9231,6 +9263,7 @@
           if (_membershipFilter === 'pending' && paid) return false;
           if (_membershipNewFilter === 'new' && !r.isNewMember) return false;
           if (_membershipNewFilter === 'returning' && r.isNewMember) return false;
+          if (_membershipTrackFilter !== 'all' && trackBucketOf(r) !== _membershipTrackFilter) return false;
           return true;
         });
       }
@@ -9248,7 +9281,7 @@
                 { value: 'pending', label: 'Pending', count: pendingCount }
               ],
               current: _membershipFilter,
-              onChange: function (v) { _membershipFilter = v; renderTable(); }
+              onChange: function (v) { _membershipFilter = v; renderCounts(); renderTable(); }
             };
           }
           if (col.key === 'isNewMember') {
@@ -9259,7 +9292,7 @@
                 { value: 'returning', label: 'Returning', count: total - newCount }
               ],
               current: _membershipNewFilter,
-              onChange: function (v) { _membershipNewFilter = v; renderTable(); }
+              onChange: function (v) { _membershipNewFilter = v; renderCounts(); renderTable(); }
             };
           }
         });
