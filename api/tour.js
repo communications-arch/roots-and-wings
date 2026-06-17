@@ -1701,11 +1701,12 @@ async function handleWaiversReport(req, res) {
   }
   try {
     const sql = getSql();
-    // Scope to one school year (default = active season) so a prior-year
-    // signature doesn't count as "signed" for the new year — a family that
-    // signed mid-2025-2026 must re-sign for 2026-2027. Matches how the
-    // Membership Report is season-scoped.
-    const season = String(req.query.season || DEFAULT_SEASON);
+    // Optional season scope. When ?season= is passed the report is scoped to
+    // that school year (so a prior-year signature doesn't count as signed for
+    // a new year); with no param it shows every season so the report never
+    // goes dark just because the active registration season has little data
+    // yet. The client passes the season it wants to view.
+    const season = req.query.season ? String(req.query.season) : null;
     // Single query against waiver_signatures. sent_at uses COALESCE so the
     // Resend action surfaces the latest send timestamp instead of the
     // original insert date — matters when Comms is prioritizing pending rows.
@@ -1722,7 +1723,7 @@ async function handleWaiversReport(req, res) {
              r.main_learning_coach
       FROM waiver_signatures ws
       LEFT JOIN registrations r ON r.id = ws.registration_id
-      WHERE ws.season = ${season}
+      WHERE (${season}::text IS NULL OR ws.season = ${season})
       ORDER BY COALESCE(ws.last_sent_at, ws.sent_at, ws.signed_at, ws.created_at) DESC
     `;
     // Re-shape into the three buckets the Waivers Report renderer
@@ -1776,7 +1777,7 @@ async function handleWaiversReport(req, res) {
              student_signature, waiver_photo_consent, created_at
       FROM registrations
       WHERE student_signature IS NOT NULL AND student_signature <> ''
-        AND season = ${season}
+        AND (${season}::text IS NULL OR season = ${season})
     `;
     regsForStudents.forEach(r => {
       const ss = String(r.student_signature || '').trim();
