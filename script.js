@@ -7020,10 +7020,9 @@
   function loadWaiversReport(body) {
     if (!body) body = document.getElementById('ws-waivers-report-body');
     if (!body) return;
-    var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/tour?waivers_report=1', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       if (!res.ok) {
@@ -8241,7 +8240,12 @@
       var _scroller = findScrollableAncestor(containerEl);
       var _savedScrollTop = _scroller ? _scroller.scrollTop : 0;
       containerEl.innerHTML = h;
-      if (_scroller) _scroller.scrollTop = _savedScrollTop;
+      if (_scroller) {
+        _scroller.scrollTop = _savedScrollTop;
+        // Belt-and-suspenders: if a post-render reflow re-clamps scrollTop,
+        // restore once more on the next frame.
+        requestAnimationFrame(function () { _scroller.scrollTop = _savedScrollTop; });
+      }
 
       // Funnel button → filter popover. Wired BEFORE the th-click sort
       // handler with stopPropagation so clicking the funnel doesn't
@@ -9452,7 +9456,7 @@
     // Lightweight counts endpoint — single aggregate query, no per-row
     // payload. Keeps the To Do card snappy as the waiver table grows.
     fetch('/api/tour?waivers_counts=1', {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })

@@ -1658,13 +1658,15 @@ async function handleSendWelcomeEmail(body, req, res) {
 // waiver_signatures — no JOIN, no per-row payload. Same auth gate as
 // the full report so the card stays Comms-only.
 async function handleWaiversCounts(req, res) {
-  const user = await verifyWorkspaceAuth(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  if (!(await canEditAsRole(user.email, 'Communications Director'))) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const isComms = isSuperUser(auth.email) ||
+    await canEditAsRole(auth.email, 'Communications Director');
+  if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can view this report.',
-      youAre: user.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
@@ -1689,13 +1691,19 @@ async function handleWaiversCounts(req, res) {
 }
 
 async function handleWaiversReport(req, res) {
-  const user = await verifyWorkspaceAuth(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  if (!(await canEditAsRole(user.email, 'Communications Director'))) {
+  // View-As aware (mirrors the Membership + Merch reports): super users and
+  // dev/preview testers reach this via X-View-As into Comms. Without it, a
+  // tester signed in as their own @rootsandwingsindy.com email 403s even
+  // though they can impersonate.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const isComms = isSuperUser(auth.email) ||
+    await canEditAsRole(auth.email, 'Communications Director');
+  if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can view this report.',
-      youAre: user.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
