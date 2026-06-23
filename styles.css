@@ -11773,6 +11773,22 @@ button.staff-role:hover {
   font-size: 0.84rem;
 }
 
+/* Subtle inline text link rendered as a button (opens a modal rather than
+   navigating). Used in the Ways to Help card to point at Organization &
+   Roles and the Class Ideas board. */
+.ws-inline-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ws-inline-link:hover { color: var(--color-primary-dark); }
+
 /* ---------- PM Submissions Report (modal opened from PM Class Scheduling) ---------- */
 .pmrep-modal {
   width: min(980px, 96vw);

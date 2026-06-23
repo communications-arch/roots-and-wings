@@ -2870,18 +2870,21 @@ async function handleProfilePhoto(body, req, res) {
 
 // ── Tour Pipeline: list (Membership Director) ──
 async function handleTourList(req, res) {
-  const user = await verifyWorkspaceAuth(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   // Tour Pipeline is owned exclusively by the Membership Director.
-  // canEditAsRole already short-circuits true for app-wide super users
-  // (communications@, vicepresident@) so they keep access via View As
-  // without needing to be listed explicitly here.
-  const isMembership = await canEditAsRole(user.email, 'Membership Director');
+  // View-As-aware: when a super user / dev tester is impersonating the
+  // Membership Director, auth.email is the effective (impersonated)
+  // email so the role gate matches the role they're acting as.
+  // canEditAsRole also short-circuits true for app-wide super users
+  // (communications@, vicepresident@), so they keep access either way.
+  // auth.realEmail is preserved for the youAre field.
+  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
   if (!isMembership) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership Director can view the tour pipeline.',
-      youAre: user.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
@@ -2914,17 +2917,21 @@ async function handleTourList(req, res) {
 
 // ── Tour Pipeline: update status / scheduling / notes (Membership) ──
 async function handleTourUpdate(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  const isMembership = await canEditAsRole(user.email, 'Membership Director');
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  // View-As-aware role gate (see handleTourList). The action itself is
+  // still attributed to the real signed-in person via auth.realEmail in
+  // updated_by + the status-history `by` field below.
+  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
   if (!isMembership) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership Director can update tour records.',
-      youAre: user.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
+  const actorEmail = auth.realEmail;
 
   const id = parseInt(body.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Valid tour id is required.' });
@@ -2971,7 +2978,7 @@ async function handleTourUpdate(body, req, res) {
     if (newStatus && newStatus !== existing.status) {
       history.push({
         at: new Date().toISOString(),
-        by: user.email,
+        by: actorEmail,
         from: existing.status,
         to: newStatus,
         note: transitionNote || undefined
@@ -2987,7 +2994,7 @@ async function handleTourUpdate(body, req, res) {
         decline_reason  = ${targetDeclineReason},
         status_history  = ${JSON.stringify(history)}::jsonb,
         updated_at      = NOW(),
-        updated_by      = ${user.email}
+        updated_by      = ${actorEmail}
       WHERE id = ${id}
     `;
 

@@ -6273,9 +6273,9 @@
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit an Afternoon Class</button><span class="ws-part-submit-hint">Teach an elective you love — propose an idea for an upcoming session.</span></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit an Afternoon Class</button><span class="ws-part-submit-hint">Teach an elective you love — propose an idea for an upcoming session. Need inspiration? <button type="button" class="ws-inline-link" data-resource-action="class-ideas">Browse class ideas</button>.</span></p>';
         if (open.length === 0) {
-          h += '<p class="ws-empty">Every volunteer seat is filled right now. If you want to start something new, pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
+          h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
           h += '<p class="ws-body-hint">Open committee seats — email <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> to claim one.</p>';
           h += '<ul class="ws-opportunities">';
@@ -7530,11 +7530,10 @@
         // Tours) in lockstep with the cache after every status change.
         updateMembershipTourTodoCounts();
 
-        var c = localStorage.getItem('rw_google_credential');
         _toursPendingPosts++;
         fetch('/api/tour', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + c },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify(payload)
         }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
           .then(function (rres) {
@@ -7670,11 +7669,10 @@
     // mutation version at fetch-start; if it has advanced by the
     // time the response lands, an optimistic update happened
     // mid-flight and our response is stale — discard it.
-    var cred = localStorage.getItem('rw_google_credential');
     var fetchVersion = _toursMutationVersion;
     fetch('/api/tour?list=tours', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       if (_toursMutationVersion !== fetchVersion || _toursPendingPosts > 0) {
@@ -17218,7 +17216,7 @@
     if (!cred) return;
     var fetchVersion = _toursMutationVersion;
     fetch('/api/tour?list=tours', {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
