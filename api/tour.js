@@ -2873,12 +2873,14 @@ async function handleTourList(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   // Tour Pipeline is owned exclusively by the Membership Director.
-  // View-As-aware: when a super user / dev tester is impersonating the
-  // Membership Director, auth.email is the effective (impersonated)
-  // email so the role gate matches the role they're acting as.
-  // canEditAsRole also short-circuits true for app-wide super users
-  // (communications@, vicepresident@), so they keep access either way.
-  // auth.realEmail is preserved for the youAre field.
+  // View-As-aware: a super user (communications@/vicepresident@) reaches
+  // this report by View-As'ing into Membership Director. There is NO
+  // super-user short-circuit in canEditAsRole — it only matches the role
+  // mailbox or the role_holders_v2 holder — so the X-View-As header must
+  // flow through. verifyWorkspaceAuthWithViewAs sets auth.email to the
+  // impersonated target (the role holder) so the gate matches; on prod
+  // only canImpersonate() super users may do this. auth.realEmail is
+  // preserved for the youAre field.
   const isMembership = await canEditAsRole(auth.email, 'Membership Director');
   if (!isMembership) {
     const expected = await getRoleHolderEmail('Membership Director');
