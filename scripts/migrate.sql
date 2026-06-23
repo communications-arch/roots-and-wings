@@ -946,6 +946,46 @@ VALUES ('2025-2026', '')
 ON CONFLICT (school_year) DO NOTHING;
 
 -- ──────────────────────────────────────────────
+-- Morning Class Builder (Membership Director)
+-- ──────────────────────────────────────────────
+-- The Membership Director groups each upcoming year's morning-track,
+-- paid kids into the brand age-band classes (Greenhouse, Saplings, …,
+-- Pigeons). Mirrors the Afternoon Schedule Builder's draft → finalize
+-- lifecycle:
+--   - morning_class_assignments holds the DRAFT placement per kid. Keyed
+--     the same way as class_signup_picks / the kids table: school_year +
+--     family_email + first name, stored lowercased so ON CONFLICT upserts
+--     are case-insensitive. Editing here NEVER touches the live roster.
+--   - morning_class_plans carries one row per school_year with the
+--     finalize lock (status 'draft' | 'final'). Finalizing copies every
+--     draft class_group into kids.class_group (the live Directory /
+--     Classlist field); reopening flips status back to 'draft'.
+CREATE TABLE IF NOT EXISTS morning_class_assignments (
+  id              SERIAL PRIMARY KEY,
+  school_year     TEXT NOT NULL,
+  family_email    TEXT NOT NULL,
+  kid_first_name  TEXT NOT NULL,
+  class_group     TEXT NOT NULL DEFAULT '',
+  updated_by      TEXT NOT NULL DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- family_email + kid_first_name are written lowercased, so a plain-column
+-- unique index doubles as the case-insensitive key the upsert infers on.
+CREATE UNIQUE INDEX IF NOT EXISTS morning_class_assignments_key_idx
+  ON morning_class_assignments (school_year, family_email, kid_first_name);
+CREATE INDEX IF NOT EXISTS morning_class_assignments_year_idx
+  ON morning_class_assignments (school_year);
+
+CREATE TABLE IF NOT EXISTS morning_class_plans (
+  school_year    TEXT PRIMARY KEY,
+  status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'final')),
+  finalized_at   TIMESTAMPTZ,
+  finalized_by   TEXT NOT NULL DEFAULT '',
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by     TEXT NOT NULL DEFAULT ''
+);
+
+-- ──────────────────────────────────────────────
 -- Merchandise (public order form + portal report)
 -- ──────────────────────────────────────────────
 -- Customers fill out a public form on the homepage Merch section; rows

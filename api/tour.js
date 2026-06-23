@@ -3415,6 +3415,239 @@ async function handleMerchInventoryUpdate(body, req, res) {
   }
 }
 
+// ──────────────────────────────────────────────
+// Morning Class Builder (Membership Director)
+// ──────────────────────────────────────────────
+// The brand age-band classes, in age order. Kept in sync with the client
+// `ageGroupData` (script.js) and the public-site age-group cards. The
+// server only needs the names to validate an assignment payload.
+const MORNING_GROUP_NAMES = [
+  'Greenhouse', 'Saplings', 'Sassafras', 'Oaks', 'Maples',
+  'Birch', 'Willows', 'Cedars', 'Pigeons'
+];
+// Morning-inclusive registration tracks (see VALID_TRACKS).
+const MORNING_TRACKS = ['Morning Only', 'Both'];
+
+// Age a kid will be at the start of the upcoming school year (Sept 1 of
+// the fall year), so grouping reflects how old they'll be in class — not
+// their age the day the Membership Director happens to be planning.
+// Returns null for missing/invalid birth dates.
+function fallYearOf(schoolYear) {
+  const m = String(schoolYear || '').match(/^(\d{4})/);
+  return m ? parseInt(m[1], 10) : new Date().getFullYear();
+}
+function ageAsOfFall(birthDate, schoolYear) {
+  if (!birthDate) return null;
+  const bd = new Date(birthDate);
+  if (isNaN(bd.getTime())) return null;
+  const ref = new Date(Date.UTC(fallYearOf(schoolYear), 8, 1)); // Sept 1
+  let age = ref.getUTCFullYear() - bd.getUTCFullYear();
+  const mo = ref.getUTCMonth() - bd.getUTCMonth();
+  if (mo < 0 || (mo === 0 && ref.getUTCDate() < bd.getUTCDate())) age--;
+  return age >= 0 ? age : 0;
+}
+
+// Shared Membership-Director gate for the Morning Class Builder endpoints.
+// View-As-aware (see handleTourList). Returns the auth object on success,
+// or sends the 401/403 and returns null.
+async function requireMembershipDirector(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const ok = await canEditAsRole(auth.email, 'Membership Director');
+  if (!ok) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    res.status(403).json({
+      error: 'Only the Membership Director can use the Morning Class Builder.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown — sheet lookup failed)'
+    });
+    return null;
+  }
+  return auth;
+}
+
+// GET ?morning_builder=1&school_year=YYYY-YYYY
+// Roster of paid, morning-track kids for the season (each with
+// age-as-of-fall, allergies, family placement notes, and current draft
+// group) plus the plan's finalize status.
+async function handleMorningBuilderGet(req, res) {
+  const auth = await requireMembershipDirector(req, res);
+  if (!auth) return;
+  const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
+  try {
+    const sql = getSql();
+    const regs = await sql`
+      SELECT main_learning_coach, existing_family_name, track, placement_notes, kids
+      FROM registrations
+      WHERE season = ${schoolYear}
+        AND LOWER(payment_status) = 'paid'
+        AND track = ANY(${MORNING_TRACKS})
+    `;
+    const draftRows = await sql`
+      SELECT family_email, kid_first_name, class_group
+      FROM morning_class_assignments
+      WHERE school_year = ${schoolYear}
+    `;
+    const draftMap = {};
+    draftRows.forEach(r => { draftMap[r.family_email + '|' + r.kid_first_name] = r.class_group; });
+    const planRows = await sql`
+      SELECT status, finalized_at, finalized_by FROM morning_class_plans
+      WHERE school_year = ${schoolYear} LIMIT 1
+    `;
+    const plan = planRows[0] || { status: 'draft', finalized_at: null, finalized_by: '' };
+
+    const roster = [];
+    const familyEmails = new Set();
+    regs.forEach(r => {
+      const familyName = deriveFamilyName(r.main_learning_coach, r.existing_family_name);
+      const familyEmail = deriveFamilyEmail(r.main_learning_coach, familyName);
+      if (!familyEmail) return;
+      familyEmails.add(familyEmail);
+      const kids = Array.isArray(r.kids) ? r.kids : [];
+      kids.forEach(k => {
+        const display = String((k && (k.name || k.first_name)) || '').trim();
+        if (!display) return;
+        const first = display.split(/\s+/)[0].toLowerCase();
+        if (!first) return;
+        roster.push({
+          key: familyEmail + '|' + first,
+          family_email: familyEmail,
+          family_name: familyName,
+          first_name: first,
+          display_name: display,
+          birth_date: k.birth_date || null,
+          age: ageAsOfFall(k.birth_date, schoolYear),
+          placement_notes: String(r.placement_notes || '').trim(),
+          allergies: '',
+          group: draftMap[familyEmail + '|' + first] || ''
+        });
+      });
+    });
+
+    // Enrich allergies from the normalized kids table (registration kids
+    // JSON doesn't carry them). Matched on the same family_email + first
+    // name key the kids table is unique on.
+    if (familyEmails.size > 0) {
+      const kidRows = await sql`
+        SELECT family_email, first_name, allergies
+        FROM kids
+        WHERE family_email = ANY(${Array.from(familyEmails)})
+      `;
+      const kidMap = {};
+      kidRows.forEach(kr => {
+        kidMap[String(kr.family_email).toLowerCase() + '|' + String(kr.first_name || '').toLowerCase()] = kr;
+      });
+      roster.forEach(item => {
+        const kr = kidMap[item.key];
+        if (kr) item.allergies = String(kr.allergies || '').trim();
+      });
+    }
+
+    // Youngest → oldest, then by name (unknown ages last).
+    roster.sort((a, b) => {
+      const aa = (a.age == null) ? 999 : a.age;
+      const bb = (b.age == null) ? 999 : b.age;
+      if (aa !== bb) return aa - bb;
+      return a.display_name.localeCompare(b.display_name);
+    });
+
+    return res.status(200).json({
+      school_year: schoolYear,
+      roster,
+      plan: { status: plan.status, finalized_at: plan.finalized_at, finalized_by: plan.finalized_by },
+      groups: MORNING_GROUP_NAMES,
+      viewerCanAct: true
+    });
+  } catch (err) {
+    console.error('morning-builder get error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='morning-assign' — upsert one kid's draft group ('' clears it).
+// Blocked when the plan is finalized (must reopen first).
+async function handleMorningAssign(body, req, res) {
+  const auth = await requireMembershipDirector(req, res);
+  if (!auth) return;
+  const schoolYear = String(body.school_year || DEFAULT_SEASON);
+  const familyEmail = String(body.family_email || '').trim().toLowerCase();
+  const firstName = String(body.kid_first_name || '').trim().toLowerCase();
+  const group = String(body.class_group || '').trim();
+  if (!familyEmail || !firstName) {
+    return res.status(400).json({ error: 'family_email and kid_first_name are required.' });
+  }
+  if (group && MORNING_GROUP_NAMES.indexOf(group) === -1) {
+    return res.status(400).json({ error: 'Unknown class group: ' + group });
+  }
+  try {
+    const sql = getSql();
+    const planRows = await sql`SELECT status FROM morning_class_plans WHERE school_year = ${schoolYear} LIMIT 1`;
+    if (planRows[0] && planRows[0].status === 'final') {
+      return res.status(409).json({ error: 'These groups are finalized. Reopen for editing first.' });
+    }
+    await sql`
+      INSERT INTO morning_class_assignments
+        (school_year, family_email, kid_first_name, class_group, updated_by, updated_at)
+      VALUES (${schoolYear}, ${familyEmail}, ${firstName}, ${group}, ${auth.realEmail}, NOW())
+      ON CONFLICT (school_year, family_email, kid_first_name) DO UPDATE SET
+        class_group = EXCLUDED.class_group,
+        updated_by  = EXCLUDED.updated_by,
+        updated_at  = NOW()
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('morning-assign error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='morning-finalize' — finalize=true writes every non-empty
+// draft group into the live kids.class_group and locks the plan;
+// finalize=false reopens it for editing.
+async function handleMorningFinalize(body, req, res) {
+  const auth = await requireMembershipDirector(req, res);
+  if (!auth) return;
+  const schoolYear = String(body.school_year || DEFAULT_SEASON);
+  const finalize = body.finalize === true || String(body.finalize) === 'true';
+  try {
+    const sql = getSql();
+    if (!finalize) {
+      await sql`
+        INSERT INTO morning_class_plans (school_year, status, finalized_at, finalized_by, updated_by, updated_at)
+        VALUES (${schoolYear}, 'draft', NULL, '', ${auth.realEmail}, NOW())
+        ON CONFLICT (school_year) DO UPDATE SET
+          status = 'draft', finalized_at = NULL, updated_by = ${auth.realEmail}, updated_at = NOW()
+      `;
+      return res.status(200).json({ ok: true, status: 'draft' });
+    }
+    const draftRows = await sql`
+      SELECT family_email, kid_first_name, class_group
+      FROM morning_class_assignments
+      WHERE school_year = ${schoolYear} AND class_group <> ''
+    `;
+    let written = 0;
+    for (const d of draftRows) {
+      const updated = await sql`
+        UPDATE kids SET class_group = ${d.class_group}, updated_at = NOW()
+        WHERE LOWER(family_email) = ${d.family_email} AND LOWER(first_name) = ${d.kid_first_name}
+        RETURNING id
+      `;
+      written += updated.length;
+    }
+    await sql`
+      INSERT INTO morning_class_plans (school_year, status, finalized_at, finalized_by, updated_by, updated_at)
+      VALUES (${schoolYear}, 'final', NOW(), ${auth.realEmail}, ${auth.realEmail}, NOW())
+      ON CONFLICT (school_year) DO UPDATE SET
+        status = 'final', finalized_at = NOW(), finalized_by = ${auth.realEmail},
+        updated_by = ${auth.realEmail}, updated_at = NOW()
+    `;
+    return res.status(200).json({ ok: true, status: 'final', written });
+  } catch (err) {
+    console.error('morning-finalize error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -3430,6 +3663,7 @@ module.exports = async function handler(req, res) {
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
+    if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -3455,6 +3689,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'registration-invite') return handleRegistrationInvite(body, req, res);
     if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
+    if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
+    if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 

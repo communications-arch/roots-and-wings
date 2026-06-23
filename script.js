@@ -6350,6 +6350,20 @@
         if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       }
     },
+    'morning-builder': {
+      // Membership Director only — groups the upcoming year's morning-track
+      // kids into the brand age-band classes (Greenhouse … Pigeons), then
+      // finalizes into the official class roster.
+      title: 'Morning Class Builder',
+      roleGate: ['Membership Director'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Sort next year’s morning kids into age-group classes, balance the counts, then finalize.</p>';
+        h += '<ul class="ws-link-list">';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">🌱</span>Open Morning Class Builder</button></li>';
+        h += '</ul>';
+        return h;
+      }
+    },
     'todos': {
       // Per-role action queue. Items show only when the active role has
       // something waiting (e.g. Treasurer sees pending cash/check
@@ -6623,7 +6637,7 @@
   var WORKSPACE_DEFAULTS = {
     'President': ['todos', 'members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'members-summary', 'morning-builder', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Secretary': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
@@ -13646,6 +13660,7 @@
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
+    else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
     else if (action === 'pm-submissions-report' && typeof showPmSubmissionsModal === 'function') showPmSubmissionsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
@@ -17973,6 +17988,267 @@
     var ov = document.getElementById('sbOverlay');
     if (ov) ov.remove();
     document.body.style.overflow = '';
+  }
+
+  // ──────────────────────────────────────────────
+  // Morning Class Builder (Membership Director)
+  // ──────────────────────────────────────────────
+  // Mirrors the Afternoon Schedule Builder: a draggable two-pane modal
+  // (unassigned kids → age-group classes) backed by /api/tour
+  // ?morning_builder + kind=morning-assign / morning-finalize. Draft →
+  // finalize lifecycle; finalizing writes the live kids.class_group.
+  // Group list + typical ranges mirror the public-site ageGroupData; the
+  // displayed range per group is auto-derived from the kids placed in it.
+  var MORNING_GROUP_ORDER = [
+    { name: 'Greenhouse', emoji: '🌱', range: '0–2' },
+    { name: 'Saplings',   emoji: '🌿', range: '3–5' },
+    { name: 'Sassafras',  emoji: '🍃', range: '5–6' },
+    { name: 'Oaks',       emoji: '🌳', range: '7–8' },
+    { name: 'Maples',     emoji: '🍁', range: '8–9' },
+    { name: 'Birch',      emoji: '🌲', range: '9–10' },
+    { name: 'Willows',    emoji: '🌾', range: '10–11' },
+    { name: 'Cedars',     emoji: '🌲', range: '12–13' },
+    { name: 'Pigeons',    emoji: '🕊️', range: '14+' }
+  ];
+
+  var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false };
+
+  function showMorningClassBuilder() {
+    if (document.getElementById('mcbOverlay')) return;
+    var html = '<div class="sb-overlay" id="mcbOverlay">';
+    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Morning Class Builder">';
+    html += '<button class="detail-close" id="mcbCloseBtn" aria-label="Close">&times;</button>';
+    html += '<div class="sb-header">';
+    html += '<h3 style="margin:0;">Morning Class Builder</h3>';
+    html += '<label class="sb-year-label">School Year ';
+    html += '<select id="mcbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
+    html += '<option value="2026-2027">2026–2027</option>';
+    html += '<option value="2027-2028">2027–2028</option>';
+    html += '</select></label>';
+    html += '</div>';
+    html += '<div class="sb-body" id="mcbBody"><em style="color:var(--color-text-light);">Loading roster…</em></div>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    document.body.style.overflow = 'hidden';
+    var overlay = document.getElementById('mcbOverlay');
+    document.getElementById('mcbCloseBtn').addEventListener('click', closeMorningClassBuilder);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeMorningClassBuilder(); });
+    var yearSel = document.getElementById('mcbYearSelect');
+    yearSel.value = morningBuilderState.schoolYear;
+    yearSel.addEventListener('change', function () {
+      morningBuilderState.schoolYear = this.value;
+      loadMorningClassBuilder();
+    });
+    loadMorningClassBuilder();
+  }
+
+  function closeMorningClassBuilder() {
+    var ov = document.getElementById('mcbOverlay');
+    if (ov) ov.remove();
+    document.body.style.overflow = '';
+  }
+
+  function loadMorningClassBuilder() {
+    var body = document.getElementById('mcbBody');
+    if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading roster…</em>';
+    fetch('/api/tour?morning_builder=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
+      headers: rwAuthHeaders()
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || 'error';
+          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+          if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + msg + '</p>';
+          return;
+        }
+        morningBuilderState.roster = Array.isArray(res.data.roster) ? res.data.roster : [];
+        morningBuilderState.plan = res.data.plan || { status: 'draft' };
+        morningBuilderState.loaded = true;
+        renderMorningClassBuilder();
+      })
+      .catch(function (err) {
+        if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + ((err && err.message) || 'unknown') + '</p>';
+      });
+  }
+
+  // Auto age range for a group, derived from the kids placed in it.
+  function mcbGroupAgeRange(items) {
+    var ages = items.map(function (k) { return k.age; }).filter(function (a) { return a != null; });
+    if (!ages.length) return '';
+    var lo = Math.min.apply(null, ages), hi = Math.max.apply(null, ages);
+    return lo === hi ? ('Age ' + lo) : ('Ages ' + lo + '–' + hi);
+  }
+
+  // Soft-balance flag: among populated groups, flag 'big' if well above the
+  // mean and 'small' if well below — only once ≥3 groups have kids, so
+  // early grouping doesn't flash colors.
+  function mcbCountFlags(counts) {
+    var nonzero = counts.filter(function (c) { return c > 0; });
+    if (nonzero.length < 3) return counts.map(function () { return ''; });
+    var mean = nonzero.reduce(function (a, b) { return a + b; }, 0) / nonzero.length;
+    return counts.map(function (c) {
+      if (c === 0) return '';
+      if (c > mean * 1.5) return 'mcb-count-big';
+      if (c < mean * 0.5) return 'mcb-count-small';
+      return '';
+    });
+  }
+
+  function mcbKidChip(k, isFinal) {
+    var age = (k.age == null) ? '?' : k.age;
+    var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
+    var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
+    return '<div class="mcb-kid"' + (isFinal ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '">'
+      + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
+      + '<span class="mcb-kid-age">age ' + age + '</span>'
+      + allergy + note
+      + '</div>';
+  }
+
+  function renderMorningClassBuilder() {
+    var body = document.getElementById('mcbBody');
+    if (!body) return;
+    var roster = morningBuilderState.roster;
+    var isFinal = morningBuilderState.plan && morningBuilderState.plan.status === 'final';
+    var unassigned = roster.filter(function (k) { return !k.group; });
+    var total = roster.length;
+
+    var html = '<div class="mcb-workflow">';
+    if (isFinal) {
+      var fb = morningBuilderState.plan.finalized_by || '';
+      var fa = morningBuilderState.plan.finalized_at ? formatReportDate(morningBuilderState.plan.finalized_at) : '';
+      html += '<span class="mcb-final-badge">✓ Finalized</span>';
+      html += '<span class="mcb-workflow-note">' + (fa ? 'on ' + escapeHtmlWs(fa) : '') + (fb ? ' by ' + escapeHtmlWs(fb) : '') + ' — written to the official class roster.</span>';
+      html += '<button type="button" class="sc-btn" id="mcbReopenBtn">Reopen for editing</button>';
+    } else {
+      html += '<span class="mcb-workflow-note">Drag kids into a class. ' + total + ' kid' + (total === 1 ? '' : 's') + ' · <strong>' + unassigned.length + '</strong> unplaced.</span>';
+      html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize groups</button>';
+    }
+    html += '</div>';
+
+    if (!total) {
+      html += '<p class="ws-empty">No paid, morning-track kids registered for ' + escapeHtmlWs(morningBuilderState.schoolYear) + ' yet.</p>';
+      body.innerHTML = html;
+      wireMorningWorkflow();
+      return;
+    }
+
+    html += '<div class="mcb-layout">';
+    html += '<div class="mcb-pool' + (isFinal ? ' mcb-locked' : '') + '">';
+    html += '<div class="mcb-col-head">Unassigned <span class="mcb-count">' + unassigned.length + '</span></div>';
+    html += '<div class="mcb-col-body" data-drop-group="">';
+    unassigned.forEach(function (k) { html += mcbKidChip(k, isFinal); });
+    html += '</div></div>';
+
+    var counts = MORNING_GROUP_ORDER.map(function (g) {
+      return roster.filter(function (k) { return k.group === g.name; }).length;
+    });
+    var flags = mcbCountFlags(counts);
+    html += '<div class="mcb-groups">';
+    MORNING_GROUP_ORDER.forEach(function (g, i) {
+      var members = roster.filter(function (k) { return k.group === g.name; });
+      var autoRange = mcbGroupAgeRange(members);
+      html += '<div class="mcb-group' + (isFinal ? ' mcb-locked' : '') + '">';
+      html += '<div class="mcb-col-head">';
+      html += '<span class="mcb-group-name">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</span>';
+      html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>';
+      html += '</div>';
+      html += '<div class="mcb-group-range">' + (autoRange ? escapeHtmlWs(autoRange) : '<span class="mcb-range-default">typ. ' + g.range + '</span>') + '</div>';
+      html += '<div class="mcb-col-body" data-drop-group="' + escapeHtmlWs(g.name) + '">';
+      members.forEach(function (k) { html += mcbKidChip(k, isFinal); });
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+
+    body.innerHTML = html;
+    wireMorningWorkflow();
+    if (!isFinal) wireMorningDnD();
+  }
+
+  function wireMorningWorkflow() {
+    var fb = document.getElementById('mcbFinalizeBtn');
+    if (fb) fb.addEventListener('click', function () {
+      var unplaced = morningBuilderState.roster.filter(function (k) { return !k.group; }).length;
+      var msg = 'Finalize the morning class groups for ' + morningBuilderState.schoolYear + '?\n\n'
+        + 'This writes every kid’s group into the official class roster (the Directory).'
+        + (unplaced ? '\n\n' + unplaced + ' kid(s) are still unplaced and will be left without a group.' : '')
+        + '\n\nYou can Reopen to make changes afterward.';
+      if (!confirm(msg)) return;
+      postMorningFinalize(true);
+    });
+    var rb = document.getElementById('mcbReopenBtn');
+    if (rb) rb.addEventListener('click', function () {
+      if (!confirm('Reopen the groups for editing? The official roster keeps the last finalized values until you finalize again.')) return;
+      postMorningFinalize(false);
+    });
+  }
+
+  function wireMorningDnD() {
+    var dragKey = null;
+    document.querySelectorAll('#mcbBody .mcb-kid[draggable="true"]').forEach(function (chip) {
+      chip.addEventListener('dragstart', function (e) {
+        dragKey = chip.getAttribute('data-key');
+        chip.classList.add('mcb-dragging');
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', dragKey); } catch (_) {} }
+      });
+      chip.addEventListener('dragend', function () { chip.classList.remove('mcb-dragging'); });
+    });
+    document.querySelectorAll('#mcbBody [data-drop-group]').forEach(function (zone) {
+      zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('mcb-dropover'); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; });
+      zone.addEventListener('dragleave', function () { zone.classList.remove('mcb-dropover'); });
+      zone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        zone.classList.remove('mcb-dropover');
+        var key = dragKey || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
+        if (!key) return;
+        assignMorningKid(key, zone.getAttribute('data-drop-group') || '');
+      });
+    });
+  }
+
+  // Optimistic assign: update local roster + re-render, POST in the
+  // background, revert + alert on failure.
+  function assignMorningKid(key, group) {
+    var item = morningBuilderState.roster.find(function (k) { return k.key === key; });
+    if (!item || item.group === group) return;
+    var prev = item.group;
+    item.group = group;
+    renderMorningClassBuilder();
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({
+        kind: 'morning-assign',
+        school_year: morningBuilderState.schoolYear,
+        family_email: item.family_email,
+        kid_first_name: item.first_name,
+        class_group: group
+      })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          item.group = prev;
+          renderMorningClassBuilder();
+          alert('Could not move ' + item.display_name + ': ' + ((res.data && res.data.error) || 'unknown'));
+        }
+      }).catch(function (err) {
+        item.group = prev;
+        renderMorningClassBuilder();
+        alert('Network error moving ' + item.display_name + ': ' + ((err && err.message) || 'unknown'));
+      });
+  }
+
+  function postMorningFinalize(finalize) {
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: 'morning-finalize', school_year: morningBuilderState.schoolYear, finalize: finalize })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Failed: ' + ((res.data && res.data.error) || 'unknown')); return; }
+        loadMorningClassBuilder();
+      }).catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
   }
 
   function loadScheduleBuilder() {
