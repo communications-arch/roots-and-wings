@@ -7883,6 +7883,25 @@ button.staff-role:hover {
     45deg, #fffaf0, #fffaf0 7px,
     rgba(217, 164, 65, 0.10) 7px, rgba(217, 164, 65, 0.10) 14px);
 }
+.mcb-legend {
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mcb-legend-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px dashed #d9a441;
+  background: repeating-linear-gradient(
+    45deg, #fffaf0, #fffaf0 5px,
+    rgba(217, 164, 65, 0.12) 5px, rgba(217, 164, 65, 0.12) 10px);
+}
 
 .sb-overlay {
   position: fixed;
