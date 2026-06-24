@@ -7887,16 +7887,15 @@ button.staff-role:hover {
   margin: 0 0 14px;
   font-size: 0.82rem;
   color: var(--color-text-light);
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  line-height: 1.5;
 }
 .mcb-legend-swatch {
   display: inline-block;
   width: 22px;
-  height: 14px;
+  height: 13px;
   border-radius: 4px;
-  flex-shrink: 0;
+  vertical-align: middle;
+  margin-right: 5px;
   border: 1px dashed #d9a441;
   background: repeating-linear-gradient(
     45deg, #fffaf0, #fffaf0 5px,
