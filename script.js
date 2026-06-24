@@ -6390,14 +6390,13 @@
           h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-pre-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
-          // Morning class placement — surfaces only once registration has
-          // produced a paid, morning-track kid who isn't grouped yet
-          // (loadMorningClassTodos). Opens the Morning Class Builder.
-          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-morning-label">Place kids in morning classes</span></button></li>';
-          // Finalize nudge — shows when there's grouping in progress
-          // (≥1 kid placed) that hasn't been finalized into the official
-          // roster yet. Same loader (loadMorningClassTodos) toggles both.
-          h += '<li id="ws-todo-morning-finalize-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-finalize-count">0</span><span class="ws-link-icon">✅</span><span id="ws-morning-finalize-label">Finalize morning classes</span></button></li>';
+          // Morning class setup — one workflow nudge, gated to on/after
+          // June 1 of the season's fall year (building morning classes is a
+          // summer task) and hidden once finalized. Label/icon adapt as work
+          // progresses: set up → place stragglers → finalize. Driven by
+          // loadMorningClassTodos. The Report entry stays available
+          // year-round for anyone who wants to start earlier.
+          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count" hidden>0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -17220,20 +17219,21 @@
   // Clicking either row opens the Tour Pipeline scoped to that bucket.
   // Also updates _toursCache as a side effect so re-opening the modal
   // can render instantly while a fresh fetch runs in the background.
-  // Membership To Do: two morning-class nudges, both from one fetch.
-  // Self-gates on the item elements (only present on the Membership tab),
-  // so afterRender can fire it unconditionally.
-  //   - "Place kids…" shows when the upcoming season has a paid,
-  //     morning-track kid with no draft group yet. (The roster is empty
-  //     before any paid morning registration exists, so this also only
-  //     surfaces once registration is underway.)
-  //   - "Finalize…" shows when there's grouping in progress (≥1 kid
-  //     placed) that hasn't been finalized into the official roster yet.
-  // Both open the Morning Class Builder.
+  // Membership To Do: one morning-class workflow nudge.
+  // Self-gates on the item element (only present on the Membership tab),
+  // so afterRender can fire it unconditionally. Visibility rules:
+  //   - hidden once the season's plan is finalized;
+  //   - hidden before June 1 of the season's fall year (building morning
+  //     classes is a summer task — no off-season nagging);
+  //   - otherwise visible, with the label/icon adapting to the work left:
+  //       no kids placed yet  → "Set morning classes for 26/27"
+  //       some kids unplaced   → "Place kids in morning classes" (count)
+  //       all placed, draft    → "Finalize morning classes" (count)
+  // Stands on its own — it shows from June 1 even with an empty roster, so
+  // it nudges setup before registrations roll in. Opens the builder.
   function loadMorningClassTodos() {
-    var placeItem = document.getElementById('ws-todo-morning-item');
-    var finalItem = document.getElementById('ws-todo-morning-finalize-item');
-    if (!placeItem && !finalItem) return;
+    var item = document.getElementById('ws-todo-morning-item');
+    if (!item) return;
     fetch('/api/tour?morning_builder=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
       headers: rwAuthHeaders()
     })
@@ -17246,39 +17246,48 @@
           var msg = (res.data && res.data.error) || 'error';
           if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
           console.warn('[loadMorningClassTodos] ' + msg);
-          if (placeItem) placeItem.hidden = true;
-          if (finalItem) finalItem.hidden = true;
+          item.hidden = true;
           recomputeTodoEmptyState();
           return;
         }
+        var plan = res.data && res.data.plan;
+        var isFinal = plan && plan.status === 'final';
+        // Gate: only on/after June 1 of the season's fall year. "Today" in
+        // America/Indianapolis as YYYY-MM-DD so the boundary is local, not
+        // UTC (see timezone-handling rule).
+        var fallYear = parseInt(String(morningBuilderState.schoolYear).slice(0, 4), 10);
+        var todayIndy = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+        }).format(new Date());
+        var gateOpen = !Number.isFinite(fallYear) || todayIndy >= (fallYear + '-06-01');
+        if (isFinal || !gateOpen) { item.hidden = true; recomputeTodoEmptyState(); return; }
+
         var roster = Array.isArray(res.data && res.data.roster) ? res.data.roster : [];
         var placed = roster.filter(function (k) { return !!k.group; }).length;
         var unplaced = roster.length - placed;
-        var isDraft = !(res.data && res.data.plan && res.data.plan.status === 'final');
-        if (placeItem) {
-          if (unplaced > 0) {
-            var pc = document.getElementById('ws-morning-count');
-            if (pc) pc.textContent = unplaced;
-            placeItem.hidden = false;
-          } else {
-            placeItem.hidden = true;
-          }
+        var label = document.getElementById('ws-morning-label');
+        var icon = document.getElementById('ws-morning-icon');
+        var pill = document.getElementById('ws-morning-count');
+        var shortYear = (typeof seasonShortLabel === 'function') ? seasonShortLabel(morningBuilderState.schoolYear) : morningBuilderState.schoolYear;
+        if (placed === 0) {
+          if (label) label.textContent = 'Set morning classes for ' + shortYear;
+          if (icon) icon.textContent = '🌱';
+          if (pill) pill.hidden = true;
+        } else if (unplaced > 0) {
+          if (label) label.textContent = 'Place kids in morning classes';
+          if (icon) icon.textContent = '🌱';
+          if (pill) { pill.textContent = unplaced; pill.hidden = false; }
+        } else {
+          if (label) label.textContent = 'Finalize morning classes';
+          if (icon) icon.textContent = '✅';
+          if (pill) { pill.textContent = placed; pill.hidden = false; }
         }
-        if (finalItem) {
-          if (isDraft && placed > 0) {
-            var fc = document.getElementById('ws-morning-finalize-count');
-            if (fc) fc.textContent = placed;
-            finalItem.hidden = false;
-          } else {
-            finalItem.hidden = true;
-          }
-        }
+        item.hidden = false;
         recomputeTodoEmptyState();
       })
       .catch(function (err) {
         console.warn('[loadMorningClassTodos] network error:', err);
-        if (placeItem) placeItem.hidden = true;
-        if (finalItem) finalItem.hidden = true;
+        item.hidden = true;
         recomputeTodoEmptyState();
       });
   }
