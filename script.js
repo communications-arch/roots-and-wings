@@ -13765,8 +13765,16 @@
 
       // Check domain restriction if configured
       if (ALLOWED_DOMAIN && domain !== ALLOWED_DOMAIN) {
+        // Stop auto-select from silently re-latching this (wrong) account on
+        // the next visit — otherwise a member with a personal Google session
+        // gets stuck in a loop and never sees the account chooser.
+        try { google.accounts.id.disableAutoSelect(); } catch (e) { /* ignore */ }
         var googleError = document.getElementById('googleError');
-        if (googleError) googleError.style.display = 'block';
+        if (googleError) {
+          googleError.textContent = 'You’re signed in as ' + email + ', which isn’t a Roots & Wings account. '
+            + 'Tap “Sign in with Google” again and choose “Use another account” to sign in with your @rootsandwingsindy.com address.';
+          googleError.style.display = 'block';
+        }
         return;
       }
 

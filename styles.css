@@ -2204,6 +2204,27 @@ p + p { margin-top: 1rem; }
   justify-content: center;
 }
 
+.login-help {
+  margin-top: 18px;
+  text-align: left;
+  font-size: 0.85rem;
+}
+.login-help summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 600;
+  text-align: center;
+  list-style: none;
+}
+.login-help summary::-webkit-details-marker { display: none; }
+.login-help ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--color-text-light);
+  line-height: 1.5;
+}
+.login-help li { margin-bottom: 8px; }
+
 .login-back {
   display: inline-block;
   margin-top: 20px;
