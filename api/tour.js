@@ -469,7 +469,14 @@ async function appendRegistrationToSheet(row) {
 // ── Registration (public, no auth; PayPal has already captured) ──
 async function handleRegistration(body, req, res) {
   const email = String(body.email || '').trim().toLowerCase();
-  const main_learning_coach = String(body.main_learning_coach || '').trim();
+  const mlc_first_name = String(body.mlc_first_name || '').trim();
+  const mlc_last_name = String(body.mlc_last_name || '').trim();
+  const known_family_email = String(body.known_family_email || '').trim().toLowerCase();
+  // Prefer the explicit first/last fields (current form); fall back to the
+  // combined field only for an older client that didn't send them.
+  const main_learning_coach = (mlc_first_name || mlc_last_name)
+    ? (mlc_first_name + (mlc_last_name ? ' ' + mlc_last_name : '')).trim()
+    : String(body.main_learning_coach || '').trim();
   const address = String(body.address || '').trim();
   const phone = String(body.phone || '').trim();
   const track = String(body.track || '').trim();
@@ -524,6 +531,8 @@ async function handleRegistration(body, req, res) {
     // is consent=true (photos allowed); explicit false opts the child out.
     kids[i] = {
       name: String(k.name).trim().slice(0, 200),
+      first_name: String(k.first_name || '').trim().slice(0, 100),
+      last_name: String(k.last_name || '').trim().slice(0, 100),
       birth_date: k.birth_date,
       photo_consent: k.photo_consent !== false
     };
@@ -570,13 +579,27 @@ async function handleRegistration(body, req, res) {
     // when registration doesn't supply them. Non-fatal — registration
     // still succeeds if this fails.
     try {
-      const famName = deriveFamilyName(main_learning_coach, existing_family_name);
-      const famEmail = deriveFamilyEmail(main_learning_coach, famName);
+      // Family last name: use the explicitly entered last name; only fall
+      // back to parsing for an older client that didn't send it.
+      const famName = mlc_last_name || deriveFamilyName(main_learning_coach, existing_family_name);
+      // Identity (the login key) is frozen: a returning family keeps its
+      // known login; a new family gets a clean key derived from the entered
+      // first + last (no more guessing from a combined name string).
+      let famEmail;
+      if (known_family_email && known_family_email.endsWith('@' + ALLOWED_DOMAIN)) {
+        famEmail = known_family_email;
+      } else if (mlc_first_name && mlc_last_name) {
+        famEmail = deriveFamilyEmail(mlc_first_name, mlc_last_name);
+      } else {
+        famEmail = deriveFamilyEmail(main_learning_coach, famName);
+      }
       if (famEmail) {
         await upsertProfileFromRegistration(sql, {
           familyEmail: famEmail,
           familyName: famName,
           mlcName: main_learning_coach,
+          mlcFirstName: mlc_first_name,
+          mlcLastName: mlc_last_name,
           mlcEmail: email,
           mlcPhotoConsent: waiver_photo_consent === 'yes',
           backupCoaches: backup_coaches,
@@ -2280,6 +2303,14 @@ async function upsertProfileFromRegistration(sql, params) {
       phone: ''
     });
   });
+  // When the form sent explicit MLC first/last, use them verbatim for the
+  // primary coach row instead of the parsed combined name (handles
+  // multi-word first/last names cleanly).
+  if (params.mlcFirstName && params.mlcLastName && newParents.length > 0) {
+    newParents[0].first_name = params.mlcFirstName;
+    newParents[0].last_name = params.mlcLastName;
+    newParents[0].name = params.mlcFirstName + ' ' + params.mlcLastName;
+  }
   (Array.isArray(params.backupCoaches) ? params.backupCoaches : []).forEach(bc => {
     if (!bc || !bc.name) return;
     const parts = nameToParts(bc.name);
@@ -2397,7 +2428,11 @@ async function upsertProfileFromRegistration(sql, params) {
     seenKids.add(key);
     const ex = aggregateKidMatches(exKids.filter(k => kidFirst(k) === key));
     mergedKids.push({
-      first_name: String(nk.name || nk.first_name || '').trim().split(/\s+/)[0],
+      // Prefer the explicitly-entered first name; fall back to the first
+      // token of the combined name for older clients.
+      first_name: (nk.first_name && nk.first_name.trim())
+        ? nk.first_name.trim()
+        : String(nk.name || '').trim().split(/\s+/)[0],
       last_name: nk.last_name || ex.last_name || '',
       birth_date: nk.birth_date || ex.birth_date || null,
       pronouns: nk.pronouns || ex.pronouns || '',
@@ -2482,6 +2517,7 @@ function sanitizeKid(k) {
   if (!k || typeof k !== 'object') return null;
   const name = String(k.name || '').trim().slice(0, 200);
   if (!name) return null;
+  const first_name = String(k.first_name || '').trim().slice(0, 100);
   const last_name = String(k.last_name || '').trim().slice(0, 100);
   const birth_date = String(k.birth_date || '').trim();
   let bd = '';
@@ -2491,6 +2527,7 @@ function sanitizeKid(k) {
   if (['all-day', 'morning', 'afternoon'].indexOf(schedule) !== -1) sch = schedule;
   return {
     name,
+    first_name,
     last_name,
     birth_date: bd,
     pronouns: String(k.pronouns || '').trim().slice(0, 60),

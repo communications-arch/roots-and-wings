@@ -207,8 +207,17 @@
         </div>
 
         <div class="reg-field">
-          <label for="reg-coach">Main Learning Coach (parent who will attend) <span class="reg-req" aria-hidden="true">*</span></label>
-          <input type="text" id="reg-coach" required autocomplete="name" aria-required="true">
+          <label id="reg-coach-label" style="display:block;">Main Learning Coach (parent who will attend) <span class="reg-req" aria-hidden="true">*</span></label>
+          <div class="reg-field-row">
+            <div class="reg-field" style="margin-bottom:0;">
+              <label for="reg-coach-first" style="font-weight:500;font-size:0.85rem;">First name</label>
+              <input type="text" id="reg-coach-first" required autocomplete="given-name" aria-required="true">
+            </div>
+            <div class="reg-field" style="margin-bottom:0;">
+              <label for="reg-coach-last" style="font-weight:500;font-size:0.85rem;">Last name</label>
+              <input type="text" id="reg-coach-last" required autocomplete="family-name" aria-required="true">
+            </div>
+          </div>
         </div>
 
         <div class="reg-field-row">
@@ -441,6 +450,7 @@
       step: 1,
       googleCredential: null,
       prefillFamily: null,
+      prefillFamilyEmail: '',
       paypalRendered: false,
       kidIdCounter: 0
     };
@@ -526,13 +536,18 @@
       var id = ++state.kidIdCounter;
       var row = document.createElement('div');
       row.className = 'reg-kid-row';
-      var nameId = 'reg-kid-name-' + id;
+      var firstId = 'reg-kid-first-' + id;
+      var lastId = 'reg-kid-last-' + id;
       var bdayId = 'reg-kid-bday-' + id;
       var optoutId = 'reg-kid-photo-optout-' + id;
       row.innerHTML =
         '<div class="reg-field" style="margin-bottom:0;">' +
-          '<label for="' + nameId + '">Name</label>' +
-          '<input type="text" id="' + nameId + '" class="reg-kid-name" placeholder="e.g., Violet Bogan" autocomplete="off">' +
+          '<label for="' + firstId + '">First name</label>' +
+          '<input type="text" id="' + firstId + '" class="reg-kid-first" placeholder="e.g., Violet" autocomplete="off">' +
+        '</div>' +
+        '<div class="reg-field" style="margin-bottom:0;">' +
+          '<label for="' + lastId + '">Last name</label>' +
+          '<input type="text" id="' + lastId + '" class="reg-kid-last" placeholder="e.g., Bogan" autocomplete="off">' +
         '</div>' +
         '<div class="reg-field" style="margin-bottom:0;">' +
           '<label for="' + bdayId + '">Birth date</label>' +
@@ -543,7 +558,15 @@
           '<input type="checkbox" id="' + optoutId + '" class="reg-kid-photo-optout">' +
           '<span><strong>Opt out of photo and film.</strong> Check this box and Roots and Wings will not use this child\'s photo, video, or quote in any co-op material.</span>' +
         '</label>';
-      if (prefill && prefill.name) row.querySelector('.reg-kid-name').value = prefill.name;
+      // Prefer explicit first/last; fall back to splitting a legacy name.
+      var pf = (prefill && prefill.first_name) ? prefill.first_name
+             : (prefill && prefill.name ? String(prefill.name).trim().split(/\s+/)[0] : '');
+      var pl = (prefill && prefill.last_name) ? prefill.last_name : '';
+      // Default a child's last name to the coach's so siblings inherit it
+      // (editable for blended families).
+      if (!pl) pl = ((document.getElementById('reg-coach-last') || {}).value || '').trim();
+      if (pf) row.querySelector('.reg-kid-first').value = pf;
+      if (pl) row.querySelector('.reg-kid-last').value = pl;
       if (prefill && prefill.birth_date) row.querySelector('.reg-kid-bday').value = prefill.birth_date;
       if (prefill && prefill.photo_consent === false) row.querySelector('.reg-kid-photo-optout').checked = true;
       row.querySelector('.reg-kid-remove').addEventListener('click', function () {
@@ -551,7 +574,7 @@
         updateStudentSigVisibility();
       });
       row.querySelector('.reg-kid-bday').addEventListener('change', updateStudentSigVisibility);
-      row.querySelector('.reg-kid-name').addEventListener('input', updateStudentSigVisibility);
+      row.querySelector('.reg-kid-first').addEventListener('input', updateStudentSigVisibility);
       list.appendChild(row);
       updateStudentSigVisibility();
     }
@@ -560,10 +583,20 @@
       var rows = document.querySelectorAll('#reg-kids-list .reg-kid-row');
       var out = [];
       rows.forEach(function (r) {
-        var name = ((r.querySelector('.reg-kid-name') || {}).value || '').trim();
+        var first = ((r.querySelector('.reg-kid-first') || {}).value || '').trim();
+        var last = ((r.querySelector('.reg-kid-last') || {}).value || '').trim();
         var bday = ((r.querySelector('.reg-kid-bday') || {}).value || '').trim();
         var optedOut = !!(r.querySelector('.reg-kid-photo-optout') || {}).checked;
-        if (name || bday) out.push({ name: name, birth_date: bday, photo_consent: !optedOut });
+        if (first || last || bday) {
+          out.push({
+            first_name: first,
+            last_name: last,
+            // Combined name kept for back-compat with display code.
+            name: (first + (last ? ' ' + last : '')).trim(),
+            birth_date: bday,
+            photo_consent: !optedOut
+          });
+        }
       });
       return out;
     }
@@ -587,9 +620,10 @@
       var today = new Date();
       var out = [];
       for (var i = 0; i < rows.length; i++) {
-        var nameEl = rows[i].querySelector('.reg-kid-name');
+        var firstEl = rows[i].querySelector('.reg-kid-first');
+        var lastEl = rows[i].querySelector('.reg-kid-last');
         var bdayEl = rows[i].querySelector('.reg-kid-bday');
-        var name = (nameEl && nameEl.value || '').trim();
+        var name = ((firstEl && firstEl.value || '') + ' ' + (lastEl && lastEl.value || '')).trim();
         var bday = (bdayEl && bdayEl.value || '').trim();
         if (!bday) continue;
         var d = new Date(bday);
@@ -629,6 +663,16 @@
     }
 
     document.getElementById('reg-add-kid').addEventListener('click', function () { addKidRow(); updateStudentSigVisibility(); });
+
+    // When the coach's last name is set/changed, fill any blank child last
+    // names with it (siblings inherit by default; already-typed ones stay).
+    document.getElementById('reg-coach-last').addEventListener('change', function () {
+      var v = this.value.trim();
+      if (!v) return;
+      document.querySelectorAll('#reg-kids-list .reg-kid-last').forEach(function (el) {
+        if (!el.value.trim()) el.value = v;
+      });
+    });
 
     // ── Backup Learning Coaches ──
     function addBackupRow(prefill) {
@@ -779,7 +823,11 @@
 
     function prefillFromEmail(email, name) {
       document.getElementById('reg-email').value = email || '';
-      if (name) document.getElementById('reg-coach').value = name;
+      if (name) {
+        var parts = String(name).trim().split(/\s+/);
+        document.getElementById('reg-coach-first').value = parts[0] || '';
+        document.getElementById('reg-coach-last').value = parts.slice(1).join(' ') || '';
+      }
       if (document.querySelectorAll('#reg-kids-list .reg-kid-row').length === 0) addKidRow();
     }
 
@@ -787,8 +835,10 @@
       document.getElementById('reg-prefilled-banner').style.display = '';
       document.getElementById('reg-email').value = email || fam.email || '';
       var firstParent = (fam.parents || '').split(' & ')[0].trim();
-      var coach = firstParent ? (firstParent + ' ' + fam.name) : (fam.name || '');
-      document.getElementById('reg-coach').value = coach;
+      document.getElementById('reg-coach-first').value = firstParent || '';
+      document.getElementById('reg-coach-last').value = fam.name || '';
+      // Freeze identity: a returning family keeps its existing login/key.
+      state.prefillFamilyEmail = fam.email || '';
       if (fam.phone) document.getElementById('reg-phone').value = fam.phone;
       if (fam.address) document.getElementById('reg-address').value = fam.address;
       var hasAM = false, hasPM = false;
@@ -803,8 +853,7 @@
         if (r) r.checked = true;
       }
       (fam.kids || []).forEach(function (k) {
-        var last = k.lastName || fam.name;
-        addKidRow({ name: (k.name || '') + (last ? ' ' + last : ''), birth_date: '' });
+        addKidRow({ first_name: k.name || '', last_name: k.lastName || fam.name || '', birth_date: '' });
       });
       if (document.querySelectorAll('#reg-kids-list .reg-kid-row').length === 0) addKidRow();
       state.prefillFamily = fam.name || '';
@@ -855,7 +904,9 @@
       clearError('reg-form-error');
 
       var email = document.getElementById('reg-email').value.trim();
-      var coach = document.getElementById('reg-coach').value.trim();
+      var coachFirst = document.getElementById('reg-coach-first').value.trim();
+      var coachLast = document.getElementById('reg-coach-last').value.trim();
+      var coach = (coachFirst + ' ' + coachLast).trim();
       var phone = document.getElementById('reg-phone').value.trim();
       var address = document.getElementById('reg-address').value.trim();
       var trackEl = document.querySelector('input[name="reg-track"]:checked');
@@ -864,7 +915,8 @@
       var sig = document.getElementById('reg-signature').value.trim();
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('reg-form-error', 'Please enter a valid email.'); markInvalid('reg-email'); return; }
-      if (!coach) { showError('reg-form-error', 'Main Learning Coach is required.'); markInvalid('reg-coach'); return; }
+      if (!coachFirst) { showError('reg-form-error', 'Main Learning Coach first name is required.'); markInvalid('reg-coach-first'); return; }
+      if (!coachLast) { showError('reg-form-error', 'Main Learning Coach last name is required.'); markInvalid('reg-coach-last'); return; }
       if (!phone) { showError('reg-form-error', 'Phone is required.'); markInvalid('reg-phone'); return; }
       // Address is optional — but if anything was typed, validate it's
       // a plausibly complete street address (≥8 chars filters typos).
@@ -872,7 +924,7 @@
       if (!trackEl) { showError('reg-form-error', 'Please select Morning, Afternoon, or Both.'); return; }
       if (kids.length === 0) { showError('reg-form-error', 'Please add at least one child.'); return; }
       for (var i = 0; i < kids.length; i++) {
-        if (!kids[i].name) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a name.'); return; }
+        if (!kids[i].first_name) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a first name.'); return; }
         if (!kids[i].birth_date) { showError('reg-form-error', 'Child ' + (i + 1) + ' needs a birth date.'); return; }
       }
       if (!sig) { showError('reg-form-error', 'Please type your name to sign the agreement.'); markInvalid('reg-signature'); return; }
@@ -904,9 +956,14 @@
       var studentSig = studentSigParts.join('; ');
 
       state.form = {
-        email: email, main_learning_coach: coach, phone: phone, address: address,
+        email: email, main_learning_coach: coach,
+        mlc_first_name: coachFirst, mlc_last_name: coachLast,
+        phone: phone, address: address,
         track: trackEl.value, track_other: '', kids: kids, placement_notes: notes,
         existing_family_name: state.prefillFamily || '',
+        // Freeze identity: when set, the backend keeps this returning family's
+        // existing login/key instead of re-deriving from the name.
+        known_family_email: state.prefillFamilyEmail || '',
         backup_coaches: backupCoaches
       };
       var lcOptOut = !!(document.getElementById('reg-lc-photo-optout') || {}).checked;
