@@ -17273,9 +17273,12 @@
         if (!gateOpen) { item.hidden = true; recomputeTodoEmptyState(); return; }
 
         var roster = Array.isArray(res.data && res.data.roster) ? res.data.roster : [];
-        var placed = roster.filter(function (k) { return !!k.group; }).length;
-        var unplaced = roster.length - placed;
-        var pending = roster.filter(function (k) { return k.group && !k.locked; }).length;
+        // Pending (unpaid) kids are heads-up only — they never drive the
+        // To Do, so all placement math is over the placeable (paid) set.
+        var placeable = roster.filter(function (k) { return !k.pending; });
+        var placed = placeable.filter(function (k) { return !!k.group; }).length;
+        var unplaced = placeable.length - placed;
+        var awaitingFinal = placeable.filter(function (k) { return k.group && !k.locked; }).length;
         var label = document.getElementById('ws-morning-label');
         var icon = document.getElementById('ws-morning-icon');
         var pill = document.getElementById('ws-morning-count');
@@ -17293,9 +17296,9 @@
           lbl = 'Place kids in morning classes';
           count = unplaced;
         } else if (isFinal) {
-          if (pending > 0) { lbl = 'Finalize new placements'; ic = '✅'; }
+          if (awaitingFinal > 0) { lbl = 'Finalize new placements'; ic = '✅'; }
           else { show = false; } // fully finalized, nothing outstanding
-        } else if (roster.length === 0) {
+        } else if (placeable.length === 0) {
           lbl = 'Set morning classes for ' + shortYear;
         } else if (!seeded) {
           lbl = 'Review morning class placement';
@@ -18094,16 +18097,26 @@
   // Group list + typical ranges mirror the public-site ageGroupData; the
   // displayed range per group is auto-derived from the kids placed in it.
   var MORNING_GROUP_ORDER = [
-    { name: 'Greenhouse', emoji: '🌱', range: '0–2' },
-    { name: 'Saplings',   emoji: '🌿', range: '3–5' },
-    { name: 'Sassafras',  emoji: '🍃', range: '5–6' },
-    { name: 'Oaks',       emoji: '🌳', range: '7–8' },
-    { name: 'Maples',     emoji: '🍁', range: '8–9' },
-    { name: 'Birch',      emoji: '🌲', range: '9–10' },
-    { name: 'Willows',    emoji: '🌾', range: '10–11' },
-    { name: 'Cedars',     emoji: '🌲', range: '12–13' },
-    { name: 'Pigeons',    emoji: '🕊️', range: '14+' }
+    { name: 'Greenhouse', emoji: '🌱', range: '0–2',   min: 0,  max: 2 },
+    { name: 'Saplings',   emoji: '🌿', range: '3–5',   min: 3,  max: 5 },
+    { name: 'Sassafras',  emoji: '🍃', range: '5–6',   min: 5,  max: 6 },
+    { name: 'Oaks',       emoji: '🌳', range: '7–8',   min: 7,  max: 8 },
+    { name: 'Maples',     emoji: '🍁', range: '8–9',   min: 8,  max: 9 },
+    { name: 'Birch',      emoji: '🌲', range: '9–10',  min: 9,  max: 10 },
+    { name: 'Willows',    emoji: '🌾', range: '10–11', min: 10, max: 11 },
+    { name: 'Cedars',     emoji: '🌲', range: '12–13', min: 12, max: 13 },
+    { name: 'Pigeons',    emoji: '🕊️', range: '14+',   min: 14, max: 200 }
   ];
+  // Suggested group for an age (first-match, mirrors the server groupForAge).
+  // Used to hint which class a pending kid would likely land in.
+  function mcbGroupForAge(age) {
+    if (age == null) return '';
+    for (var i = 0; i < MORNING_GROUP_ORDER.length; i++) {
+      var g = MORNING_GROUP_ORDER[i];
+      if (age >= g.min && age <= g.max) return g.name;
+    }
+    return '';
+  }
 
   var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false };
 
@@ -18201,6 +18214,16 @@
     var age = (k.age == null) ? '?' : k.age;
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
     var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
+    // Pending (unpaid) kids: read-only info chip, not draggable. Shows the
+    // age-suggested group so Membership can anticipate which class grows.
+    if (k.pending) {
+      var sug = mcbGroupForAge(k.age);
+      return '<div class="mcb-kid mcb-kid-pending" data-key="' + escapeHtmlWs(k.key) + '">'
+        + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
+        + '<span class="mcb-kid-age">age ' + age + (sug ? ' · ≈ ' + escapeHtmlWs(sug) : '') + '</span>'
+        + allergy + note
+        + '</div>';
+    }
     var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
     return '<div class="mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + '"' + (k.locked ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '">'
       + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
@@ -18214,12 +18237,16 @@
     if (!body) return;
     var roster = morningBuilderState.roster;
     var isFinal = morningBuilderState.plan && morningBuilderState.plan.status === 'final';
-    var unassigned = roster.filter(function (k) { return !k.group; });
-    var total = roster.length;
-    // "Pending" = placed but not yet locked (late additions awaiting a
-    // re-finalize). "New work" while finalized = unplaced + pending.
-    var pending = roster.filter(function (k) { return k.group && !k.locked; }).length;
-    var newWork = unassigned.length + pending;
+    // Pending (unpaid) kids are heads-up only — excluded from all placement
+    // math; rendered in their own section below.
+    var placeable = roster.filter(function (k) { return !k.pending; });
+    var pendingKids = roster.filter(function (k) { return k.pending; });
+    var unassigned = placeable.filter(function (k) { return !k.group; });
+    var total = placeable.length;
+    // "awaitingFinal" = placed but not yet locked (late additions awaiting a
+    // re-finalize). "New work" while finalized = unplaced + awaitingFinal.
+    var awaitingFinal = placeable.filter(function (k) { return k.group && !k.locked; }).length;
+    var newWork = unassigned.length + awaitingFinal;
 
     var html = '<div class="mcb-workflow">';
     if (isFinal && newWork === 0) {
@@ -18241,8 +18268,21 @@
     }
     html += '</div>';
 
+    // Heads-up section for registered-but-unpaid families (read-only).
+    function pendingSectionHtml() {
+      if (!pendingKids.length) return '';
+      var h = '<div class="mcb-pending-section">';
+      h += '<div class="mcb-col-head">⏳ Pending — registered, payment not received <span class="mcb-count">' + pendingKids.length + '</span></div>';
+      h += '<p class="mcb-pending-note">Heads-up for planning — not placeable until paid. The “≈” shows the class their age suggests.</p>';
+      h += '<div class="mcb-pending-list">';
+      pendingKids.forEach(function (k) { h += mcbKidChip(k); });
+      h += '</div></div>';
+      return h;
+    }
+
     if (!total) {
       html += '<p class="ws-empty">No paid, morning-track kids registered for ' + escapeHtmlWs(morningBuilderState.schoolYear) + ' yet.</p>';
+      html += pendingSectionHtml();
       body.innerHTML = html;
       wireMorningWorkflow();
       return;
@@ -18256,12 +18296,12 @@
     html += '</div></div>';
 
     var counts = MORNING_GROUP_ORDER.map(function (g) {
-      return roster.filter(function (k) { return k.group === g.name; }).length;
+      return placeable.filter(function (k) { return k.group === g.name; }).length;
     });
     var flags = mcbCountFlags(counts);
     html += '<div class="mcb-groups">';
     MORNING_GROUP_ORDER.forEach(function (g, i) {
-      var members = roster.filter(function (k) { return k.group === g.name; });
+      var members = placeable.filter(function (k) { return k.group === g.name; });
       var autoRange = mcbGroupAgeRange(members);
       html += '<div class="mcb-group">';
       html += '<div class="mcb-col-head">';
@@ -18275,10 +18315,12 @@
     });
     html += '</div></div>';
 
+    html += pendingSectionHtml();
+
     body.innerHTML = html;
     wireMorningWorkflow();
     // Wire DnD whenever any chip is draggable (drafts, or late additions
-    // under a finalized plan). Locked chips simply aren't draggable.
+    // under a finalized plan). Locked/pending chips simply aren't draggable.
     wireMorningDnD();
   }
 

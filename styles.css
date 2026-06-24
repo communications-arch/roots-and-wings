@@ -7873,6 +7873,32 @@ button.staff-role:hover {
   border-style: dashed;
   opacity: 0.85;
 }
+/* Pending (unpaid) kids: heads-up only, not draggable. */
+.mcb-pending-section {
+  margin-top: 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-cream, #faf8f3);
+  padding: 4px 0 10px;
+}
+.mcb-pending-note {
+  margin: 6px 10px 10px;
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+}
+.mcb-pending-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px;
+}
+.mcb-kid-pending {
+  cursor: default;
+  background: #fff;
+  border-style: dashed;
+  opacity: 0.9;
+}
+.mcb-pending-list .mcb-kid { width: auto; min-width: 160px; }
 
 .sb-overlay {
   position: fixed;
