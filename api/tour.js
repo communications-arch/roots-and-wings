@@ -3447,6 +3447,40 @@ function ageAsOfFall(birthDate, schoolYear) {
   return age >= 0 ? age : 0;
 }
 
+// Brand age bands for the one-time auto-placement. Ranges overlap by design
+// (the Membership Director makes the call at boundaries); auto-seed uses
+// first-match — e.g. age 5 → Saplings, 8 → Oaks. A starting guess she
+// reviews, not a hard rule.
+const MORNING_GROUP_RANGES = [
+  { name: 'Greenhouse', min: 0,  max: 2 },
+  { name: 'Saplings',   min: 3,  max: 5 },
+  { name: 'Sassafras',  min: 5,  max: 6 },
+  { name: 'Oaks',       min: 7,  max: 8 },
+  { name: 'Maples',     min: 8,  max: 9 },
+  { name: 'Birch',      min: 9,  max: 10 },
+  { name: 'Willows',    min: 10, max: 11 },
+  { name: 'Cedars',     min: 12, max: 13 },
+  { name: 'Pigeons',    min: 14, max: 200 }
+];
+function groupForAge(age) {
+  if (age == null) return '';
+  for (const g of MORNING_GROUP_RANGES) {
+    if (age >= g.min && age <= g.max) return g.name;
+  }
+  return '';
+}
+// "Today" as YYYY-MM-DD in America/Indianapolis (string-comparable).
+function indyTodayStr() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+// True once we're on/after June 1 of the season's fall year — when morning
+// class building begins (no off-season auto-seed or To Do nag).
+function morningGateOpen(schoolYear) {
+  return indyTodayStr() >= (fallYearOf(schoolYear) + '-06-01');
+}
+
 // Shared Membership-Director gate for the Morning Class Builder endpoints.
 // View-As-aware (see handleTourList). Returns the auth object on success,
 // or sends the 401/403 and returns null.
@@ -3466,10 +3500,14 @@ async function requireMembershipDirector(req, res) {
   return auth;
 }
 
-// GET ?morning_builder=1&school_year=YYYY-YYYY
+// GET ?morning_builder=1&school_year=YYYY-YYYY[&seed=1]
 // Roster of paid, morning-track kids for the season (each with
-// age-as-of-fall, allergies, family placement notes, and current draft
-// group) plus the plan's finalize status.
+// age-as-of-fall, allergies, family placement notes, current draft group,
+// and a `locked` flag once finalized) plus the plan's status/seeded state.
+// When seed=1 (the builder modal's load) and the season hasn't been
+// auto-seeded yet, every unplaced kid with a known age is dropped into its
+// age-matched group as a one-time starting point — so the builder opens as
+// a review. Later registrations are never re-seeded; they stay unplaced.
 async function handleMorningBuilderGet(req, res) {
   const auth = await requireMembershipDirector(req, res);
   if (!auth) return;
@@ -3484,17 +3522,19 @@ async function handleMorningBuilderGet(req, res) {
         AND track = ANY(${MORNING_TRACKS})
     `;
     const draftRows = await sql`
-      SELECT family_email, kid_first_name, class_group
+      SELECT family_email, kid_first_name, class_group, finalized
       FROM morning_class_assignments
       WHERE school_year = ${schoolYear}
     `;
     const draftMap = {};
-    draftRows.forEach(r => { draftMap[r.family_email + '|' + r.kid_first_name] = r.class_group; });
+    draftRows.forEach(r => {
+      draftMap[r.family_email + '|' + r.kid_first_name] = { group: r.class_group, finalized: !!r.finalized };
+    });
     const planRows = await sql`
-      SELECT status, finalized_at, finalized_by FROM morning_class_plans
+      SELECT status, finalized_at, finalized_by, seeded_at FROM morning_class_plans
       WHERE school_year = ${schoolYear} LIMIT 1
     `;
-    const plan = planRows[0] || { status: 'draft', finalized_at: null, finalized_by: '' };
+    const plan = planRows[0] || { status: 'draft', finalized_at: null, finalized_by: '', seeded_at: null };
 
     const roster = [];
     const familyEmails = new Set();
@@ -3509,6 +3549,7 @@ async function handleMorningBuilderGet(req, res) {
         if (!display) return;
         const first = display.split(/\s+/)[0].toLowerCase();
         if (!first) return;
+        const entry = draftMap[familyEmail + '|' + first];
         roster.push({
           key: familyEmail + '|' + first,
           family_email: familyEmail,
@@ -3519,10 +3560,48 @@ async function handleMorningBuilderGet(req, res) {
           age: ageAsOfFall(k.birth_date, schoolYear),
           placement_notes: String(r.placement_notes || '').trim(),
           allergies: '',
-          group: draftMap[familyEmail + '|' + first] || ''
+          group: entry ? entry.group : '',
+          locked: false
         });
       });
     });
+
+    // One-time age-based auto-placement. Runs only on an explicit seed=1
+    // load (the builder modal), in season, while the plan is draft and has
+    // never been seeded, and only for currently-unplaced kids with a known
+    // age. Later opens don't re-seed, so late registrations stay unplaced.
+    const wantSeed = (req.query.seed === '1' || req.query.seed === 'true');
+    if (wantSeed && plan.status !== 'final' && !plan.seeded_at && roster.length > 0 && morningGateOpen(schoolYear)) {
+      for (const item of roster) {
+        if (item.group) continue;             // already placed
+        const g = groupForAge(item.age);
+        if (!g) continue;                      // unknown/out-of-range age → leave unplaced
+        await sql`
+          INSERT INTO morning_class_assignments
+            (school_year, family_email, kid_first_name, class_group, finalized, updated_by, updated_at)
+          VALUES (${schoolYear}, ${item.family_email}, ${item.first_name}, ${g}, FALSE, ${auth.realEmail}, NOW())
+          ON CONFLICT (school_year, family_email, kid_first_name) DO NOTHING
+        `;
+        item.group = g;
+      }
+      await sql`
+        INSERT INTO morning_class_plans (school_year, status, seeded_at, updated_by, updated_at)
+        VALUES (${schoolYear}, 'draft', NOW(), ${auth.realEmail}, NOW())
+        ON CONFLICT (school_year) DO UPDATE SET
+          seeded_at = COALESCE(morning_class_plans.seeded_at, NOW()), updated_at = NOW()
+      `;
+      plan.seeded_at = plan.seeded_at || new Date().toISOString();
+    }
+
+    // Per-kid lock: a placement is locked only once it's been finalized
+    // (plan final AND this assignment was included in that finalize). New
+    // additions placed after a finalize stay unlocked until re-finalized.
+    if (plan.status === 'final') {
+      roster.forEach(item => {
+        const entry = draftMap[item.key];
+        item.locked = !!(entry && entry.finalized);
+      });
+    }
 
     // Enrich allergies from the normalized kids table (registration kids
     // JSON doesn't carry them). Matched on the same family_email + first
@@ -3554,7 +3633,12 @@ async function handleMorningBuilderGet(req, res) {
     return res.status(200).json({
       school_year: schoolYear,
       roster,
-      plan: { status: plan.status, finalized_at: plan.finalized_at, finalized_by: plan.finalized_by },
+      plan: {
+        status: plan.status,
+        finalized_at: plan.finalized_at,
+        finalized_by: plan.finalized_by,
+        seeded: !!plan.seeded_at
+      },
       groups: MORNING_GROUP_NAMES,
       viewerCanAct: true
     });
@@ -3565,7 +3649,10 @@ async function handleMorningBuilderGet(req, res) {
 }
 
 // POST kind='morning-assign' — upsert one kid's draft group ('' clears it).
-// Blocked when the plan is finalized (must reopen first).
+// When the plan is finalized, finalized placements stay locked (409 — reopen
+// to change them), but a NOT-yet-finalized kid (a late addition) can still be
+// placed; it's written as finalized=FALSE so the next finalize picks it up
+// without disturbing the locked kids.
 async function handleMorningAssign(body, req, res) {
   const auth = await requireMembershipDirector(req, res);
   if (!auth) return;
@@ -3583,14 +3670,22 @@ async function handleMorningAssign(body, req, res) {
     const sql = getSql();
     const planRows = await sql`SELECT status FROM morning_class_plans WHERE school_year = ${schoolYear} LIMIT 1`;
     if (planRows[0] && planRows[0].status === 'final') {
-      return res.status(409).json({ error: 'These groups are finalized. Reopen for editing first.' });
+      const existing = await sql`
+        SELECT finalized FROM morning_class_assignments
+        WHERE school_year = ${schoolYear} AND family_email = ${familyEmail} AND kid_first_name = ${firstName}
+        LIMIT 1
+      `;
+      if (existing[0] && existing[0].finalized) {
+        return res.status(409).json({ error: 'That placement is finalized. Reopen the plan to change finalized kids.' });
+      }
     }
     await sql`
       INSERT INTO morning_class_assignments
-        (school_year, family_email, kid_first_name, class_group, updated_by, updated_at)
-      VALUES (${schoolYear}, ${familyEmail}, ${firstName}, ${group}, ${auth.realEmail}, NOW())
+        (school_year, family_email, kid_first_name, class_group, finalized, updated_by, updated_at)
+      VALUES (${schoolYear}, ${familyEmail}, ${firstName}, ${group}, FALSE, ${auth.realEmail}, NOW())
       ON CONFLICT (school_year, family_email, kid_first_name) DO UPDATE SET
         class_group = EXCLUDED.class_group,
+        finalized   = FALSE,
         updated_by  = EXCLUDED.updated_by,
         updated_at  = NOW()
     `;
@@ -3612,6 +3707,8 @@ async function handleMorningFinalize(body, req, res) {
   try {
     const sql = getSql();
     if (!finalize) {
+      // Reopen: unlock every placement so the whole plan is editable again.
+      await sql`UPDATE morning_class_assignments SET finalized = FALSE WHERE school_year = ${schoolYear}`;
       await sql`
         INSERT INTO morning_class_plans (school_year, status, finalized_at, finalized_by, updated_by, updated_at)
         VALUES (${schoolYear}, 'draft', NULL, '', ${auth.realEmail}, NOW())
@@ -3620,6 +3717,9 @@ async function handleMorningFinalize(body, req, res) {
       `;
       return res.status(200).json({ ok: true, status: 'draft' });
     }
+    // Finalize: write every non-empty draft group into the live kids row
+    // (idempotent for already-finalized kids; applies any late additions),
+    // then mark those placements finalized so they lock.
     const draftRows = await sql`
       SELECT family_email, kid_first_name, class_group
       FROM morning_class_assignments
@@ -3634,6 +3734,7 @@ async function handleMorningFinalize(body, req, res) {
       `;
       written += updated.length;
     }
+    await sql`UPDATE morning_class_assignments SET finalized = TRUE WHERE school_year = ${schoolYear} AND class_group <> ''`;
     await sql`
       INSERT INTO morning_class_plans (school_year, status, finalized_at, finalized_by, updated_by, updated_at)
       VALUES (${schoolYear}, 'final', NOW(), ${auth.realEmail}, ${auth.realEmail}, NOW())

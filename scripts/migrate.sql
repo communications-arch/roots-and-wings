@@ -984,6 +984,15 @@ CREATE TABLE IF NOT EXISTS morning_class_plans (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_by     TEXT NOT NULL DEFAULT ''
 );
+-- Initial age-based auto-placement is a one-time pass per season; seeded_at
+-- stamps when it ran so later registrations land unplaced (manual review),
+-- instead of being re-seeded on every open.
+ALTER TABLE morning_class_plans ADD COLUMN IF NOT EXISTS seeded_at TIMESTAMPTZ;
+-- Marks a draft placement as already written into the official roster by a
+-- finalize. Placements made after a finalize stay finalized=FALSE until the
+-- next finalize — so finalized kids stay locked while late additions can be
+-- placed and confirmed without disturbing them.
+ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS finalized BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ──────────────────────────────────────────────
 -- Merchandise (public order form + portal report)

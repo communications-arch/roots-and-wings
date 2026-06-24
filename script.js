@@ -6396,7 +6396,7 @@
           // progresses: set up → place stragglers → finalize. Driven by
           // loadMorningClassTodos. The Report entry stays available
           // year-round for anyone who wants to start earlier.
-          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count" hidden>0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
+          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count" hidden style="display:none;">0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -17220,17 +17220,20 @@
   // Also updates _toursCache as a side effect so re-opening the modal
   // can render instantly while a fresh fetch runs in the background.
   // Membership To Do: one morning-class workflow nudge.
-  // Self-gates on the item element (only present on the Membership tab),
-  // so afterRender can fire it unconditionally. Visibility rules:
-  //   - hidden once the season's plan is finalized;
-  //   - hidden before June 1 of the season's fall year (building morning
-  //     classes is a summer task — no off-season nagging);
-  //   - otherwise visible, with the label/icon adapting to the work left:
-  //       no kids placed yet  → "Set morning classes for 26/27"
-  //       some kids unplaced   → "Place kids in morning classes" (count)
-  //       all placed, draft    → "Finalize morning classes" (count)
-  // Stands on its own — it shows from June 1 even with an empty roster, so
-  // it nudges setup before registrations roll in. Opens the builder.
+  // Self-gates on the item element (only present on the Membership tab), so
+  // afterRender can fire it unconditionally. Visibility:
+  //   - before June 1 of the season's fall year → hidden (summer task);
+  //   - draft, not yet seeded → "Review morning class placement" (no count)
+  //     — opening the builder auto-places by age, so it reads as a review;
+  //   - draft, seeded, all placed → "Finalize morning classes" (no count);
+  //   - some kids unplaced (late additions, pre- or post-finalize) →
+  //     "Place kids in morning classes" WITH a count;
+  //   - finalized with new placements awaiting confirm → "Finalize new
+  //     placements" (no count);
+  //   - finalized, nothing outstanding → hidden.
+  // Count is shown ONLY for unplaced late additions — never for the initial
+  // setup/review (per Erin: the initial pass isn't a count-driven task).
+  // Does NOT pass seed=1, so the count load never triggers auto-placement.
   function loadMorningClassTodos() {
     var item = document.getElementById('ws-todo-morning-item');
     if (!item) return;
@@ -17252,36 +17255,50 @@
         }
         var plan = res.data && res.data.plan;
         var isFinal = plan && plan.status === 'final';
-        // Gate: only on/after June 1 of the season's fall year. "Today" in
-        // America/Indianapolis as YYYY-MM-DD so the boundary is local, not
-        // UTC (see timezone-handling rule).
+        var seeded = !!(plan && plan.seeded);
+        // June-1 gate (today in America/Indianapolis; local-day boundary).
         var fallYear = parseInt(String(morningBuilderState.schoolYear).slice(0, 4), 10);
         var todayIndy = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
         }).format(new Date());
         var gateOpen = !Number.isFinite(fallYear) || todayIndy >= (fallYear + '-06-01');
-        if (isFinal || !gateOpen) { item.hidden = true; recomputeTodoEmptyState(); return; }
+        if (!gateOpen) { item.hidden = true; recomputeTodoEmptyState(); return; }
 
         var roster = Array.isArray(res.data && res.data.roster) ? res.data.roster : [];
         var placed = roster.filter(function (k) { return !!k.group; }).length;
         var unplaced = roster.length - placed;
+        var pending = roster.filter(function (k) { return k.group && !k.locked; }).length;
         var label = document.getElementById('ws-morning-label');
         var icon = document.getElementById('ws-morning-icon');
         var pill = document.getElementById('ws-morning-count');
         var shortYear = (typeof seasonShortLabel === 'function') ? seasonShortLabel(morningBuilderState.schoolYear) : morningBuilderState.schoolYear;
-        if (placed === 0) {
-          if (label) label.textContent = 'Set morning classes for ' + shortYear;
-          if (icon) icon.textContent = '🌱';
-          if (pill) pill.hidden = true;
-        } else if (unplaced > 0) {
-          if (label) label.textContent = 'Place kids in morning classes';
-          if (icon) icon.textContent = '🌱';
-          if (pill) { pill.textContent = unplaced; pill.hidden = false; }
-        } else {
-          if (label) label.textContent = 'Finalize morning classes';
-          if (icon) icon.textContent = '✅';
-          if (pill) { pill.textContent = placed; pill.hidden = false; }
+        function setPill(show, n) {
+          if (!pill) return;
+          if (show) { pill.textContent = n; pill.style.display = ''; pill.hidden = false; }
+          else { pill.style.display = 'none'; pill.hidden = true; }
         }
+
+        var show = true, lbl = '', ic = '🌱', count = null;
+        if (unplaced > 0) {
+          // Late additions / unknown-age kids waiting for a class. The only
+          // state that carries a count.
+          lbl = 'Place kids in morning classes';
+          count = unplaced;
+        } else if (isFinal) {
+          if (pending > 0) { lbl = 'Finalize new placements'; ic = '✅'; }
+          else { show = false; } // fully finalized, nothing outstanding
+        } else if (roster.length === 0) {
+          lbl = 'Set morning classes for ' + shortYear;
+        } else if (!seeded) {
+          lbl = 'Review morning class placement';
+        } else {
+          lbl = 'Finalize morning classes'; ic = '✅';
+        }
+
+        if (!show) { item.hidden = true; recomputeTodoEmptyState(); return; }
+        if (label) label.textContent = lbl;
+        if (icon) icon.textContent = ic;
+        setPill(count != null, count);
         item.hidden = false;
         recomputeTodoEmptyState();
       })
@@ -18120,7 +18137,9 @@
   function loadMorningClassBuilder() {
     var body = document.getElementById('mcbBody');
     if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading roster…</em>';
-    fetch('/api/tour?morning_builder=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
+    // seed=1: opening the builder triggers the one-time age-based
+    // auto-placement (server no-ops if already seeded / finalized / off-season).
+    fetch('/api/tour?morning_builder=1&seed=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
       headers: rwAuthHeaders()
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -18164,14 +18183,18 @@
     });
   }
 
-  function mcbKidChip(k, isFinal) {
+  // A chip is draggable unless it's locked (finalized). Locked chips show a
+  // 🔒 and can't be moved until the plan is reopened — but unlocked chips
+  // (late additions placed after a finalize) stay draggable.
+  function mcbKidChip(k) {
     var age = (k.age == null) ? '?' : k.age;
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
     var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
-    return '<div class="mcb-kid"' + (isFinal ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '">'
+    var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
+    return '<div class="mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + '"' + (k.locked ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '">'
       + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
       + '<span class="mcb-kid-age">age ' + age + '</span>'
-      + allergy + note
+      + allergy + note + lock
       + '</div>';
   }
 
@@ -18182,14 +18205,25 @@
     var isFinal = morningBuilderState.plan && morningBuilderState.plan.status === 'final';
     var unassigned = roster.filter(function (k) { return !k.group; });
     var total = roster.length;
+    // "Pending" = placed but not yet locked (late additions awaiting a
+    // re-finalize). "New work" while finalized = unplaced + pending.
+    var pending = roster.filter(function (k) { return k.group && !k.locked; }).length;
+    var newWork = unassigned.length + pending;
 
     var html = '<div class="mcb-workflow">';
-    if (isFinal) {
+    if (isFinal && newWork === 0) {
       var fb = morningBuilderState.plan.finalized_by || '';
       var fa = morningBuilderState.plan.finalized_at ? formatReportDate(morningBuilderState.plan.finalized_at) : '';
       html += '<span class="mcb-final-badge">✓ Finalized</span>';
       html += '<span class="mcb-workflow-note">' + (fa ? 'on ' + escapeHtmlWs(fa) : '') + (fb ? ' by ' + escapeHtmlWs(fb) : '') + ' — written to the official class roster.</span>';
       html += '<button type="button" class="sc-btn" id="mcbReopenBtn">Reopen for editing</button>';
+    } else if (isFinal) {
+      // Finalized, but late additions need placing/confirming. Locked kids
+      // stay put; place the new ones and confirm just those.
+      html += '<span class="mcb-final-badge">✓ Finalized</span>';
+      html += '<span class="mcb-workflow-note">' + newWork + ' new since finalizing' + (unassigned.length ? ' · ' + unassigned.length + ' to place' : '') + '. Locked kids stay put.</span>';
+      html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize new placements</button>';
+      html += '<button type="button" class="sc-btn" id="mcbReopenBtn">Reopen all</button>';
     } else {
       html += '<span class="mcb-workflow-note">Drag kids into a class. ' + total + ' kid' + (total === 1 ? '' : 's') + ' · <strong>' + unassigned.length + '</strong> unplaced.</span>';
       html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize groups</button>';
@@ -18204,10 +18238,10 @@
     }
 
     html += '<div class="mcb-layout">';
-    html += '<div class="mcb-pool' + (isFinal ? ' mcb-locked' : '') + '">';
+    html += '<div class="mcb-pool">';
     html += '<div class="mcb-col-head">Unassigned <span class="mcb-count">' + unassigned.length + '</span></div>';
     html += '<div class="mcb-col-body" data-drop-group="">';
-    unassigned.forEach(function (k) { html += mcbKidChip(k, isFinal); });
+    unassigned.forEach(function (k) { html += mcbKidChip(k); });
     html += '</div></div>';
 
     var counts = MORNING_GROUP_ORDER.map(function (g) {
@@ -18218,37 +18252,48 @@
     MORNING_GROUP_ORDER.forEach(function (g, i) {
       var members = roster.filter(function (k) { return k.group === g.name; });
       var autoRange = mcbGroupAgeRange(members);
-      html += '<div class="mcb-group' + (isFinal ? ' mcb-locked' : '') + '">';
+      html += '<div class="mcb-group">';
       html += '<div class="mcb-col-head">';
       html += '<span class="mcb-group-name">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</span>';
       html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>';
       html += '</div>';
       html += '<div class="mcb-group-range">' + (autoRange ? escapeHtmlWs(autoRange) : '<span class="mcb-range-default">typ. ' + g.range + '</span>') + '</div>';
       html += '<div class="mcb-col-body" data-drop-group="' + escapeHtmlWs(g.name) + '">';
-      members.forEach(function (k) { html += mcbKidChip(k, isFinal); });
+      members.forEach(function (k) { html += mcbKidChip(k); });
       html += '</div></div>';
     });
     html += '</div></div>';
 
     body.innerHTML = html;
     wireMorningWorkflow();
-    if (!isFinal) wireMorningDnD();
+    // Wire DnD whenever any chip is draggable (drafts, or late additions
+    // under a finalized plan). Locked chips simply aren't draggable.
+    wireMorningDnD();
   }
 
   function wireMorningWorkflow() {
     var fb = document.getElementById('mcbFinalizeBtn');
     if (fb) fb.addEventListener('click', function () {
-      var unplaced = morningBuilderState.roster.filter(function (k) { return !k.group; }).length;
-      var msg = 'Finalize the morning class groups for ' + morningBuilderState.schoolYear + '?\n\n'
-        + 'This writes every kid’s group into the official class roster (the Directory).'
-        + (unplaced ? '\n\n' + unplaced + ' kid(s) are still unplaced and will be left without a group.' : '')
-        + '\n\nYou can Reopen to make changes afterward.';
+      var roster = morningBuilderState.roster;
+      var isFinal = morningBuilderState.plan && morningBuilderState.plan.status === 'final';
+      var unplaced = roster.filter(function (k) { return !k.group; }).length;
+      var msg;
+      if (isFinal) {
+        msg = 'Finalize the new placements for ' + morningBuilderState.schoolYear + '?\n\n'
+          + 'This writes the newly-placed kids into the official class roster. Already-finalized kids are not changed.'
+          + (unplaced ? '\n\n' + unplaced + ' kid(s) are still unplaced and will be left without a group.' : '');
+      } else {
+        msg = 'Finalize the morning class groups for ' + morningBuilderState.schoolYear + '?\n\n'
+          + 'This writes every kid’s group into the official class roster (the Directory).'
+          + (unplaced ? '\n\n' + unplaced + ' kid(s) are still unplaced and will be left without a group.' : '')
+          + '\n\nYou can Reopen to make changes afterward.';
+      }
       if (!confirm(msg)) return;
       postMorningFinalize(true);
     });
     var rb = document.getElementById('mcbReopenBtn');
     if (rb) rb.addEventListener('click', function () {
-      if (!confirm('Reopen the groups for editing? The official roster keeps the last finalized values until you finalize again.')) return;
+      if (!confirm('Reopen the groups for editing? Every placement unlocks so you can rearrange. The official roster keeps the last finalized values until you finalize again.')) return;
       postMorningFinalize(false);
     });
   }

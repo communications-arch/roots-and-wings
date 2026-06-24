@@ -7845,8 +7845,13 @@ button.staff-role:hover {
 .mcb-flag { cursor: help; font-size: 0.8rem; }
 .mcb-dragging { opacity: 0.45; }
 .mcb-dropover { outline: 2px dashed var(--color-primary); outline-offset: -3px; }
-.mcb-locked .mcb-kid { cursor: default; }
-.mcb-locked { opacity: 0.92; }
+/* Finalized (locked) kid chips: not draggable, visually settled. */
+.mcb-kid-locked {
+  cursor: default;
+  background: var(--color-cream, #faf8f3);
+  border-style: dashed;
+  opacity: 0.85;
+}
 
 .sb-overlay {
   position: fixed;

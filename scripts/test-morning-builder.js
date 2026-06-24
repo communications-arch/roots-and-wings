@@ -46,6 +46,18 @@ const server = new Function(
   'return { fallYearOf, ageAsOfFall };'
 )();
 
+function extractConstArray(src, name) {
+  const re = new RegExp('^const ' + name + ' = \\[[\\s\\S]*?^\\];', 'm');
+  const m = src.match(re);
+  if (!m) throw new Error('could not extract const ' + name);
+  return m[0];
+}
+const seedHelpers = new Function(
+  extractConstArray(tourSrc, 'MORNING_GROUP_RANGES') + '\n' +
+  extractTop(tourSrc, 'groupForAge') + '\n' +
+  'return { groupForAge };'
+)();
+
 console.log('Morning Class Builder helpers');
 
 // ── ageAsOfFall: age at Sept 1 of the fall year (2026-2027 -> Sept 1 2026) ──
@@ -81,6 +93,33 @@ t('group well below the mean flagged small', () =>
   assert.strictEqual(client.mcbCountFlags([8, 8, 8, 1])[3], 'mcb-count-small'));
 t('empty groups are never flagged', () =>
   assert.strictEqual(client.mcbCountFlags([6, 6, 6, 0])[3], ''));
+
+// ── groupForAge: age → brand group, first-match on overlapping ranges ──
+t('toddler → Greenhouse', () => {
+  assert.strictEqual(seedHelpers.groupForAge(0), 'Greenhouse');
+  assert.strictEqual(seedHelpers.groupForAge(2), 'Greenhouse');
+});
+t('boundary 5 → Saplings (first match), 6 → Sassafras', () => {
+  assert.strictEqual(seedHelpers.groupForAge(3), 'Saplings');
+  assert.strictEqual(seedHelpers.groupForAge(5), 'Saplings');
+  assert.strictEqual(seedHelpers.groupForAge(6), 'Sassafras');
+});
+t('boundary 8 → Oaks (first match), 9 → Maples, 10 → Birch, 11 → Willows', () => {
+  assert.strictEqual(seedHelpers.groupForAge(7), 'Oaks');
+  assert.strictEqual(seedHelpers.groupForAge(8), 'Oaks');
+  assert.strictEqual(seedHelpers.groupForAge(9), 'Maples');
+  assert.strictEqual(seedHelpers.groupForAge(10), 'Birch');
+  assert.strictEqual(seedHelpers.groupForAge(11), 'Willows');
+});
+t('teens → Cedars then Pigeons', () => {
+  assert.strictEqual(seedHelpers.groupForAge(12), 'Cedars');
+  assert.strictEqual(seedHelpers.groupForAge(13), 'Cedars');
+  assert.strictEqual(seedHelpers.groupForAge(14), 'Pigeons');
+  assert.strictEqual(seedHelpers.groupForAge(18), 'Pigeons');
+});
+t('null/unknown age → empty (left unplaced)', () => {
+  assert.strictEqual(seedHelpers.groupForAge(null), '');
+});
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
