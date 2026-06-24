@@ -18214,14 +18214,14 @@
     var age = (k.age == null) ? '?' : k.age;
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
     var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
-    // Pending (unpaid) kids: read-only info chip, not draggable. Shows the
-    // age-suggested group so Membership can anticipate which class grows.
+    // Pending (unpaid) kids: read-only chip, not draggable. Sits in the
+    // group its age suggests so Membership sees the likely capacity impact.
     if (k.pending) {
-      var sug = mcbGroupForAge(k.age);
-      return '<div class="mcb-kid mcb-kid-pending" data-key="' + escapeHtmlWs(k.key) + '">'
+      return '<div class="mcb-kid mcb-kid-pending" title="Registered — payment not received yet" data-key="' + escapeHtmlWs(k.key) + '">'
         + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
-        + '<span class="mcb-kid-age">age ' + age + (sug ? ' · ≈ ' + escapeHtmlWs(sug) : '') + '</span>'
+        + '<span class="mcb-kid-age">age ' + age + '</span>'
         + allergy + note
+        + ' <span class="mcb-flag" title="Pending payment">⏳</span>'
         + '</div>';
     }
     var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
@@ -18268,21 +18268,22 @@
     }
     html += '</div>';
 
-    // Heads-up section for registered-but-unpaid families (read-only).
-    function pendingSectionHtml() {
-      if (!pendingKids.length) return '';
-      var h = '<div class="mcb-pending-section">';
-      h += '<div class="mcb-col-head">⏳ Pending — registered, payment not received <span class="mcb-count">' + pendingKids.length + '</span></div>';
-      h += '<p class="mcb-pending-note">Heads-up for planning — not placeable until paid. The “≈” shows the class their age suggests.</p>';
-      h += '<div class="mcb-pending-list">';
-      pendingKids.forEach(function (k) { h += mcbKidChip(k); });
-      h += '</div></div>';
-      return h;
+    // Bucket pending (unpaid) kids by the group their age suggests, so they
+    // appear inside the placement columns (read-only) for capacity planning.
+    // Unknown-age pending fall into the Unassigned column.
+    var pendingByGroup = {};
+    var pendingNoGroup = [];
+    pendingKids.forEach(function (k) {
+      var g = mcbGroupForAge(k.age);
+      if (g) { (pendingByGroup[g] = pendingByGroup[g] || []).push(k); }
+      else { pendingNoGroup.push(k); }
+    });
+    function pendBadge(n) {
+      return n ? ' <span class="mcb-count-pending" title="' + n + ' pending (not yet paid)">+' + n + '</span>' : '';
     }
 
-    if (!total) {
-      html += '<p class="ws-empty">No paid, morning-track kids registered for ' + escapeHtmlWs(morningBuilderState.schoolYear) + ' yet.</p>';
-      html += pendingSectionHtml();
+    if (!total && !pendingKids.length) {
+      html += '<p class="ws-empty">No morning-track kids registered for ' + escapeHtmlWs(morningBuilderState.schoolYear) + ' yet.</p>';
       body.innerHTML = html;
       wireMorningWorkflow();
       return;
@@ -18290,9 +18291,10 @@
 
     html += '<div class="mcb-layout">';
     html += '<div class="mcb-pool">';
-    html += '<div class="mcb-col-head">Unassigned <span class="mcb-count">' + unassigned.length + '</span></div>';
+    html += '<div class="mcb-col-head">Unassigned <span class="mcb-count">' + unassigned.length + '</span>' + pendBadge(pendingNoGroup.length) + '</div>';
     html += '<div class="mcb-col-body" data-drop-group="">';
     unassigned.forEach(function (k) { html += mcbKidChip(k); });
+    pendingNoGroup.forEach(function (k) { html += mcbKidChip(k); });
     html += '</div></div>';
 
     var counts = MORNING_GROUP_ORDER.map(function (g) {
@@ -18302,20 +18304,20 @@
     html += '<div class="mcb-groups">';
     MORNING_GROUP_ORDER.forEach(function (g, i) {
       var members = placeable.filter(function (k) { return k.group === g.name; });
+      var pend = pendingByGroup[g.name] || [];
       var autoRange = mcbGroupAgeRange(members);
       html += '<div class="mcb-group">';
       html += '<div class="mcb-col-head">';
       html += '<span class="mcb-group-name">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</span>';
-      html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>';
+      html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>' + pendBadge(pend.length);
       html += '</div>';
       html += '<div class="mcb-group-range">' + (autoRange ? escapeHtmlWs(autoRange) : '<span class="mcb-range-default">typ. ' + g.range + '</span>') + '</div>';
       html += '<div class="mcb-col-body" data-drop-group="' + escapeHtmlWs(g.name) + '">';
       members.forEach(function (k) { html += mcbKidChip(k); });
+      pend.forEach(function (k) { html += mcbKidChip(k); });
       html += '</div></div>';
     });
     html += '</div></div>';
-
-    html += pendingSectionHtml();
 
     body.innerHTML = html;
     wireMorningWorkflow();

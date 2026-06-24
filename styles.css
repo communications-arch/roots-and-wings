@@ -7873,32 +7873,23 @@ button.staff-role:hover {
   border-style: dashed;
   opacity: 0.85;
 }
-/* Pending (unpaid) kids: heads-up only, not draggable. */
-.mcb-pending-section {
-  margin-top: 16px;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md, 8px);
-  background: var(--color-cream, #faf8f3);
-  padding: 4px 0 10px;
-}
-.mcb-pending-note {
-  margin: 6px 10px 10px;
-  font-size: 0.78rem;
-  color: var(--color-text-light);
-}
-.mcb-pending-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 10px;
-}
+/* Pending (unpaid) kids: shown inside their age-suggested group column,
+   read-only, not draggable — dashed + faded so they read as "not yet here." */
 .mcb-kid-pending {
   cursor: default;
-  background: #fff;
   border-style: dashed;
-  opacity: 0.9;
+  opacity: 0.7;
+  background: repeating-linear-gradient(
+    45deg, transparent, transparent 6px,
+    rgba(var(--color-primary-rgb), 0.04) 6px, rgba(var(--color-primary-rgb), 0.04) 12px);
 }
-.mcb-pending-list .mcb-kid { width: auto; min-width: 160px; }
+/* "+N pending" pill next to a group's count. */
+.mcb-count-pending {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  font-style: italic;
+  margin-left: 2px;
+}
 
 .sb-overlay {
   position: fixed;
