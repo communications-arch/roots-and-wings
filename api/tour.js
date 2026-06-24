@@ -3551,9 +3551,9 @@ async function handleMorningBuilderGet(req, res) {
   const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
   try {
     const sql = getSql();
-    // Include not-yet-paid morning registrations too — they're surfaced
-    // read-only as a heads-up for capacity planning (flagged `pending`,
-    // never auto-seeded or placeable).
+    // Include not-yet-paid morning registrations too. They're placed/seeded/
+    // finalized exactly like paid kids — `pending` is only a visual flag so
+    // Membership knows payment hasn't landed yet.
     const regs = await sql`
       SELECT main_learning_coach, existing_family_name, track, placement_notes, payment_status, kids
       FROM registrations
@@ -3600,10 +3600,10 @@ async function handleMorningBuilderGet(req, res) {
           age: ageAsOfFall(k.birth_date, schoolYear),
           placement_notes: String(r.placement_notes || '').trim(),
           allergies: '',
-          // Pending (unpaid) kids are informational only: never seeded,
-          // never placed/finalized, not draggable on the client.
+          // Pending (unpaid) kids are treated the same as paid for placement;
+          // `pending` is just a visual flag on the client.
           pending: pending,
-          group: pending ? '' : (entry ? entry.group : ''),
+          group: entry ? entry.group : '',
           locked: false
         });
       });
@@ -3616,7 +3616,6 @@ async function handleMorningBuilderGet(req, res) {
     const wantSeed = (req.query.seed === '1' || req.query.seed === 'true');
     if (wantSeed && plan.status !== 'final' && !plan.seeded_at && roster.length > 0 && morningGateOpen(schoolYear)) {
       for (const item of roster) {
-        if (item.pending) continue;           // unpaid → heads-up only, don't place
         if (item.group) continue;             // already placed
         const g = groupForAge(item.age);
         if (!g) continue;                      // unknown/out-of-range age → leave unplaced
