@@ -6392,8 +6392,12 @@
           h += '</li>';
           // Morning class placement — surfaces only once registration has
           // produced a paid, morning-track kid who isn't grouped yet
-          // (loadMorningUnplacedCount). Opens the Morning Class Builder.
+          // (loadMorningClassTodos). Opens the Morning Class Builder.
           h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-morning-label">Place kids in morning classes</span></button></li>';
+          // Finalize nudge — shows when there's grouping in progress
+          // (≥1 kid placed) that hasn't been finalized into the official
+          // roster yet. Same loader (loadMorningClassTodos) toggles both.
+          h += '<li id="ws-todo-morning-finalize-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-finalize-count">0</span><span class="ws-link-icon">✅</span><span id="ws-morning-finalize-label">Finalize morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -6424,7 +6428,7 @@
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
-        if (typeof loadMorningUnplacedCount === 'function') loadMorningUnplacedCount();
+        if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
       }
     },
     'members-summary': {
@@ -17216,15 +17220,20 @@
   // Clicking either row opens the Tour Pipeline scoped to that bucket.
   // Also updates _toursCache as a side effect so re-opening the modal
   // can render instantly while a fresh fetch runs in the background.
-  // Membership To Do: nudge to place registered morning kids into classes.
-  // Self-gates on the item element (only present on the Membership tab), so
-  // afterRender can fire it unconditionally. Shows only when the upcoming
-  // season has ≥1 paid, morning-track kid with no draft group yet — which
-  // also means registration is underway, since the roster is empty before
-  // any paid morning registration exists. Opens the Morning Class Builder.
-  function loadMorningUnplacedCount() {
-    var item = document.getElementById('ws-todo-morning-item');
-    if (!item) return;
+  // Membership To Do: two morning-class nudges, both from one fetch.
+  // Self-gates on the item elements (only present on the Membership tab),
+  // so afterRender can fire it unconditionally.
+  //   - "Place kids…" shows when the upcoming season has a paid,
+  //     morning-track kid with no draft group yet. (The roster is empty
+  //     before any paid morning registration exists, so this also only
+  //     surfaces once registration is underway.)
+  //   - "Finalize…" shows when there's grouping in progress (≥1 kid
+  //     placed) that hasn't been finalized into the official roster yet.
+  // Both open the Morning Class Builder.
+  function loadMorningClassTodos() {
+    var placeItem = document.getElementById('ws-todo-morning-item');
+    var finalItem = document.getElementById('ws-todo-morning-finalize-item');
+    if (!placeItem && !finalItem) return;
     fetch('/api/tour?morning_builder=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
       headers: rwAuthHeaders()
     })
@@ -17236,25 +17245,40 @@
         if (!res.ok) {
           var msg = (res.data && res.data.error) || 'error';
           if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
-          console.warn('[loadMorningUnplacedCount] ' + msg);
-          item.hidden = true;
+          console.warn('[loadMorningClassTodos] ' + msg);
+          if (placeItem) placeItem.hidden = true;
+          if (finalItem) finalItem.hidden = true;
           recomputeTodoEmptyState();
           return;
         }
         var roster = Array.isArray(res.data && res.data.roster) ? res.data.roster : [];
-        var unplaced = roster.filter(function (k) { return !k.group; }).length;
-        if (unplaced > 0) {
-          var pill = document.getElementById('ws-morning-count');
-          if (pill) pill.textContent = unplaced;
-          item.hidden = false;
-        } else {
-          item.hidden = true;
+        var placed = roster.filter(function (k) { return !!k.group; }).length;
+        var unplaced = roster.length - placed;
+        var isDraft = !(res.data && res.data.plan && res.data.plan.status === 'final');
+        if (placeItem) {
+          if (unplaced > 0) {
+            var pc = document.getElementById('ws-morning-count');
+            if (pc) pc.textContent = unplaced;
+            placeItem.hidden = false;
+          } else {
+            placeItem.hidden = true;
+          }
+        }
+        if (finalItem) {
+          if (isDraft && placed > 0) {
+            var fc = document.getElementById('ws-morning-finalize-count');
+            if (fc) fc.textContent = placed;
+            finalItem.hidden = false;
+          } else {
+            finalItem.hidden = true;
+          }
         }
         recomputeTodoEmptyState();
       })
       .catch(function (err) {
-        console.warn('[loadMorningUnplacedCount] network error:', err);
-        item.hidden = true;
+        console.warn('[loadMorningClassTodos] network error:', err);
+        if (placeItem) placeItem.hidden = true;
+        if (finalItem) finalItem.hidden = true;
         recomputeTodoEmptyState();
       });
   }
@@ -18284,6 +18308,9 @@
       .then(function (res) {
         if (!res.ok) { alert('Failed: ' + ((res.data && res.data.error) || 'unknown')); return; }
         loadMorningClassBuilder();
+        // Keep the workspace To Do nudges (behind the modal) in sync with
+        // the new draft/final state without waiting for a re-render.
+        if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
       }).catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
   }
 
