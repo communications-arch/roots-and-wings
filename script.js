@@ -18132,6 +18132,9 @@
     var ov = document.getElementById('mcbOverlay');
     if (ov) ov.remove();
     document.body.style.overflow = '';
+    // Re-sync the To Do card — placements made in the modal change the
+    // count / state, and the workspace behind it didn't re-render.
+    if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
   }
 
   function loadMorningClassBuilder() {
