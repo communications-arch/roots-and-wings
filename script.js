@@ -6350,20 +6350,6 @@
         if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       }
     },
-    'morning-builder': {
-      // Membership Director only — groups the upcoming year's morning-track
-      // kids into the brand age-band classes (Greenhouse … Pigeons), then
-      // finalizes into the official class roster.
-      title: 'Morning Class Builder',
-      roleGate: ['Membership Director'],
-      render: function () {
-        var h = '<p class="ws-body-hint">Sort next year’s morning kids into age-group classes, balance the counts, then finalize.</p>';
-        h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">🌱</span>Open Morning Class Builder</button></li>';
-        h += '</ul>';
-        return h;
-      }
-    },
     'todos': {
       // Per-role action queue. Items show only when the active role has
       // something waiting (e.g. Treasurer sees pending cash/check
@@ -6404,6 +6390,10 @@
           h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-pre-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
+          // Morning class placement — surfaces only once registration has
+          // produced a paid, morning-track kid who isn't grouped yet
+          // (loadMorningUnplacedCount). Opens the Morning Class Builder.
+          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-morning-label">Place kids in morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -6434,6 +6424,7 @@
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+        if (typeof loadMorningUnplacedCount === 'function') loadMorningUnplacedCount();
       }
     },
     'members-summary': {
@@ -6590,6 +6581,7 @@
     ],
     'Membership Director': [
       { key: 'tour-pipeline', title: 'Tour Pipeline' },
+      { key: 'morning-classes', title: 'Morning Classes' },
       { key: 'membership', title: 'Membership Report' }
     ],
     'Treasurer': [
@@ -6637,7 +6629,7 @@
   var WORKSPACE_DEFAULTS = {
     'President': ['todos', 'members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'members-summary', 'morning-builder', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Secretary': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
@@ -6934,6 +6926,7 @@
         else if (key === 'membership') showMembershipReportModal();
         else if (key === 'participation') showParticipationReportModal();
         else if (key === 'tour-pipeline') showTourPipelineModal();
+        else if (key === 'morning-classes') showMorningClassBuilder();
         else if (key === 'merch-orders') showMerchOrdersModal();
       });
     });
@@ -17223,6 +17216,49 @@
   // Clicking either row opens the Tour Pipeline scoped to that bucket.
   // Also updates _toursCache as a side effect so re-opening the modal
   // can render instantly while a fresh fetch runs in the background.
+  // Membership To Do: nudge to place registered morning kids into classes.
+  // Self-gates on the item element (only present on the Membership tab), so
+  // afterRender can fire it unconditionally. Shows only when the upcoming
+  // season has ≥1 paid, morning-track kid with no draft group yet — which
+  // also means registration is underway, since the roster is empty before
+  // any paid morning registration exists. Opens the Morning Class Builder.
+  function loadMorningUnplacedCount() {
+    var item = document.getElementById('ws-todo-morning-item');
+    if (!item) return;
+    fetch('/api/tour?morning_builder=1&school_year=' + encodeURIComponent(morningBuilderState.schoolYear), {
+      headers: rwAuthHeaders()
+    })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; })
+          .catch(function () { return { ok: r.ok, data: null }; });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || 'error';
+          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+          console.warn('[loadMorningUnplacedCount] ' + msg);
+          item.hidden = true;
+          recomputeTodoEmptyState();
+          return;
+        }
+        var roster = Array.isArray(res.data && res.data.roster) ? res.data.roster : [];
+        var unplaced = roster.filter(function (k) { return !k.group; }).length;
+        if (unplaced > 0) {
+          var pill = document.getElementById('ws-morning-count');
+          if (pill) pill.textContent = unplaced;
+          item.hidden = false;
+        } else {
+          item.hidden = true;
+        }
+        recomputeTodoEmptyState();
+      })
+      .catch(function (err) {
+        console.warn('[loadMorningUnplacedCount] network error:', err);
+        item.hidden = true;
+        recomputeTodoEmptyState();
+      });
+  }
+
   function loadMembershipTourRequestsCount() {
     var reqItem  = document.getElementById('ws-todo-tours-item');
     var schedItem = document.getElementById('ws-todo-tours-scheduled-item');
