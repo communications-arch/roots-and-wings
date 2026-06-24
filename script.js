@@ -18236,13 +18236,7 @@
     var awaitingFinal = roster.filter(function (k) { return k.group && !k.locked; }).length;
     var newWork = unassigned.length + awaitingFinal;
 
-    var html = '';
-    // Legend for the pending styling — at the very top, above everything,
-    // only when there are pending kids.
-    if (roster.some(function (k) { return k.pending; })) {
-      html += '<p class="mcb-legend"><span class="mcb-legend-swatch"></span> ⏳ <strong>Amber dashed</strong> chips are registered but <strong>pending final payment</strong>. They’re seeded and placed with everyone else — just keep an eye out in case payment doesn’t come through.</p>';
-    }
-    html += '<div class="mcb-workflow">';
+    var html = '<div class="mcb-workflow">';
     if (isFinal && newWork === 0) {
       var fb = morningBuilderState.plan.finalized_by || '';
       var fa = morningBuilderState.plan.finalized_at ? formatReportDate(morningBuilderState.plan.finalized_at) : '';
@@ -18261,6 +18255,12 @@
       html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize groups</button>';
     }
     html += '</div>';
+
+    // Legend for the pending styling — below the workflow line, above the
+    // grid. Only when there are pending kids.
+    if (roster.some(function (k) { return k.pending; })) {
+      html += '<p class="mcb-legend"><span class="mcb-legend-swatch"></span> ⏳ <strong>Amber dashed</strong> chips are registered but <strong>pending final payment</strong>. They’re seeded and placed with everyone else — just keep an eye out in case payment doesn’t come through.</p>';
+    }
 
     if (!total) {
       html += '<p class="ws-empty">No morning-track kids registered for ' + escapeHtmlWs(morningBuilderState.schoolYear) + ' yet.</p>';
