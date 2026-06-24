@@ -207,14 +207,14 @@
         </div>
 
         <div class="reg-field">
-          <label id="reg-coach-label" style="display:block;">Main Learning Coach (parent who will attend) <span class="reg-req" aria-hidden="true">*</span></label>
+          <label id="reg-coach-label" style="display:block;">Main Learning Coach (parent who will attend)</label>
           <div class="reg-field-row">
             <div class="reg-field" style="margin-bottom:0;">
-              <label for="reg-coach-first" style="font-weight:500;font-size:0.85rem;">First name</label>
+              <label for="reg-coach-first">First name <span class="reg-req" aria-hidden="true">*</span></label>
               <input type="text" id="reg-coach-first" required autocomplete="given-name" aria-required="true">
             </div>
             <div class="reg-field" style="margin-bottom:0;">
-              <label for="reg-coach-last" style="font-weight:500;font-size:0.85rem;">Last name</label>
+              <label for="reg-coach-last">Last name <span class="reg-req" aria-hidden="true">*</span></label>
               <input type="text" id="reg-coach-last" required autocomplete="family-name" aria-required="true">
             </div>
           </div>
@@ -243,20 +243,20 @@
 
         <fieldset class="reg-field" style="border: none; padding: 0; margin-bottom: 16px;">
           <legend style="font-weight: 600; color: var(--color-primary-dark); margin-bottom: 6px; font-size: 0.95rem;">Children <span class="reg-req" aria-hidden="true">*</span></legend>
-          <p class="reg-field-hint" style="margin: 0 0 10px;">Add each child's full name and birth date.</p>
+          <p class="reg-field-hint" style="margin: 0 0 10px;">Add each child's name and birth date.</p>
           <div class="reg-kids-list" id="reg-kids-list"></div>
           <button type="button" class="reg-add-kid-btn" id="reg-add-kid">+ Add another child</button>
         </fieldset>
 
         <fieldset class="reg-field" style="border: none; padding: 0; margin-bottom: 16px;">
-          <legend style="font-weight: 600; color: var(--color-primary-dark); margin-bottom: 6px; font-size: 0.95rem;">Backup Learning Coaches (optional)</legend>
+          <legend style="font-weight: 600; color: var(--color-primary-dark); margin-bottom: 6px; font-size: 0.95rem;">Backup Learning Coaches <span class="reg-optional">(optional)</span></legend>
           <p class="reg-field-hint" style="margin: 0 0 10px;">Any adult (spouse, grandparent, friend) who will sub or cover for the Main Learning Coach needs their own waiver on file. Add them below and <strong>we'll email each one a link to sign their waiver</strong>.</p>
           <div class="reg-kids-list" id="reg-backup-list"></div>
           <button type="button" class="reg-add-kid-btn" id="reg-add-backup">+ Add a backup Learning Coach</button>
         </fieldset>
 
         <div class="reg-field">
-          <label for="reg-notes">Placement requests, allergies, or notes (optional)</label>
+          <label for="reg-notes">Placement requests, allergies, or notes <span class="reg-optional">(optional)</span></label>
           <textarea id="reg-notes" placeholder="e.g., please place my child in the younger/older class, sibling requests, allergies, accommodations, etc."></textarea>
         </div>
 
@@ -542,15 +542,15 @@
       var optoutId = 'reg-kid-photo-optout-' + id;
       row.innerHTML =
         '<div class="reg-field" style="margin-bottom:0;">' +
-          '<label for="' + firstId + '">First name</label>' +
+          '<label for="' + firstId + '">First name <span class="reg-req" aria-hidden="true">*</span></label>' +
           '<input type="text" id="' + firstId + '" class="reg-kid-first" placeholder="e.g., Violet" autocomplete="off">' +
         '</div>' +
         '<div class="reg-field" style="margin-bottom:0;">' +
-          '<label for="' + lastId + '">Last name</label>' +
+          '<label for="' + lastId + '">Last name <span class="reg-optional">(optional)</span></label>' +
           '<input type="text" id="' + lastId + '" class="reg-kid-last" placeholder="e.g., Bogan" autocomplete="off">' +
         '</div>' +
         '<div class="reg-field" style="margin-bottom:0;">' +
-          '<label for="' + bdayId + '">Birth date</label>' +
+          '<label for="' + bdayId + '">Birth date <span class="reg-req" aria-hidden="true">*</span></label>' +
           '<input type="date" id="' + bdayId + '" class="reg-kid-bday" min="' + MIN_BIRTH_DATE + '" max="' + MAX_BIRTH_DATE + '">' +
         '</div>' +
         '<button type="button" class="reg-kid-remove" aria-label="Remove this child">Remove</button>' +
