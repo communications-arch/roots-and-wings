@@ -1191,3 +1191,29 @@ ALTER TABLE co_op_sessions
 ALTER TABLE class_signup_windows
   ADD COLUMN IF NOT EXISTS signup_start_date DATE,
   ADD COLUMN IF NOT EXISTS signup_end_date   DATE;
+
+-- ──────────────────────────────────────────────
+-- Board Calendar (any board member)
+-- ──────────────────────────────────────────────
+-- A single board-facing calendar of date-sensitive co-op events that don't
+-- have their own home editor yet — registration opens/closes, "morning
+-- classes finalized by", board meeting dates, and any future date the board
+-- wants to track. Session start/end dates (co_op_sessions) and afternoon
+-- sign-up windows (class_signup_windows) keep their own editors and are NOT
+-- duplicated here; v1 of the calendar is just these standalone events. Any
+-- board member can view and edit (server gate: isBoardMember). end_date is
+-- optional — set it for a multi-day window (e.g. a registration window),
+-- leave it NULL for a single-day event.
+CREATE TABLE IF NOT EXISTS board_calendar_events (
+  id           SERIAL PRIMARY KEY,
+  school_year  TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  event_date   DATE NOT NULL,
+  end_date     DATE,
+  note         TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS board_calendar_events_year_idx
+  ON board_calendar_events (school_year, event_date);

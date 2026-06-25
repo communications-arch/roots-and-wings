@@ -223,6 +223,7 @@ const unitTests = [
   'scripts/test-org-structure.js',
   'scripts/test-members-summary.js',
   'scripts/test-morning-builder.js',
+  'scripts/test-board-calendar.js',
 ];
 
 for (const rel of unitTests) {

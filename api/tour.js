@@ -3792,6 +3792,278 @@ async function handleMorningFinalize(body, req, res) {
   }
 }
 
+// ── Board Calendar ──
+// A board-facing list of date-sensitive co-op events that don't have their
+// own home editor (registration opens/closes, "morning classes finalized
+// by", board meetings, …). Session dates + sign-up windows keep their own
+// editors and are NOT surfaced here in v1. Any board member can view + edit.
+
+// Render a Neon DATE (returned as a JS Date at UTC-midnight) as a TZ-agnostic
+// YYYY-MM-DD string; passes through a NULL/empty end_date as ''.
+function calDateStr(v) {
+  if (!v) return '';
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+}
+
+// Pure validator for one event payload. Returns an error string, or '' when
+// the payload is valid. Exported for the regression test.
+function validateBoardCalendarEvent(p) {
+  p = p || {};
+  const schoolYear = String(p.school_year || '').trim();
+  const title = String(p.title || '').trim();
+  const eventDate = String(p.event_date || '').trim();
+  const endDate = String(p.end_date || '').trim();
+  if (!/^\d{4}-\d{4}$/.test(schoolYear)) return 'school_year must be "YYYY-YYYY".';
+  const yrA = parseInt(schoolYear.slice(0, 4), 10);
+  const yrB = parseInt(schoolYear.slice(5), 10);
+  if (yrB !== yrA + 1) return 'school_year second half must be the year after the first half.';
+  if (!title) return 'An event name is required.';
+  if (title.length > 200) return 'Event name is too long (200 characters max).';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return 'A valid date is required.';
+  if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return 'End date must be YYYY-MM-DD.';
+  if (endDate && endDate < eventDate) return 'End date must be on or after the start date.';
+  if (String(p.note || '').length > 1000) return 'Note is too long (1000 characters max).';
+  return '';
+}
+
+// ── Derived calendar events ──
+// The board's date-sensitive work is mostly driven off the session calendar
+// (co_op_sessions). Rather than make the board re-enter those dates, we
+// COMPUTE the trigger dates and show them as read-only rows alongside any
+// manual events. All math is string-based (YYYY-MM-DD) in UTC so it's
+// timezone-agnostic — matches how Neon DATE values round-trip.
+
+// Add n days (may be negative) to a YYYY-MM-DD string.
+function calAddDays(dateStr, n) {
+  const d = new Date(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+// Nearest Wednesday strictly before (dir=-1) or after (dir=+1) a date. If the
+// date is itself a Wednesday, lands a full week away (never the same day).
+function calSnapWed(dateStr, dir) {
+  const d = new Date(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  do { d.setUTCDate(d.getUTCDate() + dir); } while (d.getUTCDay() !== 3);
+  return d.toISOString().slice(0, 10);
+}
+function calSessionsForYear(sessions, schoolYear) {
+  return (sessions || [])
+    .filter(s => s.school_year === schoolYear && s.start_date && s.end_date)
+    .sort((a, b) => (a.session_number || 0) - (b.session_number || 0));
+}
+// Field Day = the Wednesday strictly after the last session's end. '' if the
+// year has no sessions yet.
+function fieldDayForYear(sessions, schoolYear) {
+  const ends = calSessionsForYear(sessions, schoolYear).map(s => s.end_date).sort();
+  return ends.length ? calSnapWed(ends[ends.length - 1], 1) : '';
+}
+// Ice Cream Social = the Wednesday strictly before the first session's start.
+function iceCreamSocialForYear(sessions, schoolYear) {
+  const rows = calSessionsForYear(sessions, schoolYear);
+  return rows.length ? calSnapWed(rows[0].start_date, -1) : '';
+}
+
+// Build the read-only derived events for one school year. Each carries a
+// synthetic string id (so the client can key/skip it), derived:true, and the
+// action item / role it relates to. Returns [] when the year has no sessions
+// to anchor the date math (June-1 morning build is still emitted — it doesn't
+// need sessions).
+function computeDerivedCalendarEvents(sessions, schoolYear) {
+  if (!/^\d{4}-\d{4}$/.test(String(schoolYear))) return [];
+  const F = parseInt(schoolYear.slice(0, 4), 10);
+  const nextYr = (F + 1) + '-' + (F + 2);
+  const out = [];
+  const push = (key, title, date, end, note, role, icon) => {
+    if (!date) return;
+    out.push({
+      id: 'derived:' + key + ':' + schoolYear,
+      school_year: schoolYear, title: title, event_date: date, end_date: end || '',
+      note: note || '', role: role || '', icon: icon || '📌', derived: true
+    });
+  };
+
+  // Summer setup
+  push('morning', 'Build morning classes', F + '-06-01', '',
+    'Membership Director groups morning kids into age classes', 'Membership Director', '🌱');
+
+  const ics = iceCreamSocialForYear(sessions, schoolYear);
+  push('removemembers', 'Remove non-returning members', calAddDays(ics, -3), '',
+    'Workspace cleanup for families who did not re-enroll (a few days before the Ice Cream Social)',
+    'Communications Director', '🧹');
+  push('icecream', 'Ice Cream Social', ics, '',
+    'Welcome social — the Wednesday before the first session', '', '🍦');
+
+  // The five sessions
+  calSessionsForYear(sessions, schoolYear).forEach(s => {
+    push('session' + s.session_number, s.name || ('Session ' + s.session_number),
+      s.start_date, s.end_date, 'Co-op session', '', '📚');
+  });
+
+  // Year-end cluster, anchored to Field Day
+  const fd = fieldDayForYear(sessions, schoolYear);
+  push('regexisting', 'Registration opens — existing members (' + nextYr + ')', calAddDays(fd, -28), '',
+    'Returning families re-enroll for next year (2 weeks before public)', 'Membership Director', '📝');
+  push('regpublic', 'Registration opens — public (' + nextYr + ')', calAddDays(fd, -14), '',
+    'Public registration for next year (2 weeks before Field Day)', 'Membership Director', '📝');
+  push('fieldday', 'Field Day (last day)', fd, '',
+    'Final day of the school year', '', '🎉');
+  push('roleconfirm', 'Confirm role holders', calAddDays(fd, 1), '',
+    'Comms Director confirms board role assignments for the new year', 'Communications Director', '🧭');
+  const ends = calSessionsForYear(sessions, schoolYear).map(s => s.end_date).sort();
+  if (ends.length) {
+    push('setdates', 'Set next year’s session dates', calAddDays(ends[ends.length - 1], 14), '',
+      'President / VP enter the ' + nextYr + ' session calendar', 'President / Vice President', '📆');
+  }
+  return out;
+}
+
+async function requireBoardMember(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const ok = await isBoardMember(auth.email);
+  if (!ok) {
+    res.status(403).json({
+      error: 'Only board members can use the Board Calendar.',
+      youAre: auth.realEmail
+    });
+    return null;
+  }
+  return auth;
+}
+
+// GET ?calendar=1[&school_year=YYYY-YYYY]
+// Returns every board calendar event (all years) so the client can build its
+// year picker; the dataset is tiny. Sorted by date.
+async function handleBoardCalendarGet(req, res) {
+  const auth = await requireBoardMember(req, res);
+  if (!auth) return;
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, school_year, title, event_date, end_date, note, updated_at, updated_by
+      FROM board_calendar_events
+      ORDER BY event_date, id
+    `;
+    const manual = rows.map(r => ({
+      id: r.id,
+      school_year: r.school_year,
+      title: r.title,
+      event_date: calDateStr(r.event_date),
+      end_date: calDateStr(r.end_date),
+      note: r.note || '',
+      derived: false,
+      updated_at: r.updated_at,
+      updated_by: r.updated_by
+    }));
+
+    // Derived (read-only) trigger dates computed off the session calendar.
+    const sessRows = await sql`
+      SELECT school_year, session_number, name, start_date, end_date
+      FROM co_op_sessions
+    `;
+    const sessions = sessRows.map(s => ({
+      school_year: s.school_year,
+      session_number: s.session_number,
+      name: s.name,
+      start_date: calDateStr(s.start_date),
+      end_date: calDateStr(s.end_date)
+    }));
+    // Compute for every year that has sessions, plus the active + next year
+    // (so a not-yet-scheduled upcoming year still shows the June-1 morning
+    // build prompt). De-duped.
+    const active = activeSchoolYear();
+    const F = parseInt(active.slice(0, 4), 10);
+    const nextYr = (F + 1) + '-' + (F + 2);
+    const years = Array.from(new Set(
+      sessions.map(s => s.school_year).concat([active, nextYr])
+    ));
+    const derived = [];
+    years.forEach(yr => { computeDerivedCalendarEvents(sessions, yr).forEach(e => derived.push(e)); });
+
+    const events = manual.concat(derived)
+      .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
+    return res.status(200).json({ events });
+  } catch (err) {
+    console.error('board-calendar get error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='calendar-save' — insert a new event, or update an existing one
+// when body.id is present. Any board member may write.
+async function handleBoardCalendarSave(body, req, res) {
+  const auth = await requireBoardMember(req, res);
+  if (!auth) return;
+  const validationErr = validateBoardCalendarEvent(body);
+  if (validationErr) return res.status(400).json({ error: validationErr });
+  const schoolYear = String(body.school_year).trim();
+  const title = String(body.title).trim();
+  const eventDate = String(body.event_date).trim();
+  const endDate = String(body.end_date || '').trim() || null;
+  const note = String(body.note || '').trim();
+  const id = body.id != null ? parseInt(body.id, 10) : null;
+  try {
+    const sql = getSql();
+    let row;
+    if (Number.isInteger(id) && id > 0) {
+      const updated = await sql`
+        UPDATE board_calendar_events
+        SET school_year = ${schoolYear}, title = ${title}, event_date = ${eventDate},
+            end_date = ${endDate}, note = ${note}, updated_at = NOW(), updated_by = ${auth.realEmail}
+        WHERE id = ${id}
+        RETURNING id, school_year, title, event_date, end_date, note, updated_at, updated_by
+      `;
+      if (updated.length === 0) return res.status(404).json({ error: 'Event not found.' });
+      row = updated[0];
+    } else {
+      const inserted = await sql`
+        INSERT INTO board_calendar_events
+          (school_year, title, event_date, end_date, note, updated_at, updated_by)
+        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, NOW(), ${auth.realEmail})
+        RETURNING id, school_year, title, event_date, end_date, note, updated_at, updated_by
+      `;
+      row = inserted[0];
+    }
+    return res.status(200).json({
+      event: {
+        id: row.id,
+        school_year: row.school_year,
+        title: row.title,
+        event_date: calDateStr(row.event_date),
+        end_date: calDateStr(row.end_date),
+        note: row.note || '',
+        updated_at: row.updated_at,
+        updated_by: row.updated_by
+      }
+    });
+  } catch (err) {
+    console.error('board-calendar save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='calendar-delete' — remove an event by id.
+async function handleBoardCalendarDelete(body, req, res) {
+  const auth = await requireBoardMember(req, res);
+  if (!auth) return;
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ error: 'id is required.' });
+  }
+  try {
+    const sql = getSql();
+    const existing = await sql`SELECT id FROM board_calendar_events WHERE id = ${id}`;
+    if (existing.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    await sql`DELETE FROM board_calendar_events WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('board-calendar delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -3808,6 +4080,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
+    if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -3835,6 +4108,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
     if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
+    if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
+    if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 
@@ -3846,3 +4121,9 @@ module.exports = async function handler(req, res) {
 module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
 module.exports.deriveFamilyName = deriveFamilyName;
 module.exports.deriveFamilyEmail = deriveFamilyEmail;
+module.exports.validateBoardCalendarEvent = validateBoardCalendarEvent;
+module.exports.computeDerivedCalendarEvents = computeDerivedCalendarEvents;
+module.exports.fieldDayForYear = fieldDayForYear;
+module.exports.iceCreamSocialForYear = iceCreamSocialForYear;
+module.exports.calAddDays = calAddDays;
+module.exports.calSnapWed = calSnapWed;

@@ -12592,6 +12592,56 @@ button.staff-role:hover {
   justify-content: flex-end;
 }
 
+/* Board Calendar add/edit form (inline panel inside the Board Calendar
+   modal). Reuses the coop-cal table/toolbar/save-bar styles for layout. */
+.board-cal-form {
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-cream, #fbf8f2);
+}
+.board-cal-field { margin-bottom: 10px; }
+.board-cal-field label { font-weight: 600; font-size: 0.9rem; }
+.board-cal-field input,
+.board-cal-field textarea {
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font: inherit;
+  margin-top: 2px;
+}
+.board-cal-field textarea { max-width: 100%; resize: vertical; }
+.board-cal-field input[type="date"] { max-width: 200px; }
+.board-cal-opt { font-weight: 400; color: var(--color-text-muted, #777); font-size: 0.82rem; }
+.board-cal-legend { font-size: 0.82rem; color: var(--color-text-muted, #777); margin: 4px 0 10px; line-height: 1.4; }
+.board-cal-derived-row td { background: #f7f5fb; }
+.board-cal-auto-cell {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
+  width: 1%;
+}
+.board-cal-auto-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #ece7f6;
+  color: #5b4a93;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.board-cal-role {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.76rem;
+  color: var(--color-text-muted, #777);
+  font-style: italic;
+}
+
 /* Role edit overlay (opens on top of the Roles Manager modal). Uses its
    own stacking context so closing it doesn't collapse the manager. */
 .role-edit-overlay {

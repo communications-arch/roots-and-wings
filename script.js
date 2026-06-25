@@ -6315,6 +6315,10 @@
         var h = '<p class="ws-body-hint">Manage role descriptions, terms, and current holders for your committee.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
+        // Board Calendar — any board member can view/edit the standalone
+        // date-driven events. Server gate (isBoardMember) is the real
+        // enforcement; shown to every board chair on this card.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Board Calendar</button></li>';
         if (role === 'President' || role === 'Vice President') {
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-icon">📆</span>Session Dates<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span></button></li>';
         }
@@ -13662,6 +13666,7 @@
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
+    else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
     else if (action === 'waivers-pending' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
     else if (action === 'treasurer-pending-payments' && typeof showMembershipReportModal === 'function') {
@@ -15763,6 +15768,15 @@
     // table at click time and POSTs them sequentially.
   };
 
+  // Board Calendar — standalone date-driven events any board member can edit.
+  // Separate from _coopCalState (session dates) on purpose; the two never
+  // share data. Editing happens row-by-row (a small modal per add/edit) so we
+  // keep no DOM-as-truth batching here.
+  var _boardCalState = {
+    schoolYear: '',     // year picker value
+    events: []          // full payload from /api/tour?calendar=1
+  };
+
   // Default the picker to the active school year per activeSchoolYear()
   // (April-1 pivot). When that year has zero rows the table will show
   // an empty state + "+ Add session" — exactly what the President sees
@@ -16546,6 +16560,256 @@
   // etc.). Replaces window.alert so feedback stays inside the modal.
   function coopCalShowMsg(text) {
     var el = document.getElementById('coop-cal-msg');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = text;
+    el.style.display = '';
+  }
+
+  // ── Board Calendar ────────────────────────────────────────────────
+  // A board-wide list of date-sensitive co-op events (registration opens,
+  // "morning classes finalized by", board meetings, …) that don't have
+  // their own editor elsewhere. Any board member can view + edit. Session
+  // dates and afternoon sign-up windows keep their own editors and are NOT
+  // duplicated here (v1). Add/Edit happens through one inline form; Save
+  // POSTs immediately and reloads (no batched DOM-as-truth here).
+  function boardCalDefaultYear() {
+    return (typeof activeSchoolYear === 'function') ? activeSchoolYear().label : ACTIVE_SESSION_YEAR;
+  }
+
+  function boardCalFmtDate(s) {
+    if (!s) return '';
+    var p = String(s).split('-');
+    if (p.length !== 3) return s;
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return (months[parseInt(p[1], 10) - 1] || '') + ' ' + parseInt(p[2], 10) + ', ' + p[0];
+  }
+
+  function boardCalFmtRange(start, end) {
+    if (!start) return '';
+    return boardCalFmtDate(start) + (end ? ' – ' + boardCalFmtDate(end) : '');
+  }
+
+  function showBoardCalendarModal() {
+    var body = renderReportModal({
+      title: 'Board Calendar',
+      subtitle: 'Date-sensitive co-op events the board tracks together. Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Schedule Builder.)',
+      meta: '',
+      icons: [],
+      bodyId: 'board-cal-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading calendar…</p>'
+    });
+    if (!body) return;
+    loadBoardCalendar();
+  }
+
+  function loadBoardCalendar() {
+    var body = document.getElementById('board-cal-body');
+    if (!body) return;
+    body.innerHTML = '<p class="ws-empty">Loading calendar…</p>';
+    fetch('/api/tour?calendar=1', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((r.data && r.data.error) || 'Could not load the calendar.') + '</p>';
+          return;
+        }
+        _boardCalState.events = Array.isArray(r.data.events) ? r.data.events : [];
+        if (!_boardCalState.schoolYear) _boardCalState.schoolYear = boardCalDefaultYear();
+        renderBoardCalendarBody();
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderBoardCalendarBody() {
+    var body = document.getElementById('board-cal-body');
+    if (!body) return;
+    var allYears = Array.from(new Set(_boardCalState.events.map(function (e) { return e.school_year; })));
+    var active = boardCalDefaultYear();
+    var nextYear = (function () {
+      var p = active.split('-'); return (parseInt(p[0], 10) + 1) + '-' + (parseInt(p[1], 10) + 1);
+    })();
+    [active, nextYear].forEach(function (yr) { if (allYears.indexOf(yr) === -1) allYears.push(yr); });
+    allYears.sort();
+    if (allYears.indexOf(_boardCalState.schoolYear) === -1) _boardCalState.schoolYear = active;
+
+    var rows = _boardCalState.events
+      .filter(function (e) { return e.school_year === _boardCalState.schoolYear; })
+      .sort(function (a, b) { return (a.event_date || '').localeCompare(b.event_date || ''); });
+
+    var h = '<div class="coop-cal-toolbar">';
+    h += '<label class="coop-cal-yearpick">School year ';
+    h += '<select id="board-cal-year">';
+    allYears.forEach(function (yr) {
+      h += '<option value="' + yr + '"' + (yr === _boardCalState.schoolYear ? ' selected' : '') + '>' + yr + '</option>';
+    });
+    h += '</select></label>';
+    h += '<button id="board-cal-add" class="btn btn-outline-dark btn-sm" type="button">+ Add event</button>';
+    h += '</div>';
+
+    h += '<div class="coop-cal-msg cls-error" id="board-cal-msg" style="display:none;"></div>';
+    h += '<div id="board-cal-form-wrap"></div>';
+
+    if (rows.length === 0) {
+      h += '<p class="ws-empty" style="margin-top:12px;">No events yet for ' + escapeHtml(_boardCalState.schoolYear) + '. Use “+ Add event” to add one.</p>';
+    } else {
+      h += '<p class="board-cal-legend">Dates marked <span class="board-cal-auto-pill">Auto</span> are calculated from the session calendar and update if you change the Session Dates — they can’t be edited here. Add your own one-off dates with “+ Add event”.</p>';
+      h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
+      h += '<th>Date</th><th>Event</th><th>Notes</th><th></th>';
+      h += '</tr></thead><tbody>';
+      rows.forEach(function (e) {
+        h += '<tr data-id="' + e.id + '"' + (e.derived ? ' class="board-cal-derived-row"' : '') + '>';
+        h += '<td style="white-space:nowrap;">' + escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) + '</td>';
+        h += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</td>';
+        var notes = escapeHtml(e.note || '');
+        if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
+        h += '<td>' + notes + '</td>';
+        if (e.derived) {
+          h += '<td class="board-cal-auto-cell"><span class="board-cal-auto-pill" title="Auto-calculated from the session calendar">Auto</span></td>';
+        } else {
+          h += '<td class="coop-cal-actions">';
+          h += '<button class="btn btn-outline-dark btn-sm board-cal-edit" data-id="' + e.id + '" type="button">Edit</button> ';
+          h += '<button class="btn btn-danger btn-sm board-cal-delete" data-id="' + e.id + '" type="button">Delete</button>';
+          h += '</td>';
+        }
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    body.innerHTML = h;
+    wireBoardCalendarBody();
+  }
+
+  function wireBoardCalendarBody() {
+    var body = document.getElementById('board-cal-body');
+    if (!body) return;
+    var picker = document.getElementById('board-cal-year');
+    if (picker) picker.addEventListener('change', function () {
+      _boardCalState.schoolYear = this.value;
+      renderBoardCalendarBody();
+    });
+    var addBtn = document.getElementById('board-cal-add');
+    if (addBtn) addBtn.addEventListener('click', function () { boardCalShowForm(null); });
+    body.querySelectorAll('.board-cal-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var ev = _boardCalState.events.filter(function (e) { return e.id === id; })[0];
+        if (ev) boardCalShowForm(ev);
+      });
+    });
+    body.querySelectorAll('.board-cal-delete').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (btn.getAttribute('data-confirming') !== '1') {
+          body.querySelectorAll('.board-cal-delete[data-confirming="1"]').forEach(function (o) {
+            if (o !== btn) { o.removeAttribute('data-confirming'); o.textContent = 'Delete'; }
+          });
+          btn.setAttribute('data-confirming', '1');
+          btn.textContent = 'Confirm delete';
+          return;
+        }
+        boardCalDelete(parseInt(btn.getAttribute('data-id'), 10), btn);
+      });
+    });
+  }
+
+  // Inline add/edit form. ev = null for a new event, or the existing event row.
+  function boardCalShowForm(ev) {
+    var wrap = document.getElementById('board-cal-form-wrap');
+    if (!wrap) return;
+    boardCalShowMsg('');
+    var isEdit = !!ev;
+    var v = ev || { title: '', event_date: '', end_date: '', note: '' };
+    var h = '<div class="board-cal-form">';
+    h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
+    h += '<div class="board-cal-field"><label>Event name<br><input type="text" id="board-cal-f-title" maxlength="200" value="' + escapeHtml(v.title) + '" placeholder="e.g. Registration opens" /></label></div>';
+    h += '<div class="board-cal-field"><label>Date<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
+    h += ' <label>End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
+    h += '<div class="board-cal-field"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
+    h += '<div class="coop-cal-save-bar">';
+    h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
+    h += '<button id="board-cal-form-save" class="btn btn-primary btn-sm" type="button"' + (isEdit ? ' data-id="' + ev.id + '"' : '') + '>Save event</button>';
+    h += '</div></div>';
+    wrap.innerHTML = h;
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    var titleInp = document.getElementById('board-cal-f-title');
+    if (titleInp) titleInp.focus();
+    document.getElementById('board-cal-form-cancel').addEventListener('click', function () {
+      wrap.innerHTML = '';
+      boardCalShowMsg('');
+    });
+    document.getElementById('board-cal-form-save').addEventListener('click', boardCalSave);
+  }
+
+  function boardCalSave() {
+    var saveBtn = document.getElementById('board-cal-form-save');
+    if (!saveBtn) return;
+    var payload = {
+      kind: 'calendar-save',
+      school_year: _boardCalState.schoolYear,
+      title: (document.getElementById('board-cal-f-title').value || '').trim(),
+      event_date: document.getElementById('board-cal-f-date').value || '',
+      end_date: document.getElementById('board-cal-f-end').value || '',
+      note: (document.getElementById('board-cal-f-note').value || '').trim()
+    };
+    var idAttr = saveBtn.getAttribute('data-id');
+    if (idAttr) payload.id = parseInt(idAttr, 10);
+    // Mirror the server-side checks so the user sees problems before a round trip.
+    if (!payload.title) { boardCalShowMsg('An event name is required.'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.event_date)) { boardCalShowMsg('A valid date is required.'); return; }
+    if (payload.end_date && payload.end_date < payload.event_date) {
+      boardCalShowMsg('End date must be on or after the start date.'); return;
+    }
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    boardCalShowMsg('');
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify(payload)
+    })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          boardCalShowMsg((r.data && r.data.error) || 'Save failed.');
+          saveBtn.disabled = false; saveBtn.textContent = 'Save event';
+          return;
+        }
+        loadBoardCalendar();
+      })
+      .catch(function (err) {
+        boardCalShowMsg('Network error: ' + (err.message || 'unknown'));
+        saveBtn.disabled = false; saveBtn.textContent = 'Save event';
+      });
+  }
+
+  function boardCalDelete(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+    boardCalShowMsg('');
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: 'calendar-delete', id: id })
+    })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          boardCalShowMsg((r.data && r.data.error) || 'Delete failed.');
+          if (btn) { btn.disabled = false; btn.removeAttribute('data-confirming'); btn.textContent = 'Delete'; }
+          return;
+        }
+        loadBoardCalendar();
+      })
+      .catch(function (err) {
+        boardCalShowMsg('Network error: ' + (err.message || 'unknown'));
+        if (btn) { btn.disabled = false; btn.removeAttribute('data-confirming'); btn.textContent = 'Delete'; }
+      });
+  }
+
+  function boardCalShowMsg(text) {
+    var el = document.getElementById('board-cal-msg');
     if (!el) return;
     if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
     el.textContent = text;
