@@ -904,7 +904,12 @@ async function handleList(req, res) {
   const isComms      = !isMembership && await canEditAsRole(auth.email, 'Communications Director');
   const isTreasurer  = !isMembership && !isComms && await canEditAsRole(auth.email, 'Treasurer');
   const viewerCanAct = isMembership || isComms || isTreasurer;
-  const isBoard      = viewerCanAct || await isBoardMember(auth.email);
+  // Welcome Coordinator is a committee role under the Membership Committee
+  // (supports new families) — granted the same read-only view as a board
+  // member. viewerCanAct stays false, so Actions + source-sheet link are
+  // hidden client-side and the write endpoints' own gates apply server-side.
+  const isWelcome    = !viewerCanAct && await canEditAsRole(auth.email, 'Welcome Coordinator');
+  const isBoard      = viewerCanAct || isWelcome || await isBoardMember(auth.email);
   if (!isBoard) {
     const expectedM = await getRoleHolderEmail('Membership Director');
     const expectedC = await getRoleHolderEmail('Communications Director');
@@ -3937,8 +3942,20 @@ async function requireBoardMember(req, res) {
 // Returns every board calendar event (all years) so the client can build its
 // year picker; the dataset is tiny. Sorted by date.
 async function handleBoardCalendarGet(req, res) {
-  const auth = await requireBoardMember(req, res);
-  if (!auth) return;
+  // Read-only access is broader than edit: any board member PLUS the
+  // Welcome Coordinator (who shows new families the upcoming co-op dates).
+  // Saving/deleting events stays board-only via requireBoardMember in
+  // handleBoardCalendarSave/Delete.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canRead = await isBoardMember(auth.email) ||
+    await canEditAsRole(auth.email, 'Welcome Coordinator');
+  if (!canRead) {
+    return res.status(403).json({
+      error: 'Only board members and the Welcome Coordinator can view the calendar.',
+      youAre: auth.realEmail
+    });
+  }
   try {
     const sql = getSql();
     const rows = await sql`
@@ -4064,6 +4081,124 @@ async function handleBoardCalendarDelete(body, req, res) {
   }
 }
 
+// ── Welcome List (Welcome Coordinator) ────────────────────────────────
+// The Welcome Coordinator's purpose-built view of this season's NEW
+// families: name + contact info + a "mark as welcomed" toggle backed by
+// the welcome_outreach table. Deliberately independent of the Comms
+// Director's onboarding queue so the two roles don't step on each other.
+
+// Read access: Welcome Coordinator, any board member, or a super user.
+async function canViewWelcomeList(email) {
+  if (isSuperUser(email)) return true;
+  if (await canEditAsRole(email, 'Welcome Coordinator')) return true;
+  return isBoardMember(email);
+}
+// Write access (mark/un-mark welcomed): Welcome Coordinator or super user.
+async function canActWelcomeList(email) {
+  if (isSuperUser(email)) return true;
+  return canEditAsRole(email, 'Welcome Coordinator');
+}
+
+// GET ?welcome=1[&season=YYYY-YYYY] — new families + welcomed status.
+async function handleWelcomeListGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!await canViewWelcomeList(auth.email)) {
+    const expected = await getRoleHolderEmail('Welcome Coordinator');
+    return res.status(403).json({
+      error: 'Only the Welcome Coordinator can view the Welcome List.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+  const season = String(req.query.season || DEFAULT_SEASON);
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT r.id, r.email, r.main_learning_coach, r.existing_family_name,
+             r.phone, r.track, r.track_other, r.kids, r.created_at,
+             w.welcomed_at, w.welcomed_by, w.note AS welcome_note
+      FROM registrations r
+      LEFT JOIN welcome_outreach w ON w.registration_id = r.id
+      WHERE r.season = ${season}
+      ORDER BY r.created_at DESC
+    `;
+    // Keep only NEW families — same canonical rule as the Membership
+    // Report / Directory First-Year badge (keyed by personal + workspace
+    // email). Degrades to showing all rows if the lookup fails, so the
+    // coordinator never gets an empty list from a transient error.
+    let families = rows;
+    try {
+      const firstSeasons = await firstSeasonByEmail(sql);
+      const seasonLabel = seasonToYearLabel(season);
+      families = rows.filter(r => {
+        const fs = firstSeasons[String(r.email || '').toLowerCase().trim()] || '';
+        return !!(fs && seasonLabel && fs >= seasonLabel);
+      });
+    } catch (nmErr) {
+      console.error('Welcome List new-member filter failed (non-fatal):', nmErr);
+    }
+    const out = families.map(r => ({
+      id: r.id,
+      name: r.main_learning_coach || r.existing_family_name || '',
+      email: r.email || '',
+      phone: r.phone || '',
+      track: r.track === 'Other' ? (r.track_other || 'Other') : (r.track || ''),
+      kids: Array.isArray(r.kids) ? r.kids : [],
+      created_at: r.created_at,
+      welcomed_at: r.welcomed_at || null,
+      welcomed_by: r.welcomed_by || '',
+      welcome_note: r.welcome_note || ''
+    }));
+    return res.status(200).json({ families: out });
+  } catch (err) {
+    console.error('Welcome List get error:', err);
+    return res.status(500).json({ error: 'Could not load the Welcome List.' });
+  }
+}
+
+// POST kind='welcome-mark' — record that a family has been welcomed
+// (upsert), or kind='welcome-unmark' — clear it (delete the row).
+async function handleWelcomeMark(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!await canActWelcomeList(auth.email)) {
+    const expected = await getRoleHolderEmail('Welcome Coordinator');
+    return res.status(403).json({
+      error: 'Only the Welcome Coordinator can update the Welcome List.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ error: 'id is required.' });
+  }
+  const unmark = body.kind && String(body.kind).toLowerCase() === 'welcome-unmark';
+  const note = String(body.note || '').trim().slice(0, 1000);
+  const sql = getSql();
+  try {
+    // realEmail (not the View-As email) is the audit trail.
+    const by = String(auth.realEmail || auth.email || '');
+    if (unmark) {
+      await sql`DELETE FROM welcome_outreach WHERE registration_id = ${id}`;
+      return res.status(200).json({ ok: true, welcomed_at: null });
+    }
+    const rows = await sql`
+      INSERT INTO welcome_outreach (registration_id, welcomed_at, welcomed_by, note)
+      VALUES (${id}, NOW(), ${by}, ${note})
+      ON CONFLICT (registration_id)
+      DO UPDATE SET welcomed_at = NOW(), welcomed_by = ${by}, note = ${note}
+      RETURNING welcomed_at, welcomed_by
+    `;
+    const row = rows[0] || {};
+    return res.status(200).json({ ok: true, welcomed_at: row.welcomed_at || null, welcomed_by: row.welcomed_by || by });
+  } catch (err) {
+    console.error('Welcome List mark error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -4081,6 +4216,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
+    if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -4110,6 +4246,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
+    if (kind === 'welcome-mark' || kind === 'welcome-unmark') return handleWelcomeMark(body, req, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 

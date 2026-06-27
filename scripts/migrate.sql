@@ -1217,3 +1217,19 @@ CREATE TABLE IF NOT EXISTS board_calendar_events (
 );
 CREATE INDEX IF NOT EXISTS board_calendar_events_year_idx
   ON board_calendar_events (school_year, event_date);
+
+-- ── Welcome outreach ──────────────────────────────────────────────────
+-- Tracks which new families the Welcome Coordinator has personally
+-- reached out to. Intentionally SEPARATE from the Communications
+-- Director's onboarding state (registrations.welcome_email_sent_at /
+-- existing_family_name) so the two roles don't collide — a family can be
+-- "welcomed" by the coordinator before, after, or independently of the
+-- formal Comms onboarding email. One row per registration (the PK); the
+-- row's presence means "welcomed", and deleting it un-marks. No FK on
+-- registration_id to keep this additive-only migration order-independent.
+CREATE TABLE IF NOT EXISTS welcome_outreach (
+  registration_id INTEGER PRIMARY KEY,
+  welcomed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  welcomed_by     TEXT NOT NULL DEFAULT '',
+  note            TEXT NOT NULL DEFAULT ''
+);

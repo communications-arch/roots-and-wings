@@ -710,6 +710,13 @@
       if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
       if (typeof renderDirectory === 'function') renderDirectory();
       if (typeof renderMyFamily === 'function') renderMyFamily();
+      // My Workspace is role-gated off COMMITTEE_ROLE_HOLDERS, which is only
+      // populated here (from the live /api/sheets overlay). Without this
+      // re-render, a committee role assigned in the Roles UI (e.g. Welcome
+      // Coordinator) never surfaces its cards until a tab switch — the
+      // workspace was first built from stale cache that predated the
+      // assignment. Re-render so fresh committee-role data shows immediately.
+      if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
     }
     // Header-level View As picker depends on FAMILIES.
     if (typeof renderHeaderViewAs === 'function') renderHeaderViewAs();
@@ -6445,7 +6452,7 @@
       // table for acting roles; read-only — Actions hidden — for the rest,
       // via viewerCanAct).
       title: SEASON_SHORT + ' Members',
-      roleGate: ['President', 'Vice President', 'Secretary', 'Sustaining Director', 'Treasurer', 'Communications Director', 'Membership Director'],
+      roleGate: ['President', 'Vice President', 'Secretary', 'Sustaining Director', 'Treasurer', 'Communications Director', 'Membership Director', 'Welcome Coordinator'],
       render: function () {
         var h = '<p class="ws-body-hint">A live snapshot of this season’s registered families.</p>';
         h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
@@ -6458,6 +6465,36 @@
       },
       afterRender: function () {
         if (typeof loadMembersSummary === 'function') loadMembersSummary();
+      }
+    },
+    'welcome-list': {
+      // Welcome Coordinator's working list of this season's NEW families:
+      // contact info + a "mark as welcomed" toggle (welcome_outreach table).
+      // Independent of the Comms onboarding queue on purpose.
+      title: 'Welcome List',
+      roleGate: ['Welcome Coordinator'],
+      render: function () {
+        var h = '<p class="ws-body-hint">New families this season. Reach out to welcome them, then mark them off.</p>';
+        h += '<div id="ws-welcome-list-body" aria-live="polite"><p class="ws-part-meter-caption">Loading new families…</p></div>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadWelcomeList === 'function') loadWelcomeList();
+      }
+    },
+    'upcoming-events': {
+      // Read-only view of the board calendar (manual + derived dates) so the
+      // coordinator can tell new members what's coming up. Editing stays on
+      // the board's Co-op Management card.
+      title: 'Upcoming Events',
+      roleGate: ['Welcome Coordinator'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Key co-op dates to share with new families.</p>';
+        h += '<div id="ws-upcoming-events-body" aria-live="polite"><p class="ws-part-meter-caption">Loading events…</p></div>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadUpcomingEvents === 'function') loadUpcomingEvents();
       }
     },
     'reports': {
@@ -6594,6 +6631,12 @@
     'Treasurer': [
       { key: 'membership', title: 'Membership Report' }
     ],
+    // Welcome Coordinator (committee role under Membership) gets a
+    // read-only Membership Report — viewerCanAct=false from the server
+    // hides the Actions column + source-sheet link.
+    'Welcome Coordinator': [
+      { key: 'membership', title: 'Membership Report' }
+    ],
     // President, Secretary, and Sustaining Director no longer get the
     // operational Membership Report. Board members now see the read-only
     // "26/27 Members" summary card + snapshot (the members-summary widget)
@@ -6643,6 +6686,7 @@
     'Sustaining Director': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
+    'Welcome Coordinator': ['welcome-list', 'members-summary', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
@@ -16564,6 +16608,176 @@
     if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
     el.textContent = text;
     el.style.display = '';
+  }
+
+  // ── Welcome List (Welcome Coordinator) ────────────────────────────
+  // This season's NEW families + a "mark as welcomed" toggle. Reads
+  // /api/tour?welcome=1; the toggle POSTs welcome-mark / welcome-unmark
+  // against the welcome_outreach table (separate from Comms onboarding).
+  var _welcomeListState = { families: [] };
+
+  // "Today" in Indianapolis local (YYYY-MM-DD) so date windows don't flip
+  // a day early for members in adjacent timezones. Shared by Welcome List
+  // + Upcoming Events.
+  function rwTodayIndyStr() {
+    try {
+      var parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).formatToParts(new Date());
+      var l = {};
+      parts.forEach(function (p) { l[p.type] = p.value; });
+      return l.year + '-' + l.month + '-' + l.day;
+    } catch (e) {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  // welcomed_at is a full timestamp; show just the date (reuses the board
+  // calendar's Mon D, YYYY formatter).
+  function welcomeFmtDate(iso) {
+    if (!iso) return '';
+    return boardCalFmtDate(String(iso).slice(0, 10));
+  }
+
+  function loadWelcomeList() {
+    var body = document.getElementById('ws-welcome-list-body');
+    if (!body) return;
+    fetch('/api/tour?welcome=1', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((r.data && r.data.error) || 'Could not load the list.') + '</p>';
+          return;
+        }
+        _welcomeListState.families = Array.isArray(r.data.families) ? r.data.families : [];
+        renderWelcomeListBody();
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderWelcomeListBody() {
+    var body = document.getElementById('ws-welcome-list-body');
+    if (!body) return;
+    var fams = _welcomeListState.families.slice();
+    // Not-yet-welcomed float to the top, then most recent registration first.
+    fams.sort(function (a, b) {
+      var aw = a.welcomed_at ? 1 : 0, bw = b.welcomed_at ? 1 : 0;
+      if (aw !== bw) return aw - bw;
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+    if (fams.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
+      return;
+    }
+    var pending = fams.filter(function (f) { return !f.welcomed_at; }).length;
+    var h = '<p class="ws-body-hint">' + pending + ' to welcome &middot; ' + fams.length + ' new famil' + (fams.length === 1 ? 'y' : 'ies') + ' this season.</p>';
+    h += '<ul class="ws-welcome-list">';
+    fams.forEach(function (f) {
+      var done = !!f.welcomed_at;
+      var kids = Array.isArray(f.kids) ? f.kids : [];
+      var kidNames = kids.map(function (k) { return escapeHtml(k.name || k.first_name || ''); }).filter(Boolean).join(', ');
+      h += '<li class="ws-welcome-item' + (done ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
+      h += '<div class="ws-welcome-main">';
+      h += '<div class="ws-welcome-name">' + (done ? '✅ ' : '🌱 ') + escapeHtml(f.name || '(no name)') + '</div>';
+      var contact = [];
+      if (f.email) contact.push('<a href="mailto:' + escapeHtml(f.email) + '">' + escapeHtml(f.email) + '</a>');
+      if (f.phone) contact.push('<a href="tel:' + escapeHtml(f.phone) + '">' + escapeHtml(f.phone) + '</a>');
+      if (contact.length) h += '<div class="ws-welcome-contact">' + contact.join(' &middot; ') + '</div>';
+      var sub = [];
+      if (f.track) sub.push(escapeHtml(f.track));
+      if (kids.length) sub.push(kids.length + ' kid' + (kids.length === 1 ? '' : 's') + (kidNames ? ' (' + kidNames + ')' : ''));
+      if (sub.length) h += '<div class="ws-welcome-sub">' + sub.join(' &middot; ') + '</div>';
+      if (done) h += '<div class="ws-welcome-stamp">Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
+      h += '</div>';
+      h += '<div class="ws-welcome-action">';
+      h += '<button type="button" class="btn btn-sm ' + (done ? 'btn-outline-dark' : 'btn-primary') + ' ws-welcome-toggle" data-id="' + f.id + '" data-done="' + (done ? '1' : '0') + '">' + (done ? 'Undo' : 'Mark welcomed') + '</button>';
+      h += '</div>';
+      h += '</li>';
+    });
+    h += '</ul>';
+    body.innerHTML = h;
+    body.querySelectorAll('.ws-welcome-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        welcomeListToggle(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-done') !== '1', btn);
+      });
+    });
+  }
+
+  function welcomeListToggle(id, mark, btn) {
+    if (!id) return;
+    btn.disabled = true;
+    var prev = btn.textContent;
+    btn.textContent = mark ? 'Saving…' : 'Removing…';
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: mark ? 'welcome-mark' : 'welcome-unmark', id: id })
+    })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          btn.disabled = false; btn.textContent = prev;
+          alert((r.data && r.data.error) || 'Could not update.');
+          return;
+        }
+        var fam = _welcomeListState.families.filter(function (f) { return f.id === id; })[0];
+        if (fam) {
+          fam.welcomed_at = mark ? (r.data.welcomed_at || new Date().toISOString()) : null;
+          fam.welcomed_by = mark ? (r.data.welcomed_by || '') : '';
+        }
+        renderWelcomeListBody();
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = prev;
+        alert('Network error: ' + (err.message || 'unknown'));
+      });
+  }
+
+  // ── Upcoming Events (read-only board calendar) ────────────────────
+  // Same data as the board's Board Calendar (manual + session-derived
+  // dates) but read-only, filtered to today-and-later, for the Welcome
+  // Coordinator to relay to new families.
+  function loadUpcomingEvents() {
+    var body = document.getElementById('ws-upcoming-events-body');
+    if (!body) return;
+    fetch('/api/tour?calendar=1', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml((r.data && r.data.error) || 'Could not load events.') + '</p>';
+          return;
+        }
+        renderUpcomingEventsBody(Array.isArray(r.data.events) ? r.data.events : []);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderUpcomingEventsBody(events) {
+    var body = document.getElementById('ws-upcoming-events-body');
+    if (!body) return;
+    var today = rwTodayIndyStr();
+    var upcoming = events.filter(function (e) {
+      var ref = e.end_date || e.event_date || '';
+      return ref >= today;
+    }).sort(function (a, b) { return (a.event_date || '').localeCompare(b.event_date || ''); });
+    if (upcoming.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No upcoming events on the calendar right now.</p>';
+      return;
+    }
+    var h = '<ul class="ws-upcoming-list">';
+    upcoming.slice(0, 12).forEach(function (e) {
+      h += '<li class="ws-upcoming-item">';
+      h += '<span class="ws-upcoming-date">' + escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) + '</span>';
+      h += '<span class="ws-upcoming-title">' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</span>';
+      if (e.note) h += '<span class="ws-upcoming-note">' + escapeHtml(e.note) + '</span>';
+      h += '</li>';
+    });
+    h += '</ul>';
+    body.innerHTML = h;
   }
 
   // ── Board Calendar ────────────────────────────────────────────────

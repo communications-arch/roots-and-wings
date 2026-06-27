@@ -9961,6 +9961,70 @@ button.staff-role:hover {
   font-style: italic;
   margin: 0;
 }
+
+/* ── Welcome List (Welcome Coordinator) ───────────────────────────── */
+.ws-welcome-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ws-welcome-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.ws-welcome-item.ws-welcome-done {
+  background: rgba(var(--color-primary-rgb), 0.04);
+  border-color: rgba(var(--color-primary-rgb), 0.18);
+}
+.ws-welcome-main { min-width: 0; flex: 1; }
+.ws-welcome-name {
+  font-weight: 600;
+  color: var(--color-primary);
+  font-size: 0.9rem;
+}
+.ws-welcome-contact { font-size: 0.8rem; margin-top: 1px; word-break: break-word; }
+.ws-welcome-contact a { color: var(--color-primary-light); }
+.ws-welcome-sub { font-size: 0.78rem; color: var(--color-text-light); margin-top: 1px; }
+.ws-welcome-stamp { font-size: 0.74rem; color: var(--color-text-light); margin-top: 2px; font-style: italic; }
+.ws-welcome-action { flex: 0 0 auto; }
+.ws-welcome-action .ws-welcome-toggle { padding: 3px 10px; font-size: 0.8rem; }
+
+/* ── Upcoming Events (read-only board calendar) ───────────────────── */
+.ws-upcoming-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.ws-upcoming-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.ws-upcoming-item:last-child { border-bottom: none; }
+.ws-upcoming-date {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.ws-upcoming-title { font-size: 0.86rem; color: var(--color-text); }
+.ws-upcoming-note { flex-basis: 100%; font-size: 0.78rem; color: var(--color-text-light); }
 .ws-link-list {
   list-style: none;
   padding: 0;

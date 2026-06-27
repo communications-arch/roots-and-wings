@@ -839,6 +839,51 @@ module.exports = async function handler(req, res) {
         if (!allowed) {
           return res.status(403).json({ error: 'Not authorized to assign holders for this role' });
         }
+        // Board roles are single-seat: President, VP, Treasurer, etc. each
+        // have exactly one holder per year. Committee roles can be co-held,
+        // so this replace-guard only fires for category='board'. Without it
+        // the UI silently stacks a second active holder, and the two board
+        // surfaces disagree (My Family card dedups to one; the org chart
+        // lists all). See the dup-President incident on dev (2026-06-27).
+        const roleRow = await sql`SELECT category FROM roles WHERE id = ${roleId} LIMIT 1`;
+        const isBoardRole = roleRow[0] && roleRow[0].category === 'board';
+        if (isBoardRole) {
+          // Idempotent: re-assigning the same person is a no-op — return the
+          // existing active holder instead of inserting a duplicate.
+          const existing = await sql`
+            SELECT id, role_id, person_email, school_year
+            FROM role_holders_v2
+            WHERE role_id = ${roleId} AND school_year = ${yr}
+              AND LOWER(person_email) = ${personEmail} AND ended_at IS NULL
+            LIMIT 1
+          `;
+          if (existing.length > 0) {
+            const e = existing[0];
+            const en = await sql`
+              SELECT TRIM(CONCAT_WS(' ', p.first_name, p.last_name)) AS person_name,
+                     COALESCE(p.last_name, '') AS family_name
+              FROM people p WHERE LOWER(p.email) = ${personEmail} LIMIT 1
+            `;
+            const ed = en[0] || { person_name: '', family_name: '' };
+            return res.status(200).json({
+              holder: {
+                id: e.id, role_id: e.role_id, email: e.person_email,
+                person_name: ed.person_name, family_name: ed.family_name,
+                school_year: e.school_year
+              }
+            });
+          }
+          // Replace: remove whoever currently holds this board seat for the
+          // year so the new assignment is the sole holder. Hard-delete (not
+          // soft-end) to match the DELETE endpoint and because the unique
+          // index (role_id, lower(person_email), school_year) ignores
+          // ended_at — a soft-ended row would permanently block re-assigning
+          // that same person to this seat later.
+          await sql`
+            DELETE FROM role_holders_v2
+            WHERE role_id = ${roleId} AND school_year = ${yr} AND ended_at IS NULL
+          `;
+        }
         const inserted = await sql`
           INSERT INTO role_holders_v2 (role_id, person_email, school_year, updated_by)
           VALUES (${roleId}, ${personEmail}, ${yr}, ${user.email})
