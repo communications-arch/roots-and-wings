@@ -6392,6 +6392,10 @@
         }
         if (role === 'Membership Director') {
           h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-pre-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
+          // General inquiries from the public Contact Us form — a separate
+          // bucket from tour requests so questions don't mix into the tour
+          // queue. Opens the pipeline scoped to inquiries.
+          h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-pre-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
           // Scheduled Tours entry has both the button (opens Pipeline
           // scoped to scheduled) AND a sibling <ul> rendered by
           // updateMembershipTourTodoCounts() — a glance-view list of
@@ -7304,6 +7308,11 @@
   var _toursFilter = 'open';     // open = requested + scheduled + toured
   var _toursSlotsCache = null;   // { dates, times } from /api/tour?config=1
   var _toursPendingAction = null; // { tourId, type: 'schedule' | 'decline' }
+  // When true, the pipeline modal renders the lean Inquiries view: only
+  // contact-form inquiries, a stripped column set (Family / Message /
+  // Received / Actions), and no tour-stage counts strip or status filter.
+  // Set by showTourPipelineModal({ mode: 'inquiry' }) from the To Do.
+  var _inquiryMode = false;
   // Bumped on every optimistic mutation. Background fetches stash the
   // version they started at and discard their response if it has since
   // advanced — fixes the "schedule a tour, pill flickers" race where a
@@ -7375,13 +7384,18 @@
       sortValue: function (t) { return (t.family_name || '').toLowerCase(); },
       render: function (t) {
         var n = escapeHtmlWs(t.family_name || '');
+        // Tag general inquiries (Contact Us form) so Membership can tell
+        // them apart from full tour requests at a glance.
+        var badge = (t.source === 'contact-form')
+          ? ' <span class="ws-tour-source-badge" title="Came in through the Contact Us form">Inquiry</span>'
+          : '';
         var em = t.family_email ? '<br><span class="ws-wv-context">' + escapeHtmlWs(t.family_email) + '</span>' : '';
-        return n + em;
+        return n + badge + em;
       }
     },
     { key: 'status', label: 'Status', type: 'string',
       sortValue: function (t) {
-        var order = { requested: 0, scheduled: 1, toured: 2, joined: 3, declined: 4, ghosted: 5 };
+        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, joined: 4, declined: 5, ghosted: 6 };
         return String(order[t.status] != null ? order[t.status] : 9);
       },
       render: function (t) {
@@ -7405,6 +7419,8 @@
     { key: 'kids', label: 'Kids', type: 'number',
       sortValue: function (t) { return t.num_kids != null ? Number(t.num_kids) : -1; },
       render: function (t) {
+        // Contact inquiries carry no kid info — show a dash, not "?".
+        if (t.source === 'contact-form' && t.num_kids == null) return '<span class="ws-srt-actions-empty">&mdash;</span>';
         var n = (t.num_kids != null) ? String(t.num_kids) : '?';
         var ages = t.ages ? ' <span class="ws-wv-context">(' + escapeHtmlWs(t.ages) + ')</span>' : '';
         return n + ages;
@@ -7417,7 +7433,12 @@
       render: function (t) {
         if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
         var btns = '';
-        if (t.status === 'requested') {
+        if (t.status === 'inquiry') {
+          // A general inquiry: turn it into a tour, or close it out once
+          // it's been answered (Ghost = no further action needed).
+          btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
+          btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Close out</button>';
+        } else if (t.status === 'requested') {
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
           btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Ghost</button>';
         } else if (t.status === 'scheduled') {
@@ -7435,11 +7456,55 @@
     }
   ];
 
+  // Lean column set for the Inquiries view (_inquiryMode). An inquiry has
+  // no tour-stage data (no preferred slot, no scheduled slot, no kid count),
+  // so we drop those columns and surface what actually matters: who they
+  // are, what they asked, when it came in, and the two actions (turn it
+  // into a tour, or close it out). Actions reuse the same button classes as
+  // the full pipeline so the delegated click handlers work unchanged.
+  var INQUIRY_TABLE_COLS = [
+    { key: 'family_name', label: 'From', type: 'string',
+      sortValue: function (t) { return (t.family_name || '').toLowerCase(); },
+      render: function (t) {
+        var n = escapeHtmlWs(t.family_name || '');
+        var bits = [];
+        if (t.family_email) bits.push('<a href="mailto:' + escapeHtmlWs(t.family_email) + '">' + escapeHtmlWs(t.family_email) + '</a>');
+        if (t.phone) bits.push(escapeHtmlWs(t.phone));
+        var ctx = bits.length ? '<br><span class="ws-wv-context">' + bits.join(' &middot; ') + '</span>' : '';
+        return n + ctx;
+      }
+    },
+    { key: 'message', label: 'Message', type: 'string', sortable: false,
+      render: function (t) {
+        var m = String(t.message || '').trim();
+        if (!m) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        var short = m.length > 90 ? m.slice(0, 90).replace(/\s+\S*$/, '') + '…' : m;
+        return '<span class="ws-inq-msg">' + escapeHtmlWs(short) + '</span>';
+      }
+    },
+    { key: 'created_at', label: 'Received', type: 'date',
+      render: function (t) { return formatReportDate(t.created_at); }
+    },
+    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
+      render: function (t) {
+        if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        var btns = '';
+        btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
+        btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Close out</button>';
+        return '<div class="ws-srt-actions">' + btns + '</div>';
+      }
+    }
+  ];
+
   function showTourPipelineModal(opts) {
-    // initialFilter lets a caller (e.g. the Membership To Do widget)
-    // open the modal pre-scoped to a specific status bucket. Otherwise
-    // _toursFilter persists across reopens like the other reports.
-    if (opts && opts.initialFilter) _toursFilter = opts.initialFilter;
+    // mode:'inquiry' opens the lean Inquiries view (Contact Us submissions
+    // only). initialFilter lets a caller open the full pipeline pre-scoped
+    // to a status bucket. Otherwise _toursFilter persists across reopens.
+    _inquiryMode = !!(opts && opts.mode === 'inquiry');
+    // In inquiry mode rowsForFilter/toursFilteredRows short-circuit on
+    // _inquiryMode, so we leave _toursFilter untouched — that keeps the
+    // 'inquiry' scope from leaking into the next full-pipeline open.
+    if (!_inquiryMode && opts && opts.initialFilter) _toursFilter = opts.initialFilter;
     var icons = [
       { label: 'Print',      icon: ICON_SVG.print,    aria: 'Print the visible tours',         action: function () { printToursReport(); } },
       { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download visible tours as CSV',   action: function () { exportToursCSV(); } }
@@ -7450,12 +7515,14 @@
     // the cache in the background.
     var hasCache = Array.isArray(_toursCache) && _toursCache.length > 0;
     var body = renderReportModal({
-      title: 'Tour Pipeline',
-      subtitle: 'Prospective families from request through joined or closed out. Tours run on Wednesdays during active sessions, 10:00 AM – 2:30 PM.',
+      title: _inquiryMode ? 'Inquiries' : 'Tour Pipeline',
+      subtitle: _inquiryMode
+        ? 'General questions from the website Contact form. Reply by email, turn one into a tour, or close it out once it’s handled.'
+        : 'Prospective families from request through joined or closed out. Tours run on Wednesdays during active sessions, 10:00 AM – 2:30 PM.',
       meta: '',
       icons: icons,
       bodyId: 'ws-tours-report-body',
-      bodyPlaceholder: hasCache ? '' : '<p class="ws-empty">Loading tour pipeline…</p>'
+      bodyPlaceholder: hasCache ? '' : '<p class="ws-empty">Loading…</p>'
     });
     if (!body) return;
     // Kick off the slots fetch (only once per session — cached for
@@ -7490,21 +7557,35 @@
     var tableTarget = body.querySelector('#ws-tours-table-target');
 
       function computeCounts() {
-        var counts = { requested: 0, scheduled: 0, toured: 0, joined: 0, declined: 0, ghosted: 0 };
+        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, joined: 0, declined: 0, ghosted: 0 };
         (_toursCache || []).forEach(function (t) { if (counts[t.status] != null) counts[t.status] += 1; });
         return counts;
       }
       function rowsForFilter() {
         if (!_toursCache) return [];
+        if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
         if (_toursFilter === 'all') return _toursCache;
         if (_toursFilter === 'open') return _toursCache.filter(function (t) {
-          return t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
+          return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
         });
         return _toursCache.filter(function (t) { return t.status === _toursFilter; });
       }
       function refreshAll() {
         var counts = computeCounts();
         var total = (_toursCache || []).length;
+
+        // Inquiries view: lean header (just a count), no tour-stage strip.
+        if (_inquiryMode) {
+          var metaElInq = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+          if (metaElInq) metaElInq.textContent = counts.inquiry + ' open inquir' + (counts.inquiry === 1 ? 'y' : 'ies');
+          if (stripEl) stripEl.innerHTML = '';
+          if (counts.inquiry === 0) {
+            if (tableTarget) tableTarget.innerHTML = '<p class="ws-empty">No new inquiries right now. Questions from the website Contact form will land here.</p>';
+            return;
+          }
+          renderTable(counts, total);
+          return;
+        }
 
         // Modal meta line — total tours.
         var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
@@ -7515,6 +7596,7 @@
         // attached.
         if (stripEl) {
           var s = '';
+          s += '<span class="ws-tour-status ws-tour-status-inquiry">'   + counts.inquiry   + ' Inquiry</span>';
           s += '<span class="ws-tour-status ws-tour-status-requested">' + counts.requested + ' Requested</span>';
           s += '<span class="ws-tour-status ws-tour-status-scheduled">' + counts.scheduled + ' Scheduled</span>';
           s += '<span class="ws-tour-status ws-tour-status-toured">'    + counts.toured    + ' Toured</span>';
@@ -7535,7 +7617,16 @@
         // re-renders pass them through; cache-mutation paths do too).
         if (!counts) counts = computeCounts();
         if (total == null) total = (_toursCache || []).length;
-        var openCount = counts.requested + counts.scheduled + counts.toured;
+        // Inquiries view: lean columns, no status filter funnel.
+        if (_inquiryMode) {
+          renderSortableTable(tableTarget, INQUIRY_TABLE_COLS.slice(), rowsForFilter(), {
+            initialSort: { key: 'created_at', dir: 'desc' },
+            expandable: true,
+            renderDetail: renderTourRowDetail
+          });
+          return;
+        }
+        var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured;
         var cols = TOURS_TABLE_COLS.slice();
         cols.forEach(function (col) {
           if (col.key === 'status') {
@@ -7546,7 +7637,8 @@
             col.filter = {
               options: [
                 { value: 'all',       label: 'Any',       count: total },
-                { value: 'open',      label: 'Open (req/sched/toured)', count: openCount },
+                { value: 'open',      label: 'Open (needs action)', count: openCount },
+                { value: 'inquiry',   label: 'Inquiry',   count: counts.inquiry },
                 { value: 'requested', label: 'Requested', count: counts.requested },
                 { value: 'scheduled', label: 'Scheduled', count: counts.scheduled },
                 { value: 'toured',    label: 'Toured',    count: counts.toured },
@@ -7652,7 +7744,17 @@
         var joinedBtn = e.target.closest('.ws-tour-joined-btn');
         if (joinedBtn) { tourQuickAction(parseInt(joinedBtn.getAttribute('data-tour-id'), 10), 'joined', 'Mark this family as joined? They should now appear in the Membership Report once they register.'); return; }
         var ghostBtn = e.target.closest('.ws-tour-ghost-btn');
-        if (ghostBtn) { tourQuickAction(parseInt(ghostBtn.getAttribute('data-tour-id'), 10), 'ghosted', 'Mark this family as ghosted (no response)?'); return; }
+        if (ghostBtn) {
+          var gId = parseInt(ghostBtn.getAttribute('data-tour-id'), 10);
+          var gRow = (_toursCache || []).find(function (t) { return t.id === gId; });
+          // Same terminal status ('ghosted'), friendlier wording for an
+          // inquiry being closed out vs a tour lead that went silent.
+          var gMsg = (gRow && gRow.status === 'inquiry')
+            ? 'Close out this inquiry? Use this once you’ve replied or it needs no further action.'
+            : 'Mark this family as ghosted (no response)?';
+          tourQuickAction(gId, 'ghosted', gMsg);
+          return;
+        }
 
         if (e.target.classList.contains('ws-tour-cancel-btn')) {
           _toursPendingAction = null;
@@ -7816,17 +7918,27 @@
       }
     }
 
+    // A still-open inquiry has no tour-stage data — show the lean set
+    // (who/contact/when) and skip Kids/Preferred/Scheduled. Once it's been
+    // scheduled (or it's a real tour request) the full set comes back.
+    var isOpenInquiry = (t.status === 'inquiry');
     h += '<div class="ws-reg-detail-grid">';
     h += fld('Family', escapeHtmlWs(t.family_name));
     h += fld('Email', t.family_email ? '<a href="mailto:' + escapeHtmlWs(t.family_email) + '">' + escapeHtmlWs(t.family_email) + '</a>' : '');
     h += fld('Phone', escapeHtmlWs(t.phone));
-    h += fld('Kids', (t.num_kids != null ? t.num_kids : '?') + (t.ages ? ' (' + escapeHtmlWs(t.ages) + ')' : ''));
-    h += fld('Preferred', t.preferred_date ? escapeHtmlWs(tourSlotLabel(t.preferred_date, t.preferred_time)) : '<em>no preference</em>');
-    h += fld('Scheduled', t.scheduled_date ? escapeHtmlWs(tourSlotLabel(t.scheduled_date, t.scheduled_time)) : '<em>not yet</em>');
-    h += fld('Requested', t.created_at ? escapeHtmlWs(new Date(t.created_at).toLocaleString()) : '');
+    if (!isOpenInquiry) {
+      h += fld('Kids', (t.num_kids != null ? t.num_kids : '?') + (t.ages ? ' (' + escapeHtmlWs(t.ages) + ')' : ''));
+      h += fld('Preferred', t.preferred_date ? escapeHtmlWs(tourSlotLabel(t.preferred_date, t.preferred_time)) : '<em>no preference</em>');
+      h += fld('Scheduled', t.scheduled_date ? escapeHtmlWs(tourSlotLabel(t.scheduled_date, t.scheduled_time)) : '<em>not yet</em>');
+    }
+    h += fld('Received', t.created_at ? escapeHtmlWs(new Date(t.created_at).toLocaleString()) : '');
     h += fld('Last update', t.updated_at ? escapeHtmlWs(new Date(t.updated_at).toLocaleString() + (t.updated_by ? ' · ' + t.updated_by : '')) : '');
     h += '</div>';
 
+    // The visitor's free-text message from the Contact Us form.
+    if (t.message) {
+      h += '<div class="ws-reg-detail-section"><h5>Their message</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(t.message) + '</div></div>';
+    }
     if (t.internal_notes) {
       h += '<div class="ws-reg-detail-section"><h5>Internal notes</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(t.internal_notes) + '</div></div>';
     }
@@ -7853,9 +7965,10 @@
 
   function toursFilteredRows() {
     if (!_toursCache) return [];
+    if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
     if (_toursFilter === 'all') return _toursCache;
     if (_toursFilter === 'open') return _toursCache.filter(function (t) {
-      return t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
+      return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
     });
     return _toursCache.filter(function (t) { return t.status === _toursFilter; });
   }
@@ -13727,6 +13840,10 @@
       // needs to prep for / conduct.
       showTourPipelineModal({ initialFilter: 'scheduled' });
     }
+    else if (action === 'membership-inquiries' && typeof showTourPipelineModal === 'function') {
+      // General Contact Us inquiries — the lean, dedicated Inquiries view.
+      showTourPipelineModal({ mode: 'inquiry' });
+    }
   });
 
   // Render all coordination tabs
@@ -17799,7 +17916,8 @@
   function loadMembershipTourRequestsCount() {
     var reqItem  = document.getElementById('ws-todo-tours-item');
     var schedItem = document.getElementById('ws-todo-tours-scheduled-item');
-    if (!reqItem && !schedItem) return;
+    var inqItem  = document.getElementById('ws-todo-inquiry-item');
+    if (!reqItem && !schedItem && !inqItem) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     var fetchVersion = _toursMutationVersion;
@@ -17825,6 +17943,7 @@
           console.warn('[loadMembershipTourRequestsCount] ' + msg);
           if (reqItem)   reqItem.hidden = true;
           if (schedItem) schedItem.hidden = true;
+          if (inqItem)   inqItem.hidden = true;
           recomputeTodoEmptyState();
           return;
         }
@@ -17846,10 +17965,24 @@
   function updateMembershipTourTodoCounts() {
     var reqItem  = document.getElementById('ws-todo-tours-item');
     var schedItem = document.getElementById('ws-todo-tours-scheduled-item');
-    if (!reqItem && !schedItem) return;
+    var inqItem  = document.getElementById('ws-todo-inquiry-item');
+    if (!reqItem && !schedItem && !inqItem) return;
     var tours = _toursCache || [];
     var requested = tours.filter(function (t) { return t.status === 'requested'; }).length;
     var scheduled = tours.filter(function (t) { return t.status === 'scheduled'; }).length;
+    var inquiries = tours.filter(function (t) { return t.status === 'inquiry'; }).length;
+
+    if (inqItem) {
+      if (inquiries > 0) {
+        var iLabel = document.getElementById('ws-inquiry-label');
+        var iPill  = document.getElementById('ws-inquiry-count');
+        if (iLabel) iLabel.textContent = 'New Inquir' + (inquiries === 1 ? 'y' : 'ies');
+        if (iPill)  iPill.textContent  = String(inquiries);
+        inqItem.hidden = false;
+      } else {
+        inqItem.hidden = true;
+      }
+    }
 
     if (reqItem) {
       if (requested > 0) {

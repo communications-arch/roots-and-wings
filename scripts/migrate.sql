@@ -502,6 +502,13 @@ CREATE TABLE IF NOT EXISTS tours (
 CREATE INDEX IF NOT EXISTS tours_status_idx     ON tours (status);
 CREATE INDEX IF NOT EXISTS tours_created_at_idx ON tours (created_at DESC);
 CREATE INDEX IF NOT EXISTS tours_email_idx      ON tours (family_email);
+-- A `tours` row can originate from the public "Schedule a Tour" form
+-- (source='tour-request', the default for every pre-existing row) or the
+-- public "Contact Us" form (source='contact-form'), which captures a
+-- general inquiry into the same pipeline. `message` holds the visitor's
+-- free-text note from the contact form (empty for tour requests).
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS source  TEXT NOT NULL DEFAULT 'tour-request';
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS message TEXT DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Member Profiles — editable overlay on top of the Directory sheet.

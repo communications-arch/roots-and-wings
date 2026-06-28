@@ -10555,12 +10555,29 @@ button.staff-role:hover {
   line-height: 1.4;
   white-space: nowrap;
 }
+.ws-tour-status-inquiry   { background: rgba(82, 58, 121, 0.12);           color: var(--color-primary-dark); }
 .ws-tour-status-requested { background: rgba(224, 181, 44, 0.18);          color: var(--color-accent-dark); }
 .ws-tour-status-scheduled { background: rgba(var(--color-primary-rgb), 0.14); color: var(--color-primary-dark); }
 .ws-tour-status-toured    { background: rgba(var(--color-accent-light-rgb), 0.35); color: var(--color-accent-dark); }
 .ws-tour-status-joined    { background: rgba(90, 107, 57, 0.16);            color: var(--color-leaf); }
 .ws-tour-status-declined  { background: rgba(var(--color-coral-rgb), 0.18); color: #8A2222; }
 .ws-tour-status-ghosted   { background: rgba(0, 0, 0, 0.08);                color: var(--color-text-light); }
+/* "Inquiry" tag on Tour Pipeline rows that came from the Contact Us form
+   rather than the Schedule a Tour form. */
+/* Truncated message preview in the lean Inquiries table. */
+.ws-inq-msg { color: var(--color-text-light); font-style: italic; }
+.ws-tour-source-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  background: rgba(var(--color-primary-rgb), 0.1);
+  color: var(--color-primary-dark);
+}
 
 /* Schedule + reschedule form rendered at the top of the expansion
    panel for a Tour Pipeline row. Two-column grid for date + time,

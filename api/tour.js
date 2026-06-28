@@ -189,7 +189,11 @@ const TOUR_TIME_SLOTS = [
 ];
 const TOUR_TIME_VALUES = TOUR_TIME_SLOTS.map(s => s.value);
 
-const VALID_TOUR_STATUSES = ['requested', 'scheduled', 'toured', 'joined', 'declined', 'ghosted'];
+// 'inquiry' is the entry status for Contact Us submissions (source=
+// 'contact-form'). It's a separate bucket from 'requested' (a tour ask) so
+// general questions don't inflate the Tour Requests to-do; Membership can
+// move an inquiry into 'scheduled' if it turns into a tour, or close it out.
+const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'joined', 'declined', 'ghosted'];
 
 // Compute every future Wednesday that falls inside an active session
 // range (inclusive). Returns chronological order. Today is excluded —
@@ -412,6 +416,101 @@ async function handleTour(body, res) {
     }
     if (results[1].status === 'rejected' || (results[1].value && results[1].value.error)) {
       console.error('Tour family-confirmation email error:',
+        results[1].reason || (results[1].value && results[1].value.error));
+    }
+  });
+  waitUntil(emailWork);
+
+  return res.status(200).json({ success: true, tourId });
+}
+
+// ── Contact / general inquiry (public, no auth) ──
+// The public "Contact Us" form. Lands in the SAME Tour Pipeline as a tour
+// request (so Membership works one list) but tagged source='contact-form'
+// and carrying the visitor's free-text message. No kids/ages/slot — those
+// stay null/empty. Mirrors handleTour's best-effort email pattern: persist
+// the row first, then fire the two Resend emails in the background.
+async function handleContact(body, res) {
+  const name = body.name ? String(body.name).trim() : '';
+  const email = body.email ? String(body.email).trim() : '';
+  const phone = body.phone ? String(body.phone).trim() : '';
+  const message = body.message ? String(body.message).trim() : '';
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required.' });
+  }
+  if (name.length > 200 || email.length > 200 || phone.length > 50 || message.length > 2000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone);
+  const safeMessage = escapeHtml(message);
+
+  // DB insert first — best-effort, same rationale as handleTour: the row is
+  // the source of truth for the pipeline; email is the user-visible confirm.
+  let tourId = null;
+  try {
+    const sql = getSql();
+    const inserted = await sql`
+      INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                         status, source, message, status_history)
+      VALUES (${name}, ${email.toLowerCase()}, ${phone}, NULL, '',
+              'inquiry', 'contact-form', ${message},
+              ${JSON.stringify([{ at: new Date().toISOString(), by: 'contact-form', from: null, to: 'inquiry' }])}::jsonb)
+      RETURNING id
+    `;
+    tourId = inserted[0] && inserted[0].id;
+  } catch (dbErr) {
+    console.error('Contact DB insert error (non-fatal — email still going):', dbErr);
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const messageBlock = safeMessage
+    ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;vertical-align:top;">Message</td><td style="padding:8px 0;white-space:pre-wrap;">${safeMessage}</td></tr>`
+    : '';
+  const emailWork = Promise.allSettled([
+    resend.emails.send({
+      from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+      to: 'membership@rootsandwingsindy.com',
+      replyTo: email,
+      subject: emailSubject(`New Contact Inquiry from ${safeName}`),
+      html: `
+        <h2>New Contact Inquiry</h2>
+        <table style="border-collapse:collapse;font-family:sans-serif;">
+          <tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Name</td><td style="padding:8px 0;">${safeName}</td></tr>
+          <tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Email</td><td style="padding:8px 0;"><a href="mailto:${safeEmail}">${safeEmail}</a></td></tr>
+          ${safePhone ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Phone</td><td style="padding:8px 0;">${safePhone}</td></tr>` : ''}
+          ${messageBlock}
+        </table>
+        <p style="color:#666;font-size:0.9rem;margin-top:16px;">This inquiry is in the Tour Pipeline in My Workspace (tagged "General inquiry"). Reply to this email to reach the family directly, or schedule them a tour from there.</p>
+      `,
+    }),
+    resend.emails.send({
+      from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+      to: email,
+      cc: ['membership@rootsandwingsindy.com'],
+      replyTo: 'membership@rootsandwingsindy.com',
+      subject: emailSubject(`Roots & Wings: We received your message`),
+      html: `
+        <h2>Thanks for reaching out!</h2>
+        <p>Hi ${safeName},</p>
+        <p>We've received your message and someone from our Membership team will get back to you soon. If you'd like to see the co-op in action, we host tours on Wednesdays during the school year — just let us know and we'll help you set one up.</p>
+        <p>If anything changes on your end, just reply to this email — it'll reach our Membership Director directly.</p>
+        <p style="color:#666;font-size:0.9rem;margin-top:20px;">— The Roots &amp; Wings Membership team<br>membership@rootsandwingsindy.com</p>
+      `,
+    })
+  ]).then(function (results) {
+    if (results[0].status === 'rejected' || (results[0].value && results[0].value.error)) {
+      console.error('Contact membership email error:',
+        results[0].reason || (results[0].value && results[0].value.error));
+    }
+    if (results[1].status === 'rejected' || (results[1].value && results[1].value.error)) {
+      console.error('Contact family-confirmation email error:',
         results[1].reason || (results[1].value && results[1].value.error));
     }
   });
@@ -2938,17 +3037,18 @@ async function handleTourList(req, res) {
       SELECT id, family_name, family_email, phone, num_kids, ages,
              preferred_date, preferred_time, scheduled_date, scheduled_time,
              status, internal_notes, decline_reason, status_history,
-             created_at, updated_at, updated_by
+             source, message, created_at, updated_at, updated_by
       FROM tours
       ORDER BY
         CASE status
-          WHEN 'requested' THEN 0
-          WHEN 'scheduled' THEN 1
-          WHEN 'toured'    THEN 2
-          WHEN 'joined'    THEN 3
-          WHEN 'declined'  THEN 4
-          WHEN 'ghosted'   THEN 5
-          ELSE 6
+          WHEN 'inquiry'   THEN 0
+          WHEN 'requested' THEN 1
+          WHEN 'scheduled' THEN 2
+          WHEN 'toured'    THEN 3
+          WHEN 'joined'    THEN 4
+          WHEN 'declined'  THEN 5
+          WHEN 'ghosted'   THEN 6
+          ELSE 7
         END,
         created_at DESC
     `;
@@ -4224,6 +4324,7 @@ module.exports = async function handler(req, res) {
     const body = req.body || {};
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
+    if (kind === 'contact') return handleContact(body, res);
     if (kind === 'merch-order') return handleMerchOrder(body, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);

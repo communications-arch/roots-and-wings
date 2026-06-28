@@ -21,7 +21,7 @@
        neither was on-brand and they were costing bytes. -->
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260627b">
+  <link rel="stylesheet" href="styles.css?v=20260627e">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <link rel="manifest" href="manifest-public.json?v=20260430g">
@@ -661,7 +661,7 @@
         </p>
         <div class="cta-buttons">
           <a href="#" class="btn btn-primary" onclick="document.getElementById('tour-modal').classList.add('active');document.body.style.overflow='hidden';return false;">Schedule a Tour</a>
-          <a href="mailto:membership@rootsandwingsindy.com" class="btn btn-outline">Email Us</a>
+          <a href="#" class="btn btn-outline" onclick="document.getElementById('contact-modal').classList.add('active');document.body.style.overflow='hidden';return false;">Email Us</a>
         </div>
       </div>
     </div>
@@ -860,6 +860,78 @@
     </div>
   </div>
 
+  <!-- ====== Contact Modal ====== -->
+  <!-- General-inquiry form. Submits to /api/tour (kind:'contact'), which
+       drops a row into the same Tour Pipeline tagged source='contact-form'
+       so Membership sees every inbound family in one place. Reuses the
+       .tour-modal-* / .tour-form-* styles. -->
+  <div id="contact-modal" class="tour-modal-overlay" onclick="if(event.target===this){this.classList.remove('active');document.body.style.overflow='';}">
+    <div class="tour-modal">
+      <button class="tour-modal-close" aria-label="Close" onclick="document.getElementById('contact-modal').classList.remove('active');document.body.style.overflow='';">&times;</button>
+      <h2 class="tour-modal-title">Get in Touch</h2>
+      <p class="tour-modal-subtitle">Have a question about Roots &amp; Wings? Send us a note and our Membership team will get back to you.</p>
+      <form id="contact-modal-form" class="tour-modal-form">
+        <div class="tour-form-field">
+          <label for="contact-name">Your Name</label>
+          <input type="text" id="contact-name" name="name" required placeholder="First and Last Name">
+        </div>
+        <div class="tour-form-field">
+          <label for="contact-email">Email</label>
+          <input type="email" id="contact-email" name="email" required placeholder="you@example.com">
+        </div>
+        <div class="tour-form-field">
+          <label for="contact-phone">Phone Number <span style="font-weight:400;opacity:0.7;">(optional)</span></label>
+          <input type="tel" id="contact-phone" name="phone" placeholder="(317) 555-1234">
+        </div>
+        <div class="tour-form-field">
+          <label for="contact-message">Your Message</label>
+          <textarea id="contact-message" name="message" rows="4" required placeholder="What would you like to know?"></textarea>
+        </div>
+        <div id="contact-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
+        <button type="submit" id="contact-modal-btn" class="btn btn-primary tour-form-submit">Send Message</button>
+      </form>
+      <script>
+        document.getElementById('contact-modal-form').addEventListener('submit', async function (e) {
+          e.preventDefault();
+          var btn = document.getElementById('contact-modal-btn');
+          var errEl = document.getElementById('contact-modal-error');
+          errEl.style.display = 'none';
+          btn.disabled = true;
+          btn.textContent = 'Sending…';
+          try {
+            var res = await fetch('/api/tour', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                kind: 'contact',
+                name: document.getElementById('contact-name').value,
+                email: document.getElementById('contact-email').value,
+                phone: document.getElementById('contact-phone').value,
+                message: document.getElementById('contact-message').value
+              })
+            });
+            if (!res.ok) {
+              var data = null;
+              try { data = await res.json(); } catch (e2) {}
+              throw new Error((data && data.error) || 'request failed');
+            }
+            var modal = document.querySelector('#contact-modal .tour-modal');
+            modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'contact-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
+              + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
+              + '<p class="tour-modal-subtitle">We\'ve received your message and someone from our Membership team will be in touch soon.</p>';
+          } catch (err) {
+            errEl.textContent = (err && err.message)
+              ? ('We couldn\'t send your message: ' + err.message + '. Please email membership@rootsandwingsindy.com directly.')
+              : 'Something went wrong. Please email membership@rootsandwingsindy.com directly.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = 'Send Message';
+          }
+        });
+      </script>
+    </div>
+  </div>
+
   <!-- ====== Merch Order Modal ====== -->
   <div id="merch-modal" class="tour-modal-overlay" onclick="if(event.target===this){this.classList.remove('active');document.body.style.overflow='';}">
     <div class="tour-modal">
@@ -1038,7 +1110,7 @@
     </div>
   </div>
 
-  <script src="script.js?v=20260627b"></script>
+  <script src="script.js?v=20260627e"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.
