@@ -3770,6 +3770,23 @@ async function handleMorningBuilderGet(req, res) {
       });
     }
 
+    // First-year flag — same source + rule as the Directory's "First Year"
+    // badge (firstSeasonByEmail, keyed by personal AND derived Workspace
+    // email). A family is new until they've completed a full co-op year, so
+    // for the season being built a kid is "new" when their family's first
+    // full season is this season or later (string compare on 'YYYY-YYYY').
+    // Best-effort: a lookup failure just leaves new_member false (no badge).
+    try {
+      const { firstSeasonByEmail } = require('./sheets.js');
+      const firstSeasonMap = await firstSeasonByEmail(sql);
+      roster.forEach(item => {
+        const fs = firstSeasonMap[String(item.family_email || '').toLowerCase()];
+        item.new_member = !!fs && fs >= schoolYear;
+      });
+    } catch (nmErr) {
+      console.warn('morning-builder new-member lookup failed (non-fatal):', nmErr.message);
+    }
+
     // Youngest → oldest, then by name (unknown ages last).
     roster.sort((a, b) => {
       const aa = (a.age == null) ? 999 : a.age;

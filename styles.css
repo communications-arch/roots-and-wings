@@ -7883,6 +7883,11 @@ button.staff-role:hover {
     45deg, #fffaf0, #fffaf0 7px,
     rgba(217, 164, 65, 0.10) 7px, rgba(217, 164, 65, 0.10) 14px);
 }
+/* First-year family: a green left accent so new members read at a glance,
+   echoing the Directory's 🌱 First Year cue. Inset shadow so it layers over
+   the pending tint/border without fighting it. */
+.mcb-kid-new { box-shadow: inset 3px 0 0 0 var(--color-leaf, #5a6b39); }
+.mcb-flag-new { cursor: default; }
 .mcb-legend {
   margin: 0 0 14px;
   font-size: 0.82rem;
@@ -7900,6 +7905,11 @@ button.staff-role:hover {
   background: repeating-linear-gradient(
     45deg, #fffaf0, #fffaf0 5px,
     rgba(217, 164, 65, 0.12) 5px, rgba(217, 164, 65, 0.12) 10px);
+}
+.mcb-legend-swatch-new {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  box-shadow: inset 3px 0 0 0 var(--color-leaf, #5a6b39);
 }
 
 .sb-overlay {

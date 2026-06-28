@@ -18822,15 +18822,18 @@
   // a ⏳ marker so Membership knows payment hasn't landed.
   function mcbKidChip(k) {
     var age = (k.age == null) ? '?' : k.age;
+    // First-year family marker — same 🌱 cue as the Directory's First Year
+    // badge, plus a green left accent (.mcb-kid-new) so it reads at a glance.
+    var newm = k.new_member ? ' <span class="mcb-flag mcb-flag-new" title="First-year family">🌱</span>' : '';
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
     var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
     var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
     var pend = k.pending ? ' <span class="mcb-flag" title="Registered — payment not received yet">⏳</span>' : '';
-    var cls = 'mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + (k.pending ? ' mcb-kid-pending' : '');
+    var cls = 'mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + (k.pending ? ' mcb-kid-pending' : '') + (k.new_member ? ' mcb-kid-new' : '');
     return '<div class="' + cls + '"' + (k.locked ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '"'
       + (k.pending ? ' title="Registered — payment not received yet"' : '') + '>'
       + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
-      + '<span class="mcb-kid-age">age ' + age + '</span>'
+      + newm + '<span class="mcb-kid-age">age ' + age + '</span>'
       + allergy + note + pend + lock
       + '</div>';
   }
@@ -18871,6 +18874,9 @@
     // grid. Only when there are pending kids.
     if (roster.some(function (k) { return k.pending; })) {
       html += '<p class="mcb-legend"><span class="mcb-legend-swatch"></span> ⏳ <strong>Amber dashed</strong> chips are registered but <strong>pending final payment</strong>. They’re seeded and placed with everyone else — just keep an eye out in case payment doesn’t come through.</p>';
+    }
+    if (roster.some(function (k) { return k.new_member; })) {
+      html += '<p class="mcb-legend"><span class="mcb-legend-swatch mcb-legend-swatch-new"></span> 🌱 <strong>First-year families</strong> (green accent) are in their first co-op year.</p>';
     }
 
     if (!total) {
