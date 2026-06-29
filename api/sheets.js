@@ -1958,28 +1958,54 @@ async function buildParticipationReport(sql, data) {
     m.timeline[sessionNum].push(entry);
   }
 
-  // AM classes — counts per session per group
-  var amClasses = data.amClasses || {};
-  Object.keys(amClasses).forEach(function (groupName) {
-    var cls = amClasses[groupName];
-    var sessions = cls.sessions || {};
-    Object.keys(sessions).forEach(function (sKey) {
-      var sNum = parseInt(sKey, 10);
-      var s = sessions[sKey] || {};
-      var teacherKey = participationResolveName(s.teacher, nameIndex);
-      if (teacherKey && members[teacherKey]) {
-        members[teacherKey].counts.am_lead += 1;
-        addTimeline(teacherKey, sNum, { category: 'am_lead', label: 'Leading AM — ' + groupName });
+  // AM teaching — prefer the DB (am_class_assignments, Phase B1; managed in
+  // the Morning Class Builder). Fall back to the master sheet's AM Volunteer
+  // tab only when no DB rows exist for the season, so prod is safe until the
+  // teaching grid is populated for the year.
+  var amDbRows = [];
+  try {
+    amDbRows = await sql`
+      SELECT session_number, group_name, role, person_email, person_name
+      FROM am_class_assignments WHERE school_year = ${seasonLabel}
+    `;
+  } catch (e) {
+    console.error('Participation AM-teaching query failed:', e.message);
+  }
+  if (amDbRows.length) {
+    amDbRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.person_email, r.person_name);
+      if (!key || !members[key]) return;
+      if (r.role === 'lead') {
+        members[key].counts.am_lead += 1;
+        addTimeline(key, r.session_number, { category: 'am_lead', label: 'Leading AM — ' + (r.group_name || '') });
+      } else {
+        members[key].counts.am_assist += 1;
+        addTimeline(key, r.session_number, { category: 'am_assist', label: 'Assisting AM — ' + (r.group_name || '') });
       }
-      (s.assistants || []).forEach(function (a) {
-        var aKey = participationResolveName(a, nameIndex);
-        if (aKey && members[aKey]) {
-          members[aKey].counts.am_assist += 1;
-          addTimeline(aKey, sNum, { category: 'am_assist', label: 'Assisting AM — ' + groupName });
+    });
+  } else {
+    var amClasses = data.amClasses || {};
+    Object.keys(amClasses).forEach(function (groupName) {
+      var cls = amClasses[groupName];
+      var sessions = cls.sessions || {};
+      Object.keys(sessions).forEach(function (sKey) {
+        var sNum = parseInt(sKey, 10);
+        var s = sessions[sKey] || {};
+        var teacherKey = participationResolveName(s.teacher, nameIndex);
+        if (teacherKey && members[teacherKey]) {
+          members[teacherKey].counts.am_lead += 1;
+          addTimeline(teacherKey, sNum, { category: 'am_lead', label: 'Leading AM — ' + groupName });
         }
+        (s.assistants || []).forEach(function (a) {
+          var aKey = participationResolveName(a, nameIndex);
+          if (aKey && members[aKey]) {
+            members[aKey].counts.am_assist += 1;
+            addTimeline(aKey, sNum, { category: 'am_assist', label: 'Assisting AM — ' + groupName });
+          }
+        });
       });
     });
-  });
+  }
 
   // PM electives — "both hour" electives count twice
   // PM elective LEADERS come from the DB (scheduled class_submissions) as of

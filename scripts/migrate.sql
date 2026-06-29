@@ -1240,3 +1240,29 @@ CREATE TABLE IF NOT EXISTS welcome_outreach (
   welcomed_by     TEXT NOT NULL DEFAULT '',
   note            TEXT NOT NULL DEFAULT ''
 );
+
+-- ──────────────────────────────────────────────
+-- AM class teaching assignments (participation sheet→DB migration, Phase B1)
+-- Who leads / assists each morning group per session. Managed in the Morning
+-- Class Builder (Membership Director + VP). Feeds the participation report's
+-- am_lead / am_assist counts, replacing the master sheet's "AM Volunteer" tab.
+-- One 'lead' + N 'assist' rows per (school_year, session_number, group_name);
+-- saves replace the whole cell. person_email enables email-based participation
+-- matching; person_name is the display fallback.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS am_class_assignments (
+  id             SERIAL PRIMARY KEY,
+  school_year    TEXT NOT NULL,
+  session_number INTEGER NOT NULL CHECK (session_number BETWEEN 1 AND 5),
+  group_name     TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (role IN ('lead','assist')),
+  person_email   TEXT NOT NULL DEFAULT '',
+  person_name    TEXT NOT NULL DEFAULT '',
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS am_class_assign_year_idx
+  ON am_class_assignments (school_year);
+CREATE INDEX IF NOT EXISTS am_class_assign_cell_idx
+  ON am_class_assignments (school_year, session_number, group_name);

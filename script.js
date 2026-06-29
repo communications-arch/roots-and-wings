@@ -18773,7 +18773,7 @@
     return '';
   }
 
-  var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false };
+  var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false, view: 'kids', teaching: [], members: [], viewerCanTeach: false, viewerCanAct: true };
 
   function showMorningClassBuilder() {
     if (document.getElementById('mcbOverlay')) return;
@@ -18784,6 +18784,9 @@
     html += '<h3 style="margin:0;">Morning Class Builder</h3>';
     html += '<label class="sb-year-label">School Year ';
     html += '<select id="mcbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
+    // Current year is selectable too so AM teaching can be recorded for the
+    // season participation tracks (the kid-placement side mainly plans ahead).
+    html += '<option value="2025-2026">2025–2026 (current)</option>';
     html += '<option value="2026-2027">2026–2027</option>';
     html += '<option value="2027-2028">2027–2028</option>';
     html += '</select></label>';
@@ -18831,6 +18834,10 @@
         }
         morningBuilderState.roster = Array.isArray(res.data.roster) ? res.data.roster : [];
         morningBuilderState.plan = res.data.plan || { status: 'draft' };
+        morningBuilderState.teaching = Array.isArray(res.data.teaching) ? res.data.teaching : [];
+        morningBuilderState.members = Array.isArray(res.data.members) ? res.data.members : [];
+        morningBuilderState.viewerCanTeach = !!res.data.viewerCanTeach;
+        morningBuilderState.viewerCanAct = res.data.viewerCanAct !== false;
         morningBuilderState.loaded = true;
         renderMorningClassBuilder();
       })
@@ -18916,6 +18923,22 @@
     }
     html += '</div>';
 
+    // Kids ⇄ AM Teachers view toggle (teaching is editable by Membership + VP).
+    var view = morningBuilderState.view || 'kids';
+    if (morningBuilderState.viewerCanTeach) {
+      html += '<div class="mcb-viewtoggle">';
+      html += '<button type="button" class="mcb-vt-btn' + (view === 'kids' ? ' mcb-vt-on' : '') + '" data-mcb-view="kids">Kids</button>';
+      html += '<button type="button" class="mcb-vt-btn' + (view === 'teachers' ? ' mcb-vt-on' : '') + '" data-mcb-view="teachers">AM Teachers</button>';
+      html += '</div>';
+    }
+    if (view === 'teachers') {
+      html += renderAmTeachingGridHtml();
+      body.innerHTML = html;
+      wireMorningWorkflow();
+      wireAmTeaching();
+      return;
+    }
+
     // Legend for the pending styling — below the workflow line, above the
     // grid. Only when there are pending kids.
     if (roster.some(function (k) { return k.pending; })) {
@@ -18966,7 +18989,140 @@
     wireMorningDnD();
   }
 
+  // ── AM Teaching (participation sheet→DB, Phase B1) ──
+  // Build a {group|session → {lead, assists[]}} map from the flat rows.
+  function amTeachingMap() {
+    var m = {};
+    (morningBuilderState.teaching || []).forEach(function (r) {
+      var k = r.group_name + '|' + r.session_number;
+      if (!m[k]) m[k] = { lead: null, assists: [] };
+      if (r.role === 'lead') m[k].lead = { email: r.person_email || '', name: r.person_name || '' };
+      else m[k].assists.push({ email: r.person_email || '', name: r.person_name || '' });
+    });
+    return m;
+  }
+
+  function renderAmTeachingGridHtml() {
+    var map = amTeachingMap();
+    var canEdit = !!morningBuilderState.viewerCanTeach;
+    var h = '<p class="mcb-legend">Assign the <strong>teacher (lead)</strong> and assistants for each morning group, per session — this feeds each family’s participation. Year: <strong>' + escapeHtmlWs(morningBuilderState.schoolYear) + '</strong>.' + (canEdit ? ' Tap a cell to edit.' : '') + '</p>';
+    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Group</th>';
+    for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
+    h += '</tr></thead><tbody>';
+    MORNING_GROUP_ORDER.forEach(function (g) {
+      h += '<tr><th class="mcb-teach-grp">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</th>';
+      for (var s2 = 1; s2 <= 5; s2++) {
+        var cell = map[g.name + '|' + s2] || { lead: null, assists: [] };
+        var hasLead = cell.lead && (cell.lead.name || cell.lead.email);
+        h += '<td class="mcb-teach-cell' + (canEdit ? ' mcb-teach-edit' : '') + '"' +
+          (canEdit ? (' data-grp="' + escapeHtmlWs(g.name) + '" data-sess="' + s2 + '"') : '') + '>';
+        if (hasLead) h += '<span class="mcb-teach-lead">' + escapeHtmlWs(cell.lead.name || cell.lead.email) + '</span>';
+        else h += '<span class="mcb-teach-empty">' + (canEdit ? '+ add' : '—') + '</span>';
+        if (cell.assists.length) h += '<span class="mcb-teach-assists">+' + cell.assists.length + ' assist' + (cell.assists.length > 1 ? 's' : '') + '</span>';
+        h += '</td>';
+      }
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    h += '<datalist id="mcbMemberList">';
+    (morningBuilderState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
+    h += '</datalist>';
+    return h;
+  }
+
+  function wireAmTeaching() {
+    document.querySelectorAll('#mcbBody .mcb-teach-edit').forEach(function (cell) {
+      cell.addEventListener('click', function () {
+        openAmCellEditor(cell.getAttribute('data-grp'), parseInt(cell.getAttribute('data-sess'), 10));
+      });
+    });
+  }
+
+  function amAssistInputHtml(val) {
+    return '<input type="text" class="cl-input mcb-assist-input" list="mcbMemberList" value="' + escapeHtmlWs(val || '') + '" placeholder="Assistant name…">';
+  }
+
+  function openAmCellEditor(group, session) {
+    if (document.getElementById('mcbCellOverlay')) return;
+    var map = amTeachingMap();
+    var cell = map[group + '|' + session] || { lead: null, assists: [] };
+    var h = '<div class="sb-overlay" id="mcbCellOverlay" style="z-index:100001;">';
+    h += '<div class="sb-panel mcb-cell-panel" role="dialog" aria-modal="true" aria-label="Edit AM teaching">';
+    h += '<button class="detail-close" id="mcbCellClose" aria-label="Close">&times;</button>';
+    h += '<h3 style="margin:0 0 12px;">' + escapeHtmlWs(group) + ' — Session ' + session + '</h3>';
+    h += '<label class="mcb-cell-lbl">Teacher (lead)</label>';
+    h += '<input type="text" class="cl-input" id="mcbLeadInput" list="mcbMemberList" value="' + escapeHtmlWs(cell.lead ? (cell.lead.name || cell.lead.email) : '') + '" placeholder="Start typing a name…">';
+    h += '<label class="mcb-cell-lbl">Assistants</label>';
+    h += '<div id="mcbAssistList">';
+    cell.assists.forEach(function (a) { h += amAssistInputHtml(a.name || a.email); });
+    h += amAssistInputHtml('');
+    h += '</div>';
+    h += '<button type="button" class="ws-inline-link" id="mcbAddAssist">+ add another assistant</button>';
+    h += '<div class="mcb-cell-actions"><button type="button" class="sc-btn mcb-primary" id="mcbCellSave">Save</button><button type="button" class="sc-btn" id="mcbCellCancel">Cancel</button></div>';
+    h += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', h);
+    var ov = document.getElementById('mcbCellOverlay');
+    function close() { if (ov) ov.remove(); }
+    document.getElementById('mcbCellClose').addEventListener('click', close);
+    document.getElementById('mcbCellCancel').addEventListener('click', close);
+    ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    document.getElementById('mcbAddAssist').addEventListener('click', function () {
+      document.getElementById('mcbAssistList').insertAdjacentHTML('beforeend', amAssistInputHtml(''));
+    });
+    document.getElementById('mcbCellSave').addEventListener('click', function () {
+      var nameMap = {};
+      (morningBuilderState.members || []).forEach(function (mm) { nameMap[String(mm.name || '').toLowerCase()] = mm; });
+      function toPerson(val) {
+        var v = String(val || '').trim();
+        if (!v) return null;
+        var mm = nameMap[v.toLowerCase()];
+        return mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v };
+      }
+      var lead = toPerson(document.getElementById('mcbLeadInput').value);
+      var assists = [];
+      document.querySelectorAll('#mcbAssistList .mcb-assist-input').forEach(function (inp) {
+        var p = toPerson(inp.value);
+        if (p) assists.push(p);
+      });
+      saveAmCell(group, session, lead, assists, close);
+    });
+  }
+
+  function saveAmCell(group, session, lead, assists, done) {
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+      body: JSON.stringify({
+        kind: 'am-teacher-assign',
+        school_year: morningBuilderState.schoolYear,
+        session_number: session,
+        group_name: group,
+        lead: lead,
+        assists: assists
+      })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Could not save: ' + ((res.data && res.data.error) || 'error')); return; }
+        // Update local state so the grid reflects the change without a reload.
+        morningBuilderState.teaching = (morningBuilderState.teaching || []).filter(function (r) {
+          return !(r.group_name === group && String(r.session_number) === String(session));
+        });
+        if (lead) morningBuilderState.teaching.push({ group_name: group, session_number: session, role: 'lead', person_email: lead.email, person_name: lead.name });
+        assists.forEach(function (a) { morningBuilderState.teaching.push({ group_name: group, session_number: session, role: 'assist', person_email: a.email, person_name: a.name }); });
+        if (done) done();
+        renderMorningClassBuilder();
+      })
+      .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
+  }
+
   function wireMorningWorkflow() {
+    document.querySelectorAll('#mcbBody [data-mcb-view]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        morningBuilderState.view = this.getAttribute('data-mcb-view');
+        renderMorningClassBuilder();
+      });
+    });
     var fb = document.getElementById('mcbFinalizeBtn');
     if (fb) fb.addEventListener('click', function () {
       var roster = morningBuilderState.roster;

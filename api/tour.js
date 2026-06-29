@@ -3643,6 +3643,29 @@ async function requireMembershipDirector(req, res) {
   return auth;
 }
 
+// Morning Class Builder access for the GET + AM-teaching writes: Membership
+// Director OR Vice President (VP manages volunteer/teaching assignments;
+// canEditAsRole grants super users). auth.canPlaceKids is true only for
+// Membership/super — VP can manage teaching but not drag kids or trigger the
+// one-time seed. Kid placement/finalize keep their Membership-only gate.
+async function morningBuilderAccess(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
+  const isVP = !isMembership && await canEditAsRole(auth.email, 'Vice President');
+  if (!isMembership && !isVP) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    res.status(403).json({
+      error: 'Only the Membership Director or Vice President can use the Morning Class Builder.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown — sheet lookup failed)'
+    });
+    return null;
+  }
+  auth.canPlaceKids = isMembership; // VP: teaching only
+  return auth;
+}
+
 // GET ?morning_builder=1&school_year=YYYY-YYYY[&seed=1]
 // Roster of paid, morning-track kids for the season (each with
 // age-as-of-fall, allergies, family placement notes, current draft group,
@@ -3652,7 +3675,7 @@ async function requireMembershipDirector(req, res) {
 // age-matched group as a one-time starting point — so the builder opens as
 // a review. Later registrations are never re-seeded; they stay unplaced.
 async function handleMorningBuilderGet(req, res) {
-  const auth = await requireMembershipDirector(req, res);
+  const auth = await morningBuilderAccess(req, res);
   if (!auth) return;
   const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
   try {
@@ -3719,7 +3742,7 @@ async function handleMorningBuilderGet(req, res) {
     // load (the builder modal), in season, while the plan is draft and has
     // never been seeded, and only for currently-unplaced kids with a known
     // age. Later opens don't re-seed, so late registrations stay unplaced.
-    const wantSeed = (req.query.seed === '1' || req.query.seed === 'true');
+    const wantSeed = (req.query.seed === '1' || req.query.seed === 'true') && auth.canPlaceKids;
     if (wantSeed && plan.status !== 'final' && !plan.seeded_at && roster.length > 0 && morningGateOpen(schoolYear)) {
       for (const item of roster) {
         if (item.group) continue;             // already placed
@@ -3796,6 +3819,36 @@ async function handleMorningBuilderGet(req, res) {
       return a.display_name.localeCompare(b.display_name);
     });
 
+    // AM teaching assignments for this year + a member picker list (Phase B1).
+    // Non-fatal: a failure just yields an empty teaching grid.
+    let teaching = [];
+    let teachMembers = [];
+    try {
+      teaching = await sql`
+        SELECT session_number, group_name, role, person_email, person_name
+        FROM am_class_assignments
+        WHERE school_year = ${schoolYear}
+        ORDER BY group_name, session_number, role DESC, sort_order
+      `;
+      const memRows = await sql`
+        SELECT email, personal_email, first_name, last_name
+        FROM people
+        WHERE COALESCE(role, '') <> 'blc'
+        ORDER BY first_name, last_name
+      `;
+      const seenM = new Set();
+      memRows.forEach(p => {
+        const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).trim();
+        const em = String(p.email || p.personal_email || '').toLowerCase();
+        const k = em || nm.toLowerCase();
+        if (!nm || seenM.has(k)) return;
+        seenM.add(k);
+        teachMembers.push({ name: nm, email: em });
+      });
+    } catch (e) {
+      console.warn('AM teaching load failed (non-fatal):', e.message);
+    }
+
     return res.status(200).json({
       school_year: schoolYear,
       roster,
@@ -3806,7 +3859,10 @@ async function handleMorningBuilderGet(req, res) {
         seeded: !!plan.seeded_at
       },
       groups: MORNING_GROUP_NAMES,
-      viewerCanAct: true
+      teaching,
+      members: teachMembers,
+      viewerCanAct: auth.canPlaceKids,
+      viewerCanTeach: true
     });
   } catch (err) {
     console.error('morning-builder get error:', err);
@@ -3911,6 +3967,49 @@ async function handleMorningFinalize(body, req, res) {
     return res.status(200).json({ ok: true, status: 'final', written });
   } catch (err) {
     console.error('morning-finalize error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='am-teacher-assign' — set the lead + assistants for one AM cell
+// (school_year, session_number, group_name). Replaces the whole cell. Gated
+// to Membership Director + VP (+ super). Feeds participation am_lead/am_assist.
+async function handleAmTeacherAssign(body, req, res) {
+  const auth = await morningBuilderAccess(req, res);
+  if (!auth) return;
+  const schoolYear = String(body.school_year || DEFAULT_SEASON);
+  const session = parseInt(body.session_number, 10);
+  const group = String(body.group_name || '').trim();
+  if (!(session >= 1 && session <= 5)) return res.status(400).json({ error: 'session_number 1–5 required' });
+  if (!group || MORNING_GROUP_NAMES.indexOf(group) === -1) return res.status(400).json({ error: 'valid group_name required' });
+  const clean = (p) => (p && (p.name || p.email))
+    ? { email: String(p.email || '').trim().toLowerCase(), name: String(p.name || '').trim() }
+    : null;
+  const lead = clean(body.lead);
+  const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean);
+  try {
+    const sql = getSql();
+    await sql`
+      DELETE FROM am_class_assignments
+      WHERE school_year = ${schoolYear} AND session_number = ${session} AND group_name = ${group}
+    `;
+    if (lead) {
+      await sql`
+        INSERT INTO am_class_assignments
+          (school_year, session_number, group_name, role, person_email, person_name, sort_order, updated_by)
+        VALUES (${schoolYear}, ${session}, ${group}, 'lead', ${lead.email}, ${lead.name}, 0, ${auth.realEmail})
+      `;
+    }
+    for (let i = 0; i < assists.length; i++) {
+      await sql`
+        INSERT INTO am_class_assignments
+          (school_year, session_number, group_name, role, person_email, person_name, sort_order, updated_by)
+        VALUES (${schoolYear}, ${session}, ${group}, 'assist', ${assists[i].email}, ${assists[i].name}, ${i}, ${auth.realEmail})
+      `;
+    }
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('am-teacher-assign error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -4363,6 +4462,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
     if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
+    if (kind === 'am-teacher-assign') return handleAmTeacherAssign(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark') return handleWelcomeMark(body, req, res);
