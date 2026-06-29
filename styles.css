@@ -7936,6 +7936,9 @@ button.staff-role:hover {
 .mcb-assist-input { margin-bottom: 6px; }
 .mcb-cell-actions { display: flex; gap: 8px; margin-top: 16px; }
 
+/* PM Schedule Builder helper inputs (Phase B2) — stacked member pickers. */
+.sbEditHelper { margin-bottom: 6px; }
+
 .sb-overlay {
   position: fixed;
   inset: 0;

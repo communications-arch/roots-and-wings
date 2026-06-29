@@ -2030,22 +2030,46 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation PM-lead query failed:', e.message);
   }
 
-  var pmElectives = data.pmElectives || {};
-  Object.keys(pmElectives).forEach(function (sKey) {
-    var sNum = parseInt(sKey, 10);
-    (pmElectives[sKey] || []).forEach(function (el) {
-      var mult = el.hour === 'both' ? 2 : 1;
-      // Leaders are credited from the DB above — the sheet contributes
-      // assistants only (moves to the Schedule Builder in Phase B).
-      (el.assistants || []).forEach(function (a) {
-        var aKey = participationResolveName(a, nameIndex);
-        if (aKey && members[aKey]) {
-          members[aKey].counts.pm_assist += mult;
-          addTimeline(aKey, sNum, { category: 'pm_assist', label: 'Assisting PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
-        }
+  // PM ASSISTANTS — prefer the DB (class_assignment_helpers, Phase B2; set in
+  // the Schedule Builder). Fall back to the master sheet's PM assistants only
+  // when no DB helper rows exist for the season's scheduled classes.
+  var pmAssistDbRows = [];
+  try {
+    pmAssistDbRows = await sql`
+      SELECT h.person_email, h.person_name, cs.scheduled_session, cs.scheduled_hour, cs.class_name
+      FROM class_assignment_helpers h
+      JOIN class_submissions cs ON cs.id = h.class_submission_id
+      WHERE cs.status = 'scheduled' AND cs.school_year = ${seasonLabel}
+    `;
+  } catch (e) {
+    console.error('Participation PM-assist query failed:', e.message);
+  }
+  if (pmAssistDbRows.length) {
+    pmAssistDbRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.person_email, r.person_name);
+      if (!key || !members[key]) return;
+      var mult = r.scheduled_hour === 'both' ? 2 : 1;
+      members[key].counts.pm_assist += mult;
+      addTimeline(key, r.scheduled_session, { category: 'pm_assist', label: 'Assisting PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
+    });
+  } else {
+    var pmElectives = data.pmElectives || {};
+    Object.keys(pmElectives).forEach(function (sKey) {
+      var sNum = parseInt(sKey, 10);
+      (pmElectives[sKey] || []).forEach(function (el) {
+        var mult = el.hour === 'both' ? 2 : 1;
+        // Leaders are credited from the DB above — the sheet contributes
+        // assistants only here when no DB helpers exist yet.
+        (el.assistants || []).forEach(function (a) {
+          var aKey = participationResolveName(a, nameIndex);
+          if (aKey && members[aKey]) {
+            members[aKey].counts.pm_assist += mult;
+            addTimeline(aKey, sNum, { category: 'pm_assist', label: 'Assisting PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
+          }
+        });
       });
     });
-  });
+  }
 
   // Cleaning crew — from the DB (cleaning_assignments) as of the sheet→DB
   // migration. One count per family per session (DISTINCT dedupes across

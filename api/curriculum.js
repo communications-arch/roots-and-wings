@@ -530,9 +530,10 @@ async function sendSubmissionConfirmation(sub) {
 // Safe public shape for sending submissions back to the client. No reviewer-only
 // fields are ever stripped here — reviewer notes etc. are fine for the submitter
 // to see as well.
-function serializeSubmission(r) {
+function serializeSubmission(r, helpers) {
   return {
     id: r.id,
+    helpers: helpers || [],
     submitted_by_email: r.submitted_by_email,
     submitted_by_name: r.submitted_by_name,
     school_year: r.school_year,
@@ -598,15 +599,36 @@ module.exports = async function handler(req, res) {
           // session so the builder can surface the "Open Sign-Ups" date
           // panel inline. Both maps keyed by `${school_year}|${session_number}`
           // to keep the payload tiny even across multiple years.
-          const [rows, approvalRows, windowRows] = await Promise.all([
+          const [rows, approvalRows, windowRows, helperRows, memberRows] = await Promise.all([
             sql`SELECT * FROM class_submissions ORDER BY created_at DESC`,
             sql`SELECT school_year, session_number, approved_at, approved_by
                 FROM co_op_sessions
                 WHERE approved_at IS NOT NULL`,
             sql`SELECT school_year, session_number, status,
                        signup_start_date, signup_end_date
-                FROM class_signup_windows`
+                FROM class_signup_windows`,
+            sql`SELECT class_submission_id, person_email, person_name
+                FROM class_assignment_helpers ORDER BY class_submission_id, sort_order`,
+            sql`SELECT email, personal_email, first_name, last_name
+                FROM people WHERE COALESCE(role, '') <> 'blc'
+                ORDER BY first_name, last_name`
           ]);
+          // PM helpers per scheduled class (Phase B2) + a member picker list.
+          const helpersBySub = {};
+          helperRows.forEach(h => {
+            (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
+              .push({ email: h.person_email || '', name: h.person_name || '' });
+          });
+          const seenMem = new Set();
+          const members = [];
+          memberRows.forEach(p => {
+            const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).trim();
+            const em = String(p.email || p.personal_email || '').toLowerCase();
+            const k = em || nm.toLowerCase();
+            if (!nm || seenMem.has(k)) return;
+            seenMem.add(k);
+            members.push({ name: nm, email: em });
+          });
           const session_approvals = {};
           approvalRows.forEach(r => {
             session_approvals[r.school_year + '|' + r.session_number] = {
@@ -631,9 +653,10 @@ module.exports = async function handler(req, res) {
             };
           });
           return res.status(200).json({
-            submissions: rows.map(serializeSubmission),
+            submissions: rows.map(r => serializeSubmission(r, helpersBySub[r.id] || [])),
             session_approvals,
             signup_windows,
+            members,
             is_reviewer: true
           });
         }
@@ -1094,7 +1117,24 @@ module.exports = async function handler(req, res) {
           WHERE id = ${id}
           RETURNING *
         `;
-        return res.status(200).json({ submission: serializeSubmission(updated[0]) });
+        // PM helpers (Phase B2): when the editor sends a helpers array, replace
+        // this class's helper roster. Feeds participation pm_assist.
+        let helpersOut;
+        if (Array.isArray(req.body.helpers)) {
+          await sql`DELETE FROM class_assignment_helpers WHERE class_submission_id = ${id}`;
+          const hs = req.body.helpers
+            .filter(h => h && (h.name || h.email))
+            .map(h => ({ email: String(h.email || '').trim().toLowerCase(), name: String(h.name || '').trim() }));
+          for (let i = 0; i < hs.length; i++) {
+            await sql`
+              INSERT INTO class_assignment_helpers
+                (class_submission_id, person_email, person_name, sort_order, updated_by)
+              VALUES (${id}, ${hs[i].email}, ${hs[i].name}, ${i}, ${user.email})
+            `;
+          }
+          helpersOut = hs;
+        }
+        return res.status(200).json({ submission: serializeSubmission(updated[0], helpersOut) });
       }
 
       // Edit own PM class submission (only while still 'submitted' — once the

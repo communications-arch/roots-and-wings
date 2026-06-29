@@ -15777,6 +15777,7 @@
     submissions: [],   // all submissions for the school year
     approvals: {},     // { "YYYY-YYYY|N": { approved_at, approved_by } }
     signupWindows: {}, // { "YYYY-YYYY|N": { status, signup_start_date, signup_end_date } }
+    members: [],       // [{name,email}] for the PM helper picker (Phase B2)
     loaded: false
   };
   function sbApprovalFor(sess) {
@@ -19240,6 +19241,7 @@
       });
       scheduleBuilderState.approvals = (data && data.session_approvals) || {};
       scheduleBuilderState.signupWindows = (data && data.signup_windows) || {};
+      scheduleBuilderState.members = (data && data.members) || [];
       scheduleBuilderState.loaded = true;
       renderScheduleBuilder();
     })
@@ -19863,6 +19865,22 @@
     }).join('');
     html += '<div class="cls-field"><label class="cls-label">Ages</label><div class="cls-cb-group">' + sbAgeCbs + '</div>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Check the age groups for this placement — leave all unchecked to fall back to the preferred ages.</div>') + '</div>';
     html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
+
+    // Helpers / assistants (Phase B2) — feeds participation pm_assist. Member
+    // datalist comes from the Schedule Builder load; free text is allowed and
+    // resolves to an email when the typed name matches a member.
+    var sbHelpers = Array.isArray(sub.helpers) ? sub.helpers : [];
+    html += '<div class="cls-field"><label class="cls-label">Helpers / assistants</label>';
+    html += '<div id="sbEditHelperList">';
+    sbHelpers.forEach(function (hp) { html += '<input type="text" class="cl-input sbEditHelper" maxlength="120" list="sbMemberList" value="' + escClsAttr(hp.name || hp.email || '') + '" placeholder="Helper name…"' + disAttr + '>'; });
+    html += '<input type="text" class="cl-input sbEditHelper" maxlength="120" list="sbMemberList" value="" placeholder="Helper name…"' + disAttr + '>';
+    html += '</div>';
+    if (!locked) html += '<button type="button" class="ws-inline-link" id="sbEditAddHelper">+ add another helper</button>';
+    html += '<datalist id="sbMemberList">';
+    (scheduleBuilderState.members || []).forEach(function (mm) { html += '<option value="' + escClsAttr(mm.name) + '"></option>'; });
+    html += '</datalist>';
+    html += '</div>';
+
     html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000"' + disAttr + '>' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
 
     html += '<div id="sbEditError" class="cls-error" style="display:none;"></div>';
@@ -19890,6 +19908,11 @@
     document.getElementById('sbEditCloseBtn').addEventListener('click', close);
     document.getElementById('sbEditCancelBtn').addEventListener('click', close);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var addHelperBtn = document.getElementById('sbEditAddHelper');
+    if (addHelperBtn) addHelperBtn.addEventListener('click', function () {
+      document.getElementById('sbEditHelperList').insertAdjacentHTML('beforeend',
+        '<input type="text" class="cl-input sbEditHelper" maxlength="120" list="sbMemberList" value="" placeholder="Helper name…">');
+    });
 
     function currentForm() {
       // No buckets checked → fall back to the teacher's submitted ages so the
@@ -19899,12 +19922,23 @@
       var checkedAges = [];
       document.querySelectorAll('#sbEditOverlay .sbEditAgeCb:checked').forEach(function (cb) { checkedAges.push(cb.value); });
       var agesOut = checkedAges.length ? (prettyAgesClient(checkedAges, '') || '') : (prefAges === '—' ? '' : prefAges);
+      // Helpers → {email,name}; resolve email when the typed name matches a member.
+      var nameMap = {};
+      (scheduleBuilderState.members || []).forEach(function (mm) { nameMap[String(mm.name || '').toLowerCase()] = mm; });
+      var helpers = [];
+      document.querySelectorAll('#sbEditOverlay .sbEditHelper').forEach(function (inp) {
+        var v = String(inp.value || '').trim();
+        if (!v) return;
+        var mm = nameMap[v.toLowerCase()];
+        helpers.push(mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v });
+      });
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
         scheduled_hour: document.getElementById('sbEditHour').value,
         scheduled_age_range: agesOut,
         scheduled_room: document.getElementById('sbEditRoom').value.trim(),
-        reviewer_notes: document.getElementById('sbEditNotes').value
+        reviewer_notes: document.getElementById('sbEditNotes').value,
+        helpers: helpers
       };
     }
     function runPatch(overrides, actionLabel) {

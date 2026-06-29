@@ -1266,3 +1266,19 @@ CREATE INDEX IF NOT EXISTS am_class_assign_year_idx
   ON am_class_assignments (school_year);
 CREATE INDEX IF NOT EXISTS am_class_assign_cell_idx
   ON am_class_assignments (school_year, session_number, group_name);
+
+-- PM elective helpers (participation sheet→DB, Phase B2). Who assists each
+-- scheduled afternoon class, set in the PM Schedule Builder. Feeds the
+-- participation report's pm_assist count, replacing the master sheet's PM
+-- tab assistants. One row per helper, attached to the class_submission.
+CREATE TABLE IF NOT EXISTS class_assignment_helpers (
+  id                  SERIAL PRIMARY KEY,
+  class_submission_id INTEGER NOT NULL REFERENCES class_submissions(id) ON DELETE CASCADE,
+  person_email        TEXT NOT NULL DEFAULT '',
+  person_name         TEXT NOT NULL DEFAULT '',
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS class_helpers_sub_idx
+  ON class_assignment_helpers (class_submission_id);
