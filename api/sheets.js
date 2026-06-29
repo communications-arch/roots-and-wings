@@ -2119,20 +2119,46 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation roles query failed:', e.message);
   }
 
-  // Special events
-  (data.specialEvents || []).forEach(function (ev) {
-    if (ev.coordinator) {
-      var ck = participationResolveName(ev.coordinator, nameIndex);
-      if (ck && members[ck]) {
-        members[ck].counts.event_lead += 1;
-        members[ck].roles.push('Event coordinator — ' + (ev.name || ''));
+  // Special events — prefer the DB (special_events + special_event_people,
+  // Phase B3; managed by the Special Events Liaison). Fall back to the master
+  // sheet only when no DB event-people rows exist for the season.
+  var evDbRows = [];
+  try {
+    evDbRows = await sql`
+      SELECT se.name, sep.role, sep.person_email, sep.person_name
+      FROM special_event_people sep
+      JOIN special_events se ON se.id = sep.event_id
+      WHERE se.school_year = ${seasonLabel}
+    `;
+  } catch (e) {
+    console.error('Participation special-events query failed:', e.message);
+  }
+  if (evDbRows.length) {
+    evDbRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.person_email, r.person_name);
+      if (!key || !members[key]) return;
+      if (r.role === 'lead') {
+        members[key].counts.event_lead += 1;
+        members[key].roles.push('Event lead — ' + (r.name || ''));
+      } else {
+        members[key].counts.event_assist += 1;
       }
-    }
-    (ev.support || []).forEach(function (n) {
-      var k = participationResolveName(n, nameIndex);
-      if (k && members[k]) members[k].counts.event_assist += 1;
     });
-  });
+  } else {
+    (data.specialEvents || []).forEach(function (ev) {
+      if (ev.coordinator) {
+        var ck = participationResolveName(ev.coordinator, nameIndex);
+        if (ck && members[ck]) {
+          members[ck].counts.event_lead += 1;
+          members[ck].roles.push('Event coordinator — ' + (ev.name || ''));
+        }
+      }
+      (ev.support || []).forEach(function (n) {
+        var k = participationResolveName(n, nameIndex);
+        if (k && members[k]) members[k].counts.event_assist += 1;
+      });
+    });
+  }
 
   // Coverage given (not weighted — reported alongside)
   try {

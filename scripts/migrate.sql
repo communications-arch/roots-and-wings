@@ -1282,3 +1282,34 @@ CREATE TABLE IF NOT EXISTS class_assignment_helpers (
 );
 CREATE INDEX IF NOT EXISTS class_helpers_sub_idx
   ON class_assignment_helpers (class_submission_id);
+
+-- Special events (participation sheet→DB, Phase B3). Managed by the Special
+-- Events Liaison (+ VP). Dates are proposed at the summer meeting then approved
+-- (date_status). Each event has one lead (→ event_lead) and up to four
+-- assistants (→ event_assist) in special_event_people. Seeded per year with the
+-- standard event list. UNIQUE(school_year,name) lets the seed be idempotent.
+CREATE TABLE IF NOT EXISTS special_events (
+  id          SERIAL PRIMARY KEY,
+  school_year TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  event_date  DATE,
+  date_status TEXT NOT NULL DEFAULT 'proposed' CHECK (date_status IN ('proposed','approved')),
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by  TEXT NOT NULL DEFAULT '',
+  UNIQUE (school_year, name)
+);
+CREATE INDEX IF NOT EXISTS special_events_year_idx ON special_events (school_year);
+
+CREATE TABLE IF NOT EXISTS special_event_people (
+  id           SERIAL PRIMARY KEY,
+  event_id     INTEGER NOT NULL REFERENCES special_events(id) ON DELETE CASCADE,
+  role         TEXT NOT NULL CHECK (role IN ('lead','assist')),
+  person_email TEXT NOT NULL DEFAULT '',
+  person_name  TEXT NOT NULL DEFAULT '',
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by   TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS special_event_people_idx ON special_event_people (event_id);

@@ -4014,6 +4014,166 @@ async function handleAmTeacherAssign(body, req, res) {
   }
 }
 
+// ── Special Events (participation sheet→DB, Phase B3) ──
+// Managed by the Special Events Liaison (+ VP). Dates proposed → approved;
+// each event gets one lead + up to four assistants. Feeds participation
+// event_lead / event_assist.
+const SPECIAL_EVENT_SEED = [
+  'Ice Cream Social', 'Field Day', 'Dance', "Maker's Market", 'Passion Fair',
+  'PJ Party', 'Service Project', 'Variety Show', 'Camp'
+];
+
+async function requireSpecialEventsEditor(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const ok = (await canEditAsRole(auth.email, 'Special Events Liaison'))
+    || (await canEditAsRole(auth.email, 'Vice President'));
+  if (!ok) {
+    res.status(403).json({
+      error: 'Only the Special Events Liaison or Vice President can manage special events.',
+      youAre: auth.realEmail
+    });
+    return null;
+  }
+  return auth;
+}
+
+function specialEventDateStr(v) {
+  if (!v) return '';
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+}
+
+// GET ?special_events=1&school_year=YYYY-YYYY — seeds the standard event list
+// for the year on first load, then returns each event + lead/assistants + a
+// member picker list.
+async function handleSpecialEventsGet(req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
+  try {
+    const sql = getSql();
+    for (let i = 0; i < SPECIAL_EVENT_SEED.length; i++) {
+      await sql`
+        INSERT INTO special_events (school_year, name, sort_order, updated_by)
+        VALUES (${schoolYear}, ${SPECIAL_EVENT_SEED[i]}, ${i}, ${auth.realEmail})
+        ON CONFLICT (school_year, name) DO NOTHING
+      `;
+    }
+    const events = await sql`
+      SELECT id, name, event_date, date_status, sort_order, notes
+      FROM special_events WHERE school_year = ${schoolYear}
+      ORDER BY sort_order, name
+    `;
+    const people = await sql`
+      SELECT sep.event_id, sep.role, sep.person_email, sep.person_name, sep.sort_order
+      FROM special_event_people sep
+      JOIN special_events se ON se.id = sep.event_id
+      WHERE se.school_year = ${schoolYear}
+      ORDER BY sep.event_id, sep.role DESC, sep.sort_order
+    `;
+    const byEvent = {};
+    people.forEach(p => { (byEvent[p.event_id] || (byEvent[p.event_id] = [])).push(p); });
+    const out = events.map(e => {
+      const ppl = byEvent[e.id] || [];
+      const lead = ppl.find(x => x.role === 'lead');
+      const assists = ppl.filter(x => x.role === 'assist').map(x => ({ email: x.person_email || '', name: x.person_name || '' }));
+      return {
+        id: e.id,
+        name: e.name,
+        event_date: specialEventDateStr(e.event_date),
+        date_status: e.date_status,
+        notes: e.notes || '',
+        // Ice Cream Social + Field Day dates are also driven by the session
+        // calendar (board-calendar derived events) — flag so the UI can note it.
+        date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
+        lead: lead ? { email: lead.person_email || '', name: lead.person_name || '' } : null,
+        assists
+      };
+    });
+    const memRows = await sql`
+      SELECT email, personal_email, first_name, last_name
+      FROM people WHERE COALESCE(role, '') <> 'blc'
+      ORDER BY first_name, last_name
+    `;
+    const seen = new Set();
+    const members = [];
+    memRows.forEach(p => {
+      const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).trim();
+      const em = String(p.email || p.personal_email || '').toLowerCase();
+      const k = em || nm.toLowerCase();
+      if (!nm || seen.has(k)) return;
+      seen.add(k);
+      members.push({ name: nm, email: em });
+    });
+    return res.status(200).json({ school_year: schoolYear, events: out, members });
+  } catch (err) {
+    console.error('special-events get error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='special-event-people' — replace one event's lead + assistants.
+async function handleSpecialEventSave(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventId = parseInt(body.event_id, 10);
+  if (!eventId) return res.status(400).json({ error: 'event_id required' });
+  const clean = (p) => (p && (p.name || p.email))
+    ? { email: String(p.email || '').trim().toLowerCase(), name: String(p.name || '').trim() }
+    : null;
+  const lead = clean(body.lead);
+  const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean).slice(0, 4);
+  try {
+    const sql = getSql();
+    const owns = await sql`SELECT id FROM special_events WHERE id = ${eventId}`;
+    if (!owns.length) return res.status(404).json({ error: 'Event not found' });
+    await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
+    if (lead) {
+      await sql`
+        INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
+        VALUES (${eventId}, 'lead', ${lead.email}, ${lead.name}, 0, ${auth.realEmail})
+      `;
+    }
+    for (let i = 0; i < assists.length; i++) {
+      await sql`
+        INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
+        VALUES (${eventId}, 'assist', ${assists[i].email}, ${assists[i].name}, ${i}, ${auth.realEmail})
+      `;
+    }
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('special-event-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='special-event-date' — set an event's date + proposed/approved.
+async function handleSpecialEventDate(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventId = parseInt(body.event_id, 10);
+  if (!eventId) return res.status(400).json({ error: 'event_id required' });
+  const status = body.date_status === 'approved' ? 'approved' : 'proposed';
+  const eventDate = String(body.event_date || '').trim();
+  if (eventDate && !/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) {
+    return res.status(400).json({ error: 'Date must be YYYY-MM-DD.' });
+  }
+  try {
+    const sql = getSql();
+    const upd = await sql`
+      UPDATE special_events
+      SET event_date = ${eventDate || null}, date_status = ${status},
+          updated_by = ${auth.realEmail}, updated_at = NOW()
+      WHERE id = ${eventId} RETURNING id
+    `;
+    if (!upd.length) return res.status(404).json({ error: 'Event not found' });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('special-event-date error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // ── Board Calendar ──
 // A board-facing list of date-sensitive co-op events that don't have their
 // own home editor (registration opens/closes, "morning classes finalized
@@ -4432,6 +4592,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
+    if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
@@ -4463,6 +4624,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
     if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
     if (kind === 'am-teacher-assign') return handleAmTeacherAssign(body, req, res);
+    if (kind === 'special-event-people') return handleSpecialEventSave(body, req, res);
+    if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark') return handleWelcomeMark(body, req, res);

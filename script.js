@@ -6532,6 +6532,17 @@
         if (typeof loadWelcomeList === 'function') loadWelcomeList();
       }
     },
+    'special-events': {
+      // Special Events Liaison (+ VP): propose/approve event dates and assign a
+      // lead + four assistants per event. Feeds participation event_lead/assist.
+      title: 'Special Events',
+      roleGate: ['Special Events Liaison', 'Vice President'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Propose &amp; approve event dates, then assign a lead and up to four assistants for each event.</p>';
+        h += '<button type="button" class="sc-btn mcb-primary" data-resource-action="special-events">Manage Special Events</button>';
+        return h;
+      }
+    },
     'upcoming-events': {
       // Read-only view of the board calendar (manual + derived dates) so the
       // coordinator can tell new members what's coming up. Editing stays on
@@ -6731,9 +6742,10 @@
     'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'special-events', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Secretary': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Sustaining Director': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Special Events Liaison': ['special-events', 'members-summary', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['welcome-list', 'members-summary', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
@@ -13864,6 +13876,7 @@
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
     else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
+    else if (action === 'special-events' && typeof showSpecialEventsModal === 'function') showSpecialEventsModal();
     else if (action === 'pm-submissions-report' && typeof showPmSubmissionsModal === 'function') showPmSubmissionsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
@@ -18777,6 +18790,137 @@
   }
 
   var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false, view: 'kids', teaching: [], members: [], viewerCanTeach: false, viewerCanAct: true };
+
+  // ── Special Events manager (participation sheet→DB, Phase B3) ──
+  var specialEventsState = { schoolYear: '2025-2026', events: [], members: [] };
+
+  function showSpecialEventsModal() {
+    if (document.getElementById('seOverlay')) return;
+    var html = '<div class="sb-overlay" id="seOverlay">';
+    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Special Events">';
+    html += '<button class="detail-close" id="seCloseBtn" aria-label="Close">&times;</button>';
+    html += '<div class="sb-header"><h3 style="margin:0;">Special Events</h3>';
+    html += '<label class="sb-year-label">School Year <select id="seYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
+    html += '<option value="2025-2026">2025–2026 (current)</option><option value="2026-2027">2026–2027</option><option value="2027-2028">2027–2028</option>';
+    html += '</select></label></div>';
+    html += '<div class="sb-body" id="seBody"><em style="color:var(--color-text-light);">Loading events…</em></div>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    document.body.style.overflow = 'hidden';
+    var overlay = document.getElementById('seOverlay');
+    document.getElementById('seCloseBtn').addEventListener('click', closeSpecialEventsModal);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeSpecialEventsModal(); });
+    var yearSel = document.getElementById('seYearSelect');
+    yearSel.value = specialEventsState.schoolYear;
+    yearSel.addEventListener('change', function () { specialEventsState.schoolYear = this.value; loadSpecialEvents(); });
+    loadSpecialEvents();
+  }
+
+  function closeSpecialEventsModal() {
+    var ov = document.getElementById('seOverlay');
+    if (ov) ov.remove();
+    document.body.style.overflow = '';
+  }
+
+  function loadSpecialEvents() {
+    var body = document.getElementById('seBody');
+    if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading events…</em>';
+    fetch('/api/tour?special_events=1&school_year=' + encodeURIComponent(specialEventsState.schoolYear), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || 'error';
+          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ')';
+          if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtmlWs(msg) + '</p>';
+          return;
+        }
+        specialEventsState.events = res.data.events || [];
+        specialEventsState.members = res.data.members || [];
+        renderSpecialEvents();
+      })
+      .catch(function (err) { if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>'; });
+  }
+
+  function renderSpecialEvents() {
+    var body = document.getElementById('seBody');
+    if (!body) return;
+    var h = '<datalist id="seMemberList">';
+    (specialEventsState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
+    h += '</datalist>';
+    h += '<p class="ws-body-hint" style="margin:0 0 12px;">Dates are proposed at the summer meeting, then approved. Assign a lead and up to four assistants per event — this feeds participation.</p>';
+    h += '<div class="se-list">';
+    (specialEventsState.events || []).forEach(function (ev) {
+      h += '<div class="se-card" data-eid="' + ev.id + '">';
+      h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
+      h += '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
+      h += '<div class="se-row"><label class="se-lbl">Date</label>';
+      h += '<input type="date" class="cl-input se-date" value="' + escapeHtmlWs(ev.event_date || '') + '">';
+      h += '<button type="button" class="sc-btn se-date-save">Save date</button>';
+      h += '<button type="button" class="sc-btn se-status-toggle">' + (ev.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
+      h += '</div>';
+      if (ev.date_from_calendar) h += '<p class="se-note">📅 This date also drives the board calendar (it comes from the session schedule).</p>';
+      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
+      h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
+      for (var i = 0; i < 4; i++) {
+        var a = (ev.assists || [])[i];
+        h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
+      }
+      h += '</div></div>';
+      h += '<button type="button" class="sc-btn mcb-primary se-people-save">Save lead &amp; assistants</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+    body.innerHTML = h;
+    wireSpecialEvents();
+  }
+
+  function seNameToPerson(val) {
+    var v = String(val || '').trim();
+    if (!v) return null;
+    var map = {};
+    (specialEventsState.members || []).forEach(function (mm) { map[String(mm.name || '').toLowerCase()] = mm; });
+    var mm = map[v.toLowerCase()];
+    return mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v };
+  }
+
+  function wireSpecialEvents() {
+    var body = document.getElementById('seBody');
+    if (!body) return;
+    body.querySelectorAll('.se-card').forEach(function (card) {
+      var eid = parseInt(card.getAttribute('data-eid'), 10);
+      var ev = (specialEventsState.events || []).find(function (x) { return x.id === eid; }) || {};
+      var dateSave = card.querySelector('.se-date-save');
+      var statusToggle = card.querySelector('.se-status-toggle');
+      var peopleSave = card.querySelector('.se-people-save');
+      if (dateSave) dateSave.addEventListener('click', function () {
+        postSpecialEvent({ kind: 'special-event-date', event_id: eid, event_date: card.querySelector('.se-date').value, date_status: ev.date_status || 'proposed' });
+      });
+      if (statusToggle) statusToggle.addEventListener('click', function () {
+        var newStatus = (ev.date_status === 'approved') ? 'proposed' : 'approved';
+        postSpecialEvent({ kind: 'special-event-date', event_id: eid, event_date: card.querySelector('.se-date').value, date_status: newStatus });
+      });
+      if (peopleSave) peopleSave.addEventListener('click', function () {
+        var lead = seNameToPerson(card.querySelector('.se-lead').value);
+        var assists = [];
+        card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
+        postSpecialEvent({ kind: 'special-event-people', event_id: eid, lead: lead, assists: assists });
+      });
+    });
+  }
+
+  function postSpecialEvent(payload) {
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Could not save: ' + ((res.data && res.data.error) || 'error')); return; }
+        loadSpecialEvents();
+      })
+      .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
+  }
 
   function showMorningClassBuilder() {
     if (document.getElementById('mcbOverlay')) return;
