@@ -1881,6 +1881,12 @@ async function participationFetchSheetData(sheetsClient) {
 
 async function buildParticipationReport(sql, data) {
   var families = data.families || [];
+  // Report season. A prior refactor (commit 2704e42) dropped this line while
+  // leaving the `return { season }` below, which 500'd the whole report —
+  // restored. Short '25_26' form; the long '2025-2026' label drives the
+  // DB school_year filters added in the sheet→DB migration.
+  var season = participationCurrentSeason();
+  var seasonLabel = seasonToYearLabel(season);
   var nameIndex = participationBuildNameIndex(families);
   var members = {};
 
@@ -1915,6 +1921,37 @@ async function buildParticipationReport(sql, data) {
     });
   });
 
+  // Email → member-key index for matching DB rows (roles, PM lead) to the
+  // exact parent. Built from each family's people roster (workspace +
+  // personal email); BLCs skipped to mirror the member map above. The
+  // familyFirstMemberKey index credits cleaning (stored by family name, no
+  // person) to one parent — the first tracked parent in the family.
+  var emailToMemberKey = {};
+  var familyFirstMemberKey = {};
+  (families || []).forEach(function (fam) {
+    var famName = String(fam.name || '').trim();
+    if (!famName) return;
+    var famKeyLc = famName.toLowerCase();
+    (fam.people || []).forEach(function (pp) {
+      if (pp.role === 'blc') return;
+      var fn = String(pp.first_name || '').trim();
+      if (!fn) return;
+      var canonical = participationNormName(fn + ' ' + famName);
+      if (!members[canonical]) return;
+      [pp.email, pp.personal_email].forEach(function (e) {
+        var elc = String(e || '').trim().toLowerCase();
+        if (elc && !emailToMemberKey[elc]) emailToMemberKey[elc] = canonical;
+      });
+      if (!familyFirstMemberKey[famKeyLc]) familyFirstMemberKey[famKeyLc] = canonical;
+    });
+  });
+  // Resolve a DB row to a member: prefer its email, fall back to name match.
+  function resolveMemberByEmail(email, fallbackName) {
+    var elc = String(email || '').trim().toLowerCase();
+    if (elc && emailToMemberKey[elc]) return emailToMemberKey[elc];
+    return participationResolveName(fallbackName, nameIndex);
+  }
+
   function addTimeline(memberKey, sessionNum, entry) {
     var m = members[memberKey];
     if (!m || !sessionNum || !m.timeline[sessionNum]) return;
@@ -1945,16 +1982,35 @@ async function buildParticipationReport(sql, data) {
   });
 
   // PM electives — "both hour" electives count twice
+  // PM elective LEADERS come from the DB (scheduled class_submissions) as of
+  // the sheet→DB migration; the leader is the submitter. 'both'-hour classes
+  // count double. Assistants still come from the master sheet below until the
+  // Schedule Builder records helpers (Phase B).
+  try {
+    var pmLeadRows = await sql`
+      SELECT submitted_by_email, submitted_by_name, scheduled_session,
+             scheduled_hour, class_name
+      FROM class_submissions
+      WHERE status = 'scheduled' AND school_year = ${seasonLabel}
+    `;
+    pmLeadRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.submitted_by_email, r.submitted_by_name);
+      if (!key || !members[key]) return;
+      var mult = r.scheduled_hour === 'both' ? 2 : 1;
+      members[key].counts.pm_lead += mult;
+      addTimeline(key, r.scheduled_session, { category: 'pm_lead', label: 'Leading PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
+    });
+  } catch (e) {
+    console.error('Participation PM-lead query failed:', e.message);
+  }
+
   var pmElectives = data.pmElectives || {};
   Object.keys(pmElectives).forEach(function (sKey) {
     var sNum = parseInt(sKey, 10);
     (pmElectives[sKey] || []).forEach(function (el) {
       var mult = el.hour === 'both' ? 2 : 1;
-      var leaderKey = participationResolveName(el.leader, nameIndex);
-      if (leaderKey && members[leaderKey]) {
-        members[leaderKey].counts.pm_lead += mult;
-        addTimeline(leaderKey, sNum, { category: 'pm_lead', label: 'Leading PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
-      }
+      // Leaders are credited from the DB above — the sheet contributes
+      // assistants only (moves to the Schedule Builder in Phase B).
       (el.assistants || []).forEach(function (a) {
         var aKey = participationResolveName(a, nameIndex);
         if (aKey && members[aKey]) {
@@ -1965,61 +2021,53 @@ async function buildParticipationReport(sql, data) {
     });
   });
 
-  // Cleaning crew — one count per session per person (dedupe across areas)
-  var cleaning = data.cleaningCrew || {};
-  var cSessions = cleaning.sessions || {};
-  Object.keys(cSessions).forEach(function (sKey) {
-    var sNum = parseInt(sKey, 10);
-    var s = cSessions[sKey] || {};
-    var seen = {};
-    function tally(name, label) {
-      var key = participationResolveName(name, nameIndex);
-      if (!key || !members[key] || seen[key]) return;
-      seen[key] = true;
+  // Cleaning crew — from the DB (cleaning_assignments) as of the sheet→DB
+  // migration. One count per family per session (DISTINCT dedupes across
+  // areas); credited to the family's first tracked parent per Erin's
+  // "one parent only" rule.
+  try {
+    var cleanRows = await sql`
+      SELECT DISTINCT session_number, family_name FROM cleaning_assignments
+    `;
+    cleanRows.forEach(function (r) {
+      var key = familyFirstMemberKey[String(r.family_name || '').trim().toLowerCase()];
+      if (!key) key = participationResolveName(r.family_name, nameIndex);
+      if (!key || !members[key]) return;
       members[key].counts.cleaning_session += 1;
-      addTimeline(key, sNum, { category: 'cleaning_session', label: label });
-    }
-    ['mainFloor', 'upstairs', 'outside'].forEach(function (floor) {
-      var areas = s[floor] || {};
-      Object.keys(areas).forEach(function (area) {
-        (areas[area] || []).forEach(function (n) { tally(n, 'Cleaning — ' + area); });
-      });
+      addTimeline(key, r.session_number, { category: 'cleaning_session', label: 'Cleaning crew' });
     });
-    (s.floater || []).forEach(function (n) { tally(n, 'Cleaning floater'); });
-  });
+  } catch (e) {
+    console.error('Participation cleaning query failed:', e.message);
+  }
 
-  // Volunteer committees — chair = board role (annual, count once),
-  // other roles = one-year role (count once per role held).
-  (data.volunteerCommittees || []).forEach(function (comm) {
-    if (comm.chair && comm.chair.person) {
-      var ckey = participationResolveName(comm.chair.person, nameIndex);
-      if (ckey && members[ckey]) {
-        if (members[ckey].counts.board_role === 0) members[ckey].counts.board_role = 1;
-        members[ckey].isBoard = true;
-        if (comm.chair.title) members[ckey].roles.push(comm.chair.title);
+  // Board + committee roles — from the DB (role_holders × role_descriptions)
+  // as of the sheet→DB migration. 'board' category = board_role (counted
+  // once); 'committee_role' = one_year_role (per role held). cleaning_area /
+  // class categories aren't volunteer roles and are excluded. AM class
+  // liaisons, if tracked, are committee_role rows and counted here too.
+  try {
+    var roleRows = await sql`
+      SELECT rh.email, rh.person_name, rd.title, rd.category
+      FROM role_holders rh
+      JOIN role_descriptions rd ON rd.id = rh.role_id
+      WHERE rh.school_year = ${seasonLabel}
+        AND rd.status = 'active'
+        AND rd.category IN ('board', 'committee_role')
+    `;
+    roleRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.email, r.person_name);
+      if (!key || !members[key]) return;
+      if (r.category === 'board') {
+        if (members[key].counts.board_role === 0) members[key].counts.board_role = 1;
+        members[key].isBoard = true;
+      } else {
+        members[key].counts.one_year_role += 1;
       }
-    }
-    (comm.roles || []).forEach(function (role) {
-      if (!role.person) return;
-      String(role.person).split(/\s*[&\/,]\s*/).map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (p) {
-        var k = participationResolveName(p, nameIndex);
-        if (k && members[k]) {
-          members[k].counts.one_year_role += 1;
-          members[k].roles.push(role.title || 'Volunteer role');
-        }
-      });
+      if (r.title) members[key].roles.push(r.title);
     });
-  });
-
-  // AM class liaisons — counted as a 1-year role
-  (data.classLiaisons || []).forEach(function (l) {
-    if (!l.person) return;
-    var k = participationResolveName(l.person, nameIndex);
-    if (k && members[k]) {
-      members[k].counts.one_year_role += 1;
-      members[k].roles.push('AM Class Liaison — ' + (l.group || ''));
-    }
-  });
+  } catch (e) {
+    console.error('Participation roles query failed:', e.message);
+  }
 
   // Special events
   (data.specialEvents || []).forEach(function (ev) {
@@ -2075,7 +2123,7 @@ async function buildParticipationReport(sql, data) {
   // Seasons compare as normalized long labels — registrations store
   // '2026-2027' while participationCurrentSeason() returns '25_26', so the
   // raw equality this used to do never matched.
-  var seasonLabel = seasonToYearLabel(participationCurrentSeason());
+  // seasonLabel computed at the top of the function.
   var firstSeasons = await firstSeasonByEmail(sql);
   Object.keys(members).forEach(function (k) {
     var m = members[k];

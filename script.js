@@ -6301,9 +6301,16 @@
           }
 
           h += '</div>'; // /.ws-part-panel
+        } else if (_participationMine) {
+          // Fetch completed but you're not on the participation roster yet
+          // (e.g. a backup coach, or no AM/PM/cleaning/role activity recorded
+          // this year). Don't hang on the loading placeholder.
+          h += '<div class="ws-part-panel ws-part-panel-empty">';
+          h += '<p class="ws-part-meter-caption">No participation recorded for you yet this year — see the ways to jump in below.</p>';
+          h += '</div>';
         } else if (_participationMineEmail && localStorage.getItem('rw_google_credential')) {
-          // Fetch is in flight (or errored silently). Show a gentle
-          // placeholder so the card isn't empty on first paint.
+          // Fetch is in flight. Show a gentle placeholder so the card isn't
+          // empty on first paint.
           h += '<div class="ws-part-panel ws-part-panel-loading">';
           h += '<p class="ws-part-meter-caption">Loading your year so far…</p>';
           h += '</div>';
