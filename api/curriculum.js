@@ -449,6 +449,19 @@ function prettySpace(a, other) {
   if (other) parts.push(other);
   return parts.join(', ');
 }
+// Whole-year age as of today from a YYYY-MM-DD birth date (or Date).
+// Returns null for a missing/invalid date.
+function ageFromBirthDate(birthDate) {
+  if (!birthDate) return null;
+  const bd = new Date(birthDate);
+  if (isNaN(bd.getTime())) return null;
+  const now = new Date();
+  let age = now.getUTCFullYear() - bd.getUTCFullYear();
+  const mo = now.getUTCMonth() - bd.getUTCMonth();
+  if (mo < 0 || (mo === 0 && now.getUTCDate() < bd.getUTCDate())) age--;
+  return age >= 0 ? age : 0;
+}
+
 function prettyAges(a, other) {
   const map = {
     saplings: 'Saplings (3–5)', sassafras: 'Sassafras (5–6)',
@@ -733,14 +746,21 @@ module.exports = async function handler(req, res) {
         const effEmail = resolveSubmitterEmail(user, req.query.view_as);
         const fam = await resolveFamily(sql, effEmail);
         let kids = [];
+        const kidAges = {};
         const picks = {};
         if (fam && fam.family_email) {
           const kidRows = await sql`
-            SELECT first_name FROM kids
+            SELECT first_name, birth_date FROM kids
             WHERE LOWER(family_email) = LOWER(${fam.family_email})
             ORDER BY sort_order, first_name
           `;
           kids = kidRows.map(k => k.first_name).filter(Boolean);
+          // Current age per kid so the parent card can flag age-appropriate
+          // classes. Keyed by first name (same key as picks/working).
+          kidRows.forEach(k => {
+            const age = ageFromBirthDate(k.birth_date);
+            if (k.first_name && age != null) kidAges[k.first_name] = age;
+          });
           const pickRows = await sql`
             SELECT kid_first_name, hour, class_submission_id
             FROM class_signup_picks
@@ -756,7 +776,7 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           school_year: sy, session,
           window: winRows[0] || { status: null },
-          classes, kids, picks,
+          classes, kids, kidAges, picks,
           is_reviewer: reviewer
         });
       }

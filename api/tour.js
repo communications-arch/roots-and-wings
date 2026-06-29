@@ -2164,6 +2164,7 @@ async function handleRegistrationInvite(body, req, res) {
         <p>Hi ${escapeHtml(name)},</p>
         <p>Thanks for your interest in joining our co-op. When you're ready, use the link below to complete registration for your family.</p>
         ${note ? `<p style="background:#f5f0f8;padding:10px 14px;border-left:3px solid #523A79;border-radius:4px;"><em>${escapeHtml(note)}</em></p>` : ''}
+        <p style="background:#fdf3e7;padding:10px 14px;border-left:3px solid #c8862a;border-radius:4px;"><strong>Please complete your registration within 2 weeks.</strong> After that, we can't guarantee a spot will still be available.</p>
         <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#523A79;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Complete registration</a></p>
         <p style="color:#666;font-size:0.9rem;">Or copy this link into your browser:<br><span style="word-break:break-all;">${escapeHtml(link)}</span></p>
         <p style="color:#666;font-size:0.9rem;margin-top:20px;">Questions? Reply to this email and it'll reach the Membership team.</p>

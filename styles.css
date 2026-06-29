@@ -11507,6 +11507,23 @@ button.staff-role:hover {
   cursor: pointer;
 }
 .signup-class:disabled { cursor: default; opacity: 0.75; }
+/* Age-fit highlighting — fit gets a green accent, clear mismatches recede.
+   Defined before .signup-class-sel so the selected (purple) state wins. */
+.signup-class-fit { border-color: #5a9e63; background: rgba(90, 158, 99, 0.09); }
+.signup-class-misfit { opacity: 0.5; }
+.signup-class-misfit .signup-class-name { font-weight: 500; color: var(--color-text-light); }
+.signup-fit-check { color: #2e7d32; font-weight: 800; }
+.signup-fit-key { color: #2e7d32; font-weight: 700; background: rgba(90, 158, 99, 0.16); padding: 0 4px; border-radius: 4px; }
+.signup-kid-age {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+  background: var(--color-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
 .signup-class-sel { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.08); }
 .signup-rank {
   flex-shrink: 0;
@@ -12439,8 +12456,24 @@ button.staff-role:hover {
   color: var(--color-accent-dark);
   font-weight: 700;
 }
+/* Flow each board member's branch into responsive columns so the whole
+   org reads side-by-side at a glance instead of one long scroll. Column
+   count is width-driven (≈18rem min): ~3 across a wide modal, 2 on a
+   tablet, 1 on a phone. break-inside keeps a branch intact in one column. */
+.org-tree {
+  columns: 18rem 3;
+  column-gap: 16px;
+}
 .org-branch {
-  margin-bottom: 18px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(var(--color-primary-rgb), 0.035);
 }
 .org-branch-head {
   font-family: var(--font-rounded);
@@ -12449,7 +12482,7 @@ button.staff-role:hover {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-text-light);
-  margin: 10px 0 6px 18px;
+  margin: 10px 0 6px 14px;
 }
 .org-row {
   border: 1px solid var(--color-border);
@@ -12458,7 +12491,7 @@ button.staff-role:hover {
   background: var(--color-white);
 }
 .org-row-depth-1 {
-  margin-left: 18px;
+  margin-left: 14px;
 }
 .org-row-vacant {
   border-style: dashed;

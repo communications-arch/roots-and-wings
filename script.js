@@ -3875,17 +3875,19 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Tap classes in order of preference (1 = first choice), up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Tap classes in order of preference (1 = first choice), up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span>.</p>';
 
     var kids = s.kids || [];
     if (kids.length === 0) {
       h += '<p class="mf-empty">No children on this family to sign up.</p>';
     } else {
       kids.forEach(function (kid) {
+        var age = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
         h += '<div class="signup-kid">';
-        h += '<div class="signup-kid-name">' + escapeHtml(kid) + '</div>';
-        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit);
+        h += '<div class="signup-kid-name">' + escapeHtml(kid) +
+             (age != null ? ' <span class="signup-kid-age">age ' + age + '</span>' : '') + '</div>';
+        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, age);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, age);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kid) + '’s picks</button>';
         h += '</div>';
       });
@@ -3894,7 +3896,7 @@
     wireSignupCard();
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit) {
+  function signupHourHtml(kid, hour, classes, canEdit, age) {
     var ranked = (_signup.working[kid] && _signup.working[kid][hour]) || [];
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     if (classes.length === 0) {
@@ -3904,13 +3906,18 @@
       classes.forEach(function (c) {
         var idx = ranked.indexOf(c.id);
         var sel = idx !== -1;
+        // null = age/range unknown (no judgement); true = age fits; false = clearly outside.
+        var fit = ageFitsRange(age, c.ageRange);
+        var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
         var bits = [c.ageRange, c.room, c.leader ? ('led by ' + c.leader) : ''];
         if (c.hour === 'both') bits.push('fills both hours');
         var meta = bits.filter(Boolean).join(' · ');
-        h += '<button type="button" class="signup-class' + (sel ? ' signup-class-sel' : '') + '"' +
+        h += '<button type="button" class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '"' +
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
         h += '<span class="signup-rank">' + (sel ? (idx + 1) : '+') + '</span>';
-        h += '<span class="signup-class-body"><span class="signup-class-name">' + escapeHtml(c.name) + '</span>';
+        h += '<span class="signup-class-body"><span class="signup-class-name">' +
+             (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
+             escapeHtml(c.name) + '</span>';
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         h += '</span></button>';
       });
@@ -3918,6 +3925,38 @@
     }
     h += '</div>';
     return h;
+  }
+
+  // Pull numeric age bands out of a free-text / age-group range string like
+  // "Oaks (7–8)", "Mixed: Younger (3–8)", "5-8", "8+", or "All ages".
+  // Returns { allAges:true }, { bands:[[min,max],…] }, or null if nothing parses.
+  function parseAgeBands(text) {
+    var t = String(text || '').toLowerCase().replace(/[–—]/g, '-');
+    if (!t.trim()) return null;
+    if (/all\s*ages/.test(t)) return { allAges: true };
+    // Grade-based labels (e.g. "K-2", "grades 3-5") aren't ages — don't guess.
+    if (/grade|kindergarten|\bk\s*-?\s*\d/.test(t)) return null;
+    var bands = [];
+    var rest = t.replace(/(\d+)\s*(?:-|to|through|thru)\s*(\d+)/g, function (m, a, b) {
+      bands.push([parseInt(a, 10), parseInt(b, 10)]); return ' ';
+    });
+    rest = rest.replace(/(\d+)\s*(?:\+|and up|or older|and older|&\s*up)/g, function (m, a) {
+      bands.push([parseInt(a, 10), 200]); return ' ';
+    });
+    rest.replace(/\d+/g, function (m) { bands.push([parseInt(m, 10), parseInt(m, 10)]); return ' '; });
+    return bands.length ? { bands: bands } : null;
+  }
+
+  // null = can't tell (don't flag); true = age fits; false = clearly outside.
+  function ageFitsRange(age, text) {
+    if (age == null) return null;
+    var p = parseAgeBands(text);
+    if (!p) return null;
+    if (p.allAges) return true;
+    for (var i = 0; i < p.bands.length; i++) {
+      if (age >= p.bands[i][0] && age <= p.bands[i][1]) return true;
+    }
+    return false;
   }
 
   function wireSignupCard() {
