@@ -15246,9 +15246,12 @@
   };
   // Mirrors AGE_RANGE_OPTIONS in the curriculum library so the two places use
   // the same co-op group names. Keys are stable ids; labels are for display.
+  // The selectable buckets: the 8 named groups plus a single "All ages". The
+  // composite "Mixed: …" options were retired — teachers check the individual
+  // buckets a class spans instead. (AGE_GROUP_LABELS keeps the mixed entries so
+  // any legacy saved submissions still display correctly.)
   var AGE_GROUP_VALUES = [
-    'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons',
-    'mixed-younger','mixed-elementary','mixed-older','all-ages'
+    'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
   ];
   var AGE_GROUP_LABELS = {
     saplings: 'Saplings (3–5)',
@@ -15499,7 +15502,6 @@
     html += '<div class="cls-cb-group">';
     AGE_GROUP_VALUES.forEach(function (v) { html += checkbox('age_groups', v, AGE_GROUP_LABELS[v]); });
     html += '</div>';
-    html += '<input class="cl-input cls-input" type="text" id="clsAgeOther" maxlength="200" value="' + escClsAttr(cur.age_groups_other) + '" placeholder="Other (optional)" style="margin-top:8px;">';
     html += '</div>';
 
     // (Pre-enroll your own kids is deferred to a later flow.)
@@ -15580,7 +15582,7 @@
         max_students: max_students,
         max_students_other: max_students_other,
         age_groups: collectChecked('age_groups'),
-        age_groups_other: document.getElementById('clsAgeOther').value.trim(),
+        age_groups_other: '',
         pre_enroll_kids: cur.pre_enroll_kids || '', // field not in v1 UI, preserve existing value on edit
         open_to_teen_assistant: document.getElementById('clsTeenAssist').checked,
         prerequisites: document.getElementById('clsPrereq').value.trim(),
@@ -19798,7 +19800,21 @@
     // differ — scheduled_age_range is a free-text override the VP can edit
     // here without rewriting the teacher's submitted age_groups.
     var prefAges = prettyAgesClient(sub.age_groups, sub.age_groups_other) || '—';
-    var schedAgesInit = sub.scheduled_age_range || '';
+    // Scheduled-ages override is now bucket checkboxes (matching the submission
+    // form). Seed the checked set from a prior scheduled_age_range when present
+    // (best-effort match on the bucket name), else from the teacher's submitted
+    // age_groups so the override defaults to the preferred ages.
+    var schedAgeSet = {};
+    var schedSrc = String(sub.scheduled_age_range || '');
+    if (schedSrc) {
+      AGE_GROUP_VALUES.forEach(function (v) {
+        var nm = String(AGE_GROUP_LABELS[v] || v).split(' (')[0];
+        if (nm && schedSrc.toLowerCase().indexOf(nm.toLowerCase()) !== -1) schedAgeSet[v] = true;
+      });
+    }
+    if (!Object.keys(schedAgeSet).length) {
+      (sub.age_groups || []).forEach(function (v) { if (AGE_GROUP_VALUES.indexOf(v) !== -1) schedAgeSet[v] = true; });
+    }
     var prefSessText = (sub.session_preferences || []).map(function (x) {
       return x === 'flexible' ? 'Flexible' : 'S' + x;
     }).join(', ') || '—';
@@ -19842,7 +19858,10 @@
     html += '<div class="sb-sched-block-title">Scheduled</div>';
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess"' + disAttr + '>' + sessOptions + '</select></div>';
     html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Ages</label><input class="cl-input" id="sbEditAges" type="text" maxlength="100" value="' + escClsAttr(schedAgesInit) + '" placeholder="' + escClsAttr(prefAges === '—' ? '' : prefAges) + '"' + disAttr + '>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Override for this placement — leave blank to fall back to the preferred ages.</div>') + '</div>';
+    var sbAgeCbs = AGE_GROUP_VALUES.map(function (v) {
+      return '<label class="cls-cb-label"><input type="checkbox" class="sbEditAgeCb" value="' + v + '"' + (schedAgeSet[v] ? ' checked' : '') + disAttr + '> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
+    }).join('');
+    html += '<div class="cls-field"><label class="cls-label">Ages</label><div class="cls-cb-group">' + sbAgeCbs + '</div>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Check the age groups for this placement — leave all unchecked to fall back to the preferred ages.</div>') + '</div>';
     html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
     html += '<div class="cls-field"><label class="cls-label">Reviewer notes (private)</label><textarea class="cl-input cls-textarea" id="sbEditNotes" rows="3" maxlength="2000"' + disAttr + '>' + escClsHtml(sub.reviewer_notes || '') + '</textarea></div>';
 
@@ -19873,11 +19892,13 @@
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
 
     function currentForm() {
-      // Empty Ages field → fall back to the teacher's submitted ages so the
+      // No buckets checked → fall back to the teacher's submitted ages so the
       // column never goes blank in downstream consumers (the published
-      // schedule, the class roster). VP can still override with any string.
-      var agesInput = document.getElementById('sbEditAges').value.trim();
-      var agesOut = agesInput || (prefAges === '—' ? '' : prefAges);
+      // schedule, the class roster). scheduled_age_range stays a readable
+      // label string (e.g. "Oaks (7–8), Maples (8–9)").
+      var checkedAges = [];
+      document.querySelectorAll('#sbEditOverlay .sbEditAgeCb:checked').forEach(function (cb) { checkedAges.push(cb.value); });
+      var agesOut = checkedAges.length ? (prettyAgesClient(checkedAges, '') || '') : (prefAges === '—' ? '' : prefAges);
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
         scheduled_hour: document.getElementById('sbEditHour').value,

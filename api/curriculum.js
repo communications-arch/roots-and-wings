@@ -262,9 +262,11 @@ const ASSISTANT_COUNT_VALS = [1, 2, 3];
 const SPACE_REQ_VALUES     = ['any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'];
 // Matches AGE_RANGE_OPTIONS in the curriculum library (script.js) so reviewers
 // see familiar co-op group names instead of generic age bands.
+// Selectable buckets: the 8 named groups + "All ages". The composite "Mixed:…"
+// options were retired (teachers check the individual buckets a class spans).
+// prettyAges still maps the legacy mixed keys so old submissions display right.
 const AGE_GROUP_VALUES     = [
-  'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons',
-  'mixed-younger','mixed-elementary','mixed-older','all-ages'
+  'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
 ];
 
 function pickArray(raw, allowed, opts) {
