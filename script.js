@@ -2240,6 +2240,23 @@
     return f === 'Teens'; // legacy alias for Pigeons
   }
 
+  // Age-group branding helper: the CSS class that carries a group's brand
+  // color (defined once in styles.css as .ag-<GroupName>). Normalizes the
+  // "Teens" legacy alias to "Pigeons"; returns '' for non-group values so
+  // callers can safely concatenate. Emoji per group lives in AGE_GROUP_EMOJI.
+  var AGE_GROUP_EMOJI = {
+    Greenhouse: '🌱', Saplings: '🌿', Sassafras: '🍃', Oaks: '🌳',
+    Maples: '🍁', Birch: '🌲', Willows: '🌾', Cedars: '🌲', Pigeons: '🕊️'
+  };
+  function ageGroupClass(name) {
+    var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
+    return (BRAND_AGE_GROUPS.indexOf(g) !== -1) ? ('ag-' + g) : '';
+  }
+  function ageGroupEmoji(name) {
+    var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
+    return AGE_GROUP_EMOJI[g] || '';
+  }
+
   // ── New-member detection ──
   // A family is "new" until it has completed a full co-op year. A year
   // completes at the end of Field Day (the isSummerBreak boundary), so:
@@ -5240,7 +5257,7 @@
       var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
       var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
       html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
-      html += '<td><span class="session-group-link">' + groupName + '</span></td>';
+      html += '<td><span class="session-group-link ' + ageGroupClass(groupName) + '"><span class="ag-dot"></span>' + groupName + '</span></td>';
       html += '<td>' + cls.ages + '</td>';
       html += '<td>' + s.topic + '</td>';
       html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
@@ -19155,7 +19172,7 @@
     MORNING_GROUP_ORDER.forEach(function (g, i) {
       var members = roster.filter(function (k) { return k.group === g.name; });
       var autoRange = mcbGroupAgeRange(members);
-      html += '<div class="mcb-group">';
+      html += '<div class="mcb-group ' + ageGroupClass(g.name) + '">';
       html += '<div class="mcb-col-head">';
       html += '<span class="mcb-group-name">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</span>';
       html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>';

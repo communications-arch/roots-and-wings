@@ -1267,6 +1267,47 @@ p + p { margin-top: 1rem; }
   white-space: nowrap;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   Age-group branding — one distinct color per age group, used app-wide.
+   `.ag-<GroupName>` sets --ag (the group's brand color); components read
+   var(--ag). Keep the class list in sync with MORNING_GROUP_ORDER /
+   ageGroupData in script.js; the ageGroupClass() helper emits these names.
+   ══════════════════════════════════════════════════════════════════ */
+.ag-Greenhouse { --ag: #7CB342; } /* leaf green   🌱 */
+.ag-Saplings   { --ag: #2E9E5B; } /* emerald      🌿 */
+.ag-Sassafras  { --ag: #14A3A3; } /* teal         🍃 */
+.ag-Oaks       { --ag: #8D6E63; } /* oak brown    🌳 */
+.ag-Maples     { --ag: #EF6C00; } /* maple orange 🍁 */
+.ag-Birch      { --ag: #4F91A6; } /* birch blue   🌲 */
+.ag-Willows    { --ag: #C9A227; } /* golden wheat 🌾 */
+.ag-Cedars     { --ag: #1B5E20; } /* deep cedar   🌲 */
+.ag-Pigeons    { --ag: #7E6BA6; } /* dove purple  🕊️ */
+
+/* Small color dot for inline group labels (schedules, person cards). */
+.ag-dot {
+  display: inline-block;
+  width: 0.62em; height: 0.62em;
+  border-radius: 50%;
+  background: var(--ag, var(--color-border));
+  margin-right: 0.4em;
+  vertical-align: baseline;
+  flex-shrink: 0;
+}
+
+/* A group filter pill wearing its group color. */
+.filter-pill.ag-grouped {
+  border-color: var(--ag);
+  color: var(--ag);
+  border-style: solid;
+  opacity: 1;
+}
+.filter-pill.ag-grouped:hover { border-color: var(--ag); color: var(--ag); }
+.filter-pill.ag-grouped.active { background: var(--ag); border-color: var(--ag); color: #fff; }
+
+/* Morning Class Builder group columns get a color header cap + name. */
+.mcb-group .mcb-col-head { border-top: 3px solid var(--ag, var(--color-border)); border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.mcb-group .mcb-group-name { color: var(--ag, inherit); }
+
 .age-group-note {
   display: block;
   font-size: 0.7rem;
