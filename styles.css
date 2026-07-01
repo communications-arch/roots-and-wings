@@ -12608,6 +12608,7 @@ button.staff-role:hover {
   font-weight: 700;
   font-size: 0.95rem;
 }
+.org-col-emoji { font-size: 1.05rem; line-height: 1; margin-right: 2px; }
 .org-col-head .org-item-holders { margin-left: 0; }
 .org-col-head .org-holder-name { color: var(--color-primary); font-size: 0.86rem; }
 .org-col-head-static {

@@ -16130,7 +16130,12 @@
       var cls = (kind === 'head') ? 'org-row-head org-col-head' : 'org-row-head org-mini';
       var i = '<div class="org-item' + (isOpen ? ' org-item-open' : '') + '">';
       i += '<button type="button" class="' + cls + '" data-org-role="' + r.id + '" aria-expanded="false">';
-      i += '<span class="org-item-title">' + escapeHtml(r.title) + '</span>';
+      // Board-member header rows keep their icon; nested roles stay lean.
+      var titleInner = escapeHtml(r.title);
+      if (kind === 'head') {
+        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + (r.icon_emoji || '\u{1F333}') + '</span> ' + titleInner;
+      }
+      i += '<span class="org-item-title">' + titleInner + '</span>';
       i += '<span class="org-item-holders">' + holdersHtml + '</span>';
       i += '</button>';
       i += '<div class="org-row-detail" hidden>';
