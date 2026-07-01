@@ -2360,14 +2360,16 @@
           ? person.name + ' ' + person.lastName
           : person.name;
         var bgStyle = faceColor(person.name);
+        // First-year families: green card outline (.yb-card-new) instead of a
+        // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
+        var isNewM = isNewMemberPerson(person);
         var extras = '';
-        if (isNewMemberPerson(person)) extras += '<div class="yb-new-badge">\u{1F331} First Year</div>';
         if (person.pronouns) extras += '<div class="yb-pronouns">' + person.pronouns + '</div>';
         if (person.allergies) extras += '<div class="yb-allergy">' + person.allergies + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
         if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="This child is opted out of photos.">⛔ No Photos</div>';
 
-        html += '<button class="yb-card yb-card-class' + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
+        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + (person.age ? 'Age ' + person.age : '') + '</div>' +
@@ -2461,16 +2463,15 @@
           ? '<div class="yb-allergy">' + person.allergies + '</div>'
           : '';
 
-        var newMemberTag = isNewMemberPerson(person)
-          ? '<div class="yb-new-badge" title="This family is in their first co-op year.">\u{1F331} First Year</div>'
-          : '';
+        // First-year families: green card outline (.yb-card-new) instead of a
+        // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
+        var isNewM = isNewMemberPerson(person);
 
-        html += '<button class="yb-card' + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + '">' +
+        html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + (isNewM ? 'This family is in their first co-op year.' : '') + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
           boardTag +
-          newMemberTag +
           pronounTag +
           '<div class="yb-family">' + (person.familyDisplay || person.family) + ' Family</div>' +
           parentOfTag +
@@ -19022,18 +19023,19 @@
   // a ⏳ marker so Membership knows payment hasn't landed.
   function mcbKidChip(k) {
     var age = (k.age == null) ? '?' : k.age;
-    // First-year family marker — same 🌱 cue as the Directory's First Year
-    // badge, plus a green left accent (.mcb-kid-new) so it reads at a glance.
-    var newm = k.new_member ? ' <span class="mcb-flag mcb-flag-new" title="First-year family">🌱</span>' : '';
+    // First-year families get a green chip outline (.mcb-kid-new) instead of a
+    // 🌱 badge — same cue as the Directory's green card outline, less clutter.
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
     var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
     var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
     var pend = k.pending ? ' <span class="mcb-flag" title="Registered — payment not received yet">⏳</span>' : '';
     var cls = 'mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + (k.pending ? ' mcb-kid-pending' : '') + (k.new_member ? ' mcb-kid-new' : '');
+    var titleAttr = k.new_member ? 'First-year family' : '';
+    if (k.pending) titleAttr = 'Registered — payment not received yet';
     return '<div class="' + cls + '"' + (k.locked ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '"'
-      + (k.pending ? ' title="Registered — payment not received yet"' : '') + '>'
+      + (titleAttr ? ' title="' + escapeHtmlWs(titleAttr) + '"' : '') + '>'
       + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
-      + newm + '<span class="mcb-kid-age">age ' + age + '</span>'
+      + '<span class="mcb-kid-age">age ' + age + '</span>'
       + allergy + note + pend + lock
       + '</div>';
   }
@@ -19092,7 +19094,7 @@
       html += '<p class="mcb-legend"><span class="mcb-legend-swatch"></span> ⏳ <strong>Amber dashed</strong> chips are registered but <strong>pending final payment</strong>. They’re seeded and placed with everyone else — just keep an eye out in case payment doesn’t come through.</p>';
     }
     if (roster.some(function (k) { return k.new_member; })) {
-      html += '<p class="mcb-legend"><span class="mcb-legend-swatch mcb-legend-swatch-new"></span> 🌱 <strong>First-year families</strong> (green accent) are in their first co-op year.</p>';
+      html += '<p class="mcb-legend"><span class="mcb-legend-swatch mcb-legend-swatch-new"></span> <strong>First-year families</strong> (green outline) are in their first co-op year.</p>';
     }
 
     if (!total) {

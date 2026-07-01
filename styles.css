@@ -3477,6 +3477,14 @@ p + p { margin-top: 1rem; }
   border-width: 1.5px;
 }
 
+/* First-year families: a green card outline instead of a 🌱 badge — same
+   "new growth" cue, less visual clutter. outline (not border) so there's no
+   layout shift and it survives the hover border-color change. */
+.yb-card-new {
+  outline: 2px solid var(--color-leaf, #5a6b39);
+  outline-offset: -1px;
+}
+
 .yb-board-badge {
   font-size: 0.58rem;
   font-weight: 600;
@@ -7883,10 +7891,10 @@ button.staff-role:hover {
     45deg, #fffaf0, #fffaf0 7px,
     rgba(217, 164, 65, 0.10) 7px, rgba(217, 164, 65, 0.10) 14px);
 }
-/* First-year family: a green left accent so new members read at a glance,
-   echoing the Directory's 🌱 First Year cue. Inset shadow so it layers over
-   the pending tint/border without fighting it. */
-.mcb-kid-new { box-shadow: inset 3px 0 0 0 var(--color-leaf, #5a6b39); }
+/* First-year family: a green chip outline so new members read at a glance,
+   echoing the Directory's green card outline. outline (not border) so it
+   layers over the pending amber/dashed border without fighting it. */
+.mcb-kid-new { outline: 2px solid var(--color-leaf, #5a6b39); outline-offset: -1px; }
 .mcb-flag-new { cursor: default; }
 .mcb-legend {
   margin: 0 0 14px;
@@ -7907,9 +7915,9 @@ button.staff-role:hover {
     rgba(217, 164, 65, 0.12) 5px, rgba(217, 164, 65, 0.12) 10px);
 }
 .mcb-legend-swatch-new {
-  border: 1px solid var(--color-border);
+  border: 2px solid var(--color-leaf, #5a6b39);
   background: #fff;
-  box-shadow: inset 3px 0 0 0 var(--color-leaf, #5a6b39);
+  box-shadow: none;
 }
 
 /* ── AM Teaching view (Morning Class Builder, Phase B1) ── */
