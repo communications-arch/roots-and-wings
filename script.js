@@ -5257,7 +5257,7 @@
       var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
       var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
       html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
-      html += '<td><span class="session-group-link ' + ageGroupClass(groupName) + '"><span class="ag-dot"></span>' + groupName + '</span></td>';
+      html += '<td><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
       html += '<td>' + cls.ages + '</td>';
       html += '<td>' + s.topic + '</td>';
       html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
@@ -19590,7 +19590,6 @@
 
         s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
         s += '<div class="sb-class-top">';
-        if (schedAges) s += '<div class="sb-class-ages">' + escClsHtml(schedAges) + '</div>';
         if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
         s += '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
@@ -19657,9 +19656,6 @@
         paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
         // Lead with ages. Status chip omitted — palette = inbox by
         // definition, so "Submitted" is implicit.
-        paletteHtml += '<div class="sb-class-top">';
-        if (ages) paletteHtml += '<div class="sb-class-ages">' + escClsHtml(ages) + '</div>';
-        paletteHtml += '</div>';
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';

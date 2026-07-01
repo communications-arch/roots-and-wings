@@ -1273,15 +1273,19 @@ p + p { margin-top: 1rem; }
    var(--ag). Keep the class list in sync with MORNING_GROUP_ORDER /
    ageGroupData in script.js; the ageGroupClass() helper emits these names.
    ══════════════════════════════════════════════════════════════════ */
-.ag-Greenhouse { --ag: #7CB342; } /* leaf green   🌱 */
-.ag-Saplings   { --ag: #2E9E5B; } /* emerald      🌿 */
-.ag-Sassafras  { --ag: #14A3A3; } /* teal         🍃 */
-.ag-Oaks       { --ag: #8D6E63; } /* oak brown    🌳 */
-.ag-Maples     { --ag: #EF6C00; } /* maple orange 🍁 */
-.ag-Birch      { --ag: #4F91A6; } /* birch blue   🌲 */
-.ag-Willows    { --ag: #C9A227; } /* golden wheat 🌾 */
-.ag-Cedars     { --ag: #1B5E20; } /* deep cedar   🌲 */
-.ag-Pigeons    { --ag: #7E6BA6; } /* dove purple  🕊️ */
+.ag-Greenhouse { --ag: #9CCC3C; } /* chartreuse    🌱 */
+.ag-Saplings   { --ag: #3FA34D; } /* grass green   🌿 */
+.ag-Sassafras  { --ag: #12A594; } /* teal-green    🍃 */
+.ag-Oaks       { --ag: #8D6E63; } /* oak brown     🌳 */
+.ag-Maples     { --ag: #EF6C00; } /* maple orange  🍁 */
+.ag-Birch      { --ag: #3F7FBF; } /* birch blue    🌲 */
+.ag-Willows    { --ag: #C9A227; } /* golden wheat  🌾 */
+.ag-Cedars     { --ag: #14532D; } /* deep forest   🌲 */
+.ag-Pigeons    { --ag: #7E6BA6; } /* dove purple   🕊️ */
+
+/* Group name rendered in its brand color (schedules, cards, tiles). */
+.ag-name { color: var(--ag); font-weight: 700; }
+.session-group-link.ag-name { color: var(--ag); }
 
 /* Small color dot for inline group labels (schedules, person cards). */
 .ag-dot {
