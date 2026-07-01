@@ -3348,6 +3348,24 @@ p + p { margin-top: 1rem; }
   opacity: 1;
 }
 
+/* First-year families filter pill — bright green to match the card outline.
+   Placed after .filter-pill-secondary so it overrides at equal specificity. */
+.filter-pill-new {
+  border-color: var(--color-chartreuse, #9BC431);
+  color: #4e6a17;
+  opacity: 1;
+}
+.filter-pill-new:hover {
+  border-color: var(--color-chartreuse, #9BC431);
+  color: #3d5411;
+}
+.filter-pill-new.active {
+  background: var(--color-chartreuse, #9BC431);
+  border-color: var(--color-chartreuse, #9BC431);
+  border-style: solid;
+  color: #2e3d10;
+}
+
 /* Search bar + count */
 .directory-search-wrap {
   max-width: 480px;
@@ -3481,7 +3499,7 @@ p + p { margin-top: 1rem; }
    "new growth" cue, less visual clutter. outline (not border) so there's no
    layout shift and it survives the hover border-color change. */
 .yb-card-new {
-  outline: 2px solid var(--color-leaf, #5a6b39);
+  outline: 2.5px solid var(--color-chartreuse, #9BC431);
   outline-offset: -1px;
 }
 
@@ -7894,7 +7912,7 @@ button.staff-role:hover {
 /* First-year family: a green chip outline so new members read at a glance,
    echoing the Directory's green card outline. outline (not border) so it
    layers over the pending amber/dashed border without fighting it. */
-.mcb-kid-new { outline: 2px solid var(--color-leaf, #5a6b39); outline-offset: -1px; }
+.mcb-kid-new { outline: 2.5px solid var(--color-chartreuse, #9BC431); outline-offset: -1px; }
 .mcb-flag-new { cursor: default; }
 .mcb-legend {
   margin: 0 0 14px;
@@ -7915,7 +7933,7 @@ button.staff-role:hover {
     rgba(217, 164, 65, 0.12) 5px, rgba(217, 164, 65, 0.12) 10px);
 }
 .mcb-legend-swatch-new {
-  border: 2px solid var(--color-leaf, #5a6b39);
+  border: 2.5px solid var(--color-chartreuse, #9BC431);
   background: #fff;
   box-shadow: none;
 }
