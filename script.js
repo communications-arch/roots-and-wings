@@ -16113,60 +16113,67 @@
     if (openCount > 0) h += ' &middot; <span class="org-open-count">' + openCount + ' open</span>';
     h += '</div>';
 
-    function rowHtml(r, depth) {
+    // Compact role item: a toggle button (title + holder/open) with an
+    // expandable detail panel. No icons — kept lean for the condensed layout.
+    // kind 'head' = the board member atop a column; 'mini' = a nested role.
+    function orgItem(r, kind) {
       var held = holdersByRole[r.id] || [];
       var isOpen = held.length === 0;
-      var emoji = r.icon_emoji || (r.category === 'board' ? '\u{1F333}' : '\u{1F33F}');
-      var h2 = '<div class="org-row org-row-depth-' + depth + (isOpen ? ' org-row-vacant' : '') + '">';
-      h2 += '<button type="button" class="org-row-head" data-org-role="' + r.id + '" aria-expanded="false">';
-      h2 += '<span class="org-row-emoji" aria-hidden="true">' + emoji + '</span>';
-      h2 += '<span class="org-row-title">' + escapeHtml(r.title) + '</span>';
-      if (r.job_length) h2 += '<span class="roles-pill roles-pill-term">' + escapeHtml(r.job_length) + '</span>';
-      h2 += '<span class="org-row-holders">';
+      var holdersHtml;
       if (isOpen) {
-        h2 += '<span class="org-open-pill">Open &mdash; volunteer!</span>';
+        holdersHtml = '<span class="org-open-pill">Open</span>';
       } else {
-        held.forEach(function (hh) {
-          h2 += '<span class="confirm-roles-chip">' + escapeHtml(hh.person_name || hh.email || '') + '</span>';
-        });
+        holdersHtml = held.map(function (hh) {
+          return '<span class="org-holder-name">' + escapeHtml(hh.person_name || hh.email || '') + '</span>';
+        }).join('');
       }
-      h2 += '</span>';
-      h2 += '<span class="org-row-caret" aria-hidden="true">▾</span>';
-      h2 += '</button>';
-      h2 += '<div class="org-row-detail" hidden>';
-      if (r.overview) h2 += '<p class="rd-overview">' + escapeHtml(r.overview) + '</p>';
+      var cls = (kind === 'head') ? 'org-row-head org-col-head' : 'org-row-head org-mini';
+      var i = '<div class="org-item' + (isOpen ? ' org-item-open' : '') + '">';
+      i += '<button type="button" class="' + cls + '" data-org-role="' + r.id + '" aria-expanded="false">';
+      i += '<span class="org-item-title">' + escapeHtml(r.title) + '</span>';
+      i += '<span class="org-item-holders">' + holdersHtml + '</span>';
+      i += '</button>';
+      i += '<div class="org-row-detail" hidden>';
+      if (r.job_length) i += '<span class="roles-pill roles-pill-term">' + escapeHtml(r.job_length) + '</span>';
+      if (r.overview) i += '<p class="rd-overview">' + escapeHtml(r.overview) + '</p>';
       if (r.duties && r.duties.length > 0) {
-        h2 += '<ul class="rd-duties">';
-        r.duties.forEach(function (d) { h2 += '<li>' + escapeHtml(d) + '</li>'; });
-        h2 += '</ul>';
+        i += '<ul class="rd-duties">';
+        r.duties.forEach(function (d) { i += '<li>' + escapeHtml(d) + '</li>'; });
+        i += '</ul>';
       }
       if (!r.overview && !(r.duties && r.duties.length > 0)) {
-        h2 += '<p class="ws-empty">No description written for this role yet.</p>';
+        i += '<p class="ws-empty">No description written for this role yet.</p>';
       }
-      h2 += '</div></div>';
-      return h2;
+      i += '</div></div>';
+      return i;
     }
 
-    h += '<div class="org-tree">';
+    // Board members across the top; the roles that report to each nested
+    // beneath in that member's column.
+    h += '<div class="org-cols">';
     boards.forEach(function (b) {
-      h += '<section class="org-branch">';
-      h += rowHtml(b, 0);
+      h += '<div class="org-col">';
+      h += orgItem(b, 'head');
       var kids = childrenOf[b.id] || [];
       if (kids.length > 0) {
         var named = null;
         for (var i = 0; i < kids.length; i++) { if (kids[i].committee) { named = kids[i].committee; break; } }
-        if (named) h += '<h5 class="org-branch-head">' + escapeHtml(named) + '</h5>';
-        kids.forEach(function (k) { h += rowHtml(k, 1); });
+        h += '<div class="org-col-roles">';
+        if (named) h += '<div class="org-col-cat">' + escapeHtml(named) + '</div>';
+        kids.forEach(function (k) { h += orgItem(k, 'mini'); });
+        h += '</div>';
       }
-      h += '</section>';
+      h += '</div>';
     });
     if (orphans.length > 0) {
-      h += '<section class="org-branch"><h5 class="org-branch-head">Other Volunteer Roles</h5>';
-      orphans.forEach(function (k) { h += rowHtml(k, 1); });
-      h += '</section>';
+      h += '<div class="org-col org-col-other">';
+      h += '<div class="org-col-head-static">Other Volunteer Roles</div>';
+      h += '<div class="org-col-roles">';
+      orphans.forEach(function (k) { h += orgItem(k, 'mini'); });
+      h += '</div></div>';
     }
     h += '</div>';
-    h += '<p class="org-foot">Interested in an open role? Reach out to the board member it sits under &mdash; or any board member. They’d love the help. \u{1F49A}</p>';
+    h += '<p class="org-foot">Interested in an open role? Reach out to the board member it sits under &mdash; or any board member. \u{1F49A}</p>';
     return h;
   }
 

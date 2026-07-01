@@ -12579,119 +12579,106 @@ button.staff-role:hover {
   color: var(--color-accent-dark);
   font-weight: 700;
 }
-/* Flow each board member's branch into responsive columns so the whole
-   org reads side-by-side at a glance instead of one long scroll. Column
-   count is width-driven (≈18rem min): ~3 across a wide modal, 2 on a
-   tablet, 1 on a phone. break-inside keeps a branch intact in one column. */
-.org-tree {
-  columns: 18rem 3;
-  column-gap: 16px;
+/* Condensed org chart: board members across the top as columns, with the
+   roles that report to each nested beneath. No icons. Responsive grid —
+   as many ~14rem columns as fit; wraps to 1 on a phone. */
+.org-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 12px;
+  align-items: start;
 }
-.org-branch {
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  display: inline-block;
-  width: 100%;
-  margin: 0 0 14px;
-  padding: 10px 12px;
+.org-col {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: rgba(var(--color-primary-rgb), 0.035);
+  overflow: hidden;
 }
-.org-branch-head {
-  font-family: var(--font-rounded);
-  font-size: 0.74rem;
+/* Board-member header atop a column: title over holder name. */
+.org-col-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  background: rgba(var(--color-primary-rgb), 0.10);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+}
+.org-col-head .org-item-title {
+  color: var(--color-primary-dark);
   font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+}
+.org-col-head .org-item-holders { margin-left: 0; }
+.org-col-head .org-holder-name { color: var(--color-primary); font-size: 0.86rem; }
+.org-col-head-static {
+  padding: 7px 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--color-primary-dark);
+  background: rgba(var(--color-primary-rgb), 0.10);
+  border-bottom: 1px solid var(--color-border);
+}
+.org-col-roles { padding: 6px; }
+.org-col-cat {
+  font-family: var(--font-rounded);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--color-text-light);
-  margin: 10px 0 6px 14px;
+  margin: 6px 4px 3px;
 }
-.org-row {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-  background: var(--color-white);
-}
-.org-row-depth-1 {
-  margin-left: 14px;
-}
-.org-row-vacant {
-  border-style: dashed;
-  border-color: rgba(var(--color-accent-light-rgb), 0.9);
-  background: rgba(var(--color-accent-light-rgb), 0.08);
-}
+.org-item { margin-bottom: 4px; }
+.org-item:last-child { margin-bottom: 0; }
 .org-row-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: 1px 8px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 6px 8px;
   background: none;
   border: 0;
   cursor: pointer;
   text-align: left;
   font: inherit;
   color: inherit;
+  border-radius: var(--radius-sm);
 }
-.org-row-emoji {
-  font-size: 1.05rem;
-  line-height: 1;
-}
-.org-row-title {
-  font-weight: 700;
-  color: var(--color-primary-dark);
-}
-.org-row-depth-1 .org-row-title {
-  font-weight: 600;
-  color: var(--color-text);
-}
-.org-row-holders {
+.org-row-head:hover { background: rgba(var(--color-primary-rgb), 0.06); }
+.org-row-head-expanded { background: rgba(var(--color-primary-rgb), 0.06); }
+.org-mini { border: 1px solid var(--color-border); background: var(--color-white); }
+.org-item-title { font-weight: 600; color: var(--color-text); font-size: 0.85rem; }
+.org-item-holders {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: 3px 5px;
   margin-left: auto;
 }
+.org-holder-name { font-size: 0.8rem; color: var(--color-text-light); font-weight: 600; }
 .org-open-pill {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
+  padding: 1px 8px;
   border-radius: 999px;
   background: rgba(var(--color-accent-light-rgb), 0.35);
   color: var(--color-accent-dark);
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
-.org-row-caret {
-  color: var(--color-text-light);
-  font-size: 0.8rem;
-  transition: transform 0.15s ease;
-}
-.org-row-head-expanded .org-row-caret {
-  transform: rotate(180deg);
+.org-item-open .org-mini {
+  border-style: dashed;
+  border-color: rgba(var(--color-accent-light-rgb), 0.9);
+  background: rgba(var(--color-accent-light-rgb), 0.08);
 }
 .org-row-detail {
-  padding: 0 14px 12px;
-  border-top: 1px dashed var(--color-border);
-  margin: 0 8px;
-  padding-top: 10px;
+  padding: 4px 10px 9px;
+  font-size: 0.84rem;
 }
 .org-foot {
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   color: var(--color-text-light);
-  margin-top: 16px;
-}
-@media (max-width: 540px) {
-  .org-row-holders {
-    margin-left: 0;
-    width: 100%;
-    padding-left: 26px;
-  }
-  .org-branch-head,
-  .org-row-depth-1 {
-    margin-left: 10px;
-  }
+  margin-top: 14px;
 }
 .roles-row-holder-line {
   display: flex;
