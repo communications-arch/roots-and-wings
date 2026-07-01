@@ -13,6 +13,7 @@ function getDb() {
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const { verifyBearer } = require('./_auth');
 
 // ── Verify caller is authenticated ──
 async function verifyAuth(req) {
@@ -22,10 +23,7 @@ async function verifyAuth(req) {
   if (authHeader.startsWith('Bearer ')) {
     var token = authHeader.slice(7);
     try {
-      var ticket = await oauthClient.verifyIdToken({
-        idToken: token,
-        audience: GOOGLE_CLIENT_ID,
-      });
+      var ticket = await verifyBearer(token);
       var payload = ticket.getPayload();
       var domain = (payload.email || '').split('@')[1] || '';
       if (domain !== ALLOWED_DOMAIN) {

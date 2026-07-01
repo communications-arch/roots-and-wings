@@ -22,6 +22,7 @@ const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.goo
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const { verifyBearer } = require('./_auth');
 
 // When a super user passes ?view_as=<member-email>, return that email so
 // the scope=mine query filters by the impersonated identity. Mirrors
@@ -41,10 +42,7 @@ async function verifyGoogleAuth(req) {
   const authHeader = req.headers.authorization || '';
   if (!authHeader.startsWith('Bearer ')) return null;
   try {
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: authHeader.slice(7),
-      audience: GOOGLE_CLIENT_ID
-    });
+    const ticket = await verifyBearer(authHeader.slice(7));
     const payload = ticket.getPayload();
     const email = payload.email || '';
     const domain = email.split('@')[1] || '';

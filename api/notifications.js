@@ -12,6 +12,7 @@ const { isSuperUser } = require('./_permissions');
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const { verifyBearer } = require('./_auth');
 
 // If the real signed-in user is a super user (communications@ /
 // vicepresident@) and they've asked to view as another
@@ -31,7 +32,7 @@ async function verifyGoogleAuth(req) {
   const authHeader = req.headers.authorization || '';
   if (!authHeader.startsWith('Bearer ')) return null;
   try {
-    const ticket = await oauthClient.verifyIdToken({ idToken: authHeader.slice(7), audience: GOOGLE_CLIENT_ID });
+    const ticket = await verifyBearer(authHeader.slice(7));
     const payload = ticket.getPayload();
     const email = payload.email || '';
     if ((email.split('@')[1] || '') !== ALLOWED_DOMAIN) return null;

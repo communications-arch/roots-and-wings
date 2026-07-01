@@ -1827,6 +1827,9 @@
   if (loginSection && dashboard) {
     if (localStorage.getItem(SESSION_KEY) === 'true' && hasValidStoredCredential()) {
       showDashboard();
+      // Slide the 30-day app-session window forward on each load so active
+      // members effectively never get signed out. Best-effort / silent.
+      if (typeof rwExchangeSession === 'function') rwExchangeSession();
     }
 
     // Logout — clear *everything* that could keep a stale Google JWT
@@ -14010,9 +14013,37 @@
       localStorage.setItem('rw_user_email', email);
       localStorage.setItem('rw_google_credential', response.credential);
       showDashboard();
+      // Upgrade the short-lived (~1h) Google token to a 30-day app session
+      // token so members stop getting signed out mid-use. Best-effort: on any
+      // failure we keep the Google token and behave exactly as before.
+      rwExchangeSession(response.credential);
     } catch (err) {
       console.error('Google Sign-In error:', err);
     }
+  }
+
+  // Exchange the current Bearer token (Google ID token or an existing app
+  // session token) for a fresh 30-day app session token and store it in place
+  // of the credential everything already sends. Called on sign-in and on each
+  // load so an active member's 30-day window keeps sliding forward. Silent on
+  // failure (e.g. session tokens not enabled → the app keeps using the Google
+  // token, i.e. today's behavior).
+  function rwExchangeSession(bearerToken) {
+    var tok = bearerToken || localStorage.getItem('rw_google_credential');
+    if (!tok) return;
+    try {
+      fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (data && data.token) {
+            localStorage.setItem('rw_google_credential', data.token);
+          }
+        })
+        .catch(function () { /* keep the existing token */ });
+    } catch (e) { /* keep the existing token */ }
   }
 
   // ──────────────────────────────────────────────

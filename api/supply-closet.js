@@ -25,15 +25,13 @@ const VALID_CATEGORIES = ['permanent', 'currently_available', 'classroom_cabinet
 const VALID_QTY_LEVELS = ['empty', 'low', 'medium', 'high'];
 
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const { verifyBearer } = require('./_auth');
 
 async function verifyGoogleAuth(req) {
   const authHeader = req.headers.authorization || '';
   if (!authHeader.startsWith('Bearer ')) return null;
   try {
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: authHeader.slice(7),
-      audience: GOOGLE_CLIENT_ID
-    });
+    const ticket = await verifyBearer(authHeader.slice(7));
     const payload = ticket.getPayload();
     const email = payload.email || '';
     const domain = email.split('@')[1] || '';
