@@ -8237,6 +8237,8 @@ button.staff-role:hover {
 /* Age groups as colored words (replaces the old purple .sb-class-ages pill).
    Color comes from the .ag-name spans inside; this just sets size/weight. */
 .sb-class-ages-words { font-size: 0.72rem; font-weight: 700; line-height: 1.3; margin-bottom: 3px; }
+/* Co-leader request from the class submission (co_teachers free text). */
+.sb-coleader { font-size: 0.7rem; color: var(--color-text-light); line-height: 1.3; margin-top: 2px; }
 .sb-status-chip {
   font-size: 0.65rem;
   font-weight: 700;

@@ -19548,6 +19548,7 @@
       var marker = count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴';
       var s = '<div class="sb-cell" data-hour="' + hour + '">';
       s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
+      if (!isApproved) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       list.forEach(function (c) {
         // Scheduled age range can be a VP override (scheduled_age_range);
         // fall back to the teacher's submitted age_groups when not set.
@@ -19602,6 +19603,7 @@
         if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
+        if (c.co_teachers) s += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
         s += '<div class="sb-pref-line">';
         s += '<span class="sb-pref-label">Pref:</span> ';
         s += prefSessChips;
@@ -19611,7 +19613,6 @@
         s += '</div>';
         s += '</div>';
       });
-      if (!isApproved) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       s += '</div>';
       return s;
     }
@@ -19668,6 +19669,7 @@
         if (palAges) paletteHtml += '<div class="sb-class-ages-words">' + palAges + '</div>';
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
+        if (s.co_teachers) paletteHtml += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(s.co_teachers) + '</div>';
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
         paletteHtml += '</div>';
       });
