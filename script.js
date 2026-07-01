@@ -19597,9 +19597,7 @@
           ? escClsHtml(c.scheduled_age_range)
           : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
         s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
-        s += '<div class="sb-class-top">';
-        if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
-        s += '</div>';
+        if (c.scheduled_hour === 'both') s += '<div class="sb-class-top"><span class="sb-both-badge">Both</span></div>';
         if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
