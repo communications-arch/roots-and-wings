@@ -6398,7 +6398,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Review inbound afternoon class submissions and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Afternoon Class Builder</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder</button></li>';
         // The submissions report opens in a modal so the workspace card
         // stays scannable. Count of pending-submitted is fetched in
         // afterRender and painted into the ws-link-count pill so the
