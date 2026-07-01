@@ -19588,8 +19588,11 @@
         var hourOff = !hourMatches();
         var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
 
-        // Age groups shown as colored words (VP override wins as plain text).
-        var agesWords = c.scheduled_age_range
+        // Age groups shown as colored words. Placing a class auto-sets
+        // scheduled_age_range to the pretty age_groups string, so only treat
+        // it as a plain-text override when it actually DIFFERS from that —
+        // otherwise a moved class keeps its colored age range.
+        var agesWords = (c.scheduled_age_range && c.scheduled_age_range !== prefAges)
           ? escClsHtml(c.scheduled_age_range)
           : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
         s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
@@ -19614,8 +19617,8 @@
     }
 
     html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
-    html += renderBlock('PM1', 'PM Hour 1 · 1:00–1:55', pm1List);
-    html += renderBlock('PM2', 'PM Hour 2 · 2:00–2:55', pm2List);
+    html += renderBlock('PM1', 'Hour 1 · 1:00–1:55', pm1List);
+    html += renderBlock('PM2', 'Hour 2 · 2:00–2:55', pm2List);
     html += '</div>';
 
     // Available-classes palette: submitted + approved-but-unplaced, excluding
