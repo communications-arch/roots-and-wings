@@ -19588,10 +19588,15 @@
         var hourOff = !hourMatches();
         var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
 
+        // Age groups shown as colored words (VP override wins as plain text).
+        var agesWords = c.scheduled_age_range
+          ? escClsHtml(c.scheduled_age_range)
+          : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
         s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
         s += '<div class="sb-class-top">';
         if (c.scheduled_hour === 'both') s += '<span class="sb-both-badge">Both</span>';
         s += '</div>';
+        if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
         s += '<div class="sb-pref-line">';
@@ -19654,8 +19659,10 @@
         }).join('');
         if (!sessChips) sessChips = '<span class="sb-sess-chip sb-sess-none">no pref</span>';
         paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
-        // Lead with ages. Status chip omitted — palette = inbox by
-        // definition, so "Submitted" is implicit.
+        // Lead with ages as colored words. Status chip omitted — palette =
+        // inbox by definition, so "Submitted" is implicit.
+        var palAges = ageGroupsColoredHtml(s.age_groups, s.age_groups_other);
+        if (palAges) paletteHtml += '<div class="sb-class-ages-words">' + palAges + '</div>';
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
@@ -19980,6 +19987,23 @@
     var parts = (a || []).map(function (v) { return AGE_GROUP_LABELS[v] || v; });
     if (other) parts.push(other);
     return parts.join(', ') || '—';
+  }
+
+  // Like prettyAgesClient, but each named age group is wrapped in a span
+  // carrying its brand color (ag-name ag-<Group>). Non-group values (all-ages,
+  // mixed-*, free text) render as plain text. Used on the Afternoon Class
+  // Builder tiles so the age groups read in their group colors.
+  function ageGroupsColoredHtml(a, other) {
+    var parts = (a || []).map(function (v) {
+      var label = AGE_GROUP_LABELS[v] || v;
+      var name = String(v).charAt(0).toUpperCase() + String(v).slice(1);
+      var cls = ageGroupClass(name);
+      return cls
+        ? '<span class="ag-name ' + cls + '">' + escClsHtml(label) + '</span>'
+        : escClsHtml(label);
+    });
+    if (other) parts.push(escClsHtml(other));
+    return parts.join(', ');
   }
 
   // Editor modal for a class already in the grid. Lets VP/PMA change hour,
