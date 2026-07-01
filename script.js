@@ -3862,7 +3862,7 @@
       h += '<button type="button" class="sc-btn" data-signup-win="closed"' + (status !== 'open' ? ' disabled' : '') + '>Close</button>';
       h += '<button type="button" class="sc-btn sc-btn-del" data-signup-win="locked"' + ((status === 'locked' || !status) ? ' disabled' : '') + '>Lock</button>';
       h += '</div></div>';
-      h += '<p class="signup-note">Set sign-up dates from the Schedule Builder under the Approved badge.</p>';
+      h += '<p class="signup-note">Set sign-up dates from the Afternoon Class Builder under the Approved badge.</p>';
     }
 
     if (!s.session) {
@@ -6395,7 +6395,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Review inbound afternoon class submissions and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Schedule Builder</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Open Afternoon Class Builder</button></li>';
         // The submissions report opens in a modal so the workspace card
         // stays scannable. Count of pending-submitted is fetched in
         // afterRender and painted into the ws-link-count pill so the
@@ -16987,7 +16987,7 @@
   function showBoardCalendarModal() {
     var body = renderReportModal({
       title: 'Board Calendar',
-      subtitle: 'Date-sensitive co-op events the board tracks together. Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Schedule Builder.)',
+      subtitle: 'Date-sensitive co-op events the board tracks together. Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Afternoon Class Builder.)',
       meta: '',
       icons: [],
       bodyId: 'board-cal-body',
@@ -17785,7 +17785,7 @@
     ];
     var body = renderReportModal({
       title: 'Afternoon Class Submissions',
-      subtitle: 'Approve to queue a submission for scheduling, or decline with a confirmation. The Schedule Builder still owns final session/hour placement.',
+      subtitle: 'Approve to queue a submission for scheduling, or decline with a confirmation. The Afternoon Class Builder still owns final session/hour placement.',
       meta: '',
       icons: icons,
       bodyId: 'pmrep-body',
@@ -18662,7 +18662,7 @@
       } else if (s.status === 'declined' || s.status === 'withdrawn') {
         h += '<button class="sc-btn pmrep-btn pmrep-requeue-btn" data-sub-id="' + s.id + '" title="Send back to Submitted">↩ Re-queue</button>';
       } else {
-        h += '<span class="pmrep-schedule-note">Use Schedule Builder</span>';
+        h += '<span class="pmrep-schedule-note">Use Afternoon Class Builder</span>';
       }
       h += '</td>';
       h += '</tr>';
@@ -18727,10 +18727,10 @@
   function showScheduleBuilder() {
     if (document.getElementById('sbOverlay')) return;
     var html = '<div class="sb-overlay" id="sbOverlay">';
-    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Afternoon Class Schedule Builder">';
+    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Afternoon Class Builder">';
     html += '<button class="detail-close" id="sbCloseBtn" aria-label="Close">&times;</button>';
     html += '<div class="sb-header">';
-    html += '<h3 style="margin:0;">Afternoon Class Schedule Builder</h3>';
+    html += '<h3 style="margin:0;">Afternoon Class Builder</h3>';
     html += '<label class="sb-year-label">School Year ';
     html += '<select id="sbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
     html += '<option value="2026-2027">2026–2027</option>';
@@ -19987,7 +19987,7 @@
     html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + '</p>';
 
     if (locked) {
-      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Schedule Builder header to make changes.</div>';
+      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Afternoon Class Builder header to make changes.</div>';
     }
 
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,

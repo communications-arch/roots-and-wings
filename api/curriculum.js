@@ -938,7 +938,7 @@ module.exports = async function handler(req, res) {
             LIMIT 1
           `;
           if (approvedRows.length === 0) {
-            return res.status(400).json({ error: 'Approve Session ' + session + ' in the Schedule Builder before opening sign-ups.' });
+            return res.status(400).json({ error: 'Approve Session ' + session + ' in the Afternoon Class Builder before opening sign-ups.' });
           }
         }
         const startDate = rawStart || null;
