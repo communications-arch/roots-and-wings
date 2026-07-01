@@ -19072,21 +19072,26 @@
     }
     html += '</div>';
 
-    // Kids ⇄ AM Teachers view toggle (teaching is editable by Membership + VP).
-    var view = morningBuilderState.view || 'kids';
-    if (morningBuilderState.viewerCanTeach) {
-      html += '<div class="mcb-viewtoggle">';
-      html += '<button type="button" class="mcb-vt-btn' + (view === 'kids' ? ' mcb-vt-on' : '') + '" data-mcb-view="kids">Kids</button>';
-      html += '<button type="button" class="mcb-vt-btn' + (view === 'teachers' ? ' mcb-vt-on' : '') + '" data-mcb-view="teachers">AM Teachers</button>';
-      html += '</div>';
-    }
-    if (view === 'teachers') {
-      html += renderAmTeachingGridHtml();
-      body.innerHTML = html;
-      wireMorningWorkflow();
-      wireAmTeaching();
-      return;
-    }
+    // ── AM Teachers assignment TEMPORARILY DISABLED (2026-07-01, per Erin —
+    // needs more design work before going live). The Kids ⇄ AM Teachers view
+    // toggle and the teachers grid are hidden; all supporting code
+    // (renderAmTeachingGridHtml, wireAmTeaching, am-teacher-assign API,
+    // am_class_assignments table, participation AM fallback) is left intact.
+    // Re-enable by uncommenting this block.
+    // var view = morningBuilderState.view || 'kids';
+    // if (morningBuilderState.viewerCanTeach) {
+    //   html += '<div class="mcb-viewtoggle">';
+    //   html += '<button type="button" class="mcb-vt-btn' + (view === 'kids' ? ' mcb-vt-on' : '') + '" data-mcb-view="kids">Kids</button>';
+    //   html += '<button type="button" class="mcb-vt-btn' + (view === 'teachers' ? ' mcb-vt-on' : '') + '" data-mcb-view="teachers">AM Teachers</button>';
+    //   html += '</div>';
+    // }
+    // if (view === 'teachers') {
+    //   html += renderAmTeachingGridHtml();
+    //   body.innerHTML = html;
+    //   wireMorningWorkflow();
+    //   wireAmTeaching();
+    //   return;
+    // }
 
     // Legend for the pending styling — below the workflow line, above the
     // grid. Only when there are pending kids.
