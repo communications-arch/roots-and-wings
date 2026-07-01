@@ -2,7 +2,7 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole, isSuperUser } = require('./_permissions');
+const { canEditAsRole, isSuperUser, canImpersonate } = require('./_permissions');
 const { resolveFamily } = require('./_family');
 
 function getDb() {
@@ -2309,8 +2309,12 @@ function participationTier(status) {
   return 'sprout';
 }
 
-async function handleParticipationAction(req, res, action, userEmail, authGivenName) {
+async function handleParticipationAction(req, res, action, userEmail, authGivenName, realEmail) {
   var sql = getDb();
+  // userEmail = effective (View-As) identity used for gates + own-row
+  // resolution. realEmail = the actual signed-in person, used for write
+  // audit fields so an impersonated action is still attributed correctly.
+  var auditEmail = realEmail || userEmail;
 
   // Personal participation view — any authed @rootsandwingsindy.com member
   // can fetch their own row. Super users (communications@ / vicepresident@)
@@ -2424,7 +2428,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
     if (!Number.isFinite(value)) return res.status(400).json({ error: 'value must be a number' });
     var rows = await sql`
       UPDATE participation_weights
-      SET value = ${value}, updated_by = ${userEmail}, updated_at = NOW()
+      SET value = ${value}, updated_by = ${auditEmail}, updated_at = NOW()
       WHERE key = ${key}
       RETURNING key, value, updated_at
     `;
@@ -2479,7 +2483,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
         INSERT INTO participation_exemptions
           (member_email, member_name, start_date, end_date, reason, note, created_by)
         VALUES
-          (${mEmail}, ${mName}, ${startDate}, ${endDateVal}, ${reason}, ${note}, ${userEmail})
+          (${mEmail}, ${mName}, ${startDate}, ${endDateVal}, ${reason}, ${note}, ${auditEmail})
         RETURNING *
       `;
     }
@@ -2509,7 +2513,7 @@ module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-View-As');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // ── Authentication required ──
@@ -2583,7 +2587,17 @@ module.exports = async function handler(req, res) {
   // their own row. The router gates at the action level inside the handler.
   if (action && action.indexOf('participation-') === 0) {
     try {
-      return await handleParticipationAction(req, res, action, authResult.email, authResult.givenName || '');
+      // View-As aware (mirrors api/tour.js verifyWorkspaceAuthWithViewAs and
+      // the merch/membership reports): when the real caller may impersonate
+      // (super user, or any @rootsandwingsindy.com on dev/preview) and sends
+      // an X-View-As header, gate + own-row resolution use the impersonated
+      // identity so acting as VP / Afternoon Class Liaison grants the read.
+      // realEmail is preserved so write audit fields stay attributed to the
+      // actual signed-in person.
+      var partReal = String(authResult.email || '').toLowerCase();
+      var partViewAs = String(req.headers['x-view-as'] || '').trim().toLowerCase();
+      var partEffective = (partViewAs && canImpersonate(partReal)) ? partViewAs : partReal;
+      return await handleParticipationAction(req, res, action, partEffective, authResult.givenName || '', partReal);
     } catch (err) {
       console.error('Participation action error:', err);
       return res.status(500).json({ error: 'Participation request failed' });

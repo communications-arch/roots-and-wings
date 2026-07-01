@@ -10488,7 +10488,7 @@
     var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/sheets?action=participation-report', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
     .then(function (res) {
       if (!res.ok) {
@@ -10699,7 +10699,7 @@
     var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/sheets?action=participation-weights', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       var body = personDetailCard.querySelector('#ws-part-weights-body');
@@ -10732,7 +10732,7 @@
           statusEl.textContent = '';
           fetch('/api/sheets?action=participation-weight-save', {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ key: key, value: value })
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res2) {
@@ -10775,7 +10775,7 @@
     var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/sheets?action=participation-exemptions', {
       method: 'GET',
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
     .then(function (res) {
       if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
@@ -10824,7 +10824,7 @@
           if (!confirm('Delete this exemption?')) return;
           fetch('/api/sheets?action=participation-exemption-delete', {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ id: parseInt(id, 10) })
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res2) {
@@ -10896,7 +10896,7 @@
       statusEl.textContent = '';
       fetch('/api/sheets?action=participation-exemption-save', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        headers: rwAuthHeaders(true),
         body: JSON.stringify(payload)
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
