@@ -2198,7 +2198,7 @@
   var directoryCount = document.getElementById('directoryCount');
   var personDetail = document.getElementById('personDetail');
   var personDetailCard = document.getElementById('personDetailCard');
-  var activeFilter = 'parents';
+  var activeFilter = 'all';
 
   // Helper: find a person in allPeople by full name (first + family)
   function findPersonByFullName(fullName) {
