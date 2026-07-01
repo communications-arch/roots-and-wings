@@ -2256,6 +2256,28 @@ function deriveFamilyName(mainLcName, existingFamilyName) {
   return words[words.length - 1] || '';
 }
 
+// Build a kid's displayed "First Last" for the Morning Class Builder. Prefers
+// the explicit first_name/last_name the registration stores (since b03fe12);
+// falls back to the family surname when the row only has a bare first name, so
+// a kid never renders without a last name. Older rows that carry a combined
+// `name` with a space are kept verbatim (preserves compound surnames).
+function morningKidDisplayName(k, familyName) {
+  const rawName = String((k && (k.name || k.first_name)) || '').trim();
+  if (!rawName) return '';
+  const fam = String(familyName || '').trim();
+  let display;
+  if (k && (k.first_name || k.last_name)) {
+    const kFirst = String(k.first_name || '').trim() || rawName.split(/\s+/)[0];
+    const kLast = String(k.last_name || '').trim() || fam;
+    display = (kFirst + (kLast ? ' ' + kLast : '')).trim();
+  } else if (rawName.indexOf(' ') !== -1) {
+    display = rawName;
+  } else {
+    display = (rawName + (fam ? ' ' + fam : '')).trim();
+  }
+  return display || rawName;
+}
+
 // Upsert a single parent's photo_consent. Used by the registration insert
 // (Main LC's own choice) and the backup LC sign (co-parent's own choice).
 // Writes against the `people` table. Match priority:
@@ -3714,10 +3736,17 @@ async function handleMorningBuilderGet(req, res) {
       familyEmails.add(familyEmail);
       const kids = Array.isArray(r.kids) ? r.kids : [];
       kids.forEach(k => {
-        const display = String((k && (k.name || k.first_name)) || '').trim();
-        if (!display) return;
-        const first = display.split(/\s+/)[0].toLowerCase();
+        // rawName is the combined name (or bare first) as stored. Keep the
+        // matching key derived from its first token exactly as before so
+        // existing placements/draft rows still resolve.
+        const rawName = String((k && (k.name || k.first_name)) || '').trim();
+        if (!rawName) return;
+        const first = rawName.split(/\s+/)[0].toLowerCase();
         if (!first) return;
+        // Displayed name uses the explicit first/last the registration now
+        // stores (b03fe12), with the family surname as a fallback so a kid
+        // never renders without a last name.
+        const display = morningKidDisplayName(k, familyName);
         const entry = draftMap[familyEmail + '|' + first];
         roster.push({
           key: familyEmail + '|' + first,
@@ -4640,6 +4669,7 @@ module.exports = async function handler(req, res) {
 module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
 module.exports.deriveFamilyName = deriveFamilyName;
 module.exports.deriveFamilyEmail = deriveFamilyEmail;
+module.exports.morningKidDisplayName = morningKidDisplayName;
 module.exports.validateBoardCalendarEvent = validateBoardCalendarEvent;
 module.exports.computeDerivedCalendarEvents = computeDerivedCalendarEvents;
 module.exports.fieldDayForYear = fieldDayForYear;

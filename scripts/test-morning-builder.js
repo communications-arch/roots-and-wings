@@ -43,7 +43,8 @@ const client = new Function(
 const server = new Function(
   extractTop(tourSrc, 'fallYearOf') + '\n' +
   extractTop(tourSrc, 'ageAsOfFall') + '\n' +
-  'return { fallYearOf, ageAsOfFall };'
+  extractTop(tourSrc, 'morningKidDisplayName') + '\n' +
+  'return { fallYearOf, ageAsOfFall, morningKidDisplayName };'
 )();
 
 function extractConstArray(src, name) {
@@ -120,6 +121,23 @@ t('teens → Cedars then Pigeons', () => {
 t('null/unknown age → empty (left unplaced)', () => {
   assert.strictEqual(seedHelpers.groupForAge(null), '');
 });
+
+// ── morningKidDisplayName: chips must always show a last name ──
+const mkdn = server.morningKidDisplayName;
+t('explicit first + last -> "First Last"', () =>
+  assert.strictEqual(mkdn({ name: 'Robert Kielma', first_name: 'Robert', last_name: 'Kielma' }, 'Kielma'), 'Robert Kielma'));
+t('explicit compound last preserved (not truncated)', () =>
+  assert.strictEqual(mkdn({ first_name: 'Robert', last_name: 'Van Kielma' }, 'Kielma'), 'Robert Van Kielma'));
+t('bare first + no explicit last -> append family surname', () =>
+  assert.strictEqual(mkdn({ name: 'Robert' }, 'Kielma'), 'Robert Kielma'));
+t('explicit first, empty last -> fall back to family surname', () =>
+  assert.strictEqual(mkdn({ first_name: 'Robert', last_name: '' }, 'Kielma'), 'Robert Kielma'));
+t('legacy combined name with surname kept verbatim', () =>
+  assert.strictEqual(mkdn({ name: 'Robert Van Kielma' }, 'Kielma'), 'Robert Van Kielma'));
+t('bare first with no family surname -> first only (no crash)', () =>
+  assert.strictEqual(mkdn({ name: 'Robert' }, ''), 'Robert'));
+t('empty kid -> empty string', () =>
+  assert.strictEqual(mkdn({}, 'Kielma'), ''));
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
