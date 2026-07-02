@@ -7089,6 +7089,25 @@
     });
   }
 
+  // Re-render a SINGLE workspace card's body in place, instead of rebuilding
+  // the whole workspace tab (which flickers every card). Used when one data
+  // source lands late — e.g. participation-mine refreshing the Ways to Help
+  // panel ~1s after load. No-ops if the widget/card isn't on screen.
+  function refreshWorkspaceWidget(type) {
+    var w = WORKSPACE_WIDGETS[type];
+    if (!w || typeof w.render !== 'function') return;
+    var bodies = document.querySelectorAll('[data-widget-type="' + type + '"] .workspace-card-body');
+    if (!bodies.length) return;
+    var prefs = getWorkspacePrefs();
+    var roles = getWorkspaceRoles();
+    bodies.forEach(function (body) {
+      try { body.innerHTML = w.render(prefs, roles, null); } catch (e) { /* leave prior content */ }
+    });
+    if (typeof w.afterRender === 'function') {
+      try { w.afterRender(); } catch (e) { /* non-fatal */ }
+    }
+  }
+
   // Async loader for the Waivers Report widget body.
   // Cached merged waivers + active filter \u2014 preserved across the
   // close/reopen cycle that follows a successful Resend so the user
@@ -10480,13 +10499,10 @@
           }
         } catch (e) { /* ignore */ }
         renderParticipationBadge();
-        // If Ways to Help is currently on-screen, refresh so the panel
-        // picks up the new data without requiring a tab bounce.
-        var wsPanel = document.getElementById('page-workspace');
-        if (wsPanel && wsPanel.style.display !== 'none' &&
-            typeof renderWorkspaceTab === 'function') {
-          renderWorkspaceTab();
-        }
+        // Refresh ONLY the Ways to Help card body so it picks up the
+        // participation panel — re-rendering the whole workspace here caused
+        // the entire tab (To Do included) to flicker ~1s after load.
+        refreshWorkspaceWidget('ways-to-help');
       })
       .catch(function () { /* silent — badge stays hidden on error */ });
   }
