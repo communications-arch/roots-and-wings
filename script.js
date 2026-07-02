@@ -6436,7 +6436,7 @@
       // Server-side data fetches stay role-scoped via the /api/tour?
       // list=registrations endpoint each loader hits.
       title: 'To Do',
-      roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President'],
+      roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President', 'Welcome Coordinator'],
       render: function (prefs, roles, role) {
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
@@ -6493,6 +6493,15 @@
           var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
           h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
+        if (role === 'Welcome Coordinator') {
+          // Welcome New Members — this season's not-yet-welcomed families.
+          // Opens the welcome list (mark welcomed / undo). Count + visibility
+          // driven by loadWelcomeTodoCount; _welcomeTodoState persists across
+          // workspace re-renders so it doesn't flicker hidden→visible.
+          var wcHidden = !(_welcomeTodoState && _welcomeTodoState.visible);
+          var wcCount  = (_welcomeTodoState && _welcomeTodoState.count) || 0;
+          h += '<li id="ws-todo-welcome-item"' + (wcHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members"><span class="ws-link-pre-count" id="ws-welcome-todo-count">' + wcCount + '</span><span class="ws-link-icon">🌱</span><span id="ws-welcome-todo-label">Welcome New Members</span></button></li>';
+        }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
         return h;
@@ -6510,6 +6519,7 @@
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
+        if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
       }
     },
     'members-summary': {
@@ -6536,21 +6546,6 @@
       },
       afterRender: function () {
         if (typeof loadMembersSummary === 'function') loadMembersSummary();
-      }
-    },
-    'welcome-list': {
-      // Welcome Coordinator's working list of this season's NEW families:
-      // contact info + a "mark as welcomed" toggle (welcome_outreach table).
-      // Independent of the Comms onboarding queue on purpose.
-      title: 'Welcome List',
-      roleGate: ['Welcome Coordinator'],
-      render: function () {
-        var h = '<p class="ws-body-hint">New families this season. Reach out to welcome them, then mark them off.</p>';
-        h += '<div id="ws-welcome-list-body" aria-live="polite"><p class="ws-part-meter-caption">Loading new families…</p></div>';
-        return h;
-      },
-      afterRender: function () {
-        if (typeof loadWelcomeList === 'function') loadWelcomeList();
       }
     },
     'special-events': {
@@ -6769,7 +6764,7 @@
     'Special Events Liaison': ['special-events', 'members-summary', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
-    'Welcome Coordinator': ['welcome-list', 'members-summary', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
+    'Welcome Coordinator': ['todos', 'members-summary', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'ways-to-help', 'resources']
   };
 
@@ -13907,6 +13902,7 @@
     else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
     else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
+    else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') showWelcomeListModal();
     else if (action === 'waivers-pending' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
     else if (action === 'treasurer-pending-payments' && typeof showMembershipReportModal === 'function') {
       // Open the Membership Report pre-scoped to pending payments.
@@ -16857,6 +16853,9 @@
   // /api/tour?welcome=1; the toggle POSTs welcome-mark / welcome-unmark
   // against the welcome_outreach table (separate from Comms onboarding).
   var _welcomeListState = { families: [] };
+  // Persists the "Welcome New Members" To Do count/visibility across
+  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState).
+  var _welcomeTodoState = { visible: false, count: 0 };
 
   // "Today" in Indianapolis local (YYYY-MM-DD) so date windows don't flip
   // a day early for members in adjacent timezones. Shared by Welcome List
@@ -16970,11 +16969,60 @@
           fam.welcomed_by = mark ? (r.data.welcomed_by || '') : '';
         }
         renderWelcomeListBody();
+        // Keep the To Do badge in sync live (no extra fetch).
+        var pending = _welcomeListState.families.filter(function (f) { return !f.welcomed_at; }).length;
+        applyWelcomeTodo(pending);
       })
       .catch(function (err) {
         btn.disabled = false; btn.textContent = prev;
         alert('Network error: ' + (err.message || 'unknown'));
       });
+  }
+
+  // ── "Welcome New Members" To Do (Welcome Coordinator) ──────────────
+  // The Welcome List now lives behind a To Do action instead of a always-on
+  // card. loadWelcomeTodoCount() sets the badge; the item shows only while
+  // there are families still to welcome (collapses to "all caught up" once
+  // every new family is marked). Clicking it opens the list in a modal.
+  function applyWelcomeTodo(count) {
+    _welcomeTodoState.count = count;
+    _welcomeTodoState.visible = count > 0;
+    var item = document.getElementById('ws-todo-welcome-item');
+    var pill = document.getElementById('ws-welcome-todo-count');
+    if (pill) pill.textContent = count;
+    if (item) item.hidden = count <= 0;
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  function loadWelcomeTodoCount() {
+    var item = document.getElementById('ws-todo-welcome-item');
+    if (!item) return; // not the Welcome Coordinator's tab
+    fetch('/api/tour?welcome=1', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var fams = Array.isArray(data.families) ? data.families : [];
+        // Cache so the modal opens instantly without a second fetch.
+        _welcomeListState.families = fams;
+        applyWelcomeTodo(fams.filter(function (f) { return !f.welcomed_at; }).length);
+      })
+      .catch(function () { /* silent — item stays as-is */ });
+  }
+
+  function showWelcomeListModal() {
+    var body = renderReportModal({
+      title: 'Welcome New Members',
+      subtitle: 'New families this season. Reach out to welcome them, then mark them off. (Separate from the Comms onboarding queue.)',
+      meta: '',
+      icons: [],
+      bodyId: 'ws-welcome-list-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading new families…</p>'
+    });
+    if (!body) return;
+    // If we already have the list cached (from the To Do loader), paint it
+    // immediately; loadWelcomeList refreshes it from the server regardless.
+    if (_welcomeListState.families.length) renderWelcomeListBody();
+    loadWelcomeList();
   }
 
   // ── Upcoming Events (read-only, from the co-op Google Calendar) ────
