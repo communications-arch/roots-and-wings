@@ -1513,7 +1513,9 @@ function aliasesFor(firstLc) {
 }
 
 function participationCurrentSeason() {
-  // School year runs Aug–May. Anything before August rolls back a year.
+  // Fallback heuristic only (used when the session calendar is unavailable).
+  // The real boundary is Field Day — see participationResolveSeason below.
+  // School year runs Aug–May; anything before August rolls back a year.
   var now = new Date();
   var y = now.getFullYear();
   var start = now.getMonth() >= 7 ? y : y - 1; // month 7 = Aug
@@ -1521,13 +1523,108 @@ function participationCurrentSeason() {
   return String(start).slice(2) + '_' + String(end).slice(2);
 }
 
-function participationYearBounds() {
-  var season = participationCurrentSeason();
+function participationYearBounds(season) {
+  // `season` is the short 'YY_YY' form; defaults to the month heuristic.
+  season = season || participationCurrentSeason();
   var startYear = 2000 + parseInt(season.slice(0, 2), 10);
   return {
     start: new Date(startYear, 7, 1),       // Aug 1
     end: new Date(startYear + 1, 4, 31)     // May 31
   };
+}
+
+// The Master planning sheet represents a single pre-migration school year. For
+// any season AFTER this, participation is DB-only (no sheet fallback) so last
+// year's sheet data can't bleed into a freshly-reset new year. Phase C removes
+// the sheet entirely. See rw-participation-db-migration.
+var PARTICIPATION_LAST_SHEET_SEASON = '2025-2026';
+
+// UTC-safe date helpers for the Field-Day season math (mirror api/tour.js's
+// calAddDays / calSnapWed so participation and the Board Calendar agree).
+function participationAddDays(dateStr, n) {
+  var d = new Date(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+// Nearest Wednesday strictly after a YYYY-MM-DD date (Field Day = the Wednesday
+// after the last session ends; never lands on the same day).
+function participationSnapWedAfter(dateStr) {
+  var d = new Date(String(dateStr) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return '';
+  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 3);
+  return d.toISOString().slice(0, 10);
+}
+
+// Pure resolver: given the co-op sessions ([{school_year, end_date}]) and today
+// (YYYY-MM-DD), return the current participation season by the Field-Day
+// boundary — the school year flips the DAY AFTER Field Day (rw-school-year-
+// boundary), not on a fixed calendar month. Returns
+//   { seasonLabel:'2026-2027', seasonShort:'26_27', seasonStart:'2026-05-21' }
+// or null when there are no sessions to anchor the math (caller falls back to
+// the month heuristic). `seasonStart` = the day after the PREVIOUS season's
+// Field Day; used to scope year-agnostic tables (cleaning/coverage/absences) to
+// the current year. It is '' when the previous year's sessions aren't known, in
+// which case callers simply skip date-scoping (no regression).
+function participationResolveSeason(sessions, todayStr) {
+  var latestEnd = {};
+  (sessions || []).forEach(function (s) {
+    var yr = String(s.school_year || '');
+    if (!/^\d{4}-\d{4}$/.test(yr)) return;
+    var end = String(s.end_date || '').slice(0, 10);
+    if (!end) return;
+    if (!latestEnd[yr] || end > latestEnd[yr]) latestEnd[yr] = end;
+  });
+  var years = Object.keys(latestEnd).sort(); // ascending
+  if (!years.length) return null;
+  var fd = {};
+  years.forEach(function (yr) { fd[yr] = participationSnapWedAfter(latestEnd[yr]); });
+  // Current season = the smallest year whose Field Day is today-or-later; if
+  // today is past every known Field Day we're into the year AFTER the latest.
+  var curYear = null;
+  for (var i = 0; i < years.length; i++) {
+    if (fd[years[i]] && todayStr <= fd[years[i]]) { curYear = years[i]; break; }
+  }
+  var startY, prevYearLabel;
+  if (curYear) {
+    startY = parseInt(curYear.slice(0, 4), 10);
+    prevYearLabel = (startY - 1) + '-' + startY;
+  } else {
+    var last = years[years.length - 1];
+    startY = parseInt(last.slice(0, 4), 10) + 1;
+    prevYearLabel = last; // the latest known year is the season we just left
+  }
+  return {
+    seasonLabel: startY + '-' + (startY + 1),
+    seasonShort: String(startY).slice(2) + '_' + String(startY + 1).slice(2),
+    seasonStart: fd[prevYearLabel] ? participationAddDays(fd[prevYearLabel], 1) : ''
+  };
+}
+
+// Async wrapper: read co_op_sessions and resolve the season. Falls back to the
+// month heuristic (no date-scoping) if the table is empty or unavailable.
+async function participationSeasonInfo(sql) {
+  var fallback = {
+    seasonShort: participationCurrentSeason(),
+    seasonLabel: seasonToYearLabel(participationCurrentSeason()),
+    seasonStart: ''
+  };
+  try {
+    var rows = await sql`SELECT school_year, end_date FROM co_op_sessions WHERE end_date IS NOT NULL`;
+    var sessions = (rows || []).map(function (r) {
+      return {
+        school_year: r.school_year,
+        end_date: (r.end_date instanceof Date)
+          ? r.end_date.toISOString().slice(0, 10)
+          : String(r.end_date).slice(0, 10)
+      };
+    });
+    var todayStr = new Date().toISOString().slice(0, 10);
+    return participationResolveSeason(sessions, todayStr) || fallback;
+  } catch (e) {
+    console.error('participationSeasonInfo failed:', e.message);
+    return fallback;
+  }
 }
 
 // Normalize a school-year/season string to the long '2025-2026' form.
@@ -1879,12 +1976,20 @@ async function participationFetchSheetData(sheetsClient) {
 
 async function buildParticipationReport(sql, data) {
   var families = data.families || [];
-  // Report season. A prior refactor (commit 2704e42) dropped this line while
-  // leaving the `return { season }` below, which 500'd the whole report —
-  // restored. Short '25_26' form; the long '2025-2026' label drives the
-  // DB school_year filters added in the sheet→DB migration.
-  var season = participationCurrentSeason();
-  var seasonLabel = seasonToYearLabel(season);
+  // Report season — resolved from the actual co-op calendar so participation
+  // resets the day AFTER Field Day (rw-school-year-boundary), not on a fixed
+  // Aug-1 flip. Short '25_26' form drives display; the long '2025-2026' label
+  // drives the DB school_year filters. `seasonStart` (day after last year's
+  // Field Day) scopes the year-agnostic tables (cleaning/coverage/absences) so
+  // last year's rows don't carry into a freshly-reset new year; '' = skip
+  // date-scoping (calendar unavailable → no regression).
+  var seasonInfo = await participationSeasonInfo(sql);
+  var season = seasonInfo.seasonShort;
+  var seasonLabel = seasonInfo.seasonLabel;
+  var seasonStart = seasonInfo.seasonStart;
+  // The Master sheet only speaks for pre-migration years; never let it bleed
+  // last year's AM/PM/event data into a newer, reset season.
+  var allowSheetFallback = seasonLabel <= PARTICIPATION_LAST_SHEET_SEASON;
   var nameIndex = participationBuildNameIndex(families);
   var members = {};
 
@@ -1981,7 +2086,7 @@ async function buildParticipationReport(sql, data) {
         addTimeline(key, r.session_number, { category: 'am_assist', label: 'Assisting AM — ' + (r.group_name || '') });
       }
     });
-  } else {
+  } else if (allowSheetFallback) {
     var amClasses = data.amClasses || {};
     Object.keys(amClasses).forEach(function (groupName) {
       var cls = amClasses[groupName];
@@ -2050,7 +2155,7 @@ async function buildParticipationReport(sql, data) {
       members[key].counts.pm_assist += mult;
       addTimeline(key, r.scheduled_session, { category: 'pm_assist', label: 'Assisting PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
     });
-  } else {
+  } else if (allowSheetFallback) {
     var pmElectives = data.pmElectives || {};
     Object.keys(pmElectives).forEach(function (sKey) {
       var sNum = parseInt(sKey, 10);
@@ -2074,9 +2179,17 @@ async function buildParticipationReport(sql, data) {
   // areas); credited to the family's first tracked parent per Erin's
   // "one parent only" rule.
   try {
-    var cleanRows = await sql`
-      SELECT DISTINCT session_number, family_name FROM cleaning_assignments
-    `;
+    // cleaning_assignments has no school_year — it's a single "current" grid
+    // rebuilt each year. Scope by updated_at ≥ the season start (day after last
+    // year's Field Day) so last year's rows don't count against the new season.
+    var cleanRows = seasonStart
+      ? await sql`
+          SELECT DISTINCT session_number, family_name FROM cleaning_assignments
+          WHERE updated_at >= ${seasonStart}
+        `
+      : await sql`
+          SELECT DISTINCT session_number, family_name FROM cleaning_assignments
+        `;
     cleanRows.forEach(function (r) {
       var key = familyFirstMemberKey[String(r.family_name || '').trim().toLowerCase()];
       if (!key) key = participationResolveName(r.family_name, nameIndex);
@@ -2142,7 +2255,7 @@ async function buildParticipationReport(sql, data) {
         members[key].counts.event_assist += 1;
       }
     });
-  } else {
+  } else if (allowSheetFallback) {
     (data.specialEvents || []).forEach(function (ev) {
       if (ev.coordinator) {
         var ck = participationResolveName(ev.coordinator, nameIndex);
@@ -2160,12 +2273,22 @@ async function buildParticipationReport(sql, data) {
 
   // Coverage given (not weighted — reported alongside)
   try {
-    var coverageRows = await sql`
-      SELECT claimed_by_email, claimed_by_name, COUNT(*)::int AS c
-      FROM coverage_slots
-      WHERE claimed_by_email IS NOT NULL
-      GROUP BY claimed_by_email, claimed_by_name
-    `;
+    // Scope to the current season via the parent absence's date (coverage_slots
+    // has no year of its own) so last year's coverage doesn't carry over.
+    var coverageRows = seasonStart
+      ? await sql`
+          SELECT cs.claimed_by_email, cs.claimed_by_name, COUNT(*)::int AS c
+          FROM coverage_slots cs
+          JOIN absences a ON a.id = cs.absence_id
+          WHERE cs.claimed_by_email IS NOT NULL AND a.absence_date >= ${seasonStart}
+          GROUP BY cs.claimed_by_email, cs.claimed_by_name
+        `
+      : await sql`
+          SELECT claimed_by_email, claimed_by_name, COUNT(*)::int AS c
+          FROM coverage_slots
+          WHERE claimed_by_email IS NOT NULL
+          GROUP BY claimed_by_email, claimed_by_name
+        `;
     coverageRows.forEach(function (r) {
       var k = participationResolveName(r.claimed_by_name, nameIndex);
       if (k && members[k]) members[k].coverageGiven += r.c;
@@ -2176,12 +2299,19 @@ async function buildParticipationReport(sql, data) {
 
   // Active absences count (informational)
   try {
-    var absRows = await sql`
-      SELECT absent_person, COUNT(*)::int AS c
-      FROM absences
-      WHERE cancelled_at IS NULL
-      GROUP BY absent_person
-    `;
+    var absRows = seasonStart
+      ? await sql`
+          SELECT absent_person, COUNT(*)::int AS c
+          FROM absences
+          WHERE cancelled_at IS NULL AND absence_date >= ${seasonStart}
+          GROUP BY absent_person
+        `
+      : await sql`
+          SELECT absent_person, COUNT(*)::int AS c
+          FROM absences
+          WHERE cancelled_at IS NULL
+          GROUP BY absent_person
+        `;
     absRows.forEach(function (r) {
       var k = participationResolveName(r.absent_person, nameIndex);
       if (k && members[k]) members[k].absencesCount = r.c;
@@ -2252,7 +2382,7 @@ async function buildParticipationReport(sql, data) {
 
   var annualExpected = Number.isFinite(weights.annual_expected_points) ? weights.annual_expected_points : 14;
   var newPct = (Number.isFinite(weights.new_member_baseline_pct) ? weights.new_member_baseline_pct : 60) / 100;
-  var yearBounds = participationYearBounds();
+  var yearBounds = participationYearBounds(season);
   var yearMs = yearBounds.end - yearBounds.start;
 
   Object.keys(members).forEach(function (k) {

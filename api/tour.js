@@ -4323,6 +4323,8 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
     'Final day of the school year', '', '🎉');
   push('roleconfirm', 'Confirm role holders', calAddDays(fd, 1), '',
     'Comms Director confirms board role assignments for the new year', 'Communications Director', '🧭');
+  push('participationreset', 'Participation resets (' + nextYr + ')', calAddDays(fd, 1), '',
+    'Volunteer participation counts reset to zero for ' + nextYr + ' — the new school year begins the day after Field Day', '', '🔄');
   const ends = calSessionsForYear(sessions, schoolYear).map(s => s.end_date).sort();
   if (ends.length) {
     push('setdates', 'Set next year’s session dates', calAddDays(ends[ends.length - 1], 14), '',

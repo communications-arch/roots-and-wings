@@ -163,6 +163,10 @@ t('Field Day event matches fieldDayForYear', () =>
   assert.strictEqual(byKey.fieldday.event_date, fd));
 t('confirm-role-holders is the day after Field Day', () =>
   assert.strictEqual(byKey.roleconfirm.event_date, server.calAddDays(fd, 1)));
+t('participation-reset is the day after Field Day (matches the season flip)', () =>
+  assert.strictEqual(byKey.participationreset.event_date, server.calAddDays(fd, 1)));
+t('participation-reset title names the next school year', () =>
+  assert.ok(/2026-2027/.test(byKey.participationreset.title)));
 t('remove-members is 3 days before the Ice Cream Social', () =>
   assert.strictEqual(byKey.removemembers.event_date, server.calAddDays(ics, -3)));
 t('ice cream social matches iceCreamSocialForYear', () =>
