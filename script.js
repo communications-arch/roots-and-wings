@@ -9427,8 +9427,10 @@
   function showMembershipReportModal(opts) {
     // Preserve the user's filter across closes/reopens unless the
     // caller explicitly passes initialFilter (treasurer-pending action
-    // forces 'pending' to scope to the pending-payments todo list).
+    // forces 'pending' to scope to the pending-payments todo list; the
+    // "26/27 Members" card drills in via initialNewFilter new/returning).
     if (opts && opts.initialFilter) _membershipFilter = opts.initialFilter;
+    if (opts && opts.initialNewFilter) _membershipNewFilter = opts.initialNewFilter;
     var sheetUrl = 'https://docs.google.com/spreadsheets/d/1ACLxC6nYfzb2vXbL3JzeaedNlqXzAPL-lEfq6dTIkRg/edit';
     var icons = [
       { label: 'View as Google Sheet', icon: ICON_SVG.sheet, aria: 'Open the source Google Sheet in a new tab', href: sheetUrl },
@@ -18460,11 +18462,19 @@
           else                             kidsOther += n;
         });
 
+        // Each stat is a button that opens the Membership Report drilled into
+        // that segment (new / returning / all). Clicking a number → details.
+        function msumTile(num, label, filter, extra) {
+          return '<button type="button" class="ws-msum-stat ws-msum-click' + (extra ? ' ' + extra : '') +
+            '" data-msum-filter="' + filter + '" title="View these families">' +
+            '<span class="ws-msum-num">' + num + '</span>' +
+            '<span class="ws-msum-lab">' + label + '</span></button>';
+        }
         var h = '<div class="ws-msum-grid">';
-        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + returningFams + '</span><span class="ws-msum-lab">Returning ' + (returningFams === 1 ? 'family' : 'families') + '</span></div>';
-        h += '<div class="ws-msum-stat ws-msum-stat-new"><span class="ws-msum-num">' + newFams + '</span><span class="ws-msum-lab">🌱 New ' + (newFams === 1 ? 'family' : 'families') + '</span></div>';
-        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + total + '</span><span class="ws-msum-lab">Total ' + (total === 1 ? 'family' : 'families') + '</span></div>';
-        h += '<div class="ws-msum-stat"><span class="ws-msum-num">' + totalKids + '</span><span class="ws-msum-lab">' + (totalKids === 1 ? 'Child' : 'Children') + '</span></div>';
+        h += msumTile(returningFams, 'Returning ' + (returningFams === 1 ? 'family' : 'families'), 'returning', '');
+        h += msumTile(newFams, '🌱 New ' + (newFams === 1 ? 'family' : 'families'), 'new', 'ws-msum-stat-new');
+        h += msumTile(total, 'Total ' + (total === 1 ? 'family' : 'families'), 'all', '');
+        h += msumTile(totalKids, (totalKids === 1 ? 'Child' : 'Children'), 'all', '');
         h += '</div>';
         // Track row reuses the global count-strip pills (.rd-counts +
         // .ws-track-count) — the exact treatment the Membership Report's
@@ -18476,6 +18486,15 @@
         if (kidsOther) h += '<span class="ws-track-count">' + kidsOther + ' Kids Other</span>';
         h += '</div>';
         el.innerHTML = h;
+        // Wire the stat tiles → open the Membership Report for that segment.
+        // Painted async into #ws-msum-body, so bind here (the container-level
+        // [data-report-key] handler doesn't reach dynamically-added nodes).
+        el.querySelectorAll('.ws-msum-click').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (typeof showMembershipReportModal !== 'function') return;
+            showMembershipReportModal({ initialFilter: 'all', initialNewFilter: this.getAttribute('data-msum-filter') || 'all' });
+          });
+        });
       })
       .catch(function (err) {
         console.warn('[loadMembersSummary] network error:', err);

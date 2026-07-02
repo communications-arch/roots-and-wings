@@ -10818,6 +10818,23 @@ button.staff-role:hover {
   font-weight: 600;
   color: var(--color-text-light);
 }
+/* Clickable stat tiles (26/27 Members card → drill into the Membership Report) */
+.ws-msum-stat.ws-msum-click {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ws-msum-stat.ws-msum-click:hover,
+.ws-msum-stat.ws-msum-click:focus-visible {
+  border-color: rgba(var(--color-primary-rgb), 0.5);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+  outline: none;
+}
 .ws-waivers-table {
   width: 100%;
   border-collapse: collapse;
