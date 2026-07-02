@@ -715,8 +715,10 @@
       // re-render, a committee role assigned in the Roles UI (e.g. Welcome
       // Coordinator) never surfaces its cards until a tab switch — the
       // workspace was first built from stale cache that predated the
-      // assignment. Re-render so fresh committee-role data shows immediately.
-      if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+      // assignment. ifChanged:true so we ONLY rebuild when the role set
+      // actually changed (a new role appeared) — otherwise skip to avoid the
+      // full-card flicker when live data matches the cache we just rendered.
+      if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab({ ifChanged: true });
     }
     // Header-level View As picker depends on FAMILIES.
     if (typeof renderHeaderViewAs === 'function') renderHeaderViewAs();
@@ -6800,12 +6802,25 @@
     catch (e) { console.error('workspace notes save failed:', e); }
   }
 
-  function renderWorkspaceTab() {
+  function renderWorkspaceTab(opts) {
     var container = document.getElementById('workspaceTabContent');
     if (!container) return;
 
     var roles = getWorkspaceRoles();
     var prefs = getWorkspacePrefs();
+
+    // Skip a redundant full rebuild that would visibly flicker the cards.
+    // loadLiveData renders once from cached /api/sheets, then again ~1s later
+    // when the live fetch returns; if the role set + hidden-widget prefs are
+    // identical (the common case) the second render produces the same markup,
+    // so callers that fire on data refresh pass {ifChanged:true} to no-op it.
+    // The per-item To Do loaders already updated their counts in place on the
+    // first render, so nothing is lost. A genuinely new role (e.g. a just-
+    // assigned committee role) changes the signature and still re-renders.
+    var wsSig = JSON.stringify({ r: roles.slice().sort(), h: (prefs.hidden || []).slice().sort() });
+    if (opts && opts.ifChanged && container.innerHTML && container.getAttribute('data-ws-sig') === wsSig) {
+      return;
+    }
 
     // Split widgets into role-scoped and universal buckets. Each role section
     // gets its role-gated widgets; universal widgets (roleGate=null) end up in
@@ -6971,6 +6986,7 @@
     }
 
     container.innerHTML = html;
+    container.setAttribute('data-ws-sig', wsSig);
 
     // Per-widget post-render hooks (e.g. kick off async data fetches).
     allVisibleTypes.forEach(function (type) {
