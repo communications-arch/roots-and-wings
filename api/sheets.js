@@ -2031,10 +2031,15 @@ async function buildParticipationReport(sql, data) {
   // person) to one parent — the first tracked parent in the family.
   var emailToMemberKey = {};
   var familyFirstMemberKey = {};
+  // family_email → first tracked parent, so a role held under a family/role
+  // inbox (e.g. president@…) credits the family's primary parent when the
+  // holder's own address doesn't match a specific person.
+  var familyEmailFirstKey = {};
   (families || []).forEach(function (fam) {
     var famName = String(fam.name || '').trim();
     if (!famName) return;
     var famKeyLc = famName.toLowerCase();
+    var famEmailLc = String(fam.email || '').trim().toLowerCase();
     (fam.people || []).forEach(function (pp) {
       if (pp.role === 'blc') return;
       var fn = String(pp.first_name || '').trim();
@@ -2046,12 +2051,24 @@ async function buildParticipationReport(sql, data) {
         if (elc && !emailToMemberKey[elc]) emailToMemberKey[elc] = canonical;
       });
       if (!familyFirstMemberKey[famKeyLc]) familyFirstMemberKey[famKeyLc] = canonical;
+      if (famEmailLc && !familyEmailFirstKey[famEmailLc]) familyEmailFirstKey[famEmailLc] = canonical;
     });
   });
   // Resolve a DB row to a member: prefer its email, fall back to name match.
   function resolveMemberByEmail(email, fallbackName) {
     var elc = String(email || '').trim().toLowerCase();
     if (elc && emailToMemberKey[elc]) return emailToMemberKey[elc];
+    return participationResolveName(fallbackName, nameIndex);
+  }
+  // Resolve a role holder: try their own address, then their family_email
+  // (role/workspace inboxes map to a family via people.family_email), then
+  // the family's primary parent, then a name match.
+  function resolveRoleHolder(personEmail, familyEmail, fallbackName) {
+    var pe = String(personEmail || '').trim().toLowerCase();
+    if (pe && emailToMemberKey[pe]) return emailToMemberKey[pe];
+    var fe = String(familyEmail || '').trim().toLowerCase();
+    if (fe && emailToMemberKey[fe]) return emailToMemberKey[fe];
+    if (fe && familyEmailFirstKey[fe]) return familyEmailFirstKey[fe];
     return participationResolveName(fallbackName, nameIndex);
   }
 
@@ -2201,22 +2218,31 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation cleaning query failed:', e.message);
   }
 
-  // Board + committee roles — from the DB (role_holders × role_descriptions)
-  // as of the sheet→DB migration. 'board' category = board_role (counted
-  // once); 'committee_role' = one_year_role (per role held). cleaning_area /
-  // class categories aren't volunteer roles and are excluded. AM class
-  // liaisons, if tracked, are committee_role rows and counted here too.
+  // Board + committee roles — from the LIVE roles system (roles +
+  // role_holders_v2, managed in the Org & Roles UI). The legacy
+  // role_holders/role_descriptions tables this used to read are dead (only
+  // seed scripts ever wrote them), so continuing role holders were silently
+  // getting zero role points — and, crucially, none in a freshly-reset year.
+  // Reading the live tables means a holder earns the role's points AGAIN each
+  // school_year they serve (board = board_role once; committee_role =
+  // one_year_role per role). ended_at IS NULL = still serving; matched to a
+  // participation member by holder email → family_email → primary parent.
   try {
     var roleRows = await sql`
-      SELECT rh.email, rh.person_name, rd.title, rd.category
-      FROM role_holders rh
-      JOIN role_descriptions rd ON rd.id = rh.role_id
-      WHERE rh.school_year = ${seasonLabel}
-        AND rd.status = 'active'
-        AND rd.category IN ('board', 'committee_role')
+      SELECT rhv.person_email AS email,
+             p.family_email AS family_email,
+             TRIM(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')) AS person_name,
+             r.title, r.category
+      FROM role_holders_v2 rhv
+      JOIN roles r ON r.id = rhv.role_id
+      LEFT JOIN people p ON LOWER(p.email) = LOWER(rhv.person_email)
+      WHERE rhv.school_year = ${seasonLabel}
+        AND rhv.ended_at IS NULL
+        AND r.status = 'active'
+        AND r.category IN ('board', 'committee_role')
     `;
     roleRows.forEach(function (r) {
-      var key = resolveMemberByEmail(r.email, r.person_name);
+      var key = resolveRoleHolder(r.email, r.family_email, r.person_name);
       if (!key || !members[key]) return;
       if (r.category === 'board') {
         if (members[key].counts.board_role === 0) members[key].counts.board_role = 1;
