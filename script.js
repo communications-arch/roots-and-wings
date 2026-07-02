@@ -6507,6 +6507,9 @@
         return h;
       },
       afterRender: function () {
+        // Paint the list in its last-known shape immediately (kills the
+        // load flicker), then let the loaders below refresh from the server.
+        if (typeof restoreTodoSnapshot === 'function') restoreTodoSnapshot();
         // afterRender gets no role context (renderSection calls it once
         // per type, not per role-section). Each loader self-gates by
         // checking for its own DOM element and no-ops if missing — so
@@ -9707,6 +9710,48 @@
     var anyVisible = false;
     items.forEach(function (li) { if (!li.hidden) anyVisible = true; });
     emptyEl.hidden = anyVisible;
+    // Persist the settled state so the next page load can paint the list
+    // immediately instead of flashing "All caught up" while the per-item
+    // fetches run (~1s on prod cold starts). See restoreTodoSnapshot.
+    snapshotTodoState();
+  }
+
+  // ── To Do flicker fix: snapshot / restore ─────────────────────────
+  // The To Do items each render hidden and are revealed by their own async
+  // loader, so on load the whole list briefly reads "All caught up" and then
+  // rows pop in. We cache the last settled per-item state (visibility + count
+  // pill) in localStorage, keyed by item id, and reapply it synchronously on
+  // the next render — so the list appears in its last-known shape instantly,
+  // then the loaders refresh it (cache-then-revalidate). Merges by id so a
+  // super-user's View-As across roles keeps each role's items remembered.
+  function snapshotTodoState() {
+    var list = document.getElementById('ws-todo-list');
+    if (!list) return;
+    var snap;
+    try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || '{}'); } catch (e) { snap = {}; }
+    if (!snap || typeof snap !== 'object') snap = {};
+    list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
+      var pre = li.querySelector('.ws-link-pre-count');
+      snap[li.id] = { hidden: !!li.hidden, count: pre ? pre.textContent : '' };
+    });
+    try { localStorage.setItem('rw_todo_state', JSON.stringify(snap)); } catch (e) { /* quota */ }
+  }
+
+  function restoreTodoSnapshot() {
+    var list = document.getElementById('ws-todo-list');
+    if (!list) return;
+    var snap;
+    try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || 'null'); } catch (e) { snap = null; }
+    if (!snap || typeof snap !== 'object') return;
+    Object.keys(snap).forEach(function (id) {
+      var li = document.getElementById(id);
+      if (!li) return; // item not in this role's list — skip
+      var s = snap[id] || {};
+      li.hidden = !!s.hidden;
+      var pre = li.querySelector('.ws-link-pre-count');
+      if (pre && s.count !== '' && s.count != null) pre.textContent = s.count;
+    });
+    recomputeTodoEmptyState();
   }
 
   // Counts unsigned backup-coach + one-off waivers (registration signers
@@ -16854,16 +16899,10 @@
   // against the welcome_outreach table (separate from Comms onboarding).
   var _welcomeListState = { families: [] };
   // Persists the "Welcome New Members" To Do count/visibility across
-  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState) AND
-  // across page loads via localStorage — so on a repeat visit the item paints
-  // instantly from the cached count instead of waiting ~1s for the fetch.
-  var _welcomeTodoState = (function () {
-    try {
-      var o = JSON.parse(localStorage.getItem('rw_welcome_todo') || 'null');
-      if (o && typeof o.count === 'number') return { visible: o.count > 0, count: o.count };
-    } catch (e) { /* ignore */ }
-    return { visible: false, count: 0 };
-  })();
+  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState).
+  // Cross-page-load instant paint is handled generically by
+  // snapshotTodoState/restoreTodoSnapshot.
+  var _welcomeTodoState = { visible: false, count: 0 };
 
   // "Today" in Indianapolis local (YYYY-MM-DD) so date windows don't flip
   // a day early for members in adjacent timezones. Shared by Welcome List
@@ -16995,7 +17034,6 @@
   function applyWelcomeTodo(count) {
     _welcomeTodoState.count = count;
     _welcomeTodoState.visible = count > 0;
-    try { localStorage.setItem('rw_welcome_todo', JSON.stringify({ count: count })); } catch (e) { /* quota */ }
     var item = document.getElementById('ws-todo-welcome-item');
     var pill = document.getElementById('ws-welcome-todo-count');
     if (pill) pill.textContent = count;
