@@ -4339,7 +4339,7 @@ async function requireBoardMember(req, res) {
   const ok = await isBoardMember(auth.email);
   if (!ok) {
     res.status(403).json({
-      error: 'Only board members can use the Board Calendar.',
+      error: 'Only board members can use the Admin Calendar.',
       youAre: auth.realEmail
     });
     return null;

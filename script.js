@@ -6392,7 +6392,7 @@
         // Board Calendar — any board member can view/edit the standalone
         // date-driven events. Server gate (isBoardMember) is the real
         // enforcement; shown to every board chair on this card.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Board Calendar</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar</button></li>';
         if (role === 'President' || role === 'Vice President') {
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-icon">📆</span>Session Dates<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span></button></li>';
         }
@@ -6565,9 +6565,9 @@
       }
     },
     'upcoming-events': {
-      // Read-only view of the board calendar (manual + derived dates) so the
-      // coordinator can tell new members what's coming up. Editing stays on
-      // the board's Co-op Management card.
+      // Read-only view of the shared co-op Google Calendar so the coordinator
+      // can tell new members what actual events are coming up (not the board's
+      // admin trigger-dates — those live in the Admin Calendar).
       title: 'Upcoming Events',
       roleGate: ['Welcome Coordinator'],
       render: function () {
@@ -16975,14 +16975,18 @@
       });
   }
 
-  // ── Upcoming Events (read-only board calendar) ────────────────────
-  // Same data as the board's Board Calendar (manual + session-derived
-  // dates) but read-only, filtered to today-and-later, for the Welcome
-  // Coordinator to relay to new families.
+  // ── Upcoming Events (read-only, from the co-op Google Calendar) ────
+  // The actual scheduled co-op events (socials, meetings, field trips, …)
+  // pulled from the shared Google Calendar via /api/calendar — the same
+  // source the main Calendar view uses — so the Welcome Coordinator relays
+  // real events to new families, not the board's admin trigger-dates.
   function loadUpcomingEvents() {
     var body = document.getElementById('ws-upcoming-events-body');
     if (!body) return;
-    fetch('/api/tour?calendar=1', { headers: rwAuthHeaders() })
+    var googleCred = localStorage.getItem('rw_google_credential');
+    if (!googleCred) { body.innerHTML = '<p class="ws-empty">Sign in to see upcoming events.</p>'; return; }
+    // Plain Authorization only — /api/calendar does not accept X-View-As.
+    fetch('/api/calendar', { headers: { 'Authorization': 'Bearer ' + googleCred } })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
       .then(function (r) {
         if (!r.ok) {
@@ -16996,24 +17000,32 @@
       });
   }
 
+  // Friendly "when" for a Google Calendar event. e.start/e.end are
+  // 'YYYY-MM-DD' for all-day events or ISO datetimes otherwise.
+  function fmtCalendarWhen(e) {
+    var start = e.start || '';
+    if (!start) return '';
+    var d = new Date(e.allDay ? (start + 'T00:00:00') : start);
+    if (isNaN(d.getTime())) return start;
+    var s = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    if (!e.allDay) s += ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return s;
+  }
+
   function renderUpcomingEventsBody(events) {
     var body = document.getElementById('ws-upcoming-events-body');
     if (!body) return;
-    var today = rwTodayIndyStr();
-    var upcoming = events.filter(function (e) {
-      var ref = e.end_date || e.event_date || '';
-      return ref >= today;
-    }).sort(function (a, b) { return (a.event_date || '').localeCompare(b.event_date || ''); });
-    if (upcoming.length === 0) {
+    // /api/calendar already returns upcoming events (next ~3 months, sorted).
+    if (!events.length) {
       body.innerHTML = '<p class="ws-empty">No upcoming events on the calendar right now.</p>';
       return;
     }
     var h = '<ul class="ws-upcoming-list">';
-    upcoming.slice(0, 12).forEach(function (e) {
+    events.slice(0, 12).forEach(function (e) {
       h += '<li class="ws-upcoming-item">';
-      h += '<span class="ws-upcoming-date">' + escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) + '</span>';
-      h += '<span class="ws-upcoming-title">' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</span>';
-      if (e.note) h += '<span class="ws-upcoming-note">' + escapeHtml(e.note) + '</span>';
+      h += '<span class="ws-upcoming-date">' + escapeHtml(fmtCalendarWhen(e)) + '</span>';
+      h += '<span class="ws-upcoming-title">' + escapeHtml(e.summary || 'Event') + '</span>';
+      if (e.location) h += '<span class="ws-upcoming-note">' + escapeHtml(e.location) + '</span>';
       h += '</li>';
     });
     h += '</ul>';
@@ -17046,8 +17058,8 @@
 
   function showBoardCalendarModal() {
     var body = renderReportModal({
-      title: 'Board Calendar',
-      subtitle: 'Date-sensitive co-op events the board tracks together. Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Afternoon Class Builder.)',
+      title: 'Admin Calendar',
+      subtitle: 'Key dates that trigger admin & board tasks (registration opens, remove non-returning members, finalize classes, …). Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
       meta: '',
       icons: [],
       bodyId: 'board-cal-body',
