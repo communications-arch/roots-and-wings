@@ -16854,8 +16854,16 @@
   // against the welcome_outreach table (separate from Comms onboarding).
   var _welcomeListState = { families: [] };
   // Persists the "Welcome New Members" To Do count/visibility across
-  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState).
-  var _welcomeTodoState = { visible: false, count: 0 };
+  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState) AND
+  // across page loads via localStorage — so on a repeat visit the item paints
+  // instantly from the cached count instead of waiting ~1s for the fetch.
+  var _welcomeTodoState = (function () {
+    try {
+      var o = JSON.parse(localStorage.getItem('rw_welcome_todo') || 'null');
+      if (o && typeof o.count === 'number') return { visible: o.count > 0, count: o.count };
+    } catch (e) { /* ignore */ }
+    return { visible: false, count: 0 };
+  })();
 
   // "Today" in Indianapolis local (YYYY-MM-DD) so date windows don't flip
   // a day early for members in adjacent timezones. Shared by Welcome List
@@ -16987,6 +16995,7 @@
   function applyWelcomeTodo(count) {
     _welcomeTodoState.count = count;
     _welcomeTodoState.visible = count > 0;
+    try { localStorage.setItem('rw_welcome_todo', JSON.stringify({ count: count })); } catch (e) { /* quota */ }
     var item = document.getElementById('ws-todo-welcome-item');
     var pill = document.getElementById('ws-welcome-todo-count');
     if (pill) pill.textContent = count;
