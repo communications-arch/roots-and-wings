@@ -6544,9 +6544,8 @@
         h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
         h += '<p class="ws-part-meter-caption ws-msum-loading">Loading members…</p>';
         h += '</div>';
-        // Same list-wrapped link as the Reports widget, so it picks up the
-        // global .ws-link-list li .ws-link-btn styling (plum, icon, hover).
-        h += '<ul class="ws-link-list"><li><button type="button" class="ws-link-btn" data-report-key="membership"><span class="ws-link-icon">📊</span>View Family Details</button></li></ul>';
+        // "View Family Details" moved to the Reports card ("Membership") for
+        // all board members. Clicking a count still drills into that report.
         return h;
       },
       afterRender: function () {
@@ -6700,7 +6699,7 @@
       // Membership Director's workspace only. Super users can still see it
       // by View-As'ing into Membership.
       { key: 'waivers', title: 'Waivers Report' },
-      { key: 'membership', title: 'Membership Report' },
+      { key: 'membership', title: 'Membership' },
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
     'Merchandise Manager': [
@@ -6709,27 +6708,34 @@
     'Membership Director': [
       { key: 'tour-pipeline', title: 'Tour Pipeline' },
       { key: 'morning-classes', title: 'Morning Classes' },
-      { key: 'membership', title: 'Membership Report' }
+      { key: 'membership', title: 'Membership' }
     ],
     'Treasurer': [
-      { key: 'membership', title: 'Membership Report' }
+      { key: 'membership', title: 'Membership' }
     ],
     // Welcome Coordinator (committee role under Membership) gets a
-    // read-only Membership Report — viewerCanAct=false from the server
+    // read-only Membership report — viewerCanAct=false from the server
     // hides the Actions column + source-sheet link.
     'Welcome Coordinator': [
-      { key: 'membership', title: 'Membership Report' }
+      { key: 'membership', title: 'Membership' }
     ],
-    // President, Secretary, and Sustaining Director no longer get the
-    // operational Membership Report. Board members now see the read-only
-    // "26/27 Members" summary card + snapshot (the members-summary widget)
-    // instead; the Membership Report stays scoped to the acting roles
-    // (Treasurer, Membership Director, Communications Director).
-    //
-    // Vice President keeps a Reports widget for Member Participation
-    // (injected in the render fn below); the empty array keeps the derived
-    // roleGate picking VP up without re-adding the Membership Report.
-    'Vice President': [],
+    // ALL board members get the Membership report in Reports (Erin, 2026-07-03):
+    // President, Secretary, Sustaining Director + VP now hold it alongside the
+    // acting roles above. Read-only for non-acting board members
+    // (viewerCanAct=false). VP also gets Member Participation, injected in the
+    // render fn below.
+    'President': [
+      { key: 'membership', title: 'Membership' }
+    ],
+    'Secretary': [
+      { key: 'membership', title: 'Membership' }
+    ],
+    'Sustaining Director': [
+      { key: 'membership', title: 'Membership' }
+    ],
+    'Vice President': [
+      { key: 'membership', title: 'Membership' }
+    ],
     // Listed with an empty array so the widget's roleGate (derived below)
     // picks it up. Member Participation is injected dynamically inside
     // the render fn for this role.
@@ -6760,13 +6766,13 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
-    'President': ['todos', 'members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'President': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'special-events', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Secretary': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['members-summary', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Secretary': ['members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['special-events', 'members-summary', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
