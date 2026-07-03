@@ -6503,6 +6503,11 @@
           var wcHidden = !(_welcomeTodoState && _welcomeTodoState.visible);
           var wcCount  = (_welcomeTodoState && _welcomeTodoState.count) || 0;
           h += '<li id="ws-todo-welcome-item"' + (wcHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members"><span class="ws-link-pre-count" id="ws-welcome-todo-count">' + wcCount + '</span><span class="ws-link-icon">🌱</span><span id="ws-welcome-todo-label">Welcome New Members</span></button></li>';
+          // Pre-co-op outreach — fires the ~2 weeks before the first session so
+          // the coordinator reaches out to each new family before co-op begins.
+          // Date-gated by loadWelcomeOutreachTodo; opens the same Welcome List.
+          var woHidden = !(_welcomeOutreachTodoState && _welcomeOutreachTodoState.visible);
+          h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members"><span class="ws-link-icon">💛</span><span id="ws-welcome-outreach-label">Reach out to new families — co-op starts soon</span></button></li>';
         }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
@@ -6525,6 +6530,7 @@
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
+        if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
       }
     },
     'members-summary': {
@@ -16947,6 +16953,9 @@
   // Cross-page-load instant paint is handled generically by
   // snapshotTodoState/restoreTodoSnapshot.
   var _welcomeTodoState = { visible: false, count: 0 };
+  // Same, for the date-gated "Reach out to new families — co-op starts soon"
+  // pre-co-op outreach reminder.
+  var _welcomeOutreachTodoState = { visible: false };
 
   // "Today" in Indianapolis local (YYYY-MM-DD) so date windows don't flip
   // a day early for members in adjacent timezones. Shared by Welcome List
@@ -17146,6 +17155,37 @@
         applyWelcomeTodo(fams.filter(welcomeInProgress).length);
       })
       .catch(function () { /* silent — item stays as-is */ });
+  }
+
+  // Date-gated pre-co-op outreach reminder: show the "Reach out to new
+  // families — co-op starts soon" To Do during the ~2 weeks before the first
+  // session's start (the responsibility to welcome new families the week before
+  // co-op begins). Driven off _allCoopSessions (the same session calendar the
+  // Admin Calendar's derived event uses); no-ops when co-op isn't imminent.
+  function welcomeNextCoopStart() {
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var starts = (Array.isArray(_allCoopSessions) ? _allCoopSessions : [])
+      .filter(function (s) { return Number(s.session_number) === 1 && s.start_date; })
+      .map(function (s) { return String(s.start_date).slice(0, 10); })
+      .sort();
+    for (var i = 0; i < starts.length; i++) { if (starts[i] >= today) return starts[i]; }
+    return '';
+  }
+  function welcomeDaysBefore(dateStr, n) {
+    var d = new Date(String(dateStr) + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return '';
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+  function loadWelcomeOutreachTodo() {
+    var item = document.getElementById('ws-todo-welcome-outreach-item');
+    if (!item) return; // not the Welcome Coordinator's tab
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var s1 = welcomeNextCoopStart();
+    var show = !!(s1 && today >= welcomeDaysBefore(s1, 14) && today <= s1);
+    _welcomeOutreachTodoState.visible = show;
+    item.hidden = !show;
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
   function showWelcomeListModal() {

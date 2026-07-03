@@ -171,6 +171,10 @@ t('remove-members is 3 days before the Ice Cream Social', () =>
   assert.strictEqual(byKey.removemembers.event_date, server.calAddDays(ics, -3)));
 t('ice cream social matches iceCreamSocialForYear', () =>
   assert.strictEqual(byKey.icecream.event_date, ics));
+t('welcome outreach is 7 days before the first session start', () =>
+  assert.strictEqual(byKey.welcomeoutreach.event_date, '2025-08-27'));
+t('welcome outreach is a Welcome Coordinator task', () =>
+  assert.strictEqual(byKey.welcomeoutreach.role, 'Welcome Coordinator'));
 t('all five sessions are emitted', () =>
   assert.strictEqual(derived.filter(e => /^derived:session/.test(e.id)).length, 5));
 t('set-next-year-dates is 14 days after the last session end', () =>

@@ -4306,6 +4306,14 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
   push('icecream', 'Ice Cream Social', ics, '',
     'Welcome social — the Wednesday before the first session', '', '🍦');
 
+  // Welcome Coordinator reaches out to each new family the week before co-op
+  // begins (one week before the first session's start).
+  const s1rows = calSessionsForYear(sessions, schoolYear);
+  const s1start = s1rows.length ? s1rows[0].start_date : '';
+  push('welcomeoutreach', 'Welcome outreach to new families', calAddDays(s1start, -7), '',
+    'Welcome Coordinator reaches out to each new family the week before co-op begins — welcome them and answer questions',
+    'Welcome Coordinator', '💛');
+
   // The five sessions
   calSessionsForYear(sessions, schoolYear).forEach(s => {
     push('session' + s.session_number, s.name || ('Session ' + s.session_number),
