@@ -6572,6 +6572,7 @@
       roleGate: ['Welcome Coordinator'],
       render: function () {
         var h = '<p class="ws-body-hint">Key co-op dates to share with new families.</p>';
+        h += '<p class="ws-events-note">💛 For each event, line up a current member to be there to greet new families and help them feel at home.</p>';
         h += '<div id="ws-upcoming-events-body" aria-live="polite"><p class="ws-part-meter-caption">Loading events…</p></div>';
         return h;
       },
@@ -17151,7 +17152,7 @@
   function showWelcomeListModal() {
     var body = renderReportModal({
       title: 'Welcome New Members',
-      subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log an Orientation. (Separate from the Comms onboarding queue.)',
+      subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log an Orientation.',
       meta: '',
       icons: [],
       bodyId: 'ws-welcome-list-body',

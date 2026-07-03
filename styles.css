@@ -10211,6 +10211,18 @@ button.staff-role:hover {
 }
 .ws-welcome-action .btn { padding: 5px 14px; font-size: 0.82rem; }
 
+/* Gentle reminder callout on the Welcome Coordinator's Upcoming Events card. */
+.ws-events-note {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--color-primary-dark, #3d2a5c);
+}
+
 /* ── Upcoming Events (read-only board calendar) ───────────────────── */
 .ws-upcoming-list {
   list-style: none;
