@@ -10547,10 +10547,12 @@
   };
 
   function participationCanWrite() {
-    // VP or super user (communications@) — backend re-checks. The super-user
-    // shortcut lets communications@ act as VP for the report.
+    // VP, Afternoon Class Liaison, or super user (communications@) — backend
+    // re-checks. The super-user shortcut lets communications@ act for the report.
     if (isCommsUser()) return true;
-    return isVP();
+    if (isVP()) return true;
+    return (typeof getWorkspaceRoles === 'function') &&
+      getWorkspaceRoles().indexOf('Afternoon Class Liaison') !== -1;
   }
 
   function showParticipationReportModal() {
@@ -10788,7 +10790,7 @@
   // ─── Weights admin (VP / super user only) ───
   function showParticipationWeightsModal() {
     if (!personDetail || !personDetailCard) return;
-    if (!participationCanWrite()) { alert('Vice President or super user only.'); return; }
+    if (!participationCanWrite()) { alert('Vice President, Afternoon Class Liaison, or super user only.'); return; }
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
     html += '<h3 class="rd-title">Participation Weights</h3>';
@@ -10859,7 +10861,7 @@
   // ─── Exemptions admin (VP / super user only) ───
   function showParticipationExemptionsModal() {
     if (!personDetail || !personDetailCard) return;
-    if (!participationCanWrite()) { alert('Vice President or super user only.'); return; }
+    if (!participationCanWrite()) { alert('Vice President, Afternoon Class Liaison, or super user only.'); return; }
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
     html += '<h3 class="rd-title">Participation Exemptions</h3>';

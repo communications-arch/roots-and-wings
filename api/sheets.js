@@ -1439,7 +1439,11 @@ async function participationCanRead(email) {
 async function participationCanWrite(email) {
   if (!email) return false;
   if (isSuperUser(email)) return true;
-  return await canEditAsRole(email, 'Vice President');
+  if (await canEditAsRole(email, 'Vice President')) return true;
+  // Afternoon Class Liaison (the "Afternoon Coordinator") reviews + edits
+  // participation points alongside the VP.
+  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
+  return false;
 }
 
 function participationNormName(s) {
@@ -2573,7 +2577,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
 
   if (action === 'participation-weight-save' && req.method === 'POST') {
     if (!(await participationCanWrite(userEmail))) {
-      return res.status(403).json({ error: 'Vice President or super user only' });
+      return res.status(403).json({ error: 'Vice President, Afternoon Class Liaison, or super user only' });
     }
     var body = req.body || {};
     var key = String(body.key || '').trim();
@@ -2601,7 +2605,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
 
   if (action === 'participation-exemption-save' && req.method === 'POST') {
     if (!(await participationCanWrite(userEmail))) {
-      return res.status(403).json({ error: 'Vice President or super user only' });
+      return res.status(403).json({ error: 'Vice President, Afternoon Class Liaison, or super user only' });
     }
     var body2 = req.body || {};
     var exId = body2.id ? parseInt(body2.id, 10) : null;
@@ -2646,7 +2650,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
 
   if (action === 'participation-exemption-delete' && req.method === 'POST') {
     if (!(await participationCanWrite(userEmail))) {
-      return res.status(403).json({ error: 'Vice President or super user only' });
+      return res.status(403).json({ error: 'Vice President, Afternoon Class Liaison, or super user only' });
     }
     var body3 = req.body || {};
     var delId = parseInt(body3.id, 10);
