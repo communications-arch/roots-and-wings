@@ -16927,14 +16927,14 @@
 
   // ── Welcome List (Welcome Coordinator) ────────────────────────────
   // This season's NEW families through the welcome LIFECYCLE:
-  //   new → Welcomed → Meet & Greet (done).
+  //   new → Welcomed → Orientation (done).
   // Reads /api/tour?welcome=1; actions POST welcome-mark / welcome-unmark /
   // welcome-meet-mark / welcome-meet-unmark against welcome_outreach
   // (separate from the Comms onboarding queue).
   var _welcomeListState = { families: [] };
 
   // A family's lifecycle stage: 0 = new (not welcomed), 1 = welcomed (needs
-  // Meet & Greet), 2 = met & greeted (done). Families are "in progress" until
+  // Orientation), 2 = oriented (done). Families are "in progress" until
   // stage 2 — that's what the To Do counts.
   function welcomeStage(f) {
     if (f && f.met_at) return 2;
@@ -17008,8 +17008,8 @@
       // label = the family's current state (per-card badge);
       // todo  = the action the coordinator still needs to do (top count pill).
       { key: 'new',      label: 'New',            todo: 'To Welcome',  pill: 'is-new' },
-      { key: 'welcomed', label: 'Welcomed',       todo: 'Meet & Greet', pill: 'is-welcomed' },
-      { key: 'done',     label: 'Met & greeted',  todo: 'Done',        pill: 'is-done' }
+      { key: 'welcomed', label: 'Welcomed',       todo: 'Orientation', pill: 'is-welcomed' },
+      { key: 'done',     label: 'Oriented',       todo: 'Done',        pill: 'is-done' }
     ];
     // Count per lifecycle stage → color-coded pill strip at the top.
     var stageCounts = [0, 0, 0];
@@ -17020,7 +17020,7 @@
     h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
     h += '</div>';
     // Color-coded count pills framed as to-dos — how many still need each
-    // action (To Welcome / Meet & Greet), plus a Done bucket for context.
+    // action (To Welcome / Orientation), plus a Done bucket for context.
     // Same palette as the stage badges + card accents = one colour system.
     h += '<div class="ws-welcome-counts">';
     STAGE_META.forEach(function (m, i) {
@@ -17050,16 +17050,16 @@
       if (sub.length) h += '<div class="ws-welcome-sub">' + sub.join(' &middot; ') + '</div>';
       // Completed-step stamps.
       if (f.welcomed_at) h += '<div class="ws-welcome-stamp">✓ Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
-      if (f.met_at) h += '<div class="ws-welcome-stamp">✓ Met &amp; greeted ' + escapeHtml(welcomeFmtDate(f.met_at)) + (f.met_by ? ' by ' + escapeHtml(f.met_by) : '') + '</div>';
+      if (f.met_at) h += '<div class="ws-welcome-stamp">✓ Oriented ' + escapeHtml(welcomeFmtDate(f.met_at)) + (f.met_by ? ' by ' + escapeHtml(f.met_by) : '') + '</div>';
       // Actions: primary next-step + de-emphasized undo.
       h += '<div class="ws-welcome-action">';
       if (stage === 0) {
         h += welcomeActBtn(f.id, 'welcome-mark', 'Mark welcomed', 'btn-primary');
       } else if (stage === 1) {
-        h += welcomeActBtn(f.id, 'welcome-meet-mark', 'Log Meet &amp; Greet', 'btn-primary');
+        h += welcomeActBtn(f.id, 'welcome-meet-mark', 'Log Orientation', 'btn-primary');
         h += welcomeActBtn(f.id, 'welcome-unmark', 'Undo welcome', 'btn-outline-dark');
       } else {
-        h += welcomeActBtn(f.id, 'welcome-meet-unmark', 'Undo Meet &amp; Greet', 'btn-outline-dark');
+        h += welcomeActBtn(f.id, 'welcome-meet-unmark', 'Undo Orientation', 'btn-outline-dark');
       }
       h += '</div>';
       h += '</li>';
@@ -17077,7 +17077,7 @@
     return '<button type="button" class="btn btn-sm ' + cls + ' ws-welcome-act" data-id="' + id + '" data-kind="' + kind + '">' + label + '</button>';
   }
 
-  // Recount the "in progress" families (not yet through Meet & Greet) and
+  // Recount the "in progress" families (not yet through Orientation) and
   // update the To Do badge — no extra fetch.
   function syncWelcomeTodoFromState() {
     applyWelcomeTodo(_welcomeListState.families.filter(welcomeInProgress).length);
@@ -17122,7 +17122,7 @@
   // card. loadWelcomeTodoCount() sets the badge; the item shows while any new
   // family is still IN PROGRESS through the lifecycle (not yet welcomed OR
   // welcomed-but-not-met), and collapses to "all caught up" once every family
-  // has completed the Meet & Greet. Clicking it opens the list in a modal.
+  // has completed the Orientation. Clicking it opens the list in a modal.
   function applyWelcomeTodo(count) {
     _welcomeTodoState.count = count;
     _welcomeTodoState.visible = count > 0;
@@ -17151,7 +17151,7 @@
   function showWelcomeListModal() {
     var body = renderReportModal({
       title: 'Welcome New Members',
-      subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log a Meet & Greet. (Separate from the Comms onboarding queue.)',
+      subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log an Orientation. (Separate from the Comms onboarding queue.)',
       meta: '',
       icons: [],
       bodyId: 'ws-welcome-list-body',
