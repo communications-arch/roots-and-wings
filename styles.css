@@ -10126,7 +10126,28 @@ button.staff-role:hover {
   font-size: 0.78rem;
   font-weight: 700;
 }
-.ws-welcome-progress { font-size: 0.82rem; color: var(--color-text-light); }
+/* Color-coded count strip — one pill per lifecycle stage, sharing the
+   stage palette (amber / plum / leaf) with the card accents + badges. */
+.ws-welcome-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.ws-welcome-cpill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.ws-welcome-cpill strong { font-size: 0.95rem; font-weight: 800; }
+.ws-welcome-cpill.is-new      { background: rgba(224, 181, 44, 0.14); color: var(--color-accent-dark); border-color: rgba(224, 181, 44, 0.4); }
+.ws-welcome-cpill.is-welcomed { background: rgba(82, 58, 121, 0.10);  color: var(--color-primary-dark, #3d2a5c); border-color: rgba(82, 58, 121, 0.3); }
+.ws-welcome-cpill.is-done     { background: rgba(90, 107, 57, 0.12);  color: var(--color-leaf); border-color: rgba(90, 107, 57, 0.35); }
 .ws-welcome-list {
   list-style: none;
   padding: 0;
@@ -10137,13 +10158,18 @@ button.staff-role:hover {
 }
 .ws-welcome-item {
   border: 1px solid rgba(var(--color-primary-rgb), 0.15);
+  border-left-width: 4px;
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 12px 14px 12px 13px;
   background: #fff;
 }
+/* Color-code each card's accent by lifecycle stage — matches the count
+   pills + stage badges (amber = new, plum = welcomed, leaf = done). */
+.ws-welcome-item.ws-welcome-s0 { border-left-color: var(--color-accent-dark); }
+.ws-welcome-item.ws-welcome-s1 { border-left-color: var(--color-primary); }
+.ws-welcome-item.ws-welcome-s2 { border-left-color: var(--color-leaf); }
 .ws-welcome-item.ws-welcome-done {
-  background: rgba(var(--color-primary-rgb), 0.04);
-  border-color: rgba(var(--color-primary-rgb), 0.18);
+  background: rgba(90, 107, 57, 0.05);
 }
 .ws-welcome-head {
   display: flex;

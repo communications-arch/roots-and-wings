@@ -17004,17 +17004,25 @@
       body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
       return;
     }
-    var inProgress = fams.filter(welcomeInProgress).length;
     var STAGE_META = [
       { key: 'new',      label: 'New',            pill: 'is-new' },
       { key: 'welcomed', label: 'Welcomed',       pill: 'is-welcomed' },
       { key: 'done',     label: 'Met & greeted',  pill: 'is-done' }
     ];
-    // Section header: Playfair heading + count pill, matching the Member
+    // Count per lifecycle stage → color-coded pill strip at the top.
+    var stageCounts = [0, 0, 0];
+    fams.forEach(function (f) { stageCounts[welcomeStage(f)]++; });
+    // Section header: Playfair heading + total count pill, matching the Member
     // Onboarding modal's .mo-section-h / .mo-pill pattern.
     var h = '<div class="ws-welcome-head-row">';
     h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
-    h += '<span class="ws-welcome-progress">' + (inProgress ? inProgress + ' in progress' : 'all caught up') + '</span>';
+    h += '</div>';
+    // Color-coded count pills — one per stage, same palette as the stage
+    // badges + card accents, so the whole list reads as one colour system.
+    h += '<div class="ws-welcome-counts">';
+    STAGE_META.forEach(function (m, i) {
+      h += '<span class="ws-welcome-cpill ' + m.pill + '"><strong>' + stageCounts[i] + '</strong> ' + m.label + '</span>';
+    });
     h += '</div>';
     h += '<ul class="ws-welcome-list">';
     fams.forEach(function (f) {
@@ -17022,7 +17030,7 @@
       var meta = STAGE_META[stage];
       var kids = Array.isArray(f.kids) ? f.kids : [];
       var kidNames = kids.map(function (k) { return escapeHtml(k.name || k.first_name || ''); }).filter(Boolean).join(', ');
-      h += '<li class="ws-welcome-item' + (stage === 2 ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
+      h += '<li class="ws-welcome-item ws-welcome-s' + stage + (stage === 2 ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
       // Head: name + stage pill.
       h += '<div class="ws-welcome-head">';
       h += '<span class="ws-welcome-name">' + escapeHtml(f.name || '(no name)') + '</span>';
