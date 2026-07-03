@@ -10965,31 +10965,37 @@ button.staff-role:hover {
 .ws-roster-track.is-pm    { background: rgba(82, 58, 121, 0.12);  color: var(--color-primary-dark, #3d2a5c); }
 .ws-roster-track.is-both  { background: rgba(90, 107, 57, 0.14);  color: var(--color-leaf); }
 .ws-roster-track.is-other { background: rgba(0, 0, 0, 0.06);      color: var(--color-text-light); }
-.ws-roster-members { font-size: 0.86rem; color: var(--color-text); margin-top: 4px; word-break: break-word; }
-.ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); margin-top: 2px; }
+.ws-roster-newicon { margin-right: 4px; }
+.ws-roster-members { font-size: 0.86rem; color: var(--color-text-light); margin-top: 3px; word-break: break-word; }
+.ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); margin-top: 4px; }
+/* Kids as cohesive, group-color-coded chips: emoji + name + class, all wearing
+   the age group's brand colour (--ag from the .ag-<Group> class). Kids with no
+   morning class fall back to a neutral grey chip. */
 .ws-roster-kids {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
 }
-.ws-roster-kids li {
-  font-size: 0.85rem;
-  color: var(--color-text);
-  display: flex;
+.ws-roster-kid {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-.ws-roster-class {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.08);
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
   border-radius: 999px;
-  padding: 1px 8px;
-  white-space: nowrap;
+  border: 1.5px solid var(--ag, var(--color-border));
+  background: var(--color-white);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.ws-roster-kid-emoji { font-size: 0.9rem; line-height: 1; }
+.ws-roster-kid-name { font-weight: 600; color: var(--color-text); }
+.ws-roster-kid-group {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ag, var(--color-text-light));
 }
 .ws-waivers-table {
   width: 100%;

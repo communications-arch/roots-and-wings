@@ -18729,18 +18729,26 @@
       var kids = Array.isArray(f.kids) ? f.kids : [];
       h += '<li class="ws-roster-item">';
       h += '<div class="ws-roster-head">';
-      h += '<span class="ws-roster-name">' + escapeHtml(f.name || '(family)') + (f.isNewMember ? ' <span class="ws-roster-newdot" title="New family">🌱</span>' : '') + '</span>';
+      // Icon before the name: 🌱 marks a new family.
+      h += '<span class="ws-roster-name">' + (f.isNewMember ? '<span class="ws-roster-newicon" title="New family">🌱</span>' : '') + escapeHtml(f.name || '(family)') + '</span>';
       h += '<span class="ws-roster-track ' + (COMMUNITY_TRACK_PILL[f.track] || 'is-other') + '">' + escapeHtml(f.trackLabel || '') + '</span>';
       h += '</div>';
-      // Coach on the family line; kids listed below with their class.
+      // Coach on the family line; kids as group-color-coded chips (emoji +
+      // name + class) so each child reads as one cohesive unit.
       if (f.coach) h += '<div class="ws-roster-members">' + escapeHtml(f.coach) + '</div>';
       var kidsWithNames = kids.filter(function (k) { return k && k.name; });
       if (kidsWithNames.length) {
-        h += '<ul class="ws-roster-kids">';
+        h += '<div class="ws-roster-kids">';
         kidsWithNames.forEach(function (k) {
-          h += '<li>' + escapeHtml(k.name) + (k.class ? ' <span class="ws-roster-class">' + escapeHtml(k.class) + '</span>' : '') + '</li>';
+          var agCls = ageGroupClass(k.class);
+          var emoji = ageGroupEmoji(k.class);
+          h += '<span class="ws-roster-kid' + (agCls ? ' ' + agCls : '') + '">';
+          if (emoji) h += '<span class="ws-roster-kid-emoji">' + emoji + '</span>';
+          h += '<span class="ws-roster-kid-name">' + escapeHtml(k.name) + '</span>';
+          if (k.class) h += '<span class="ws-roster-kid-group">' + escapeHtml(k.class) + '</span>';
+          h += '</span>';
         });
-        h += '</ul>';
+        h += '</div>';
       } else {
         h += '<div class="ws-roster-sub">No children listed</div>';
       }
