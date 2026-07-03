@@ -17004,22 +17004,31 @@
       body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
       return;
     }
-    var toWelcome = fams.filter(function (f) { return welcomeStage(f) === 0; }).length;
-    var toMeet = fams.filter(function (f) { return welcomeStage(f) === 1; }).length;
-    var summ = [];
-    if (toWelcome) summ.push(toWelcome + ' to welcome');
-    if (toMeet) summ.push(toMeet + ' for meet &amp; greet');
-    if (!summ.length) summ.push('all caught up');
-    var h = '<p class="ws-body-hint">' + summ.join(' &middot; ') + ' &middot; ' + fams.length + ' new famil' + (fams.length === 1 ? 'y' : 'ies') + ' this season.</p>';
+    var inProgress = fams.filter(welcomeInProgress).length;
+    var STAGE_META = [
+      { key: 'new',      label: 'New',            pill: 'is-new' },
+      { key: 'welcomed', label: 'Welcomed',       pill: 'is-welcomed' },
+      { key: 'done',     label: 'Met & greeted',  pill: 'is-done' }
+    ];
+    // Section header: Playfair heading + count pill, matching the Member
+    // Onboarding modal's .mo-section-h / .mo-pill pattern.
+    var h = '<div class="ws-welcome-head-row">';
+    h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
+    h += '<span class="ws-welcome-progress">' + (inProgress ? inProgress + ' in progress' : 'all caught up') + '</span>';
+    h += '</div>';
     h += '<ul class="ws-welcome-list">';
     fams.forEach(function (f) {
       var stage = welcomeStage(f);
+      var meta = STAGE_META[stage];
       var kids = Array.isArray(f.kids) ? f.kids : [];
       var kidNames = kids.map(function (k) { return escapeHtml(k.name || k.first_name || ''); }).filter(Boolean).join(', ');
-      var icon = stage === 2 ? '✅ ' : (stage === 1 ? '👋 ' : '🌱 ');
       h += '<li class="ws-welcome-item' + (stage === 2 ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
-      h += '<div class="ws-welcome-main">';
-      h += '<div class="ws-welcome-name">' + icon + escapeHtml(f.name || '(no name)') + '</div>';
+      // Head: name + stage pill.
+      h += '<div class="ws-welcome-head">';
+      h += '<span class="ws-welcome-name">' + escapeHtml(f.name || '(no name)') + '</span>';
+      h += '<span class="ws-welcome-stage ' + meta.pill + '">' + meta.label + '</span>';
+      h += '</div>';
+      // Contact + registration details.
       var contact = [];
       if (f.email) contact.push('<a href="mailto:' + escapeHtml(f.email) + '">' + escapeHtml(f.email) + '</a>');
       if (f.phone) contact.push('<a href="tel:' + escapeHtml(f.phone) + '">' + escapeHtml(f.phone) + '</a>');
@@ -17028,11 +17037,10 @@
       if (f.track) sub.push(escapeHtml(f.track));
       if (kids.length) sub.push(kids.length + ' kid' + (kids.length === 1 ? '' : 's') + (kidNames ? ' (' + kidNames + ')' : ''));
       if (sub.length) h += '<div class="ws-welcome-sub">' + sub.join(' &middot; ') + '</div>';
-      // Stage stamps (completed steps).
-      if (f.welcomed_at) h += '<div class="ws-welcome-stamp">Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
-      if (f.met_at) h += '<div class="ws-welcome-stamp">Met &amp; greeted ' + escapeHtml(welcomeFmtDate(f.met_at)) + (f.met_by ? ' by ' + escapeHtml(f.met_by) : '') + '</div>';
-      h += '</div>';
-      // Action area: primary next-step button + undo links for done stages.
+      // Completed-step stamps.
+      if (f.welcomed_at) h += '<div class="ws-welcome-stamp">✓ Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
+      if (f.met_at) h += '<div class="ws-welcome-stamp">✓ Met &amp; greeted ' + escapeHtml(welcomeFmtDate(f.met_at)) + (f.met_by ? ' by ' + escapeHtml(f.met_by) : '') + '</div>';
+      // Actions: primary next-step + de-emphasized undo.
       h += '<div class="ws-welcome-action">';
       if (stage === 0) {
         h += welcomeActBtn(f.id, 'welcome-mark', 'Mark welcomed', 'btn-primary');

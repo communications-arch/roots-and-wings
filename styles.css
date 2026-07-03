@@ -10096,40 +10096,94 @@ button.staff-role:hover {
 }
 
 /* ── Welcome List (Welcome Coordinator) ───────────────────────────── */
+/* Welcome New Members — aligned to the Member Onboarding modal's card
+   language (.mo-row / .mo-section-h / .mo-pill) and the global .ws-wv-*
+   status-pill shape, so the lifecycle list reads as one system with the
+   rest of the site. */
+.ws-welcome-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.ws-welcome-h {
+  font-family: 'Playfair Display', serif;
+  color: var(--color-primary-dark);
+  font-size: 1.05rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ws-welcome-count {
+  display: inline-block;
+  background: rgba(var(--color-primary-rgb), 0.12);
+  color: var(--color-primary-dark);
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.ws-welcome-progress { font-size: 0.82rem; color: var(--color-text-light); }
 .ws-welcome-list {
   list-style: none;
   padding: 0;
-  margin: 4px 0 0 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 .ws-welcome-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
+  border-radius: 10px;
+  padding: 12px 14px;
   background: #fff;
 }
 .ws-welcome-item.ws-welcome-done {
   background: rgba(var(--color-primary-rgb), 0.04);
   border-color: rgba(var(--color-primary-rgb), 0.18);
 }
-.ws-welcome-main { min-width: 0; flex: 1; }
+.ws-welcome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .ws-welcome-name {
   font-weight: 600;
-  color: var(--color-primary);
-  font-size: 0.9rem;
+  color: var(--color-primary-dark);
+  font-size: 0.98rem;
 }
-.ws-welcome-contact { font-size: 0.8rem; margin-top: 1px; word-break: break-word; }
-.ws-welcome-contact a { color: var(--color-primary-light); }
-.ws-welcome-sub { font-size: 0.78rem; color: var(--color-text-light); margin-top: 1px; }
-.ws-welcome-stamp { font-size: 0.74rem; color: var(--color-text-light); margin-top: 2px; font-style: italic; }
-.ws-welcome-action { flex: 0 0 auto; }
-.ws-welcome-action .ws-welcome-toggle { padding: 3px 10px; font-size: 0.8rem; }
+/* Lifecycle stage badge — reuses the global .ws-wv-* pill shape/colors. */
+.ws-welcome-stage {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ws-welcome-stage.is-new      { background: rgba(224, 181, 44, 0.18); color: var(--color-accent-dark); }
+.ws-welcome-stage.is-welcomed { background: rgba(82, 58, 121, 0.12);  color: var(--color-primary-dark, #3d2a5c); }
+.ws-welcome-stage.is-done     { background: rgba(90, 107, 57, 0.14);  color: var(--color-leaf); }
+.ws-welcome-contact { font-size: 0.84rem; margin-top: 4px; word-break: break-word; }
+.ws-welcome-contact a { color: var(--color-primary); }
+.ws-welcome-sub { font-size: 0.84rem; color: var(--color-text-light); margin-top: 2px; }
+.ws-welcome-stamp { font-size: 0.8rem; color: var(--color-leaf); margin-top: 3px; }
+.ws-welcome-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.ws-welcome-action .btn { padding: 5px 14px; font-size: 0.82rem; }
 
 /* ── Upcoming Events (read-only board calendar) ───────────────────── */
 .ws-upcoming-list {
