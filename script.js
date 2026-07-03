@@ -17009,8 +17009,21 @@
       if (sa !== sb) return sa - sb;
       return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
+    // Shareable Member Portal install link — part of helping new families
+    // acclimate to our communication channels. The link always points at prod
+    // (what a new family should open), even when the coordinator is on dev.
+    var INSTALL_URL = 'https://www.rootsandwingsindy.com/install';
+    var shareBlock = '<div class="ws-welcome-share">' +
+      '<div class="ws-welcome-share-head">💬 Help new families get connected</div>' +
+      '<p class="ws-welcome-share-text">Share the Member Portal so they can install the app and join our chat channels:</p>' +
+      '<div class="ws-welcome-share-row">' +
+        '<a class="ws-welcome-share-link" href="' + INSTALL_URL + '" target="_blank" rel="noopener">rootsandwingsindy.com/install</a>' +
+        '<button type="button" class="btn btn-sm btn-outline-dark ws-welcome-copy" data-copy="' + INSTALL_URL + '">Copy link</button>' +
+      '</div>' +
+    '</div>';
     if (fams.length === 0) {
-      body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
+      body.innerHTML = shareBlock + '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
+      wireWelcomeCopy(body);
       return;
     }
     var STAGE_META = [
@@ -17025,7 +17038,8 @@
     fams.forEach(function (f) { stageCounts[welcomeStage(f)]++; });
     // Section header: Playfair heading + total count pill, matching the Member
     // Onboarding modal's .mo-section-h / .mo-pill pattern.
-    var h = '<div class="ws-welcome-head-row">';
+    var h = shareBlock;
+    h += '<div class="ws-welcome-head-row">';
     h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
     h += '</div>';
     // Color-coded count pills framed as to-dos — how many still need each
@@ -17080,6 +17094,35 @@
         welcomeStageAction(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-kind'), btn);
       });
     });
+    wireWelcomeCopy(body);
+  }
+
+  // Copy-to-clipboard for the shareable install link (secure-context
+  // navigator.clipboard, with a textarea fallback) + brief "Copied!" feedback.
+  function wireWelcomeCopy(root) {
+    (root || document).querySelectorAll('.ws-welcome-copy').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var url = this.getAttribute('data-copy') || '';
+        var self = this;
+        function feedback() {
+          var orig = self.getAttribute('data-orig') || self.textContent;
+          self.setAttribute('data-orig', orig);
+          self.textContent = '✓ Copied';
+          setTimeout(function () { self.textContent = orig; }, 1600);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(feedback, function () { rwFallbackCopy(url); feedback(); });
+        } else { rwFallbackCopy(url); feedback(); }
+      });
+    });
+  }
+  function rwFallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+    } catch (e) { /* clipboard unavailable — the link is still visible to copy manually */ }
   }
 
   function welcomeActBtn(id, kind, label, cls) {

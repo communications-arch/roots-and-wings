@@ -10148,6 +10148,29 @@ button.staff-role:hover {
 .ws-welcome-cpill.is-new      { background: rgba(224, 181, 44, 0.14); color: var(--color-accent-dark); border-color: rgba(224, 181, 44, 0.4); }
 .ws-welcome-cpill.is-welcomed { background: rgba(82, 58, 121, 0.10);  color: var(--color-primary-dark, #3d2a5c); border-color: rgba(82, 58, 121, 0.3); }
 .ws-welcome-cpill.is-done     { background: rgba(90, 107, 57, 0.12);  color: var(--color-leaf); border-color: rgba(90, 107, 57, 0.35); }
+/* Shareable "get connected" block at the top of the Welcome List — the
+   Member Portal install link the coordinator sends to new families. */
+.ws-welcome-share {
+  border: 1px solid rgba(var(--color-primary-rgb), 0.18);
+  background: rgba(var(--color-primary-rgb), 0.04);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+}
+.ws-welcome-share-head { font-weight: 700; color: var(--color-primary-dark); font-size: 0.92rem; }
+.ws-welcome-share-text { margin: 4px 0 8px; font-size: 0.85rem; color: var(--color-text-light); }
+.ws-welcome-share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ws-welcome-share-link {
+  font-weight: 600;
+  color: var(--color-primary);
+  word-break: break-all;
+}
+.ws-welcome-share .ws-welcome-copy { white-space: nowrap; }
 .ws-welcome-list {
   list-style: none;
   padding: 0;
