@@ -6509,6 +6509,9 @@
         }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
+        // Welcome Coordinator: the "get connected" share block lives here on
+        // the To Do card (helping new families onto our comms channels).
+        if (role === 'Welcome Coordinator') h += welcomeShareBlockHtml();
         return h;
       },
       afterRender: function () {
@@ -6531,6 +6534,10 @@
         // date-gated pre-co-op outreach nudge.
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
+        // Wire the "get connected" copy-link button on the WC To Do card.
+        if (typeof wireWelcomeCopy === 'function') {
+          wireWelcomeCopy(document.getElementById('workspaceTabContent') || document);
+        }
       }
     },
     'members-summary': {
@@ -17008,6 +17015,21 @@
       });
   }
 
+  // Shareable "help new families get connected" block (Member Portal install
+  // link). Lives on the Welcome Coordinator's To Do card. The link always
+  // points at prod (what a new family opens), even when the coordinator's on dev.
+  function welcomeShareBlockHtml() {
+    var INSTALL_URL = 'https://www.rootsandwingsindy.com/install';
+    return '<div class="ws-welcome-share">' +
+      '<div class="ws-welcome-share-head">💬 Help new families get connected</div>' +
+      '<p class="ws-welcome-share-text">Share the Member Portal so they can install the app and join our chat channels:</p>' +
+      '<div class="ws-welcome-share-row">' +
+        '<a class="ws-welcome-share-link" href="' + INSTALL_URL + '" target="_blank" rel="noopener">rootsandwingsindy.com/install</a>' +
+        '<button type="button" class="btn btn-sm btn-outline-dark ws-welcome-copy" data-copy="' + INSTALL_URL + '">Copy link</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   function renderWelcomeListBody() {
     var body = document.getElementById('ws-welcome-list-body');
     if (!body) return;
@@ -17019,21 +17041,8 @@
       if (sa !== sb) return sa - sb;
       return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
-    // Shareable Member Portal install link — part of helping new families
-    // acclimate to our communication channels. The link always points at prod
-    // (what a new family should open), even when the coordinator is on dev.
-    var INSTALL_URL = 'https://www.rootsandwingsindy.com/install';
-    var shareBlock = '<div class="ws-welcome-share">' +
-      '<div class="ws-welcome-share-head">💬 Help new families get connected</div>' +
-      '<p class="ws-welcome-share-text">Share the Member Portal so they can install the app and join our chat channels:</p>' +
-      '<div class="ws-welcome-share-row">' +
-        '<a class="ws-welcome-share-link" href="' + INSTALL_URL + '" target="_blank" rel="noopener">rootsandwingsindy.com/install</a>' +
-        '<button type="button" class="btn btn-sm btn-outline-dark ws-welcome-copy" data-copy="' + INSTALL_URL + '">Copy link</button>' +
-      '</div>' +
-    '</div>';
     if (fams.length === 0) {
-      body.innerHTML = shareBlock + '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
-      wireWelcomeCopy(body);
+      body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
       return;
     }
     var STAGE_META = [
@@ -17048,8 +17057,7 @@
     fams.forEach(function (f) { stageCounts[welcomeStage(f)]++; });
     // Section header: Playfair heading + total count pill, matching the Member
     // Onboarding modal's .mo-section-h / .mo-pill pattern.
-    var h = shareBlock;
-    h += '<div class="ws-welcome-head-row">';
+    var h = '<div class="ws-welcome-head-row">';
     h += '<h4 class="ws-welcome-h">New families this season <button type="button" class="ws-welcome-count' + (_welcomeListFilter === null ? ' is-active' : '') + '" data-welcome-cfilter="all">' + fams.length + '</button></h4>';
     h += '</div>';
     // Color-coded count pills framed as to-dos — how many still need each
@@ -17121,7 +17129,6 @@
         renderWelcomeListBody();
       });
     });
-    wireWelcomeCopy(body);
   }
 
   // Copy-to-clipboard for the shareable install link (secure-context

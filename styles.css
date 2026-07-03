@@ -10178,7 +10178,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   background: rgba(var(--color-primary-rgb), 0.04);
   border-radius: 10px;
   padding: 12px 14px;
-  margin: 0 0 14px;
+  margin: 12px 0 2px;
 }
 .ws-welcome-share-head { font-weight: 700; color: var(--color-primary-dark); font-size: 0.92rem; }
 .ws-welcome-share-text { margin: 4px 0 8px; font-size: 0.85rem; color: var(--color-text-light); }
