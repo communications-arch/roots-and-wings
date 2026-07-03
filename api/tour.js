@@ -1004,12 +1004,11 @@ async function handleList(req, res) {
   const isComms      = !isMembership && await canEditAsRole(auth.email, 'Communications Director');
   const isTreasurer  = !isMembership && !isComms && await canEditAsRole(auth.email, 'Treasurer');
   const viewerCanAct = isMembership || isComms || isTreasurer;
-  // Welcome Coordinator is a committee role under the Membership Committee
-  // (supports new families) — granted the same read-only view as a board
-  // member. viewerCanAct stays false, so Actions + source-sheet link are
-  // hidden client-side and the write endpoints' own gates apply server-side.
-  const isWelcome    = !viewerCanAct && await canEditAsRole(auth.email, 'Welcome Coordinator');
-  const isBoard      = viewerCanAct || isWelcome || await isBoardMember(auth.email);
+  // The full Membership Report is board-only (Erin, 2026-07-03). Committee
+  // roles like Welcome Coordinator (not a voted board seat) no longer get it —
+  // they use the all-members community snapshot (?community=1) instead. The
+  // Welcome List (?welcome=1) is a separate endpoint with its own gate.
+  const isBoard      = viewerCanAct || await isBoardMember(auth.email);
   if (!isBoard) {
     const expectedM = await getRoleHolderEmail('Membership Director');
     const expectedC = await getRoleHolderEmail('Communications Director');
@@ -4680,11 +4679,32 @@ async function handleCommunitySnapshot(req, res) {
     } catch (nmErr) {
       console.error('Community snapshot new-member lookup failed (non-fatal):', nmErr);
     }
+    // Each kid's morning class ("Pigeons", …) from the Morning Class Builder's
+    // placements. Keyed by derived family_email + kid first name — the same
+    // derivation the builder uses (deriveFamilyName/deriveFamilyEmail), so keys
+    // line up. Non-morning kids simply have no class. Non-fatal if it fails.
+    const classByKid = {};
+    try {
+      const clsRows = await sql`
+        SELECT family_email, kid_first_name, class_group
+        FROM morning_class_assignments
+        WHERE school_year = ${season} AND class_group <> ''
+      `;
+      clsRows.forEach(c => {
+        classByKid[String(c.family_email || '').toLowerCase() + '|' + String(c.kid_first_name || '').toLowerCase()] = c.class_group;
+      });
+    } catch (clsErr) {
+      console.error('Community snapshot class lookup failed (non-fatal):', clsErr);
+    }
     const families = rows.map(r => {
       const coach = r.main_learning_coach || r.existing_family_name || '';
-      const kids = (Array.isArray(r.kids) ? r.kids : []).map(k => ({
-        name: (k && (k.name || k.first_name)) || ''
-      })).filter(k => k.name);
+      const familyName = deriveFamilyName(r.main_learning_coach, r.existing_family_name);
+      const familyEmail = String(deriveFamilyEmail(r.main_learning_coach, familyName) || '').toLowerCase();
+      const kids = (Array.isArray(r.kids) ? r.kids : []).map(k => {
+        const nm = (k && (k.name || k.first_name)) || '';
+        const first = String(nm).trim().split(/\s+/)[0].toLowerCase();
+        return { name: nm, class: (familyEmail && first) ? (classByKid[familyEmail + '|' + first] || '') : '' };
+      }).filter(k => k.name);
       const t = communityTrack(r.track, r.track_other);
       const fs = firstSeasons[String(r.email || '').toLowerCase().trim()] || '';
       const isNewMember = !!(fs && seasonLabel && fs >= seasonLabel);

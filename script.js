@@ -6708,12 +6708,10 @@
     'Treasurer': [
       { key: 'membership', title: 'Membership' }
     ],
-    // Welcome Coordinator (committee role under Membership) gets a
-    // read-only Membership report — viewerCanAct=false from the server
-    // hides the Actions column + source-sheet link.
-    'Welcome Coordinator': [
-      { key: 'membership', title: 'Membership' }
-    ],
+    // The Membership report is BOARD-ONLY (Erin, 2026-07-03). Welcome
+    // Coordinator is a committee role (not a voted board seat), so it no
+    // longer gets the report — Welcome Coordinators use the all-members
+    // community snapshot (26/27 Members card) like everyone else.
     // ALL board members get the Membership report in Reports (Erin, 2026-07-03):
     // President, Secretary, Sustaining Director + VP now hold it alongside the
     // acting roles above. Read-only for non-acting board members
@@ -6771,7 +6769,7 @@
     'Special Events Liaison': ['special-events', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
-    'Welcome Coordinator': ['todos', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
+    'Welcome Coordinator': ['todos', 'upcoming-events', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'members-summary', 'ways-to-help', 'resources']
   };
 
@@ -18734,11 +18732,18 @@
       h += '<span class="ws-roster-name">' + escapeHtml(f.name || '(family)') + (f.isNewMember ? ' <span class="ws-roster-newdot" title="New family">🌱</span>' : '') + '</span>';
       h += '<span class="ws-roster-track ' + (COMMUNITY_TRACK_PILL[f.track] || 'is-other') + '">' + escapeHtml(f.trackLabel || '') + '</span>';
       h += '</div>';
-      var members = [];
-      if (f.coach) members.push(escapeHtml(f.coach));
-      kids.forEach(function (k) { if (k && k.name) members.push(escapeHtml(k.name)); });
-      if (members.length) h += '<div class="ws-roster-members">' + members.join(' &middot; ') + '</div>';
-      h += '<div class="ws-roster-sub">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</div>';
+      // Coach on the family line; kids listed below with their class.
+      if (f.coach) h += '<div class="ws-roster-members">' + escapeHtml(f.coach) + '</div>';
+      var kidsWithNames = kids.filter(function (k) { return k && k.name; });
+      if (kidsWithNames.length) {
+        h += '<ul class="ws-roster-kids">';
+        kidsWithNames.forEach(function (k) {
+          h += '<li>' + escapeHtml(k.name) + (k.class ? ' <span class="ws-roster-class">' + escapeHtml(k.class) + '</span>' : '') + '</li>';
+        });
+        h += '</ul>';
+      } else {
+        h += '<div class="ws-roster-sub">No children listed</div>';
+      }
       h += '</li>';
     });
     h += '</ul>';

@@ -10967,6 +10967,30 @@ button.staff-role:hover {
 .ws-roster-track.is-other { background: rgba(0, 0, 0, 0.06);      color: var(--color-text-light); }
 .ws-roster-members { font-size: 0.86rem; color: var(--color-text); margin-top: 4px; word-break: break-word; }
 .ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); margin-top: 2px; }
+.ws-roster-kids {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ws-roster-kids li {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ws-roster-class {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
 .ws-waivers-table {
   width: 100%;
   border-collapse: collapse;
