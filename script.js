@@ -18733,25 +18733,23 @@
       h += '<span class="ws-roster-name">' + (f.isNewMember ? '<span class="ws-roster-newicon" title="New family">🌱</span>' : '') + escapeHtml(f.name || '(family)') + '</span>';
       h += '<span class="ws-roster-track ' + (COMMUNITY_TRACK_PILL[f.track] || 'is-other') + '">' + escapeHtml(f.trackLabel || '') + '</span>';
       h += '</div>';
-      // Coach on the family line; kids as group-color-coded chips (emoji +
-      // name + class) so each child reads as one cohesive unit.
-      if (f.coach) h += '<div class="ws-roster-members">' + escapeHtml(f.coach) + '</div>';
+      // Main Learning Coach + kids all on one wrapping row; kids are
+      // group-color-coded chips (emoji + name + class) so each child reads as
+      // one cohesive unit.
       var kidsWithNames = kids.filter(function (k) { return k && k.name; });
-      if (kidsWithNames.length) {
-        h += '<div class="ws-roster-kids">';
-        kidsWithNames.forEach(function (k) {
-          var agCls = ageGroupClass(k.class);
-          var emoji = ageGroupEmoji(k.class);
-          h += '<span class="ws-roster-kid' + (agCls ? ' ' + agCls : '') + '">';
-          if (emoji) h += '<span class="ws-roster-kid-emoji">' + emoji + '</span>';
-          h += '<span class="ws-roster-kid-name">' + escapeHtml(k.name) + '</span>';
-          if (k.class) h += '<span class="ws-roster-kid-group">' + escapeHtml(k.class) + '</span>';
-          h += '</span>';
-        });
-        h += '</div>';
-      } else {
-        h += '<div class="ws-roster-sub">No children listed</div>';
-      }
+      h += '<div class="ws-roster-people">';
+      if (f.coach) h += '<span class="ws-roster-coach">' + escapeHtml(f.coach) + '</span>';
+      kidsWithNames.forEach(function (k) {
+        var agCls = ageGroupClass(k.class);
+        var emoji = ageGroupEmoji(k.class);
+        h += '<span class="ws-roster-kid' + (agCls ? ' ' + agCls : '') + '">';
+        if (emoji) h += '<span class="ws-roster-kid-emoji">' + emoji + '</span>';
+        h += '<span class="ws-roster-kid-name">' + escapeHtml(k.name) + '</span>';
+        if (k.class) h += '<span class="ws-roster-kid-group">' + escapeHtml(k.class) + '</span>';
+        h += '</span>';
+      });
+      if (!kidsWithNames.length) h += '<span class="ws-roster-sub">No children listed</span>';
+      h += '</div>';
       h += '</li>';
     });
     h += '</ul>';

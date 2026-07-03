@@ -10966,16 +10966,22 @@ button.staff-role:hover {
 .ws-roster-track.is-both  { background: rgba(90, 107, 57, 0.14);  color: var(--color-leaf); }
 .ws-roster-track.is-other { background: rgba(0, 0, 0, 0.06);      color: var(--color-text-light); }
 .ws-roster-newicon { margin-right: 4px; }
-.ws-roster-members { font-size: 0.86rem; color: var(--color-text-light); margin-top: 3px; word-break: break-word; }
-.ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); margin-top: 4px; }
-/* Kids as cohesive, group-color-coded chips: emoji + name + class, all wearing
-   the age group's brand colour (--ag from the .ag-<Group> class). Kids with no
-   morning class fall back to a neutral grey chip. */
-.ws-roster-kids {
+.ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); }
+/* Main Learning Coach + kid chips all on one wrapping row. Kids are cohesive,
+   group-color-coded chips: emoji + name + class, wearing the age group's brand
+   colour (--ag from .ag-<Group>). Kids with no morning class → neutral grey. */
+.ws-roster-people {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 7px;
-  margin-top: 8px;
+  margin-top: 7px;
+}
+.ws-roster-coach {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-right: 2px;
 }
 .ws-roster-kid {
   display: inline-flex;
