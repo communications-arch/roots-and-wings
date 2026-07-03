@@ -17005,9 +17005,11 @@
       return;
     }
     var STAGE_META = [
-      { key: 'new',      label: 'New',            pill: 'is-new' },
-      { key: 'welcomed', label: 'Welcomed',       pill: 'is-welcomed' },
-      { key: 'done',     label: 'Met & greeted',  pill: 'is-done' }
+      // label = the family's current state (per-card badge);
+      // todo  = the action the coordinator still needs to do (top count pill).
+      { key: 'new',      label: 'New',            todo: 'To Welcome',  pill: 'is-new' },
+      { key: 'welcomed', label: 'Welcomed',       todo: 'Meet & Greet', pill: 'is-welcomed' },
+      { key: 'done',     label: 'Met & greeted',  todo: 'Done',        pill: 'is-done' }
     ];
     // Count per lifecycle stage → color-coded pill strip at the top.
     var stageCounts = [0, 0, 0];
@@ -17017,11 +17019,12 @@
     var h = '<div class="ws-welcome-head-row">';
     h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
     h += '</div>';
-    // Color-coded count pills — one per stage, same palette as the stage
-    // badges + card accents, so the whole list reads as one colour system.
+    // Color-coded count pills framed as to-dos — how many still need each
+    // action (To Welcome / Meet & Greet), plus a Done bucket for context.
+    // Same palette as the stage badges + card accents = one colour system.
     h += '<div class="ws-welcome-counts">';
     STAGE_META.forEach(function (m, i) {
-      h += '<span class="ws-welcome-cpill ' + m.pill + '"><strong>' + stageCounts[i] + '</strong> ' + m.label + '</span>';
+      h += '<span class="ws-welcome-cpill ' + m.pill + '"><strong>' + stageCounts[i] + '</strong> ' + m.todo + '</span>';
     });
     h += '</div>';
     h += '<ul class="ws-welcome-list">';
