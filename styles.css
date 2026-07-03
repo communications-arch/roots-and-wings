@@ -10927,6 +10927,46 @@ button.staff-role:hover {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
   outline: none;
 }
+/* Community roster drill-in (26/27 Members count → families). Card rows +
+   track pills share the site's .mo-row / .ws-wv-* pill language. */
+.ws-roster-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-roster-item {
+  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: #fff;
+}
+.ws-roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ws-roster-name { font-weight: 600; color: var(--color-primary-dark); font-size: 0.98rem; }
+.ws-roster-track {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.ws-roster-track.is-am    { background: rgba(224, 181, 44, 0.18); color: var(--color-accent-dark); }
+.ws-roster-track.is-pm    { background: rgba(82, 58, 121, 0.12);  color: var(--color-primary-dark, #3d2a5c); }
+.ws-roster-track.is-both  { background: rgba(90, 107, 57, 0.14);  color: var(--color-leaf); }
+.ws-roster-track.is-other { background: rgba(0, 0, 0, 0.06);      color: var(--color-text-light); }
+.ws-roster-members { font-size: 0.86rem; color: var(--color-text); margin-top: 4px; word-break: break-word; }
+.ws-roster-sub { font-size: 0.8rem; color: var(--color-text-light); margin-top: 2px; }
 .ws-waivers-table {
   width: 100%;
   border-collapse: collapse;

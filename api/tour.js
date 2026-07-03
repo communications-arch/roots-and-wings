@@ -4642,6 +4642,72 @@ async function handleWelcomeMark(body, req, res) {
   }
 }
 
+// GET ?community=1[&season=YYYY-YYYY] — a members-facing snapshot of this
+// season's registered families. Unlike the board-only Membership Report, this
+// is readable by ANY signed-in @rootsandwingsindy.com member (no role gate) and
+// returns ONLY non-sensitive fields — family name, the coach + kids' first
+// names, and the family's track — the same directory-level info members already
+// see. No email / phone / address / payment / waiver data is exposed.
+function communityTrack(track, trackOther) {
+  switch (String(track || '')) {
+    case 'Morning Only':   return { key: 'am',   label: 'AM only' };
+    case 'Afternoon Only': return { key: 'pm',   label: 'PM only' };
+    case 'Both':           return { key: 'both', label: 'AM + PM' };
+    default:               return { key: 'other', label: String(trackOther || track || 'Other') };
+  }
+}
+async function handleCommunitySnapshot(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const season = String(req.query.season || DEFAULT_SEASON);
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT r.id, r.email, r.main_learning_coach, r.existing_family_name,
+             r.kids, r.track, r.track_other, r.created_at
+      FROM registrations r
+      WHERE r.season = ${season}
+      ORDER BY r.main_learning_coach
+    `;
+    // New vs returning — same canonical rule as the Directory First-Year badge
+    // / Membership report (firstSeasonByEmail, keyed by the personal email on
+    // the registration). Degrades gracefully if the lookup fails.
+    let firstSeasons = {};
+    let seasonLabel = '';
+    try {
+      firstSeasons = await firstSeasonByEmail(sql);
+      seasonLabel = seasonToYearLabel(season);
+    } catch (nmErr) {
+      console.error('Community snapshot new-member lookup failed (non-fatal):', nmErr);
+    }
+    const families = rows.map(r => {
+      const coach = r.main_learning_coach || r.existing_family_name || '';
+      const kids = (Array.isArray(r.kids) ? r.kids : []).map(k => ({
+        name: (k && (k.name || k.first_name)) || ''
+      })).filter(k => k.name);
+      const t = communityTrack(r.track, r.track_other);
+      const fs = firstSeasons[String(r.email || '').toLowerCase().trim()] || '';
+      const isNewMember = !!(fs && seasonLabel && fs >= seasonLabel);
+      // Display name: prefer the explicit family surname, else the coach's.
+      const surname = r.existing_family_name ||
+        (coach.trim().split(/\s+/).pop() || coach);
+      return {
+        id: r.id,
+        name: surname,
+        coach: coach,
+        kids: kids,
+        track: t.key,
+        trackLabel: t.label,
+        isNewMember: isNewMember
+      };
+    });
+    return res.status(200).json({ season: season, families: families });
+  } catch (err) {
+    console.error('Community snapshot error:', err);
+    return res.status(500).json({ error: 'Could not load the community snapshot.' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -4661,6 +4727,7 @@ module.exports = async function handler(req, res) {
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
+    if (req.query.community === '1' || req.query.community === 'true') return handleCommunitySnapshot(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 

@@ -6528,24 +6528,19 @@
       }
     },
     'members-summary': {
-      // At-a-glance card of this season's registered families for the whole
-      // board. Headline counts (returning/new families, kids by track) are
-      // painted by loadMembersSummary() in afterRender from /api/tour?list=
-      // registrations — so it reflects new sign-ups on each workspace load
-      // and rolls the season label/data over automatically when next year's
-      // registration reopens (the endpoint is scoped to the active season).
-      // "View family details" opens the Membership Report (the operational
-      // table for acting roles; read-only — Actions hidden — for the rest,
-      // via viewerCanAct).
+      // A community snapshot of this season's registered families for EVERY
+      // member (roleGate null → renders in the shared section below My Links).
+      // Headline counts (returning/new families, kids by track) are painted by
+      // loadMembersSummary() from the members-facing /api/tour?community=1
+      // endpoint (safe, non-sensitive fields only — no board gate). Clicking a
+      // count opens a member-friendly roster (family name, members, track).
       title: SEASON_SHORT + ' Members',
-      roleGate: ['President', 'Vice President', 'Secretary', 'Sustaining Director', 'Treasurer', 'Communications Director', 'Membership Director', 'Welcome Coordinator'],
+      roleGate: null,
       render: function () {
-        var h = '<p class="ws-body-hint">A live snapshot of this season’s registered families.</p>';
+        var h = '<p class="ws-body-hint">A snapshot of our co-op community this season.</p>';
         h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
-        h += '<p class="ws-part-meter-caption ws-msum-loading">Loading members…</p>';
+        h += '<p class="ws-part-meter-caption ws-msum-loading">Loading community…</p>';
         h += '</div>';
-        // "View Family Details" moved to the Reports card ("Membership") for
-        // all board members. Clicking a count still drills into that report.
         return h;
       },
       afterRender: function () {
@@ -6766,18 +6761,18 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
-    'President': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'members-summary', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'members-summary', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Treasurer': ['todos', 'members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'members-summary', 'reports', 'forms', 'pm-scheduling', 'special-events', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Secretary': ['members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['members-summary', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Special Events Liaison': ['special-events', 'members-summary', 'my-links', 'ways-to-help', 'resources'],
+    'President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'forms', 'pm-scheduling', 'special-events', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Secretary': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Special Events Liaison': ['special-events', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
-    'Welcome Coordinator': ['todos', 'members-summary', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
-    '*': ['my-links', 'ways-to-help', 'resources']
+    'Welcome Coordinator': ['todos', 'upcoming-events', 'reports', 'my-links', 'ways-to-help', 'resources'],
+    '*': ['my-links', 'members-summary', 'ways-to-help', 'resources']
   };
 
   // Resolve the ordered widget list for a user: union of defaults for each
@@ -18615,7 +18610,7 @@
     if (!body) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) { body.innerHTML = '<p class="ws-empty">Sign in to see member counts.</p>'; return; }
-    fetch('/api/tour?list=registrations', { headers: rwAuthHeaders() })
+    fetch('/api/tour?community=1', { headers: rwAuthHeaders() })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
           .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
@@ -18625,42 +18620,42 @@
         if (!el) return;
         if (!res.ok) {
           var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
-          el.innerHTML = '<p class="ws-empty ws-wv-err">Could not load members: ' + escapeHtmlWs(msg) + '</p>';
+          el.innerHTML = '<p class="ws-empty ws-wv-err">Could not load community: ' + escapeHtmlWs(msg) + '</p>';
           return;
         }
-        var regs = Array.isArray(res.data && res.data.registrations) ? res.data.registrations : [];
+        var fams = Array.isArray(res.data && res.data.families) ? res.data.families : [];
+        // Cache for the roster drill-in modal.
+        _communityRoster = fams;
 
         // Roll the card title to whatever season the server is serving.
-        var dataSeason = (regs.length && regs[0].season) ? regs[0].season : ACTIVE_YEAR.label;
+        var dataSeason = (res.data && res.data.season) ? res.data.season : ACTIVE_YEAR.label;
         var titleEl = document.querySelector('[data-widget-type="members-summary"] .workspace-card-header h4');
         if (titleEl) titleEl.textContent = seasonShortLabel(dataSeason) + ' Members';
 
-        if (regs.length === 0) {
-          el.innerHTML = '<p class="ws-empty">No registrations yet this season.</p>';
+        if (fams.length === 0) {
+          el.innerHTML = '<p class="ws-empty">No families registered yet this season.</p>';
           return;
         }
 
-        var total = regs.length;
-        var newFams = regs.filter(function (r) { return !!r.isNewMember; }).length;
+        var total = fams.length;
+        var newFams = fams.filter(function (f) { return !!f.isNewMember; }).length;
         var returningFams = total - newFams;
+        // Track is family-level; every kid in a family shares the family track.
         var kidsAm = 0, kidsPm = 0, kidsBoth = 0, kidsOther = 0, totalKids = 0;
-        regs.forEach(function (r) {
-          var kids = [];
-          try { kids = Array.isArray(r.kids) ? r.kids : (typeof r.kids === 'string' ? JSON.parse(r.kids) : []); } catch (e) { kids = []; }
-          var n = kids.length;
+        fams.forEach(function (f) {
+          var n = Array.isArray(f.kids) ? f.kids.length : 0;
           totalKids += n;
-          var t = String(r.track || '');
-          if      (t === 'Morning Only')   kidsAm   += n;
-          else if (t === 'Afternoon Only') kidsPm   += n;
-          else if (t === 'Both')           kidsBoth += n;
-          else                             kidsOther += n;
+          if      (f.track === 'am')   kidsAm   += n;
+          else if (f.track === 'pm')   kidsPm   += n;
+          else if (f.track === 'both') kidsBoth += n;
+          else                         kidsOther += n;
         });
 
-        // Each stat is a button that opens the Membership Report drilled into
-        // that segment (new / returning / all). Clicking a number → details.
+        // Each stat is a button that opens the community roster drilled into
+        // that segment (new / returning / all). Clicking a number → families.
         function msumTile(num, label, filter, extra) {
           return '<button type="button" class="ws-msum-stat ws-msum-click' + (extra ? ' ' + extra : '') +
-            '" data-msum-filter="' + filter + '" title="View these families">' +
+            '" data-msum-filter="' + filter + '" title="See these families">' +
             '<span class="ws-msum-num">' + num + '</span>' +
             '<span class="ws-msum-lab">' + label + '</span></button>';
         }
@@ -18671,8 +18666,7 @@
         h += msumTile(totalKids, (totalKids === 1 ? 'Child' : 'Children'), 'all', '');
         h += '</div>';
         // Track row reuses the global count-strip pills (.rd-counts +
-        // .ws-track-count) — the exact treatment the Membership Report's
-        // own "Kids AM only" strip uses, so the two read as one system.
+        // .ws-track-count) so it reads as one system with the rest of the site.
         h += '<div class="rd-counts" aria-label="Children by track">';
         h += '<span class="ws-track-count">' + kidsAm + ' Kids AM only</span>';
         h += '<span class="ws-track-count">' + kidsPm + ' Kids PM only</span>';
@@ -18680,21 +18674,75 @@
         if (kidsOther) h += '<span class="ws-track-count">' + kidsOther + ' Kids Other</span>';
         h += '</div>';
         el.innerHTML = h;
-        // Wire the stat tiles → open the Membership Report for that segment.
-        // Painted async into #ws-msum-body, so bind here (the container-level
-        // [data-report-key] handler doesn't reach dynamically-added nodes).
+        // Wire the stat tiles → open the community roster for that segment.
+        // Painted async into #ws-msum-body, so bind here.
         el.querySelectorAll('.ws-msum-click').forEach(function (btn) {
           btn.addEventListener('click', function () {
-            if (typeof showMembershipReportModal !== 'function') return;
-            showMembershipReportModal({ initialFilter: 'all', initialNewFilter: this.getAttribute('data-msum-filter') || 'all' });
+            if (typeof showCommunityRosterModal !== 'function') return;
+            showCommunityRosterModal(this.getAttribute('data-msum-filter') || 'all');
           });
         });
       })
       .catch(function (err) {
         console.warn('[loadMembersSummary] network error:', err);
         var el = document.getElementById('ws-msum-body');
-        if (el) el.innerHTML = '<p class="ws-empty">Could not load members right now.</p>';
+        if (el) el.innerHTML = '<p class="ws-empty">Could not load the community snapshot right now.</p>';
       });
+  }
+
+  // Cached community roster (safe, members-facing) from loadMembersSummary,
+  // reused by the drill-in modal so it opens instantly.
+  var _communityRoster = [];
+
+  // Member-friendly roster drill-in: family name, members (coach + kids), and
+  // the family's AM/PM/Both track. Filter = 'new' | 'returning' | 'all'.
+  function showCommunityRosterModal(filter) {
+    filter = filter || 'all';
+    var titleWord = filter === 'new' ? 'New Families'
+      : (filter === 'returning' ? 'Returning Families' : 'Our Families');
+    var body = renderReportModal({
+      title: titleWord,
+      subtitle: 'Families in our co-op community this season, with their morning/afternoon track.',
+      meta: '',
+      icons: [],
+      bodyId: 'ws-community-roster-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading families…</p>'
+    });
+    if (!body) return;
+    renderCommunityRosterBody(filter);
+  }
+
+  var COMMUNITY_TRACK_PILL = { am: 'is-am', pm: 'is-pm', both: 'is-both', other: 'is-other' };
+  function renderCommunityRosterBody(filter) {
+    var body = document.getElementById('ws-community-roster-body');
+    if (!body) return;
+    var fams = _communityRoster.filter(function (f) {
+      if (filter === 'new') return !!f.isNewMember;
+      if (filter === 'returning') return !f.isNewMember;
+      return true;
+    }).sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    if (fams.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No families in this group yet.</p>';
+      return;
+    }
+    var h = '<p class="ws-body-hint">' + fams.length + ' famil' + (fams.length === 1 ? 'y' : 'ies') + '</p>';
+    h += '<ul class="ws-roster-list">';
+    fams.forEach(function (f) {
+      var kids = Array.isArray(f.kids) ? f.kids : [];
+      h += '<li class="ws-roster-item">';
+      h += '<div class="ws-roster-head">';
+      h += '<span class="ws-roster-name">' + escapeHtml(f.name || '(family)') + (f.isNewMember ? ' <span class="ws-roster-newdot" title="New family">🌱</span>' : '') + '</span>';
+      h += '<span class="ws-roster-track ' + (COMMUNITY_TRACK_PILL[f.track] || 'is-other') + '">' + escapeHtml(f.trackLabel || '') + '</span>';
+      h += '</div>';
+      var members = [];
+      if (f.coach) members.push(escapeHtml(f.coach));
+      kids.forEach(function (k) { if (k && k.name) members.push(escapeHtml(k.name)); });
+      if (members.length) h += '<div class="ws-roster-members">' + members.join(' &middot; ') + '</div>';
+      h += '<div class="ws-roster-sub">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</div>';
+      h += '</li>';
+    });
+    h += '</ul>';
+    body.innerHTML = h;
   }
 
   function loadPmSubmissionsPendingCount() {
