@@ -4526,7 +4526,8 @@ async function handleWelcomeListGet(req, res) {
     const rows = await sql`
       SELECT r.id, r.email, r.main_learning_coach, r.existing_family_name,
              r.phone, r.track, r.track_other, r.kids, r.created_at,
-             w.welcomed_at, w.welcomed_by, w.note AS welcome_note
+             w.welcomed_at, w.welcomed_by, w.note AS welcome_note,
+             w.met_at, w.met_by
       FROM registrations r
       LEFT JOIN welcome_outreach w ON w.registration_id = r.id
       WHERE r.season = ${season}
@@ -4557,7 +4558,9 @@ async function handleWelcomeListGet(req, res) {
       created_at: r.created_at,
       welcomed_at: r.welcomed_at || null,
       welcomed_by: r.welcomed_by || '',
-      welcome_note: r.welcome_note || ''
+      welcome_note: r.welcome_note || '',
+      met_at: r.met_at || null,
+      met_by: r.met_by || ''
     }));
     return res.status(200).json({ families: out });
   } catch (err) {
@@ -4566,8 +4569,11 @@ async function handleWelcomeListGet(req, res) {
   }
 }
 
-// POST kind='welcome-mark' — record that a family has been welcomed
-// (upsert), or kind='welcome-unmark' — clear it (delete the row).
+// Welcome lifecycle stage updates. kind is one of:
+//   welcome-mark        — record the initial welcome (upsert)
+//   welcome-unmark      — clear the whole row (back to not-welcomed)
+//   welcome-meet-mark   — record the Meet & Greet (implies welcomed)
+//   welcome-meet-unmark — clear just the Meet & Greet, keep welcomed
 async function handleWelcomeMark(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -4583,25 +4589,53 @@ async function handleWelcomeMark(body, req, res) {
   if (!Number.isInteger(id) || id < 1) {
     return res.status(400).json({ error: 'id is required.' });
   }
-  const unmark = body.kind && String(body.kind).toLowerCase() === 'welcome-unmark';
+  const kind = String(body.kind || '').toLowerCase();
   const note = String(body.note || '').trim().slice(0, 1000);
   const sql = getSql();
   try {
     // realEmail (not the View-As email) is the audit trail.
     const by = String(auth.realEmail || auth.email || '');
-    if (unmark) {
+
+    if (kind === 'welcome-unmark') {
       await sql`DELETE FROM welcome_outreach WHERE registration_id = ${id}`;
-      return res.status(200).json({ ok: true, welcomed_at: null });
+      return res.status(200).json({ ok: true, welcomed_at: null, met_at: null });
     }
+
+    if (kind === 'welcome-meet-unmark') {
+      // Keep the welcome; just clear the Meet & Greet stage.
+      const rows = await sql`
+        UPDATE welcome_outreach SET met_at = NULL, met_by = ''
+        WHERE registration_id = ${id}
+        RETURNING welcomed_at, welcomed_by, met_at, met_by
+      `;
+      const row = rows[0] || {};
+      return res.status(200).json({ ok: true, welcomed_at: row.welcomed_at || null, welcomed_by: row.welcomed_by || '', met_at: null, met_by: '' });
+    }
+
+    if (kind === 'welcome-meet-mark') {
+      // Record the Meet & Greet. Upsert so it also stamps the welcome if the
+      // family somehow skipped straight to it (welcomed_at defaults to NOW()).
+      const rows = await sql`
+        INSERT INTO welcome_outreach (registration_id, welcomed_by, met_at, met_by)
+        VALUES (${id}, ${by}, NOW(), ${by})
+        ON CONFLICT (registration_id)
+        DO UPDATE SET met_at = NOW(), met_by = ${by}
+        RETURNING welcomed_at, welcomed_by, met_at, met_by
+      `;
+      const row = rows[0] || {};
+      return res.status(200).json({ ok: true, welcomed_at: row.welcomed_at || null, welcomed_by: row.welcomed_by || '', met_at: row.met_at || null, met_by: row.met_by || by });
+    }
+
+    // Default: welcome-mark — record the initial welcome.
     const rows = await sql`
       INSERT INTO welcome_outreach (registration_id, welcomed_at, welcomed_by, note)
       VALUES (${id}, NOW(), ${by}, ${note})
       ON CONFLICT (registration_id)
       DO UPDATE SET welcomed_at = NOW(), welcomed_by = ${by}, note = ${note}
-      RETURNING welcomed_at, welcomed_by
+      RETURNING welcomed_at, welcomed_by, met_at, met_by
     `;
     const row = rows[0] || {};
-    return res.status(200).json({ ok: true, welcomed_at: row.welcomed_at || null, welcomed_by: row.welcomed_by || by });
+    return res.status(200).json({ ok: true, welcomed_at: row.welcomed_at || null, welcomed_by: row.welcomed_by || by, met_at: row.met_at || null, met_by: row.met_by || '' });
   } catch (err) {
     console.error('Welcome List mark error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -4660,7 +4694,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
-    if (kind === 'welcome-mark' || kind === 'welcome-unmark') return handleWelcomeMark(body, req, res);
+    if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||
+        kind === 'welcome-meet-mark' || kind === 'welcome-meet-unmark') return handleWelcomeMark(body, req, res);
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 

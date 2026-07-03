@@ -1240,6 +1240,10 @@ CREATE TABLE IF NOT EXISTS welcome_outreach (
   welcomed_by     TEXT NOT NULL DEFAULT '',
   note            TEXT NOT NULL DEFAULT ''
 );
+-- Welcome is a lifecycle, not one-and-done: after the initial welcome the
+-- Welcome Coordinator does a Meet & Greet. met_at/met_by track that stage.
+ALTER TABLE welcome_outreach ADD COLUMN IF NOT EXISTS met_at TIMESTAMPTZ;
+ALTER TABLE welcome_outreach ADD COLUMN IF NOT EXISTS met_by TEXT NOT NULL DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- AM class teaching assignments (participation sheet→DB migration, Phase B1)

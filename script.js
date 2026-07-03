@@ -16926,10 +16926,22 @@
   }
 
   // ── Welcome List (Welcome Coordinator) ────────────────────────────
-  // This season's NEW families + a "mark as welcomed" toggle. Reads
-  // /api/tour?welcome=1; the toggle POSTs welcome-mark / welcome-unmark
-  // against the welcome_outreach table (separate from Comms onboarding).
+  // This season's NEW families through the welcome LIFECYCLE:
+  //   new → Welcomed → Meet & Greet (done).
+  // Reads /api/tour?welcome=1; actions POST welcome-mark / welcome-unmark /
+  // welcome-meet-mark / welcome-meet-unmark against welcome_outreach
+  // (separate from the Comms onboarding queue).
   var _welcomeListState = { families: [] };
+
+  // A family's lifecycle stage: 0 = new (not welcomed), 1 = welcomed (needs
+  // Meet & Greet), 2 = met & greeted (done). Families are "in progress" until
+  // stage 2 — that's what the To Do counts.
+  function welcomeStage(f) {
+    if (f && f.met_at) return 2;
+    if (f && f.welcomed_at) return 1;
+    return 0;
+  }
+  function welcomeInProgress(f) { return welcomeStage(f) < 2; }
   // Persists the "Welcome New Members" To Do count/visibility across
   // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState).
   // Cross-page-load instant paint is handled generically by
@@ -16981,26 +16993,33 @@
     var body = document.getElementById('ws-welcome-list-body');
     if (!body) return;
     var fams = _welcomeListState.families.slice();
-    // Not-yet-welcomed float to the top, then most recent registration first.
+    // Earlier lifecycle stages float to the top (new before welcomed before
+    // done), then most recent registration first within a stage.
     fams.sort(function (a, b) {
-      var aw = a.welcomed_at ? 1 : 0, bw = b.welcomed_at ? 1 : 0;
-      if (aw !== bw) return aw - bw;
+      var sa = welcomeStage(a), sb = welcomeStage(b);
+      if (sa !== sb) return sa - sb;
       return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     if (fams.length === 0) {
       body.innerHTML = '<p class="ws-empty">No new families this season yet. New registrations will appear here.</p>';
       return;
     }
-    var pending = fams.filter(function (f) { return !f.welcomed_at; }).length;
-    var h = '<p class="ws-body-hint">' + pending + ' to welcome &middot; ' + fams.length + ' new famil' + (fams.length === 1 ? 'y' : 'ies') + ' this season.</p>';
+    var toWelcome = fams.filter(function (f) { return welcomeStage(f) === 0; }).length;
+    var toMeet = fams.filter(function (f) { return welcomeStage(f) === 1; }).length;
+    var summ = [];
+    if (toWelcome) summ.push(toWelcome + ' to welcome');
+    if (toMeet) summ.push(toMeet + ' for meet &amp; greet');
+    if (!summ.length) summ.push('all caught up');
+    var h = '<p class="ws-body-hint">' + summ.join(' &middot; ') + ' &middot; ' + fams.length + ' new famil' + (fams.length === 1 ? 'y' : 'ies') + ' this season.</p>';
     h += '<ul class="ws-welcome-list">';
     fams.forEach(function (f) {
-      var done = !!f.welcomed_at;
+      var stage = welcomeStage(f);
       var kids = Array.isArray(f.kids) ? f.kids : [];
       var kidNames = kids.map(function (k) { return escapeHtml(k.name || k.first_name || ''); }).filter(Boolean).join(', ');
-      h += '<li class="ws-welcome-item' + (done ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
+      var icon = stage === 2 ? '✅ ' : (stage === 1 ? '👋 ' : '🌱 ');
+      h += '<li class="ws-welcome-item' + (stage === 2 ? ' ws-welcome-done' : '') + '" data-id="' + f.id + '">';
       h += '<div class="ws-welcome-main">';
-      h += '<div class="ws-welcome-name">' + (done ? '✅ ' : '🌱 ') + escapeHtml(f.name || '(no name)') + '</div>';
+      h += '<div class="ws-welcome-name">' + icon + escapeHtml(f.name || '(no name)') + '</div>';
       var contact = [];
       if (f.email) contact.push('<a href="mailto:' + escapeHtml(f.email) + '">' + escapeHtml(f.email) + '</a>');
       if (f.phone) contact.push('<a href="tel:' + escapeHtml(f.phone) + '">' + escapeHtml(f.phone) + '</a>');
@@ -17009,60 +17028,82 @@
       if (f.track) sub.push(escapeHtml(f.track));
       if (kids.length) sub.push(kids.length + ' kid' + (kids.length === 1 ? '' : 's') + (kidNames ? ' (' + kidNames + ')' : ''));
       if (sub.length) h += '<div class="ws-welcome-sub">' + sub.join(' &middot; ') + '</div>';
-      if (done) h += '<div class="ws-welcome-stamp">Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
+      // Stage stamps (completed steps).
+      if (f.welcomed_at) h += '<div class="ws-welcome-stamp">Welcomed ' + escapeHtml(welcomeFmtDate(f.welcomed_at)) + (f.welcomed_by ? ' by ' + escapeHtml(f.welcomed_by) : '') + '</div>';
+      if (f.met_at) h += '<div class="ws-welcome-stamp">Met &amp; greeted ' + escapeHtml(welcomeFmtDate(f.met_at)) + (f.met_by ? ' by ' + escapeHtml(f.met_by) : '') + '</div>';
       h += '</div>';
+      // Action area: primary next-step button + undo links for done stages.
       h += '<div class="ws-welcome-action">';
-      h += '<button type="button" class="btn btn-sm ' + (done ? 'btn-outline-dark' : 'btn-primary') + ' ws-welcome-toggle" data-id="' + f.id + '" data-done="' + (done ? '1' : '0') + '">' + (done ? 'Undo' : 'Mark welcomed') + '</button>';
+      if (stage === 0) {
+        h += welcomeActBtn(f.id, 'welcome-mark', 'Mark welcomed', 'btn-primary');
+      } else if (stage === 1) {
+        h += welcomeActBtn(f.id, 'welcome-meet-mark', 'Log Meet &amp; Greet', 'btn-primary');
+        h += welcomeActBtn(f.id, 'welcome-unmark', 'Undo welcome', 'btn-outline-dark');
+      } else {
+        h += welcomeActBtn(f.id, 'welcome-meet-unmark', 'Undo Meet &amp; Greet', 'btn-outline-dark');
+      }
       h += '</div>';
       h += '</li>';
     });
     h += '</ul>';
     body.innerHTML = h;
-    body.querySelectorAll('.ws-welcome-toggle').forEach(function (btn) {
+    body.querySelectorAll('.ws-welcome-act').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        welcomeListToggle(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-done') !== '1', btn);
+        welcomeStageAction(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-kind'), btn);
       });
     });
   }
 
-  function welcomeListToggle(id, mark, btn) {
-    if (!id) return;
+  function welcomeActBtn(id, kind, label, cls) {
+    return '<button type="button" class="btn btn-sm ' + cls + ' ws-welcome-act" data-id="' + id + '" data-kind="' + kind + '">' + label + '</button>';
+  }
+
+  // Recount the "in progress" families (not yet through Meet & Greet) and
+  // update the To Do badge — no extra fetch.
+  function syncWelcomeTodoFromState() {
+    applyWelcomeTodo(_welcomeListState.families.filter(welcomeInProgress).length);
+  }
+
+  function welcomeStageAction(id, kind, btn) {
+    if (!id || !kind) return;
     btn.disabled = true;
-    var prev = btn.textContent;
-    btn.textContent = mark ? 'Saving…' : 'Removing…';
+    var prev = btn.innerHTML;
+    btn.textContent = 'Saving…';
     fetch('/api/tour', {
       method: 'POST',
       headers: rwAuthHeaders(true),
-      body: JSON.stringify({ kind: mark ? 'welcome-mark' : 'welcome-unmark', id: id })
+      body: JSON.stringify({ kind: kind, id: id })
     })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
       .then(function (r) {
         if (!r.ok) {
-          btn.disabled = false; btn.textContent = prev;
+          btn.disabled = false; btn.innerHTML = prev;
           alert((r.data && r.data.error) || 'Could not update.');
           return;
         }
         var fam = _welcomeListState.families.filter(function (f) { return f.id === id; })[0];
         if (fam) {
-          fam.welcomed_at = mark ? (r.data.welcomed_at || new Date().toISOString()) : null;
-          fam.welcomed_by = mark ? (r.data.welcomed_by || '') : '';
+          // Server returns the authoritative welcomed_at/met_at after the op.
+          fam.welcomed_at = r.data.welcomed_at || null;
+          fam.welcomed_by = r.data.welcomed_by || '';
+          fam.met_at = r.data.met_at || null;
+          fam.met_by = r.data.met_by || '';
         }
         renderWelcomeListBody();
-        // Keep the To Do badge in sync live (no extra fetch).
-        var pending = _welcomeListState.families.filter(function (f) { return !f.welcomed_at; }).length;
-        applyWelcomeTodo(pending);
+        syncWelcomeTodoFromState();
       })
       .catch(function (err) {
-        btn.disabled = false; btn.textContent = prev;
+        btn.disabled = false; btn.innerHTML = prev;
         alert('Network error: ' + (err.message || 'unknown'));
       });
   }
 
   // ── "Welcome New Members" To Do (Welcome Coordinator) ──────────────
   // The Welcome List now lives behind a To Do action instead of a always-on
-  // card. loadWelcomeTodoCount() sets the badge; the item shows only while
-  // there are families still to welcome (collapses to "all caught up" once
-  // every new family is marked). Clicking it opens the list in a modal.
+  // card. loadWelcomeTodoCount() sets the badge; the item shows while any new
+  // family is still IN PROGRESS through the lifecycle (not yet welcomed OR
+  // welcomed-but-not-met), and collapses to "all caught up" once every family
+  // has completed the Meet & Greet. Clicking it opens the list in a modal.
   function applyWelcomeTodo(count) {
     _welcomeTodoState.count = count;
     _welcomeTodoState.visible = count > 0;
@@ -17083,7 +17124,7 @@
         var fams = Array.isArray(data.families) ? data.families : [];
         // Cache so the modal opens instantly without a second fetch.
         _welcomeListState.families = fams;
-        applyWelcomeTodo(fams.filter(function (f) { return !f.welcomed_at; }).length);
+        applyWelcomeTodo(fams.filter(welcomeInProgress).length);
       })
       .catch(function () { /* silent — item stays as-is */ });
   }
@@ -17091,7 +17132,7 @@
   function showWelcomeListModal() {
     var body = renderReportModal({
       title: 'Welcome New Members',
-      subtitle: 'New families this season. Reach out to welcome them, then mark them off. (Separate from the Comms onboarding queue.)',
+      subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log a Meet & Greet. (Separate from the Comms onboarding queue.)',
       meta: '',
       icons: [],
       bodyId: 'ws-welcome-list-body',
