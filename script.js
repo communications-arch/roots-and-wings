@@ -6440,16 +6440,20 @@
       title: 'To Do',
       roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President', 'Welcome Coordinator'],
       render: function (prefs, roles, role) {
-        // Welcome Coordinator: their primary To Dos ARE the welcome tasks, so
-        // render the Welcome List inline in this card (not behind a modal).
-        if (role === 'Welcome Coordinator') {
-          var wh = '<p class="ws-body-hint">Welcome each new family, then log their Orientation.</p>';
-          wh += '<div id="ws-todo-welcome-outreach-banner" class="ws-welcome-outreach-banner" hidden></div>';
-          wh += '<div id="ws-welcome-list-body" class="ws-welcome-inline"><p class="ws-part-meter-caption ws-msum-loading">Loading new families…</p></div>';
-          return wh;
-        }
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
+        if (role === 'Welcome Coordinator') {
+          // Welcome tasks split by lifecycle stage — each count links to the
+          // Welcome List filtered to those families. Counts persist across
+          // re-renders via _welcomeStageCounts (no flicker).
+          var toWelcome = (_welcomeStageCounts && _welcomeStageCounts[0]) || 0;
+          var toOrient  = (_welcomeStageCounts && _welcomeStageCounts[1]) || 0;
+          h += '<li id="ws-todo-welcome-towelcome-item"' + (toWelcome > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="0"><span class="ws-link-pre-count" id="ws-welcome-towelcome-count">' + toWelcome + '</span><span class="ws-link-icon">🌱</span><span>To Welcome</span></button></li>';
+          h += '<li id="ws-todo-welcome-orientation-item"' + (toOrient > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="1"><span class="ws-link-pre-count" id="ws-welcome-orientation-count">' + toOrient + '</span><span class="ws-link-icon">👋</span><span>Orientation</span></button></li>';
+          // Date-gated pre-co-op outreach nudge → opens the full list.
+          var woHidden = !(_welcomeOutreachTodoState && _welcomeOutreachTodoState.visible);
+          h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter=""><span class="ws-link-icon">💛</span><span>Reach out to new families — co-op starts soon</span></button></li>';
+        }
         if (role === 'Treasurer') {
           h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-pre-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
         }
@@ -6523,9 +6527,9 @@
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
-        // Welcome Coordinator: render the Welcome List inline (self-gates on
-        // #ws-welcome-list-body) + the date-gated pre-co-op outreach banner.
-        if (typeof loadWelcomeList === 'function') loadWelcomeList();
+        // Welcome Coordinator: per-stage counts on the To Do card + the
+        // date-gated pre-co-op outreach nudge.
+        if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
       }
     },
@@ -13981,7 +13985,10 @@
     else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
     else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
-    else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') showWelcomeListModal();
+    else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') {
+      var wf = btn.getAttribute('data-welcome-filter');
+      showWelcomeListModal(wf === '0' ? 0 : (wf === '1' ? 1 : (wf === '2' ? 2 : null)));
+    }
     else if (action === 'waivers-pending' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
     else if (action === 'treasurer-pending-payments' && typeof showMembershipReportModal === 'function') {
       // Open the Membership Report pre-scoped to pending payments.
@@ -16949,6 +16956,13 @@
   // Cross-page-load instant paint is handled generically by
   // snapshotTodoState/restoreTodoSnapshot.
   var _welcomeTodoState = { visible: false, count: 0 };
+  // Per-stage To Do counts [toWelcome, orientation, done] — persisted across
+  // workspace re-renders so the "To Welcome" / "Orientation" To Do items paint
+  // their last-known counts without flicker.
+  var _welcomeStageCounts = [0, 0, 0];
+  // Stage filter the Welcome List modal is currently showing: null = all,
+  // 0 = To Welcome, 1 = Orientation, 2 = done.
+  var _welcomeListFilter = null;
   // Same, for the date-gated "Reach out to new families — co-op starts soon"
   // pre-co-op outreach reminder.
   var _welcomeOutreachTodoState = { visible: false };
@@ -17036,18 +17050,27 @@
     // Onboarding modal's .mo-section-h / .mo-pill pattern.
     var h = shareBlock;
     h += '<div class="ws-welcome-head-row">';
-    h += '<h4 class="ws-welcome-h">New families this season <span class="ws-welcome-count">' + fams.length + '</span></h4>';
+    h += '<h4 class="ws-welcome-h">New families this season <button type="button" class="ws-welcome-count' + (_welcomeListFilter === null ? ' is-active' : '') + '" data-welcome-cfilter="all">' + fams.length + '</button></h4>';
     h += '</div>';
     // Color-coded count pills framed as to-dos — how many still need each
-    // action (To Welcome / Orientation), plus a Done bucket for context.
-    // Same palette as the stage badges + card accents = one colour system.
+    // action (To Welcome / Orientation), plus a Done bucket for context. Also
+    // clickable filters: click one to show just those families (the To Do card
+    // items open the list pre-filtered this way).
     h += '<div class="ws-welcome-counts">';
     STAGE_META.forEach(function (m, i) {
-      h += '<span class="ws-welcome-cpill ' + m.pill + '"><strong>' + stageCounts[i] + '</strong> ' + m.todo + '</span>';
+      var active = (_welcomeListFilter === i) ? ' is-active' : '';
+      h += '<button type="button" class="ws-welcome-cpill ' + m.pill + active + '" data-welcome-cfilter="' + i + '"><strong>' + stageCounts[i] + '</strong> ' + m.todo + '</button>';
     });
     h += '</div>';
+    // Apply the active stage filter (null = show all).
+    var shownFams = fams.filter(function (f) {
+      return _welcomeListFilter === null || welcomeStage(f) === _welcomeListFilter;
+    });
+    if (shownFams.length === 0) {
+      h += '<p class="ws-empty">No families in this group right now.</p>';
+    }
     h += '<ul class="ws-welcome-list">';
-    fams.forEach(function (f) {
+    shownFams.forEach(function (f) {
       var stage = welcomeStage(f);
       var meta = STAGE_META[stage];
       var kids = Array.isArray(f.kids) ? f.kids : [];
@@ -17090,6 +17113,14 @@
         welcomeStageAction(parseInt(btn.getAttribute('data-id'), 10), btn.getAttribute('data-kind'), btn);
       });
     });
+    // Clickable count pills → filter the list by stage (or 'all').
+    body.querySelectorAll('[data-welcome-cfilter]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var v = this.getAttribute('data-welcome-cfilter');
+        _welcomeListFilter = (v === 'all') ? null : parseInt(v, 10);
+        renderWelcomeListBody();
+      });
+    });
     wireWelcomeCopy(body);
   }
 
@@ -17125,10 +17156,12 @@
     return '<button type="button" class="btn btn-sm ' + cls + ' ws-welcome-act" data-id="' + id + '" data-kind="' + kind + '">' + label + '</button>';
   }
 
-  // Recount the "in progress" families (not yet through Orientation) and
-  // update the To Do badge — no extra fetch.
+  // Recount per stage from the cached families and refresh the To Do items —
+  // no extra fetch (called after a stage action toggles a family).
   function syncWelcomeTodoFromState() {
-    applyWelcomeTodo(_welcomeListState.families.filter(welcomeInProgress).length);
+    var counts = [0, 0, 0];
+    _welcomeListState.families.forEach(function (f) { counts[welcomeStage(f)]++; });
+    applyWelcomeStageCounts(counts);
   }
 
   function welcomeStageAction(id, kind, btn) {
@@ -17165,24 +17198,25 @@
       });
   }
 
-  // ── "Welcome New Members" To Do (Welcome Coordinator) ──────────────
-  // The Welcome List now lives behind a To Do action instead of a always-on
-  // card. loadWelcomeTodoCount() sets the badge; the item shows while any new
-  // family is still IN PROGRESS through the lifecycle (not yet welcomed OR
-  // welcomed-but-not-met), and collapses to "all caught up" once every family
-  // has completed the Orientation. Clicking it opens the list in a modal.
-  function applyWelcomeTodo(count) {
-    _welcomeTodoState.count = count;
-    _welcomeTodoState.visible = count > 0;
-    var item = document.getElementById('ws-todo-welcome-item');
-    var pill = document.getElementById('ws-welcome-todo-count');
+  // ── Welcome To Do items (Welcome Coordinator) ─────────────────────
+  // Two per-stage count items on the To Do card — "N To Welcome" and
+  // "M Orientation" — each opening the Welcome List filtered to those families.
+  // Each item hides when its count is 0.
+  function applyWelcomeStageCounts(counts) {
+    _welcomeStageCounts = counts || [0, 0, 0];
+    setWelcomeCountItem('ws-todo-welcome-towelcome-item', 'ws-welcome-towelcome-count', _welcomeStageCounts[0]);
+    setWelcomeCountItem('ws-todo-welcome-orientation-item', 'ws-welcome-orientation-count', _welcomeStageCounts[1]);
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+  function setWelcomeCountItem(itemId, pillId, count) {
+    var item = document.getElementById(itemId);
+    var pill = document.getElementById(pillId);
     if (pill) pill.textContent = count;
     if (item) item.hidden = count <= 0;
-    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
   function loadWelcomeTodoCount() {
-    var item = document.getElementById('ws-todo-welcome-item');
+    var item = document.getElementById('ws-todo-welcome-towelcome-item');
     if (!item) return; // not the Welcome Coordinator's tab
     fetch('/api/tour?welcome=1', { headers: rwAuthHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
@@ -17191,9 +17225,11 @@
         var fams = Array.isArray(data.families) ? data.families : [];
         // Cache so the modal opens instantly without a second fetch.
         _welcomeListState.families = fams;
-        applyWelcomeTodo(fams.filter(welcomeInProgress).length);
+        var counts = [0, 0, 0];
+        fams.forEach(function (f) { counts[welcomeStage(f)]++; });
+        applyWelcomeStageCounts(counts);
       })
-      .catch(function () { /* silent — item stays as-is */ });
+      .catch(function () { /* silent — items stay as-is */ });
   }
 
   // Date-gated pre-co-op outreach reminder: show the "Reach out to new
@@ -17217,17 +17253,19 @@
     return d.toISOString().slice(0, 10);
   }
   function loadWelcomeOutreachTodo() {
-    var banner = document.getElementById('ws-todo-welcome-outreach-banner');
-    if (!banner) return; // not the Welcome Coordinator's tab
+    var item = document.getElementById('ws-todo-welcome-outreach-item');
+    if (!item) return; // not the Welcome Coordinator's tab
     var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
     var s1 = welcomeNextCoopStart();
     var show = !!(s1 && today >= welcomeDaysBefore(s1, 14) && today <= s1);
     _welcomeOutreachTodoState.visible = show;
-    if (show) banner.innerHTML = '💛 <strong>Co-op starts soon</strong> — reach out to each new family this week to welcome them and answer any questions.';
-    banner.hidden = !show;
+    item.hidden = !show;
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
-  function showWelcomeListModal() {
+  // filter: 0 = To Welcome, 1 = Orientation, 2 = done, null/undefined = all.
+  function showWelcomeListModal(filter) {
+    _welcomeListFilter = (filter === 0 || filter === 1 || filter === 2) ? filter : null;
     var body = renderReportModal({
       title: 'Welcome New Members',
       subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log an Orientation.',

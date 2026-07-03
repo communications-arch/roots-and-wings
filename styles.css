@@ -10148,6 +10148,17 @@ button.staff-role:hover {
 .ws-welcome-cpill.is-new      { background: rgba(224, 181, 44, 0.14); color: var(--color-accent-dark); border-color: rgba(224, 181, 44, 0.4); }
 .ws-welcome-cpill.is-welcomed { background: rgba(82, 58, 121, 0.10);  color: var(--color-primary-dark, #3d2a5c); border-color: rgba(82, 58, 121, 0.3); }
 .ws-welcome-cpill.is-done     { background: rgba(90, 107, 57, 0.12);  color: var(--color-leaf); border-color: rgba(90, 107, 57, 0.35); }
+/* Clickable filter pills: cursor + a stronger ring when active. */
+button.ws-welcome-cpill { cursor: pointer; }
+button.ws-welcome-cpill:hover { filter: brightness(0.97); }
+button.ws-welcome-cpill.is-active { box-shadow: 0 0 0 2px currentColor inset; }
+/* The total-count chip in the header doubles as the "show all" filter. */
+button.ws-welcome-count {
+  cursor: pointer;
+  border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+  font: inherit;
+}
+button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.4) inset; }
 /* Date-gated "co-op starts soon" reminder banner at the top of the Welcome
    Coordinator's inline To Do list. */
 .ws-welcome-outreach-banner {
