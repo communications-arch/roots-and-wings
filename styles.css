@@ -10148,6 +10148,18 @@ button.staff-role:hover {
 .ws-welcome-cpill.is-new      { background: rgba(224, 181, 44, 0.14); color: var(--color-accent-dark); border-color: rgba(224, 181, 44, 0.4); }
 .ws-welcome-cpill.is-welcomed { background: rgba(82, 58, 121, 0.10);  color: var(--color-primary-dark, #3d2a5c); border-color: rgba(82, 58, 121, 0.3); }
 .ws-welcome-cpill.is-done     { background: rgba(90, 107, 57, 0.12);  color: var(--color-leaf); border-color: rgba(90, 107, 57, 0.35); }
+/* Date-gated "co-op starts soon" reminder banner at the top of the Welcome
+   Coordinator's inline To Do list. */
+.ws-welcome-outreach-banner {
+  background: rgba(224, 181, 44, 0.14);
+  border: 1px solid rgba(224, 181, 44, 0.4);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--color-accent-dark);
+}
 /* Shareable "get connected" block at the top of the Welcome List — the
    Member Portal install link the coordinator sends to new families. */
 .ws-welcome-share {

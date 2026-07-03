@@ -6440,6 +6440,14 @@
       title: 'To Do',
       roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President', 'Welcome Coordinator'],
       render: function (prefs, roles, role) {
+        // Welcome Coordinator: their primary To Dos ARE the welcome tasks, so
+        // render the Welcome List inline in this card (not behind a modal).
+        if (role === 'Welcome Coordinator') {
+          var wh = '<p class="ws-body-hint">Welcome each new family, then log their Orientation.</p>';
+          wh += '<div id="ws-todo-welcome-outreach-banner" class="ws-welcome-outreach-banner" hidden></div>';
+          wh += '<div id="ws-welcome-list-body" class="ws-welcome-inline"><p class="ws-part-meter-caption ws-msum-loading">Loading new families…</p></div>';
+          return wh;
+        }
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
         if (role === 'Treasurer') {
@@ -6495,20 +6503,6 @@
           var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
           h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
-        if (role === 'Welcome Coordinator') {
-          // Welcome New Members — this season's not-yet-welcomed families.
-          // Opens the welcome list (mark welcomed / undo). Count + visibility
-          // driven by loadWelcomeTodoCount; _welcomeTodoState persists across
-          // workspace re-renders so it doesn't flicker hidden→visible.
-          var wcHidden = !(_welcomeTodoState && _welcomeTodoState.visible);
-          var wcCount  = (_welcomeTodoState && _welcomeTodoState.count) || 0;
-          h += '<li id="ws-todo-welcome-item"' + (wcHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members"><span class="ws-link-pre-count" id="ws-welcome-todo-count">' + wcCount + '</span><span class="ws-link-icon">🌱</span><span id="ws-welcome-todo-label">Welcome New Members</span></button></li>';
-          // Pre-co-op outreach — fires the ~2 weeks before the first session so
-          // the coordinator reaches out to each new family before co-op begins.
-          // Date-gated by loadWelcomeOutreachTodo; opens the same Welcome List.
-          var woHidden = !(_welcomeOutreachTodoState && _welcomeOutreachTodoState.visible);
-          h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members"><span class="ws-link-icon">💛</span><span id="ws-welcome-outreach-label">Reach out to new families — co-op starts soon</span></button></li>';
-        }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
         return h;
@@ -6529,7 +6523,9 @@
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
-        if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
+        // Welcome Coordinator: render the Welcome List inline (self-gates on
+        // #ws-welcome-list-body) + the date-gated pre-co-op outreach banner.
+        if (typeof loadWelcomeList === 'function') loadWelcomeList();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
       }
     },
@@ -17221,14 +17217,14 @@
     return d.toISOString().slice(0, 10);
   }
   function loadWelcomeOutreachTodo() {
-    var item = document.getElementById('ws-todo-welcome-outreach-item');
-    if (!item) return; // not the Welcome Coordinator's tab
+    var banner = document.getElementById('ws-todo-welcome-outreach-banner');
+    if (!banner) return; // not the Welcome Coordinator's tab
     var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
     var s1 = welcomeNextCoopStart();
     var show = !!(s1 && today >= welcomeDaysBefore(s1, 14) && today <= s1);
     _welcomeOutreachTodoState.visible = show;
-    item.hidden = !show;
-    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+    if (show) banner.innerHTML = '💛 <strong>Co-op starts soon</strong> — reach out to each new family this week to welcome them and answer any questions.';
+    banner.hidden = !show;
   }
 
   function showWelcomeListModal() {
