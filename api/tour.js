@@ -4203,6 +4203,59 @@ async function handleSpecialEventDate(body, req, res) {
   }
 }
 
+// POST kind='special-event-create' — add a NEW special event for a year,
+// beyond the seeded standard nine (Admin Calendar "+ Add event" with the
+// 🎉 Special event type). Created as 'proposed'; date optional.
+async function handleSpecialEventCreate(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const schoolYear = String(body.school_year || '').trim();
+  const name = String(body.name || '').trim().slice(0, 120);
+  const eventDate = String(body.event_date || '').trim();
+  if (!/^\d{4}-\d{4}$/.test(schoolYear)) return res.status(400).json({ error: 'school_year must look like 2026-2027' });
+  if (!name) return res.status(400).json({ error: 'Event name required' });
+  if (eventDate && !/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return res.status(400).json({ error: 'event_date must be YYYY-MM-DD' });
+  try {
+    const sql = getSql();
+    const maxRows = await sql`SELECT COALESCE(MAX(sort_order), 0) AS m FROM special_events WHERE school_year = ${schoolYear}`;
+    const ins = await sql`
+      INSERT INTO special_events (school_year, name, event_date, date_status, sort_order, updated_by)
+      VALUES (${schoolYear}, ${name}, ${eventDate || null}, 'proposed', ${(parseInt(maxRows[0].m, 10) || 0) + 1}, ${auth.realEmail})
+      ON CONFLICT (school_year, name) DO NOTHING
+      RETURNING id
+    `;
+    if (!ins.length) return res.status(409).json({ error: '“' + name + '” already exists for ' + schoolYear });
+    return res.status(200).json({ success: true, id: ins[0].id });
+  } catch (err) {
+    console.error('special-event-create error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='special-event-delete' — remove a CUSTOM special event (and
+// its lead/assistant rows). The seeded standard nine are protected — the
+// calendar GET would just re-seed them on the next load anyway.
+async function handleSpecialEventDelete(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId <= 0) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    if (!rows.length) return res.status(404).json({ error: 'Event not found' });
+    if (SPECIAL_EVENT_SEED.indexOf(rows[0].name) !== -1) {
+      return res.status(400).json({ error: '“' + rows[0].name + '” is a standard event and can’t be deleted.' });
+    }
+    await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
+    await sql`DELETE FROM special_events WHERE id = ${eventId}`;
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('special-event-delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // ── Board Calendar ──
 // A board-facing list of date-sensitive co-op events that don't have their
 // own home editor (registration opens/closes, "morning classes finalized
@@ -4449,7 +4502,10 @@ async function handleBoardCalendarGet(req, res) {
       date_status: e.date_status,
       // Ice Cream Social + Field Day dates are driven by the session
       // calendar (derived events above) — read-only here.
-      date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day')
+      date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
+      // Standard events can't be deleted (they'd just re-seed); custom
+      // ones added via "+ Add event" can.
+      seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
     }));
     const viewerCanEditSpecialEvents = isSEL ||
       await canEditAsRole(auth.email, 'Vice President');
@@ -4828,6 +4884,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'am-teacher-assign') return handleAmTeacherAssign(body, req, res);
     if (kind === 'special-event-people') return handleSpecialEventSave(body, req, res);
     if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
+    if (kind === 'special-event-create') return handleSpecialEventCreate(body, req, res);
+    if (kind === 'special-event-delete') return handleSpecialEventDelete(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||

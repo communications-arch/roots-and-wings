@@ -17980,6 +17980,16 @@
       });
   }
 
+  // Client-side board check for calendar affordances (+ Add board task,
+  // Edit/Delete manual rows). The server re-checks everything.
+  function boardCalViewerIsBoard() {
+    if (isCommsUser()) return true;
+    var BOARD = ['President', 'Vice President', 'Treasurer', 'Secretary',
+      'Membership Director', 'Sustaining Director', 'Communications Director'];
+    var roles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    return roles.some(function (r) { return BOARD.indexOf(r) !== -1; });
+  }
+
   function renderBoardCalendarBody() {
     var body = document.getElementById('board-cal-body');
     if (!body) return;
@@ -18001,10 +18011,8 @@
     // (manual board events + the other derived trigger dates).
     var year = _boardCalState.schoolYear;
     var canSE = !!_boardCalState.canEditSpecialEvents;
-    var CAL_BOARD_ROLES = ['President', 'Vice President', 'Treasurer', 'Secretary',
-      'Membership Director', 'Sustaining Director', 'Communications Director'];
     var myRoles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
-    var viewerIsBoard = isCommsUser() || myRoles.some(function (r) { return CAL_BOARD_ROLES.indexOf(r) !== -1; });
+    var viewerIsBoard = boardCalViewerIsBoard();
     var canSessionDates = isCommsUser() || myRoles.indexOf('President') !== -1 || myRoles.indexOf('Vice President') !== -1;
 
     function calKind(e) {
@@ -18050,7 +18058,9 @@
       h += '<option value="' + yr + '"' + (yr === year ? ' selected' : '') + '>' + yr + '</option>';
     });
     h += '</select></label>';
-    if (viewerIsBoard) h += '<button id="board-cal-add" class="btn btn-outline-dark btn-sm" type="button">+ Add event</button>';
+    // Board members add board tasks; SEL (even non-board) adds special
+    // events — the form's Type choice routes each to the right pill.
+    if (viewerIsBoard || canSE) h += '<button id="board-cal-add" class="btn btn-outline-dark btn-sm" type="button">+ Add event</button>';
     h += '</div>';
 
     // View pills — one list, four lenses.
@@ -18103,6 +18113,11 @@
             if (!r.autoDate) h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
             else h += '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span> ';
             h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '">' + (r.seRow.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
+            // Custom (non-seeded) special events can be removed; the
+            // standard nine would just re-seed, so no Delete for them.
+            if (!r.autoDate && !r.seRow.seeded) {
+              h += ' <button type="button" class="btn btn-danger btn-sm board-cal-se-delete" data-se-id="' + r.seRow.id + '">Delete</button>';
+            }
             h += '</td>';
           } else {
             h += '<td class="board-cal-auto-cell">' + (r.autoDate ? '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span>' : '') + '</td>';
@@ -18211,6 +18226,23 @@
         boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status === 'approved' ? 'proposed' : 'approved');
       });
     });
+    body.querySelectorAll('.board-cal-se-delete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var b = seRowBits(this);
+        if (!confirm('Delete “' + (b.ev.name || 'this event') + '”?\nIts lead/assistant assignments are removed too.')) return;
+        fetch('/api/tour', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({ kind: 'special-event-delete', event_id: b.id })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert('Could not delete: ' + ((res.data && res.data.error) || 'error')); return; }
+            loadBoardCalendar();
+          })
+          .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
+      });
+    });
   }
 
   // Inline add/edit form. ev = null for a new event, or the existing event row.
@@ -18220,12 +18252,28 @@
     boardCalShowMsg('');
     var isEdit = !!ev;
     var v = ev || { title: '', event_date: '', end_date: '', note: '' };
+    // Type choice (new events only): 📌 Board task vs 🎉 Special event —
+    // answers "which pill does this land under?". Each option renders
+    // only for viewers who can actually create that kind (server
+    // re-checks): board members → tasks, SEL/VP → special events.
+    var canSEForm = !!_boardCalState.canEditSpecialEvents;
+    var boardForm = boardCalViewerIsBoard();
     var h = '<div class="board-cal-form">';
     h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
+    if (!isEdit && canSEForm && boardForm) {
+      h += '<div class="board-cal-field" id="board-cal-type-row">Type:&nbsp; ';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task" checked> 📌 Board task</label>&nbsp;&nbsp;';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
+      h += '</div>';
+    } else if (!isEdit && canSEForm && !boardForm) {
+      // SEL-only viewer: special events are the only kind she can add.
+      h += '<input type="hidden" name="board-cal-f-type" value="special" id="board-cal-f-type-fixed">';
+      h += '<p class="board-cal-legend" style="margin:0 0 8px;">🎉 Adding a special event (it lands under the Special Events view).</p>';
+    }
     h += '<div class="board-cal-field"><label>Event name<br><input type="text" id="board-cal-f-title" maxlength="200" value="' + escapeHtml(v.title) + '" placeholder="e.g. Registration opens" /></label></div>';
-    h += '<div class="board-cal-field"><label>Date<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
-    h += ' <label>End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
-    h += '<div class="board-cal-field"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
+    h += '<div class="board-cal-field"><label>Date' + (isEdit ? '' : ' <span class="board-cal-opt" id="board-cal-date-opt" hidden>(optional — special events can start undated)</span>') + '<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
+    h += ' <label id="board-cal-end-wrap">End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
+    h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
     h += '<button id="board-cal-form-save" class="btn btn-primary btn-sm" type="button"' + (isEdit ? ' data-id="' + ev.id + '"' : '') + '>Save event</button>';
@@ -18239,11 +18287,63 @@
       boardCalShowMsg('');
     });
     document.getElementById('board-cal-form-save').addEventListener('click', boardCalSave);
+    document.querySelectorAll('input[name="board-cal-f-type"]').forEach(function (r) {
+      r.addEventListener('change', boardCalApplyTypeUi);
+    });
+    boardCalApplyTypeUi();
+  }
+
+  // Which kind is the add-event form creating? 'special' → special_events
+  // row (Special Events pill); 'task' → board_calendar_events (Board tasks).
+  function boardCalFormType() {
+    if (document.getElementById('board-cal-f-type-fixed')) return 'special';
+    var checked = document.querySelector('input[name="board-cal-f-type"]:checked');
+    return checked ? checked.value : 'task';
+  }
+
+  // Special events have no end-date/notes in this form, and may start
+  // undated (proposed); board tasks require a date.
+  function boardCalApplyTypeUi() {
+    var isSpecial = boardCalFormType() === 'special';
+    var endWrap = document.getElementById('board-cal-end-wrap');
+    var noteWrap = document.getElementById('board-cal-note-wrap');
+    var dateOpt = document.getElementById('board-cal-date-opt');
+    if (endWrap) endWrap.hidden = isSpecial;
+    if (noteWrap) noteWrap.hidden = isSpecial;
+    if (dateOpt) dateOpt.hidden = !isSpecial;
   }
 
   function boardCalSave() {
     var saveBtn = document.getElementById('board-cal-form-save');
     if (!saveBtn) return;
+    // New special event → its own endpoint + table (lands under the
+    // Special Events pill). Edits of existing rows are always tasks.
+    if (!saveBtn.getAttribute('data-id') && boardCalFormType() === 'special') {
+      var seTitle = (document.getElementById('board-cal-f-title').value || '').trim();
+      var seDate = document.getElementById('board-cal-f-date').value || '';
+      if (!seTitle) { boardCalShowMsg('An event name is required.'); return; }
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      boardCalShowMsg('');
+      fetch('/api/tour', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify({ kind: 'special-event-create', school_year: _boardCalState.schoolYear, name: seTitle, event_date: seDate })
+      })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+        .then(function (r) {
+          if (!r.ok) {
+            boardCalShowMsg((r.data && r.data.error) || 'Save failed.');
+            saveBtn.disabled = false; saveBtn.textContent = 'Save event';
+            return;
+          }
+          loadBoardCalendar();
+        })
+        .catch(function (err) {
+          boardCalShowMsg('Network error: ' + (err.message || 'unknown'));
+          saveBtn.disabled = false; saveBtn.textContent = 'Save event';
+        });
+      return;
+    }
     var payload = {
       kind: 'calendar-save',
       school_year: _boardCalState.schoolYear,
