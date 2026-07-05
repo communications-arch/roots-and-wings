@@ -6372,16 +6372,27 @@
       }
     },
     'admin-consoles': {
-      title: 'Admin Consoles',
+      // Admin Consoles + Source Google Sheets merged into one card
+      // (2026-07-05 workspace review): both were Comms-only external-link
+      // reference lists. Consoles render statically; the sheet index
+      // lazy-loads into its sub-list via afterRender (moved from the old
+      // standalone source-sheets widget).
+      title: 'Admin Consoles &amp; Sources',
       roleGate: ['Communications Director'],
       render: function () {
-        var h = '<p class="ws-body-hint">External dashboards for the tools powering the site.</p>';
+        var h = '<p class="ws-body-hint">External dashboards and the source Google Sheets powering the site.</p>';
         h += '<ul class="ws-link-list">';
         WORKSPACE_ADMIN_CONSOLES.forEach(function (l) {
           h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + l.icon + '</span>' + l.title + '</a></li>';
         });
         h += '</ul>';
+        h += '<h5 class="ws-part-subhead">Source Google Sheets</h5>';
+        h += '<p class="ws-body-hint">Read-only references the app pulls data from. Click to open in Google Sheets.</p>';
+        h += '<ul class="ws-link-list" id="ws-source-sheets-list"><li class="ws-empty">Loading…</li></ul>';
         return h;
+      },
+      afterRender: function () {
+        if (typeof loadSourceSheetIndex === 'function') loadSourceSheetIndex();
       }
     },
     'roles': {
@@ -6406,12 +6417,23 @@
         if (role === 'President' || role === 'Vice President') {
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-icon">📆</span>Session Dates<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span></button></li>';
         }
+        if (role === 'Vice President') {
+          // VP consolidation (2026-07-05 workspace review): Afternoon Class
+          // Scheduling + Special Events fold in here as rows instead of
+          // occupying two more one-or-two-button cards. The Afternoon Class
+          // Liaison and Special Events Liaison keep their own cards.
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder</button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="pm-submissions-report"><span class="ws-link-icon">📝</span>Submissions Report<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="special-events"><span class="ws-link-icon">🎉</span>Special Events</button></li>';
+        }
         h += '</ul>';
         return h;
       },
       afterRender: function () {
         if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
         if (typeof updateCoopCalendarBadge === 'function') updateCoopCalendarBadge();
+        // VP's folded-in Submissions Report row (self-gates on element).
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       }
     },
     'pm-scheduling': {
@@ -6609,10 +6631,14 @@
       }
     },
     'reports': {
-      title: 'Reports',
-      // roleGate is filled in below from Object.keys(ROLE_REPORTS) so
-      // the list of roles allowed to see Reports stays in sync with
-      // the list of roles that have reports configured. Placeholder
+      // Reports + Forms merged into one card (2026-07-05 workspace review):
+      // both were identical ws-link-list modal-launchers and Forms was thin
+      // everywhere (0-1 items) — a whole card for a single button, and a
+      // literally empty card for the VP. Form rows render after report rows
+      // with their own icon; the data-form-key wiring is unchanged.
+      title: 'Reports &amp; Forms',
+      // roleGate is filled in below from the union of ROLE_REPORTS +
+      // ROLE_FORMS keys so the gate stays in sync with the data. Placeholder
       // empty array here keeps the widgetListFor check happy until the
       // post-init assignment runs.
       roleGate: [],
@@ -6628,9 +6654,11 @@
             items.unshift(sharedParticipation);
           }
         }
-        var h = '<p class="ws-body-hint">Live reports scoped to your role.</p>';
+        var formItems = (ROLE_FORMS[role] || []);
+        var h = '<p class="ws-body-hint">Live reports scoped to your role'
+          + (formItems.length ? ', plus forms to send out' : '') + '.</p>';
         h += '<ul class="ws-link-list">';
-        if (items.length === 0) {
+        if (items.length === 0 && formItems.length === 0) {
           h += '<li class="ws-empty">No reports configured for this role yet.</li>';
         } else {
           items.forEach(function (r) {
@@ -6640,84 +6668,63 @@
               h += '<li><button type="button" class="ws-link-btn" data-report-key="' + r.key + '"><span class="ws-link-icon">\uD83D\uDCCA</span>' + escapeHtml(r.title) + '</button></li>';
             }
           });
+          formItems.forEach(function (f) {
+            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '"><span class="ws-link-icon">✍</span>' + escapeHtml(f.title) + '</button></li>';
+          });
         }
         h += '</ul>';
         h += '<p class="ws-report-request-hint">Need a different report? Email the <a href="mailto:communications@rootsandwingsindy.com">Communications Director</a>.</p>';
         return h;
       }
     },
-    'forms': {
-      title: 'Forms',
-      // Same derived-roleGate pattern as 'reports' — see ROLE_FORMS
-      // below. Placeholder; real value assigned after ROLE_FORMS exists.
-      roleGate: [],
-      render: function (prefs, roles, role) {
-        var items = (ROLE_FORMS[role] || []);
-        var h = '<p class="ws-body-hint">Send a form or invite to someone outside the co-op.</p>';
-        h += '<ul class="ws-link-list">';
-        if (items.length === 0) {
-          h += '<li class="ws-empty">No forms configured for this role yet.</li>';
-        } else {
-          items.forEach(function (f) {
-            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '"><span class="ws-link-icon">\u270D</span>' + escapeHtml(f.title) + '</button></li>';
-          });
-        }
-        h += '</ul>';
-        return h;
-      }
-    },
-    'source-sheets': {
-      title: 'Source Google Sheets',
-      // Communications-only — these are admin/debug references for the
-      // person managing the app, not a general board affordance. Other
-      // board roles can still find sheets via Drive directly.
-      roleGate: ['Communications Director'],
-      render: function () {
-        var h = '<p class="ws-body-hint">Read-only references the app pulls data from. Click to open in Google Sheets.</p>';
-        h += '<ul class="ws-link-list" id="ws-source-sheets-list"><li class="ws-empty">Loading…</li></ul>';
-        return h;
-      },
-      afterRender: function () {
-        var listEl = document.getElementById('ws-source-sheets-list');
-        if (!listEl) return;
-        var googleCred = localStorage.getItem('rw_google_credential');
-        if (!googleCred) {
-          listEl.innerHTML = '<li class="ws-empty">Sign in to load.</li>';
+    // NOTE: the old standalone 'forms' widget merged into 'reports' above
+    // (2026-07-05 workspace review); ROLE_FORMS still drives the form rows.
+    // NOTE: the old standalone 'source-sheets' widget merged into
+    // 'admin-consoles' above (2026-07-05 workspace review); its lazy
+    // loader lives on as loadSourceSheetIndex below.
+  };
+
+  // Sheet-index lazy loader for the Admin Consoles & Sources card.
+  // (Extracted from the old source-sheets widget's afterRender.)
+  function loadSourceSheetIndex() {
+    var listEl = document.getElementById('ws-source-sheets-list');
+    if (!listEl) return;
+    var googleCred = localStorage.getItem('rw_google_credential');
+    if (!googleCred) {
+      listEl.innerHTML = '<li class="ws-empty">Sign in to load.</li>';
+      return;
+    }
+    fetch('/api/sheets?action=sheet-index', {
+      headers: { 'Authorization': 'Bearer ' + googleCred }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var rows = (data && data.sheets) || [];
+        if (rows.length === 0) {
+          listEl.innerHTML = '<li class="ws-empty">No sheets configured.</li>';
           return;
         }
-        fetch('/api/sheets?action=sheet-index', {
-          headers: { 'Authorization': 'Bearer ' + googleCred }
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            var rows = (data && data.sheets) || [];
-            if (rows.length === 0) {
-              listEl.innerHTML = '<li class="ws-empty">No sheets configured.</li>';
-              return;
-            }
-            var html = '';
-            rows.forEach(function (s) {
-              if (!s.url) {
-                html += '<li class="ws-source-sheet-item"><a><span class="ws-link-icon">⚠️</span><strong>' + escapeHtml(s.label) + '</strong></a><div class="ws-source-sheet-purpose">' + escapeHtml(s.envVar) + ' env var not set</div></li>';
-                return;
-              }
-              html += '<li class="ws-source-sheet-item"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">';
-              html += '<span class="ws-link-icon">📊</span>';
-              html += '<strong>' + escapeHtml(s.label) + '</strong>';
-              html += '</a>';
-              if (s.purpose) {
-                html += '<div class="ws-source-sheet-purpose">' + escapeHtml(s.purpose) + '</div>';
-              }
-              html += '</li>';
-            });
-            listEl.innerHTML = html;
-          })
-          .catch(function () {
-            listEl.innerHTML = '<li class="ws-empty">Could not load sheet index.</li>';
-          });
-      }
-    }
-  };
+        var html = '';
+        rows.forEach(function (s) {
+          if (!s.url) {
+            html += '<li class="ws-source-sheet-item"><a><span class="ws-link-icon">⚠️</span><strong>' + escapeHtml(s.label) + '</strong></a><div class="ws-source-sheet-purpose">' + escapeHtml(s.envVar) + ' env var not set</div></li>';
+            return;
+          }
+          html += '<li class="ws-source-sheet-item"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">';
+          html += '<span class="ws-link-icon">📊</span>';
+          html += '<strong>' + escapeHtml(s.label) + '</strong>';
+          html += '</a>';
+          if (s.purpose) {
+            html += '<div class="ws-source-sheet-purpose">' + escapeHtml(s.purpose) + '</div>';
+          }
+          html += '</li>';
+        });
+        listEl.innerHTML = html;
+      })
+      .catch(function () {
+        listEl.innerHTML = '<li class="ws-empty">Could not load sheet index.</li>';
+      });
+  }
 
   // Per-role report and form registries. Each entry opens a modal via the
   // handlers in renderWorkspaceTab. Keep keys lowercase-kebab so they can be
@@ -6774,8 +6781,9 @@
     ],
     'Membership Director': [
       { key: 'send-registration', title: 'Send Registration Form' }
-    ],
-    'Vice President': []
+    ]
+    // (VP's old empty entry removed 2026-07-05 — it rendered a dead
+    // "No forms configured" card before the Reports & Forms merge.)
   };
 
   // Derive the Reports + Forms widget roleGates from the maps above so
@@ -6784,8 +6792,15 @@
   // WORKSPACE_WIDGETS.reports.roleGate required. Mirrors the broader
   // [[feedback_role_perms_pattern]] checklist item #8 — make the gate
   // and the data the same source of truth so nothing silently hides.
-  if (WORKSPACE_WIDGETS.reports) WORKSPACE_WIDGETS.reports.roleGate = Object.keys(ROLE_REPORTS);
-  if (WORKSPACE_WIDGETS.forms)   WORKSPACE_WIDGETS.forms.roleGate   = Object.keys(ROLE_FORMS);
+  if (WORKSPACE_WIDGETS.reports) {
+    // Union of both maps: a role with only forms configured still sees
+    // the merged Reports & Forms card.
+    var _rfGate = Object.keys(ROLE_REPORTS);
+    Object.keys(ROLE_FORMS).forEach(function (r) {
+      if (_rfGate.indexOf(r) === -1) _rfGate.push(r);
+    });
+    WORKSPACE_WIDGETS.reports.roleGate = _rfGate;
+  }
 
   // Each board chair now defaults to the 'roles' widget so they can
   // manage their own committee (server-side gate in api/cleaning.js
@@ -6793,16 +6808,21 @@
   // reorder, archive, assign holders, and create roles inside their
   // own committee).
   var WORKSPACE_DEFAULTS = {
+    // 2026-07-05 workspace review: 'forms' merged into 'reports',
+    // 'source-sheets' merged into 'admin-consoles', and the VP's
+    // pm-scheduling + special-events folded into the 'roles' card as
+    // rows — VP dropped from 7 role cards to 4, Comms from 7 to 5.
     'President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'reports', 'forms', 'admin-consoles', 'source-sheets', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'reports', 'forms', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'reports', 'forms', 'pm-scheduling', 'special-events', 'roles', 'my-links', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Secretary': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Sustaining Director': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['special-events', 'my-links', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
+    'Supply Coordinator': ['supply-closet-mgmt', 'my-links', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'my-links', 'ways-to-help', 'resources'],
     '*': ['my-links', 'members-summary', 'ways-to-help', 'resources']
   };

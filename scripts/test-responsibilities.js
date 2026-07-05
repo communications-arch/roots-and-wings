@@ -406,8 +406,12 @@ const ROLE_REPORTS_FIXTURE = {
   'Treasurer': ['membership'],
   'Vice President': []
 };
+// 2026-07-05 workspace consolidation: 'forms' merged into 'reports';
+// VP's pm-scheduling folded into the 'roles' (Co-op Management) card as
+// link rows, so only the Afternoon Class Liaison keeps the standalone
+// pm-scheduling card.
 const WORKSPACE_DEFAULTS_FIXTURE = {
-  'Vice President': ['reports', 'forms', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
+  'Vice President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
   'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources']
 };
 
@@ -427,17 +431,20 @@ t('Tour Pipeline is listed for Membership Director only (not Comms)', () => {
   assert.ok(commSection && !/tour-pipeline/.test(commSection[0]), 'Comms Director must NOT have tour-pipeline');
 });
 
-t('PM Class Scheduling is gated to VP + Afternoon Class Liaison', () => {
+t('PM scheduling card: standalone for ACL; VP reaches it via Co-op Management', () => {
   const vp = WORKSPACE_DEFAULTS_FIXTURE['Vice President'] || [];
   const acl = WORKSPACE_DEFAULTS_FIXTURE['Afternoon Class Liaison'] || [];
-  assert.ok(vp.indexOf('pm-scheduling') !== -1, 'VP should have pm-scheduling');
   assert.ok(acl.indexOf('pm-scheduling') !== -1, 'Afternoon Class Liaison should have pm-scheduling');
-  // Sanity: nobody else has it.
-  Object.keys(WORKSPACE_DEFAULTS_FIXTURE).forEach(role => {
-    if (role === 'Vice President' || role === 'Afternoon Class Liaison') return;
-    assert.strictEqual(WORKSPACE_DEFAULTS_FIXTURE[role].indexOf('pm-scheduling'), -1,
-      role + ' should NOT have pm-scheduling');
-  });
+  // VP's PM tools folded into the roles card (2026-07-05) — the standalone
+  // card must NOT come back on VP's defaults.
+  assert.strictEqual(vp.indexOf('pm-scheduling'), -1, 'VP should NOT have the standalone pm-scheduling card');
+  assert.ok(vp.indexOf('roles') !== -1, 'VP must keep the roles (Co-op Management) card that hosts the folded rows');
+  // And the real script.js roles card must actually render the VP rows.
+  const fs2 = require('fs');
+  const src2 = fs2.readFileSync(require('path').join(__dirname, '..', 'script.js'), 'utf8');
+  assert.ok(/data-resource-action="schedule-builder"/.test(src2), 'roles card should link the Afternoon Class Builder');
+  const vpFold = src2.match(/if \(role === 'Vice President'\) \{[\s\S]*?special-events[\s\S]*?\}/);
+  assert.ok(vpFold, "roles card should fold special-events into the VP's rows");
 });
 
 t('Sheet-only family with no people row falls back to fam.parents matching', () => {
