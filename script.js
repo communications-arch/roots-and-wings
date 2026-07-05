@@ -11900,12 +11900,27 @@
 
   function renderLocationManager() {
     if (!personDetail || !personDetailCard) return;
+    // Standard settings pattern: slide-over drawer OVER the Supply Closet
+    // modal (openReportDrawer) — the inventory stays visible behind it.
+    // Re-renders into the same drawer body after every add/rename/delete;
+    // any close path refreshes the inventory (locations feed its filter
+    // dropdown + item rows), matching the old "Back to Inventory" flow.
+    var body = document.getElementById('sc-locs-drawer-body');
+    if (!body) {
+      body = openReportDrawer({
+        title: 'Storage Locations',
+        bodyId: 'sc-locs-drawer-body',
+        onClose: function () {
+          fetchSupplyLocations().catch(function () {}).then(function () {
+            loadSupplyClosetAndRender();
+          });
+        }
+      });
+      if (!body) return;
+    }
     var locs = supplyClosetState.locations || [];
 
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail sc-modal">';
-    html += '<h3>Manage Storage Locations</h3>';
-    html += '<p class="sc-intro">Add, rename, or remove the locations that appear in the supply closet location dropdown.</p>';
+    var html = '<p class="sc-intro">Add, rename, or remove the locations that appear in the supply closet location dropdown.</p>';
 
     html += '<div class="sc-locs-list">';
     if (locs.length === 0) {
@@ -11925,43 +11940,21 @@
     html += '<button class="sc-btn sc-save" id="sc-loc-add-btn">Add</button>';
     html += '</div>';
 
-    html += '<div class="sc-footer" style="margin-top:1rem;">';
-    html += '<button class="sc-add" id="sc-locs-back-btn">&larr; Back to Inventory</button>';
-    html += '</div>';
-    html += '</div>';
+    body.innerHTML = html;
 
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-
-    wireLocationManagerEvents();
+    wireLocationManagerEvents(body);
   }
 
-  function wireLocationManagerEvents() {
+  function wireLocationManagerEvents(body) {
     var cred = localStorage.getItem('rw_google_credential');
     var headers = { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' };
 
-    // Close
-    var closeBtn = personDetailCard.querySelector('.detail-close');
-    if (closeBtn) closeBtn.addEventListener('click', closeDetail);
-    personDetail.onclick = function (e) {
-      if (e.target === personDetail) closeDetail();
-    };
-
-    // Back
-    var backBtn = personDetailCard.querySelector('#sc-locs-back-btn');
-    if (backBtn) {
-      backBtn.addEventListener('click', function () {
-        // Refresh locations then go back to inventory
-        fetchSupplyLocations().catch(function () {}).then(function () {
-          loadSupplyClosetAndRender();
-        });
-      });
-    }
+    // Close / back-to-inventory are handled by the drawer chrome
+    // (openReportDrawer onClose) — nothing to wire here.
 
     // Add location
-    var addBtn = personDetailCard.querySelector('#sc-loc-add-btn');
-    var addInput = personDetailCard.querySelector('#sc-loc-new-input');
+    var addBtn = body.querySelector('#sc-loc-add-btn');
+    var addInput = body.querySelector('#sc-loc-new-input');
     if (addBtn && addInput) {
       addBtn.addEventListener('click', function () {
         var name = addInput.value.trim();
@@ -11984,10 +11977,10 @@
     }
 
     // Rename buttons
-    personDetailCard.querySelectorAll('.sc-loc-rename').forEach(function (btn) {
+    body.querySelectorAll('.sc-loc-rename').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = btn.getAttribute('data-loc-id');
-        var input = personDetailCard.querySelector('.sc-loc-name-input[data-loc-id="' + id + '"]');
+        var input = body.querySelector('.sc-loc-name-input[data-loc-id="' + id + '"]');
         var name = input ? input.value.trim() : '';
         if (!name) { alert('Name cannot be empty.'); return; }
         btn.disabled = true;
@@ -12004,7 +11997,7 @@
     });
 
     // Delete buttons
-    personDetailCard.querySelectorAll('.sc-loc-delete').forEach(function (btn) {
+    body.querySelectorAll('.sc-loc-delete').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = btn.getAttribute('data-loc-id');
         var row = btn.closest('.sc-loc-row');
