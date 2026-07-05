@@ -357,6 +357,11 @@
   function isDevHost() {
     var h = (window.location && window.location.hostname || '').toLowerCase();
     if (h === 'localhost' || h === '127.0.0.1') return true;
+    // dev.rootsandwingsindy.com serves the dev branch (added 2026-07-02) —
+    // must be listed BEFORE the prod-domain check or the View As picker
+    // vanishes on the friendly dev URL (it worked on rw-dev.vercel.app
+    // only via the .vercel.app suffix rule below).
+    if (h === 'dev.rootsandwingsindy.com') return true;
     if (h === 'roots-and-wings-topaz.vercel.app') return false;
     if (h === 'rootsandwingsindy.com' || h === 'www.rootsandwingsindy.com') return false;
     if (h.endsWith('.vercel.app')) return true; // preview deploys
