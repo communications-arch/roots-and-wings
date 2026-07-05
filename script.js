@@ -11754,7 +11754,9 @@
     });
     html += '</select>';
     if (state.canEdit) {
-      html += '<button class="sc-btn sc-manage-locs-btn" id="sc-manage-locs-btn" title="Manage locations">Manage locations</button>';
+      // Settings gear — same chrome as the report modals' Settings icon
+      // (rd-icon + ICON_SVG.gear). Opens the Storage Locations drawer.
+      html += '<button class="rd-icon" id="sc-manage-locs-btn" aria-label="Manage storage locations" title="Manage storage locations">' + ICON_SVG.gear + '</button>';
     }
     html += '</div>';
 

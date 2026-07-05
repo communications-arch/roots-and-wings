@@ -6551,8 +6551,9 @@ button.staff-role:hover {
   font-style: italic;
   background: transparent;
 }
-.sc-manage-locs-btn {
-  white-space: nowrap;
+/* Storage-locations settings gear (rd-icon) — pushed to the right end
+   of the controls row; stays a square icon at every breakpoint. */
+#sc-manage-locs-btn {
   flex-shrink: 0;
   margin-left: auto;
 }
@@ -9601,11 +9602,6 @@ button.staff-role:hover {
   outline: none;
   border-color: var(--color-primary);
 }
-.sc-controls .sc-manage-locs-btn {
-  margin-left: auto;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
 @media (max-width: 540px) {
   .sc-controls {
     gap: 0.4rem;
@@ -9614,10 +9610,6 @@ button.staff-role:hover {
   .sc-sort {
     flex: 1 1 140px;
     max-width: none;
-  }
-  .sc-controls .sc-manage-locs-btn {
-    margin-left: 0;
-    flex: 1 1 100%;
   }
 }
 
