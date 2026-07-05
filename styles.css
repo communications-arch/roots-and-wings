@@ -8010,6 +8010,23 @@ button.staff-role:hover {
 
 /* ── Special Events manager (Phase B3) ── */
 .se-list { display: grid; gap: 14px; }
+/* Special-events bits reused in their new homes (2026-07-05): the
+   Admin Calendar's dates section + Roles Assignments' people section. */
+.board-cal-se-head,
+.roles-mgr-se-head {
+  margin: 22px 0 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary-dark);
+  border-top: 2px solid var(--color-border);
+  padding-top: 14px;
+}
+.board-cal-se-unset { color: var(--color-text-light); }
+.board-cal-se-date { width: auto; }
+.se-date-label { font-size: 0.82rem; color: var(--color-text-light); margin-left: auto; }
+.se-save-status { display: inline-block; margin-left: 8px; font-size: 0.78rem; }
 .se-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 14px; background: var(--color-white); }
 .se-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .se-name { font-weight: 700; font-size: 1rem; color: var(--color-primary-dark); }

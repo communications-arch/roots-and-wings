@@ -439,12 +439,14 @@ t('PM scheduling card: standalone for ACL; VP reaches it via Co-op Management', 
   // card must NOT come back on VP's defaults.
   assert.strictEqual(vp.indexOf('pm-scheduling'), -1, 'VP should NOT have the standalone pm-scheduling card');
   assert.ok(vp.indexOf('roles') !== -1, 'VP must keep the roles (Co-op Management) card that hosts the folded rows');
-  // And the real script.js roles card must actually render the VP rows.
+  // And the real script.js roles card must actually render the VP row:
+  // the Afternoon Class Builder (which absorbed the Submissions Report,
+  // so the pending-count pill rides on it too).
   const fs2 = require('fs');
   const src2 = fs2.readFileSync(require('path').join(__dirname, '..', 'script.js'), 'utf8');
   assert.ok(/data-resource-action="schedule-builder"/.test(src2), 'roles card should link the Afternoon Class Builder');
-  const vpFold = src2.match(/if \(role === 'Vice President'\) \{[\s\S]*?special-events[\s\S]*?\}/);
-  assert.ok(vpFold, "roles card should fold special-events into the VP's rows");
+  const vpFold = src2.match(/if \(role === 'Vice President'\) \{[\s\S]*?schedule-builder[\s\S]*?pmrep-pending-count[\s\S]*?\}/);
+  assert.ok(vpFold, "roles card should fold the Afternoon Class Builder (with its pending pill) into the VP's rows");
 });
 
 t('Sheet-only family with no people row falls back to fam.parents matching', () => {

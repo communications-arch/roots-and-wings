@@ -4359,16 +4359,20 @@ async function requireBoardMember(req, res) {
 // year picker; the dataset is tiny. Sorted by date.
 async function handleBoardCalendarGet(req, res) {
   // Read-only access is broader than edit: any board member PLUS the
-  // Welcome Coordinator (who shows new families the upcoming co-op dates).
-  // Saving/deleting events stays board-only via requireBoardMember in
-  // handleBoardCalendarSave/Delete.
+  // Welcome Coordinator (who shows new families the upcoming co-op dates)
+  // PLUS the Special Events Liaison (special-event dates live on this
+  // calendar as of 2026-07-05). Saving/deleting manual events stays
+  // board-only via requireBoardMember in handleBoardCalendarSave/Delete;
+  // special-event dates save via kind='special-event-date' with its own
+  // SEL/VP gate (requireSpecialEventsEditor).
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const isSEL = await canEditAsRole(auth.email, 'Special Events Liaison');
   const canRead = await isBoardMember(auth.email) ||
-    await canEditAsRole(auth.email, 'Welcome Coordinator');
+    await canEditAsRole(auth.email, 'Welcome Coordinator') || isSEL;
   if (!canRead) {
     return res.status(403).json({
-      error: 'Only board members and the Welcome Coordinator can view the calendar.',
+      error: 'Only board members, the Welcome Coordinator, and the Special Events Liaison can view the calendar.',
       youAre: auth.realEmail
     });
   }
@@ -4417,7 +4421,44 @@ async function handleBoardCalendarGet(req, res) {
 
     const events = manual.concat(derived)
       .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
-    return res.status(200).json({ events });
+
+    // Special events (2026-07-05): their dates are managed HERE now (the
+    // standalone Special Events manager is gone). Seed the standard list
+    // for the active + next year so rows exist without any other visit,
+    // then return every year's rows for the client's year picker.
+    // Editing stays gated to SEL/VP via kind='special-event-date'.
+    for (const yr of [active, nextYr]) {
+      for (let i = 0; i < SPECIAL_EVENT_SEED.length; i++) {
+        await sql`
+          INSERT INTO special_events (school_year, name, sort_order, updated_by)
+          VALUES (${yr}, ${SPECIAL_EVENT_SEED[i]}, ${i}, ${auth.realEmail})
+          ON CONFLICT (school_year, name) DO NOTHING
+        `;
+      }
+    }
+    const seRows = await sql`
+      SELECT id, school_year, name, event_date, date_status, sort_order
+      FROM special_events
+      ORDER BY sort_order, name
+    `;
+    const specialEvents = seRows.map(e => ({
+      id: e.id,
+      school_year: e.school_year,
+      name: e.name,
+      event_date: specialEventDateStr(e.event_date),
+      date_status: e.date_status,
+      // Ice Cream Social + Field Day dates are driven by the session
+      // calendar (derived events above) — read-only here.
+      date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day')
+    }));
+    const viewerCanEditSpecialEvents = isSEL ||
+      await canEditAsRole(auth.email, 'Vice President');
+
+    return res.status(200).json({
+      events,
+      special_events: specialEvents,
+      viewer_can_edit_special_events: viewerCanEditSpecialEvents
+    });
   } catch (err) {
     console.error('board-calendar get error:', err);
     return res.status(500).json({ error: 'Server error' });

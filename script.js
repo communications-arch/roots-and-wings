@@ -6443,14 +6443,12 @@
           + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
           + '</button></li>';
         if (role === 'Vice President') {
-          // VP consolidation (2026-07-05 workspace review): Afternoon Class
-          // Scheduling + Special Events fold in here as rows instead of
-          // occupying two more one-or-two-button cards. The Afternoon Class
-          // Liaison and Special Events Liaison keep their own cards. The
-          // Submissions Report merged into the builder; its pending pill
-          // rides on the builder row.
+          // VP consolidation (2026-07-05 workspace review): the Afternoon
+          // Class Builder folds in here (the Submissions Report merged into
+          // it; the pending pill rides this row). Special-events dates +
+          // helpers live in the Admin Calendar / Roles Assignments rows the
+          // VP already has on this card — no separate special-events row.
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="special-events"><span class="ws-link-icon">🎉</span>Special Events</button></li>';
         }
         h += '</ul>';
         return h;
@@ -6619,16 +6617,17 @@
       }
     },
     'special-events': {
-      // Special Events Liaison (+ VP): propose/approve event dates and assign a
-      // lead + four assistants per event. Feeds participation event_lead/assist.
+      // Special Events Liaison (+ VP): the standalone manager was retired
+      // (2026-07-05) — dates live on the Admin Calendar, lead + assistants
+      // in Roles Assignments. This card is the liaison's doorway to both
+      // (a committee role holds neither tool elsewhere).
       title: 'Special Events',
       roleGate: ['Special Events Liaison', 'Vice President'],
       render: function () {
-        // Standard link-row anatomy (2026-07-05 review) — no more one-off
-        // hero button; matches every other action card.
-        var h = '<p class="ws-body-hint">Propose &amp; approve event dates, then assign a lead and up to four assistants for each event.</p>';
+        var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="special-events"><span class="ws-link-icon">🎉</span>Event Dates &amp; Helpers</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🎉</span>Lead &amp; Assistants</button></li>';
         h += '</ul>';
         return h;
       }
@@ -14405,7 +14404,6 @@
     else if (action === 'supply-closet-manage' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(); // edit mode — canEdit computed from role
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
     else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
-    else if (action === 'special-events' && typeof showSpecialEventsModal === 'function') showSpecialEventsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
@@ -16454,7 +16452,8 @@
     // a no-op for non-Comms.
     toolbar += '<button id="roles-confirm-btn" class="btn btn-outline-dark btn-sm" hidden></button>';
     toolbar += '</div>';
-    body.innerHTML = toolbar + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>';
+    body.innerHTML = toolbar + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>'
+      + '<div id="roles-mgr-events"></div>';
 
     document.getElementById('roles-show-archived').addEventListener('change', function () {
       _rolesMgrState.showArchived = this.checked;
@@ -16464,9 +16463,102 @@
       _rolesMgrState.schoolYear = this.value;
       loadRolesManagerTree();
       loadRolesConfirmState();
+      loadRolesMgrSpecialEvents();
     });
     loadRolesManagerTree();
     loadRolesConfirmState();
+    loadRolesMgrSpecialEvents();
+  }
+
+  // ── Special Events lead & assistants (inside Roles Assignments) ──
+  // Moved here from the retired standalone Special Events manager
+  // (2026-07-05, Erin: "the volunteer roles need to be set in the Roles
+  // Assignments"). Dates live on the Admin Calendar; this section only
+  // assigns people, which feeds participation event_lead / event_assist.
+  // The GET is gated to SEL / VP / super — anyone else opening Roles
+  // Assignments simply doesn't see the section (403 → hidden).
+  var _rolesMgrEventsState = { events: [], members: [] };
+
+  function loadRolesMgrSpecialEvents() {
+    var wrap = document.getElementById('roles-mgr-events');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    fetch('/api/tour?special_events=1&school_year=' + encodeURIComponent(_rolesMgrState.schoolYear), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) return; // 403 for non-SEL/VP viewers — section stays hidden
+        _rolesMgrEventsState.events = res.data.events || [];
+        _rolesMgrEventsState.members = res.data.members || [];
+        renderRolesMgrSpecialEvents();
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function seNameToPerson(val) {
+    var v = String(val || '').trim();
+    if (!v) return null;
+    var map = {};
+    (_rolesMgrEventsState.members || []).forEach(function (mm) { map[String(mm.name || '').toLowerCase()] = mm; });
+    var mm = map[v.toLowerCase()];
+    return mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v };
+  }
+
+  function renderRolesMgrSpecialEvents() {
+    var wrap = document.getElementById('roles-mgr-events');
+    if (!wrap) return;
+    var events = _rolesMgrEventsState.events || [];
+    if (events.length === 0) { wrap.innerHTML = ''; return; }
+    var h = '<datalist id="seMemberList">';
+    (_rolesMgrEventsState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
+    h += '</datalist>';
+    h += '<h4 class="roles-mgr-se-head">🎉 Special Events — Lead &amp; Assistants</h4>';
+    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar.</p>';
+    h += '<div class="se-list">';
+    events.forEach(function (ev) {
+      h += '<div class="se-card" data-eid="' + ev.id + '">';
+      h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
+      if (ev.event_date) h += '<span class="se-date-label">' + escapeHtmlWs(boardCalFmtDate(ev.event_date)) + '</span>';
+      h += '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
+      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
+      h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
+      for (var i = 0; i < 4; i++) {
+        var a = (ev.assists || [])[i];
+        h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
+      }
+      h += '</div></div>';
+      h += '<button type="button" class="sc-btn se-people-save">Save lead &amp; assistants</button>';
+      h += '<span class="se-save-status" aria-live="polite"></span>';
+      h += '</div>';
+    });
+    h += '</div>';
+    wrap.innerHTML = h;
+
+    wrap.querySelectorAll('.se-card').forEach(function (card) {
+      var eid = parseInt(card.getAttribute('data-eid'), 10);
+      var peopleSave = card.querySelector('.se-people-save');
+      if (peopleSave) peopleSave.addEventListener('click', function () {
+        var statusEl = card.querySelector('.se-save-status');
+        var lead = seNameToPerson(card.querySelector('.se-lead').value);
+        var assists = [];
+        card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
+        peopleSave.disabled = true;
+        fetch('/api/tour', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: lead, assists: assists })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            peopleSave.disabled = false;
+            if (!res.ok) { if (statusEl) { statusEl.className = 'se-save-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; } return; }
+            if (statusEl) { statusEl.className = 'se-save-status ws-wv-ok'; statusEl.textContent = 'Saved ✓'; }
+          })
+          .catch(function (err) {
+            peopleSave.disabled = false;
+            if (statusEl) { statusEl.className = 'se-save-status ws-wv-err'; statusEl.textContent = (err && err.message) || 'Network error'; }
+          });
+      });
+    });
   }
 
   // Toggle button labels + click handler reflect the current
@@ -17829,6 +17921,9 @@
           return;
         }
         _boardCalState.events = Array.isArray(r.data.events) ? r.data.events : [];
+        // Special events (dates managed here since 2026-07-05).
+        _boardCalState.specialEvents = Array.isArray(r.data.special_events) ? r.data.special_events : [];
+        _boardCalState.canEditSpecialEvents = !!r.data.viewer_can_edit_special_events;
         if (!_boardCalState.schoolYear) _boardCalState.schoolYear = boardCalDefaultYear();
         renderBoardCalendarBody();
       })
@@ -17893,8 +17988,62 @@
       h += '</tbody></table></div>';
     }
 
+    // ── Special Events (dates + Proposed→Approved live here now) ──
+    // Every board member sees them; only the Special Events Liaison /
+    // VP / super get the date + status controls (server re-checks via
+    // kind='special-event-date'). Ice Cream Social + Field Day dates
+    // come from the session calendar and stay read-only.
+    var seRows = (_boardCalState.specialEvents || []).filter(function (e) {
+      return e.school_year === _boardCalState.schoolYear;
+    });
+    if (seRows.length > 0) {
+      var canSE = !!_boardCalState.canEditSpecialEvents;
+      h += '<h4 class="board-cal-se-head">🎉 Special Events</h4>';
+      h += '<p class="board-cal-legend">Dates are proposed at the summer meeting, then approved'
+        + (canSE ? ' — set them here.' : '.')
+        + ' Leads &amp; assistants are assigned in Roles Assignments.</p>';
+      h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
+      h += '<th>Event</th><th>Date</th><th>Status</th>' + (canSE ? '<th></th>' : '');
+      h += '</tr></thead><tbody>';
+      seRows.forEach(function (ev) {
+        var statusChip = '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
+        h += '<tr data-se-id="' + ev.id + '">';
+        h += '<td>' + escapeHtml(ev.name) + (ev.date_from_calendar ? ' <span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span>' : '') + '</td>';
+        if (ev.date_from_calendar || !canSE) {
+          h += '<td style="white-space:nowrap;">' + (ev.event_date ? escapeHtml(boardCalFmtDate(ev.event_date)) : '<span class="board-cal-se-unset">—</span>') + '</td>';
+          h += '<td>' + statusChip + '</td>';
+          if (canSE) h += '<td></td>';
+        } else {
+          h += '<td><input type="date" class="cl-input board-cal-se-date" value="' + escapeHtml(ev.event_date || '') + '"></td>';
+          h += '<td>' + statusChip + '</td>';
+          h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
+          h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-save" data-se-id="' + ev.id + '">Save</button> ';
+          h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + ev.id + '">' + (ev.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
+          h += '</td>';
+        }
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
     body.innerHTML = h;
     wireBoardCalendarBody();
+  }
+
+  // POST a special-event date/status change, then reload the calendar
+  // (the row + any derived interplay refresh together).
+  function boardCalSaveSpecialEvent(eventId, dateVal, status) {
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+      body: JSON.stringify({ kind: 'special-event-date', event_id: eventId, event_date: dateVal, date_status: status })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Could not save: ' + ((res.data && res.data.error) || 'error')); return; }
+        loadBoardCalendar();
+      })
+      .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
   }
 
   function wireBoardCalendarBody() {
@@ -17926,6 +18075,28 @@
           return;
         }
         boardCalDelete(parseInt(btn.getAttribute('data-id'), 10), btn);
+      });
+    });
+
+    // Special-event date save + Proposed↔Approved toggle (SEL/VP only —
+    // the buttons only render for them).
+    function seRowBits(btn) {
+      var id = parseInt(btn.getAttribute('data-se-id'), 10);
+      var tr = btn.closest('tr');
+      var dateInp = tr && tr.querySelector('.board-cal-se-date');
+      var ev = (_boardCalState.specialEvents || []).filter(function (x) { return x.id === id; })[0] || {};
+      return { id: id, date: dateInp ? dateInp.value : (ev.event_date || ''), ev: ev };
+    }
+    body.querySelectorAll('.board-cal-se-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var b = seRowBits(this);
+        boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status || 'proposed');
+      });
+    });
+    body.querySelectorAll('.board-cal-se-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var b = seRowBits(this);
+        boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status === 'approved' ? 'proposed' : 'approved');
       });
     });
   }
@@ -19340,136 +19511,9 @@
 
   var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false, view: 'kids', teaching: [], members: [], viewerCanTeach: false, viewerCanAct: true };
 
-  // ── Special Events manager (participation sheet→DB, Phase B3) ──
-  var specialEventsState = { schoolYear: '2025-2026', events: [], members: [] };
-
-  function showSpecialEventsModal() {
-    if (document.getElementById('seOverlay')) return;
-    var html = '<div class="sb-overlay" id="seOverlay">';
-    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Special Events">';
-    html += '<button class="detail-close" id="seCloseBtn" aria-label="Close">&times;</button>';
-    html += '<div class="sb-header"><h3 style="margin:0;">Special Events</h3>';
-    html += '<label class="sb-year-label">School Year <select id="seYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
-    html += '<option value="2025-2026">2025–2026 (current)</option><option value="2026-2027">2026–2027</option><option value="2027-2028">2027–2028</option>';
-    html += '</select></label></div>';
-    html += '<div class="sb-body" id="seBody"><em style="color:var(--color-text-light);">Loading events…</em></div>';
-    html += '</div></div>';
-    document.body.insertAdjacentHTML('beforeend', html);
-    document.body.style.overflow = 'hidden';
-    var overlay = document.getElementById('seOverlay');
-    document.getElementById('seCloseBtn').addEventListener('click', closeSpecialEventsModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeSpecialEventsModal(); });
-    var yearSel = document.getElementById('seYearSelect');
-    yearSel.value = specialEventsState.schoolYear;
-    yearSel.addEventListener('change', function () { specialEventsState.schoolYear = this.value; loadSpecialEvents(); });
-    loadSpecialEvents();
-  }
-
-  function closeSpecialEventsModal() {
-    var ov = document.getElementById('seOverlay');
-    if (ov) ov.remove();
-    document.body.style.overflow = '';
-  }
-
-  function loadSpecialEvents() {
-    var body = document.getElementById('seBody');
-    if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading events…</em>';
-    fetch('/api/tour?special_events=1&school_year=' + encodeURIComponent(specialEventsState.schoolYear), { headers: rwAuthHeaders() })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) {
-          var msg = (res.data && res.data.error) || 'error';
-          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ')';
-          if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtmlWs(msg) + '</p>';
-          return;
-        }
-        specialEventsState.events = res.data.events || [];
-        specialEventsState.members = res.data.members || [];
-        renderSpecialEvents();
-      })
-      .catch(function (err) { if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>'; });
-  }
-
-  function renderSpecialEvents() {
-    var body = document.getElementById('seBody');
-    if (!body) return;
-    var h = '<datalist id="seMemberList">';
-    (specialEventsState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
-    h += '</datalist>';
-    h += '<p class="ws-body-hint" style="margin:0 0 12px;">Dates are proposed at the summer meeting, then approved. Assign a lead and up to four assistants per event — this feeds participation.</p>';
-    h += '<div class="se-list">';
-    (specialEventsState.events || []).forEach(function (ev) {
-      h += '<div class="se-card" data-eid="' + ev.id + '">';
-      h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
-      h += '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
-      h += '<div class="se-row"><label class="se-lbl">Date</label>';
-      h += '<input type="date" class="cl-input se-date" value="' + escapeHtmlWs(ev.event_date || '') + '">';
-      h += '<button type="button" class="sc-btn se-date-save">Save date</button>';
-      h += '<button type="button" class="sc-btn se-status-toggle">' + (ev.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
-      h += '</div>';
-      if (ev.date_from_calendar) h += '<p class="se-note">📅 This date also drives the board calendar (it comes from the session schedule).</p>';
-      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
-      h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
-      for (var i = 0; i < 4; i++) {
-        var a = (ev.assists || [])[i];
-        h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
-      }
-      h += '</div></div>';
-      h += '<button type="button" class="sc-btn mcb-primary se-people-save">Save lead &amp; assistants</button>';
-      h += '</div>';
-    });
-    h += '</div>';
-    body.innerHTML = h;
-    wireSpecialEvents();
-  }
-
-  function seNameToPerson(val) {
-    var v = String(val || '').trim();
-    if (!v) return null;
-    var map = {};
-    (specialEventsState.members || []).forEach(function (mm) { map[String(mm.name || '').toLowerCase()] = mm; });
-    var mm = map[v.toLowerCase()];
-    return mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v };
-  }
-
-  function wireSpecialEvents() {
-    var body = document.getElementById('seBody');
-    if (!body) return;
-    body.querySelectorAll('.se-card').forEach(function (card) {
-      var eid = parseInt(card.getAttribute('data-eid'), 10);
-      var ev = (specialEventsState.events || []).find(function (x) { return x.id === eid; }) || {};
-      var dateSave = card.querySelector('.se-date-save');
-      var statusToggle = card.querySelector('.se-status-toggle');
-      var peopleSave = card.querySelector('.se-people-save');
-      if (dateSave) dateSave.addEventListener('click', function () {
-        postSpecialEvent({ kind: 'special-event-date', event_id: eid, event_date: card.querySelector('.se-date').value, date_status: ev.date_status || 'proposed' });
-      });
-      if (statusToggle) statusToggle.addEventListener('click', function () {
-        var newStatus = (ev.date_status === 'approved') ? 'proposed' : 'approved';
-        postSpecialEvent({ kind: 'special-event-date', event_id: eid, event_date: card.querySelector('.se-date').value, date_status: newStatus });
-      });
-      if (peopleSave) peopleSave.addEventListener('click', function () {
-        var lead = seNameToPerson(card.querySelector('.se-lead').value);
-        var assists = [];
-        card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
-        postSpecialEvent({ kind: 'special-event-people', event_id: eid, lead: lead, assists: assists });
-      });
-    });
-  }
-
-  function postSpecialEvent(payload) {
-    fetch('/api/tour', {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
-      body: JSON.stringify(payload)
-    })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) { alert('Could not save: ' + ((res.data && res.data.error) || 'error')); return; }
-        loadSpecialEvents();
-      })
-      .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
-  }
+  // NOTE (2026-07-05): the standalone Special Events manager was retired —
+  // dates moved to the Admin Calendar (special-events section), lead +
+  // assistants moved into Roles Assignments (loadRolesMgrSpecialEvents).
 
   function showMorningClassBuilder() {
     if (document.getElementById('mcbOverlay')) return;
