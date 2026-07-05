@@ -6627,7 +6627,7 @@
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🎉</span>Lead &amp; Assistants</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager" data-roles-view="special-events"><span class="ws-link-icon">🎉</span>Lead &amp; Assistants</button></li>';
         h += '</ul>';
         return h;
       }
@@ -14405,7 +14405,9 @@
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
     else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
-    else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
+    else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') {
+      showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
+    }
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
     else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') {
@@ -16419,7 +16421,13 @@
       .catch(function () { /* silent — pill stays hidden */ });
   }
 
-  function showRolesManagerModal() {
+  function showRolesManagerModal(opts) {
+    opts = opts || {};
+    // Two lenses (2026-07-05, Erin: "assigning roles in lots of places
+    // made it complicated"): Board & Committees (the role tree) and
+    // Special Events (lead + assistants). Entry points can pre-focus —
+    // the Special Events Liaison's card lands straight on her view.
+    _rolesMgrState.view = opts.view === 'special-events' ? 'special-events' : 'roles';
     var icons = [
       { label: 'Add Role',   icon: ICON_SVG.add,      aria: 'Add a new role',                       action: function () { showRoleEditModal(null); } },
       { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } }
@@ -16454,8 +16462,15 @@
     // a no-op for non-Comms.
     toolbar += '<button id="roles-confirm-btn" class="btn btn-outline-dark btn-sm" hidden></button>';
     toolbar += '</div>';
-    body.innerHTML = toolbar + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>'
-      + '<div id="roles-mgr-events"></div>';
+    var viewPills = '<div class="board-cal-views" role="group" aria-label="Assignments view">'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="roles">Board &amp; Committees</button>'
+      // Hidden until the SEL/VP-gated special-events fetch succeeds — other
+      // board chairs never see the second lens.
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="special-events" id="roles-mgr-se-pill" hidden>🎉 Special Events</button>'
+      + '</div>';
+    body.innerHTML = toolbar + viewPills
+      + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>'
+      + '<div id="roles-mgr-events" hidden></div>';
 
     document.getElementById('roles-show-archived').addEventListener('change', function () {
       _rolesMgrState.showArchived = this.checked;
@@ -16467,9 +16482,27 @@
       loadRolesConfirmState();
       loadRolesMgrSpecialEvents();
     });
+    body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        rolesMgrSetView(this.getAttribute('data-roles-view'));
+      });
+    });
+    rolesMgrSetView(_rolesMgrState.view);
     loadRolesManagerTree();
     loadRolesConfirmState();
     loadRolesMgrSpecialEvents();
+  }
+
+  // Flip between the role tree and the special-events people view.
+  function rolesMgrSetView(view) {
+    _rolesMgrState.view = view === 'special-events' ? 'special-events' : 'roles';
+    var tree = document.getElementById('roles-mgr-tree');
+    var events = document.getElementById('roles-mgr-events');
+    if (tree) tree.hidden = _rolesMgrState.view !== 'roles';
+    if (events) events.hidden = _rolesMgrState.view !== 'special-events';
+    document.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.getAttribute('data-roles-view') === _rolesMgrState.view);
+    });
   }
 
   // ── Special Events lead & assistants (inside Roles Assignments) ──
@@ -16488,10 +16521,19 @@
     fetch('/api/tour?special_events=1&school_year=' + encodeURIComponent(_rolesMgrState.schoolYear), { headers: rwAuthHeaders() })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function (res) {
-        if (!res.ok) return; // 403 for non-SEL/VP viewers — section stays hidden
+        var pill = document.getElementById('roles-mgr-se-pill');
+        if (!res.ok) {
+          // 403 for non-SEL/VP viewers — pill + section stay hidden; if an
+          // entry point asked for the special-events lens anyway, fall back.
+          if (pill) pill.hidden = true;
+          if (_rolesMgrState.view === 'special-events') rolesMgrSetView('roles');
+          return;
+        }
         _rolesMgrEventsState.events = res.data.events || [];
         _rolesMgrEventsState.members = res.data.members || [];
+        if (pill) pill.hidden = false;
         renderRolesMgrSpecialEvents();
+        rolesMgrSetView(_rolesMgrState.view); // re-apply visibility post-render
       })
       .catch(function () { /* silent */ });
   }
