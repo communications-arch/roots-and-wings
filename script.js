@@ -6626,7 +6626,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🎉</span>Lead &amp; Assistants</button></li>';
         h += '</ul>';
         return h;
@@ -14408,7 +14408,9 @@
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
-    else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
+    else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') {
+      showBoardCalendarModal({ view: btn.getAttribute('data-cal-view') || undefined });
+    }
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
     else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') {
       var wf = btn.getAttribute('data-welcome-filter');
@@ -17883,7 +17885,11 @@
     return boardCalFmtDate(start) + (end ? ' – ' + boardCalFmtDate(end) : '');
   }
 
-  function showBoardCalendarModal() {
+  function showBoardCalendarModal(opts) {
+    opts = opts || {};
+    // Entry points can pre-focus a view (e.g. the Special Events
+    // Liaison's card opens straight onto the Special Events lens).
+    if (opts.view) _boardCalState.view = opts.view;
     // ⚙ Session Dates drawer — President + VP set the session calendar
     // that generates this calendar's derived trigger dates. Same gate as
     // the old standalone Session Dates entry (server enforces for real).
@@ -17944,82 +17950,130 @@
     allYears.sort();
     if (allYears.indexOf(_boardCalState.schoolYear) === -1) _boardCalState.schoolYear = active;
 
+    // ── One chronological list, filtered by view pills (2026-07-05,
+    // Erin: "dates set in lots of places made it complicated") ──
+    // Kinds: 'session' (derived session rows — Pres/VP jump to the
+    // Session Dates drawer), 'special' (special_events rows w/ inline
+    // date + Proposed↔Approved for SEL/VP; Ice Cream Social + Field Day
+    // merge onto their session-derived rows, dates read-only), 'task'
+    // (manual board events + the other derived trigger dates).
+    var year = _boardCalState.schoolYear;
+    var canSE = !!_boardCalState.canEditSpecialEvents;
+    var CAL_BOARD_ROLES = ['President', 'Vice President', 'Treasurer', 'Secretary',
+      'Membership Director', 'Sustaining Director', 'Communications Director'];
+    var myRoles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    var viewerIsBoard = isCommsUser() || myRoles.some(function (r) { return CAL_BOARD_ROLES.indexOf(r) !== -1; });
+    var canSessionDates = isCommsUser() || myRoles.indexOf('President') !== -1 || myRoles.indexOf('Vice President') !== -1;
+
+    function calKind(e) {
+      var id = String(e.id || '');
+      if (id.indexOf('derived:session') === 0) return 'session';
+      if (id.indexOf('derived:icecream:') === 0 || id.indexOf('derived:fieldday:') === 0) return 'special';
+      return 'task';
+    }
+    var seByName = {};
+    (_boardCalState.specialEvents || []).forEach(function (s) {
+      if (s.school_year === year) seByName[s.name] = s;
+    });
     var rows = _boardCalState.events
-      .filter(function (e) { return e.school_year === _boardCalState.schoolYear; })
-      .sort(function (a, b) { return (a.event_date || '').localeCompare(b.event_date || ''); });
+      .filter(function (e) { return e.school_year === year; })
+      .map(function (e) {
+        var kind = calKind(e);
+        var seRow = null;
+        if (kind === 'special') {
+          seRow = seByName[String(e.id).indexOf('derived:icecream:') === 0 ? 'Ice Cream Social' : 'Field Day'] || null;
+        }
+        return { ev: e, kind: kind, seRow: seRow, autoDate: true };
+      });
+    // The other special events (Dance, Camp, …) join the same list; their
+    // dates are editable inline. Undated ones sink to the bottom.
+    (_boardCalState.specialEvents || []).forEach(function (s) {
+      if (s.school_year !== year || s.date_from_calendar) return;
+      rows.push({
+        ev: { id: 'se:' + s.id, title: s.name, event_date: s.event_date || '', end_date: '', note: '', icon: '🎉', derived: false },
+        kind: 'special', seRow: s, autoDate: false
+      });
+    });
+    rows.sort(function (a, b) {
+      return (a.ev.event_date || '9999-99-99').localeCompare(b.ev.event_date || '9999-99-99');
+    });
+
+    var view = _boardCalState.view || 'all';
+    var visibleRows = rows.filter(function (r) { return view === 'all' || r.kind === view; });
 
     var h = '<div class="coop-cal-toolbar">';
     h += '<label class="coop-cal-yearpick">School year ';
     h += '<select id="board-cal-year">';
     allYears.forEach(function (yr) {
-      h += '<option value="' + yr + '"' + (yr === _boardCalState.schoolYear ? ' selected' : '') + '>' + yr + '</option>';
+      h += '<option value="' + yr + '"' + (yr === year ? ' selected' : '') + '>' + yr + '</option>';
     });
     h += '</select></label>';
-    h += '<button id="board-cal-add" class="btn btn-outline-dark btn-sm" type="button">+ Add event</button>';
+    if (viewerIsBoard) h += '<button id="board-cal-add" class="btn btn-outline-dark btn-sm" type="button">+ Add event</button>';
+    h += '</div>';
+
+    // View pills — one list, four lenses.
+    h += '<div class="board-cal-views" role="group" aria-label="Calendar view">';
+    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['task', 'Board tasks']].forEach(function (v) {
+      h += '<button type="button" class="board-cal-view-pill' + (view === v[0] ? ' is-active' : '') + '" data-cal-view="' + v[0] + '">' + v[1] + '</button>';
+    });
     h += '</div>';
 
     h += '<div class="coop-cal-msg cls-error" id="board-cal-msg" style="display:none;"></div>';
     h += '<div id="board-cal-form-wrap"></div>';
 
-    if (rows.length === 0) {
-      h += '<p class="ws-empty" style="margin-top:12px;">No events yet for ' + escapeHtml(_boardCalState.schoolYear) + '. Use “+ Add event” to add one.</p>';
+    if (visibleRows.length === 0) {
+      h += '<p class="ws-empty" style="margin-top:12px;">Nothing here yet for ' + escapeHtml(year) + '.</p>';
     } else {
-      h += '<p class="board-cal-legend">Dates marked <span class="board-cal-auto-pill">Auto</span> are calculated from the session calendar and update if you change the Session Dates — they can’t be edited here. Add your own one-off dates with “+ Add event”.</p>';
+      h += '<p class="board-cal-legend">Dates marked <span class="board-cal-auto-pill">Auto</span> are calculated from the session calendar'
+        + (canSessionDates ? ' (⚙ Session Dates changes them)' : '')
+        + '. 🎉 Special-event dates are proposed at the summer meeting, then approved'
+        + (canSE ? ' — set them right in the row.' : '.')
+        + (viewerIsBoard ? ' One-off dates go in with “+ Add event”.' : '')
+        + '</p>';
       h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
       h += '<th>Date</th><th>Event</th><th>Notes</th><th></th>';
       h += '</tr></thead><tbody>';
-      rows.forEach(function (e) {
-        h += '<tr data-id="' + e.id + '"' + (e.derived ? ' class="board-cal-derived-row"' : '') + '>';
-        h += '<td style="white-space:nowrap;">' + escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) + '</td>';
+      visibleRows.forEach(function (r) {
+        var e = r.ev;
+        h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + '>';
+        // Date cell: inline picker for editable special events, text otherwise.
+        if (r.kind === 'special' && !r.autoDate && canSE) {
+          h += '<td style="white-space:nowrap;"><input type="date" class="cl-input board-cal-se-date" data-se-id="' + r.seRow.id + '" value="' + escapeHtml(e.event_date || '') + '"></td>';
+        } else {
+          h += '<td style="white-space:nowrap;">' + (e.event_date ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) : '<span class="board-cal-se-unset">—</span>') + '</td>';
+        }
         h += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</td>';
+        // Notes cell (+ status chip for special events).
         var notes = escapeHtml(e.note || '');
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
+        if (r.kind === 'special' && r.seRow) {
+          notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
+        }
         h += '<td>' + notes + '</td>';
-        if (e.derived) {
+        // Actions cell by kind.
+        if (r.kind === 'session') {
+          h += '<td class="board-cal-auto-cell"><span class="board-cal-auto-pill" title="Auto-calculated from the session calendar">Auto</span>'
+            + (canSessionDates ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-session-edit">Edit dates</button>' : '')
+            + '</td>';
+        } else if (r.kind === 'special') {
+          if (canSE && r.seRow) {
+            h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
+            if (!r.autoDate) h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
+            else h += '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span> ';
+            h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '">' + (r.seRow.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
+            h += '</td>';
+          } else {
+            h += '<td class="board-cal-auto-cell">' + (r.autoDate ? '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span>' : '') + '</td>';
+          }
+        } else if (e.derived) {
           h += '<td class="board-cal-auto-cell"><span class="board-cal-auto-pill" title="Auto-calculated from the session calendar">Auto</span></td>';
-        } else {
+        } else if (viewerIsBoard) {
           h += '<td class="coop-cal-actions">';
           h += '<button class="btn btn-outline-dark btn-sm board-cal-edit" data-id="' + e.id + '" type="button">Edit</button> ';
           h += '<button class="btn btn-danger btn-sm board-cal-delete" data-id="' + e.id + '" type="button">Delete</button>';
           h += '</td>';
-        }
-        h += '</tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-
-    // ── Special Events (dates + Proposed→Approved live here now) ──
-    // Every board member sees them; only the Special Events Liaison /
-    // VP / super get the date + status controls (server re-checks via
-    // kind='special-event-date'). Ice Cream Social + Field Day dates
-    // come from the session calendar and stay read-only.
-    var seRows = (_boardCalState.specialEvents || []).filter(function (e) {
-      return e.school_year === _boardCalState.schoolYear;
-    });
-    if (seRows.length > 0) {
-      var canSE = !!_boardCalState.canEditSpecialEvents;
-      h += '<h4 class="board-cal-se-head">🎉 Special Events</h4>';
-      h += '<p class="board-cal-legend">Dates are proposed at the summer meeting, then approved'
-        + (canSE ? ' — set them here.' : '.')
-        + ' Leads &amp; assistants are assigned in Roles Assignments.</p>';
-      h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
-      h += '<th>Event</th><th>Date</th><th>Status</th>' + (canSE ? '<th></th>' : '');
-      h += '</tr></thead><tbody>';
-      seRows.forEach(function (ev) {
-        var statusChip = '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
-        h += '<tr data-se-id="' + ev.id + '">';
-        h += '<td>' + escapeHtml(ev.name) + (ev.date_from_calendar ? ' <span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span>' : '') + '</td>';
-        if (ev.date_from_calendar || !canSE) {
-          h += '<td style="white-space:nowrap;">' + (ev.event_date ? escapeHtml(boardCalFmtDate(ev.event_date)) : '<span class="board-cal-se-unset">—</span>') + '</td>';
-          h += '<td>' + statusChip + '</td>';
-          if (canSE) h += '<td></td>';
         } else {
-          h += '<td><input type="date" class="cl-input board-cal-se-date" value="' + escapeHtml(ev.event_date || '') + '"></td>';
-          h += '<td>' + statusChip + '</td>';
-          h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
-          h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-save" data-se-id="' + ev.id + '">Save</button> ';
-          h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + ev.id + '">' + (ev.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
-          h += '</td>';
+          h += '<td></td>';
         }
         h += '</tr>';
       });
@@ -18075,6 +18129,22 @@
           return;
         }
         boardCalDelete(parseInt(btn.getAttribute('data-id'), 10), btn);
+      });
+    });
+
+    // View pills — one list, four lenses.
+    body.querySelectorAll('.board-cal-view-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _boardCalState.view = this.getAttribute('data-cal-view');
+        renderBoardCalendarBody();
+      });
+    });
+
+    // Session rows → the Session Dates drawer (Pres/VP only — the button
+    // only renders for them).
+    body.querySelectorAll('.board-cal-session-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
       });
     });
 
