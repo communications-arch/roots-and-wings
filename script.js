@@ -20254,10 +20254,15 @@
 
     function renderBlock(hour, label, list) {
       var count = list.length;
-      var marker = count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴';
-      var s = '<div class="sb-cell" data-hour="' + hour + '">';
-      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + count + ' class' + (count === 1 ? '' : 'es') + '</span></div>';
-      if (!isApproved) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      // Morning group slots hold exactly ONE class: 🟢 filled / 🔴 open.
+      // PM hour blocks keep the 3+ 🟢 / 1+ 🟡 / empty 🔴 capacity read.
+      var isAmBlock = String(hour).indexOf('AM') === 0;
+      var marker = isAmBlock
+        ? (count >= 1 ? '🟢' : '🔴')
+        : (count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴');
+      var s = '<div class="sb-cell' + (isAmBlock ? ' sb-cell-am' : '') + '" data-hour="' + hour + '">';
+      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? (count >= 1 ? 'filled' : 'open') : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span></div>';
+      if (!isApproved && !(isAmBlock && count >= 1)) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       list.forEach(function (c) {
         // Scheduled age range can be a VP override (scheduled_age_range);
         // fall back to the teacher's submitted age_groups when not set.
@@ -20326,11 +20331,14 @@
     }
 
     if (period === 'AM') {
-      // Morning: one open block per session — classes are one-age-group by
-      // definition, sorted youngest-group first, so the block reads as the
-      // morning roster for the session.
+      // Morning: one SLOT per age group (like PM has Hour 1 / Hour 2),
+      // and only one class fits a group per session — 🟢 filled / 🔴 open
+      // reads as the session's morning coverage at a glance.
       html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
-      html += renderBlock('AM', 'Morning classes', classesInSession.slice().sort(sortByAgeThenName));
+      MORNING_GROUP_ORDER.forEach(function (g) {
+        var list = classesInSession.filter(function (c) { return sbAmGroupOf(c) === g.name; });
+        html += renderBlock('AM:' + g.name, g.emoji + ' ' + g.name + ' · ' + g.range, list);
+      });
       html += '</div>';
     } else {
       html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
@@ -20714,6 +20722,24 @@
 
   var _sbDragId = null;
 
+  // Morning submission's target group ('oaks' → 'Oaks') — single by rule.
+  function sbAmGroupOf(s) {
+    var v = String(((s && s.age_groups) || [])[0] || '');
+    return v ? v.charAt(0).toUpperCase() + v.slice(1) : '';
+  }
+
+  // One morning class per age group per session — the class already in
+  // this group's slot (scheduled or drafted), if any.
+  function sbAmSlotOccupant(group, sess, exceptId) {
+    return scheduleBuilderState.submissions.filter(function (s) {
+      return s.class_period === 'AM'
+        && (s.status === 'scheduled' || s.status === 'drafted')
+        && s.scheduled_session === sess
+        && s.id !== exceptId
+        && sbAmGroupOf(s) === group;
+    })[0] || null;
+  }
+
   // Drop a submission into a PM block → schedule it for the active session.
   // The grid is now hour-based open blocks (no preset age sections), so the
   // age range comes from the submission's own age_groups. 2-hour-required
@@ -20725,8 +20751,20 @@
       alert('Session ' + scheduleBuilderState.session + ' is approved. Reopen it for editing first.');
       return;
     }
-    var scheduledHour = hour;
-    if (hour !== 'AM' && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+    // Morning drops route to the submission's OWN group slot no matter
+    // which morning cell caught the drop (each class targets exactly one
+    // group), and the slot must be free — one class per group per session.
+    var isAmDrop = String(hour).indexOf('AM') === 0;
+    if (isAmDrop) {
+      var amGroup = sbAmGroupOf(sub);
+      var occupant = sbAmSlotOccupant(amGroup, scheduleBuilderState.session, sub.id);
+      if (occupant) {
+        alert('The ' + amGroup + ' slot for Session ' + scheduleBuilderState.session + ' already has “' + occupant.class_name + '”.\nDrag that one back to the inbox first if you want to swap.');
+        return;
+      }
+    }
+    var scheduledHour = isAmDrop ? 'AM' : hour;
+    if (!isAmDrop && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     patchReviewAction(subId, {
       status: 'scheduled',
@@ -20833,7 +20871,9 @@
     if (document.getElementById('sbPickerOverlay')) return;
 
     var sess = scheduleBuilderState.session;
-    var pickerPeriod = hour === 'AM' ? 'AM' : 'PM';
+    var isAmPick = String(hour).indexOf('AM') === 0;
+    var amGroup = isAmPick ? (String(hour).split(':')[1] || '') : '';
+    var pickerPeriod = isAmPick ? 'AM' : 'PM';
     var pool = scheduleBuilderState.submissions.filter(function (s) {
       return s.status === 'submitted'
         && ((s.class_period === 'AM' ? 'AM' : 'PM') === pickerPeriod);
@@ -20843,7 +20883,8 @@
       return prefs.indexOf(String(sess)) !== -1 || prefs.indexOf('flexible') !== -1;
     }
     function matchesHour(s) {
-      if (hour === 'AM') return true; // morning has no hour concept
+      // Morning: "matches" = this slot's age group (no hour concept).
+      if (isAmPick) return amGroup ? sbAmGroupOf(s) === amGroup : true;
       var prefs = s.hour_preference || [];
       if (prefs.indexOf('flexible') !== -1) return true;
       if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
@@ -20879,7 +20920,9 @@
     var html = '<div class="sb-overlay" id="sbPickerOverlay" style="z-index:10000;">';
     html += '<div class="sb-panel sb-panel-picker" role="dialog" aria-modal="true">';
     html += '<button class="detail-close" id="sbPickerCloseBtn" aria-label="Close">&times;</button>';
-    var hourLabel = hour === 'PM1' ? 'PM Hour 1' : hour === 'PM2' ? 'PM Hour 2' : 'Both Hours';
+    var hourLabel = isAmPick
+      ? ('Morning' + (amGroup ? ' · ' + amGroup : ''))
+      : (hour === 'PM1' ? 'PM Hour 1' : hour === 'PM2' ? 'PM Hour 2' : 'Both Hours');
     html += '<h3 style="margin:0 0 0.25rem;">Assign to ' + hourLabel + ' · Session ' + sess + '</h3>';
     html += '<p class="cls-help" style="margin:0 0 1rem;">Showing submissions that fit this session + hour preference. Expand "Other submissions" to broaden.</p>';
 
@@ -20911,10 +20954,19 @@
       btn.addEventListener('click', function () {
         var subId = parseInt(btn.getAttribute('data-sub-id'), 10);
         // 2-hour classes always span both cells, so auto-set 'both' when the
-        // submission's hour preference requires it.
+        // submission's hour preference requires it. Morning picks route to
+        // the class's OWN group slot, which must be free (one per session).
         var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
-        var scheduledHour = hour;
-        if (sub && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+        if (isAmPick && sub) {
+          var grp = sbAmGroupOf(sub);
+          var occ = sbAmSlotOccupant(grp, scheduleBuilderState.session, subId);
+          if (occ) {
+            alert('The ' + grp + ' slot for Session ' + scheduleBuilderState.session + ' already has “' + occ.class_name + '”.\nSend that one back to the inbox first if you want to swap.');
+            return;
+          }
+        }
+        var scheduledHour = isAmPick ? 'AM' : hour;
+        if (!isAmPick && sub && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
         btn.disabled = true; btn.textContent = 'Assigning…';
         patchReviewAction(subId, {
           status: 'scheduled',

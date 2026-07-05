@@ -8286,6 +8286,13 @@ button.staff-role:hover {
   color: var(--color-text-light);
 }
 
+/* Morning lens: one slot per age group — 9 compact cells, 3-up on wide
+   screens; each holds at most one class. */
+@media (min-width: 1100px) {
+  .sb-grid.sb-grid-am { grid-template-columns: 1fr 1fr 1fr; }
+}
+.sb-cell-am { min-height: 88px; }
+
 /* Morning/Afternoon lens pills inline in the builder header. */
 .sb-period-views {
   display: inline-flex;
