@@ -6551,12 +6551,6 @@ button.staff-role:hover {
   font-style: italic;
   background: transparent;
 }
-/* Storage-locations settings gear (rd-icon) — pushed to the right end
-   of the controls row; stays a square icon at every breakpoint. */
-#sc-manage-locs-btn {
-  flex-shrink: 0;
-  margin-left: auto;
-}
 /* Location manager */
 .sc-locs-list {
   margin: 0.75rem 0;

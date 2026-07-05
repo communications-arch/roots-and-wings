@@ -11727,13 +11727,28 @@
     var state = supplyClosetState;
     var rows = filterAndSortSupplyItems();
 
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail sc-modal' + (state.browseMode ? ' sc-browse' : '') + '">';
-    html += '<h3>Supply Closet Inventory</h3>';
-    html += '<p class="sc-intro">Search what\'s available in the co-op\'s closets and cabinets. If something is running low, tap <strong>Report low</strong> next to the item and the Supply Coordinator will be notified.</p>';
+    // Standard report-modal shell (renderReportModal): title + icon chrome
+    // at the top — ⚙ Settings (coordinator only, opens the Storage
+    // Locations drawer), 🖨 Print, ✕ Close — matching the Participation /
+    // Membership / Waivers pattern instead of the old hand-rolled header.
+    var icons = [];
+    if (state.canEdit) {
+      icons.push({ label: 'Settings', icon: ICON_SVG.gear,
+        aria: 'Manage storage locations',
+        action: function () { renderLocationManager(); } });
+    }
+    icons.push({ label: 'Print', icon: ICON_SVG.print,
+      aria: 'Print the visible inventory', action: printSupplyCloset });
+    var body = renderReportModal({
+      title: 'Supply Closet Inventory',
+      subtitle: 'Search what’s available in the co-op’s closets and cabinets. If something is running low, tap Report low next to the item and the Supply Coordinator will be notified.',
+      icons: icons,
+      bodyId: 'sc-modal-body'
+    });
+    if (!body) return;
 
     // Controls: search + location + sort (single calm row)
-    html += '<div class="sc-controls">';
+    var html = '<div class="sc-controls">';
     html += '<input type="text" class="sc-search" id="sc-search-input" placeholder="Search items, locations, notes..." value="' + escapeAttr(state.searchQuery) + '">';
     html += '<select class="sc-loc-select" id="sc-loc-select" aria-label="Filter by location">';
     html += '<option value=""' + (state.locationFilter ? '' : ' selected') + '>All locations</option>';
@@ -11753,11 +11768,6 @@
       html += '<option value="' + o.v + '"' + sel + '>' + o.label + '</option>';
     });
     html += '</select>';
-    if (state.canEdit) {
-      // Settings gear — same chrome as the report modals' Settings icon
-      // (rd-icon + ICON_SVG.gear). Opens the Storage Locations drawer.
-      html += '<button class="rd-icon" id="sc-manage-locs-btn" aria-label="Manage storage locations" title="Manage storage locations">' + ICON_SVG.gear + '</button>';
-    }
     html += '</div>';
 
     // Category filter: calm outlined pills with colored dot (keeps brand colors meaningful but quieter)
@@ -11792,12 +11802,66 @@
     }
     html += '</div>';
 
-    html += '</div>';
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    body.innerHTML = html;
 
     wireSupplyClosetEvents();
+  }
+
+  // ─── Supply Closet print (🖨 in the header chrome) ───
+  // Prints what's currently VISIBLE (search + location + category filters
+  // applied), grouped by category — so the coordinator can print a
+  // restock walk-list for one closet, or members a full inventory.
+  function printSupplyCloset() {
+    var state = supplyClosetState;
+    if (!state.items || state.items.length === 0) {
+      alert('Inventory still loading — try again in a moment.');
+      return;
+    }
+    openPrintIframe(buildSupplyClosetPrintHtml());
+  }
+
+  function buildSupplyClosetPrintHtml() {
+    var state = supplyClosetState;
+    var rows = filterAndSortSupplyItems();
+    var byCat = {};
+    rows.forEach(function (it) {
+      (byCat[it.category] = byCat[it.category] || []).push(it);
+    });
+    var levelLabel = { empty: 'Empty', low: 'Low', medium: 'Medium', high: 'High' };
+    var css = 'body{font-family:Arial,sans-serif;font-size:11px;margin:24px;}'
+      + 'h1{font-size:18px;margin:0 0 4px;}'
+      + 'p.sub{color:#555;margin:0 0 16px;}'
+      + 'h2{font-size:13px;margin:16px 0 4px;}'
+      + 'table{width:100%;border-collapse:collapse;}'
+      + 'th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top;}'
+      + 'th{background:#eee;}'
+      + 'em.flag{color:#a32222;font-style:normal;font-weight:bold;}';
+    var filterBits = [];
+    if (state.searchQuery) filterBits.push('search "' + escapeHtmlWs(state.searchQuery) + '"');
+    if (state.locationFilter) filterBits.push('location ' + escapeHtmlWs(state.locationFilter));
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>Supply Closet Inventory</title><style>' + css + '</style></head><body>';
+    html += '<h1>Supply Closet Inventory</h1>';
+    html += '<p class="sub">' + rows.length + ' of ' + (state.items || []).length + ' items'
+      + (filterBits.length ? ' · ' + filterBits.join(' · ') : '')
+      + ' · printed ' + new Date().toLocaleDateString() + '</p>';
+    SUPPLY_CATEGORIES.forEach(function (cat) {
+      var list = byCat[cat.key] || [];
+      if (list.length === 0) return;
+      html += '<h2>' + escapeHtmlWs(cat.label) + ' — ' + escapeHtmlWs(cat.sub) + ' (' + list.length + ')</h2>';
+      html += '<table><thead><tr><th>Item</th><th>Qty</th><th>Location</th><th>Notes</th></tr></thead><tbody>';
+      list.forEach(function (it) {
+        html += '<tr>'
+          + '<td>' + escapeHtmlWs(it.item_name || '') + (it.needs_restock ? ' <em class="flag">⚑ low</em>' : '') + '</td>'
+          + '<td>' + escapeHtmlWs(levelLabel[it.quantity_level] || '') + '</td>'
+          + '<td>' + escapeHtmlWs(it.location || '') + '</td>'
+          + '<td>' + escapeHtmlWs(it.notes || '') + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+    });
+    if (rows.length === 0) html += '<p>No items match the current filters.</p>';
+    html += '</body></html>';
+    return html;
   }
 
   // Renders just the <div class="sc-list"> INNER HTML. Splits the result into
@@ -12106,12 +12170,8 @@
   }
 
   function wireSupplyClosetEvents() {
-    // Close button + backdrop
-    var closeBtn = personDetailCard.querySelector('.detail-close');
-    if (closeBtn) closeBtn.addEventListener('click', closeDetail);
-    personDetail.onclick = function (e) {
-      if (e.target === personDetail) closeDetail();
-    };
+    // Close button + backdrop + header icons (⚙ / 🖨) are wired by
+    // renderReportModal — nothing to do here.
 
     // Search input — update list in place so the input keeps focus
     var searchInput = personDetailCard.querySelector('#sc-search-input');
@@ -12162,14 +12222,6 @@
         supplyClosetState.addingNew = true;
         supplyClosetState.editingId = null;
         renderSupplyClosetModal();
-      });
-    }
-
-    // Manage Locations button
-    var manageLocsBtn = personDetailCard.querySelector('#sc-manage-locs-btn');
-    if (manageLocsBtn) {
-      manageLocsBtn.addEventListener('click', function () {
-        renderLocationManager();
       });
     }
 
