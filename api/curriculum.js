@@ -848,13 +848,21 @@ module.exports = async function handler(req, res) {
 
     // ── POST create, copy, or link ──
     if (req.method === 'POST') {
-      // Create a new PM class submission.
+      // Create a new class submission (AM or PM). View-As aware
+      // (2026-07-05): a super user submitting while impersonating files
+      // the class under the VIEWED member — matching the Class Ideas
+      // card, which lists the impersonated person's submissions. Without
+      // this the two disagreed: submit attributed to the real login, the
+      // card showed the impersonated one, and the class "vanished".
       if (action === 'class-submission') {
         let clean;
         try { clean = normalizeSubmission(req.body || {}); }
         catch (validationErr) {
           return res.status(400).json({ error: validationErr.message });
         }
+        const submitterEmail = resolveSubmitterEmail(user, req.query.view_as);
+        const submitterName = submitterEmail.toLowerCase() === user.email.toLowerCase()
+          ? (user.name || '') : '';
         const inserted = await sql`
           INSERT INTO class_submissions (
             submitted_by_email, submitted_by_name, school_year, class_period,
@@ -864,7 +872,7 @@ module.exports = async function handler(req, res) {
             pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info
           )
           VALUES (
-            ${user.email}, ${user.name || ''}, ${clean.school_year}, ${clean.class_period},
+            ${submitterEmail}, ${submitterName}, ${clean.school_year}, ${clean.class_period},
             ${clean.class_name}, ${clean.session_preferences}, ${clean.hour_preference}, ${clean.assistant_count},
             ${clean.co_teachers}, ${clean.space_request}, ${clean.space_request_other},
             ${clean.max_students}, ${clean.max_students_other}, ${clean.age_groups}, ${clean.age_groups_other},

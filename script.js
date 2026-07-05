@@ -4872,6 +4872,12 @@
     // is open for sign-ups and the viewer isn't a reviewer (VP/Liaison).
     if (typeof loadClassSignupCard === 'function') loadClassSignupCard(fam);
 
+    // Class Ideas card — ALWAYS refresh on a My Family render. The shell
+    // above resets the body to "Loading…", and renders triggered by tab
+    // switches / View-As changes / post-submit navigation previously left
+    // it stale (2026-07-05, Erin: card didn't refresh after submitting).
+    if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
+
     // Keep the header picker in sync with the active family.
     renderHeaderViewAs();
 
@@ -15939,7 +15945,8 @@
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/curriculum?action=class-submissions&scope=mine' + notifViewAsSuffix(), {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: { 'Authorization': 'Bearer ' + cred },
+      cache: 'no-store' // never serve a stale list after a submit
     })
     .then(function (r) { return r.json(); })
     .then(function (data) {
@@ -16450,7 +16457,10 @@
       var cred = localStorage.getItem('rw_google_credential');
       // On edit, send view_as so reviewer-via-impersonation passes the server's
       // isReviewerReq gate (dev testers can now edit any class' details).
-      var url = '/api/curriculum?action=class-submission' + (isEdit ? '&id=' + existing.id + notifViewAsSuffix() : '');
+      // view_as on BOTH paths: create files the class under the viewed
+      // member (matching the Class Ideas card); edit passes the reviewer
+      // impersonation gate.
+      var url = '/api/curriculum?action=class-submission' + (isEdit ? '&id=' + existing.id : '') + notifViewAsSuffix();
       var method = isEdit ? 'PATCH' : 'POST';
       fetch(url, {
         method: method,
