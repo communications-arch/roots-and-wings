@@ -6088,15 +6088,34 @@
     var email = getActiveEmail() || 'anonymous';
     try {
       var raw = localStorage.getItem(WORKSPACE_PREFS_KEY_PREFIX + email);
-      if (!raw) return { hidden: [], myLinks: [] };
+      if (!raw) return { hidden: [], myLinks: [], collapsed: {} };
       var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return { hidden: [], myLinks: [] };
+      if (!parsed || typeof parsed !== 'object') return { hidden: [], myLinks: [], collapsed: {} };
       if (!Array.isArray(parsed.hidden)) parsed.hidden = [];
       if (!Array.isArray(parsed.myLinks)) parsed.myLinks = [];
+      if (!parsed.collapsed || typeof parsed.collapsed !== 'object' || Array.isArray(parsed.collapsed)) parsed.collapsed = {};
+      // Migration (2026-07-05): the Hide option is gone — cards a user had
+      // hidden become minimized instead, so nothing silently disappears.
+      if (parsed.hidden.length > 0) {
+        parsed.hidden.forEach(function (t) { parsed.collapsed[t] = true; });
+        parsed.hidden = [];
+        try { localStorage.setItem(WORKSPACE_PREFS_KEY_PREFIX + email, JSON.stringify(parsed)); } catch (e2) { /* quota */ }
+      }
       return parsed;
     } catch (e) {
-      return { hidden: [], myLinks: [] };
+      return { hidden: [], myLinks: [], collapsed: {} };
     }
+  }
+
+  // Effective minimized state for a card: the user's explicit choice wins;
+  // otherwise the widget's defaultCollapsed flag (cards that should start
+  // minimized for everyone until the user expands them).
+  function isWidgetCollapsed(type, prefs) {
+    var w = WORKSPACE_WIDGETS[type];
+    if (prefs && prefs.collapsed && Object.prototype.hasOwnProperty.call(prefs.collapsed, type)) {
+      return !!prefs.collapsed[type];
+    }
+    return !!(w && w.defaultCollapsed);
   }
   function saveWorkspacePrefs(prefs) {
     var email = getActiveEmail() || 'anonymous';
@@ -6226,6 +6245,9 @@
     'resources': {
       title: 'Resources',
       roleGate: null,
+      // Reference list everyone knows — starts minimized to keep the
+      // Shared section short; expands with one tap and the choice sticks.
+      defaultCollapsed: true,
       render: function () {
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
@@ -6580,6 +6602,9 @@
       // count opens a member-friendly roster (family name, members, track).
       title: SEASON_SHORT + ' Members',
       roleGate: null,
+      // Community snapshot — informational, not actionable; starts
+      // minimized (defaultCollapsed) to keep the Shared section short.
+      defaultCollapsed: true,
       render: function () {
         var h = '<p class="ws-body-hint">A snapshot of our co-op community this season.</p>';
         h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
@@ -6874,13 +6899,13 @@
 
     // Skip a redundant full rebuild that would visibly flicker the cards.
     // loadLiveData renders once from cached /api/sheets, then again ~1s later
-    // when the live fetch returns; if the role set + hidden-widget prefs are
+    // when the live fetch returns; if the role set + minimized-card prefs are
     // identical (the common case) the second render produces the same markup,
     // so callers that fire on data refresh pass {ifChanged:true} to no-op it.
     // The per-item To Do loaders already updated their counts in place on the
     // first render, so nothing is lost. A genuinely new role (e.g. a just-
     // assigned committee role) changes the signature and still re-renders.
-    var wsSig = JSON.stringify({ r: roles.slice().sort(), h: (prefs.hidden || []).slice().sort() });
+    var wsSig = JSON.stringify({ r: roles.slice().sort(), c: prefs.collapsed || {} });
     if (opts && opts.ifChanged && container.innerHTML && container.getAttribute('data-ws-sig') === wsSig) {
       return;
     }
@@ -6930,23 +6955,18 @@
     html += '</div>';
 
     // Track visible widget types across all sections so afterRender hooks and
-    // form wiring can still iterate a flat list.
+    // form wiring can still iterate a flat list. Every gated widget renders
+    // now (Hide is gone — cards minimize instead), so this is simply the
+    // union of all sections' widget lists.
     var allVisibleTypes = [];
-    var allHiddenTypes = [];
 
     function renderSection(heading, roleKey, widgetTypes, opts) {
       opts = opts || {};
-      var visible = [];
-      var hidden = [];
-      widgetTypes.forEach(function (type) {
-        if (prefs.hidden.indexOf(type) !== -1) hidden.push(type);
-        else visible.push(type);
-      });
+      var visible = widgetTypes.slice();
       visible.forEach(function (t) { if (allVisibleTypes.indexOf(t) === -1) allVisibleTypes.push(t); });
-      hidden.forEach(function (t) { if (allHiddenTypes.indexOf(t) === -1) allHiddenTypes.push(t); });
 
       // Only skip the whole section if it has no content *and* no notes slot.
-      if (visible.length === 0 && hidden.length === 0 && !opts.showNotes) return '';
+      if (visible.length === 0 && !opts.showNotes) return '';
 
       var s = '<section class="workspace-role-section">';
       var role = (opts.showNotes && roleKey) ? getRoleByKey(roleKey) : null;
@@ -6954,9 +6974,7 @@
 
       var showHandoff = !!(opts.showNotes && roleKey);
 
-      if (!showHandoff && visible.length === 0) {
-        s += '<p class="ws-empty">All cards for this section are hidden. Restore one below.</p>';
-      } else {
+      {
         s += '<div class="workspace-grid">';
 
         if (showHandoff) {
@@ -7009,20 +7027,20 @@
           s += '</div>'; // /.ws-handoff-card
         }
 
-        if (visible.length === 0 && showHandoff) {
-          // Handoff card shown alone — no additional widgets.
-        } else {
-          visible.forEach(function (type) {
-            var w = WORKSPACE_WIDGETS[type];
-            s += '<div class="mf-card workspace-card" data-widget-type="' + type + '">';
-            s += '<div class="workspace-card-header">';
-            s += '<h4>' + w.title + '</h4>';
-            s += '<button class="sc-btn ws-hide-btn" data-widget="' + type + '" title="Hide this card">Hide</button>';
-            s += '</div>';
-            s += '<div class="workspace-card-body">' + w.render(prefs, roles, heading) + '</div>';
-            s += '</div>';
-          });
-        }
+        visible.forEach(function (type) {
+          var w = WORKSPACE_WIDGETS[type];
+          // Minimizable card: the whole header is the expand/collapse
+          // toggle (chevron mirrors state). Bodies stay in the DOM when
+          // minimized (CSS hides them) so count loaders keep working.
+          var collapsed = isWidgetCollapsed(type, prefs);
+          s += '<div class="mf-card workspace-card' + (collapsed ? ' ws-card-collapsed' : '') + '" data-widget-type="' + type + '">';
+          s += '<div class="workspace-card-header ws-card-toggle" data-widget="' + type + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" title="' + (collapsed ? 'Expand' : 'Minimize') + '">';
+          s += '<h4>' + w.title + '</h4>';
+          s += '<span class="ws-min-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span>';
+          s += '</div>';
+          s += '<div class="workspace-card-body">' + w.render(prefs, roles, heading) + '</div>';
+          s += '</div>';
+        });
 
         s += '</div>'; // /.workspace-grid
       }
@@ -7038,15 +7056,6 @@
     // "Shared" bucket for universal widgets. Always render (even if empty)
     // so a brand-new member sees the My Links / Ways to Help baseline.
     html += renderSection('Shared', null, universalTypes, { showNotes: false });
-
-    if (allHiddenTypes.length > 0) {
-      html += '<div class="workspace-hidden"><span class="workspace-hidden-label">Hidden:</span> ';
-      allHiddenTypes.forEach(function (type) {
-        var w = WORKSPACE_WIDGETS[type];
-        html += '<button class="sc-btn ws-restore-btn" data-widget="' + type + '">+ ' + w.title + '</button> ';
-      });
-      html += '</div>';
-    }
 
     container.innerHTML = html;
     container.setAttribute('data-ws-sig', wsSig);
@@ -7085,23 +7094,32 @@
       });
     });
 
-    // Hide / restore buttons
-    container.querySelectorAll('.ws-hide-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var t = this.getAttribute('data-widget');
-        var p = getWorkspacePrefs();
-        if (p.hidden.indexOf(t) === -1) p.hidden.push(t);
-        saveWorkspacePrefs(p);
-        renderWorkspaceTab();
-      });
-    });
-    container.querySelectorAll('.ws-restore-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var t = this.getAttribute('data-widget');
-        var p = getWorkspacePrefs();
-        p.hidden = p.hidden.filter(function (x) { return x !== t; });
-        saveWorkspacePrefs(p);
-        renderWorkspaceTab();
+    // Minimize / expand cards. Click (or Enter/Space) on a card header
+    // toggles its body; the choice persists per user. We flip the class in
+    // place — no full re-render — so scroll position and in-flight count
+    // loaders are untouched.
+    function toggleCardCollapsed(headerEl) {
+      var t = headerEl.getAttribute('data-widget');
+      var card = headerEl.closest('.workspace-card');
+      if (!t || !card) return;
+      var nowCollapsed = !card.classList.contains('ws-card-collapsed');
+      card.classList.toggle('ws-card-collapsed', nowCollapsed);
+      headerEl.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+      headerEl.setAttribute('title', nowCollapsed ? 'Expand' : 'Minimize');
+      var caret = headerEl.querySelector('.ws-min-caret');
+      if (caret) caret.textContent = nowCollapsed ? '▸' : '▾';
+      var p = getWorkspacePrefs();
+      if (!p.collapsed || typeof p.collapsed !== 'object') p.collapsed = {};
+      p.collapsed[t] = nowCollapsed;
+      saveWorkspacePrefs(p);
+      // Keep the ifChanged signature honest so the next data-refresh render
+      // doesn't rebuild against a stale collapsed state.
+      container.setAttribute('data-ws-sig', JSON.stringify({ r: roles.slice().sort(), c: p.collapsed }));
+    }
+    container.querySelectorAll('.ws-card-toggle').forEach(function (hd) {
+      hd.addEventListener('click', function () { toggleCardCollapsed(this); });
+      hd.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCardCollapsed(this); }
       });
     });
 

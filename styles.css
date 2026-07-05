@@ -11649,23 +11649,26 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   background-color: var(--color-white);
   box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
 }
-.workspace-hidden {
-  margin-top: 24px;
-  padding: 14px 16px;
-  background: rgba(var(--color-primary-rgb), 0.06);
+/* Minimizable workspace cards (2026-07-05): the Hide option + hidden
+   strip are gone — every card renders and the whole header toggles the
+   body. The chevron mirrors state; minimized cards keep their body in
+   the DOM (display:none) so count loaders still land. */
+.ws-card-toggle { cursor: pointer; }
+.ws-card-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
   border-radius: var(--radius-sm);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
 }
-.workspace-hidden-label {
-  font-family: var(--font-body);
+.ws-min-caret {
+  font-size: 0.85rem;
   color: var(--color-text-light);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.workspace-card.ws-card-collapsed .workspace-card-body { display: none; }
+.workspace-card.ws-card-collapsed .workspace-card-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 @media (max-width: 600px) {
   .workspace-grid {
