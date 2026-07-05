@@ -6285,9 +6285,10 @@
     'resources': {
       title: 'Resources',
       roleGate: null,
-      // Reference list everyone knows — starts minimized to keep the
-      // Shared section short; expands with one tap and the choice sticks.
-      defaultCollapsed: true,
+      // NOTE: no defaultCollapsed here — a card that starts minimized
+      // reads as "empty card with just a header" to members (Erin,
+      // 2026-07-05, re the 26/27 Members card). Minimizing is purely a
+      // per-user choice via the header toggle.
       render: function () {
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
@@ -6642,9 +6643,7 @@
       // count opens a member-friendly roster (family name, members, track).
       title: SEASON_SHORT + ' Members',
       roleGate: null,
-      // Community snapshot — informational, not actionable; starts
-      // minimized (defaultCollapsed) to keep the Shared section short.
-      defaultCollapsed: true,
+      // No defaultCollapsed — see the note on 'resources'.
       render: function () {
         var h = '<p class="ws-body-hint">A snapshot of our co-op community this season.</p>';
         h += '<div class="ws-msum" id="ws-msum-body" aria-live="polite">';
