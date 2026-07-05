@@ -6579,6 +6579,19 @@
         return h;
       }
     },
+    'supply-closet-mgmt': {
+      // Supply Coordinator: the same closet modal members browse from
+      // Resources, opened in EDIT mode (add/edit items, quantities, and the
+      // Storage Locations drawer). Previously only reachable via the duty
+      // card on My Responsibilities.
+      title: 'Supply Closet',
+      roleGate: ['Supply Coordinator'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Add and update inventory, adjust quantities, and manage storage locations.</p>';
+        h += '<button type="button" class="sc-btn mcb-primary" data-resource-action="supply-closet-manage">Manage Supply Closet</button>';
+        return h;
+      }
+    },
     'upcoming-events': {
       // Read-only view of the shared co-op Google Calendar so the coordinator
       // can tell new members what actual events are coming up (not the board's
@@ -11610,6 +11623,15 @@
     // while impersonating via View As.
     var realEmail = localStorage.getItem('rw_user_email');
     if (isSuperUserEmail(realEmail)) return true;
+    // Roles-UI path: committee assignment via Org & Roles (role_holders_v2)
+    // — the same source that gates the workspace "Supply Closet" card and
+    // that the server's canEditAsRole checks on write. Without this, a
+    // coordinator assigned in the Roles UI (no legacy sheet row) would see
+    // the card but open the closet read-only.
+    if (typeof getWorkspaceRoles === 'function' &&
+        getWorkspaceRoles().indexOf('Supply Coordinator') !== -1) return true;
+    // Legacy fallback: last-name match against the Volunteer Committees
+    // sheet data (pre-Roles-UI assignments).
     var email = getActiveEmail();
     if (!email) return false;
     var me = null;
@@ -14277,6 +14299,7 @@
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
     else if (action === 'supply-closet' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true);
+    else if (action === 'supply-closet-manage' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(); // edit mode — canEdit computed from role
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
     else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
     else if (action === 'special-events' && typeof showSpecialEventsModal === 'function') showSpecialEventsModal();
