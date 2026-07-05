@@ -6446,9 +6446,10 @@
           // VP consolidation (2026-07-05 workspace review): Afternoon Class
           // Scheduling + Special Events fold in here as rows instead of
           // occupying two more one-or-two-button cards. The Afternoon Class
-          // Liaison and Special Events Liaison keep their own cards.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder</button></li>';
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="pm-submissions-report"><span class="ws-link-icon">📝</span>Submissions Report<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+          // Liaison and Special Events Liaison keep their own cards. The
+          // Submissions Report merged into the builder; its pending pill
+          // rides on the builder row.
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="special-events"><span class="ws-link-icon">🎉</span>Special Events</button></li>';
         }
         h += '</ul>';
@@ -6470,14 +6471,13 @@
       title: 'Afternoon Class Scheduling',
       roleGate: ['Vice President', 'Afternoon Class Liaison'],
       render: function () {
+        // The Submissions Report merged into the builder (2026-07-05):
+        // details on tap, ✗ decline, declined/withdrawn history, print +
+        // CSV all live there now. The pending-submitted count pill rides
+        // on this single row (painted in afterRender).
         var h = '<p class="ws-body-hint">Review inbound afternoon class submissions and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder</button></li>';
-        // The submissions report opens in a modal so the workspace card
-        // stays scannable. Count of pending-submitted is fetched in
-        // afterRender and painted into the ws-link-count pill so the
-        // reviewer sees activity at a glance without opening it.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="pm-submissions-report"><span class="ws-link-icon">📝</span>Submissions Report<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
         h += '</ul>';
         return h;
       },
@@ -14406,7 +14406,6 @@
     else if (action === 'schedule-builder' && typeof showScheduleBuilder === 'function') showScheduleBuilder();
     else if (action === 'morning-class-builder' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
     else if (action === 'special-events' && typeof showSpecialEventsModal === 'function') showSpecialEventsModal();
-    else if (action === 'pm-submissions-report' && typeof showPmSubmissionsModal === 'function') showPmSubmissionsModal();
     else if (action === 'submit-pm-class' && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(null);
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
@@ -16366,15 +16365,9 @@
   // PM Submissions Report (in the PM Class Scheduling workspace card)
   // ══════════════════════════════════════════════
   // Quick-triage list view of /api/curriculum?action=class-submissions.
-  // The Schedule Builder (opens in an overlay) is the right place for
-  // visual placement; this in-card table is the scannable list VP/PMA
-  // asked for — filter by status/session/age/year, see counts, and do
-  // fast approve (→drafted) or decline (→declined) per row.
-  var _pmReportState = {
-    loaded: false,
-    submissions: [],
-    filters: { status: 'submitted', session: 'all', age: 'all', school_year: '2026-2027' }
-  };
+  // NOTE (2026-07-05): the standalone Submissions Report was merged into
+  // the Afternoon Class Builder — details on tap, ✗ decline, declined/
+  // withdrawn history with re-queue, and print/CSV all live there now.
 
   // ══════════════════════════════════════════════
   // Roles Manager (President workspace widget → modal)
@@ -18600,104 +18593,8 @@
       });
   }
 
-  function showPmSubmissionsModal() {
-    // Subtitle is the action hint (approve/decline) — useful here since
-    // the row buttons aren't self-evident on first open. Filter row +
-    // table get rendered into the body by renderPmSubmissionsReport.
-    var icons = [
-      { label: 'Print', icon: ICON_SVG.print, aria: 'Print the visible submissions',
-        action: function () { printPmSubmissionsReport(); } },
-      { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the visible submissions as CSV',
-        action: function () { exportPmSubmissionsCSV(); } }
-    ];
-    var body = renderReportModal({
-      title: 'Afternoon Class Submissions',
-      subtitle: 'Approve to queue a submission for scheduling, or decline with a confirmation. The Afternoon Class Builder still owns final session/hour placement.',
-      meta: '',
-      icons: icons,
-      bodyId: 'pmrep-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading submissions…</p>'
-    });
-    if (!body) return;
-    loadPmSubmissionsReport();
-  }
-
-  function pmFilteredSubmissions() {
-    var f = _pmReportState.filters;
-    var all = _pmReportState.submissions || [];
-    return all.filter(function (s) {
-      if (f.status !== 'all' && s.status !== f.status) return false;
-      if (f.school_year !== 'all' && s.school_year !== f.school_year) return false;
-      if (f.session !== 'all') {
-        var prefs = s.session_preferences || [];
-        if (!prefs.some(function (p) { return String(p) === f.session; })) return false;
-      }
-      if (f.age !== 'all') {
-        var ages = (s.age_groups || []).map(function (a) { return String(a).toLowerCase(); });
-        if (ages.indexOf(f.age) === -1) return false;
-      }
-      return true;
-    });
-  }
-
-  function exportPmSubmissionsCSV() {
-    var subs = pmFilteredSubmissions();
-    var year = _pmReportState.filters.school_year;
-    var headers = ['Class', 'Status', 'Submitter', 'Sessions', 'Hour', 'Ages', 'Max', 'Description'];
-    function esc(v) {
-      var s = String(v == null ? '' : v);
-      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
-      return s;
-    }
-    var lines = [headers.join(',')];
-    subs.forEach(function (s) {
-      lines.push([
-        esc(s.class_name),
-        esc(s.status),
-        esc(s.submitted_by_name || s.submitted_by_email),
-        esc(pmrepFormatSessions(s.session_preferences)),
-        esc(pmrepFormatHourPrefs(s.hour_preference)),
-        esc((s.age_groups || []).join('; ')),
-        esc(s.max_students || ''),
-        esc(s.description || '')
-      ].join(','));
-    });
-    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'pm-class-submissions-' + year + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
-  function printPmSubmissionsReport() {
-    var subs = pmFilteredSubmissions();
-    var year = _pmReportState.filters.school_year;
-    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Afternoon Class Submissions ' + escapeHtml(year) + '</title>';
-    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}td.desc{color:#444;font-size:11px;}</style>';
-    doc += '</head><body>';
-    doc += '<h1>Afternoon Class Submissions</h1>';
-    doc += '<p class="meta">Year ' + escapeHtml(year) + ' · ' + subs.length + ' submission' + (subs.length === 1 ? '' : 's') + '</p>';
-    doc += '<table><thead><tr><th>Class</th><th>Status</th><th>Submitter</th><th>Sessions</th><th>Hour</th><th>Ages</th><th>Max</th></tr></thead><tbody>';
-    subs.forEach(function (s) {
-      doc += '<tr><td><strong>' + escapeHtml(s.class_name) + '</strong>';
-      if (s.description) {
-        doc += '<div class="desc">' + escapeHtml(String(s.description).slice(0, 200)) + (String(s.description).length > 200 ? '…' : '') + '</div>';
-      }
-      doc += '</td>';
-      doc += '<td>' + escapeHtml((s.status || '').toUpperCase()) + '</td>';
-      doc += '<td>' + escapeHtml(s.submitted_by_name || s.submitted_by_email) + '</td>';
-      doc += '<td>' + escapeHtml(pmrepFormatSessions(s.session_preferences)) + '</td>';
-      doc += '<td>' + escapeHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</td>';
-      doc += '<td>' + escapeHtml((s.age_groups || []).join(', ')) + '</td>';
-      doc += '<td>' + escapeHtml(String(s.max_students || '')) + '</td></tr>';
-    });
-    doc += '</tbody></table></body></html>';
-    openPrintIframe(doc);
-  }
+  // (showPmSubmissionsModal + its filters/CSV/print were removed
+  // 2026-07-05 — see the sb* equivalents next to the Schedule Builder.)
 
   // Lightweight count fetch used on workspace render to paint a "N pending"
   // pill next to the Submissions Report button without loading the full list.
@@ -19334,10 +19231,7 @@
       .then(function (data) {
         if (!data) return;
         var subs = Array.isArray(data.submissions) ? data.submissions : [];
-        // Cache so the modal can open instantly without a second fetch.
-        _pmReportState.submissions = subs;
-        _pmReportState.loaded = true;
-        var year = _pmReportState.filters.school_year;
+        var year = scheduleBuilderState.schoolYear;
         var pending = subs.filter(function (s) {
           return s.status === 'submitted' && s.school_year === year;
         }).length;
@@ -19349,34 +19243,6 @@
         }
       })
       .catch(function () { /* silent — pill stays hidden */ });
-  }
-
-  function loadPmSubmissionsReport(forceRefetch) {
-    var cred = localStorage.getItem('rw_google_credential');
-    if (!cred) return;
-    // Filter handlers are wired inside the body now (see
-    // wirePmFilterChange) since the dropdowns live in the body slot,
-    // not the modal shell. Each render re-creates them.
-    if (_pmReportState.loaded && !forceRefetch) {
-      renderPmSubmissionsReport();
-      return;
-    }
-    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
-      headers: { 'Authorization': 'Bearer ' + cred }
-    })
-      .then(function (r) {
-        if (r.status === 403) throw new Error('Reviewer access only.');
-        return r.json();
-      })
-      .then(function (data) {
-        _pmReportState.submissions = Array.isArray(data.submissions) ? data.submissions : [];
-        _pmReportState.loaded = true;
-        renderPmSubmissionsReport();
-      })
-      .catch(function (err) {
-        var body = document.getElementById('pmrep-body');
-        if (body) body.innerHTML = '<p class="ws-empty">' + escapeHtml(err.message || 'Could not load submissions.') + '</p>';
-      });
   }
 
   function pmrepFormatHourPrefs(arr) {
@@ -19398,242 +19264,6 @@
     }).join(', ');
   }
 
-  // Filters live inside the table header row (one <th> per filterable
-  // column with a <select> aligned under its label) so they read as
-  // "filter for THIS column" instead of a generic nav bar. Year is the
-  // exception — it scopes the entire table, not a single column —
-  // and surfaces in the modal meta line as a small inline select.
-  function renderPmYearMetaSelect() {
-    var f = _pmReportState.filters;
-    var html = '<select class="rd-meta-select" data-filter="school_year" aria-label="School year">';
-    ['2026-2027','2027-2028'].forEach(function (yr) {
-      html += '<option value="' + yr + '"' + (f.school_year === yr ? ' selected' : '') + '>' + yr.replace('-','–') + '</option>';
-    });
-    html += '</select>';
-    return html;
-  }
-  // Build per-column funnel buttons + their popover configs for the
-  // PM Submissions header. Counts only ride on the Status options
-  // (single-valued, sums to total). Sessions / ages are multi-value
-  // arrays where counts wouldn't sum cleanly, so labels stand alone.
-  function pmFilterFunnel(key, label, currentValue, defaultValue) {
-    var isActive = currentValue && currentValue !== defaultValue;
-    return '<button type="button" class="ws-th-filter-btn'
-      + (isActive ? ' is-active' : '')
-      + '" data-pm-filter="' + key + '"'
-      + ' aria-label="Filter ' + label + '">' + FUNNEL_SVG + '</button>';
-  }
-  function pmFilterConfig(key) {
-    var f = _pmReportState.filters;
-    var all = _pmReportState.submissions || [];
-    if (key === 'status') {
-      var statuses = ['submitted','drafted','scheduled','declined','withdrawn'];
-      var counts = {};
-      all.forEach(function (s) {
-        if (s.school_year === f.school_year) counts[s.status] = (counts[s.status] || 0) + 1;
-      });
-      var opts = [{ value: 'all', label: 'Any', count: all.filter(function (s) { return s.school_year === f.school_year; }).length }];
-      statuses.forEach(function (v) {
-        opts.push({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1), count: counts[v] || 0 });
-      });
-      return {
-        options: opts,
-        current: f.status,
-        defaultValue: 'submitted',
-        onChange: function (v) { _pmReportState.filters.status = v; renderPmSubmissionsReport(); }
-      };
-    }
-    if (key === 'session') {
-      var sopts = [{ value: 'all', label: 'Any' }, { value: 'flexible', label: 'Flexible' }];
-      for (var s = 1; s <= 5; s++) sopts.push({ value: String(s), label: 'Session ' + s });
-      return {
-        options: sopts,
-        current: f.session,
-        defaultValue: 'all',
-        onChange: function (v) { _pmReportState.filters.session = v; renderPmSubmissionsReport(); }
-      };
-    }
-    if (key === 'age') {
-      return {
-        options: [
-          { value: 'all',   label: 'Any' },
-          { value: '3-7',   label: '3–7' },
-          { value: '7-9',   label: '7–9' },
-          { value: '10-12', label: '10–12' },
-          { value: 'teens', label: 'Teens' }
-        ],
-        current: f.age,
-        defaultValue: 'all',
-        onChange: function (v) { _pmReportState.filters.age = v; renderPmSubmissionsReport(); }
-      };
-    }
-    return null;
-  }
-
-  function renderPmSubmissionsReport() {
-    var body = document.getElementById('pmrep-body');
-    if (!body) return;
-
-    var all = _pmReportState.submissions;
-    var filtered = pmFilteredSubmissions();
-
-    // Update the modal's meta line: count + a year scope-picker. The
-    // year is the only filter that doesn't map to a single column, so
-    // it lives here instead of in the table header row. innerHTML is
-    // safe — values are class-controlled, not user input.
-    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-    if (metaEl) {
-      var countText = filtered.length === all.length
-        ? filtered.length + ' submission' + (filtered.length === 1 ? '' : 's')
-        : filtered.length + ' of ' + all.length;
-      metaEl.innerHTML = 'Year ' + renderPmYearMetaSelect() + ' · ' + escapeHtmlWs(countText);
-      // Wire the year select inline since the meta lives in the modal
-      // shell (not the body that gets re-rendered every filter change).
-      var yearSel = metaEl.querySelector('[data-filter="school_year"]');
-      if (yearSel && !yearSel._pmrepWired) {
-        yearSel._pmrepWired = true;
-        yearSel.addEventListener('change', function () {
-          _pmReportState.filters.school_year = this.value;
-          renderPmSubmissionsReport();
-        });
-      }
-    }
-
-    // Use the shared ws-waivers-table classes so PM Submissions inherits
-    // the standard sticky header + sticky-first-column treatment used by
-    // every tabular Workspace report. Filter row sits inside <thead> so
-    // each filter aligns with its column. The header (and its filters)
-    // ALWAYS renders even on zero matches so the user can adjust the
-    // filter that's hiding everything.
-    var f = _pmReportState.filters;
-
-    // Always-visible status count strip (year-scoped). Same pill shape
-    // and colors as the in-row Status badges so the summary maps onto
-    // the column it summarizes.
-    var allYear = all.filter(function (s) { return s.school_year === f.school_year; });
-    var pmStatusCounts = { submitted: 0, drafted: 0, scheduled: 0, declined: 0, withdrawn: 0 };
-    allYear.forEach(function (s) {
-      if (pmStatusCounts[s.status] != null) pmStatusCounts[s.status] += 1;
-    });
-    function pmCountPill(variant, label) {
-      var n = pmStatusCounts[variant] || 0;
-      return '<span class="pmrep-status pmrep-status-' + variant + '">'
-        + n + ' ' + escapeHtmlWs(label) + '</span>';
-    }
-    var countsHtml = '<div class="rd-counts">';
-    countsHtml += pmCountPill('submitted', 'Submitted');
-    countsHtml += pmCountPill('drafted',   'Drafted');
-    countsHtml += pmCountPill('scheduled', 'Scheduled');
-    countsHtml += pmCountPill('declined',  'Declined');
-    countsHtml += pmCountPill('withdrawn', 'Withdrawn');
-    countsHtml += '</div>';
-
-    var h = countsHtml;
-    h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table">';
-    h += '<thead><tr>';
-    // Column convention: row identifier (Class) → Status pill →
-    // everything else, with Actions trailing. Same shape Participation
-    // Tracker uses. Filterable columns get a funnel button next to
-    // their label — click opens a popover with options + counts.
-    h += '<th>Class</th>';
-    h += '<th>Status' + pmFilterFunnel('status', 'status', f.status, 'submitted') + '</th>';
-    h += '<th>Submitter</th>';
-    h += '<th>Sessions' + pmFilterFunnel('session', 'session', f.session, 'all') + '</th>';
-    h += '<th>Hour</th>';
-    h += '<th>Ages' + pmFilterFunnel('age', 'age', f.age, 'all') + '</th>';
-    h += '<th>Max</th>';
-    h += '<th class="pmrep-actions-col">Actions</th>';
-    h += '</tr></thead><tbody>';
-    if (filtered.length === 0) {
-      h += '<tr><td colspan="8" class="ws-empty" style="text-align:center;">No submissions match these filters.</td></tr>';
-      h += '</tbody></table></div>';
-      body.innerHTML = h;
-      wirePmFilterChange(body);
-      return;
-    }
-    filtered.forEach(function (s) {
-      h += '<tr data-sub-id="' + s.id + '">';
-      h += '<td class="pmrep-class-cell">' + escapeHtml(s.class_name);
-      if (s.description) {
-        var snippet = String(s.description).slice(0, 120);
-        h += '<div class="pmrep-class-desc">' + escapeHtml(snippet) + (String(s.description).length > 120 ? '…' : '') + '</div>';
-      }
-      h += '</td>';
-      h += '<td><span class="pmrep-status pmrep-status-' + s.status + '">' + s.status + '</span></td>';
-      h += '<td>' + escapeHtml(s.submitted_by_name || s.submitted_by_email) + '</td>';
-      h += '<td>' + escapeHtml(pmrepFormatSessions(s.session_preferences)) + '</td>';
-      h += '<td>' + escapeHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</td>';
-      h += '<td>' + (s.age_groups || []).map(escapeHtml).join(', ') + '</td>';
-      h += '<td>' + (s.max_students || '—') + '</td>';
-      h += '<td class="pmrep-actions">';
-      if (s.status === 'submitted') {
-        h += '<button class="sc-btn pmrep-btn pmrep-approve-btn" data-sub-id="' + s.id + '" title="Queue for scheduling (status → drafted)">✓ Approve</button>';
-        h += '<button class="sc-btn sc-btn-del pmrep-btn pmrep-decline-btn" data-sub-id="' + s.id + '" title="Decline this submission">✗ Decline</button>';
-      } else if (s.status === 'declined' || s.status === 'withdrawn') {
-        h += '<button class="sc-btn pmrep-btn pmrep-requeue-btn" data-sub-id="' + s.id + '" title="Send back to Submitted">↩ Re-queue</button>';
-      } else {
-        h += '<span class="pmrep-schedule-note">Use Afternoon Class Builder</span>';
-      }
-      h += '</td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table></div>';
-    body.innerHTML = h;
-
-    // Wire per-row action buttons.
-    body.querySelectorAll('.pmrep-approve-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () { pmReportAction(this.getAttribute('data-sub-id'), 'drafted', 'approve'); });
-    });
-    body.querySelectorAll('.pmrep-decline-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        if (!confirm('Decline this submission? The submitter will see "Declined" on their dashboard.')) return;
-        pmReportAction(this.getAttribute('data-sub-id'), 'declined', 'decline');
-      });
-    });
-    body.querySelectorAll('.pmrep-requeue-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () { pmReportAction(this.getAttribute('data-sub-id'), 'submitted', 're-queue'); });
-    });
-    wirePmFilterChange(body);
-  }
-
-  // Wire the column-header funnel buttons in the PM Submissions body.
-  // Re-runs each render since the body innerHTML is replaced.
-  function wirePmFilterChange(body) {
-    body.querySelectorAll('[data-pm-filter]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var key = this.getAttribute('data-pm-filter');
-        var conf = pmFilterConfig(key);
-        if (!conf) return;
-        openFilterPopover(this, conf.options, conf.current, conf.onChange);
-      });
-    });
-  }
-
-  function pmReportAction(subId, newStatus, actionLabel) {
-    var cred = localStorage.getItem('rw_google_credential');
-    if (!cred) return;
-    fetch('/api/curriculum?action=class-submission&review=1&id=' + subId + notifViewAsSuffix(), {
-      method: 'PATCH',
-      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus })
-    })
-      .then(function (r) {
-        return r.json().then(function (d) {
-          if (!r.ok) throw new Error(d.error || 'Request failed (' + r.status + ')');
-          return d;
-        });
-      })
-      .then(function () {
-        loadPmSubmissionsReport(true); // force refetch — list changes after action
-        // Keep the workspace-card "N new" pill in sync with the server.
-        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
-      })
-      .catch(function (err) {
-        alert('Could not ' + actionLabel + ': ' + (err.message || 'unknown error'));
-      });
-  }
-
   function showScheduleBuilder() {
     if (document.getElementById('sbOverlay')) return;
     var html = '<div class="sb-overlay" id="sbOverlay">';
@@ -19646,6 +19276,12 @@
     html += '<option value="2026-2027">2026–2027</option>';
     html += '<option value="2027-2028">2027–2028</option>';
     html += '</select></label>';
+    // Print / CSV of every submission for the year — Submissions-Report
+    // parity now that the report lives inside the builder.
+    html += '<span class="sb-header-tools">';
+    html += '<button type="button" class="rd-icon" id="sbPrintBtn" aria-label="Print all submissions for the year" title="Print submissions">' + ICON_SVG.print + '</button>';
+    html += '<button type="button" class="rd-icon" id="sbCsvBtn" aria-label="Download all submissions as CSV" title="Export CSV">' + ICON_SVG.download + '</button>';
+    html += '</span>';
     html += '</div>';
     html += '<div class="sb-body" id="sbBody"><em style="color:var(--color-text-light);">Loading submissions…</em></div>';
     html += '</div></div>';
@@ -19660,6 +19296,8 @@
       scheduleBuilderState.schoolYear = this.value;
       loadScheduleBuilder();
     });
+    document.getElementById('sbPrintBtn').addEventListener('click', sbPrintSubmissions);
+    document.getElementById('sbCsvBtn').addEventListener('click', sbExportSubmissionsCSV);
     loadScheduleBuilder();
   }
 
@@ -20506,7 +20144,7 @@
     });
     var paletteHtml = '<div class="sb-palette" id="sbPalette">';
     paletteHtml += '<div class="sb-palette-title">Available classes (' + palette.length + ')</div>';
-    paletteHtml += '<div class="sb-palette-hint">Drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”. <strong>Requested session</strong> is shown on each card.</div>';
+    paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
     if (palette.length === 0) {
       paletteHtml += '<p class="sb-palette-empty">No submissions waiting — they’ll appear here as members submit classes.</p>';
     } else {
@@ -20537,6 +20175,25 @@
         if (s.co_teachers) paletteHtml += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(s.co_teachers) + '</div>';
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
         paletteHtml += '</div>';
+      });
+      paletteHtml += '</div>';
+    }
+
+    // Declined & withdrawn — collapsed history right in the builder
+    // (Submissions Report parity): tap a name for full details, ↩ sends
+    // it back to the inbox.
+    var retired = scheduleBuilderState.submissions.filter(function (s) {
+      return s.status === 'declined' || s.status === 'withdrawn';
+    }).sort(function (a, b) { return String(a.class_name || '').localeCompare(String(b.class_name || '')); });
+    if (retired.length > 0) {
+      paletteHtml += '<button type="button" class="sb-retired-toggle" id="sbRetiredToggle" aria-expanded="false">▸ Declined &amp; withdrawn (' + retired.length + ')</button>';
+      paletteHtml += '<div id="sbRetiredList" hidden>';
+      retired.forEach(function (s) {
+        paletteHtml += '<div class="sb-retired-row">'
+          + '<button type="button" class="sb-retired-name" data-sub-id="' + s.id + '" title="View details">' + escClsHtml(s.class_name) + '</button>'
+          + '<span class="pmrep-status pmrep-status-' + s.status + '">' + s.status + '</span>'
+          + '<button type="button" class="sc-btn sb-requeue-btn" data-sub-id="' + s.id + '" title="Send back to the inbox">↩</button>'
+          + '</div>';
       });
       paletteHtml += '</div>';
     }
@@ -20632,24 +20289,202 @@
       });
     }
 
-    // ✗ Decline on palette cards — Submissions Report parity, in place.
+    // ✗ Decline on palette cards — in place, no separate report needed.
     // stopPropagation keeps the click from reading as a card tap/drag.
     body.querySelectorAll('.sb-palette-decline').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var id = parseInt(this.getAttribute('data-sub-id'), 10);
-        var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
-        var name = sub ? sub.class_name : 'this class';
-        if (!confirm('Decline “' + name + '”?\nThe submitter will see “Declined” on their dashboard. You can re-queue it later from the Submissions Report.')) return;
-        patchReviewAction(id, { status: 'declined', reviewer_notes: (sub && sub.reviewer_notes) || '' })
-          .then(function () {
-            loadScheduleBuilder();
-            // Keep the workspace pill in sync with the server.
-            if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
-          })
-          .catch(function (err) { alert('Could not decline: ' + (err.message || 'error')); });
+        sbDeclineSubmission(parseInt(this.getAttribute('data-sub-id'), 10));
       });
     });
+
+    // Tap a palette card → full submission details (description, prefs,
+    // max students, …) with the review actions inline.
+    body.querySelectorAll('.sb-palette-card').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target.closest('.sb-palette-decline')) return;
+        showSbSubmissionDetail(parseInt(el.getAttribute('data-sub-id'), 10));
+      });
+    });
+
+    // Declined & withdrawn: expand/collapse + re-queue + name → details.
+    var retiredToggle = document.getElementById('sbRetiredToggle');
+    var retiredList = document.getElementById('sbRetiredList');
+    if (retiredToggle && retiredList) {
+      retiredToggle.addEventListener('click', function () {
+        var open = retiredList.hidden;
+        retiredList.hidden = !open;
+        retiredToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        retiredToggle.textContent = (open ? '▾' : '▸') + ' Declined & withdrawn (' + retired.length + ')';
+      });
+    }
+    body.querySelectorAll('.sb-requeue-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        sbRequeueSubmission(parseInt(this.getAttribute('data-sub-id'), 10));
+      });
+    });
+    body.querySelectorAll('.sb-retired-name').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showSbSubmissionDetail(parseInt(this.getAttribute('data-sub-id'), 10));
+      });
+    });
+  }
+
+  // Shared review actions for the builder (used by the palette ✗, the
+  // Declined & withdrawn rows, and the submission-detail modal).
+  function sbDeclineSubmission(id) {
+    var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+    var name = sub ? sub.class_name : 'this class';
+    if (!confirm('Decline “' + name + '”?\nThe submitter will see “Declined” on their dashboard. You can re-queue it from “Declined & withdrawn” below the inbox.')) return;
+    patchReviewAction(id, { status: 'declined', reviewer_notes: (sub && sub.reviewer_notes) || '' })
+      .then(function () {
+        closeSbSubmissionDetail();
+        loadScheduleBuilder();
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
+      })
+      .catch(function (err) { alert('Could not decline: ' + (err.message || 'error')); });
+  }
+
+  function sbRequeueSubmission(id) {
+    var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+    patchReviewAction(id, { status: 'submitted', reviewer_notes: (sub && sub.reviewer_notes) || '' })
+      .then(function () {
+        closeSbSubmissionDetail();
+        loadScheduleBuilder();
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
+      })
+      .catch(function (err) { alert('Could not re-queue: ' + (err.message || 'error')); });
+  }
+
+  // Full submission details in a small overlay over the builder — the
+  // Submissions Report's row detail, relocated. Placed (scheduled) classes
+  // are edited via their grid tile (showScheduleEntryEditor); this covers
+  // inbox + declined/withdrawn.
+  function showSbSubmissionDetail(subId) {
+    var s = scheduleBuilderState.submissions.filter(function (x) { return x.id === subId; })[0];
+    if (!s) return;
+    closeSbSubmissionDetail();
+    var ages = prettyAgesClient(s.age_groups, s.age_groups_other);
+    var html = '<div class="sb-overlay" id="sbSubDetailOverlay" style="z-index:10000;">';
+    html += '<div class="sb-panel sb-panel-picker" role="dialog" aria-modal="true" aria-label="Class submission details">';
+    html += '<button class="detail-close" id="sbSubDetailCloseX" aria-label="Close">&times;</button>';
+    html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(s.class_name) + '</h3>';
+    html += '<p style="margin:0 0 0.75rem;"><span class="pmrep-status pmrep-status-' + s.status + '">' + s.status + '</span></p>';
+    html += '<div class="sb-subdetail-meta">';
+    html += '<div><strong>Teacher:</strong> ' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (s.submitted_by_email && s.submitted_by_name ? ' <span class="sb-subdetail-dim">(' + escClsHtml(s.submitted_by_email) + ')</span>' : '') + '</div>';
+    if (s.co_teachers) html += '<div><strong>Co-leader:</strong> ' + escClsHtml(s.co_teachers) + '</div>';
+    if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
+    html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences)) + ' · <strong>Hour:</strong> ' + escClsHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
+    if (s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
+    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(s.scheduled_hour) : '') + '</div>';
+    html += '</div>';
+    if (s.description) {
+      html += '<h4 class="sb-pick-section-title" style="margin-top:0.75rem;">Description</h4>';
+      html += '<p class="sb-subdetail-desc">' + escClsHtml(s.description) + '</p>';
+    }
+    if (s.reviewer_notes) {
+      html += '<h4 class="sb-pick-section-title" style="margin-top:0.75rem;">Reviewer notes</h4>';
+      html += '<p class="sb-subdetail-desc">' + escClsHtml(s.reviewer_notes) + '</p>';
+    }
+    html += '<div class="cls-actions">';
+    if (s.status === 'submitted' || s.status === 'drafted') {
+      html += '<button type="button" class="sc-btn sc-btn-del" id="sbSubDetailDecline">✗ Decline</button>';
+    } else if (s.status === 'declined' || s.status === 'withdrawn') {
+      html += '<button type="button" class="sc-btn" id="sbSubDetailRequeue">↩ Re-queue</button>';
+    } else if (s.status === 'scheduled') {
+      html += '<span class="sb-subdetail-dim">Placed — tap its tile in the grid to edit or move it.</span>';
+    }
+    html += '<button type="button" class="sc-btn" id="sbSubDetailClose">Close</button>';
+    html += '</div>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    var overlay = document.getElementById('sbSubDetailOverlay');
+    document.getElementById('sbSubDetailCloseX').addEventListener('click', closeSbSubmissionDetail);
+    document.getElementById('sbSubDetailClose').addEventListener('click', closeSbSubmissionDetail);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeSbSubmissionDetail(); });
+    var dBtn = document.getElementById('sbSubDetailDecline');
+    if (dBtn) dBtn.addEventListener('click', function () { sbDeclineSubmission(subId); });
+    var rBtn = document.getElementById('sbSubDetailRequeue');
+    if (rBtn) rBtn.addEventListener('click', function () { sbRequeueSubmission(subId); });
+  }
+
+  function closeSbSubmissionDetail() {
+    var ov = document.getElementById('sbSubDetailOverlay');
+    if (ov) ov.remove();
+  }
+
+  // Print / CSV of every submission for the year, all statuses —
+  // Submissions-Report parity from the builder header.
+  function sbSortedSubmissions() {
+    var order = { submitted: 0, drafted: 1, scheduled: 2, declined: 3, withdrawn: 4 };
+    return scheduleBuilderState.submissions.slice().sort(function (a, b) {
+      var d = (order[a.status] != null ? order[a.status] : 9) - (order[b.status] != null ? order[b.status] : 9);
+      if (d) return d;
+      return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+    });
+  }
+
+  function sbExportSubmissionsCSV() {
+    var subs = sbSortedSubmissions();
+    if (subs.length === 0) { alert('No submissions loaded yet — try again in a moment.'); return; }
+    var year = scheduleBuilderState.schoolYear;
+    var headers = ['Class', 'Status', 'Submitter', 'Sessions', 'Hour', 'Ages', 'Max', 'Placed', 'Description'];
+    function esc(v) {
+      var s = String(v == null ? '' : v);
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    var lines = [headers.join(',')];
+    subs.forEach(function (s) {
+      lines.push([
+        esc(s.class_name),
+        esc(s.status),
+        esc(s.submitted_by_name || s.submitted_by_email),
+        esc(pmrepFormatSessions(s.session_preferences)),
+        esc(pmrepFormatHourPrefs(s.hour_preference)),
+        esc((s.age_groups || []).join('; ')),
+        esc(s.max_students || ''),
+        esc(s.scheduled_session ? 'S' + s.scheduled_session + (s.scheduled_hour ? ' ' + s.scheduled_hour : '') : ''),
+        esc(s.description || '')
+      ].join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'pm-class-submissions-' + year + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function sbPrintSubmissions() {
+    var subs = sbSortedSubmissions();
+    if (subs.length === 0) { alert('No submissions loaded yet — try again in a moment.'); return; }
+    var year = scheduleBuilderState.schoolYear;
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Afternoon Class Submissions ' + escapeHtml(year) + '</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}td.desc{color:#444;font-size:11px;}</style>';
+    doc += '</head><body>';
+    doc += '<h1>Afternoon Class Submissions</h1>';
+    doc += '<p class="meta">Year ' + escapeHtml(year) + ' · ' + subs.length + ' submission' + (subs.length === 1 ? '' : 's') + '</p>';
+    doc += '<table><thead><tr><th>Class</th><th>Status</th><th>Submitter</th><th>Sessions</th><th>Hour</th><th>Ages</th><th>Max</th><th>Placed</th></tr></thead><tbody>';
+    subs.forEach(function (s) {
+      doc += '<tr><td><strong>' + escapeHtml(s.class_name) + '</strong>';
+      if (s.description) {
+        doc += '<div class="desc">' + escapeHtml(String(s.description).slice(0, 200)) + (String(s.description).length > 200 ? '…' : '') + '</div>';
+      }
+      doc += '</td>';
+      doc += '<td>' + escapeHtml((s.status || '').toUpperCase()) + '</td>';
+      doc += '<td>' + escapeHtml(s.submitted_by_name || s.submitted_by_email) + '</td>';
+      doc += '<td>' + escapeHtml(pmrepFormatSessions(s.session_preferences)) + '</td>';
+      doc += '<td>' + escapeHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</td>';
+      doc += '<td>' + escapeHtml((s.age_groups || []).join(', ')) + '</td>';
+      doc += '<td>' + escapeHtml(String(s.max_students || '')) + '</td>';
+      doc += '<td>' + escapeHtml(s.scheduled_session ? 'S' + s.scheduled_session + (s.scheduled_hour ? ' ' + s.scheduled_hour : '') : '') + '</td></tr>';
+    });
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
   }
 
   var _sbDragId = null;

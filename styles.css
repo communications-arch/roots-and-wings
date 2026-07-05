@@ -8155,6 +8155,67 @@ button.staff-role:hover {
   font-size: 0.85rem;
   color: var(--color-text);
 }
+/* Builder header print/CSV tools (Submissions-Report parity). */
+.sb-header-tools {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+/* Declined & withdrawn history in the side palette. */
+.sb-retired-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 6px 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+}
+.sb-retired-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 0.82rem;
+}
+.sb-retired-name {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  cursor: pointer;
+  color: var(--color-primary);
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-retired-name:hover { text-decoration: underline; }
+.sb-requeue-btn { flex-shrink: 0; }
+
+/* Submission-detail overlay (palette card tap). */
+.sb-subdetail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+.sb-subdetail-dim { color: var(--color-text-light); font-size: 0.85em; }
+.sb-subdetail-desc {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
 /* Drag-and-drop palette of available submissions + slot drop states. */
 .sb-palette {
   margin-top: 16px;
