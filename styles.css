@@ -8140,7 +8140,11 @@ button.staff-role:hover {
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
-  margin-top: auto;
+  /* NOTE: no margin-top:auto here. The button used to sit at the BOTTOM
+     of the block and auto-margin pinned it there; now that it renders at
+     the top, auto-margin would swallow the stretch slack in the shorter
+     block (the "big empty gap at the top of Hour 2" bug — the grid's
+     align-items:stretch makes PM2 match PM1's height). */
 }
 .sb-cell-add:hover { background: rgba(var(--color-primary-rgb), 0.08); }
 .sb-inbox-note {
