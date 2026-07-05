@@ -18065,7 +18065,7 @@
 
     // View pills — one list, four lenses.
     h += '<div class="board-cal-views" role="group" aria-label="Calendar view">';
-    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['task', 'Board tasks']].forEach(function (v) {
+    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['task', 'Board Tasks']].forEach(function (v) {
       h += '<button type="button" class="board-cal-view-pill' + (view === v[0] ? ' is-active' : '') + '" data-cal-view="' + v[0] + '">' + v[1] + '</button>';
     });
     h += '</div>';
