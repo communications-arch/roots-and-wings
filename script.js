@@ -2868,6 +2868,9 @@
 
   function closeDetail() {
     if (personDetail) {
+      // Tear down any open settings drawer with its host modal so it
+      // can't linger invisibly and reappear over the next modal.
+      if (typeof closeReportDrawer === 'function') closeReportDrawer(true);
       personDetail.style.display = 'none';
       document.body.style.overflow = '';
     }
@@ -8632,6 +8635,66 @@
     render();
   }
 
+  // ─── Report settings drawer ───
+  //
+  // Standard navigation for a report's admin/settings tools: a panel that
+  // slides in OVER the open report modal instead of replacing it. The
+  // report stays visible (dimmed) behind and keeps its scroll position;
+  // closing the drawer puts the reviewer right back where they were.
+  // Desktop: right-side slide-over. Phones: bottom sheet (CSS). One
+  // drawer at a time. Returns the drawer body element.
+  //   opts: { title, bodyId, bodyPlaceholder, onClose }
+  // onClose fires on every close path (back arrow, ✕, backdrop tap) —
+  // use it to refresh the underlying report if the drawer saved data.
+  function openReportDrawer(opts) {
+    opts = opts || {};
+    if (!personDetail) return null;
+    closeReportDrawer(true); // one at a time; silent — no onClose for the evicted drawer
+    var backdrop = document.createElement('div');
+    backdrop.className = 'rd-drawer-backdrop';
+    var drawer = document.createElement('aside');
+    drawer.className = 'rd-drawer';
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-label', opts.title || 'Settings');
+    drawer.tabIndex = -1;
+    drawer.innerHTML =
+      '<div class="rd-drawer-head">'
+      + '<button type="button" class="rd-drawer-back" aria-label="Back to report" title="Back to report">&larr;</button>'
+      + '<h4 class="rd-drawer-title">' + escapeHtmlWs(opts.title || 'Settings') + '</h4>'
+      + '<button type="button" class="rd-drawer-close" aria-label="Close" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="rd-drawer-body" id="' + escapeHtmlWs(opts.bodyId || 'rd-drawer-body') + '">'
+      + (opts.bodyPlaceholder || '') + '</div>';
+    personDetail.appendChild(backdrop);
+    personDetail.appendChild(drawer);
+    function close(silent) {
+      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      if (drawer.parentNode) drawer.parentNode.removeChild(drawer);
+      if (!silent && typeof opts.onClose === 'function') opts.onClose();
+    }
+    drawer._rdClose = close;
+    // Backdrop click closes just the drawer — stopPropagation so the
+    // overlay's own click-outside handler doesn't close the whole modal.
+    backdrop.addEventListener('click', function (e) { e.stopPropagation(); close(); });
+    drawer.querySelector('.rd-drawer-back').addEventListener('click', function () { close(); });
+    drawer.querySelector('.rd-drawer-close').addEventListener('click', function () { close(); });
+    // Slide in on the next frame so the transition runs.
+    requestAnimationFrame(function () {
+      backdrop.classList.add('is-open');
+      drawer.classList.add('is-open');
+      try { drawer.focus(); } catch (e) {}
+    });
+    return drawer.querySelector('.rd-drawer-body');
+  }
+
+  function closeReportDrawer(silent) {
+    var d = personDetail && personDetail.querySelector('.rd-drawer');
+    if (d && typeof d._rdClose === 'function') { d._rdClose(silent); return; }
+    var b = personDetail && personDetail.querySelector('.rd-drawer-backdrop');
+    if (b && b.parentNode) b.parentNode.removeChild(b);
+    if (d && d.parentNode) d.parentNode.removeChild(d);
+  }
+
   // ─── Workspace Reports / Forms modals ───
   //
   // The Workspace "Reports" and "Forms" cards are just per-role link lists.
@@ -10879,24 +10942,32 @@
     return { was: was, counts: counts, changes: changes };
   }
 
+  // True after any successful save inside the settings drawer (weights,
+  // exemption add/edit/delete) — tells the drawer's onClose to refresh
+  // the report table sitting behind it.
+  var _participationSettingsChanged = false;
+
   function showParticipationSettingsModal(opts) {
     opts = opts || {};
     if (!personDetail || !personDetailCard) return;
     if (!participationCanWrite()) { alert('Vice President, Afternoon Class Liaison, or super user only.'); return; }
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail rd-modal">';
-    html += '<h3 class="rd-title">Participation Settings</h3>';
-    html += '<p class="rd-subtitle">Set the season goal and what each activity is worth. The preview shows what your changes would do before you save.</p>';
-    html += '<div id="ws-pset-body"><p class="ws-empty">Loading settings…</p></div>';
-    html += '</div>';
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    personDetailCard.querySelector('.detail-close').addEventListener('click', function () {
-      // Return to the report view with fresh data
-      showParticipationReportModal();
+    // Slide-over drawer OVER the report modal (openReportDrawer) — the
+    // report stays visible behind it and keeps its scroll position.
+    var drawerBody = openReportDrawer({
+      title: 'Participation Settings',
+      bodyId: 'ws-pset-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading settings…</p>',
+      onClose: function () {
+        if (!_participationSettingsChanged) return;
+        _participationSettingsChanged = false;
+        // Something was saved — refresh the report behind the drawer so
+        // the table + count strip reflect the new numbers.
+        if (personDetailCard && personDetailCard.querySelector('#ws-participation-body')) {
+          loadParticipationReport();
+        }
+      }
     });
-    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+    if (!drawerBody) return;
 
     // The preview + the exemption form's member picker both need the
     // report data; fetch it alongside the weights if it isn't cached.
@@ -10913,13 +10984,12 @@
 
     Promise.all([weightsPromise, reportPromise]).then(function (results) {
       var res = results[0];
-      var body = personDetailCard.querySelector('#ws-pset-body');
-      if (!body) return;
-      if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
-      renderParticipationSettings(body, (res.data && res.data.weights) || [], opts);
+      // The drawer may have been closed while loading — bail quietly.
+      if (!drawerBody.isConnected) return;
+      if (!res.ok) { drawerBody.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
+      renderParticipationSettings(drawerBody, (res.data && res.data.weights) || [], opts);
     }).catch(function (err) {
-      var body = personDetailCard.querySelector('#ws-pset-body');
-      if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>';
+      if (drawerBody.isConnected) drawerBody.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>';
     });
   }
 
@@ -10939,7 +11009,7 @@
         + (w && w.description ? ' title="' + escapeHtmlWs(w.description) + '"' : '') + '>';
     }
 
-    var h = '';
+    var h = '<p class="ws-pset-desc ws-pset-intro">Set the season goal and what each activity is worth. The preview shows what your changes would do before you save.</p>';
     // ── Season Goal ──
     h += '<div class="ws-pset-section">';
     h += '<h4 class="ws-pset-h">🎯 Season Goal</h4>';
@@ -11067,8 +11137,9 @@
           statusEl.textContent = (res.data && res.data.error) || 'Save failed';
           return;
         }
-        // The saved values are the new baseline; the report itself
-        // refetches when the panel closes (close → showParticipationReportModal).
+        // The saved values are the new baseline; the report behind the
+        // drawer refreshes when the drawer closes (onClose checks this flag).
+        _participationSettingsChanged = true;
         dirty.forEach(function (u) { serverWeights[u.key] = u.value; });
         statusEl.className = 'ws-pset-status ws-wv-ok';
         statusEl.textContent = 'Saved ✓';
@@ -11105,7 +11176,9 @@
   // in the add form. Used by the "Add exemption…" quick action in a report
   // row so the reviewer doesn't have to re-find the member in the dropdown.
   function loadParticipationExemptions(prefill) {
-    var body = personDetailCard && personDetailCard.querySelector('#ws-part-exempt-body');
+    // Lives inside the settings drawer (NOT personDetailCard) — resolve
+    // by id so it works wherever the section is rendered.
+    var body = document.getElementById('ws-part-exempt-body');
     if (!body) return;
     var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/sheets?action=participation-exemptions', {
@@ -11164,6 +11237,7 @@
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res2) {
             if (!res2.ok) { alert((res2.data && res2.data.error) || 'Delete failed'); return; }
+            _participationSettingsChanged = true;
             loadParticipationExemptions();
           });
         });
@@ -11237,6 +11311,7 @@
       .then(function (res) {
         saveBtn.disabled = false; saveBtn.textContent = orig;
         if (!res.ok) { statusEl.className = 'ws-part-exempt-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+        _participationSettingsChanged = true;
         loadParticipationExemptions();
       }).catch(function (err) {
         saveBtn.disabled = false; saveBtn.textContent = orig;
