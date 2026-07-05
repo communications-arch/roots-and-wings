@@ -7016,7 +7016,19 @@
 
       var s = '<section class="workspace-role-section">';
       var role = (opts.showNotes && roleKey) ? getRoleByKey(roleKey) : null;
-      s += '<header class="ws-role-header"><h4>' + escapeHtml(heading) + '</h4></header>';
+      // Minimized cards ride the section-header row as chips (Erin:
+      // "same row as the Header... so they are more visible") — tap to
+      // expand back into the grid.
+      s += '<header class="ws-role-header"><h4>' + escapeHtml(heading) + '</h4>';
+      if (minimized.length > 0) {
+        s += '<div class="ws-min-strip">';
+        minimized.forEach(function (type) {
+          var w = WORKSPACE_WIDGETS[type];
+          s += '<button type="button" class="ws-min-chip" data-widget="' + type + '" aria-label="Expand ' + escapeHtml(String(w.title).replace(/<[^>]*>/g, '')) + '">▸ ' + w.title + '</button>';
+        });
+        s += '</div>';
+      }
+      s += '</header>';
 
       var showHandoff = !!(opts.showNotes && roleKey);
 
@@ -7089,15 +7101,6 @@
         s += '</div>'; // /.workspace-grid
       }
 
-      // Minimized cards live here as compact chips — tap to expand.
-      if (minimized.length > 0) {
-        s += '<div class="ws-min-strip">';
-        minimized.forEach(function (type) {
-          var w = WORKSPACE_WIDGETS[type];
-          s += '<button type="button" class="ws-min-chip" data-widget="' + type + '" aria-label="Expand ' + escapeHtml(String(w.title).replace(/<[^>]*>/g, '')) + '">▸ ' + w.title + '</button>';
-        });
-        s += '</div>';
-      }
       s += '</section>';
       return s;
     }

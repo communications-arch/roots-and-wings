@@ -11574,6 +11574,16 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 }
 .ws-role-header {
   margin: 0 0 8px 0;
+  /* Section title + minimized-card chips share the row (chips push to
+     the right edge; wrap below the title on narrow screens). */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.ws-role-header .ws-min-strip {
+  margin-top: 0;
+  margin-left: auto;
 }
 .ws-role-header h4 {
   margin: 0;
