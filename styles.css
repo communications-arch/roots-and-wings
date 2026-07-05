@@ -11800,10 +11800,11 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   background-color: var(--color-white);
   box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
 }
-/* Minimizable workspace cards (2026-07-05): the Hide option + hidden
-   strip are gone — every card renders and the whole header toggles the
-   body. The chevron mirrors state; minimized cards keep their body in
-   the DOM (display:none) so count loaders still land. */
+/* Minimizable workspace cards (2026-07-05): tapping a card header
+   minimizes it — the card leaves the grid entirely (reclaiming its
+   slot, per Erin: "we don't want it occupying real estate") and shows
+   as a compact chip in the section's strip below; tapping the chip
+   expands it back. */
 .ws-card-toggle { cursor: pointer; }
 .ws-card-toggle:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -11815,11 +11816,27 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-text-light);
   flex-shrink: 0;
 }
-.workspace-card.ws-card-collapsed .workspace-card-body { display: none; }
-.workspace-card.ws-card-collapsed .workspace-card-header {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
+.ws-min-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ws-min-chip {
+  padding: 5px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 999px;
+  background: rgba(var(--color-primary-rgb), 0.04);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
+.ws-min-chip:hover,
+.ws-min-chip:focus-visible {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.08);
 }
 @media (max-width: 600px) {
   .workspace-grid {

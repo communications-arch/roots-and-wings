@@ -6994,19 +6994,25 @@
     }
     html += '</div>';
 
-    // Track visible widget types across all sections so afterRender hooks and
-    // form wiring can still iterate a flat list. Every gated widget renders
-    // now (Hide is gone — cards minimize instead), so this is simply the
-    // union of all sections' widget lists.
+    // Track OPEN widget types across all sections so afterRender hooks and
+    // form wiring can iterate a flat list. Minimized cards leave the grid
+    // entirely (they render as compact chips below the section — the whole
+    // point of minimizing is reclaiming the real estate), so their loaders
+    // simply have no targets until the card is expanded again.
     var allVisibleTypes = [];
 
     function renderSection(heading, roleKey, widgetTypes, opts) {
       opts = opts || {};
-      var visible = widgetTypes.slice();
+      var visible = [];
+      var minimized = [];
+      widgetTypes.forEach(function (type) {
+        if (isWidgetCollapsed(type, prefs)) minimized.push(type);
+        else visible.push(type);
+      });
       visible.forEach(function (t) { if (allVisibleTypes.indexOf(t) === -1) allVisibleTypes.push(t); });
 
       // Only skip the whole section if it has no content *and* no notes slot.
-      if (visible.length === 0 && !opts.showNotes) return '';
+      if (visible.length === 0 && minimized.length === 0 && !opts.showNotes) return '';
 
       var s = '<section class="workspace-role-section">';
       var role = (opts.showNotes && roleKey) ? getRoleByKey(roleKey) : null;
@@ -7069,20 +7075,28 @@
 
         visible.forEach(function (type) {
           var w = WORKSPACE_WIDGETS[type];
-          // Minimizable card: the whole header is the expand/collapse
-          // toggle (chevron mirrors state). Bodies stay in the DOM when
-          // minimized (CSS hides them) so count loaders keep working.
-          var collapsed = isWidgetCollapsed(type, prefs);
-          s += '<div class="mf-card workspace-card' + (collapsed ? ' ws-card-collapsed' : '') + '" data-widget-type="' + type + '">';
-          s += '<div class="workspace-card-header ws-card-toggle" data-widget="' + type + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" title="' + (collapsed ? 'Expand' : 'Minimize') + '">';
+          // Tap the header to minimize — the card shrinks to a chip in
+          // the strip below the grid, freeing its slot.
+          s += '<div class="mf-card workspace-card" data-widget-type="' + type + '">';
+          s += '<div class="workspace-card-header ws-card-toggle" data-widget="' + type + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">';
           s += '<h4>' + w.title + '</h4>';
-          s += '<span class="ws-min-caret" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span>';
+          s += '<span class="ws-min-caret" aria-hidden="true">▾</span>';
           s += '</div>';
           s += '<div class="workspace-card-body">' + w.render(prefs, roles, heading) + '</div>';
           s += '</div>';
         });
 
         s += '</div>'; // /.workspace-grid
+      }
+
+      // Minimized cards live here as compact chips — tap to expand.
+      if (minimized.length > 0) {
+        s += '<div class="ws-min-strip">';
+        minimized.forEach(function (type) {
+          var w = WORKSPACE_WIDGETS[type];
+          s += '<button type="button" class="ws-min-chip" data-widget="' + type + '" aria-label="Expand ' + escapeHtml(String(w.title).replace(/<[^>]*>/g, '')) + '">▸ ' + w.title + '</button>';
+        });
+        s += '</div>';
       }
       s += '</section>';
       return s;
@@ -7134,33 +7148,26 @@
       });
     });
 
-    // Minimize / expand cards. Click (or Enter/Space) on a card header
-    // toggles its body; the choice persists per user. We flip the class in
-    // place — no full re-render — so scroll position and in-flight count
-    // loaders are untouched.
-    function toggleCardCollapsed(headerEl) {
-      var t = headerEl.getAttribute('data-widget');
-      var card = headerEl.closest('.workspace-card');
-      if (!t || !card) return;
-      var nowCollapsed = !card.classList.contains('ws-card-collapsed');
-      card.classList.toggle('ws-card-collapsed', nowCollapsed);
-      headerEl.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
-      headerEl.setAttribute('title', nowCollapsed ? 'Expand' : 'Minimize');
-      var caret = headerEl.querySelector('.ws-min-caret');
-      if (caret) caret.textContent = nowCollapsed ? '▸' : '▾';
+    // Minimize / expand cards. Minimizing frees the card's grid slot —
+    // it re-renders as a chip in the section's ws-min-strip; expanding a
+    // chip puts the card back. Both persist per user and re-render the
+    // tab (the card physically moves, so no in-place shortcut).
+    function setCardCollapsed(t, nowCollapsed) {
+      if (!t) return;
       var p = getWorkspacePrefs();
       if (!p.collapsed || typeof p.collapsed !== 'object') p.collapsed = {};
       p.collapsed[t] = nowCollapsed;
       saveWorkspacePrefs(p);
-      // Keep the ifChanged signature honest so the next data-refresh render
-      // doesn't rebuild against a stale collapsed state.
-      container.setAttribute('data-ws-sig', JSON.stringify({ r: roles.slice().sort(), c: p.collapsed }));
+      renderWorkspaceTab();
     }
     container.querySelectorAll('.ws-card-toggle').forEach(function (hd) {
-      hd.addEventListener('click', function () { toggleCardCollapsed(this); });
+      hd.addEventListener('click', function () { setCardCollapsed(this.getAttribute('data-widget'), true); });
       hd.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCardCollapsed(this); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCardCollapsed(this.getAttribute('data-widget'), true); }
       });
+    });
+    container.querySelectorAll('.ws-min-chip').forEach(function (btn) {
+      btn.addEventListener('click', function () { setCardCollapsed(this.getAttribute('data-widget'), false); });
     });
 
     // My Links: add + delete
