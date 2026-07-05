@@ -143,7 +143,33 @@
             localStorage.getItem('rw_user_email') || '(none)',
             'credential present:',
             !!localStorage.getItem('rw_google_credential'));
-          try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+          // Verify before alarming (2026-07-05): with 30-day app sessions a
+          // single 401 is often recoverable — try the silent /api/session
+          // exchange first. Fresh token back → store it, no banner, and the
+          // next action just works. Only a refused exchange means the
+          // session is genuinely dead. origFetch so this probe can't
+          // re-enter the wrapper.
+          var probeTok = localStorage.getItem('rw_google_credential');
+          if (url.indexOf('/api/session') === -1 && probeTok) {
+            origFetch('/api/session', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + probeTok, 'Content-Type': 'application/json' }
+            })
+              .then(function (pr) { return pr.ok ? pr.json() : null; })
+              .then(function (data) {
+                if (data && data.token) {
+                  localStorage.setItem('rw_google_credential', data.token);
+                  sessionExpiredHandled = false; // recovered silently
+                } else {
+                  try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+                }
+              })
+              .catch(function () {
+                try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+              });
+          } else {
+            try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+          }
         }
         return res;
       });
@@ -158,7 +184,10 @@
     el.setAttribute('role', 'alert');
     el.style.cssText = [
       'position:fixed', 'top:0', 'left:0', 'right:0',
-      'z-index:10000',
+      // Above every overlay (sb-overlay 9999, pickers/detail 10000) — a
+      // real expiry outranks whatever modal is open. It only shows after
+      // the silent session-refresh probe failed, and it's dismissible.
+      'z-index:10010',
       'background:#7a1f2b', 'color:#fff',
       'padding:0.75rem 1rem',
       'box-shadow:0 2px 8px rgba(0,0,0,0.2)',
@@ -168,8 +197,19 @@
     ].join(';');
     el.innerHTML =
       '<span>Your session has expired. Sign in again to keep editing.</span>' +
-      '<button id="rwSignInAgainBtn" style="background:#fff;color:#7a1f2b;border:none;padding:0.45rem 0.9rem;border-radius:4px;font-weight:600;cursor:pointer;">Sign in again</button>';
+      '<button id="rwSignInAgainBtn" style="background:#fff;color:#7a1f2b;border:none;padding:0.45rem 0.9rem;border-radius:4px;font-weight:600;cursor:pointer;">Sign in again</button>' +
+      '<button id="rwSessionDismissBtn" aria-label="Dismiss" title="Dismiss" style="background:none;color:#fff;border:none;font-size:1.3rem;line-height:1;padding:0.2rem 0.5rem;cursor:pointer;">&times;</button>';
     document.body.appendChild(el);
+
+    var dismissBtnEl = document.getElementById('rwSessionDismissBtn');
+    if (dismissBtnEl) {
+      dismissBtnEl.addEventListener('click', function () {
+        // Dismiss without signing out (e.g. finish reading what's on
+        // screen). Leaves sessionExpiredHandled=true so it won't re-pop
+        // on every subsequent 401 this page load.
+        el.remove();
+      });
+    }
 
     var btn = document.getElementById('rwSignInAgainBtn');
     if (btn) {
