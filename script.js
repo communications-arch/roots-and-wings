@@ -10557,21 +10557,21 @@
 
   function showParticipationReportModal() {
     var canWrite = participationCanWrite();
-    // Header chrome — icon-only buttons. The Manage gear (Weights /
-    // Exemptions) is rendered separately by renderReportModal when
-    // supplemental is set. Inline SVGs read more reliably than emoji
-    // (no Windows / Android emoji-font rendering surprises).
-    var icons = [
+    // Header chrome — icon-only buttons. The gear opens the consolidated
+    // Participation Settings panel directly (goal + points per activity +
+    // exemptions in one place) — no intermediate popover menu. Inline SVGs
+    // read more reliably than emoji (no Windows / Android emoji-font
+    // rendering surprises).
+    var icons = [];
+    if (canWrite) {
+      icons.push({ label: 'Settings', icon: ICON_SVG.gear,
+        aria: 'Participation settings — season goal, points per activity, exemptions',
+        action: function () { showParticipationSettingsModal(); } });
+    }
+    icons.push(
       { label: 'Print',      icon: ICON_SVG.print,    aria: 'Print the report',                       action: printParticipationReport },
       { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the full report as CSV',         action: exportParticipationCSV }
-    ];
-    var supplemental = canWrite ? {
-      title: 'Manage',
-      items: [
-        { label: 'Weights', icon: '⚙️', aria: 'Edit the weights used in the participation score', action: showParticipationWeightsModal },
-        { label: 'Exemptions', icon: '🩺', aria: 'Add or edit health/family exemptions', action: showParticipationExemptionsModal }
-      ]
-    } : null;
+    );
     // Subtitle is intentionally omitted — the title is self-evident in
     // context and the row-click hint surfaces in the table itself.
     // Meta line ("Season 25_26 · 46 members") is filled in after the
@@ -10580,7 +10580,6 @@
       title: 'Member Participation Tracker',
       meta: '',
       icons: icons,
-      supplemental: supplemental,
       bodyId: 'ws-participation-body',
       bodyPlaceholder: '<p class="ws-empty">Loading participation data…</p>'
     });
@@ -10651,6 +10650,21 @@
     body.innerHTML = countsHtml + '<div id="ws-part-table-target"></div>';
     var tableTarget = body.querySelector('#ws-part-table-target');
 
+    // "Add exemption…" quick action inside a member's expanded row.
+    // Detail rows are inserted lazily on expand, so wire via delegation
+    // on the (stable) report body rather than per-button listeners.
+    body.addEventListener('click', function (e) {
+      var btn = e.target.closest('.ws-part-exempt-quick');
+      if (!btn) return;
+      showParticipationSettingsModal({
+        exemptOpen: true,
+        exemptPrefill: {
+          member_email: btn.getAttribute('data-member-email') || '',
+          member_name: btn.getAttribute('data-member-name') || ''
+        }
+      });
+    });
+
     var currentFilter = 'all';
 
     function filteredRows() {
@@ -10697,11 +10711,12 @@
   }
 
   function participationTableColumns() {
-    // Column order: identity → headline summary (Status, Weighted,
-    // Expected) → the activity-count breakdown that explains how
-    // Weighted got computed → Coverage Given trailing as a note
-    // (informational only — not part of the weighted score).
-    var cols = [
+    // Three columns: identity → Status → Progress (points bar). The
+    // nine per-activity counts + Coverage Given used to be columns too
+    // (13-wide table, mostly "–" cells); they now live in the expanded
+    // row detail as labeled chips (renderParticipationTimeline). CSV +
+    // print keep the full breakdown.
+    return [
       { key: 'displayName', label: 'Member', type: 'string',
         sortValue: function (r) { return (r.family + ' ' + r.first).toLowerCase(); },
         render: function (r) {
@@ -10723,35 +10738,39 @@
           return '<span class="' + cls + '">' + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[r.status] || r.status) + '</span>';
         }
       },
-      { key: 'weightedTotal', label: 'Weighted', type: 'number',
-        render: function (r) { return '<strong>' + (r.weightedTotal || 0) + '</strong>'; }
-      },
-      { key: 'expectedPoints', label: 'Expected', type: 'number',
-        render: function (r) { return String(r.expectedPoints || 0); }
+      { key: 'progress', label: 'Progress', type: 'number',
+        // Sort by how far along the member is toward THEIR expected
+        // points (exemption/new-member adjusted), not raw totals — so
+        // "most behind" sorts together regardless of baseline.
+        sortValue: function (r) {
+          var exp = r.expectedPoints || 0;
+          if (exp > 0) return (r.weightedTotal || 0) / exp;
+          return (r.weightedTotal || 0) > 0 ? 1 : 0;
+        },
+        render: function (r) {
+          var w = r.weightedTotal || 0;
+          var exp = r.expectedPoints || 0;
+          var pct = exp > 0 ? Math.min(100, Math.round((w / exp) * 100)) : (w > 0 ? 100 : 0);
+          var variant = r.exemption ? 'exempt' : r.status;
+          return '<div class="ws-part-bar" role="img" aria-label="' + w + ' of ' + exp + ' points">'
+            + '<div class="ws-part-bar-track"><div class="ws-part-bar-fill ws-part-bar-' + variant + '" style="width:' + pct + '%"></div></div>'
+            + '<span class="ws-part-bar-num">' + w + '&thinsp;/&thinsp;' + exp + '</span>'
+            + '</div>';
+        }
       }
     ];
-    PARTICIPATION_COUNT_FIELDS.forEach(function (f) {
-      cols.push({
-        key: f.key, label: f.label, type: 'number',
-        sortValue: function (r) { return r.counts[f.key] || 0; },
-        render: function (r) {
-          var v = r.counts[f.key] || 0;
-          return v > 0 ? String(v) : '<span class="ws-part-zero">–</span>';
-        }
-      });
-    });
-    cols.push({
-      key: 'coverageGiven', label: 'Coverage Given', type: 'number',
-      render: function (r) {
-        var v = r.coverageGiven || 0;
-        return v > 0 ? String(v) : '<span class="ws-part-zero">–</span>';
-      }
-    });
-    return cols;
   }
 
   function renderParticipationTimeline(r) {
     var h = '<div class="ws-part-timeline">';
+    // Per-activity breakdown chips — these replaced the nine count
+    // columns the table used to carry. Only non-zero activities show.
+    var chips = '';
+    PARTICIPATION_COUNT_FIELDS.forEach(function (f) {
+      var v = (r.counts && r.counts[f.key]) || 0;
+      if (v > 0) chips += '<span class="ws-part-chip">' + escapeHtmlWs(f.label) + ' ×' + v + '</span>';
+    });
+    if (chips) h += '<div class="ws-part-chiprow">' + chips + '</div>';
     if (r.roles && r.roles.length) {
       h += '<div class="ws-part-roles"><strong>Roles this year:</strong> ' + r.roles.map(escapeHtmlWs).join(' · ') + '</div>';
     }
@@ -10783,19 +10802,87 @@
     if (r.absencesCount) {
       h += '<p class="ws-part-coverage-note"><em>Absences logged: ' + r.absencesCount + '.</em></p>';
     }
+    if (participationCanWrite()) {
+      // Contextual entry point: add the exemption while you're looking at
+      // the member, instead of digging it out of Settings and re-picking
+      // them from a dropdown. Wired by delegation in renderParticipationReport.
+      h += '<div class="ws-part-detail-actions">'
+        + '<button type="button" class="sc-btn ws-part-exempt-quick"'
+        + ' data-member-email="' + escapeHtmlWs(r.email || '') + '"'
+        + ' data-member-name="' + escapeHtmlWs(r.displayName || '') + '">'
+        + (r.exemption ? 'Edit exemption…' : 'Add exemption…')
+        + '</button></div>';
+    }
     h += '</div>';
     return h;
   }
 
-  // ─── Weights admin (VP / super user only) ───
-  function showParticipationWeightsModal() {
+  // ─── Participation Settings (VP / Afternoon Class Liaison / super user) ───
+  //
+  // One panel replaces the old separate Weights + Exemptions modals:
+  //   Season Goal          annual_expected_points + new_member_baseline_pct
+  //   Points per Activity  the nine activity weights, grouped by program area
+  //   Preview              status counts recomputed live as values change
+  //   Exemptions           collapsible; the same list + add/edit form
+  // One "Save changes" button writes every edited value in a single batch
+  // POST. new_member_grace_sessions is deliberately NOT rendered — nothing
+  // in the scoring reads it, so surfacing it only confuses.
+
+  var PARTICIPATION_SETTINGS_GROUPS = [
+    { title: 'Morning classes',         items: [ { key: 'am_lead', label: 'Leading (per session)' }, { key: 'am_assist', label: 'Assisting (per session)' } ] },
+    { title: 'Afternoon electives',     items: [ { key: 'pm_lead', label: 'Leading (per hour)' },    { key: 'pm_assist', label: 'Assisting (per hour)' } ] },
+    { title: 'Cleaning crew',           items: [ { key: 'cleaning_session', label: 'Per session cleaned' } ] },
+    { title: 'Board & volunteer roles', items: [ { key: 'board_role', label: 'Board role (year)' },  { key: 'one_year_role', label: 'Volunteer role (year)' } ] },
+    { title: 'Special events',          items: [ { key: 'event_lead', label: 'Leading (per event)' }, { key: 'event_assist', label: 'Assisting (per event)' } ] }
+  ];
+
+  // Pure preview of what a settings change does to the report — mirrors the
+  // server's buildParticipationReport scoring (api/sheets.js) so the panel
+  // can show "before → after" without a round trip. serverWeights = the
+  // values the loaded report was computed with; newWeights = the form's
+  // current values. Buckets match the report's count strip: an active
+  // exemption always groups under Exempt (so weight changes never move an
+  // exempt member, and exemption pro-rating needn't be replicated here).
+  function computeParticipationPreview(members, serverWeights, newWeights) {
+    var FIELDS = ['board_role', 'one_year_role', 'am_lead', 'am_assist', 'pm_lead',
+                  'pm_assist', 'cleaning_session', 'event_lead', 'event_assist'];
+    function num(w, key, dflt) {
+      var v = w ? parseFloat(w[key]) : NaN;
+      return isFinite(v) ? v : dflt;
+    }
+    function bucketFor(m, weights) {
+      if (m.exemption) return 'exempt';
+      var total = 0;
+      FIELDS.forEach(function (f) { total += ((m.counts && m.counts[f]) || 0) * num(weights, f, 0); });
+      var exp = num(weights, 'annual_expected_points', 14);
+      if (m.isNewMember) exp = exp * num(weights, 'new_member_baseline_pct', 60) / 100;
+      if (m.isNewMember && total < exp) return 'new';
+      if (total >= exp) return 'on_track';
+      if (exp > 0 && total >= exp * 0.8) return 'near';
+      return 'behind';
+    }
+    var was = { on_track: 0, near: 0, behind: 0, 'new': 0, exempt: 0 };
+    var counts = { on_track: 0, near: 0, behind: 0, 'new': 0, exempt: 0 };
+    var changes = [];
+    (members || []).forEach(function (m) {
+      var before = bucketFor(m, serverWeights);
+      var after = bucketFor(m, newWeights);
+      if (was[before] != null) was[before] += 1;
+      if (counts[after] != null) counts[after] += 1;
+      if (before !== after) changes.push({ name: m.displayName, from: before, to: after });
+    });
+    return { was: was, counts: counts, changes: changes };
+  }
+
+  function showParticipationSettingsModal(opts) {
+    opts = opts || {};
     if (!personDetail || !personDetailCard) return;
     if (!participationCanWrite()) { alert('Vice President, Afternoon Class Liaison, or super user only.'); return; }
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
-    html += '<h3 class="rd-title">Participation Weights</h3>';
-    html += '<p class="rd-subtitle">These values are the points each session-slot contributes to the weighted score. Adjust as needed; the report recomputes on save.</p>';
-    html += '<div id="ws-part-weights-body"><p class="ws-empty">Loading weights…</p></div>';
+    html += '<h3 class="rd-title">Participation Settings</h3>';
+    html += '<p class="rd-subtitle">Set the season goal and what each activity is worth. The preview shows what your changes would do before you save.</p>';
+    html += '<div id="ws-pset-body"><p class="ws-empty">Loading settings…</p></div>';
     html += '</div>';
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
@@ -10806,80 +10893,213 @@
     });
     personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
 
-    var cred = localStorage.getItem('rw_google_credential');
-    fetch('/api/sheets?action=participation-weights', {
-      method: 'GET',
-      headers: rwAuthHeaders()
-    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-    .then(function (res) {
-      var body = personDetailCard.querySelector('#ws-part-weights-body');
+    // The preview + the exemption form's member picker both need the
+    // report data; fetch it alongside the weights if it isn't cached.
+    var weightsPromise = fetch('/api/sheets?action=participation-weights', {
+      method: 'GET', headers: rwAuthHeaders()
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); });
+    var reportPromise = _participationReport
+      ? Promise.resolve(null)
+      : fetch('/api/sheets?action=participation-report', {
+          method: 'GET', headers: rwAuthHeaders()
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) { if (res.ok) _participationReport = res.data; return null; })
+          .catch(function () { return null; });
+
+    Promise.all([weightsPromise, reportPromise]).then(function (results) {
+      var res = results[0];
+      var body = personDetailCard.querySelector('#ws-pset-body');
+      if (!body) return;
       if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
-      var weights = (res.data && res.data.weights) || [];
-      if (weights.length === 0) { body.innerHTML = '<p class="ws-empty">No weights configured.</p>'; return; }
-      var h = '<table class="ws-part-weights-table"><thead><tr><th>Label</th><th>Value</th><th></th></tr></thead><tbody>';
-      weights.forEach(function (w) {
-        h += '<tr data-weight-key="' + escapeHtmlWs(w.key) + '">'
-          + '<td><strong>' + escapeHtmlWs(w.label) + '</strong>'
-          + (w.description ? '<br><span class="ws-part-weight-desc">' + escapeHtmlWs(w.description) + '</span>' : '')
-          + '</td>'
-          + '<td><input type="number" step="0.25" class="ws-part-weight-input" value="' + escapeHtmlWs(w.value) + '" /></td>'
-          + '<td><button type="button" class="btn btn-primary btn-sm ws-part-weight-save">Save</button>'
-          + '<span class="ws-part-weight-status"></span></td>'
-          + '</tr>';
-      });
-      h += '</tbody></table>';
-      body.innerHTML = h;
+      renderParticipationSettings(body, (res.data && res.data.weights) || [], opts);
+    }).catch(function (err) {
+      var body = personDetailCard.querySelector('#ws-pset-body');
+      if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtmlWs((err && err.message) || 'unknown') + '</p>';
+    });
+  }
 
-      body.querySelectorAll('.ws-part-weight-save').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var row = this.closest('tr');
-          var key = row.getAttribute('data-weight-key');
-          var input = row.querySelector('.ws-part-weight-input');
-          var statusEl = row.querySelector('.ws-part-weight-status');
-          var value = parseFloat(input.value);
-          if (!isFinite(value)) { statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = 'Not a number'; return; }
-          var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Saving…';
-          statusEl.textContent = '';
-          fetch('/api/sheets?action=participation-weight-save', {
-            method: 'POST',
-            headers: rwAuthHeaders(true),
-            body: JSON.stringify({ key: key, value: value })
-          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-          .then(function (res2) {
-            btn.disabled = false; btn.textContent = orig;
-            if (!res2.ok) { statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = (res2.data && res2.data.error) || 'Save failed'; return; }
-            statusEl.className = 'ws-part-weight-status ws-wv-ok'; statusEl.textContent = 'Saved';
-          }).catch(function (err) {
-            btn.disabled = false; btn.textContent = orig;
-            statusEl.className = 'ws-part-weight-status ws-wv-err'; statusEl.textContent = (err && err.message) || 'Network error';
-          });
+  function renderParticipationSettings(body, weightRows, opts) {
+    if (weightRows.length === 0) { body.innerHTML = '<p class="ws-empty">No settings configured.</p>'; return; }
+    var byKey = {};
+    weightRows.forEach(function (w) { byKey[w.key] = w; });
+    // What the report on screen was computed with — "before" for the preview.
+    var serverWeights = {};
+    weightRows.forEach(function (w) { serverWeights[w.key] = parseFloat(w.value); });
+
+    function inputHtml(key, extra) {
+      var w = byKey[key];
+      var val = w ? w.value : '';
+      return '<input type="number" class="ws-pset-input" data-weight-key="' + escapeHtmlWs(key) + '"'
+        + ' value="' + escapeHtmlWs(val) + '"' + (extra || ' step="0.5" min="0"')
+        + (w && w.description ? ' title="' + escapeHtmlWs(w.description) + '"' : '') + '>';
+    }
+
+    var h = '';
+    // ── Season Goal ──
+    h += '<div class="ws-pset-section">';
+    h += '<h4 class="ws-pset-h">🎯 Season Goal</h4>';
+    h += '<div class="ws-pset-row"><label class="ws-pset-label">Points each family should earn this year</label>' + inputHtml('annual_expected_points', ' step="1" min="0"') + '</div>';
+    h += '<div class="ws-pset-row"><label class="ws-pset-label">First-year families are on track at</label><span class="ws-pset-suffixed">' + inputHtml('new_member_baseline_pct', ' step="5" min="0" max="100"') + '<span class="ws-pset-suffix">% of the goal</span></span></div>';
+    h += '</div>';
+
+    // ── Points per Activity ──
+    h += '<div class="ws-pset-section">';
+    h += '<h4 class="ws-pset-h">🪙 Points per Activity</h4>';
+    PARTICIPATION_SETTINGS_GROUPS.forEach(function (g) {
+      var rows = g.items.filter(function (it) { return !!byKey[it.key]; });
+      if (rows.length === 0) return;
+      h += '<div class="ws-pset-group"><div class="ws-pset-grouptitle">' + escapeHtmlWs(g.title) + '</div>';
+      rows.forEach(function (it) {
+        h += '<div class="ws-pset-row"><label class="ws-pset-label">' + escapeHtmlWs(it.label) + '</label>' + inputHtml(it.key) + '</div>';
+      });
+      h += '</div>';
+    });
+    h += '</div>';
+
+    // ── Preview + save bar ──
+    h += '<div class="ws-pset-section"><h4 class="ws-pset-h">👁 Preview</h4><div id="ws-pset-preview"></div></div>';
+    h += '<div class="ws-pset-savebar">'
+      + '<button type="button" class="btn btn-primary btn-sm ws-pset-save" disabled>Save changes</button>'
+      + '<span class="ws-pset-status"></span>'
+      + '</div>';
+
+    // ── Exemptions (collapsible) ──
+    h += '<div class="ws-pset-section">';
+    h += '<button type="button" class="ws-pset-exempt-toggle" aria-expanded="false"><span class="ws-pset-caret">▶</span> 🩺 Exemptions</button>';
+    h += '<p class="ws-pset-desc">Health / family leave pro-rates a member’s expected points. Leave end date blank for ongoing.</p>';
+    h += '<div id="ws-pset-exempt-wrap" hidden><div id="ws-part-exempt-body"><p class="ws-empty">Loading…</p></div></div>';
+    h += '</div>';
+
+    body.innerHTML = h;
+
+    var saveBtn = body.querySelector('.ws-pset-save');
+    var statusEl = body.querySelector('.ws-pset-status');
+    var previewEl = body.querySelector('#ws-pset-preview');
+
+    function formWeights() {
+      var w = {};
+      Object.keys(serverWeights).forEach(function (k) { w[k] = serverWeights[k]; });
+      body.querySelectorAll('.ws-pset-input').forEach(function (inp) {
+        var v = parseFloat(inp.value);
+        if (isFinite(v)) w[inp.getAttribute('data-weight-key')] = v;
+      });
+      return w;
+    }
+
+    function dirtyKeys() {
+      var dirty = [];
+      body.querySelectorAll('.ws-pset-input').forEach(function (inp) {
+        var key = inp.getAttribute('data-weight-key');
+        var v = parseFloat(inp.value);
+        if (isFinite(v) && v !== serverWeights[key]) dirty.push({ key: key, value: v });
+      });
+      return dirty;
+    }
+
+    function updatePreview() {
+      var members = (_participationReport && _participationReport.members) || [];
+      var dirty = dirtyKeys();
+      saveBtn.disabled = dirty.length === 0;
+      if (statusEl.className.indexOf('ws-wv-ok') === -1 || dirty.length > 0) {
+        statusEl.className = 'ws-pset-status';
+        statusEl.textContent = dirty.length > 0 ? 'Unsaved changes' : '';
+      }
+      if (!previewEl) return;
+      if (members.length === 0) {
+        previewEl.innerHTML = '<p class="ws-empty">Report data unavailable — save still works; the report recomputes on save.</p>';
+        return;
+      }
+      var p = computeParticipationPreview(members, serverWeights, formWeights());
+      var order = ['on_track', 'near', 'behind', 'new', 'exempt'];
+      var ph = '<div class="rd-counts">';
+      order.forEach(function (k) {
+        var delta = p.counts[k] - p.was[k];
+        ph += '<span class="ws-part-status ws-part-status-' + k + '">'
+          + p.counts[k] + ' ' + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[k])
+          + (delta !== 0 ? ' <span class="ws-pset-delta">(' + (delta > 0 ? '+' : '') + delta + ')</span>' : '')
+          + '</span>';
+      });
+      ph += '</div>';
+      if (dirty.length === 0) {
+        ph += '<p class="ws-pset-desc">This is the report as it stands. Change a value above to see the effect.</p>';
+      } else if (p.changes.length === 0) {
+        ph += '<p class="ws-pset-desc">No one changes status with these numbers.</p>';
+      } else {
+        var MAX_SHOW = 8;
+        var items = p.changes.slice(0, MAX_SHOW).map(function (c) {
+          return '<li>' + escapeHtmlWs(c.name) + ': '
+            + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[c.from]) + ' → <strong>'
+            + escapeHtmlWs(PARTICIPATION_STATUS_LABELS[c.to]) + '</strong></li>';
         });
+        ph += '<ul class="ws-pset-changes">' + items.join('')
+          + (p.changes.length > MAX_SHOW ? '<li><em>+ ' + (p.changes.length - MAX_SHOW) + ' more</em></li>' : '')
+          + '</ul>';
+      }
+      previewEl.innerHTML = ph;
+    }
+
+    body.querySelectorAll('.ws-pset-input').forEach(function (inp) {
+      inp.addEventListener('input', updatePreview);
+    });
+    updatePreview();
+
+    saveBtn.addEventListener('click', function () {
+      var dirty = dirtyKeys();
+      if (dirty.length === 0) return;
+      var orig = saveBtn.textContent;
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      statusEl.className = 'ws-pset-status'; statusEl.textContent = '';
+      fetch('/api/sheets?action=participation-weight-save', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify({ updates: dirty })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        saveBtn.textContent = orig;
+        if (!res.ok) {
+          saveBtn.disabled = false;
+          statusEl.className = 'ws-pset-status ws-wv-err';
+          statusEl.textContent = (res.data && res.data.error) || 'Save failed';
+          return;
+        }
+        // The saved values are the new baseline; the report itself
+        // refetches when the panel closes (close → showParticipationReportModal).
+        dirty.forEach(function (u) { serverWeights[u.key] = u.value; });
+        statusEl.className = 'ws-pset-status ws-wv-ok';
+        statusEl.textContent = 'Saved ✓';
+        updatePreview();
+      }).catch(function (err) {
+        saveBtn.disabled = false; saveBtn.textContent = orig;
+        statusEl.className = 'ws-pset-status ws-wv-err';
+        statusEl.textContent = (err && err.message) || 'Network error';
       });
     });
+
+    // Exemptions: lazy-load the list on first expand.
+    var exToggle = body.querySelector('.ws-pset-exempt-toggle');
+    var exWrap = body.querySelector('#ws-pset-exempt-wrap');
+    var exLoaded = false;
+    function toggleExemptions(open, prefill) {
+      if (!exToggle || !exWrap) return;
+      exWrap.hidden = !open;
+      exToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var caret = exToggle.querySelector('.ws-pset-caret');
+      if (caret) caret.textContent = open ? '▼' : '▶';
+      if (open && !exLoaded) { exLoaded = true; loadParticipationExemptions(prefill || null); }
+    }
+    if (exToggle) {
+      exToggle.addEventListener('click', function () { toggleExemptions(exWrap.hidden); });
+    }
+    if (opts && opts.exemptOpen) {
+      toggleExemptions(true, opts.exemptPrefill || null);
+      if (exToggle && exToggle.scrollIntoView) exToggle.scrollIntoView({ block: 'start' });
+    }
   }
 
-  // ─── Exemptions admin (VP / super user only) ───
-  function showParticipationExemptionsModal() {
-    if (!personDetail || !personDetailCard) return;
-    if (!participationCanWrite()) { alert('Vice President, Afternoon Class Liaison, or super user only.'); return; }
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail rd-modal">';
-    html += '<h3 class="rd-title">Participation Exemptions</h3>';
-    html += '<p class="rd-subtitle">Health / family leave pro-rates a member’s expected points. Leave end date blank for ongoing.</p>';
-    html += '<div id="ws-part-exempt-body"><p class="ws-empty">Loading…</p></div>';
-    html += '</div>';
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    personDetailCard.querySelector('.detail-close').addEventListener('click', function () {
-      showParticipationReportModal();
-    });
-    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
-
-    loadParticipationExemptions();
-  }
-
-  function loadParticipationExemptions() {
+  // prefill (optional): {member_email, member_name} — pre-picks that member
+  // in the add form. Used by the "Add exemption…" quick action in a report
+  // row so the reviewer doesn't have to re-find the member in the dropdown.
+  function loadParticipationExemptions(prefill) {
     var body = personDetailCard && personDetailCard.querySelector('#ws-part-exempt-body');
     if (!body) return;
     var cred = localStorage.getItem('rw_google_credential');
@@ -10891,7 +11111,7 @@
       if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
       var list = (res.data && res.data.exemptions) || [];
       var h = '<div class="ws-part-exempt-form"><h5>Add / Edit</h5>';
-      h += participationExemptionFormHtml(null);
+      h += participationExemptionFormHtml(prefill || null);
       h += '</div>';
       h += '<h5 class="ws-part-exempt-existing">Current & past exemptions</h5>';
       if (list.length === 0) {
@@ -10913,7 +11133,7 @@
       }
       body.innerHTML = h;
 
-      wireParticipationExemptionForm(body, null);
+      wireParticipationExemptionForm(body, prefill || null);
 
       body.querySelectorAll('.ws-part-exempt-edit').forEach(function (btn) {
         btn.addEventListener('click', function () {

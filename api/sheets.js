@@ -2580,18 +2580,32 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
       return res.status(403).json({ error: 'Vice President, Afternoon Class Liaison, or super user only' });
     }
     var body = req.body || {};
-    var key = String(body.key || '').trim();
-    if (!key) return res.status(400).json({ error: 'key required' });
-    var value = parseFloat(body.value);
-    if (!Number.isFinite(value)) return res.status(400).json({ error: 'value must be a number' });
-    var rows = await sql`
-      UPDATE participation_weights
-      SET value = ${value}, updated_by = ${auditEmail}, updated_at = NOW()
-      WHERE key = ${key}
-      RETURNING key, value, updated_at
-    `;
-    if (rows.length === 0) return res.status(404).json({ error: 'weight key not found' });
-    return res.status(200).json({ ok: true, weight: rows[0] });
+    // Accept either a single {key, value} (legacy) or a batch
+    // {updates: [{key, value}, …]} — the Settings modal saves all dirty
+    // fields in one POST. Validate everything before writing anything.
+    var updates = Array.isArray(body.updates) ? body.updates
+      : [{ key: body.key, value: body.value }];
+    if (updates.length === 0) return res.status(400).json({ error: 'no updates' });
+    var cleaned = [];
+    for (var ui = 0; ui < updates.length; ui++) {
+      var uKey = String((updates[ui] && updates[ui].key) || '').trim();
+      if (!uKey) return res.status(400).json({ error: 'key required' });
+      var uVal = parseFloat(updates[ui].value);
+      if (!Number.isFinite(uVal)) return res.status(400).json({ error: 'value must be a number (' + uKey + ')' });
+      cleaned.push({ key: uKey, value: uVal });
+    }
+    var saved = [];
+    for (var ci = 0; ci < cleaned.length; ci++) {
+      var rows = await sql`
+        UPDATE participation_weights
+        SET value = ${cleaned[ci].value}, updated_by = ${auditEmail}, updated_at = NOW()
+        WHERE key = ${cleaned[ci].key}
+        RETURNING key, value, updated_at
+      `;
+      if (rows.length === 0) return res.status(404).json({ error: 'weight key not found: ' + cleaned[ci].key });
+      saved.push(rows[0]);
+    }
+    return res.status(200).json({ ok: true, weights: saved, weight: saved[0] });
   }
 
   if (action === 'participation-exemptions' && req.method === 'GET') {

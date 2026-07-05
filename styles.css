@@ -12149,15 +12149,12 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-part-session ul { margin: 0 0 4px 16px; padding: 0; }
 .ws-part-session li { font-size: 0.85rem; line-height: 1.45; }
 
-.ws-part-weights-table,
 .ws-part-exempt-table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 8px;
   font-size: 0.85rem;
 }
-.ws-part-weights-table th,
-.ws-part-weights-table td,
 .ws-part-exempt-table th,
 .ws-part-exempt-table td {
   border: 1px solid var(--color-border);
@@ -12165,24 +12162,15 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   text-align: left;
   vertical-align: top;
 }
-.ws-part-weights-table thead th,
 .ws-part-exempt-table thead th {
   background: rgba(var(--color-accent-light-rgb), 0.2);
   font-weight: 700;
-}
-.ws-part-weight-input {
-  width: 80px;
-  padding: 4px 6px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 0.9rem;
 }
 .ws-part-weight-desc {
   font-size: 0.72rem;
   color: var(--color-text-light);
   font-weight: 400;
 }
-.ws-part-weight-status,
 .ws-part-exempt-status {
   display: inline-block;
   margin-left: 8px;
@@ -12199,6 +12187,161 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-text-light);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* ── Participation: progress bar (report Progress column) ──
+   Fill color matches the row's status-pill palette so the bar and the
+   badge read as one signal. */
+.ws-part-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+.ws-part-bar-track {
+  flex: 1 1 auto;
+  height: 8px;
+  min-width: 60px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ws-part-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width var(--transition-fast);
+}
+.ws-part-bar-on_track { background: #2e8b4f; }
+.ws-part-bar-near     { background: #d9a800; }
+.ws-part-bar-behind   { background: #c0392b; }
+.ws-part-bar-new      { background: #e08a00; }
+.ws-part-bar-exempt   { background: #9a6fc4; }
+.ws-part-bar-num {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-light);
+  white-space: nowrap;
+}
+
+/* ── Participation: activity chips in the expanded row detail ── */
+.ws-part-chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ws-part-chip {
+  display: inline-block;
+  padding: 2px 9px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: rgba(var(--color-accent-light-rgb), 0.25);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.ws-part-detail-actions { margin-top: 2px; }
+
+/* ── Participation Settings panel ── */
+.ws-pset-section {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(var(--color-accent-light-rgb), 0.08);
+}
+.ws-pset-h {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ws-pset-group { margin-top: 10px; }
+.ws-pset-group:first-of-type { margin-top: 0; }
+.ws-pset-grouptitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+}
+.ws-pset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+.ws-pset-label {
+  font-size: 0.88rem;
+  color: var(--color-text);
+}
+.ws-pset-input {
+  width: 76px;
+  padding: 5px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.ws-pset-suffixed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ws-pset-suffix {
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+  white-space: nowrap;
+}
+.ws-pset-desc {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+}
+.ws-pset-delta { font-weight: 700; }
+.ws-pset-changes {
+  margin: 8px 0 0 18px;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.ws-pset-changes li { line-height: 1.5; }
+.ws-pset-savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 2px;
+  background: var(--color-white, #fff);
+  border-top: 1px solid var(--color-border);
+}
+.ws-pset-status { font-size: 0.82rem; }
+.ws-pset-exempt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+}
+.ws-pset-caret { font-size: 0.7rem; }
+@media (max-width: 480px) {
+  .ws-pset-row {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
 }
 
 /* ---------- Personal Participation Badge (greeting strip) ----------
