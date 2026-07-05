@@ -14449,7 +14449,11 @@
       showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
     }
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
-    else if (action === 'coop-calendar' && typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
+    else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {
+      // Session dates live inline on the Admin Calendar now — the To Do
+      // nudge lands straight on the Sessions lens.
+      showBoardCalendarModal({ view: 'session' });
+    }
     else if (action === 'board-calendar' && typeof showBoardCalendarModal === 'function') {
       showBoardCalendarModal({ view: btn.getAttribute('data-cal-view') || undefined });
     }
@@ -16712,34 +16716,16 @@
   // controls accordingly. Edits write through /api/cleaning?action=sessions
   // and the dashboard's SESSION_DATES picks them up on the next page
   // load (and the loadCoopSessions refresh in the foreground).
-  var _coopCalState = {
-    schoolYear: '',     // active school year picker value
-    sessions: [],       // full payload from /api/cleaning?action=sessions
-    isLoading: false
-    // No draft / edits state — the DOM is the source of truth during editing.
-    // The bottom Save bar collects dirty existing rows + draft rows from the
-    // table at click time and POSTs them sequentially.
-  };
+  // (The old _coopCalState drawer state is gone — sessions edit inline on
+  // the Admin Calendar rows now.)
 
   // Board Calendar — standalone date-driven events any board member can edit.
-  // Separate from _coopCalState (session dates) on purpose; the two never
-  // share data. Editing happens row-by-row (a small modal per add/edit) so we
+  // Editing happens row-by-row (a small modal per add/edit) so we
   // keep no DOM-as-truth batching here.
   var _boardCalState = {
     schoolYear: '',     // year picker value
     events: []          // full payload from /api/tour?calendar=1
   };
-
-  // Default the picker to the active school year per activeSchoolYear()
-  // (April-1 pivot). When that year has zero rows the table will show
-  // an empty state + "+ Add session" — exactly what the President sees
-  // after April 1 of the new year. Past years are still reachable via
-  // the picker.
-  function coopCalDefaultYear() {
-    return (typeof activeSchoolYear === 'function')
-      ? activeSchoolYear().label
-      : ACTIVE_SESSION_YEAR;
-  }
 
   function isPastSchoolYear(yr) {
     var active = (typeof activeSchoolYear === 'function')
@@ -17119,425 +17105,11 @@
     }
   }
 
-  function showCoopCalendarModal() {
-    // Session Dates now lives as the Admin Calendar's settings drawer
-    // (2026-07-05, Erin: "combine Session Dates with the Admin Calendar").
-    // The session calendar drives the Admin Calendar's derived trigger
-    // dates, so the editor slides over the calendar it feeds; every close
-    // path refreshes the calendar underneath. All coop-cal loaders target
-    // #coop-cal-body by id, so they work inside the drawer unchanged.
-    if (!document.getElementById('board-cal-body')) showBoardCalendarModal();
-    var drawerBody = openReportDrawer({
-      title: 'Session Dates',
-      bodyId: 'coop-cal-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading sessions…</p>',
-      onClose: function () {
-        if (document.getElementById('board-cal-body')) loadBoardCalendar();
-      }
-    });
-    if (!drawerBody) return;
-    loadCoopCalendar();
-  }
-
-  function loadCoopCalendar() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return;
-    body.innerHTML = '<p class="ws-empty">Loading sessions…</p>';
-    _coopCalState.isLoading = true;
-    fetch('/api/cleaning?action=sessions', { headers: rwAuthHeaders() })
-      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-      .then(function (r) {
-        _coopCalState.isLoading = false;
-        if (!r.ok) {
-          body.innerHTML = '<p class="ws-empty">' + escapeHtml((r.data && r.data.error) || 'Could not load sessions.') + '</p>';
-          return;
-        }
-        _coopCalState.sessions = Array.isArray(r.data.sessions) ? r.data.sessions : [];
-        if (!_coopCalState.schoolYear) {
-          _coopCalState.schoolYear = coopCalDefaultYear();
-        }
-        renderCoopCalendarBody();
-      })
-      .catch(function (err) {
-        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
-      });
-  }
-
-  function renderCoopCalendarBody() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return;
-    var allYears = Array.from(new Set(_coopCalState.sessions.map(function (s) { return s.school_year; }))).sort();
-    // Also offer the active + next year even if they have no rows yet,
-    // so the President can add the first session for the new year.
-    var active = (typeof activeSchoolYear === 'function')
-      ? activeSchoolYear().label
-      : ACTIVE_SESSION_YEAR;
-    var nextYear = (function () {
-      var p = active.split('-'); return (parseInt(p[0], 10) + 1) + '-' + (parseInt(p[1], 10) + 1);
-    })();
-    [active, nextYear].forEach(function (yr) { if (allYears.indexOf(yr) === -1) allYears.push(yr); });
-    allYears.sort();
-    if (allYears.indexOf(_coopCalState.schoolYear) === -1) {
-      _coopCalState.schoolYear = active;
-    }
-
-    var rowsForYear = _coopCalState.sessions
-      .filter(function (s) { return s.school_year === _coopCalState.schoolYear; })
-      .sort(function (a, b) { return a.session_number - b.session_number; });
-    var readOnly = isPastSchoolYear(_coopCalState.schoolYear);
-
-    var h = '<div class="coop-cal-toolbar">';
-    h += '<label class="coop-cal-yearpick">School year ';
-    h += '<select id="coop-cal-year">';
-    allYears.forEach(function (yr) {
-      h += '<option value="' + yr + '"' + (yr === _coopCalState.schoolYear ? ' selected' : '') + '>' + yr + '</option>';
-    });
-    h += '</select></label>';
-    if (readOnly) {
-      h += '<span class="coop-cal-ro-pill">Read-only history</span>';
-    }
-    h += '</div>';
-
-    if (rowsForYear.length === 0) {
-      h += '<p class="ws-empty" style="margin-top:12px;">No sessions yet for ' + escapeHtml(_coopCalState.schoolYear) + '.</p>';
-    } else {
-      h += '<div class="coop-cal-table-wrap">';
-      h += '<table class="coop-cal-table"><thead><tr>';
-      h += '<th>#</th><th>Name</th><th>Start</th><th>End</th>';
-      if (!readOnly) h += '<th></th>';
-      h += '</tr></thead><tbody>';
-      rowsForYear.forEach(function (s) {
-        h += '<tr data-id="' + s.id + '" data-num="' + s.session_number + '">';
-        h += '<td>' + s.session_number + '</td>';
-        if (readOnly) {
-          h += '<td>' + escapeHtml(s.name) + '</td>';
-          h += '<td>' + escapeHtml(s.start_date) + '</td>';
-          h += '<td>' + escapeHtml(s.end_date) + '</td>';
-        } else {
-          h += '<td><input type="text" class="coop-cal-input" data-f="name" data-orig="' + escapeHtml(s.name) + '" value="' + escapeHtml(s.name) + '" /></td>';
-          h += '<td><input type="date" class="coop-cal-input" data-f="start_date" data-orig="' + escapeHtml(s.start_date) + '" value="' + escapeHtml(s.start_date) + '" /></td>';
-          h += '<td><input type="date" class="coop-cal-input" data-f="end_date" data-orig="' + escapeHtml(s.end_date) + '" value="' + escapeHtml(s.end_date) + '" /></td>';
-          h += '<td class="coop-cal-actions">';
-          h += '<button class="btn btn-danger btn-sm coop-cal-delete" data-id="' + s.id + '" title="Remove this session">Delete</button>';
-          h += '</td>';
-        }
-        h += '</tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-
-    if (!readOnly) {
-      var nextNum = rowsForYear.length > 0
-        ? Math.max.apply(null, rowsForYear.map(function (r) { return r.session_number; })) + 1
-        : 1;
-      h += '<div class="coop-cal-add-row">';
-      h += '<button id="coop-cal-add" class="btn btn-outline-dark btn-sm" data-next="' + nextNum + '">+ Add session</button>';
-      h += '</div>';
-      // Inline error row + bottom save bar. Save batches every dirty existing
-      // row + every draft row in one click so the President can fill in all
-      // five sessions and save once.
-      h += '<div class="coop-cal-msg cls-error" id="coop-cal-msg" style="display:none;"></div>';
-      h += '<div class="coop-cal-save-bar">';
-      h += '<button id="coop-cal-discard" class="btn btn-outline-dark btn-sm" disabled>Discard changes</button>';
-      h += '<button id="coop-cal-save-all" class="btn btn-primary btn-sm" disabled>Save changes</button>';
-      h += '</div>';
-    }
-
-    body.innerHTML = h;
-    wireCoopCalendarBody();
-  }
-
-  function wireCoopCalendarBody() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return;
-    var picker = document.getElementById('coop-cal-year');
-    if (picker) {
-      picker.addEventListener('change', function () {
-        if (coopCalHasUnsavedChanges() && !confirm('Discard unsaved changes and switch years?')) {
-          this.value = _coopCalState.schoolYear;
-          return;
-        }
-        _coopCalState.schoolYear = this.value;
-        renderCoopCalendarBody();
-      });
-    }
-    // Existing row inputs: flip the row's dirty class on edit and refresh the
-    // bottom Save bar's enabled state. No per-row save anymore.
-    body.querySelectorAll('tr[data-id] .coop-cal-input').forEach(function (inp) {
-      inp.addEventListener('input', function () {
-        var tr = this.closest('tr');
-        if (!tr) return;
-        var dirty = false;
-        tr.querySelectorAll('.coop-cal-input').forEach(function (i) {
-          if (i.value !== (i.getAttribute('data-orig') || '')) dirty = true;
-        });
-        tr.classList.toggle('is-dirty', dirty);
-        coopCalRefreshSaveBar();
-      });
-    });
-    // Delete row — two-step inline confirm so a misclick can't drop a session.
-    body.querySelectorAll('.coop-cal-delete').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (btn.getAttribute('data-confirming') !== '1') {
-          body.querySelectorAll('.coop-cal-delete[data-confirming="1"]').forEach(function (other) {
-            if (other !== btn) {
-              other.removeAttribute('data-confirming');
-              other.textContent = 'Delete';
-            }
-          });
-          btn.setAttribute('data-confirming', '1');
-          btn.textContent = 'Confirm delete';
-          return;
-        }
-        var id = btn.getAttribute('data-id');
-        btn.disabled = true;
-        btn.textContent = 'Deleting…';
-        coopCalShowMsg('');
-        fetch('/api/cleaning?action=sessions&id=' + encodeURIComponent(id), {
-          method: 'DELETE',
-          headers: rwAuthHeaders()
-        })
-          .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-          .then(function (r) {
-            if (!r.ok) {
-              coopCalShowMsg((r.data && r.data.error) || 'Delete failed.');
-              btn.disabled = false;
-              btn.removeAttribute('data-confirming');
-              btn.textContent = 'Delete';
-              return;
-            }
-            localStorage.removeItem(CACHE_SESSIONS_KEY);
-            loadCoopCalendar();
-            if (typeof loadCoopSessions === 'function') loadCoopSessions();
-          })
-          .catch(function (err) {
-            coopCalShowMsg('Network error: ' + (err.message || 'unknown'));
-            btn.disabled = false;
-            btn.removeAttribute('data-confirming');
-            btn.textContent = 'Delete';
-          });
-      });
-    });
-    // Click anywhere else in the modal body disarms any pending delete confirm.
-    body.addEventListener('click', function (e) {
-      if (e.target && e.target.classList && e.target.classList.contains('coop-cal-delete')) return;
-      body.querySelectorAll('.coop-cal-delete[data-confirming="1"]').forEach(function (btn) {
-        btn.removeAttribute('data-confirming');
-        btn.textContent = 'Delete';
-      });
-    });
-    // "+ Add session" — imperatively append a new draft row to the tbody so
-    // any in-progress edits on existing rows survive. Multiple drafts can be
-    // stacked; the bottom Save bar persists them all in one click.
-    var addBtn = document.getElementById('coop-cal-add');
-    if (addBtn) {
-      addBtn.addEventListener('click', function () {
-        coopCalAppendDraftRow();
-      });
-    }
-    // Bottom save bar.
-    var saveAllBtn = document.getElementById('coop-cal-save-all');
-    if (saveAllBtn) saveAllBtn.addEventListener('click', coopCalSaveAll);
-    var discardBtn = document.getElementById('coop-cal-discard');
-    if (discardBtn) discardBtn.addEventListener('click', function () {
-      if (!coopCalHasUnsavedChanges()) return;
-      if (!confirm('Discard all unsaved session edits?')) return;
-      coopCalShowMsg('');
-      loadCoopCalendar();
-    });
-    coopCalRefreshSaveBar();
-  }
-
-  // Append a fresh draft row to the tbody (or create the tbody if the year
-  // had no existing sessions). Numbering picks up where the existing rows +
-  // already-pending drafts leave off.
-  function coopCalAppendDraftRow() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return;
-    var wrap = body.querySelector('.coop-cal-table-wrap');
-    var tbody;
-    if (!wrap) {
-      // First session for this year — table doesn't exist yet. Re-render in
-      // table mode so the header chrome appears, then append the draft.
-      var empty = body.querySelector('.ws-empty');
-      if (empty) empty.remove();
-      var addRow = body.querySelector('.coop-cal-add-row');
-      wrap = document.createElement('div');
-      wrap.className = 'coop-cal-table-wrap';
-      wrap.innerHTML = '<table class="coop-cal-table"><thead><tr>' +
-        '<th>#</th><th>Name</th><th>Start</th><th>End</th><th></th>' +
-        '</tr></thead><tbody></tbody></table>';
-      body.insertBefore(wrap, addRow);
-      tbody = wrap.querySelector('tbody');
-    } else {
-      tbody = wrap.querySelector('tbody');
-    }
-    var existingNums = Array.prototype.map.call(
-      tbody.querySelectorAll('tr'),
-      function (tr) { return parseInt(tr.getAttribute('data-num'), 10) || 0; }
-    );
-    var next = existingNums.length > 0 ? Math.max.apply(null, existingNums) + 1 : 1;
-    var tr = document.createElement('tr');
-    tr.className = 'coop-cal-draft-row';
-    tr.setAttribute('data-draft', '1');
-    tr.setAttribute('data-num', String(next));
-    tr.innerHTML =
-      '<td>' + next + '</td>' +
-      '<td><input type="text" class="coop-cal-input" data-f="name" value="" placeholder="e.g. Fall Session ' + next + '" /></td>' +
-      '<td><input type="date" class="coop-cal-input" data-f="start_date" value="" /></td>' +
-      '<td><input type="date" class="coop-cal-input" data-f="end_date" value="" /></td>' +
-      '<td class="coop-cal-actions">' +
-      '<button class="btn btn-outline-dark btn-sm coop-cal-draft-remove" title="Remove this draft">✕</button>' +
-      '</td>';
-    tbody.appendChild(tr);
-    var removeBtn = tr.querySelector('.coop-cal-draft-remove');
-    if (removeBtn) removeBtn.addEventListener('click', function () {
-      tr.remove();
-      coopCalRefreshSaveBar();
-    });
-    var nameInp = tr.querySelector('[data-f="name"]');
-    if (nameInp) nameInp.focus();
-    // Bump the "+ Add session" button's nextNum for any future click (cosmetic
-    // — the actual numbering recomputes from the DOM each time).
-    var addBtn = document.getElementById('coop-cal-add');
-    if (addBtn) addBtn.setAttribute('data-next', String(next + 1));
-    coopCalRefreshSaveBar();
-  }
-
-  function coopCalHasUnsavedChanges() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return false;
-    if (body.querySelector('tr[data-draft="1"]')) return true;
-    if (body.querySelector('tr[data-id].is-dirty')) return true;
-    return false;
-  }
-
-  function coopCalRefreshSaveBar() {
-    var save = document.getElementById('coop-cal-save-all');
-    var discard = document.getElementById('coop-cal-discard');
-    var dirty = coopCalHasUnsavedChanges();
-    if (save) save.disabled = !dirty;
-    if (discard) discard.disabled = !dirty;
-  }
-
-  // Collect every dirty existing row + every draft row, validate them all,
-  // then POST sequentially. On the first failure the bar shows which session
-  // failed and stops so the user can fix that row and click Save again
-  // (already-saved rows in the same batch stay saved — that's fine, the
-  // session endpoint is upsert).
-  function coopCalSaveAll() {
-    var body = document.getElementById('coop-cal-body');
-    if (!body) return;
-    coopCalShowMsg('');
-    var payloads = [];
-    body.querySelectorAll('tr[data-id].is-dirty').forEach(function (tr) {
-      payloads.push(coopCalReadRow(tr, false));
-    });
-    body.querySelectorAll('tr[data-draft="1"]').forEach(function (tr) {
-      payloads.push(coopCalReadRow(tr, true));
-    });
-    if (payloads.length === 0) return;
-    // Validate everything up front so the user sees all problems before any
-    // network request fires.
-    for (var i = 0; i < payloads.length; i++) {
-      var p = payloads[i];
-      if (!p.name || !p.start_date || !p.end_date) {
-        coopCalShowMsg('Session ' + p.session_number + ': name, start date, and end date are required.');
-        return;
-      }
-      if (p.end_date < p.start_date) {
-        coopCalShowMsg('Session ' + p.session_number + ': end date must be on or after start date.');
-        return;
-      }
-    }
-    // Reject duplicate session numbers across drafts + existing edits — the
-    // upsert key is (school_year, session_number) so a clash would silently
-    // overwrite a row the user didn't mean to touch.
-    var seen = {};
-    for (var j = 0; j < payloads.length; j++) {
-      var n = payloads[j].session_number;
-      if (seen[n]) {
-        coopCalShowMsg('Two rows are using session number ' + n + '. Fix the numbering before saving.');
-        return;
-      }
-      seen[n] = true;
-    }
-    var saveBtn = document.getElementById('coop-cal-save-all');
-    var discardBtn = document.getElementById('coop-cal-discard');
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
-    if (discardBtn) discardBtn.disabled = true;
-    coopCalPostSequential(payloads, 0, function (err, doneCount) {
-      if (err) {
-        coopCalShowMsg(err);
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; }
-        if (discardBtn) discardBtn.disabled = false;
-        if (doneCount > 0) {
-          // Some rows landed; pull a fresh list so the saved ones show as
-          // clean and the failing one (and any after it) stay as pending.
-          localStorage.removeItem(CACHE_SESSIONS_KEY);
-          loadCoopCalendar();
-          if (typeof loadCoopSessions === 'function') loadCoopSessions();
-        }
-        return;
-      }
-      // Full success — close the Session Dates drawer (its onClose
-      // refreshes the Admin Calendar underneath, whose derived trigger
-      // dates come from these sessions) and refresh the dashboard's
-      // SESSION_DATES.
-      localStorage.removeItem(CACHE_SESSIONS_KEY);
-      if (typeof loadCoopSessions === 'function') loadCoopSessions();
-      if (typeof closeReportDrawer === 'function') closeReportDrawer();
-    });
-  }
-
-  function coopCalReadRow(tr, isDraft) {
-    return {
-      school_year: _coopCalState.schoolYear,
-      session_number: parseInt(tr.getAttribute('data-num'), 10),
-      name: tr.querySelector('[data-f="name"]').value.trim(),
-      start_date: tr.querySelector('[data-f="start_date"]').value,
-      end_date: tr.querySelector('[data-f="end_date"]').value,
-      _isDraft: !!isDraft
-    };
-  }
-
-  function coopCalPostSequential(payloads, idx, done) {
-    if (idx >= payloads.length) return done(null, idx);
-    var p = payloads[idx];
-    fetch('/api/cleaning?action=sessions', {
-      method: 'POST',
-      headers: rwAuthHeaders(true),
-      body: JSON.stringify({
-        school_year: p.school_year,
-        session_number: p.session_number,
-        name: p.name,
-        start_date: p.start_date,
-        end_date: p.end_date
-      })
-    })
-      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-      .then(function (r) {
-        if (!r.ok) {
-          var msg = (r.data && r.data.error) || 'Save failed.';
-          return done('Session ' + p.session_number + ': ' + msg, idx);
-        }
-        coopCalPostSequential(payloads, idx + 1, done);
-      })
-      .catch(function (err) {
-        done('Session ' + p.session_number + ': network error — ' + (err.message || 'unknown'), idx);
-      });
-  }
-
-  // Inline message row used by the Session Dates flows (draft save errors,
-  // etc.). Replaces window.alert so feedback stays inside the modal.
-  function coopCalShowMsg(text) {
-    var el = document.getElementById('coop-cal-msg');
-    if (!el) return;
-    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
-    el.textContent = text;
-    el.style.display = '';
-  }
+  // NOTE (2026-07-05): the Session Dates drawer was retired — sessions now
+  // edit INLINE on the Admin Calendar's rows (Sessions view), the same way
+  // special events do (Erin: "set session dates should be folded into it
+  // like the Special Events"). The To Do nudge opens the calendar there;
+  // boardCalSaveSession (next to the board-calendar code) is the write path.
 
   // ── Welcome List (Welcome Coordinator) ────────────────────────────
   // This season's NEW families through the welcome LIFECYCLE:
@@ -17972,24 +17544,11 @@
     // Entry points can pre-focus a view (e.g. the Special Events
     // Liaison's card opens straight onto the Special Events lens).
     if (opts.view) _boardCalState.view = opts.view;
-    // ⚙ Session Dates drawer — President + VP set the session calendar
-    // that generates this calendar's derived trigger dates. Same gate as
-    // the old standalone Session Dates entry (server enforces for real).
-    var canSessionDates = isCommsUser() ||
-      (typeof getWorkspaceRoles === 'function' &&
-        (getWorkspaceRoles().indexOf('President') !== -1 ||
-         getWorkspaceRoles().indexOf('Vice President') !== -1));
-    var icons = [];
-    if (canSessionDates) {
-      icons.push({ label: 'Session Dates', icon: ICON_SVG.gear,
-        aria: 'Session Dates — set each session’s start and end dates',
-        action: function () { showCoopCalendarModal(); } });
-    }
     var body = renderReportModal({
       title: 'Admin Calendar',
-      subtitle: 'Key dates that trigger admin & board tasks (registration opens, remove non-returning members, finalize classes, …). Any board member can add or edit. (Session dates live behind the ⚙ gear; afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
+      subtitle: 'Every co-op date in one place: sessions, special events, and the dates that trigger admin & board tasks. Session and special-event dates edit right in their rows (for the roles that own them); any board member can add one-off events. (Afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
       meta: '',
-      icons: icons,
+      icons: [],
       bodyId: 'board-cal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading calendar…</p>'
     });
@@ -18065,16 +17624,35 @@
     (_boardCalState.specialEvents || []).forEach(function (s) {
       if (s.school_year === year) seByName[s.name] = s;
     });
+    var canEditSessions = canSessionDates && !isPastSchoolYear(year);
+    var sessNumsSeen = {};
     var rows = _boardCalState.events
       .filter(function (e) { return e.school_year === year; })
       .map(function (e) {
         var kind = calKind(e);
         var seRow = null;
+        var sessNum = null;
         if (kind === 'special') {
           seRow = seByName[String(e.id).indexOf('derived:icecream:') === 0 ? 'Ice Cream Social' : 'Field Day'] || null;
         }
-        return { ev: e, kind: kind, seRow: seRow, autoDate: true };
+        if (kind === 'session') {
+          var sm = String(e.id).match(/^derived:session(\d+):/);
+          sessNum = sm ? parseInt(sm[1], 10) : null;
+          if (sessNum) sessNumsSeen[sessNum] = true;
+        }
+        return { ev: e, kind: kind, seRow: seRow, sessNum: sessNum, autoDate: true };
       });
+    // Placeholder rows for sessions 1–5 the year doesn't have yet — the
+    // "set next year's calendar" To Do lands here, so the empty slots
+    // must be visible and (for Pres/VP) fillable inline.
+    for (var sn = 1; sn <= 5; sn++) {
+      if (!sessNumsSeen[sn]) {
+        rows.push({
+          ev: { id: 'sess-new:' + sn, title: 'Session ' + sn, event_date: '', end_date: '', note: 'Co-op session — dates not set', icon: '📚', derived: false },
+          kind: 'session', seRow: null, sessNum: sn, autoDate: false
+        });
+      }
+    }
     // The other special events (Dance, Camp, …) join the same list; their
     // dates are editable inline. Undated ones sink to the bottom.
     (_boardCalState.specialEvents || []).forEach(function (s) {
@@ -18116,8 +17694,10 @@
     if (visibleRows.length === 0) {
       h += '<p class="ws-empty" style="margin-top:12px;">Nothing here yet for ' + escapeHtml(year) + '.</p>';
     } else {
-      h += '<p class="board-cal-legend">Dates marked <span class="board-cal-auto-pill">Auto</span> are calculated from the session calendar'
-        + (canSessionDates ? ' (⚙ Session Dates changes them)' : '')
+      h += '<p class="board-cal-legend">📚 Session dates'
+        + (canEditSessions ? ' edit right in their rows — everything marked ' : ' drive everything marked ')
+        + '<span class="board-cal-auto-pill">Auto</span>'
+        + (canEditSessions ? ' recalculates from them' : ' (recalculated automatically)')
         + '. 🎉 Special-event dates are proposed at the summer meeting, then approved'
         + (canSE ? ' — set them right in the row.' : '.')
         + (viewerIsBoard ? ' One-off dates go in with “+ Add event”.' : '')
@@ -18127,14 +17707,26 @@
       h += '</tr></thead><tbody>';
       visibleRows.forEach(function (r) {
         var e = r.ev;
-        h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + '>';
-        // Date cell: inline picker for editable special events, text otherwise.
-        if (r.kind === 'special' && !r.autoDate && canSE) {
+        var sessEditable = r.kind === 'session' && canEditSessions;
+        h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + (sessEditable ? ' data-sess-num="' + r.sessNum + '"' : '') + '>';
+        // Date cell: inline pickers for editable session rows (start → end)
+        // and editable special events; plain text otherwise.
+        if (sessEditable) {
+          h += '<td style="white-space:nowrap;">'
+            + '<input type="date" class="cl-input board-cal-sess-start" value="' + escapeHtml(e.event_date || '') + '" aria-label="Session ' + r.sessNum + ' start">'
+            + ' <span class="board-cal-se-unset">→</span> '
+            + '<input type="date" class="cl-input board-cal-sess-end" value="' + escapeHtml(e.end_date || '') + '" aria-label="Session ' + r.sessNum + ' end">'
+            + '</td>';
+        } else if (r.kind === 'special' && !r.autoDate && canSE) {
           h += '<td style="white-space:nowrap;"><input type="date" class="cl-input board-cal-se-date" data-se-id="' + r.seRow.id + '" value="' + escapeHtml(e.event_date || '') + '"></td>';
         } else {
           h += '<td style="white-space:nowrap;">' + (e.event_date ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) : '<span class="board-cal-se-unset">—</span>') + '</td>';
         }
-        h += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</td>';
+        if (sessEditable) {
+          h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
+        } else {
+          h += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</td>';
+        }
         // Notes cell (+ status chip for special events).
         var notes = escapeHtml(e.note || '');
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
@@ -18144,9 +17736,11 @@
         h += '<td>' + notes + '</td>';
         // Actions cell by kind.
         if (r.kind === 'session') {
-          h += '<td class="board-cal-auto-cell"><span class="board-cal-auto-pill" title="Auto-calculated from the session calendar">Auto</span>'
-            + (canSessionDates ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-session-edit">Edit dates</button>' : '')
-            + '</td>';
+          if (sessEditable) {
+            h += '<td class="coop-cal-actions"><button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button></td>';
+          } else {
+            h += '<td></td>';
+          }
         } else if (r.kind === 'special') {
           if (canSE && r.seRow) {
             h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
@@ -18179,6 +17773,49 @@
 
     body.innerHTML = h;
     wireBoardCalendarBody();
+  }
+
+  // Save one session row (name + start/end) inline from the Admin
+  // Calendar — the write path that replaced the Session Dates drawer.
+  // Same endpoint the drawer used (/api/cleaning?action=sessions, upsert
+  // on school_year + session_number; server gates to Pres/VP).
+  function boardCalSaveSession(sessNum, name, startDate, endDate, btn) {
+    name = String(name || '').trim();
+    if (!name) { boardCalShowMsg('Session ' + sessNum + ': a name is required.'); return; }
+    if (!startDate || !endDate) { boardCalShowMsg('Session ' + sessNum + ': start and end dates are required.'); return; }
+    if (endDate < startDate) { boardCalShowMsg('Session ' + sessNum + ': end date must be on or after the start date.'); return; }
+    boardCalShowMsg('');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    fetch('/api/cleaning?action=sessions', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({
+        school_year: _boardCalState.schoolYear,
+        session_number: sessNum,
+        name: name,
+        start_date: startDate,
+        end_date: endDate
+      })
+    })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          boardCalShowMsg('Session ' + sessNum + ': ' + ((r.data && r.data.error) || 'Save failed.'));
+          if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+          return;
+        }
+        // Session dates ripple everywhere: the dashboard's SESSION_DATES
+        // cache, every derived trigger date, and the To Do nudge.
+        localStorage.removeItem(CACHE_SESSIONS_KEY);
+        if (typeof loadCoopSessions === 'function') loadCoopSessions();
+        if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
+        if (typeof updateCoopCalendarBadge === 'function') updateCoopCalendarBadge();
+        loadBoardCalendar();
+      })
+      .catch(function (err) {
+        boardCalShowMsg('Session ' + sessNum + ': network error — ' + (err.message || 'unknown'));
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      });
   }
 
   // POST a special-event date/status change, then reload the calendar
@@ -18237,11 +17874,19 @@
       });
     });
 
-    // Session rows → the Session Dates drawer (Pres/VP only — the button
-    // only renders for them).
-    body.querySelectorAll('.board-cal-session-edit').forEach(function (btn) {
+    // Session rows save inline (Pres/VP only — inputs + button only
+    // render for them).
+    body.querySelectorAll('.board-cal-sess-save').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        if (typeof showCoopCalendarModal === 'function') showCoopCalendarModal();
+        var tr = this.closest('tr');
+        if (!tr) return;
+        boardCalSaveSession(
+          parseInt(this.getAttribute('data-sess-num'), 10),
+          (tr.querySelector('.board-cal-sess-name') || {}).value || '',
+          (tr.querySelector('.board-cal-sess-start') || {}).value || '',
+          (tr.querySelector('.board-cal-sess-end') || {}).value || '',
+          this
+        );
       });
     });
 
