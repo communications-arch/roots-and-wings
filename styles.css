@@ -8247,6 +8247,44 @@ button.staff-role:hover {
   padding: 0 3px;
 }
 .cls-chip-x:hover { color: #a32222; }
+/* Custom autocomplete panel for the co-teacher picker. */
+.cls-picker { position: relative; }
+.cls-picker-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md, 0 6px 18px rgba(0,0,0,0.12));
+  padding: 4px;
+}
+.cls-picker-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+.cls-picker-opt:hover,
+.cls-picker-opt.is-hl {
+  background: rgba(var(--color-primary-rgb), 0.08);
+  color: var(--color-primary-dark);
+}
+.cls-picker-empty {
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+}
 
 /* Morning/Afternoon lens pills inline in the builder header. */
 .sb-period-views {

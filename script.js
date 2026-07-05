@@ -16130,10 +16130,10 @@
     html += '</div>';
 
     // 6. Co-teachers — multi-select from the Main Learning Coaches
-    // (2026-07-05, Erin): chips + a type-ahead datalist; stored as the
-    // same comma-joined co_teachers text so nothing downstream changes.
-    var mlcOptions = '';
-    (function () {
+    // (2026-07-05, Erin): chips + a custom autocomplete panel (native
+    // datalist UX was too clunky, esp. on phones). Stored as the same
+    // comma-joined co_teachers text so nothing downstream changes.
+    var mlcNames = (function () {
       var seen = {};
       var names = [];
       (FAMILIES || []).forEach(function (f) {
@@ -16156,15 +16156,16 @@
         seen[k] = true;
         names.push(nm);
       });
-      names.sort(function (a, b) { return a.localeCompare(b); });
-      names.forEach(function (n) { mlcOptions += '<option value="' + escClsAttr(n) + '"></option>'; });
+      return names.sort(function (a, b) { return a.localeCompare(b); });
     })();
     html += '<div class="cls-field">';
     html += '<label class="cls-label">Co-teachers or assistants already identified?</label>';
-    html += '<p class="cls-help">Pick from the co-op’s Main Learning Coaches — add as many as you like.</p>';
+    html += '<p class="cls-help">Tap the box to browse the Main Learning Coaches, or type to filter — add as many as you like.</p>';
     html += '<div class="cls-chiprow" id="clsCoTeacherChips"></div>';
-    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="120" list="clsMlcList" placeholder="Type a name, pick from the list…" autocomplete="off">';
-    html += '<datalist id="clsMlcList">' + mlcOptions + '</datalist>';
+    html += '<div class="cls-picker" id="clsCoTeacherPicker">';
+    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="120" placeholder="Add a co-teacher…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">';
+    html += '<div class="cls-picker-panel" id="clsCoTeacherPanel" hidden></div>';
+    html += '</div>';
     html += '</div>';
 
     // 7. Space request (afternoon only — morning rooms are assigned for the year)
@@ -16262,17 +16263,81 @@
       if (!exists) coTeacherList.push(nm);
       renderCoTeacherChips();
     }
+    // Custom autocomplete: focus/typing opens a scrollable panel of MLC
+    // names (already-added ones excluded); tap or Enter adds a chip.
+    // Arrow keys move the highlight; Esc closes; Enter with no highlight
+    // adds the typed text as-is (a co-teacher who isn't an MLC).
     var coTeacherInput = document.getElementById('clsCoTeachers');
-    if (coTeacherInput) {
-      // 'change' fires on a datalist pick; Enter adds whatever's typed
-      // (covers a co-teacher who isn't an MLC, e.g. a teen helper).
-      coTeacherInput.addEventListener('change', function () {
-        if (this.value.trim()) { addCoTeacher(this.value); this.value = ''; }
+    var coTeacherPanel = document.getElementById('clsCoTeacherPanel');
+    var pickerHighlight = -1;
+    function coTeacherMatches() {
+      var q = String(coTeacherInput.value || '').trim().toLowerCase();
+      return mlcNames.filter(function (nm) {
+        if (coTeacherList.some(function (x) { return x.toLowerCase() === nm.toLowerCase(); })) return false;
+        return !q || nm.toLowerCase().indexOf(q) !== -1;
       });
+    }
+    function renderCoTeacherPanel() {
+      if (!coTeacherPanel) return;
+      var matches = coTeacherMatches();
+      if (matches.length === 0) {
+        var typed = String(coTeacherInput.value || '').trim();
+        coTeacherPanel.innerHTML = typed
+          ? '<div class="cls-picker-empty">No coach matches “' + escClsHtml(typed) + '” — press Enter to add the name anyway.</div>'
+          : '<div class="cls-picker-empty">Everyone’s already added!</div>';
+      } else {
+        var ph = '';
+        matches.forEach(function (nm, i) {
+          ph += '<button type="button" class="cls-picker-opt' + (i === pickerHighlight ? ' is-hl' : '') + '" data-name="' + escClsAttr(nm) + '">' + escClsHtml(nm) + '</button>';
+        });
+        coTeacherPanel.innerHTML = ph;
+        // mousedown (not click) so the pick lands before the input blurs.
+        coTeacherPanel.querySelectorAll('.cls-picker-opt').forEach(function (btn) {
+          btn.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            addCoTeacher(this.getAttribute('data-name'));
+            coTeacherInput.value = '';
+            pickerHighlight = -1;
+            renderCoTeacherPanel();
+            coTeacherInput.focus();
+          });
+        });
+      }
+      coTeacherPanel.hidden = false;
+      coTeacherInput.setAttribute('aria-expanded', 'true');
+    }
+    function closeCoTeacherPanel() {
+      if (coTeacherPanel) coTeacherPanel.hidden = true;
+      pickerHighlight = -1;
+      if (coTeacherInput) coTeacherInput.setAttribute('aria-expanded', 'false');
+    }
+    if (coTeacherInput && coTeacherPanel) {
+      coTeacherInput.addEventListener('focus', function () { pickerHighlight = -1; renderCoTeacherPanel(); });
+      coTeacherInput.addEventListener('input', function () { pickerHighlight = -1; renderCoTeacherPanel(); });
+      coTeacherInput.addEventListener('blur', function () { setTimeout(closeCoTeacherPanel, 150); });
       coTeacherInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
+        var matches = coTeacherMatches();
+        if (e.key === 'ArrowDown') {
           e.preventDefault();
-          if (this.value.trim()) { addCoTeacher(this.value); this.value = ''; }
+          pickerHighlight = Math.min(pickerHighlight + 1, matches.length - 1);
+          renderCoTeacherPanel();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          pickerHighlight = Math.max(pickerHighlight - 1, -1);
+          renderCoTeacherPanel();
+        } else if (e.key === 'Escape') {
+          closeCoTeacherPanel();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          var pick = (pickerHighlight >= 0 && matches[pickerHighlight])
+            ? matches[pickerHighlight]
+            : (matches.length === 1 ? matches[0] : this.value);
+          if (String(pick || '').trim()) {
+            addCoTeacher(pick);
+            this.value = '';
+            pickerHighlight = -1;
+            renderCoTeacherPanel();
+          }
         }
       });
     }
