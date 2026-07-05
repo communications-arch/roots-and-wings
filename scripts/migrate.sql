@@ -665,6 +665,12 @@ CREATE TABLE IF NOT EXISTS class_submissions (
 CREATE INDEX IF NOT EXISTS class_submissions_submitter_idx
   ON class_submissions (LOWER(submitted_by_email));
 CREATE INDEX IF NOT EXISTS class_submissions_status_idx ON class_submissions (status);
+-- Morning class proposals (2026-07-05): members submit AM classes through
+-- the same pipeline. AM rows: exactly one age group, no hour preference,
+-- no space request, max_students = 0 (the group's roster is the size);
+-- placement uses scheduled_hour = 'AM' + scheduled_age_range = the group.
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS class_period TEXT NOT NULL DEFAULT 'PM'
+  CHECK (class_period IN ('AM','PM'));
 CREATE INDEX IF NOT EXISTS class_submissions_school_year_idx ON class_submissions (school_year);
 
 -- Back-compat: pick up the teen-assistant flag on existing deployments.

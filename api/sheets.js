@@ -2082,18 +2082,56 @@ async function buildParticipationReport(sql, data) {
     m.timeline[sessionNum].push(entry);
   }
 
-  // AM teaching — prefer the DB (am_class_assignments, Phase B1; managed in
-  // the Morning Class Builder). Fall back to the master sheet's AM Volunteer
-  // tab only when no DB rows exist for the season, so prod is safe until the
-  // teaching grid is populated for the year.
-  var amDbRows = [];
+  // AM teaching — source order (2026-07-05):
+  //   1. Scheduled MORNING class_submissions (members submit AM classes
+  //      through the same pipeline as PM; leader = submitter, helpers →
+  //      am_assist). The Class Builder's Morning lens places these.
+  //   2. am_class_assignments (Phase B1 grid — hidden but still honored).
+  //   3. Master-sheet AM Volunteer tab (legacy fallback).
+  var amSubCredited = false;
   try {
-    amDbRows = await sql`
-      SELECT session_number, group_name, role, person_email, person_name
-      FROM am_class_assignments WHERE school_year = ${seasonLabel}
+    var amLeadRows = await sql`
+      SELECT submitted_by_email, submitted_by_name, scheduled_session, class_name
+      FROM class_submissions
+      WHERE status = 'scheduled' AND school_year = ${seasonLabel}
+        AND class_period = 'AM'
     `;
+    var amHelperRows = await sql`
+      SELECT h.person_email, h.person_name, cs.scheduled_session, cs.class_name
+      FROM class_assignment_helpers h
+      JOIN class_submissions cs ON cs.id = h.class_submission_id
+      WHERE cs.status = 'scheduled' AND cs.school_year = ${seasonLabel}
+        AND cs.class_period = 'AM'
+    `;
+    if (amLeadRows.length) {
+      amSubCredited = true;
+      amLeadRows.forEach(function (r) {
+        var key = resolveMemberByEmail(r.submitted_by_email, r.submitted_by_name);
+        if (!key || !members[key]) return;
+        members[key].counts.am_lead += 1;
+        addTimeline(key, r.scheduled_session, { category: 'am_lead', label: 'Leading AM — ' + (r.class_name || '') });
+      });
+      amHelperRows.forEach(function (r) {
+        var key = resolveMemberByEmail(r.person_email, r.person_name);
+        if (!key || !members[key]) return;
+        members[key].counts.am_assist += 1;
+        addTimeline(key, r.scheduled_session, { category: 'am_assist', label: 'Assisting AM — ' + (r.class_name || '') });
+      });
+    }
   } catch (e) {
-    console.error('Participation AM-teaching query failed:', e.message);
+    console.error('Participation AM-submissions query failed:', e.message);
+  }
+
+  var amDbRows = [];
+  if (!amSubCredited) {
+    try {
+      amDbRows = await sql`
+        SELECT session_number, group_name, role, person_email, person_name
+        FROM am_class_assignments WHERE school_year = ${seasonLabel}
+      `;
+    } catch (e) {
+      console.error('Participation AM-teaching query failed:', e.message);
+    }
   }
   if (amDbRows.length) {
     amDbRows.forEach(function (r) {
@@ -2107,7 +2145,7 @@ async function buildParticipationReport(sql, data) {
         addTimeline(key, r.session_number, { category: 'am_assist', label: 'Assisting AM — ' + (r.group_name || '') });
       }
     });
-  } else if (allowSheetFallback) {
+  } else if (!amSubCredited && allowSheetFallback) {
     var amClasses = data.amClasses || {};
     Object.keys(amClasses).forEach(function (groupName) {
       var cls = amClasses[groupName];
@@ -2142,6 +2180,7 @@ async function buildParticipationReport(sql, data) {
              scheduled_hour, class_name
       FROM class_submissions
       WHERE status = 'scheduled' AND school_year = ${seasonLabel}
+        AND class_period = 'PM'
     `;
     pmLeadRows.forEach(function (r) {
       var key = resolveMemberByEmail(r.submitted_by_email, r.submitted_by_name);
@@ -2164,6 +2203,7 @@ async function buildParticipationReport(sql, data) {
       FROM class_assignment_helpers h
       JOIN class_submissions cs ON cs.id = h.class_submission_id
       WHERE cs.status = 'scheduled' AND cs.school_year = ${seasonLabel}
+        AND cs.class_period = 'PM'
     `;
   } catch (e) {
     console.error('Participation PM-assist query failed:', e.message);

@@ -8218,6 +8218,12 @@ button.staff-role:hover {
   font-size: 0.85rem;
   color: var(--color-text);
 }
+/* Morning/Afternoon lens pills inline in the builder header. */
+.sb-period-views {
+  display: inline-flex;
+  margin: 0 0 0 10px;
+  vertical-align: middle;
+}
 /* Builder header print/CSV tools (Submissions-Report parity). */
 .sb-header-tools {
   display: inline-flex;

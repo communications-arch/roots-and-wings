@@ -264,7 +264,10 @@ const SPACE_REQ_VALUES     = ['any','pavilion','outside','larger-open','kitchen'
 // options were retired (teachers check the individual buckets a class spans).
 // prettyAges still maps the legacy mixed keys so old submissions display right.
 const AGE_GROUP_VALUES     = [
-  'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
+  // 'greenhouse' (0–2) is selectable for MORNING submissions only — the
+  // client hides it on the afternoon form; the AM branch in
+  // normalizeSubmission is what actually accepts it.
+  'greenhouse','saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
 ];
 
 function pickArray(raw, allowed, opts) {
@@ -289,6 +292,13 @@ function pickArray(raw, allowed, opts) {
 // message on invalid input. Returns the cleaned shape ready to INSERT.
 function normalizeSubmission(body) {
   body = body || {};
+  // Morning vs afternoon proposal (2026-07-05). Morning classes: exactly
+  // ONE age group (no combining), no hour preference (afternoon concept),
+  // no space pick (rooms are assigned for the year), and no class size
+  // (the group's roster IS the size — stored as 0 = n/a).
+  const class_period = String(body.class_period || 'PM').trim().toUpperCase() === 'AM' ? 'AM' : 'PM';
+  const isAM = class_period === 'AM';
+
   const class_name = String(body.class_name || '').trim().slice(0, 200);
   if (!class_name) throw new Error('Class Name is required.');
 
@@ -298,32 +308,46 @@ function normalizeSubmission(body) {
   const session_preferences = pickArray(body.session_preferences, SESSION_PREF_VALUES);
   if (session_preferences.length === 0) throw new Error('Pick at least one session preference.');
 
-  const hour_preference = pickArray(body.hour_preference, HOUR_PREF_VALUES);
-  if (hour_preference.length === 0) throw new Error('Pick at least one hour preference.');
+  const hour_preference = isAM ? [] : pickArray(body.hour_preference, HOUR_PREF_VALUES);
+  if (!isAM && hour_preference.length === 0) throw new Error('Pick at least one hour preference.');
 
   const assistant_count = pickArray(body.assistant_count, ASSISTANT_COUNT_VALS, { int: true });
   if (assistant_count.length === 0) throw new Error('Pick how many assistants you would like.');
 
-  const space_request = pickArray(body.space_request, SPACE_REQ_VALUES);
-  const space_request_other = String(body.space_request_other || '').trim().slice(0, 300);
-  if (space_request.length === 0 && !space_request_other) {
+  const space_request = isAM ? [] : pickArray(body.space_request, SPACE_REQ_VALUES);
+  const space_request_other = isAM ? '' : String(body.space_request_other || '').trim().slice(0, 300);
+  if (!isAM && space_request.length === 0 && !space_request_other) {
     throw new Error('Pick at least one space request.');
   }
 
   const age_groups = pickArray(body.age_groups, AGE_GROUP_VALUES);
-  const age_groups_other = String(body.age_groups_other || '').trim().slice(0, 200);
-  if (age_groups.length === 0 && !age_groups_other) {
-    throw new Error('Pick at least one age group.');
+  const age_groups_other = isAM ? '' : String(body.age_groups_other || '').trim().slice(0, 200);
+  if (isAM) {
+    if (age_groups.length !== 1 || age_groups[0] === 'all-ages') {
+      throw new Error('Morning classes are for exactly one age group.');
+    }
+  } else {
+    if (age_groups.indexOf('greenhouse') !== -1) {
+      throw new Error('Greenhouse is a morning-only age group.');
+    }
+    if (age_groups.length === 0 && !age_groups_other) {
+      throw new Error('Pick at least one age group.');
+    }
   }
 
-  // max_students: 10 / 12 / 15 or a free-text "Other" that parses to a positive int.
-  let max_students = parseInt(body.max_students, 10);
-  const max_students_other = String(body.max_students_other || '').trim().slice(0, 40);
-  if (!Number.isFinite(max_students) || max_students <= 0) {
-    max_students = parseInt(max_students_other, 10);
-  }
-  if (!Number.isFinite(max_students) || max_students <= 0 || max_students > 100) {
-    throw new Error('Enter a valid maximum class size.');
+  // max_students: 10 / 12 / 15 or a free-text "Other" that parses to a
+  // positive int. Morning classes store 0 (= n/a; the roster is the size).
+  let max_students = 0;
+  let max_students_other = '';
+  if (!isAM) {
+    max_students = parseInt(body.max_students, 10);
+    max_students_other = String(body.max_students_other || '').trim().slice(0, 40);
+    if (!Number.isFinite(max_students) || max_students <= 0) {
+      max_students = parseInt(max_students_other, 10);
+    }
+    if (!Number.isFinite(max_students) || max_students <= 0 || max_students > 100) {
+      throw new Error('Enter a valid maximum class size.');
+    }
   }
 
   const co_teachers     = String(body.co_teachers || '').trim().slice(0, 500);
@@ -334,7 +358,7 @@ function normalizeSubmission(body) {
   const open_to_teen_assistant = !!body.open_to_teen_assistant;
 
   return {
-    class_name, session_preferences, hour_preference, assistant_count,
+    class_period, class_name, session_preferences, hour_preference, assistant_count,
     co_teachers, space_request, space_request_other,
     max_students, max_students_other, age_groups, age_groups_other,
     pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info, school_year
@@ -344,7 +368,8 @@ function normalizeSubmission(body) {
 // Valid status values for a reviewer PATCH. `withdrawn` is intentionally
 // excluded — only the submitter can withdraw (via DELETE).
 const REVIEWER_STATUS_VALUES = ['submitted', 'drafted', 'scheduled', 'declined'];
-const SCHEDULED_HOUR_VALUES = ['PM1', 'PM2', 'both'];
+// 'AM' = a placed morning class (no hour concept — the whole morning).
+const SCHEDULED_HOUR_VALUES = ['PM1', 'PM2', 'both', 'AM'];
 
 // Normalize a reviewer PATCH body. Returns the cleaned fields + the status
 // that was chosen. Throws Error on invalid input.
@@ -535,6 +560,7 @@ function serializeSubmission(r, helpers) {
     submitted_by_email: r.submitted_by_email,
     submitted_by_name: r.submitted_by_name,
     school_year: r.school_year,
+    class_period: r.class_period || 'PM',
     class_name: r.class_name,
     session_preferences: r.session_preferences || [],
     hour_preference: r.hour_preference || [],
@@ -754,6 +780,7 @@ module.exports = async function handler(req, res) {
                  submitted_by_name, max_students
           FROM class_submissions
           WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
+            AND class_period = 'PM'
           ORDER BY class_name
         `;
         const ser = (r) => ({
@@ -830,14 +857,14 @@ module.exports = async function handler(req, res) {
         }
         const inserted = await sql`
           INSERT INTO class_submissions (
-            submitted_by_email, submitted_by_name, school_year,
+            submitted_by_email, submitted_by_name, school_year, class_period,
             class_name, session_preferences, hour_preference, assistant_count,
             co_teachers, space_request, space_request_other,
             max_students, max_students_other, age_groups, age_groups_other,
             pre_enroll_kids, open_to_teen_assistant, prerequisites, description, other_info
           )
           VALUES (
-            ${user.email}, ${user.name || ''}, ${clean.school_year},
+            ${user.email}, ${user.name || ''}, ${clean.school_year}, ${clean.class_period},
             ${clean.class_name}, ${clean.session_preferences}, ${clean.hour_preference}, ${clean.assistant_count},
             ${clean.co_teachers}, ${clean.space_request}, ${clean.space_request_other},
             ${clean.max_students}, ${clean.max_students_other}, ${clean.age_groups}, ${clean.age_groups_other},
@@ -1013,6 +1040,7 @@ module.exports = async function handler(req, res) {
           validRows = await sql`
             SELECT id, scheduled_hour FROM class_submissions
             WHERE status='scheduled' AND school_year=${sy} AND scheduled_session=${session}
+              AND class_period = 'PM'
               AND id = ANY(${ranked}::int[])
           `;
         }
@@ -1158,6 +1186,7 @@ module.exports = async function handler(req, res) {
         }
         const updated = await sql`
           UPDATE class_submissions SET
+            class_period = ${clean.class_period},
             class_name = ${clean.class_name},
             session_preferences = ${clean.session_preferences},
             hour_preference = ${clean.hour_preference},

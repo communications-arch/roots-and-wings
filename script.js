@@ -4845,13 +4845,15 @@
     html += '</div>';
     html += '</div>';
 
-    // PM class submissions — member-authored ideas for upcoming PM electives.
+    // Class submissions — member-authored ideas for morning classes AND
+    // afternoon electives (renamed "Class Ideas" per Erin 2026-07-05).
+    // Shows ONLY the viewer's own submissions (server scope=mine).
     // Card is always visible; body is populated by renderClassSubsCardBody()
     // after loadMyClassSubmissions() fills `myClassSubmissions`.
     html += '<div class="mf-card mf-classsubs-card" id="mfClassSubsCard">';
-    html += '<h3 class="mf-card-title">Afternoon Class Submissions</h3>';
+    html += '<h3 class="mf-card-title">Class Ideas</h3>';
     html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
-    html += 'Have an idea for an afternoon class? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
+    html += 'Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
     html += '</p>';
     html += '<div class="mf-classsubs-body" id="mfClassSubsBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
     html += '</div>';
@@ -6298,7 +6300,10 @@
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
         h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCB5</span>Reimbursement Form</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="class-ideas"><span class="ws-link-icon">\uD83D\uDCA1</span>Class Ideas</button></li>';
+        // Renamed from "Class Ideas" (2026-07-05) \u2014 that name now belongs
+        // to the My Family card listing YOUR submitted classes; this is
+        // the browse-for-inspiration list.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="class-ideas"><span class="ws-link-icon">\uD83D\uDCA1</span>Class Inspiration</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
         h += '</ul>';
@@ -6421,7 +6426,7 @@
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit an Afternoon Class</button><span class="ws-part-submit-hint">Teach an elective you love — propose an idea for an upcoming session. Need inspiration? <button type="button" class="ws-inline-link" data-resource-action="class-ideas">Browse class ideas</button>.</span></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? <button type="button" class="ws-inline-link" data-resource-action="class-ideas">Browse class inspiration</button>.</span></p>';
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
@@ -6489,7 +6494,7 @@
           // it; the pending pill rides this row). Special-events dates +
           // helpers live in the Admin Calendar / Roles Assignments rows the
           // VP already has on this card — no separate special-events row.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
         }
         h += '</ul>';
         return h;
@@ -6507,16 +6512,17 @@
       // communications@ is a super user server-side but we hide the
       // widget from her own profile so it surfaces only when she
       // View-As's into a VP / PM-scheduler row.
-      title: 'Afternoon Class Scheduling',
+      title: 'Class Scheduling',
       roleGate: ['Vice President', 'Afternoon Class Liaison'],
       render: function () {
         // The Submissions Report merged into the builder (2026-07-05):
         // details on tap, ✗ decline, declined/withdrawn history, print +
-        // CSV all live there now. The pending-submitted count pill rides
-        // on this single row (painted in afterRender).
-        var h = '<p class="ws-body-hint">Review inbound afternoon class submissions and draft the upcoming session.</p>';
+        // CSV all live there now — and the builder handles BOTH morning
+        // classes and afternoon electives via its period lenses. The
+        // pending-submitted count pill rides on this single row.
+        var h = '<p class="ws-body-hint">Review inbound class submissions — morning and afternoon — and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Afternoon Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
         h += '</ul>';
         return h;
       },
@@ -15879,9 +15885,12 @@
   // buckets a class spans instead. (AGE_GROUP_LABELS keeps the mixed entries so
   // any legacy saved submissions still display correctly.)
   var AGE_GROUP_VALUES = [
-    'saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
+    // 'greenhouse' is morning-only; 'all-ages' is afternoon-only. Both
+    // render in the form and applyPeriodUi shows/hides per period.
+    'greenhouse','saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
   ];
   var AGE_GROUP_LABELS = {
+    greenhouse: 'Greenhouse (0–2)',
     saplings: 'Saplings (3–5)',
     sassafras: 'Sassafras (5–6)',
     oaks: 'Oaks (7–8)',
@@ -15946,20 +15955,21 @@
 
     if (activeSubs.length === 0) {
       html += '<p style="margin:0 0 0.75rem;color:var(--color-text-light);font-size:0.9rem;">';
-      html += 'You haven\'t proposed an afternoon class yet.';
+      html += 'You haven\'t proposed a class yet.';
       html += '</p>';
     } else {
       html += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
       activeSubs.forEach(function (s) {
         var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
         var canEdit = s.status === 'submitted';
+        var periodTag = s.class_period === 'AM' ? '🌅 Morning' : '🌇 Afternoon';
         html += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
         html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
         html += '<strong style="font-size:1rem;">' + escClsHtml(s.class_name) + '</strong>';
         html += statusBadge(s.status);
         html += '</div>';
         html += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
-        html += 'For: ' + escClsHtml(sessText);
+        html += periodTag + ' · For: ' + escClsHtml(sessText);
         html += '</div>';
         if (canEdit) {
           html += '<div style="margin-top:0.5rem;display:flex;gap:6px;">';
@@ -15977,7 +15987,7 @@
     }
 
     html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;">';
-    html += (activeSubs.length === 0 ? '+ Submit an Afternoon Class' : '+ Submit Another Class');
+    html += (activeSubs.length === 0 ? '+ Submit a Class' : '+ Submit Another Class');
     html += '</button>';
 
     body.innerHTML = html;
@@ -16023,12 +16033,17 @@
     if (document.getElementById('classSubOverlay')) return;
     var isEdit = !!existing;
     var cur = existing || {
+      class_period:'PM',
       class_name:'', session_preferences:[], hour_preference:[], assistant_count:[],
       co_teachers:'', space_request:[], space_request_other:'',
       max_students: 12, max_students_other:'', age_groups:[], age_groups_other:'',
       pre_enroll_kids:'', open_to_teen_assistant: false,
       prerequisites:'', description:'', other_info:''
     };
+    // Morning vs afternoon proposal (2026-07-05): the period drives which
+    // fields render — AM has no hour/space/size picks and exactly one
+    // age group.
+    var curPeriod = (cur.class_period === 'AM') ? 'AM' : 'PM';
 
     function has(arr, v) { return Array.isArray(arr) && arr.indexOf(v) !== -1; }
     function checkbox(field, value, label) {
@@ -16043,9 +16058,9 @@
     var maxStudentsOtherVal = cur.max_students_other || (!isPreset && cur.max_students ? String(cur.max_students) : '');
 
     var html = '<div class="cls-overlay" id="classSubOverlay">';
-    html += '<div class="cls-modal" role="dialog" aria-modal="true" aria-label="Submit an afternoon class">';
+    html += '<div class="cls-modal" role="dialog" aria-modal="true" aria-label="Submit a class">';
     html += '<button class="detail-close" id="clsCloseBtn" aria-label="Close">&times;</button>';
-    html += '<h3 style="margin:0 0 0.25rem;">' + (isEdit ? 'Edit Afternoon Class Submission' : 'Submit an Afternoon Class') + '</h3>';
+    html += '<h3 style="margin:0 0 0.25rem;">' + (isEdit ? 'Edit Class Submission' : 'Submit a Class') + '</h3>';
     html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
     html += '</p>';
@@ -16056,6 +16071,16 @@
       html += '<div id="clsInspiration" class="cls-inspire" style="display:none;"></div>';
     }
     html += '<form id="clsForm" novalidate>';
+
+    // 0. Morning or afternoon — drives which fields show below.
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Morning or afternoon? <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    html += '<label class="cls-cb-label"><input type="radio" name="clsPeriod" value="AM"' + (curPeriod === 'AM' ? ' checked' : '') + '> 🌅 Morning class</label>';
+    html += '<label class="cls-cb-label"><input type="radio" name="clsPeriod" value="PM"' + (curPeriod === 'PM' ? ' checked' : '') + '> 🌇 Afternoon elective</label>';
+    html += '</div>';
+    html += '<p class="cls-help" id="clsPeriodHint"></p>';
+    html += '</div>';
 
     // 1. Class Name
     html += '<div class="cls-field">';
@@ -16078,8 +16103,8 @@
     SESSION_PREF_VALUES.forEach(function (v) { html += checkbox('session_preferences', v, SESSION_PREF_LABELS[v]); });
     html += '</div></div>';
 
-    // 4. Hour preference
-    html += '<div class="cls-field">';
+    // 4. Hour preference (afternoon only)
+    html += '<div class="cls-field" id="clsHourField">';
     html += '<label class="cls-label">Which afternoon hour? <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
     HOUR_PREF_VALUES.forEach(function (v) { html += checkbox('hour_preference', v, HOUR_PREF_LABELS[v]); });
@@ -16103,8 +16128,8 @@
     html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="500" value="' + escClsAttr(cur.co_teachers) + '" placeholder="Names (optional)">';
     html += '</div>';
 
-    // 7. Space request
-    html += '<div class="cls-field">';
+    // 7. Space request (afternoon only — morning rooms are assigned for the year)
+    html += '<div class="cls-field" id="clsSpaceField">';
     html += '<label class="cls-label">Space request <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
     SPACE_REQ_VALUES.forEach(function (v) { html += checkbox('space_request', v, SPACE_REQ_LABELS[v]); });
@@ -16112,8 +16137,8 @@
     html += '<input class="cl-input cls-input" type="text" id="clsSpaceOther" maxlength="300" value="' + escClsAttr(cur.space_request_other) + '" placeholder="Other (optional)" style="margin-top:8px;">';
     html += '</div>';
 
-    // 8. Max students
-    html += '<div class="cls-field">';
+    // 8. Max students (afternoon only — a morning group's roster is its size)
+    html += '<div class="cls-field" id="clsMaxField">';
     html += '<label class="cls-label">Maximum class size <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group cls-cb-inline">';
     MAX_STUDENT_OPTIONS.forEach(function (n) {
@@ -16124,11 +16149,14 @@
     html += '<input class="cl-input cls-input" type="number" id="clsMaxStudentsOther" min="1" max="100" value="' + escClsAttr(maxStudentsOtherVal) + '" style="width:6rem;" placeholder="#">';
     html += '</div></div>';
 
-    // 9. Age groups
+    // 9. Age groups — afternoon: any combination; morning: exactly ONE
+    // (Greenhouse is morning-only; "All ages" is afternoon-only).
     html += '<div class="cls-field">';
-    html += '<label class="cls-label">Age group(s) the class is designed for <span class="cls-req">*</span></label>';
+    html += '<label class="cls-label"><span id="clsAgeLabel">Age group(s) the class is designed for</span> <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
-    AGE_GROUP_VALUES.forEach(function (v) { html += checkbox('age_groups', v, AGE_GROUP_LABELS[v]); });
+    AGE_GROUP_VALUES.forEach(function (v) {
+      html += '<span class="cls-age-opt" data-age="' + v + '">' + checkbox('age_groups', v, AGE_GROUP_LABELS[v]) + '</span>';
+    });
     html += '</div>';
     html += '</div>';
 
@@ -16166,6 +16194,45 @@
     document.getElementById('clsCancelBtn').addEventListener('click', closeCls);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCls(); });
 
+    // ── Period-driven UI ──
+    function currentPeriod() {
+      var sel = overlay.querySelector('input[name="clsPeriod"]:checked');
+      return sel && sel.value === 'AM' ? 'AM' : 'PM';
+    }
+    function applyPeriodUi() {
+      var am = currentPeriod() === 'AM';
+      ['clsHourField', 'clsSpaceField', 'clsMaxField'].forEach(function (fid) {
+        var el = document.getElementById(fid);
+        if (el) el.hidden = am;
+      });
+      var hint = document.getElementById('clsPeriodHint');
+      if (hint) hint.textContent = am
+        ? 'Morning classes teach ONE age group. No hour, room, or class-size picks — rooms are assigned for the year and the group’s roster is the size.'
+        : 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.';
+      var ageLabel = document.getElementById('clsAgeLabel');
+      if (ageLabel) ageLabel.textContent = am ? 'Age group (pick exactly one)' : 'Age group(s) the class is designed for';
+      overlay.querySelectorAll('.cls-age-opt').forEach(function (sp) {
+        var v = sp.getAttribute('data-age');
+        var hide = am ? (v === 'all-ages') : (v === 'greenhouse');
+        sp.hidden = hide;
+        if (hide) { var cb = sp.querySelector('input'); if (cb) cb.checked = false; }
+      });
+    }
+    overlay.querySelectorAll('input[name="clsPeriod"]').forEach(function (r) {
+      r.addEventListener('change', applyPeriodUi);
+    });
+    // Morning = single age group: checking one unchecks the rest.
+    overlay.querySelectorAll('input.cls-cb[data-field="age_groups"]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        if (currentPeriod() !== 'AM' || !this.checked) return;
+        var self = this;
+        overlay.querySelectorAll('input.cls-cb[data-field="age_groups"]').forEach(function (o) {
+          if (o !== self) o.checked = false;
+        });
+      });
+    });
+    applyPeriodUi();
+
     if (!isEdit) loadInspirationStrip();
 
     form.addEventListener('submit', function (e) {
@@ -16182,31 +16249,35 @@
         return vals;
       }
 
-      var maxSel = overlay.querySelector('input[name="clsMaxStudents"]:checked');
-      var max_students, max_students_other = '';
-      if (!maxSel) {
-        errEl.textContent = 'Pick a maximum class size.'; errEl.style.display = ''; return;
-      }
-      if (maxSel.value === 'other') {
-        var otherVal = parseInt(document.getElementById('clsMaxStudentsOther').value, 10);
-        if (!Number.isFinite(otherVal) || otherVal <= 0) {
-          errEl.textContent = 'Enter a number for the custom class size.'; errEl.style.display = ''; return;
+      var period = currentPeriod();
+      var max_students = 0, max_students_other = '';
+      if (period === 'PM') {
+        var maxSel = overlay.querySelector('input[name="clsMaxStudents"]:checked');
+        if (!maxSel) {
+          errEl.textContent = 'Pick a maximum class size.'; errEl.style.display = ''; return;
         }
-        max_students = otherVal;
-        max_students_other = String(otherVal);
-      } else {
-        max_students = parseInt(maxSel.value, 10);
+        if (maxSel.value === 'other') {
+          var otherVal = parseInt(document.getElementById('clsMaxStudentsOther').value, 10);
+          if (!Number.isFinite(otherVal) || otherVal <= 0) {
+            errEl.textContent = 'Enter a number for the custom class size.'; errEl.style.display = ''; return;
+          }
+          max_students = otherVal;
+          max_students_other = String(otherVal);
+        } else {
+          max_students = parseInt(maxSel.value, 10);
+        }
       }
 
       var payload = {
+        class_period: period,
         class_name: document.getElementById('clsClassName').value.trim(),
         description: document.getElementById('clsDescription').value.trim(),
         session_preferences: collectChecked('session_preferences'),
-        hour_preference: collectChecked('hour_preference'),
+        hour_preference: period === 'AM' ? [] : collectChecked('hour_preference'),
         assistant_count: collectChecked('assistant_count').map(function (v) { return parseInt(v, 10); }),
         co_teachers: document.getElementById('clsCoTeachers').value.trim(),
-        space_request: collectChecked('space_request'),
-        space_request_other: document.getElementById('clsSpaceOther').value.trim(),
+        space_request: period === 'AM' ? [] : collectChecked('space_request'),
+        space_request_other: period === 'AM' ? '' : document.getElementById('clsSpaceOther').value.trim(),
         max_students: max_students,
         max_students_other: max_students_other,
         age_groups: collectChecked('age_groups'),
@@ -16402,6 +16473,7 @@
   var scheduleBuilderState = {
     schoolYear: '2026-2027',
     session: 1,
+    period: 'PM',      // active lens: 'AM' (morning) | 'PM' (afternoon)
     submissions: [],   // all submissions for the school year
     approvals: {},     // { "YYYY-YYYY|N": { approved_at, approved_by } }
     signupWindows: {}, // { "YYYY-YYYY|N": { status, signup_start_date, signup_end_date } }
@@ -19344,10 +19416,17 @@
   function showScheduleBuilder() {
     if (document.getElementById('sbOverlay')) return;
     var html = '<div class="sb-overlay" id="sbOverlay">';
-    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Afternoon Class Builder">';
+    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Class Builder">';
     html += '<button class="detail-close" id="sbCloseBtn" aria-label="Close">&times;</button>';
     html += '<div class="sb-header">';
-    html += '<h3 style="margin:0;">Afternoon Class Builder</h3>';
+    html += '<h3 style="margin:0;">Class Builder</h3>';
+    // Morning / Afternoon lenses (2026-07-05 consolidation — same view-pill
+    // pattern as the Admin Calendar). Morning places one-age-group classes
+    // per session; Afternoon keeps the PM1/PM2 hour grid.
+    html += '<span class="board-cal-views sb-period-views" role="group" aria-label="Class period">';
+    html += '<button type="button" class="board-cal-view-pill sb-period-pill' + (scheduleBuilderState.period === 'AM' ? ' is-active' : '') + '" data-period="AM">🌅 Morning</button>';
+    html += '<button type="button" class="board-cal-view-pill sb-period-pill' + (scheduleBuilderState.period === 'AM' ? '' : ' is-active') + '" data-period="PM">🌇 Afternoon</button>';
+    html += '</span>';
     html += '<label class="sb-year-label">School Year ';
     html += '<select id="sbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
     html += '<option value="2026-2027">2026–2027</option>';
@@ -19375,6 +19454,15 @@
     });
     document.getElementById('sbPrintBtn').addEventListener('click', sbPrintSubmissions);
     document.getElementById('sbCsvBtn').addEventListener('click', sbExportSubmissionsCSV);
+    overlay.querySelectorAll('.sb-period-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        scheduleBuilderState.period = this.getAttribute('data-period') === 'AM' ? 'AM' : 'PM';
+        overlay.querySelectorAll('.sb-period-pill').forEach(function (b) {
+          b.classList.toggle('is-active', b.getAttribute('data-period') === scheduleBuilderState.period);
+        });
+        renderScheduleBuilder();
+      });
+    });
     loadScheduleBuilder();
   }
 
@@ -19919,10 +20007,16 @@
       : '<span class="session-pager-btn session-pager-disabled">&raquo;</span>';
     html += '</div>';
 
-    // Filter scheduled / drafted classes for this session.
+    // Active lens: AM (morning) or PM (afternoon). Legacy rows without
+    // class_period count as PM.
+    var period = scheduleBuilderState.period === 'AM' ? 'AM' : 'PM';
+    function periodOf(s) { return s.class_period === 'AM' ? 'AM' : 'PM'; }
+
+    // Filter scheduled / drafted classes for this session + lens.
     var classesInSession = scheduleBuilderState.submissions.filter(function (s) {
       return (s.status === 'scheduled' || s.status === 'drafted')
-          && s.scheduled_session === sess;
+          && s.scheduled_session === sess
+          && periodOf(s) === period;
     });
 
     // Session workflow bar. "Approve Session" locks the grid for that session
@@ -20021,6 +20115,7 @@
           return h;
         }).join(', ');
         function hourMatches() {
+          if (c.class_period === 'AM') return true; // no hour concept in the morning
           var prefs = c.hour_preference || [];
           if (prefs.indexOf('flexible') !== -1) return true;
           if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
@@ -20065,10 +20160,19 @@
       return s;
     }
 
-    html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
-    html += renderBlock('PM1', 'Hour 1 · 1:00–1:55', pm1List);
-    html += renderBlock('PM2', 'Hour 2 · 2:00–2:55', pm2List);
-    html += '</div>';
+    if (period === 'AM') {
+      // Morning: one open block per session — classes are one-age-group by
+      // definition, sorted youngest-group first, so the block reads as the
+      // morning roster for the session.
+      html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
+      html += renderBlock('AM', 'Morning classes', classesInSession.slice().sort(sortByAgeThenName));
+      html += '</div>';
+    } else {
+      html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
+      html += renderBlock('PM1', 'Hour 1 · 1:00–1:55', pm1List);
+      html += renderBlock('PM2', 'Hour 2 · 2:00–2:55', pm2List);
+      html += '</div>';
+    }
 
     // Available-classes palette: submitted + approved-but-unplaced, excluding
     // anything already placed in this session's grid. Cards drag onto any slot
@@ -20078,6 +20182,7 @@
     classesInSession.forEach(function (c) { placedIds[c.id] = true; });
     var palette = scheduleBuilderState.submissions.filter(function (s) {
       if (placedIds[s.id]) return false;
+      if (periodOf(s) !== period) return false; // other lens's inbox
       return s.status === 'submitted' || s.status === 'drafted';
     });
     // Requested session is a key placement consideration, so float classes
@@ -20133,7 +20238,7 @@
     // (Submissions Report parity): tap a name for full details, ↩ sends
     // it back to the inbox.
     var retired = scheduleBuilderState.submissions.filter(function (s) {
-      return s.status === 'declined' || s.status === 'withdrawn';
+      return (s.status === 'declined' || s.status === 'withdrawn') && periodOf(s) === period;
     }).sort(function (a, b) { return String(a.class_name || '').localeCompare(String(b.class_name || '')); });
     if (retired.length > 0) {
       paletteHtml += '<button type="button" class="sb-retired-toggle" id="sbRetiredToggle" aria-expanded="false">▸ Declined &amp; withdrawn (' + retired.length + ')</button>';
@@ -20320,12 +20425,15 @@
     html += '<button class="detail-close" id="sbSubDetailCloseX" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(s.class_name) + '</h3>';
     html += '<p style="margin:0 0 0.75rem;"><span class="pmrep-status pmrep-status-' + s.status + '">' + s.status + '</span></p>';
+    var isAmSub = s.class_period === 'AM';
     html += '<div class="sb-subdetail-meta">';
+    html += '<div><strong>Period:</strong> ' + (isAmSub ? '🌅 Morning' : '🌇 Afternoon') + '</div>';
     html += '<div><strong>Teacher:</strong> ' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (s.submitted_by_email && s.submitted_by_name ? ' <span class="sb-subdetail-dim">(' + escClsHtml(s.submitted_by_email) + ')</span>' : '') + '</div>';
     if (s.co_teachers) html += '<div><strong>Co-leader:</strong> ' + escClsHtml(s.co_teachers) + '</div>';
     if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
-    html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences)) + ' · <strong>Hour:</strong> ' + escClsHtml(pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
-    if (s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
+    html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))
+      + (isAmSub ? '' : ' · <strong>Hour:</strong> ' + escClsHtml(pmrepFormatHourPrefs(s.hour_preference))) + '</div>';
+    if (!isAmSub && s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
     if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(s.scheduled_hour) : '') + '</div>';
     html += '</div>';
     if (s.description) {
@@ -20378,7 +20486,7 @@
     var subs = sbSortedSubmissions();
     if (subs.length === 0) { alert('No submissions loaded yet — try again in a moment.'); return; }
     var year = scheduleBuilderState.schoolYear;
-    var headers = ['Class', 'Status', 'Submitter', 'Sessions', 'Hour', 'Ages', 'Max', 'Placed', 'Description'];
+    var headers = ['Class', 'Period', 'Status', 'Submitter', 'Sessions', 'Hour', 'Ages', 'Max', 'Placed', 'Description'];
     function esc(v) {
       var s = String(v == null ? '' : v);
       if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
@@ -20388,6 +20496,7 @@
     subs.forEach(function (s) {
       lines.push([
         esc(s.class_name),
+        esc(s.class_period === 'AM' ? 'AM' : 'PM'),
         esc(s.status),
         esc(s.submitted_by_name || s.submitted_by_email),
         esc(pmrepFormatSessions(s.session_preferences)),
@@ -20418,13 +20527,14 @@
     doc += '</head><body>';
     doc += '<h1>Afternoon Class Submissions</h1>';
     doc += '<p class="meta">Year ' + escapeHtml(year) + ' · ' + subs.length + ' submission' + (subs.length === 1 ? '' : 's') + '</p>';
-    doc += '<table><thead><tr><th>Class</th><th>Status</th><th>Submitter</th><th>Sessions</th><th>Hour</th><th>Ages</th><th>Max</th><th>Placed</th></tr></thead><tbody>';
+    doc += '<table><thead><tr><th>Class</th><th>Period</th><th>Status</th><th>Submitter</th><th>Sessions</th><th>Hour</th><th>Ages</th><th>Max</th><th>Placed</th></tr></thead><tbody>';
     subs.forEach(function (s) {
       doc += '<tr><td><strong>' + escapeHtml(s.class_name) + '</strong>';
       if (s.description) {
         doc += '<div class="desc">' + escapeHtml(String(s.description).slice(0, 200)) + (String(s.description).length > 200 ? '…' : '') + '</div>';
       }
       doc += '</td>';
+      doc += '<td>' + (s.class_period === 'AM' ? 'AM' : 'PM') + '</td>';
       doc += '<td>' + escapeHtml((s.status || '').toUpperCase()) + '</td>';
       doc += '<td>' + escapeHtml(s.submitted_by_name || s.submitted_by_email) + '</td>';
       doc += '<td>' + escapeHtml(pmrepFormatSessions(s.session_preferences)) + '</td>';
@@ -20451,7 +20561,7 @@
       return;
     }
     var scheduledHour = hour;
-    if ((sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+    if (hour !== 'AM' && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     patchReviewAction(subId, {
       status: 'scheduled',
@@ -20558,14 +20668,17 @@
     if (document.getElementById('sbPickerOverlay')) return;
 
     var sess = scheduleBuilderState.session;
+    var pickerPeriod = hour === 'AM' ? 'AM' : 'PM';
     var pool = scheduleBuilderState.submissions.filter(function (s) {
-      return s.status === 'submitted';
+      return s.status === 'submitted'
+        && ((s.class_period === 'AM' ? 'AM' : 'PM') === pickerPeriod);
     });
     function matchesSession(s) {
       var prefs = s.session_preferences || [];
       return prefs.indexOf(String(sess)) !== -1 || prefs.indexOf('flexible') !== -1;
     }
     function matchesHour(s) {
+      if (hour === 'AM') return true; // morning has no hour concept
       var prefs = s.hour_preference || [];
       if (prefs.indexOf('flexible') !== -1) return true;
       if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
@@ -20715,6 +20828,9 @@
     }).join(', ') || '—';
     var prefHourText = (sub.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ') || '—';
 
+    // Morning classes have no hour or room to schedule (rooms are assigned
+    // for the year) — those controls only render for afternoon rows.
+    var isAmSub = sub.class_period === 'AM';
     var hourOptions = ['PM1', 'PM2', 'both'].map(function (h) {
       return '<option value="' + h + '"' + (sub.scheduled_hour === h ? ' selected' : '') + '>' + h + '</option>';
     }).join('');
@@ -20729,7 +20845,7 @@
     html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + '</p>';
 
     if (locked) {
-      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Afternoon Class Builder header to make changes.</div>';
+      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Class Builder header to make changes.</div>';
     }
 
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,
@@ -20752,12 +20868,12 @@
     var disAttr = locked ? ' disabled' : '';
     html += '<div class="sb-sched-block-title">Scheduled</div>';
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess"' + disAttr + '>' + sessOptions + '</select></div>';
-    html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
+    if (!isAmSub) html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
     var sbAgeCbs = AGE_GROUP_VALUES.map(function (v) {
       return '<label class="cls-cb-label"><input type="checkbox" class="sbEditAgeCb" value="' + v + '"' + (schedAgeSet[v] ? ' checked' : '') + disAttr + '> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
     }).join('');
     html += '<div class="cls-field"><label class="cls-label">Ages</label><div class="cls-cb-group">' + sbAgeCbs + '</div>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Check the age groups for this placement — leave all unchecked to fall back to the preferred ages.</div>') + '</div>';
-    html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
+    if (!isAmSub) html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
 
     // Helpers / assistants (Phase B2) — feeds participation pm_assist. Member
     // datalist comes from the Schedule Builder load; free text is allowed and
@@ -20825,11 +20941,13 @@
         var mm = nameMap[v.toLowerCase()];
         helpers.push(mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v });
       });
+      var hourEl = document.getElementById('sbEditHour');
+      var roomEl = document.getElementById('sbEditRoom');
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
-        scheduled_hour: document.getElementById('sbEditHour').value,
+        scheduled_hour: isAmSub ? 'AM' : (hourEl ? hourEl.value : sub.scheduled_hour),
         scheduled_age_range: agesOut,
-        scheduled_room: document.getElementById('sbEditRoom').value.trim(),
+        scheduled_room: roomEl ? roomEl.value.trim() : (sub.scheduled_room || ''),
         reviewer_notes: document.getElementById('sbEditNotes').value,
         helpers: helpers
       };
