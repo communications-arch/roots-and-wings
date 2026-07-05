@@ -8218,6 +8218,36 @@ button.staff-role:hover {
   font-size: 0.85rem;
   color: var(--color-text);
 }
+/* Co-teacher chips on the class-submission form. */
+.cls-chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cls-chiprow:empty { display: none; }
+.cls-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+  font-size: 0.82rem;
+  color: var(--color-primary-dark);
+}
+.cls-chip-x {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-light);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 3px;
+}
+.cls-chip-x:hover { color: #a32222; }
+
 /* Morning/Afternoon lens pills inline in the builder header. */
 .sb-period-views {
   display: inline-flex;

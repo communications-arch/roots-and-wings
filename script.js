@@ -470,6 +470,13 @@
               }
             }
           }
+          // Phantom guard (2026-07-05, the "Vejohnson Johnson" bug): when
+          // the family HAS person rows but this login email matches none
+          // of them, don't invent a person from the email prefix — that
+          // manufactured picker entries for people who don't exist in the
+          // Directory. The email-derived fallback below stays only for
+          // sheet-only families with no people rows at all.
+          if (!label && Array.isArray(f.people) && f.people.length > 0) return;
           if (!label) {
             var who = deriveFirstNameFromLogin(emLc, f.name);
             var lastFallback = familyDisplay || '';
@@ -16122,10 +16129,42 @@
     html += '</label>';
     html += '</div>';
 
-    // 6. Co-teachers
+    // 6. Co-teachers — multi-select from the Main Learning Coaches
+    // (2026-07-05, Erin): chips + a type-ahead datalist; stored as the
+    // same comma-joined co_teachers text so nothing downstream changes.
+    var mlcOptions = '';
+    (function () {
+      var seen = {};
+      var names = [];
+      (FAMILIES || []).forEach(function (f) {
+        var nm = '';
+        if (Array.isArray(f.people)) {
+          for (var i = 0; i < f.people.length; i++) {
+            var p = f.people[i];
+            if (p && p.role === 'mlc') {
+              nm = ((p.first_name || '') + ' ' + (p.last_name || f.name || '')).trim();
+              break;
+            }
+          }
+        }
+        if (!nm && f.parents) {
+          nm = (String(f.parents).split(/[,&]/)[0].trim().split(/\s+/)[0] + ' ' + (f.name || '')).trim();
+        }
+        if (!nm) return;
+        var k = nm.toLowerCase();
+        if (seen[k]) return;
+        seen[k] = true;
+        names.push(nm);
+      });
+      names.sort(function (a, b) { return a.localeCompare(b); });
+      names.forEach(function (n) { mlcOptions += '<option value="' + escClsAttr(n) + '"></option>'; });
+    })();
     html += '<div class="cls-field">';
     html += '<label class="cls-label">Co-teachers or assistants already identified?</label>';
-    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="500" value="' + escClsAttr(cur.co_teachers) + '" placeholder="Names (optional)">';
+    html += '<p class="cls-help">Pick from the co-op’s Main Learning Coaches — add as many as you like.</p>';
+    html += '<div class="cls-chiprow" id="clsCoTeacherChips"></div>';
+    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="120" list="clsMlcList" placeholder="Type a name, pick from the list…" autocomplete="off">';
+    html += '<datalist id="clsMlcList">' + mlcOptions + '</datalist>';
     html += '</div>';
 
     // 7. Space request (afternoon only — morning rooms are assigned for the year)
@@ -16193,6 +16232,51 @@
     document.getElementById('clsCloseBtn').addEventListener('click', closeCls);
     document.getElementById('clsCancelBtn').addEventListener('click', closeCls);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCls(); });
+
+    // ── Co-teacher chips ──
+    // Seed from the stored comma-joined string on edit; the payload joins
+    // the chip list back into the same co_teachers text field.
+    var coTeacherList = String(cur.co_teachers || '').split(',')
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return !!s; });
+    function renderCoTeacherChips() {
+      var wrap = document.getElementById('clsCoTeacherChips');
+      if (!wrap) return;
+      var ch = '';
+      coTeacherList.forEach(function (nm, idx) {
+        ch += '<span class="cls-chip">' + escClsHtml(nm)
+          + '<button type="button" class="cls-chip-x" data-idx="' + idx + '" aria-label="Remove ' + escClsAttr(nm) + '">&times;</button></span>';
+      });
+      wrap.innerHTML = ch;
+      wrap.querySelectorAll('.cls-chip-x').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          coTeacherList.splice(parseInt(this.getAttribute('data-idx'), 10), 1);
+          renderCoTeacherChips();
+        });
+      });
+    }
+    function addCoTeacher(name) {
+      var nm = String(name || '').trim();
+      if (!nm) return;
+      var exists = coTeacherList.some(function (x) { return x.toLowerCase() === nm.toLowerCase(); });
+      if (!exists) coTeacherList.push(nm);
+      renderCoTeacherChips();
+    }
+    var coTeacherInput = document.getElementById('clsCoTeachers');
+    if (coTeacherInput) {
+      // 'change' fires on a datalist pick; Enter adds whatever's typed
+      // (covers a co-teacher who isn't an MLC, e.g. a teen helper).
+      coTeacherInput.addEventListener('change', function () {
+        if (this.value.trim()) { addCoTeacher(this.value); this.value = ''; }
+      });
+      coTeacherInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (this.value.trim()) { addCoTeacher(this.value); this.value = ''; }
+        }
+      });
+    }
+    renderCoTeacherChips();
 
     // ── Period-driven UI ──
     function currentPeriod() {
@@ -16275,7 +16359,13 @@
         session_preferences: collectChecked('session_preferences'),
         hour_preference: period === 'AM' ? [] : collectChecked('hour_preference'),
         assistant_count: collectChecked('assistant_count').map(function (v) { return parseInt(v, 10); }),
-        co_teachers: document.getElementById('clsCoTeachers').value.trim(),
+        co_teachers: (function () {
+          // Chips + anything still typed but not yet added.
+          var pending = document.getElementById('clsCoTeachers').value.trim();
+          var all = coTeacherList.slice();
+          if (pending && !all.some(function (x) { return x.toLowerCase() === pending.toLowerCase(); })) all.push(pending);
+          return all.join(', ');
+        })(),
         space_request: period === 'AM' ? [] : collectChecked('space_request'),
         space_request_other: period === 'AM' ? '' : document.getElementById('clsSpaceOther').value.trim(),
         max_students: max_students,
