@@ -6436,10 +6436,12 @@
         // Board Calendar — any board member can view/edit the standalone
         // date-driven events. Server gate (isBoardMember) is the real
         // enforcement; shown to every board chair on this card.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar</button></li>';
-        if (role === 'President' || role === 'Vice President') {
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-icon">📆</span>Session Dates<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span></button></li>';
-        }
+        // Session Dates merged into the Admin Calendar (⚙ drawer there,
+        // 2026-07-05) — the "Set up" nudge badge rides on this row now,
+        // only for the two roles that can actually set the dates.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar'
+          + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
+          + '</button></li>';
         if (role === 'Vice President') {
           // VP consolidation (2026-07-05 workspace review): Afternoon Class
           // Scheduling + Special Events fold in here as rows instead of
@@ -16949,16 +16951,22 @@
   }
 
   function showCoopCalendarModal() {
-    var icons = [];
-    var body = renderReportModal({
+    // Session Dates now lives as the Admin Calendar's settings drawer
+    // (2026-07-05, Erin: "combine Session Dates with the Admin Calendar").
+    // The session calendar drives the Admin Calendar's derived trigger
+    // dates, so the editor slides over the calendar it feeds; every close
+    // path refreshes the calendar underneath. All coop-cal loaders target
+    // #coop-cal-body by id, so they work inside the drawer unchanged.
+    if (!document.getElementById('board-cal-body')) showBoardCalendarModal();
+    var drawerBody = openReportDrawer({
       title: 'Session Dates',
-      subtitle: 'Set the start and end dates for each session of the school year. Past years are read-only history.',
-      meta: '',
-      icons: icons,
       bodyId: 'coop-cal-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading sessions…</p>'
+      bodyPlaceholder: '<p class="ws-empty">Loading sessions…</p>',
+      onClose: function () {
+        if (document.getElementById('board-cal-body')) loadBoardCalendar();
+      }
     });
-    if (!body) return;
+    if (!drawerBody) return;
     loadCoopCalendar();
   }
 
@@ -17304,11 +17312,13 @@
         }
         return;
       }
-      // Full success — close the modal (matches the rest of the portal's
-      // save-then-dismiss flow) and refresh the dashboard's SESSION_DATES.
+      // Full success — close the Session Dates drawer (its onClose
+      // refreshes the Admin Calendar underneath, whose derived trigger
+      // dates come from these sessions) and refresh the dashboard's
+      // SESSION_DATES.
       localStorage.removeItem(CACHE_SESSIONS_KEY);
       if (typeof loadCoopSessions === 'function') loadCoopSessions();
-      if (typeof closeDetail === 'function') closeDetail();
+      if (typeof closeReportDrawer === 'function') closeReportDrawer();
     });
   }
 
@@ -17789,11 +17799,24 @@
   }
 
   function showBoardCalendarModal() {
+    // ⚙ Session Dates drawer — President + VP set the session calendar
+    // that generates this calendar's derived trigger dates. Same gate as
+    // the old standalone Session Dates entry (server enforces for real).
+    var canSessionDates = isCommsUser() ||
+      (typeof getWorkspaceRoles === 'function' &&
+        (getWorkspaceRoles().indexOf('President') !== -1 ||
+         getWorkspaceRoles().indexOf('Vice President') !== -1));
+    var icons = [];
+    if (canSessionDates) {
+      icons.push({ label: 'Session Dates', icon: ICON_SVG.gear,
+        aria: 'Session Dates — set each session’s start and end dates',
+        action: function () { showCoopCalendarModal(); } });
+    }
     var body = renderReportModal({
       title: 'Admin Calendar',
-      subtitle: 'Key dates that trigger admin & board tasks (registration opens, remove non-returning members, finalize classes, …). Any board member can add or edit. (Session dates live under Session Dates; afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
+      subtitle: 'Key dates that trigger admin & board tasks (registration opens, remove non-returning members, finalize classes, …). Any board member can add or edit. (Session dates live behind the ⚙ gear; afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
       meta: '',
-      icons: [],
+      icons: icons,
       bodyId: 'board-cal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading calendar…</p>'
     });
@@ -20483,7 +20506,7 @@
     });
     var paletteHtml = '<div class="sb-palette" id="sbPalette">';
     paletteHtml += '<div class="sb-palette-title">Available classes (' + palette.length + ')</div>';
-    paletteHtml += '<div class="sb-palette-hint">Drag onto a slot · drag a placed class here to unschedule · or use “+ Add”. <strong>Requested session</strong> is shown on each card.</div>';
+    paletteHtml += '<div class="sb-palette-hint">Drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”. <strong>Requested session</strong> is shown on each card.</div>';
     if (palette.length === 0) {
       paletteHtml += '<p class="sb-palette-empty">No submissions waiting — they’ll appear here as members submit classes.</p>';
     } else {
@@ -20500,6 +20523,11 @@
         }).join('');
         if (!sessChips) sessChips = '<span class="sb-sess-chip sb-sess-none">no pref</span>';
         paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
+        // Decline straight from the inbox (Submissions Report parity) — the
+        // reviewer shouldn't have to open a second modal to turn a class
+        // down. Same PATCH the report's Decline button sends; re-queue
+        // stays in the Submissions Report.
+        paletteHtml += '<button type="button" class="sb-palette-decline" draggable="false" data-sub-id="' + s.id + '" title="Decline this class" aria-label="Decline ' + escClsHtml(s.class_name) + '">✗</button>';
         // Lead with ages as colored words. Status chip omitted — palette =
         // inbox by definition, so "Submitted" is implicit.
         var palAges = ageGroupsColoredHtml(s.age_groups, s.age_groups_other);
@@ -20603,6 +20631,25 @@
         if (id) unscheduleDroppedSub(id);
       });
     }
+
+    // ✗ Decline on palette cards — Submissions Report parity, in place.
+    // stopPropagation keeps the click from reading as a card tap/drag.
+    body.querySelectorAll('.sb-palette-decline').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var id = parseInt(this.getAttribute('data-sub-id'), 10);
+        var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+        var name = sub ? sub.class_name : 'this class';
+        if (!confirm('Decline “' + name + '”?\nThe submitter will see “Declined” on their dashboard. You can re-queue it later from the Submissions Report.')) return;
+        patchReviewAction(id, { status: 'declined', reviewer_notes: (sub && sub.reviewer_notes) || '' })
+          .then(function () {
+            loadScheduleBuilder();
+            // Keep the workspace pill in sync with the server.
+            if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
+          })
+          .catch(function (err) { alert('Could not decline: ' + (err.message || 'error')); });
+      });
+    });
   }
 
   var _sbDragId = null;

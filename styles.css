@@ -8171,12 +8171,35 @@ button.staff-role:hover {
   padding-bottom: 6px;
 }
 .sb-palette-card {
+  position: relative; /* anchors the ✗ decline button */
   flex: 0 0 200px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 8px 10px;
+  padding-right: 30px; /* keep text clear of the ✗ */
   background: #fff;
   cursor: grab;
+}
+/* ✗ Decline straight from the inbox card (Submissions Report parity). */
+.sb-palette-decline {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sb-palette-decline:hover,
+.sb-palette-decline:focus-visible {
+  background: #fde2e2;
+  color: #a32222;
 }
 .sb-palette-card:active { cursor: grabbing; }
 .sb-palette-card strong { font-size: 0.86rem; color: var(--color-text); }
