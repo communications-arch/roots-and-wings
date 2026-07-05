@@ -10358,19 +10358,14 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 }
 /* Count pill that prepends a To Do item label, e.g. [3] Pending Waivers.
    Coral fill so it reads as "you have N items to action". */
-.ws-link-pre-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 7px;
-  margin-right: 8px;
-  background: var(--color-coral);
-  color: var(--color-white);
-  font-size: 0.78rem;
-  font-weight: 700;
-  border-radius: 999px;
+/* One count-badge component everywhere (2026-07-05 review): the To Do
+   rows' old leading .ws-link-pre-count merged into .ws-link-count.
+   Inside a flex link row the pill always sits at the trailing edge,
+   regardless of its DOM position. */
+.ws-link-btn .ws-link-count,
+.ws-link-list li a .ws-link-count {
+  margin-left: auto;
+  order: 9;
   flex-shrink: 0;
 }
 .ws-link-list li a {

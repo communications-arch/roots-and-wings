@@ -6260,7 +6260,7 @@
         h += '<div class="ws-mylink-form">';
         h += '<input type="text" id="ws-mylink-title" placeholder="Label" maxlength="80" />';
         h += '<input type="url" id="ws-mylink-url" placeholder="https://..." maxlength="400" />';
-        h += '<button class="btn btn-primary btn-sm" id="ws-mylink-add">Add</button>';
+        h += '<button class="sc-btn" id="ws-mylink-add">Add</button>';
         h += '</div>';
         return h;
       }
@@ -6269,7 +6269,8 @@
       title: 'Ways to Help',
       roleGate: null,
       render: function () {
-        var h = '';
+        // Leading hint matches every other card's anatomy (2026-07-05).
+        var h = '<p class="ws-body-hint">Your participation so far this year, and ways to jump in.</p>';
 
         // ── Your year so far (personal participation panel) ────────────
         // Backed by the same data as the greeting's plant badge
@@ -6478,19 +6479,19 @@
           // re-renders via _welcomeStageCounts (no flicker).
           var toWelcome = (_welcomeStageCounts && _welcomeStageCounts[0]) || 0;
           var toOrient  = (_welcomeStageCounts && _welcomeStageCounts[1]) || 0;
-          h += '<li id="ws-todo-welcome-towelcome-item"' + (toWelcome > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="0"><span class="ws-link-pre-count" id="ws-welcome-towelcome-count">' + toWelcome + '</span><span class="ws-link-icon">🌱</span><span>To Welcome</span></button></li>';
-          h += '<li id="ws-todo-welcome-orientation-item"' + (toOrient > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="1"><span class="ws-link-pre-count" id="ws-welcome-orientation-count">' + toOrient + '</span><span class="ws-link-icon">👋</span><span>Orientation</span></button></li>';
+          h += '<li id="ws-todo-welcome-towelcome-item"' + (toWelcome > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="0"><span class="ws-link-count" id="ws-welcome-towelcome-count">' + toWelcome + '</span><span class="ws-link-icon">🌱</span><span>To Welcome</span></button></li>';
+          h += '<li id="ws-todo-welcome-orientation-item"' + (toOrient > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="1"><span class="ws-link-count" id="ws-welcome-orientation-count">' + toOrient + '</span><span class="ws-link-icon">👋</span><span>Orientation</span></button></li>';
           // Date-gated pre-co-op outreach nudge → opens the full list.
           var woHidden = !(_welcomeOutreachTodoState && _welcomeOutreachTodoState.visible);
           h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter=""><span class="ws-link-icon">💛</span><span>Reach out to new families — co-op starts soon</span></button></li>';
         }
         if (role === 'Treasurer') {
-          h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-pre-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
+          h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
         }
         if (role === 'Communications Director') {
-          h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-pre-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
-          h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
-          h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-pre-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
+          h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
+          h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
+          h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
           // Confirm role holders for the new school year. Fires after
           // Field Day until the active year is marked confirmed in
           // role_holder_confirmations. Click opens the Confirm Role
@@ -6499,21 +6500,21 @@
           var rhHidden = !(_roleHolderTodoState && _roleHolderTodoState.visible);
           var rhCount  = (_roleHolderTodoState && _roleHolderTodoState.count) || 0;
           var rhLabel  = (_roleHolderTodoState && _roleHolderTodoState.label) || 'Confirm role holders';
-          h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-pre-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
+          h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
         }
         if (role === 'Membership Director') {
-          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-pre-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
+          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
           // General inquiries from the public Contact Us form — a separate
           // bucket from tour requests so questions don't mix into the tour
           // queue. Opens the pipeline scoped to inquiries.
-          h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-pre-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
+          h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
           // Scheduled Tours entry has both the button (opens Pipeline
           // scoped to scheduled) AND a sibling <ul> rendered by
           // updateMembershipTourTodoCounts() — a glance-view list of
           // upcoming visits sorted by date/time so Membership can see
           // what's on her calendar without opening the modal.
           h += '<li id="ws-todo-tours-scheduled-item" hidden>';
-          h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-pre-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
+          h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
           // Morning class setup — one workflow nudge, gated to on/after
@@ -6522,7 +6523,7 @@
           // progresses: set up → place stragglers → finalize. Driven by
           // loadMorningClassTodos. The Report entry stays available
           // year-round for anyone who wants to start earlier.
-          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-pre-count" id="ws-morning-count" hidden style="display:none;">0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
+          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-count" id="ws-morning-count" hidden style="display:none;">0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -6535,7 +6536,7 @@
           var coopCalHidden = !(_coopCalTodoState && _coopCalTodoState.visible);
           var coopCalCount  = (_coopCalTodoState && _coopCalTodoState.count) || 0;
           var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
-          h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-pre-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
+          h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
@@ -6596,8 +6597,12 @@
       title: 'Special Events',
       roleGate: ['Special Events Liaison', 'Vice President'],
       render: function () {
+        // Standard link-row anatomy (2026-07-05 review) — no more one-off
+        // hero button; matches every other action card.
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates, then assign a lead and up to four assistants for each event.</p>';
-        h += '<button type="button" class="sc-btn mcb-primary" data-resource-action="special-events">Manage Special Events</button>';
+        h += '<ul class="ws-link-list">';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="special-events"><span class="ws-link-icon">🎉</span>Event Dates &amp; Helpers</button></li>';
+        h += '</ul>';
         return h;
       }
     },
@@ -6609,8 +6614,12 @@
       title: 'Supply Closet',
       roleGate: ['Supply Coordinator'],
       render: function () {
+        // Standard link-row anatomy (2026-07-05 review) — no more one-off
+        // hero button; matches every other action card.
         var h = '<p class="ws-body-hint">Add and update inventory, adjust quantities, and manage storage locations.</p>';
-        h += '<button type="button" class="sc-btn mcb-primary" data-resource-action="supply-closet-manage">Manage Supply Closet</button>';
+        h += '<ul class="ws-link-list">';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-icon">📦</span>Inventory &amp; Locations</button></li>';
+        h += '</ul>';
         return h;
       }
     },
@@ -9880,7 +9889,7 @@
     try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || '{}'); } catch (e) { snap = {}; }
     if (!snap || typeof snap !== 'object') snap = {};
     list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
-      var pre = li.querySelector('.ws-link-pre-count');
+      var pre = li.querySelector('.ws-link-count');
       snap[li.id] = { hidden: !!li.hidden, count: pre ? pre.textContent : '' };
     });
     try { localStorage.setItem('rw_todo_state', JSON.stringify(snap)); } catch (e) { /* quota */ }
@@ -9897,7 +9906,7 @@
       if (!li) return; // item not in this role's list — skip
       var s = snap[id] || {};
       li.hidden = !!s.hidden;
-      var pre = li.querySelector('.ws-link-pre-count');
+      var pre = li.querySelector('.ws-link-count');
       if (pre && s.count !== '' && s.count != null) pre.textContent = s.count;
     });
     recomputeTodoEmptyState();
