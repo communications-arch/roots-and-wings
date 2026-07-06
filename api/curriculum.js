@@ -308,8 +308,16 @@ function normalizeSubmission(body) {
   const session_preferences = pickArray(body.session_preferences, SESSION_PREF_VALUES);
   if (session_preferences.length === 0) throw new Error('Pick at least one session preference.');
 
-  const hour_preference = isAM ? [] : pickArray(body.hour_preference, HOUR_PREF_VALUES);
-  if (!isAM && hour_preference.length === 0) throw new Error('Pick at least one hour preference.');
+  // Morning hours (2026-07-06): a group's morning can be one 2-hour class
+  // or two 1-hour classes — submitters pick 1st / 2nd / both (default both).
+  let hour_preference;
+  if (isAM) {
+    hour_preference = pickArray(body.hour_preference, ['first', 'last', 'both']).slice(0, 1);
+    if (hour_preference.length === 0) hour_preference = ['both'];
+  } else {
+    hour_preference = pickArray(body.hour_preference, HOUR_PREF_VALUES);
+    if (hour_preference.length === 0) throw new Error('Pick at least one hour preference.');
+  }
 
   const assistant_count = pickArray(body.assistant_count, ASSISTANT_COUNT_VALS, { int: true });
   if (assistant_count.length === 0) throw new Error('Pick how many assistants you would like.');
@@ -368,8 +376,9 @@ function normalizeSubmission(body) {
 // Valid status values for a reviewer PATCH. `withdrawn` is intentionally
 // excluded — only the submitter can withdraw (via DELETE).
 const REVIEWER_STATUS_VALUES = ['submitted', 'drafted', 'scheduled', 'declined'];
-// 'AM' = a placed morning class (no hour concept — the whole morning).
-const SCHEDULED_HOUR_VALUES = ['PM1', 'PM2', 'both', 'AM'];
+// Morning placements: 'AM' = both morning hours, 'AM1'/'AM2' = a 1-hour
+// morning class (a group's morning can split in two, 2026-07-06).
+const SCHEDULED_HOUR_VALUES = ['PM1', 'PM2', 'both', 'AM', 'AM1', 'AM2'];
 
 // Normalize a reviewer PATCH body. Returns the cleaned fields + the status
 // that was chosen. Throws Error on invalid input.
@@ -425,6 +434,28 @@ async function canReviewSubmissions(email) {
   if (isSuperUser(email)) return true;
   if (await canEditAsRole(email, 'Vice President')) return true;
   if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
+  // Age-group class liaisons build the MORNING schedule (2026-07-06,
+  // Erin: "the people that actually build the classes are the class
+  // liaison for each age group"). Any active holder of a role titled
+  // "… Class Liaison" (e.g. a future "Pigeons Class Liaison") gets
+  // reviewer access; per-group scoping can tighten later — the co-op is
+  // small and the builder's group slots make the boundaries obvious.
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT 1
+      FROM role_holders_v2 h
+      JOIN roles r ON r.id = h.role_id
+      WHERE LOWER(h.person_email) = LOWER(${email})
+        AND h.ended_at IS NULL
+        AND r.status = 'active'
+        AND r.title ILIKE '%class liaison'
+      LIMIT 1
+    `;
+    if (rows.length) return true;
+  } catch (e) {
+    console.error('canReviewSubmissions liaison lookup failed:', e.message);
+  }
   return false;
 }
 
@@ -863,9 +894,25 @@ module.exports = async function handler(req, res) {
         catch (validationErr) {
           return res.status(400).json({ error: validationErr.message });
         }
-        const submitterEmail = resolveSubmitterEmail(user, req.query.view_as);
-        const submitterName = submitterEmail.toLowerCase() === user.email.toLowerCase()
+        let submitterEmail = resolveSubmitterEmail(user, req.query.view_as);
+        let submitterName = submitterEmail.toLowerCase() === user.email.toLowerCase()
           ? (user.name || '') : '';
+        // Reviewers/liaisons can file a class ON BEHALF of a member (the
+        // builder's "+ New Class", 2026-07-06 — liaisons recruit teachers
+        // in conversation and enter the class themselves). Workspace email
+        // → files under that member (they get the confirmation email);
+        // name-only (no account yet) → files under the liaison with the
+        // intended teacher's name kept visible.
+        const behalfEmail = String((req.body || {}).on_behalf_email || '').trim().toLowerCase();
+        const behalfName = String((req.body || {}).on_behalf_name || '').trim().slice(0, 120);
+        if ((behalfEmail || behalfName) && await isReviewerReq(user, req)) {
+          if (behalfEmail && (behalfEmail.split('@')[1] || '') === ALLOWED_DOMAIN) {
+            submitterEmail = behalfEmail;
+            submitterName = behalfName;
+          } else if (behalfName) {
+            submitterName = behalfName + ' (via ' + (user.name || user.email) + ')';
+          }
+        }
         const inserted = await sql`
           INSERT INTO class_submissions (
             submitted_by_email, submitted_by_name, school_year, class_period,

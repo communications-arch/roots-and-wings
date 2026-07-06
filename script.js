@@ -16206,6 +16206,17 @@
     HOUR_PREF_VALUES.forEach(function (v) { html += checkbox('hour_preference', v, HOUR_PREF_LABELS[v]); });
     html += '</div></div>';
 
+    // 4b. Morning hours (2026-07-06): a group's morning can be one 2-hour
+    // class or two 1-hour classes — pick 1st / 2nd / both, defaulting both.
+    var amHourCur = (curPeriod === 'AM' && (cur.hour_preference || [])[0]) || 'both';
+    html += '<div class="cls-field" id="clsAmHourField" hidden>';
+    html += '<label class="cls-label">Which morning hour? <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    [['both', 'Both hours (10:00–12:00)'], ['first', '1st hour (10:00–10:55)'], ['last', '2nd hour (11:00–11:55)']].forEach(function (o) {
+      html += '<label class="cls-cb-label"><input type="radio" name="clsAmHour" value="' + o[0] + '"' + (amHourCur === o[0] ? ' checked' : '') + '> ' + o[1] + '</label>';
+    });
+    html += '</div></div>';
+
     // 5. Number of assistants
     html += '<div class="cls-field">';
     html += '<label class="cls-label">How many helpers? <span class="cls-req">*</span></label>';
@@ -16278,15 +16289,28 @@
     html += '<input class="cl-input cls-input" type="number" id="clsMaxStudentsOther" min="1" max="100" value="' + escClsAttr(maxStudentsOtherVal) + '" style="width:6rem;" placeholder="#">';
     html += '</div></div>';
 
-    // 9. Age groups — afternoon: any combination; morning: exactly ONE
-    // (Greenhouse is morning-only; "All ages" is afternoon-only).
-    html += '<div class="cls-field">';
-    html += '<label class="cls-label"><span id="clsAgeLabel">Age group(s) the class is designed for</span> <span class="cls-req">*</span></label>';
+    // 9. Age groups — afternoon: any combination (checkboxes); morning:
+    // exactly ONE via a dropdown (2026-07-06, Erin: single select).
+    // Greenhouse is morning-only; "All ages" is afternoon-only.
+    html += '<div class="cls-field" id="clsPmAgeField">';
+    html += '<label class="cls-label">Age group(s) the class is designed for <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
     AGE_GROUP_VALUES.forEach(function (v) {
-      html += '<span class="cls-age-opt" data-age="' + v + '">' + checkbox('age_groups', v, AGE_GROUP_LABELS[v]) + '</span>';
+      if (v === 'greenhouse') return; // morning-only, lives in the dropdown below
+      html += checkbox('age_groups', v, AGE_GROUP_LABELS[v]);
     });
     html += '</div>';
+    html += '</div>';
+    var amGroupCur = (curPeriod === 'AM' && (cur.age_groups || [])[0]) || '';
+    html += '<div class="cls-field" id="clsAmGroupField" hidden>';
+    html += '<label class="cls-label">Age group <span class="cls-req">*</span></label>';
+    html += '<select class="cl-input" id="clsAmGroup">';
+    html += '<option value="">— pick the age group —</option>';
+    AGE_GROUP_VALUES.forEach(function (v) {
+      if (v === 'all-ages') return; // afternoon-only
+      html += '<option value="' + v + '"' + (amGroupCur === v ? ' selected' : '') + '>' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
+    });
+    html += '</select>';
     html += '</div>';
 
     // (Pre-enroll your own kids is deferred to a later flow.)
@@ -16439,35 +16463,23 @@
     }
     function applyPeriodUi() {
       var am = currentPeriod() === 'AM';
-      ['clsHourField', 'clsSpaceField', 'clsMaxField'].forEach(function (fid) {
+      // PM-only fields hide for morning; morning gets its own hour radios
+      // + single age-group dropdown instead.
+      ['clsHourField', 'clsSpaceField', 'clsMaxField', 'clsPmAgeField'].forEach(function (fid) {
         var el = document.getElementById(fid);
         if (el) el.hidden = am;
       });
+      ['clsAmHourField', 'clsAmGroupField'].forEach(function (fid) {
+        var el = document.getElementById(fid);
+        if (el) el.hidden = !am;
+      });
       var hint = document.getElementById('clsPeriodHint');
       if (hint) hint.textContent = am
-        ? 'Morning classes teach ONE age group. No hour, room, or class-size picks — rooms are assigned for the year and the group’s roster is the size.'
+        ? 'Morning classes teach ONE age group, as one 2-hour class or a 1-hour slot. No room or class-size picks — rooms are assigned for the year and the group’s roster is the size.'
         : 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.';
-      var ageLabel = document.getElementById('clsAgeLabel');
-      if (ageLabel) ageLabel.textContent = am ? 'Age group (pick exactly one)' : 'Age group(s) the class is designed for';
-      overlay.querySelectorAll('.cls-age-opt').forEach(function (sp) {
-        var v = sp.getAttribute('data-age');
-        var hide = am ? (v === 'all-ages') : (v === 'greenhouse');
-        sp.hidden = hide;
-        if (hide) { var cb = sp.querySelector('input'); if (cb) cb.checked = false; }
-      });
     }
     overlay.querySelectorAll('input[name="clsPeriod"]').forEach(function (r) {
       r.addEventListener('change', applyPeriodUi);
-    });
-    // Morning = single age group: checking one unchecks the rest.
-    overlay.querySelectorAll('input.cls-cb[data-field="age_groups"]').forEach(function (cb) {
-      cb.addEventListener('change', function () {
-        if (currentPeriod() !== 'AM' || !this.checked) return;
-        var self = this;
-        overlay.querySelectorAll('input.cls-cb[data-field="age_groups"]').forEach(function (o) {
-          if (o !== self) o.checked = false;
-        });
-      });
     });
     applyPeriodUi();
 
@@ -16488,6 +16500,11 @@
       }
 
       var period = currentPeriod();
+      var amHourSel = overlay.querySelector('input[name="clsAmHour"]:checked');
+      var amGroupSel = document.getElementById('clsAmGroup');
+      if (period === 'AM' && (!amGroupSel || !amGroupSel.value)) {
+        errEl.textContent = 'Pick the age group for your morning class.'; errEl.style.display = ''; return;
+      }
       var max_students = 0, max_students_other = '';
       if (period === 'PM') {
         var maxSel = overlay.querySelector('input[name="clsMaxStudents"]:checked');
@@ -16511,7 +16528,9 @@
         class_name: document.getElementById('clsClassName').value.trim(),
         description: document.getElementById('clsDescription').value.trim(),
         session_preferences: collectChecked('session_preferences'),
-        hour_preference: period === 'AM' ? [] : collectChecked('hour_preference'),
+        hour_preference: period === 'AM'
+          ? [amHourSel ? amHourSel.value : 'both']
+          : collectChecked('hour_preference'),
         assistant_count: collectChecked('assistant_count').map(function (v) { return parseInt(v, 10); }),
         co_teachers: (function () {
           // Chips + anything still typed but not yet added.
@@ -16524,7 +16543,7 @@
         space_request_other: period === 'AM' ? '' : document.getElementById('clsSpaceOther').value.trim(),
         max_students: max_students,
         max_students_other: max_students_other,
-        age_groups: collectChecked('age_groups'),
+        age_groups: period === 'AM' ? [amGroupSel.value] : collectChecked('age_groups'),
         age_groups_other: '',
         pre_enroll_kids: cur.pre_enroll_kids || '', // field not in v1 UI, preserve existing value on edit
         open_to_teen_assistant: document.getElementById('clsTeenAssist').checked,
