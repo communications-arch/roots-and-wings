@@ -2150,6 +2150,14 @@
       };
     });
     recomputeSessionState();
+    // The tab pagers snapshot currentSession when the script first runs —
+    // off the hardcoded fallback year, that's Session 5. Re-point them at
+    // the freshly computed current/upcoming session so the Current Session
+    // and Cleaning tabs open on the right page (2026-07-06 bug: pager
+    // defaulted to Session 5 over the summer). Runs on load/login only,
+    // so it doesn't fight the user's manual paging.
+    sessionTabView = currentSession;
+    cleaningTabView = currentSession;
 
     // "Needs setup" surface check: the active school year per
     // activeSchoolYear() (April-1 pivot) has zero sessions. That's the
