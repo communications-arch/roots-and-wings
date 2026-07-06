@@ -735,15 +735,9 @@
           if (!cleaningDB.loaded) {
             CLEANING_CREW.liaison = data.cleaningCrew.liaison;
           }
-          // For sessions: use sheets data for any session the DB doesn't have assignments for
-          if (data.cleaningCrew.sessions) {
-            for (var cs in data.cleaningCrew.sessions) {
-              var dbHasSession = cleaningDB.assignments && cleaningDB.assignments.some(function (a) { return a.session_number === parseInt(cs); });
-              if (!dbHasSession) {
-                CLEANING_CREW.sessions[cs] = data.cleaningCrew.sessions[cs];
-              }
-            }
-          }
+          // (2026-07-06) Sheet fallback for per-session crews removed —
+          // cleaning_assignments (DB) is the only source now; the sheet
+          // only held last year's rota anyway.
         }
 
         // ── Volunteer Committees ──
@@ -6140,50 +6134,68 @@
     }
   }
 
+  // Volunteers tab \u2014 pulled from the roles DB for the active school year
+  // (2026-07-06; replaces the Master-sheet Volunteer Committees data).
+  // Renders the same org chart as the Org & Roles resource, cached per
+  // year so tab re-renders don't refetch.
+  var _volTabState = { year: null, html: null, loading: false };
   function renderVolunteersTab() {
     var container = document.getElementById('volunteersTabContent');
     if (!container) return;
-    var myNames = getMyNames();
-
-    var html = '<h3>Volunteer Committees &mdash; 2025\u20132026</h3>';
-    html += '<div class="portal-volunteer-grid">';
-
-    VOLUNTEER_COMMITTEES.forEach(function (committee) {
-      var isMyCommittee = false;
-      if (committee.chair && myNames.fullNames.some(function (fn) { return fn.toLowerCase() === (committee.chair.person || '').trim().toLowerCase(); })) isMyCommittee = true;
-      committee.roles.forEach(function (r) { if (r.person && myNames.fullNames.some(function (fn) { return fn.toLowerCase() === r.person.trim().toLowerCase(); })) isMyCommittee = true; });
-      html += '<div class="portal-role-card' + (isMyCommittee ? ' coord-my-card' : '') + '">';
-      html += '<h4>' + committee.name + '</h4>';
-      if (committee.chair) {
-        var chairRoleKey = getRoleKeyForDuty(committee.chair.title);
-        var chairTitle = committee.chair.title;
-        if (chairRoleKey && getRoleByKey(chairRoleKey)) {
-          chairTitle = '<a class="rd-role-link" data-role-key="' + chairRoleKey + '" href="#" onclick="return false;">' + committee.chair.title + '</a>';
-        }
-        html += '<div class="committee-chair"><strong>' + chairTitle + ':</strong> ' + highlightIfMe(committee.chair.person, myNames) + '</div>';
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { container.innerHTML = ''; return; }
+    var year = (typeof activeSchoolYear === 'function') ? activeSchoolYear().label : ACTIVE_SESSION_YEAR;
+    if (_volTabState.html && _volTabState.year === year) {
+      container.innerHTML = _volTabState.html;
+      wireOrgRowToggles(container);
+      return;
+    }
+    if (_volTabState.loading) return;
+    _volTabState.loading = true;
+    container.innerHTML = '<p class="ws-empty">Loading volunteer roles\u2026</p>';
+    function finish(y, roles, holders, note) {
+      _volTabState.loading = false;
+      _volTabState.year = year;
+      _volTabState.html = '<h3>Volunteer Roles &mdash; ' + escapeHtml(y) + '</h3>' + buildOrgTreeHtml(y, roles, holders, note);
+      container.innerHTML = _volTabState.html;
+      wireOrgRowToggles(container);
+    }
+    Promise.all([
+      fetch('/api/cleaning?action=roles&includeArchived=0', { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(year), { headers: rwAuthHeaders() })
+    ]).then(function (responses) {
+      return Promise.all(responses.map(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      }));
+    }).then(function (results) {
+      if (!results[0].ok) {
+        _volTabState.loading = false;
+        container.innerHTML = '<p class="ws-empty">' + escapeHtml((results[0].data && results[0].data.error) || 'Could not load roles.') + '</p>';
+        return;
       }
-      html += '<ul>';
-      committee.roles.forEach(function (r) {
-        var personText = r.person ? highlightIfMe(r.person, myNames) : '<em>Open</em>';
-        var roleKey = getRoleKeyForDuty(r.title);
-        var roleTitle = r.title;
-        if (roleKey && getRoleByKey(roleKey)) {
-          roleTitle = '<a class="rd-role-link" data-role-key="' + roleKey + '" href="#" onclick="return false;">' + r.title + '</a>';
+      var roles = Array.isArray(results[0].data.roles) ? results[0].data.roles : [];
+      var holders = (results[1].ok && Array.isArray(results[1].data.holders)) ? results[1].data.holders : [];
+      // Early-summer gap: fall back once to the prior year's holders so
+      // the tab shows the real slate instead of everything Open.
+      if (holders.length === 0) {
+        var m = /^(\d{4})-(\d{4})$/.exec(year);
+        if (m) {
+          var prev = (parseInt(m[1], 10) - 1) + '-' + (parseInt(m[2], 10) - 1);
+          fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(prev), { headers: rwAuthHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (prevRes) {
+              var prevHolders = (prevRes.ok && Array.isArray(prevRes.data.holders)) ? prevRes.data.holders : [];
+              if (prevHolders.length > 0) finish(prev, roles, prevHolders, 'Assignments for ' + year + ' haven\u2019t been entered yet \u2014 showing ' + prev + '.');
+              else finish(year, roles, [], null);
+            })
+            .catch(function () { finish(year, roles, [], null); });
+          return;
         }
-        html += '<li><strong>' + roleTitle + ':</strong> ' + personText + '</li>';
-      });
-      html += '</ul></div>';
-    });
-    html += '</div>';
-
-    container.innerHTML = html;
-    // Wire role description links
-    container.querySelectorAll('.rd-role-link').forEach(function (link) {
-      link.onclick = function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        showRoleDescriptionModal(this.getAttribute('data-role-key'), false);
-      };
+      }
+      finish(year, roles, holders, null);
+    }).catch(function (err) {
+      _volTabState.loading = false;
+      container.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
     });
   }
 
@@ -6255,7 +6267,7 @@
     if (!container) return;
 
     var html = '<h3>Class Ideas Board</h3>';
-    html += '<p style="color:var(--color-text-light);margin-bottom:20px;">Have an idea for a class? Share it in the <a href="https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit?gid=0#gid=0" target="_blank">master spreadsheet</a> or the Google Chat!</p>';
+    html += '<p style="color:var(--color-text-light);margin-bottom:20px;">Have an idea for a class? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
     html += '<div class="ideas-grid">';
 
     var groups = Object.keys(CLASS_IDEAS);
@@ -11782,7 +11794,7 @@
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
     html += '<h3>Class Ideas Board</h3>';
-    html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Share it in the <a href="https://docs.google.com/spreadsheets/d/19hR1Am3yzX9YC4jsJ32we-hPxUQ1IwMduz6xvaszMEA/edit?gid=0#gid=0" target="_blank" style="color:var(--color-primary);">master spreadsheet</a> or Google Chat!</p>';
+    html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
 
     var groups = Object.keys(CLASS_IDEAS);
     groups.forEach(function (group) {
@@ -17389,11 +17401,10 @@
       });
   }
 
-  function renderOrgStructureBody(year, roles, holders, note) {
-    var body = document.getElementById('org-structure-body');
-    if (!body) return;
-    body.innerHTML = buildOrgTreeHtml(year, roles, holders, note);
-    body.querySelectorAll('.org-row-head').forEach(function (btn) {
+  // Tap-to-expand wiring for org-chart role rows — shared by the Org &
+  // Roles modal and the Coordination → Volunteers tab.
+  function wireOrgRowToggles(rootEl) {
+    rootEl.querySelectorAll('.org-row-head').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var detail = btn.parentElement.querySelector('.org-row-detail');
         if (!detail) return;
@@ -17404,6 +17415,13 @@
         btn.classList.toggle('org-row-head-expanded', nowOpen);
       });
     });
+  }
+
+  function renderOrgStructureBody(year, roles, holders, note) {
+    var body = document.getElementById('org-structure-body');
+    if (!body) return;
+    body.innerHTML = buildOrgTreeHtml(year, roles, holders, note);
+    wireOrgRowToggles(body);
   }
 
   // Confirm Role Holders modal — purpose-built view that lists the 7
