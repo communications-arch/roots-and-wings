@@ -6248,7 +6248,7 @@
     var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '2025-2026';
     var html = '<h3>Special Events &mdash; ' + escapeHtml(String(seYear).replace('-', '\u2013')) + '</h3>';
     if (seYear !== '2025-2026') {
-      html += '<p style="color:var(--color-text-light);max-width:560px;">The board is lining up this year\u2019s special events now. Dates appear on the <strong>Co-op Calendar</strong> as they\u2019re approved, and volunteer roles for each event show up here and in My Responsibilities once assigned.</p>';
+      html += '<p style="color:var(--color-text-light);">The board is lining up this year\u2019s special events now. Dates appear on the <strong>Co-op Calendar</strong> as they\u2019re approved, and volunteer roles for each event show up here and in My Responsibilities once assigned.</p>';
       container.innerHTML = html;
       return;
     }
