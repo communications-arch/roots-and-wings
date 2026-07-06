@@ -4381,8 +4381,14 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
     'Public registration for next year (2 weeks before Field Day)', 'Membership Director', '📝');
   push('fieldday', 'Field Day (last day)', fd, '',
     'Final day of the school year', '', '🎉');
-  push('roleconfirm', 'Confirm role holders', calAddDays(fd, 1), '',
-    'Comms Director confirms board role assignments for the new year', 'Communications Director', '🧭');
+  // Board terms are TWO years (2026-07-06): the confirm event lands only
+  // after Field Day of cycle years — 2026, 2028, 2030… The Comms Director
+  // updates board roles in Google Admin AND the portal that summer.
+  if (fd && (parseInt(String(fd).slice(0, 4), 10) - 2026) % 2 === 0) {
+    push('roleconfirm', 'Confirm board roles — new 2-year term', calAddDays(fd, 1), '',
+      'Board terms run two years. Comms Director updates board roles in Google Admin (groups + mailbox access) and in the portal’s Roles Assignments, then marks the term confirmed.',
+      'Communications Director', '🧭');
+  }
   push('participationreset', 'Participation resets (' + nextYr + ')', calAddDays(fd, 1), '',
     'Volunteer participation counts reset to zero for ' + nextYr + ' — the new school year begins the day after Field Day', '', '🔄');
   const ends = calSessionsForYear(sessions, schoolYear).map(s => s.end_date).sort();

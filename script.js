@@ -17032,11 +17032,8 @@
     toolbar += '</select>';
     toolbar += '</label>';
     toolbar += '<label class="roles-mgr-toggle"><input type="checkbox" id="roles-show-archived"' + (_rolesMgrState.showArchived ? ' checked' : '') + ' /> Show archived</label>';
-    // Mark/un-mark current year as confirmed. Only the Communications
-    // Director can change it (server enforces); the button stays in the
-    // DOM for everyone so they can see the current state but click is
-    // a no-op for non-Comms.
-    toolbar += '<button id="roles-confirm-btn" class="btn btn-outline-dark btn-sm" hidden></button>';
+    // (2026-07-06) No per-year "Mark as confirmed" button here — the
+    // biennial board-roles check lives in the Comms To Do + modal.
     toolbar += '</div>';
     var viewPills = '<div class="board-cal-views" role="group" aria-label="Assignments view">'
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="roles">Board &amp; Committees</button>'
@@ -17055,7 +17052,6 @@
     document.getElementById('roles-school-year').addEventListener('change', function () {
       _rolesMgrState.schoolYear = this.value;
       loadRolesManagerTree();
-      loadRolesConfirmState();
       loadRolesMgrSpecialEvents();
     });
     body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
@@ -17065,7 +17061,6 @@
     });
     rolesMgrSetView(_rolesMgrState.view);
     loadRolesManagerTree();
-    loadRolesConfirmState();
     loadRolesMgrSpecialEvents();
   }
 
@@ -17179,65 +17174,6 @@
           });
       });
     });
-  }
-
-  // Toggle button labels + click handler reflect the current
-  // confirmation state for the picker's school year. Re-runs on year
-  // change. Comms can tick "Mark as confirmed" to clear the To Do nag,
-  // and untick it to put the nag back. Non-Comms sees the state read-only.
-  function loadRolesConfirmState() {
-    var btn = document.getElementById('roles-confirm-btn');
-    if (!btn) return;
-    var year = _rolesMgrState.schoolYear;
-    btn.hidden = true;
-    fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) {
-        if (!data || !Array.isArray(data.confirmations)) return;
-        var isConfirmed = data.confirmations.some(function (c) { return c.school_year === year; });
-        btn.dataset.confirmed = isConfirmed ? '1' : '0';
-        btn.dataset.year = year;
-        btn.textContent = isConfirmed
-          ? '✓ ' + year + ' confirmed (click to undo)'
-          : 'Mark ' + year + ' as confirmed';
-        btn.hidden = false;
-      })
-      .catch(function () { /* silent */ });
-
-    if (!btn._rwWired) {
-      btn._rwWired = true;
-      btn.addEventListener('click', function () {
-        var yr = btn.dataset.year || _rolesMgrState.schoolYear;
-        var confirmed = btn.dataset.confirmed === '1';
-        btn.disabled = true;
-        var req = confirmed
-          ? fetch('/api/cleaning?action=role-confirm&school_year=' + encodeURIComponent(yr), {
-              method: 'DELETE',
-              headers: rwAuthHeaders()
-            })
-          : fetch('/api/cleaning?action=role-confirm', {
-              method: 'POST',
-              headers: rwAuthHeaders(true),
-              body: JSON.stringify({ school_year: yr })
-            });
-        req
-          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-          .then(function (r) {
-            btn.disabled = false;
-            if (!r.ok) {
-              alert(r.data && r.data.error ? r.data.error : 'Could not update confirmation.');
-              return;
-            }
-            loadRolesConfirmState();
-            // Re-fire the To Do nag so it reflects the new state right away.
-            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
-          })
-          .catch(function (err) {
-            btn.disabled = false;
-            alert('Network error: ' + (err.message || 'unknown'));
-          });
-      });
-    }
   }
 
   // ──────────────────────────────────────────────
@@ -17481,8 +17417,8 @@
       ? activeSchoolYear().label
       : ACTIVE_SESSION_YEAR;
     var body = renderReportModal({
-      title: 'Confirm Role Holders — ' + activeYear,
-      subtitle: 'Review the board roles for the new school year. Once they look right, mark the year as confirmed and the reminder will clear.',
+      title: 'Confirm Board Roles — ' + activeYear + ' (2-year term)',
+      subtitle: 'Board terms run two years. Update the board roles in Google Admin (group members + mailbox access) AND here in the portal (Roles Assignments), then mark the term confirmed and the reminder will clear until the next cycle.',
       meta: '',
       icons: [],
       bodyId: 'confirm-roles-body',
@@ -19580,6 +19516,17 @@
       return;
     }
 
+    // Board terms are TWO years (2026-07-06, Erin): the confirm nag fires
+    // only after Field Day of a cycle year — 2026, 2028, 2030… — since the
+    // Comms Director then has to update board roles in Google Admin AND
+    // the portal. Off-cycle summers stay quiet.
+    var cycleYear = parseInt(fieldDayStr.slice(0, 4), 10);
+    if ((cycleYear - 2026) % 2 !== 0) {
+      item.hidden = true;
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      return;
+    }
+
     // Step 2: compare role-holder counts for previous vs active year.
     // Active year per the April-1 pivot — that's what the Roles
     // Assignments modal opens to by default, so the count we compare
@@ -19614,7 +19561,7 @@
           if (diff < 1) diff = 1;
           _roleHolderTodoState.visible = true;
           _roleHolderTodoState.count = diff;
-          _roleHolderTodoState.label = 'Confirm ' + activeYear + ' role holders';
+          _roleHolderTodoState.label = 'Confirm board roles — new 2-year term';
           if (pill)  pill.textContent  = String(diff);
           if (label) label.textContent = _roleHolderTodoState.label;
           item.hidden = false;
