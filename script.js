@@ -4473,6 +4473,17 @@
       var isCoord = ev.coordinator && firstNames.some(function (fn) {
         return ev.coordinator.indexOf(fn) !== -1;
       });
+      // Only UPCOMING events are responsibilities — the master-sheet tab
+      // still lists last season's events (2026-07-06, Erin saw "Field Day
+      // Coordinator · May 20, 2026" on prod in July). A parseable date in
+      // the past (with a 1-day grace so the event shows on its own day)
+      // skips the duty; unparseable dates stay visible as the safe
+      // default. This block retires with the Master sheet — the DB's
+      // special_event_people is the go-forward home for event helpers.
+      if (isCoord && ev.date) {
+        var evTs = Date.parse(ev.date);
+        if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
+      }
       if (isCoord) {
         var statusClass = ev.status === 'Complete' ? 'mf-status-done' : ev.status === 'Needs Volunteers' ? 'mf-status-open' : 'mf-status-upcoming';
         duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>', popup: {type: 'event', name: ev.name}});
