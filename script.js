@@ -4563,7 +4563,7 @@
     if (hasCleaning) blockOrder.push('Cleaning');
     blockOrder.push('annual');
 
-    var blockLabels = { AM: 'AM (10:00\u201312:00)', PM1: 'PM Hour 1 (1:00\u20131:55)', PM2: 'PM Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning', annual: 'Annual Roles' };
+    var blockLabels = { AM: 'Morning (10:00\u201312:00)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning', annual: 'Annual Roles' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
