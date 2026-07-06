@@ -454,6 +454,12 @@
         emails.forEach(function (em) {
           if (!em) return;
           var emLc = String(em).toLowerCase();
+          // Workspace logins only (2026-07-06, the REAL Vejohnson fix):
+          // View-As is rejected server-side for any other domain, so a
+          // picker entry for a personal address (e.g. a registration-born
+          // profile keyed to a yahoo.com email, pre-onboarding) is dead
+          // weight — and its derived label reads as a phantom person.
+          if (emLc.indexOf('@rootsandwingsindy.com') === -1) return;
           // Prefer email-keyed lookup against fam.people — the person
           // row's first_name + last_name are authoritative. Falls back
           // to the email-prefix derivation for sheet-only families that
