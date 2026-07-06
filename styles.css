@@ -13036,6 +13036,17 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-text-light);
 }
 
+/* Roles Assignments in org-chart columns (2026-07-06): the same
+   board-member column layout as the Org & Roles chart / Volunteers tab —
+   Roles Assignments is the editing lens on one shared structure. */
+.roles-mgr-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+}
+.roles-mgr-cols .roles-branch { margin: 0; }
 .roles-branch {
   margin: 14px 0 4px;
   border: 1px solid var(--color-border);

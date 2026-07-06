@@ -440,8 +440,10 @@ async function reviewerScope(email) {
   if (isSuperUser(email)) return { all: true };
   if (await canEditAsRole(email, 'Vice President')) return { all: true };
   if (await canEditAsRole(email, 'Afternoon Class Liaison')) return { all: true };
-  // Role titled "<Group> Class Liaison" (singular or plural group word)
-  // scopes the holder to that age group's morning slots.
+  // Role titled "<Group> Morning Class Liaison" (or "<Group> Class
+  // Liaison"; singular or plural group word) scopes the holder to that
+  // age group's morning slots. The VP assigns these via Roles
+  // Assignments; the liaison then builds that group's classes.
   try {
     const sql = getSql();
     const rows = await sql`
@@ -455,7 +457,7 @@ async function reviewerScope(email) {
     `;
     const groups = [];
     rows.forEach(r => {
-      const prefix = String(r.title || '').toLowerCase().replace(/\s*class liaison\s*$/, '').trim();
+      const prefix = String(r.title || '').toLowerCase().replace(/\s*(morning\s+)?class liaison\s*$/, '').trim();
       LIAISON_GROUPS.forEach(g => {
         if ((prefix === g || prefix + 's' === g || prefix === g + 's') && groups.indexOf(g) === -1) groups.push(g);
       });

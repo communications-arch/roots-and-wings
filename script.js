@@ -7190,11 +7190,13 @@
     // getWorkspaceRoles, and still render zero widgets — the silent
     // failure mode that hid Merchandise Manager from Lime Narwhal.
     function widgetListFor(role) {
-      // Age-group class liaisons ("Pigeons Class Liaison", …) build their
-      // group's morning schedule — give them the Class Scheduling card
-      // (the builder itself scopes them to their group). Exact-title roles
-      // like Afternoon Class Liaison keep their explicit defaults below.
-      if (!WORKSPACE_DEFAULTS[role] && /class liaison$/i.test(role)) {
+      // Age-group liaisons ("Pigeons Morning Class Liaison", …) build
+      // their group's morning schedule — give them the Class Scheduling
+      // card (the builder itself scopes them to their group). Matches
+      // group-named titles only: the legacy generic "Morning Class
+      // Liaison" role and exact titles like Afternoon Class Liaison
+      // (explicit defaults below) stay out.
+      if (!WORKSPACE_DEFAULTS[role] && /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+(morning\s+)?class liaison$/i.test(role)) {
         return ['pm-scheduling'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
@@ -18727,7 +18729,13 @@
       var classes = 'roles-row roles-row-depth-' + depth + (archived ? ' roles-row-archived' : '');
       var h2 = '<div class="' + classes + '" data-role-id="' + r.id + '">';
       h2 += '<div class="roles-row-main">';
-      h2 += '<button type="button" class="roles-row-title" data-role-id="' + r.id + '">' + escapeHtml(r.title) + '</button>';
+      // Board rows head their column with the same emoji the Org & Roles
+      // chart uses — one visual language across both surfaces.
+      var titleInner = escapeHtml(r.title);
+      if (depth === 0 && r.category === 'board') {
+        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + (r.icon_emoji || '\u{1F333}') + '</span> ' + titleInner;
+      }
+      h2 += '<button type="button" class="roles-row-title" data-role-id="' + r.id + '">' + titleInner + '</button>';
       h2 += '<div class="roles-row-pills">';
       if (r.job_length) h2 += '<span class="roles-pill roles-pill-term">' + escapeHtml(r.job_length) + '</span>';
       h2 += '<span class="roles-pill roles-pill-cat roles-pill-cat-' + r.category + '">' + escapeHtml(r.category.replace(/_/g, ' ')) + '</span>';
@@ -18827,7 +18835,10 @@
       });
       h += '</section>';
     }
-    body.innerHTML = h;
+    // Same board-member-column layout as the Org & Roles chart / the
+    // Coordination Volunteers tab (2026-07-06, Erin: make the views
+    // consistent) — this is the editing lens on the identical structure.
+    body.innerHTML = '<div class="roles-mgr-cols">' + h + '</div>';
 
     function findRoleById(id) {
       return _rolesMgrState.roles.find(function (r) { return r.id === id; });

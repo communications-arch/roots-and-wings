@@ -1336,3 +1336,30 @@ CREATE INDEX IF NOT EXISTS special_event_people_idx ON special_event_people (eve
 ALTER TABLE cleaning_assignments ADD COLUMN IF NOT EXISTS school_year TEXT;
 UPDATE cleaning_assignments SET school_year = '2025-2026' WHERE school_year IS NULL;
 CREATE INDEX IF NOT EXISTS cleaning_assignments_year_idx ON cleaning_assignments (school_year);
+
+
+-- 2026-07-06: seed the nine age-group Morning Class Liaison roles under
+-- the Vice President (Erin: the VP selects the Morning Class Liaison for
+-- each age group; that liaison then builds the group's morning classes).
+-- Parent-chain permissions give the VP assign rights automatically, and
+-- the "<Group> Morning Class Liaison" title scopes each holder's Class
+-- Builder to their own group. Idempotent by role_key.
+INSERT INTO roles (role_key, title, category, parent_role_id, display_order, term_length, overview, icon_emoji, updated_by)
+SELECT
+  v.key, v.title, 'committee_role',
+  (SELECT id FROM roles WHERE title = 'Vice President' AND category = 'board' LIMIT 1),
+  v.ord, '1 year',
+  'Builds the ' || v.grp || ' morning class schedule — recruits teachers for each session and places their classes in the Class Builder (Morning lens).',
+  E'🌅', 'migration'
+FROM (VALUES
+  ('greenhouse_morning_class_liaison', 'Greenhouse Morning Class Liaison', 'Greenhouse', 300),
+  ('saplings_morning_class_liaison', 'Saplings Morning Class Liaison', 'Saplings', 301),
+  ('sassafras_morning_class_liaison', 'Sassafras Morning Class Liaison', 'Sassafras', 302),
+  ('oaks_morning_class_liaison', 'Oaks Morning Class Liaison', 'Oaks', 303),
+  ('maples_morning_class_liaison', 'Maples Morning Class Liaison', 'Maples', 304),
+  ('birch_morning_class_liaison', 'Birch Morning Class Liaison', 'Birch', 305),
+  ('willows_morning_class_liaison', 'Willows Morning Class Liaison', 'Willows', 306),
+  ('cedars_morning_class_liaison', 'Cedars Morning Class Liaison', 'Cedars', 307),
+  ('pigeons_morning_class_liaison', 'Pigeons Morning Class Liaison', 'Pigeons', 308)
+) AS v(key, title, grp, ord)
+WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
