@@ -4316,7 +4316,10 @@
       });
       if (dup) return;
       if (s.class_period === 'AM') {
-        duties.push({ block: 'AM', icon: 'teach', text: s.class_name + ' — Leading', detail: 'Morning' + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
+        // AM1/AM2 = a 1-hour morning slot; plain 'AM' = both hours.
+        var amWhen = s.scheduled_hour === 'AM1' ? '10:00–10:55'
+          : s.scheduled_hour === 'AM2' ? '11:00–11:55' : 'Morning';
+        duties.push({ block: 'AM', icon: 'teach', text: s.class_name + ' — Leading', detail: amWhen + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
@@ -20367,15 +20370,21 @@
 
     function renderBlock(hour, label, list) {
       var count = list.length;
-      // Morning group slots hold exactly ONE class: 🟢 filled / 🔴 open.
-      // PM hour blocks keep the 3+ 🟢 / 1+ 🟡 / empty 🔴 capacity read.
+      // Morning group slots: the morning is covered by one 2-hour class OR
+      // two 1-hour classes — 🟢 fully covered / 🟡 one hour still open /
+      // 🔴 open. PM hour blocks keep the 3+ 🟢 / 1+ 🟡 / empty 🔴 read.
       var isAmBlock = String(hour).indexOf('AM') === 0;
+      var amBoth = isAmBlock && list.some(function (c) { return (c.scheduled_hour || 'AM') === 'AM'; });
+      var am1 = isAmBlock && list.some(function (c) { return c.scheduled_hour === 'AM1'; });
+      var am2 = isAmBlock && list.some(function (c) { return c.scheduled_hour === 'AM2'; });
+      var amFull = amBoth || (am1 && am2);
       var marker = isAmBlock
-        ? (count >= 1 ? '🟢' : '🔴')
+        ? (amFull ? '🟢' : count >= 1 ? '🟡' : '🔴')
         : (count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴');
+      var amState = amFull ? 'filled' : count >= 1 ? (am1 ? 'hour 2 open' : 'hour 1 open') : 'open';
       var s = '<div class="sb-cell' + (isAmBlock ? ' sb-cell-am' : '') + '" data-hour="' + hour + '">';
-      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? (count >= 1 ? 'filled' : 'open') : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span></div>';
-      if (!isApproved && !(isAmBlock && count >= 1)) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? amState : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span></div>';
+      if (!isApproved && !(isAmBlock && amFull)) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       list.forEach(function (c) {
         // Scheduled age range can be a VP override (scheduled_age_range);
         // fall back to the teacher's submitted age_groups when not set.
@@ -20390,6 +20399,7 @@
         }).join('');
         if (!prefSessChips) prefSessChips = '<span class="sb-sess-chip sb-sess-none">any</span>';
         var hourPrefShort = (c.hour_preference || []).map(function (h) {
+          if (c.class_period === 'AM') return h === 'first' ? 'Hr 1' : h === 'last' ? 'Hr 2' : 'Both';
           if (h === 'first') return 'PM1';
           if (h === 'last') return 'PM2';
           if (h === 'flexible') return 'Either';
@@ -20398,7 +20408,11 @@
           return h;
         }).join(', ');
         function hourMatches() {
-          if (c.class_period === 'AM') return true; // no hour concept in the morning
+          if (c.class_period === 'AM') {
+            var ap = (c.hour_preference || [])[0] || 'both';
+            var ah = c.scheduled_hour || 'AM';
+            return ap === 'both' ? ah === 'AM' : ap === 'first' ? ah === 'AM1' : ah === 'AM2';
+          }
           var prefs = c.hour_preference || [];
           if (prefs.indexOf('flexible') !== -1) return true;
           if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
@@ -20425,7 +20439,11 @@
           ? escClsHtml(c.scheduled_age_range)
           : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
         s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
-        if (c.scheduled_hour === 'both') s += '<div class="sb-class-top"><span class="sb-both-badge">Both</span></div>';
+        var topBadge = c.scheduled_hour === 'both' ? 'Both'
+          : c.scheduled_hour === 'AM1' ? 'Hour 1 · 10:00'
+          : c.scheduled_hour === 'AM2' ? 'Hour 2 · 11:00'
+          : (c.class_period === 'AM' ? 'Both hours' : '');
+        if (topBadge) s += '<div class="sb-class-top"><span class="sb-both-badge">' + topBadge + '</span></div>';
         if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
@@ -20450,6 +20468,10 @@
       html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
       MORNING_GROUP_ORDER.forEach(function (g) {
         var list = classesInSession.filter(function (c) { return sbAmGroupOf(c) === g.name; });
+        // Hour 1 (or both-hours) above Hour 2 so the tiles read in day order.
+        list.sort(function (a, b) {
+          return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
+        });
         html += renderBlock('AM:' + g.name, g.emoji + ' ' + g.name + ' · ' + g.range, list);
       });
       html += '</div>';
@@ -20717,10 +20739,12 @@
     html += '<div><strong>Teacher:</strong> ' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (s.submitted_by_email && s.submitted_by_name ? ' <span class="sb-subdetail-dim">(' + escClsHtml(s.submitted_by_email) + ')</span>' : '') + '</div>';
     if (s.co_teachers) html += '<div><strong>Co-leader:</strong> ' + escClsHtml(s.co_teachers) + '</div>';
     if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
+    var amPref0 = (s.hour_preference || [])[0];
+    var amPrefWord = amPref0 === 'first' ? '1st hour (10:00–10:55)' : amPref0 === 'last' ? '2nd hour (11:00–11:55)' : 'Both hours (10:00–12:00)';
     html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))
-      + (isAmSub ? '' : ' · <strong>Hour:</strong> ' + escClsHtml(pmrepFormatHourPrefs(s.hour_preference))) + '</div>';
+      + ' · <strong>Hour:</strong> ' + escClsHtml(isAmSub ? amPrefWord : pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
     if (!isAmSub && s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
-    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(s.scheduled_hour) : '') + '</div>';
+    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(isAmSub ? sbAmHourLabel(s.scheduled_hour) : s.scheduled_hour) : '') + '</div>';
     html += '</div>';
     if (s.description) {
       html += '<h4 class="sb-pick-section-title" style="margin-top:0.75rem;">Description</h4>';
@@ -20841,16 +20865,33 @@
     return v ? v.charAt(0).toUpperCase() + v.slice(1) : '';
   }
 
-  // One morning class per age group per session — the class already in
-  // this group's slot (scheduled or drafted), if any.
-  function sbAmSlotOccupant(group, sess, exceptId) {
-    return scheduleBuilderState.submissions.filter(function (s) {
+  // Placement hour from the teacher's submitted preference:
+  // first → AM1 (10:00–10:55), last → AM2 (11:00–11:55), both/blank → AM.
+  function sbAmHourFor(sub) {
+    var p = ((sub && sub.hour_preference) || [])[0];
+    return p === 'first' ? 'AM1' : p === 'last' ? 'AM2' : 'AM';
+  }
+
+  function sbAmHourLabel(h) {
+    return h === 'AM1' ? 'Hour 1' : h === 'AM2' ? 'Hour 2' : 'Both hours';
+  }
+
+  // A group's morning holds ONE both-hours class OR one Hour 1 + one Hour 2.
+  // Returns the already-placed class that blocks putting `hourSpec`
+  // ('AM' | 'AM1' | 'AM2') into this group's session, or null when it fits.
+  function sbAmSlotConflict(group, sess, hourSpec, exceptId) {
+    var existing = scheduleBuilderState.submissions.filter(function (s) {
       return s.class_period === 'AM'
         && (s.status === 'scheduled' || s.status === 'drafted')
         && s.scheduled_session === sess
         && s.id !== exceptId
         && sbAmGroupOf(s) === group;
-    })[0] || null;
+    });
+    for (var i = 0; i < existing.length; i++) {
+      var h = existing[i].scheduled_hour || 'AM';
+      if (hourSpec === 'AM' || h === 'AM' || h === hourSpec) return existing[i];
+    }
+    return null;
   }
 
   // Drop a submission into a PM block → schedule it for the active session.
@@ -20867,18 +20908,22 @@
     }
     // Morning drops route to the submission's OWN group slot no matter
     // which morning cell caught the drop (each class targets exactly one
-    // group), and the slot must be free — one class per group per session.
+    // group), landing on the hour the teacher submitted (1st/2nd/both) —
+    // and that hour must be free in the group's morning.
     var isAmDrop = String(hour).indexOf('AM') === 0;
+    var scheduledHour;
     if (isAmDrop) {
+      scheduledHour = sbAmHourFor(sub);
       var amGroup = sbAmGroupOf(sub);
-      var occupant = sbAmSlotOccupant(amGroup, scheduleBuilderState.session, sub.id);
-      if (occupant) {
-        alert('The ' + amGroup + ' slot for Session ' + scheduleBuilderState.session + ' already has “' + occupant.class_name + '”.\nDrag that one back to the inbox first if you want to swap.');
+      var conflict = sbAmSlotConflict(amGroup, scheduleBuilderState.session, scheduledHour, sub.id);
+      if (conflict) {
+        alert('The ' + amGroup + ' morning for Session ' + scheduleBuilderState.session + ' already has “' + conflict.class_name + '” (' + sbAmHourLabel(conflict.scheduled_hour || 'AM') + '), which blocks placing this class as ' + sbAmHourLabel(scheduledHour) + '.\nDrag that one back to the inbox first if you want to swap, or change its hour in the class editor.');
         return;
       }
+    } else {
+      scheduledHour = hour;
+      if ((sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
     }
-    var scheduledHour = isAmDrop ? 'AM' : hour;
-    if (!isAmDrop && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     patchReviewAction(subId, {
       status: 'scheduled',
@@ -21073,15 +21118,15 @@
         // submission's hour preference requires it. Morning picks route to
         // the class's OWN group slot, which must be free (one per session).
         var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+        var scheduledHour = isAmPick ? sbAmHourFor(sub) : hour;
         if (isAmPick && sub) {
           var grp = sbAmGroupOf(sub);
-          var occ = sbAmSlotOccupant(grp, scheduleBuilderState.session, subId);
+          var occ = sbAmSlotConflict(grp, scheduleBuilderState.session, scheduledHour, subId);
           if (occ) {
-            alert('The ' + grp + ' slot for Session ' + scheduleBuilderState.session + ' already has “' + occ.class_name + '”.\nSend that one back to the inbox first if you want to swap.');
+            alert('The ' + grp + ' morning for Session ' + scheduleBuilderState.session + ' already has “' + occ.class_name + '” (' + sbAmHourLabel(occ.scheduled_hour || 'AM') + '), which blocks placing this class as ' + sbAmHourLabel(scheduledHour) + '.\nSend that one back to the inbox first if you want to swap, or change its hour in the class editor.');
             return;
           }
         }
-        var scheduledHour = isAmPick ? 'AM' : hour;
         if (!isAmPick && sub && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
         btn.disabled = true; btn.textContent = 'Assigning…';
         patchReviewAction(subId, {
@@ -21164,8 +21209,14 @@
     // Morning classes have no hour or room to schedule (rooms are assigned
     // for the year) — those controls only render for afternoon rows.
     var isAmSub = sub.class_period === 'AM';
-    var hourOptions = ['PM1', 'PM2', 'both'].map(function (h) {
-      return '<option value="' + h + '"' + (sub.scheduled_hour === h ? ' selected' : '') + '>' + h + '</option>';
+    // Morning placements pick Both / Hour 1 / Hour 2 (a group's morning can
+    // be one 2-hour class or two 1-hour classes); afternoon keeps PM1/PM2/both.
+    var hourChoices = isAmSub
+      ? [['AM', 'Both hours (10:00–12:00)'], ['AM1', 'Hour 1 (10:00–10:55)'], ['AM2', 'Hour 2 (11:00–11:55)']]
+      : [['PM1', 'PM1'], ['PM2', 'PM2'], ['both', 'both']];
+    var curHour = sub.scheduled_hour || (isAmSub ? 'AM' : '');
+    var hourOptions = hourChoices.map(function (h) {
+      return '<option value="' + h[0] + '"' + (curHour === h[0] ? ' selected' : '') + '>' + h[1] + '</option>';
     }).join('');
     var sessOptions = [1, 2, 3, 4, 5].map(function (s) {
       return '<option value="' + s + '"' + (sub.scheduled_session === s ? ' selected' : '') + '>Session ' + s + '</option>';
@@ -21201,7 +21252,7 @@
     var disAttr = locked ? ' disabled' : '';
     html += '<div class="sb-sched-block-title">Scheduled</div>';
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbEditSess"' + disAttr + '>' + sessOptions + '</select></div>';
-    if (!isAmSub) html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
+    html += '<div class="cls-field"><label class="cls-label">Hour</label><select class="cl-input" id="sbEditHour"' + disAttr + '>' + hourOptions + '</select></div>';
     var sbAgeCbs = AGE_GROUP_VALUES.map(function (v) {
       return '<label class="cls-cb-label"><input type="checkbox" class="sbEditAgeCb" value="' + v + '"' + (schedAgeSet[v] ? ' checked' : '') + disAttr + '> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
     }).join('');
@@ -21278,7 +21329,7 @@
       var roomEl = document.getElementById('sbEditRoom');
       return {
         scheduled_session: parseInt(document.getElementById('sbEditSess').value, 10),
-        scheduled_hour: isAmSub ? 'AM' : (hourEl ? hourEl.value : sub.scheduled_hour),
+        scheduled_hour: hourEl ? hourEl.value : (sub.scheduled_hour || (isAmSub ? 'AM' : null)),
         scheduled_age_range: agesOut,
         scheduled_room: roomEl ? roomEl.value.trim() : (sub.scheduled_room || ''),
         reviewer_notes: document.getElementById('sbEditNotes').value,
@@ -21289,6 +21340,16 @@
       var errEl = document.getElementById('sbEditError');
       errEl.style.display = 'none';
       var payload = Object.assign({}, currentForm(), overrides);
+      // Morning saves can't land on an hour another class already covers in
+      // this group's session (one both-hours class OR one Hour 1 + one Hour 2).
+      if (isAmSub && payload.status === 'scheduled' && payload.scheduled_session) {
+        var amConflict = sbAmSlotConflict(sbAmGroupOf(sub), payload.scheduled_session, payload.scheduled_hour || 'AM', subId);
+        if (amConflict) {
+          errEl.textContent = 'The ' + sbAmGroupOf(sub) + ' morning for Session ' + payload.scheduled_session + ' already has “' + amConflict.class_name + '” (' + sbAmHourLabel(amConflict.scheduled_hour || 'AM') + '). Unschedule it or change its hour first.';
+          errEl.style.display = '';
+          return;
+        }
+      }
       patchReviewAction(subId, payload).then(function () {
         close();
         loadScheduleBuilder();
