@@ -2116,9 +2116,28 @@
       if (today >= span.minStart && today <= span.maxEnd) { pick = years[i]; break; }
     }
     if (!pick) {
+      // Between years. The old year owns the gap through its Field Day
+      // (Wed after the last session); after that, flip to the UPCOMING
+      // year when one is seeded (2026-07-06, Erin: over the summer the
+      // portal should default to the next upcoming session). Only when
+      // no next year exists yet do we hold the ended year for the
+      // summer-break empty states.
+      var prevYr = null;
       for (var j = years.length - 1; j >= 0; j--) {
-        if (today > yearSpan(years[j]).maxEnd) { pick = years[j]; break; }
+        if (today > yearSpan(years[j]).maxEnd) { prevYr = years[j]; break; }
       }
+      var pastFieldDay = false;
+      if (prevYr) {
+        var fdDt = new Date(yearSpan(prevYr).maxEnd + 'T00:00:00');
+        var fdDays = (3 - fdDt.getDay() + 7) % 7;
+        fdDt.setDate(fdDt.getDate() + (fdDays === 0 ? 7 : fdDays));
+        pastFieldDay = today > fdDt.toISOString().slice(0, 10);
+      }
+      var nextYr = null;
+      for (var n = 0; n < years.length; n++) {
+        if (yearSpan(years[n]).minStart > today) { nextYr = years[n]; break; }
+      }
+      pick = (pastFieldDay && nextYr) ? nextYr : (prevYr || nextYr);
     }
     if (!pick) pick = years[0];
     ACTIVE_SESSION_YEAR = pick;
@@ -6213,7 +6232,18 @@
       });
     }
 
-    var html = '<h3>Special Events &mdash; 2025\u20132026</h3>';
+    // Header follows the active season; the sheet-era SPECIAL_EVENTS rows
+    // are the 2025\u20132026 slate, so once the portal has flipped to a newer
+    // year they'd be stale \u2014 show a friendly pointer instead (the DB
+    // events surface via the Co-op Calendar + Roles Assignments until the
+    // full DB events view lands here).
+    var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '2025-2026';
+    var html = '<h3>Special Events &mdash; ' + escapeHtml(String(seYear).replace('-', '\u2013')) + '</h3>';
+    if (seYear !== '2025-2026') {
+      html += '<p style="color:var(--color-text-light);max-width:560px;">The board is lining up this year\u2019s special events now. Dates appear on the <strong>Co-op Calendar</strong> as they\u2019re approved, and volunteer roles for each event show up here and in My Responsibilities once assigned.</p>';
+      container.innerHTML = html;
+      return;
+    }
     html += '<div class="events-grid">';
 
     SPECIAL_EVENTS.forEach(function (ev) {
