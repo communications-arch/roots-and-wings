@@ -932,7 +932,10 @@ module.exports = async function handler(req, res) {
         `;
         const sub = inserted[0];
         // Fire-and-forget confirmation email (errors logged, not surfaced).
-        await sendSubmissionConfirmation(sub);
+        // Name-only on-behalf rows skip it — it would just email the liaison
+        // about her own entry; a real member still gets their confirmation.
+        const nameOnlyBehalf = !!behalfName && (!behalfEmail || (behalfEmail.split('@')[1] || '') !== ALLOWED_DOMAIN);
+        if (!nameOnlyBehalf) await sendSubmissionConfirmation(sub);
         return res.status(201).json({ submission: serializeSubmission(sub) });
       }
 

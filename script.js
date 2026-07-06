@@ -20506,7 +20506,12 @@
       return String(a.class_name || '').localeCompare(String(b.class_name || ''));
     });
     var paletteHtml = '<div class="sb-palette" id="sbPalette">';
-    paletteHtml += '<div class="sb-palette-title">Available classes (' + palette.length + ')</div>';
+    paletteHtml += '<div class="sb-palette-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
+      + '<span>Available classes (' + palette.length + ')</span>'
+      // Liaisons often recruit teachers in conversation — let them enter a
+      // class here (topic can stay TBD until right before the session).
+      + '<button type="button" class="sc-btn" id="sbNewClassBtn" style="font-size:0.8rem;">+ New Class</button>'
+      + '</div>';
     paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
     if (palette.length === 0) {
       paletteHtml += '<p class="sb-palette-empty">No submissions waiting — they’ll appear here as members submit classes.</p>';
@@ -20654,6 +20659,10 @@
 
     // ✗ Decline on palette cards — in place, no separate report needed.
     // stopPropagation keeps the click from reading as a card tap/drag.
+    var newClassBtn = document.getElementById('sbNewClassBtn');
+    if (newClassBtn) newClassBtn.addEventListener('click', function () {
+      showSbNewClassModal(period);
+    });
     body.querySelectorAll('.sb-palette-decline').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -21023,6 +21032,175 @@
       scheduled_room: '', reviewer_notes: sub.reviewer_notes || ''
     }).then(function () { loadScheduleBuilder(); })
       .catch(function (err) { alert('Could not unschedule: ' + (err.message || 'error')); });
+  }
+
+  // "+ New Class" (2026-07-06): liaisons recruit teachers in conversation
+  // and enter the class here themselves — often with the topic left TBD
+  // until right before the session begins. Creates a submission on the
+  // teacher's behalf (workspace member → filed under them; plain name →
+  // filed under the liaison with the name kept visible) and optionally
+  // places it straight into the session being built.
+  function showSbNewClassModal(period) {
+    if (document.getElementById('sbNewOverlay')) return;
+    var sess = scheduleBuilderState.session;
+    var isAM = period === 'AM';
+
+    var memberOpts = (scheduleBuilderState.members || []).map(function (m) {
+      return '<option value="' + escClsAttr(m.name || '') + '">';
+    }).join('');
+
+    var html = '<div class="sb-overlay" id="sbNewOverlay" style="z-index:10000;">';
+    html += '<div class="sb-panel sb-panel-picker" role="dialog" aria-modal="true">';
+    html += '<button class="detail-close" id="sbNewCloseBtn" aria-label="Close">&times;</button>';
+    html += '<h3 style="margin:0 0 0.25rem;">+ New ' + (isAM ? 'Morning' : 'Afternoon') + ' Class</h3>';
+    html += '<p class="cls-help" style="margin:0 0 1rem;">For classes you’ve arranged directly with a member. Topic can stay “TBD” until closer to the session.</p>';
+
+    html += '<div class="cls-field"><label class="cls-label">Teacher <span class="cls-req">*</span></label>';
+    html += '<input class="cl-input" id="sbNewTeacher" type="text" maxlength="120" list="sbNewTeacherList" placeholder="Start typing a member’s name…">';
+    html += '<datalist id="sbNewTeacherList">' + memberOpts + '</datalist>';
+    html += '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Pick a member from the list, or type any name if they don’t have an account yet.</div></div>';
+
+    html += '<div class="cls-field"><label class="cls-label">Class name</label>';
+    html += '<input class="cl-input" id="sbNewName" type="text" maxlength="200" value="TBD"></div>';
+
+    if (isAM) {
+      html += '<div class="cls-field"><label class="cls-label">Age group <span class="cls-req">*</span></label>';
+      html += '<select class="cl-input" id="sbNewAmGroup"><option value="">— pick the age group —</option>';
+      AGE_GROUP_VALUES.forEach(function (v) {
+        if (v === 'all-ages') return;
+        html += '<option value="' + v + '">' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
+      });
+      html += '</select></div>';
+      html += '<div class="cls-field"><label class="cls-label">Hour</label>';
+      html += '<select class="cl-input" id="sbNewHour">';
+      html += '<option value="AM">Both hours (10:00–12:00)</option>';
+      html += '<option value="AM1">Hour 1 (10:00–10:55)</option>';
+      html += '<option value="AM2">Hour 2 (11:00–11:55)</option>';
+      html += '</select></div>';
+    } else {
+      html += '<div class="cls-field"><label class="cls-label">Age group(s) <span class="cls-req">*</span></label><div class="cls-cb-group">';
+      AGE_GROUP_VALUES.forEach(function (v) {
+        if (v === 'greenhouse') return;
+        html += '<label class="cls-cb-label"><input type="checkbox" class="sbNewPmAge" value="' + v + '"> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
+      });
+      html += '</div></div>';
+      html += '<div class="cls-field"><label class="cls-label">Hour</label>';
+      html += '<select class="cl-input" id="sbNewHour">';
+      html += '<option value="PM1">Hour 1 (1:00–1:55)</option>';
+      html += '<option value="PM2">Hour 2 (2:00–2:55)</option>';
+      html += '<option value="both">Both hours</option>';
+      html += '</select></div>';
+    }
+
+    var sessOpts = [1, 2, 3, 4, 5].map(function (n) {
+      return '<option value="' + n + '"' + (n === sess ? ' selected' : '') + '>Session ' + n + '</option>';
+    }).join('');
+    html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbNewSess">' + sessOpts + '</select></div>';
+    html += '<div class="cls-field"><label class="cls-cb-label"><input type="checkbox" id="sbNewPlace" checked> Place into the schedule now (unchecked = goes to the inbox)</label></div>';
+
+    html += '<div class="cls-field"><label class="cls-label">Description</label>';
+    html += '<textarea class="cl-input" id="sbNewDesc" rows="2" maxlength="3000">TBD</textarea></div>';
+
+    html += '<div class="cls-error" id="sbNewError" style="display:none;"></div>';
+    html += '<div class="cls-actions"><button type="button" class="sc-btn" id="sbNewCancelBtn">Cancel</button>';
+    html += '<button type="button" class="btn btn-primary" id="sbNewSaveBtn" style="padding:8px 16px;font-size:0.9rem;">Add Class</button></div>';
+    html += '</div></div>';
+
+    document.body.insertAdjacentHTML('beforeend', html);
+    var overlay = document.getElementById('sbNewOverlay');
+    function close() { overlay.remove(); }
+    document.getElementById('sbNewCloseBtn').addEventListener('click', close);
+    document.getElementById('sbNewCancelBtn').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    document.getElementById('sbNewSaveBtn').addEventListener('click', function () {
+      var errEl = document.getElementById('sbNewError');
+      errEl.style.display = 'none';
+      var teacher = String(document.getElementById('sbNewTeacher').value || '').trim();
+      if (!teacher) { errEl.textContent = 'Enter the teacher’s name.'; errEl.style.display = ''; return; }
+      var className = String(document.getElementById('sbNewName').value || '').trim() || 'TBD';
+      var desc = String(document.getElementById('sbNewDesc').value || '').trim() || 'TBD';
+      var sessSel = parseInt(document.getElementById('sbNewSess').value, 10);
+      var hourSel = document.getElementById('sbNewHour').value;
+      var placeNow = document.getElementById('sbNewPlace').checked;
+
+      var ageGroups;
+      if (isAM) {
+        var grpEl = document.getElementById('sbNewAmGroup');
+        if (!grpEl.value) { errEl.textContent = 'Pick the age group.'; errEl.style.display = ''; return; }
+        ageGroups = [grpEl.value];
+      } else {
+        ageGroups = [];
+        overlay.querySelectorAll('.sbNewPmAge:checked').forEach(function (cb) { ageGroups.push(cb.value); });
+        if (!ageGroups.length) { errEl.textContent = 'Pick at least one age group.'; errEl.style.display = ''; return; }
+      }
+
+      if (placeNow) {
+        if (sbIsSessionApproved(sessSel, isAM ? 'AM' : 'PM')) {
+          errEl.textContent = 'Session ' + sessSel + '’s ' + (isAM ? 'morning' : 'afternoon') + ' side is approved — reopen it for editing first, or uncheck “Place now”.';
+          errEl.style.display = ''; return;
+        }
+        if (isAM) {
+          var grpName = ageGroups[0].charAt(0).toUpperCase() + ageGroups[0].slice(1);
+          var conflict = sbAmSlotConflict(grpName, sessSel, hourSel, -1);
+          if (conflict) {
+            errEl.textContent = 'The ' + grpName + ' morning for Session ' + sessSel + ' already has “' + conflict.class_name + '” (' + sbAmHourLabel(conflict.scheduled_hour || 'AM') + ').';
+            errEl.style.display = ''; return;
+          }
+        }
+      }
+
+      // Teacher name → member email when it matches; otherwise name-only.
+      var match = (scheduleBuilderState.members || []).filter(function (m) {
+        return String(m.name || '').toLowerCase() === teacher.toLowerCase();
+      })[0];
+      var body = {
+        class_period: isAM ? 'AM' : 'PM',
+        class_name: className,
+        description: desc,
+        session_preferences: [String(sessSel)],
+        // Submitted preference mirrors the chosen placement hour.
+        hour_preference: isAM
+          ? [hourSel === 'AM1' ? 'first' : hourSel === 'AM2' ? 'last' : 'both']
+          : [hourSel === 'PM1' ? 'first' : hourSel === 'PM2' ? 'last' : '2hr-optional'],
+        assistant_count: [1],
+        age_groups: ageGroups,
+        space_request: isAM ? [] : ['any'],
+        max_students: isAM ? 0 : 12
+      };
+      if (match && match.email) body.on_behalf_email = match.email;
+      body.on_behalf_name = teacher;
+
+      var btn = this;
+      btn.disabled = true; btn.textContent = 'Adding…';
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/curriculum?action=class-submission' + notifViewAsSuffix(), {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      }).then(function (res) {
+        if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not add the class.');
+        var created = res.data && res.data.submission;
+        if (!placeNow || !created) return null;
+        return patchReviewAction(created.id, {
+          status: 'scheduled',
+          scheduled_session: sessSel,
+          scheduled_hour: hourSel,
+          scheduled_age_range: prettyAgesClient(ageGroups, '') || '',
+          scheduled_room: '',
+          reviewer_notes: ''
+        });
+      }).then(function () {
+        close();
+        loadScheduleBuilder();
+      }).catch(function (err) {
+        btn.disabled = false; btn.textContent = 'Add Class';
+        errEl.textContent = err.message || 'Could not add the class.';
+        errEl.style.display = '';
+      });
+    });
   }
 
   // Picker modal: lists submissions that match the cell's age section, plus
