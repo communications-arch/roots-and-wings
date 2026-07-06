@@ -5325,15 +5325,43 @@
       : familyName;
   }
 
+  // Published (approved) schedules from the Class Builder DB (2026-07-06):
+  // once the VP approves a session's morning or afternoon side, any member
+  // sees it here — replacing the Master-sheet session data.
+  var publishedSchedule = { loaded: false, loading: false, sessions: {} };
+  function loadPublishedSchedule() {
+    if (publishedSchedule.loading || publishedSchedule.loaded) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    publishedSchedule.loading = true;
+    var yr = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '2026-2027';
+    fetch('/api/curriculum?action=published-schedule&school_year=' + encodeURIComponent(yr), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        publishedSchedule.loading = false;
+        if (!d) return;
+        publishedSchedule.sessions = d.sessions || {};
+        publishedSchedule.loaded = true;
+        renderSessionTab();
+      })
+      .catch(function () { publishedSchedule.loading = false; });
+  }
+
   function renderSessionTab() {
     var container = document.getElementById('sessionTabContent');
     if (!container) return;
+
+    if (!publishedSchedule.loaded) loadPublishedSchedule();
+    var dbSess = publishedSchedule.sessions[String(sessionTabView)] || null;
 
     // Summer-break: no current session to show. The pager + Session 5
     // schedule would be stale, so flip to a friendly empty state and
     // surface the year's annual volunteer slate from the Volunteers tab
     // as a hint of where co-op life continues year-round.
-    if (isSummerBreak) {
+    // Exception: an APPROVED schedule for the upcoming year renders
+    // anyway — parents want to see the fall line-up as soon as it posts.
+    if (isSummerBreak && !dbSess) {
       container.innerHTML =
         '<div class="session-summer-state" style="padding:32px 16px;text-align:center;">' +
         '<h4 class="session-section-title" style="margin-top:0;">Summer break</h4>' +
@@ -5353,30 +5381,89 @@
 
     var html = buildSessionPager(viewSess, 'session');
 
-    // Morning classes table
+    // Morning classes table \u2014 DB-first: an approved morning side renders
+    // from the published Class Builder schedule; otherwise fall back to
+    // the legacy Master-sheet AM_CLASSES rows.
     var myNames = getMyNames();
     html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
-    html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
-    var groups = Object.keys(AM_CLASSES);
-    groups.forEach(function (groupName) {
-      var cls = AM_CLASSES[groupName];
-      var s = cls.sessions[viewSess];
-      if (!s) return;
-      var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
-      var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
-      html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
-      html += '<td><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
-      html += '<td>' + cls.ages + '</td>';
-      html += '<td>' + s.topic + '</td>';
-      html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
-      html += '<td>' + assistantsHtml + '</td>';
-      html += '<td>' + s.room + '</td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table></div>';
+    if (dbSess && dbSess.am) {
+      if (dbSess.am.length === 0) {
+        html += '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
+      } else {
+        var amHourWord = { AM: 'Both', AM1: 'Hour 1', AM2: 'Hour 2' };
+        var groupIdx = {};
+        MORNING_GROUP_ORDER.forEach(function (g, i) { groupIdx[g.name.toLowerCase()] = { i: i, g: g }; });
+        var amRows = dbSess.am.slice().sort(function (a, b) {
+          var ai = (groupIdx[String((a.age_groups || [])[0] || '').toLowerCase()] || { i: 99 }).i;
+          var bi = (groupIdx[String((b.age_groups || [])[0] || '').toLowerCase()] || { i: 99 }).i;
+          if (ai !== bi) return ai - bi;
+          return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
+        });
+        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        amRows.forEach(function (c) {
+          var key = String((c.age_groups || [])[0] || '').toLowerCase();
+          var meta = groupIdx[key];
+          var groupName = meta ? meta.g.name : (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
+          var helperNames = (c.helpers || []).slice();
+          if (c.co_teachers) helperNames.unshift(c.co_teachers);
+          var isMyRow = myNames.fullNames.some(function (fn) {
+            var l = fn.toLowerCase();
+            return l === String(c.teacher || '').trim().toLowerCase()
+              || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
+          });
+          html += '<tr class="' + (isMyRow ? 'coord-my-row' : '') + '">';
+          html += '<td><span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
+          html += '<td>' + escapeHtml(meta ? meta.g.range : (c.scheduled_age_range || '')) + '</td>';
+          html += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
+          html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
+          html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
+          html += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
+          html += '<td>' + escapeHtml(c.scheduled_room || '') + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+    } else if (Object.keys(AM_CLASSES).length > 0) {
+      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      var groups = Object.keys(AM_CLASSES);
+      groups.forEach(function (groupName) {
+        var cls = AM_CLASSES[groupName];
+        var s = cls.sessions[viewSess];
+        if (!s) return;
+        var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
+        var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
+        html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
+        html += '<td><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
+        html += '<td>' + cls.ages + '</td>';
+        html += '<td>' + s.topic + '</td>';
+        html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
+        html += '<td>' + assistantsHtml + '</td>';
+        html += '<td>' + s.room + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
+    }
 
-    // Afternoon electives by hour
-    if (electives.length > 0) {
+    // Afternoon electives by hour \u2014 DB-first when the afternoon side is
+    // approved; sheet-era PM_ELECTIVES otherwise.
+    if (dbSess && dbSess.pm) {
+      if (dbSess.pm.length === 0) {
+        html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon electives posted for this session.</em></p>';
+      } else {
+        var dbH1 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM1' || e.scheduled_hour === 'both'; });
+        var dbH2 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM2'; });
+        html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>';
+        html += '<div class="elective-card-grid">';
+        dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
+        html += '</div>';
+        html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 2: 2:00\u20132:55</h4>';
+        html += '<div class="elective-card-grid">';
+        dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
+        html += '</div>';
+      }
+    } else if (electives.length > 0) {
       var hour1 = electives.filter(function (e) { return e.hour === 1 || e.hour === 'both'; });
       var hour2 = electives.filter(function (e) { return e.hour === 2 || e.hour === 'both'; });
 
@@ -5398,8 +5485,9 @@
     // Wire up pager
     wirePager(container);
 
-    // Wire up elective card clicks
-    container.querySelectorAll('.elective-card').forEach(function (card) {
+    // Wire up elective card clicks (sheet-era cards only — DB cards carry
+    // their full info inline and have no roster to expand yet).
+    container.querySelectorAll('.elective-card[data-elective]').forEach(function (card) {
       card.addEventListener('click', function () {
         showElectiveDetail(this.getAttribute('data-elective'));
       });
@@ -5431,6 +5519,35 @@
     html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
     html += '<div class="elective-card-spots">' + e.students.length + '/' + e.maxCapacity + '</div>';
     html += '</button>';
+    return html;
+  }
+
+  // Published-DB elective card: same look as the sheet-era card, but no
+  // roster/capacity bar yet (sign-ups feature will bring enrollment counts).
+  function buildDbElectiveCard(e, myNames) {
+    var helperNames = (e.helpers || []).slice();
+    if (e.co_teachers) helperNames.unshift(e.co_teachers);
+    var isMyCard = myNames && myNames.fullNames.some(function (fn) {
+      var l = fn.toLowerCase();
+      return l === String(e.teacher || '').trim().toLowerCase()
+        || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
+    });
+    var ages = e.scheduled_age_range || prettyAgesClient(e.age_groups, e.age_groups_other) || '';
+    var html = '<div class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" style="cursor:default;">';
+    html += '<div class="elective-card-header">';
+    html += '<span class="elective-card-name">' + escapeHtml(e.class_name || 'TBD') + '</span>';
+    if (ages) html += '<span class="elective-age-pill">' + escapeHtml(ages) + '</span>';
+    html += '</div>';
+    if (e.scheduled_hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
+    if (e.description && e.description !== 'TBD') html += '<p class="elective-card-desc">' + escapeHtml(e.description) + '</p>';
+    var leaderHtml = highlightIfMe(e.teacher || '', myNames);
+    var assistHtml = helperNames.length ? ' + ' + helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') : '';
+    var metaBits = [];
+    if (e.scheduled_room) metaBits.push(escapeHtml(e.scheduled_room));
+    metaBits.push(leaderHtml + assistHtml);
+    if (e.max_students) metaBits.push('Up to ' + e.max_students + ' kids');
+    html += '<div class="elective-card-meta">' + metaBits.join(' &middot; ') + '</div>';
+    html += '</div>';
     return html;
   }
 

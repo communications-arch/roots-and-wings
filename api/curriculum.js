@@ -735,6 +735,73 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // Published schedule — member-visible (2026-07-06, Erin: once a
+      // session's schedule is approved it should be visible to any member,
+      // replacing the Master-sheet session data in Co-op Coordination).
+      // Returns ONLY approved periods' scheduled classes, stripped of
+      // reviewer internals (no notes, no session/hour preferences), keyed
+      // by session number. An approved-but-empty period publishes as []
+      // so the client can tell "approved, none scheduled" from "not
+      // approved yet" (null).
+      if (action === 'published-schedule') {
+        const year = String(req.query.school_year || '2026-2027').slice(0, 20);
+        const [approvalRows, classRows, helperRows] = await Promise.all([
+          sql`SELECT session_number, approved_at, am_approved_at
+              FROM co_op_sessions WHERE school_year = ${year}`,
+          sql`SELECT id, class_period, class_name, description,
+                     submitted_by_name, submitted_by_email, co_teachers,
+                     age_groups, age_groups_other, max_students,
+                     scheduled_session, scheduled_hour, scheduled_age_range, scheduled_room
+              FROM class_submissions
+              WHERE status = 'scheduled' AND school_year = ${year}
+                AND scheduled_session IS NOT NULL`,
+          sql`SELECT class_submission_id, person_name
+              FROM class_assignment_helpers ORDER BY class_submission_id, sort_order`
+        ]);
+        const helpersBySub = {};
+        helperRows.forEach(h => {
+          (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
+            .push(h.person_name || '');
+        });
+        const approved = {};
+        approvalRows.forEach(r => {
+          approved[r.session_number] = { am: !!r.am_approved_at, pm: !!r.approved_at };
+        });
+        const sessions = {};
+        function bucketFor(n) {
+          return sessions[n] || (sessions[n] = { am: null, pm: null });
+        }
+        classRows.forEach(r => {
+          const ap = approved[r.scheduled_session];
+          const isAM = r.class_period === 'AM';
+          if (!ap || (isAM ? !ap.am : !ap.pm)) return; // period not approved yet
+          const bucket = bucketFor(r.scheduled_session);
+          const list = isAM ? (bucket.am || (bucket.am = [])) : (bucket.pm || (bucket.pm = []));
+          list.push({
+            id: r.id,
+            class_period: r.class_period,
+            class_name: r.class_name,
+            description: r.description || '',
+            teacher: r.submitted_by_name || r.submitted_by_email || '',
+            co_teachers: r.co_teachers || '',
+            helpers: (helpersBySub[r.id] || []).filter(Boolean),
+            age_groups: r.age_groups || [],
+            age_groups_other: r.age_groups_other || '',
+            max_students: r.max_students || 0,
+            scheduled_hour: r.scheduled_hour || (isAM ? 'AM' : ''),
+            scheduled_age_range: r.scheduled_age_range || '',
+            scheduled_room: r.scheduled_room || ''
+          });
+        });
+        approvalRows.forEach(r => {
+          if (!r.am_approved_at && !r.approved_at) return;
+          const bucket = bucketFor(r.session_number);
+          if (r.am_approved_at && !bucket.am) bucket.am = [];
+          if (r.approved_at && !bucket.pm) bucket.pm = [];
+        });
+        return res.status(200).json({ school_year: year, sessions });
+      }
+
       // Single submission fetch — owner or reviewer can view.
       if (action === 'class-submission') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
