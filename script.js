@@ -16710,10 +16710,18 @@
     members: [],       // [{name,email}] for the PM helper picker (Phase B2)
     loaded: false
   };
-  function sbApprovalFor(sess) {
-    return scheduleBuilderState.approvals[scheduleBuilderState.schoolYear + '|' + sess] || null;
+  // Per-period approvals (2026-07-06): the Morning lens locks on
+  // am_approved_*; Afternoon keeps approved_* (which also gate sign-ups).
+  // Callers pass the period they're asking about; default = 'PM'.
+  function sbApprovalFor(sess, period) {
+    var a = scheduleBuilderState.approvals[scheduleBuilderState.schoolYear + '|' + sess] || null;
+    if (!a) return null;
+    if (period === 'AM') {
+      return a.am_approved_at ? { approved_at: a.am_approved_at, approved_by: a.am_approved_by || '' } : null;
+    }
+    return a.approved_at ? { approved_at: a.approved_at, approved_by: a.approved_by || '' } : null;
   }
-  function sbIsSessionApproved(sess) { return !!sbApprovalFor(sess); }
+  function sbIsSessionApproved(sess, period) { return !!sbApprovalFor(sess, period); }
   function sbSignupWindowFor(sess) {
     return scheduleBuilderState.signupWindows[scheduleBuilderState.schoolYear + '|' + sess] || null;
   }
@@ -20254,7 +20262,11 @@
     // schedule. While locked, the same button flips to "Reopen Session N for
     // editing" and an Approved badge surfaces who locked it + when.
     var placedCount = classesInSession.length;
-    var approval = sbApprovalFor(sess);
+    // Approval is per lens (2026-07-06): Morning locks independently of
+    // Afternoon — age-assigned morning classes carry no sign-up timing
+    // stakes, so the VP can finalize each side on its own clock.
+    var lensWord = period === 'AM' ? 'Morning' : 'Afternoon';
+    var approval = sbApprovalFor(sess, period);
     var isApproved = !!approval;
     html += '<div class="sb-workflow sb-workflow-action-only">';
     if (isApproved) {
@@ -20263,10 +20275,10 @@
         var d = new Date(approval.approved_at);
         when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       } catch (e) { /* ignore */ }
-      html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
-      html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable editing for Session ' + sess + '.">Reopen Session ' + sess + ' for editing</button>';
+      html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' ' + lensWord + ' Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
+      html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable ' + lensWord.toLowerCase() + ' editing for Session ' + sess + '.">Reopen Session ' + sess + ' ' + lensWord + '</button>';
     } else {
-      html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + '</button>';
+      html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock the ' + lensWord.toLowerCase() + ' side of Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + ' — ' + lensWord + '</button>';
     }
     html += '</div>';
 
@@ -20274,7 +20286,7 @@
     // VP / Afternoon Liaison set the window dates that drive when the parent
     // My Family widget appears. While the window is open, shows the dates +
     // a Close button; before that, shows two date inputs + Open.
-    if (isApproved) {
+    if (period === 'PM' && isApproved) {
       var win = sbSignupWindowFor(sess);
       var winStatus = win && win.status;
       var winStart = (win && win.signup_start_date) || '';
@@ -20513,7 +20525,7 @@
     // state.
     var approveBtn = document.getElementById('sbApproveSession');
     if (approveBtn) approveBtn.addEventListener('click', function () {
-      toggleSessionApproval(sess, !isApproved);
+      toggleSessionApproval(sess, !isApproved, period);
     });
 
     // Wire sign-ups panel buttons (rendered only when session is approved).
@@ -20812,8 +20824,9 @@
   function assignDroppedSub(subId, hour) {
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
-    if (sbIsSessionApproved(scheduleBuilderState.session)) {
-      alert('Session ' + scheduleBuilderState.session + ' is approved. Reopen it for editing first.');
+    var subPeriod = sub.class_period === 'AM' ? 'AM' : 'PM';
+    if (sbIsSessionApproved(scheduleBuilderState.session, subPeriod)) {
+      alert('Session ' + scheduleBuilderState.session + '\'s ' + (subPeriod === 'AM' ? 'morning' : 'afternoon') + ' side is approved. Reopen it for editing first.');
       return;
     }
     // Morning drops route to the submission's OWN group slot no matter
@@ -20887,12 +20900,13 @@
   // goes read-only for that session). Reopening clears the lock so the VP
   // can drag/drop and edit again. Backed by approved_at / approved_by on
   // the co_op_sessions row.
-  function toggleSessionApproval(sess, approved) {
+  function toggleSessionApproval(sess, approved, period) {
     var year = scheduleBuilderState.schoolYear;
+    var lensWord = period === 'AM' ? 'morning' : 'afternoon';
     if (approved) {
-      if (!confirm('Approve Session ' + sess + '?\nThe placed classes become read-only so they can\'t be modified accidentally. You can reopen for editing any time.')) return;
+      if (!confirm('Approve the ' + lensWord + ' side of Session ' + sess + '?\nIts placed classes become read-only so they can\'t be modified accidentally. You can reopen for editing any time.' + (period === 'AM' ? '' : '\n(Afternoon approval is also what allows opening class sign-ups.)'))) return;
     } else {
-      if (!confirm('Reopen Session ' + sess + ' for editing?\nThe lock comes off — drag/drop and edits will work again.')) return;
+      if (!confirm('Reopen the ' + lensWord + ' side of Session ' + sess + ' for editing?\nThe lock comes off — drag/drop and edits will work again.')) return;
     }
     var btn = document.getElementById('sbApproveSession');
     if (btn) { btn.disabled = true; btn.textContent = approved ? 'Approving…' : 'Reopening…'; }
@@ -20900,7 +20914,7 @@
     fetch('/api/curriculum?action=session-approval' + notifViewAsSuffix(), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_year: year, session: sess, approved: !!approved })
+      body: JSON.stringify({ school_year: year, session: sess, approved: !!approved, period: period === 'AM' ? 'AM' : 'PM' })
     }).then(function (r) {
       return r.json().then(function (d) { return { ok: r.ok, data: d }; });
     }).then(function (res) {
@@ -20917,8 +20931,9 @@
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (sub.status === 'submitted' && !sub.scheduled_session) return; // already in the inbox
-    if (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session)) {
-      alert('Session ' + sub.scheduled_session + ' is approved. Reopen it for editing first.');
+    var subPeriod = sub.class_period === 'AM' ? 'AM' : 'PM';
+    if (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, subPeriod)) {
+      alert('Session ' + sub.scheduled_session + '\'s ' + (subPeriod === 'AM' ? 'morning' : 'afternoon') + ' side is approved. Reopen it for editing first.');
       return;
     }
     patchReviewAction(subId, {
@@ -21081,9 +21096,9 @@
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (document.getElementById('sbEditOverlay')) return;
-    // Read-only when this class's session is approved — editing requires
-    // reopening the session from the Schedule Builder header.
-    var locked = sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session);
+    // Read-only when this class's session is approved for ITS period —
+    // editing requires reopening that side from the Class Builder header.
+    var locked = sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, sub.class_period === 'AM' ? 'AM' : 'PM');
 
     // Preference values come straight from the submission (what the teacher
     // asked for). The "Scheduled" values are what the VP placed and may

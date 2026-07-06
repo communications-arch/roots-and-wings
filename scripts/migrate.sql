@@ -671,6 +671,12 @@ CREATE INDEX IF NOT EXISTS class_submissions_status_idx ON class_submissions (st
 -- placement uses scheduled_hour = 'AM' + scheduled_age_range = the group.
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS class_period TEXT NOT NULL DEFAULT 'PM'
   CHECK (class_period IN ('AM','PM'));
+-- Morning approval is independent of afternoon (2026-07-06, Erin):
+-- age-assigned morning classes have no sign-up timing stakes, so the
+-- Class Builder's Morning lens locks on its own columns. The original
+-- approved_at/approved_by stay AFTERNOON's (they also gate sign-ups).
+ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS am_approved_at TIMESTAMPTZ;
+ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS am_approved_by TEXT;
 CREATE INDEX IF NOT EXISTS class_submissions_school_year_idx ON class_submissions (school_year);
 
 -- Back-compat: pick up the teen-assistant flag on existing deployments.

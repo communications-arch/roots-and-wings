@@ -625,9 +625,10 @@ module.exports = async function handler(req, res) {
           // to keep the payload tiny even across multiple years.
           const [rows, approvalRows, windowRows, helperRows, memberRows] = await Promise.all([
             sql`SELECT * FROM class_submissions ORDER BY created_at DESC`,
-            sql`SELECT school_year, session_number, approved_at, approved_by
+            sql`SELECT school_year, session_number, approved_at, approved_by,
+                       am_approved_at, am_approved_by
                 FROM co_op_sessions
-                WHERE approved_at IS NOT NULL`,
+                WHERE approved_at IS NOT NULL OR am_approved_at IS NOT NULL`,
             sql`SELECT school_year, session_number, status,
                        signup_start_date, signup_end_date
                 FROM class_signup_windows`,
@@ -657,7 +658,9 @@ module.exports = async function handler(req, res) {
           approvalRows.forEach(r => {
             session_approvals[r.school_year + '|' + r.session_number] = {
               approved_at: r.approved_at,
-              approved_by: r.approved_by || ''
+              approved_by: r.approved_by || '',
+              am_approved_at: r.am_approved_at,
+              am_approved_by: r.am_approved_by || ''
             };
           });
           const signup_windows = {};
@@ -918,17 +921,31 @@ module.exports = async function handler(req, res) {
         const school_year = String(body.school_year || '').trim();
         const session = parseInt(body.session, 10);
         const approved = !!body.approved;
+        // Morning approval is independent (2026-07-06): period 'AM' flips
+        // am_approved_*; default/'PM' keeps the original columns, which
+        // also gate afternoon sign-ups.
+        const period = String(body.period || 'PM').toUpperCase() === 'AM' ? 'AM' : 'PM';
         if (!school_year) return res.status(400).json({ error: 'school_year required' });
         if (!session || session < 1 || session > 5) return res.status(400).json({ error: 'session must be 1–5' });
-        const updated = await sql`
-          UPDATE co_op_sessions
-          SET approved_at = ${approved ? new Date() : null},
-              approved_by = ${approved ? user.email : null},
-              updated_at  = NOW(),
-              updated_by  = ${user.email}
-          WHERE school_year = ${school_year} AND session_number = ${session}
-          RETURNING school_year, session_number, approved_at, approved_by
-        `;
+        const updated = period === 'AM'
+          ? await sql`
+              UPDATE co_op_sessions
+              SET am_approved_at = ${approved ? new Date() : null},
+                  am_approved_by = ${approved ? user.email : null},
+                  updated_at  = NOW(),
+                  updated_by  = ${user.email}
+              WHERE school_year = ${school_year} AND session_number = ${session}
+              RETURNING school_year, session_number, am_approved_at, am_approved_by
+            `
+          : await sql`
+              UPDATE co_op_sessions
+              SET approved_at = ${approved ? new Date() : null},
+                  approved_by = ${approved ? user.email : null},
+                  updated_at  = NOW(),
+                  updated_by  = ${user.email}
+              WHERE school_year = ${school_year} AND session_number = ${session}
+              RETURNING school_year, session_number, approved_at, approved_by
+            `;
         if (updated.length === 0) {
           return res.status(404).json({ error: 'No session row for ' + school_year + ' / Session ' + session + '. Add session dates first.' });
         }
