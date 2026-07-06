@@ -18748,54 +18748,49 @@
     function renderRow(r, depth) {
       var archived = r.status === 'archived';
       var classes = 'roles-row roles-row-depth-' + depth + (archived ? ' roles-row-archived' : '');
-      var h2 = '<div class="' + classes + '" data-role-id="' + r.id + '">';
-      h2 += '<div class="roles-row-main">';
+      var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
+      var descOnly = r.category === 'cleaning_area' || isDescriptionOnlyRole(r.title);
+      // Board-role holders are gated to the Comms Director (server
+      // enforces); everyone else sees who holds the seat, read-only.
+      var isBoardRow = r.category === 'board';
+      var canManageThisRow = !isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1);
+
       // Board rows head their column with the same emoji the Org & Roles
-      // chart uses — one visual language across both surfaces.
+      // chart uses - one visual language across both surfaces.
       var titleInner = escapeHtml(r.title);
-      if (depth === 0 && r.category === 'board') {
+      if (depth === 0 && isBoardRow) {
         titleInner = '<span class="org-col-emoji" aria-hidden="true">' + (r.icon_emoji || '\u{1F333}') + '</span> ' + titleInner;
       }
-      h2 += '<button type="button" class="roles-row-title" data-role-id="' + r.id + '">' + titleInner + '</button>';
+
+      // Condensed by default (Erin 2026-07-06): the visible row is just
+      // title + who holds it. Pills, assign/remove, overview, and
+      // Edit/Archive live in a tap-to-expand detail - same interaction
+      // as the org chart's role rows.
+      var headHolders;
+      if (descOnly) {
+        headHolders = '<span class="org-ref-pill" title="Staffed via the class schedule - this entry documents the job.">per schedule</span>';
+      } else if (held.length === 0) {
+        headHolders = '<span class="roles-row-holder-empty">Unassigned</span>';
+      } else {
+        headHolders = escapeHtml(held.map(function (hh) { return hh.person_name || hh.email; }).join(', '));
+      }
+
+      var h2 = '<div class="' + classes + '" data-role-id="' + r.id + '">';
+      h2 += '<button type="button" class="roles-row-head" data-role-id="' + r.id + '" aria-expanded="false">';
+      h2 += '<span class="roles-row-head-title">' + titleInner + (archived ? ' <span class="roles-pill roles-pill-archived">archived</span>' : '') + '</span>';
+      h2 += '<span class="roles-row-head-holders">' + headHolders + '</span>';
+      h2 += '</button>';
+
+      h2 += '<div class="roles-row-detail" hidden>';
       h2 += '<div class="roles-row-pills">';
       if (r.job_length) h2 += '<span class="roles-pill roles-pill-term">' + escapeHtml(r.job_length) + '</span>';
       h2 += '<span class="roles-pill roles-pill-cat roles-pill-cat-' + r.category + '">' + escapeHtml(r.category.replace(/_/g, ' ')) + '</span>';
-      if (archived) h2 += '<span class="roles-pill roles-pill-archived">archived</span>';
       h2 += '</div>';
-      h2 += '<div class="roles-row-actions">';
-      h2 += '<button type="button" class="sc-btn roles-row-edit" data-role-id="' + r.id + '" aria-label="Edit ' + escapeHtml(r.title) + '">Edit</button>';
-      if (archived) {
-        h2 += '<button type="button" class="sc-btn roles-row-restore" data-role-id="' + r.id + '" aria-label="Restore ' + escapeHtml(r.title) + '">Restore</button>';
-      } else {
-        h2 += '<button type="button" class="sc-btn sc-btn-del roles-row-archive" data-role-id="' + r.id + '" aria-label="Archive ' + escapeHtml(r.title) + '">Archive</button>';
-      }
-      h2 += '</div>';
-      h2 += '</div>';
-      // Holder line sits directly under title/pills (before overview)
-      // so the first thing a reviewer scans is "who is this?". Phase A
-      // is read-only — Phase B adds the Assign button in this slot.
-      // Skip the line for roles whose assignments live elsewhere:
-      //   - cleaning_area: per-session assignments in cleaning_assignments
-      //   - Classroom Instructor / Assistant / Floater / Morning Class
-      //     Liaison: per-class staffing in AM_CLASSES, not the volunteer
-      //     sheet. Showing "Unassigned" misled reviewers into thinking
-      //     these were vacant.
-      var holderManagedElsewhere = r.category === 'cleaning_area' || isDescriptionOnlyRole(r.title);
-      if (holderManagedElsewhere) {
-        // Say it out loud instead of silently omitting the holder line —
-        // these rows exist so the VP can maintain the job description and
+      if (descOnly) {
+        // These rows exist so the VP can maintain the job description and
         // responsibilities; the people come from the schedule.
-        h2 += '<div class="roles-row-holder-line"><span class="roles-row-board-note" title="This role exists for its job description. Staffing happens in the Class Builder / session schedule, not here.">📖 Description only — staffed via the class schedule</span></div>';
-      }
-      if (!holderManagedElsewhere) {
-        var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
-        // Board-role holders are gated to the Comms Director (server
-        // enforces). For everyone else, board rows render without the
-        // Assign button and without the × on each chip — they can see
-        // who holds the seat but can't change it. Mirrors the new
-        // canEditRoleHolders helper on the server.
-        var isBoardRow = r.category === 'board';
-        var canManageThisRow = !isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1);
+        h2 += '<div class="roles-row-holder-line"><span class="roles-row-board-note" title="This role exists for its job description. Staffing happens in the Class Builder / session schedule, not here.">📖 Description only - staffed via the class schedule</span></div>';
+      } else {
         h2 += '<div class="roles-row-holder-line">';
         if (held.length === 0) {
           h2 += '<span class="roles-row-holder roles-row-holder-empty">Unassigned</span>';
@@ -18830,6 +18825,15 @@
         try { stampBits.push(new Date(r.updated_at).toLocaleDateString()); } catch (e) { /* ignore */ }
       }
       if (stampBits.length) h2 += '<span class="roles-row-stamp">Updated ' + stampBits.join(' · ') + '</span>';
+      h2 += '</div>';
+      h2 += '<div class="roles-row-actions">';
+      h2 += '<button type="button" class="sc-btn roles-row-edit" data-role-id="' + r.id + '" aria-label="Edit ' + escapeHtml(r.title) + '">Edit</button>';
+      if (archived) {
+        h2 += '<button type="button" class="sc-btn roles-row-restore" data-role-id="' + r.id + '" aria-label="Restore ' + escapeHtml(r.title) + '">Restore</button>';
+      } else {
+        h2 += '<button type="button" class="sc-btn sc-btn-del roles-row-archive" data-role-id="' + r.id + '" aria-label="Archive ' + escapeHtml(r.title) + '">Archive</button>';
+      }
+      h2 += '</div>';
       h2 += '</div>';
       h2 += '</div>';
       return h2;
@@ -18866,7 +18870,20 @@
     function findRoleById(id) {
       return _rolesMgrState.roles.find(function (r) { return r.id === id; });
     }
-    body.querySelectorAll('.roles-row-title, .roles-row-edit').forEach(function (btn) {
+    // Row heads expand/collapse their detail (pills, assign, overview,
+    // Edit/Archive) — condensed columns stay scannable by default.
+    body.querySelectorAll('.roles-row-head').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var detail = btn.parentElement.querySelector('.roles-row-detail');
+        if (!detail) return;
+        var nowOpen = detail.hasAttribute('hidden');
+        if (nowOpen) detail.removeAttribute('hidden');
+        else detail.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+        btn.classList.toggle('roles-row-head-expanded', nowOpen);
+      });
+    });
+    body.querySelectorAll('.roles-row-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(this.getAttribute('data-role-id'), 10);
         var role = findRoleById(id);

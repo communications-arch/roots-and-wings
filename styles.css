@@ -13060,6 +13060,50 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   margin-top: 12px;
 }
 .roles-mgr-cols .roles-branch { margin: 0; }
+/* Condensed role rows (2026-07-06): visible line = title + holder; the
+   pills, assign controls, overview, and Edit/Archive expand on tap —
+   same interaction as the org chart's role rows. */
+.roles-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.roles-row-head::after {
+  content: "▸";
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--color-text-light);
+  transition: transform 0.15s ease;
+}
+.roles-row-head-expanded::after { transform: rotate(90deg); }
+.roles-row-head-title { font-weight: 600; }
+.roles-row-head-holders {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--color-text-light);
+}
+.roles-row-head-holders .roles-row-holder-empty { font-size: 0.8rem; }
+.roles-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.roles-row { padding: 8px 12px; }
 .roles-branch {
   margin: 14px 0 4px;
   border: 1px solid var(--color-border);
