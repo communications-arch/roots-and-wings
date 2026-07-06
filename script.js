@@ -4296,6 +4296,29 @@
       });
     });
 
+    // ── Scheduled class submissions (DB) ──
+    // Classes the active login submitted that the Class Builder has placed
+    // into the CURRENT session surface as teaching duties — they're leading
+    // them (Erin, 2026-07-05). Covers morning classes and afternoon
+    // electives; the legacy PM_ELECTIVES loop above keeps sheet-era rows,
+    // so skip anything it already added by class name.
+    (myClassSubmissions || []).forEach(function (s) {
+      if (s.status !== 'scheduled' || s.scheduled_session !== currentSession) return;
+      if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && s.school_year && ACTIVE_SESSION_YEAR && s.school_year !== ACTIVE_SESSION_YEAR) return;
+      var dup = duties.some(function (d) {
+        return d.icon === 'teach' && String(d.text).indexOf(s.class_name) === 0;
+      });
+      if (dup) return;
+      if (s.class_period === 'AM') {
+        duties.push({ block: 'AM', icon: 'teach', text: s.class_name + ' — Leading', detail: 'Morning' + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
+      } else {
+        var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
+        var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
+        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', detail: '1:00–1:55' + (s.scheduled_room ? ' · ' + s.scheduled_room : ''), popup: null });
+        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', detail: '2:00–2:55' + (s.scheduled_room ? ' · ' + s.scheduled_room : ''), popup: null });
+      }
+    });
+
     // PM support roles
     var pmSupport = PM_SUPPORT_ROLES[currentSession];
     if (pmSupport) {
@@ -15866,6 +15889,9 @@
   // submitted → drafted (by VP/PMA) → scheduled, or withdrawn / declined.
 
   var myClassSubmissions = [];
+  // Change signature of the last fetch — guards the duties re-render in
+  // loadMyClassSubmissions against a render↔load loop.
+  var _myClassSubsSig = '';
   // Set from /api/curriculum?action=class-submissions response. True when the
   // caller holds VP / Afternoon Class Liaison, or is the super user.
   var classSubmissionReviewer = false;
@@ -15952,7 +15978,19 @@
     .then(function (data) {
       myClassSubmissions = Array.isArray(data.submissions) ? data.submissions : [];
       classSubmissionReviewer = !!data.is_reviewer;
+      // Scheduled classes surface as teaching duties on My Responsibilities.
+      // Duties render before this fetch lands, so re-render My Family ONCE
+      // when the data actually changed AND there's something duty-relevant.
+      // The signature guard stops a render↔load loop (renderMyFamily calls
+      // this loader again, but the second fetch matches the signature).
+      var newSig = JSON.stringify(myClassSubmissions.map(function (s) {
+        return [s.id, s.status, s.scheduled_session, s.school_year];
+      }));
+      var changed = newSig !== _myClassSubsSig;
+      _myClassSubsSig = newSig;
       renderClassSubsCardBody();
+      var dutyRelevant = myClassSubmissions.some(function (s) { return s.status === 'scheduled'; });
+      if (changed && dutyRelevant && typeof renderMyFamily === 'function') renderMyFamily();
     })
     .catch(function () {
       var body = document.getElementById('mfClassSubsBody');
@@ -15972,8 +16010,35 @@
       html += 'You haven\'t proposed a class yet.';
       html += '</p>';
     } else {
+      // Ordered by session (a placed class uses its scheduled session,
+      // otherwise the earliest preferred; flexible-only sinks last), then
+      // Morning before Afternoon (Erin, 2026-07-05). Small headers mark
+      // each session bucket.
+      function subSessionKey(s) {
+        if (s.scheduled_session) return s.scheduled_session;
+        var nums = (s.session_preferences || [])
+          .filter(function (x) { return x !== 'flexible'; })
+          .map(function (x) { return parseInt(x, 10); })
+          .filter(function (n) { return Number.isFinite(n); });
+        return nums.length ? Math.min.apply(null, nums) : 99;
+      }
+      activeSubs.sort(function (a, b) {
+        var d = subSessionKey(a) - subSessionKey(b);
+        if (d) return d;
+        var pa = a.class_period === 'AM' ? 0 : 1;
+        var pb = b.class_period === 'AM' ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+      });
+      var lastSessKey = null;
       html += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
       activeSubs.forEach(function (s) {
+        var sk = subSessionKey(s);
+        if (sk !== lastSessKey) {
+          lastSessKey = sk;
+          html += '<li style="margin:10px 0 4px;font-size:0.75rem;font-weight:700;color:var(--color-text-light);text-transform:uppercase;letter-spacing:0.04em;">'
+            + (sk === 99 ? 'Flexible — any session' : 'Session ' + sk) + '</li>';
+        }
         var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
         var canEdit = s.status === 'submitted';
         var periodTag = s.class_period === 'AM' ? '🌅 Morning' : '🌇 Afternoon';
