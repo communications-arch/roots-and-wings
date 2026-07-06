@@ -17240,13 +17240,18 @@
       return r.category !== 'board' && !(r.parent_role_id && byId[r.parent_role_id]);
     }).sort(roleSort);
 
-    var filled = active.filter(function (r) { return (holdersByRole[r.id] || []).length > 0; }).length;
-    var openCount = active.length - filled;
+    // Description-only roles are staffed via the schedule — leave them out
+    // of the filled/open tally so they don't read as permanent vacancies.
+    var countable = active.filter(function (r) {
+      return !(typeof isDescriptionOnlyRole === 'function' && isDescriptionOnlyRole(r.title));
+    });
+    var filled = countable.filter(function (r) { return (holdersByRole[r.id] || []).length > 0; }).length;
+    var openCount = countable.length - filled;
 
     var h = '';
     if (note) h += '<p class="org-note">' + escapeHtml(note) + '</p>';
     h += '<div class="org-summary">School year <strong>' + escapeHtml(year) + '</strong>';
-    h += ' &middot; ' + filled + ' of ' + active.length + ' roles filled';
+    h += ' &middot; ' + filled + ' of ' + countable.length + ' roles filled';
     if (openCount > 0) h += ' &middot; <span class="org-open-count">' + openCount + ' open</span>';
     h += '</div>';
 
@@ -17257,7 +17262,13 @@
       var held = holdersByRole[r.id] || [];
       var isOpen = held.length === 0;
       var holdersHtml;
-      if (isOpen) {
+      // Description-only roles (Classroom Instructor, etc.) aren't vacant
+      // seats — staffing comes from the class schedule. Don't render the
+      // "Open" pill that makes them read as unfilled.
+      if (isOpen && typeof isDescriptionOnlyRole === 'function' && isDescriptionOnlyRole(r.title)) {
+        holdersHtml = '<span class="org-ref-pill" title="Staffed via the class schedule — this entry documents the job.">per schedule</span>';
+        isOpen = false;
+      } else if (isOpen) {
         holdersHtml = '<span class="org-open-pill">Open</span>';
       } else {
         holdersHtml = held.map(function (hh) {
@@ -18663,6 +18674,16 @@
   // through sessionStorage[VIEW_AS_KEY]). communications@ acting as
   // herself now sees only the Communications Committee — to manage
   // other committees, she View-As's that chair (or the President).
+  // Roles that live in the tree for their job DESCRIPTION only (Erin,
+  // 2026-07-06): Classroom Instructor / Classroom Assistant / Floater /
+  // the generic Morning Class Liaison. The VP maintains what the job IS
+  // here; WHO does it comes from the Class Builder / session schedule
+  // (the assignable per-group "<Group> Morning Class Liaison" roles are
+  // separate and do take holders).
+  function isDescriptionOnlyRole(title) {
+    return /^(classroom instructor|classroom assistant|floater|morning class liaison)$/i.test(String(title || '').trim());
+  }
+
   function scopeRolesToUser(allRoles) {
     var userRoles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
     if (userRoles.indexOf('President') !== -1) return allRoles;
@@ -18759,11 +18780,13 @@
       //     Liaison: per-class staffing in AM_CLASSES, not the volunteer
       //     sheet. Showing "Unassigned" misled reviewers into thinking
       //     these were vacant.
-      var holderManagedElsewhere = r.category === 'cleaning_area' ||
-        r.title === 'Classroom Instructor' ||
-        r.title === 'Classroom Assistant' ||
-        r.title === 'Floater' ||
-        r.title === 'Morning Class Liaison';
+      var holderManagedElsewhere = r.category === 'cleaning_area' || isDescriptionOnlyRole(r.title);
+      if (holderManagedElsewhere) {
+        // Say it out loud instead of silently omitting the holder line —
+        // these rows exist so the VP can maintain the job description and
+        // responsibilities; the people come from the schedule.
+        h2 += '<div class="roles-row-holder-line"><span class="roles-row-board-note" title="This role exists for its job description. Staffing happens in the Class Builder / session schedule, not here.">📖 Description only — staffed via the class schedule</span></div>';
+      }
       if (!holderManagedElsewhere) {
         var held = (_rolesMgrState.holdersByRoleId && _rolesMgrState.holdersByRoleId[r.id]) || [];
         // Board-role holders are gated to the Comms Director (server

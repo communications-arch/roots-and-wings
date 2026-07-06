@@ -13036,6 +13036,19 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-text-light);
 }
 
+/* Description-only roles (staffed via the class schedule) — neutral pill
+   so they don't read as vacant seats in the org chart. */
+.org-ref-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+  background: rgba(var(--color-primary-rgb), 0.07);
+  white-space: nowrap;
+}
+
 /* Roles Assignments in org-chart columns (2026-07-06): the same
    board-member column layout as the Org & Roles chart / Volunteers tab —
    Roles Assignments is the editing lens on one shared structure. */

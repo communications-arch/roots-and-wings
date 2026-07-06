@@ -1363,3 +1363,23 @@ FROM (VALUES
   ('pigeons_morning_class_liaison', 'Pigeons Morning Class Liaison', 'Pigeons', 308)
 ) AS v(key, title, grp, ord)
 WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
+
+
+-- 2026-07-06: the archived generic "Morning Class Liaison" role carries
+-- the real job description (it existed for description upkeep, not
+-- assignment). Copy its overview/duties/playbook onto the nine per-group
+-- liaison roles so tapping one in the org chart shows the actual job.
+-- Only fills roles still wearing the seeded placeholder text, so later
+-- hand edits are never clobbered.
+UPDATE roles t
+SET overview   = CASE WHEN l.overview <> '' THEN l.overview ELSE t.overview END,
+    duties     = CASE WHEN COALESCE(array_length(l.duties, 1), 0) > 0 THEN l.duties ELSE t.duties END,
+    playbook   = CASE WHEN l.playbook <> '' THEN l.playbook ELSE t.playbook END,
+    updated_at = NOW(),
+    updated_by = 'migration'
+FROM roles l
+WHERE LOWER(l.title) = 'morning class liaison'
+  AND t.role_key LIKE '%_morning_class_liaison'
+  AND t.role_key <> l.role_key
+  AND COALESCE(array_length(t.duties, 1), 0) = 0
+  AND (t.overview = '' OR t.overview LIKE 'Builds the %');
