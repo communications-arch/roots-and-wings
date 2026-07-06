@@ -6784,9 +6784,15 @@
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
           h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
-          // (2026-07-06) "Confirm role holders" To Do retired — Erin:
-          // roles don't need a lifecycle; assignments simply roll with
-          // the term and school calendar.
+          // Confirm role holders for the new school year. Fires after
+          // Field Day until the active year is marked confirmed in
+          // role_holder_confirmations. Click opens the Confirm Role
+          // Holders modal — a list view of board roles + names.
+          // _roleHolderTodoState persists across workspace re-renders.
+          var rhHidden = !(_roleHolderTodoState && _roleHolderTodoState.visible);
+          var rhCount  = (_roleHolderTodoState && _roleHolderTodoState.count) || 0;
+          var rhLabel  = (_roleHolderTodoState && _roleHolderTodoState.label) || 'Confirm role holders';
+          h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
         }
         if (role === 'Membership Director') {
           h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
@@ -6845,6 +6851,7 @@
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
+        if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
         // Welcome Coordinator: per-stage counts on the To Do card + the
         // date-gated pre-co-op outreach nudge.
@@ -14686,6 +14693,7 @@
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') {
       showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
     }
+    else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {
       // Session dates live inline on the Admin Calendar now — the To Do
       // nudge lands straight on the Sessions lens.
@@ -17024,8 +17032,11 @@
     toolbar += '</select>';
     toolbar += '</label>';
     toolbar += '<label class="roles-mgr-toggle"><input type="checkbox" id="roles-show-archived"' + (_rolesMgrState.showArchived ? ' checked' : '') + ' /> Show archived</label>';
-    // (2026-07-06) "Mark as confirmed" retired — roles have no lifecycle;
-    // assignments just roll with the term and school calendar.
+    // Mark/un-mark current year as confirmed. Only the Communications
+    // Director can change it (server enforces); the button stays in the
+    // DOM for everyone so they can see the current state but click is
+    // a no-op for non-Comms.
+    toolbar += '<button id="roles-confirm-btn" class="btn btn-outline-dark btn-sm" hidden></button>';
     toolbar += '</div>';
     var viewPills = '<div class="board-cal-views" role="group" aria-label="Assignments view">'
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="roles">Board &amp; Committees</button>'
@@ -17044,6 +17055,7 @@
     document.getElementById('roles-school-year').addEventListener('change', function () {
       _rolesMgrState.schoolYear = this.value;
       loadRolesManagerTree();
+      loadRolesConfirmState();
       loadRolesMgrSpecialEvents();
     });
     body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
@@ -17053,6 +17065,7 @@
     });
     rolesMgrSetView(_rolesMgrState.view);
     loadRolesManagerTree();
+    loadRolesConfirmState();
     loadRolesMgrSpecialEvents();
   }
 
@@ -17166,6 +17179,65 @@
           });
       });
     });
+  }
+
+  // Toggle button labels + click handler reflect the current
+  // confirmation state for the picker's school year. Re-runs on year
+  // change. Comms can tick "Mark as confirmed" to clear the To Do nag,
+  // and untick it to put the nag back. Non-Comms sees the state read-only.
+  function loadRolesConfirmState() {
+    var btn = document.getElementById('roles-confirm-btn');
+    if (!btn) return;
+    var year = _rolesMgrState.schoolYear;
+    btn.hidden = true;
+    fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.confirmations)) return;
+        var isConfirmed = data.confirmations.some(function (c) { return c.school_year === year; });
+        btn.dataset.confirmed = isConfirmed ? '1' : '0';
+        btn.dataset.year = year;
+        btn.textContent = isConfirmed
+          ? '✓ ' + year + ' confirmed (click to undo)'
+          : 'Mark ' + year + ' as confirmed';
+        btn.hidden = false;
+      })
+      .catch(function () { /* silent */ });
+
+    if (!btn._rwWired) {
+      btn._rwWired = true;
+      btn.addEventListener('click', function () {
+        var yr = btn.dataset.year || _rolesMgrState.schoolYear;
+        var confirmed = btn.dataset.confirmed === '1';
+        btn.disabled = true;
+        var req = confirmed
+          ? fetch('/api/cleaning?action=role-confirm&school_year=' + encodeURIComponent(yr), {
+              method: 'DELETE',
+              headers: rwAuthHeaders()
+            })
+          : fetch('/api/cleaning?action=role-confirm', {
+              method: 'POST',
+              headers: rwAuthHeaders(true),
+              body: JSON.stringify({ school_year: yr })
+            });
+        req
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            btn.disabled = false;
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not update confirmation.');
+              return;
+            }
+            loadRolesConfirmState();
+            // Re-fire the To Do nag so it reflects the new state right away.
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            alert('Network error: ' + (err.message || 'unknown'));
+          });
+      });
+    }
   }
 
   // ──────────────────────────────────────────────
@@ -17397,9 +17469,179 @@
     wireOrgRowToggles(body);
   }
 
-  // (2026-07-06) Confirm Role Holders modal + role_holder_confirmations
-  // flow retired — Erin: roles have no lifecycle; assignments simply roll
-  // with the term and school calendar.
+  // Confirm Role Holders modal — purpose-built view that lists the 7
+  // board roles + currently-assigned holders for the active school year.
+  // Opened from the Comms Director's To Do nag. Comms scans the list,
+  // confirms via the button (which sets role_holder_confirmations), or
+  // jumps to the full Roles Assignments modal to make changes. Other
+  // users with the link can read but the Confirm button is read-only
+  // for them (server enforces).
+  function showConfirmRoleHoldersModal() {
+    var activeYear = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var body = renderReportModal({
+      title: 'Confirm Role Holders — ' + activeYear,
+      subtitle: 'Review the board roles for the new school year. Once they look right, mark the year as confirmed and the reminder will clear.',
+      meta: '',
+      icons: [],
+      bodyId: 'confirm-roles-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading board roles…</p>'
+    });
+    if (!body) return;
+    loadConfirmRoleHolders(activeYear);
+  }
+
+  function loadConfirmRoleHolders(year) {
+    var body = document.getElementById('confirm-roles-body');
+    if (!body) return;
+    body.innerHTML = '<p class="ws-empty">Loading board roles…</p>';
+    Promise.all([
+      fetch('/api/cleaning?action=roles&includeArchived=0', { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(year), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+    ])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        }));
+      })
+      .then(function (results) {
+        var allRoles = (results[0].ok && Array.isArray(results[0].data.roles)) ? results[0].data.roles : [];
+        var holders  = (results[1].ok && Array.isArray(results[1].data.holders)) ? results[1].data.holders : [];
+        var confirms = (results[2].ok && Array.isArray(results[2].data.confirmations)) ? results[2].data.confirmations : [];
+        renderConfirmRoleHoldersBody(year, allRoles, holders, confirms);
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  function renderConfirmRoleHoldersBody(year, allRoles, holders, confirms) {
+    var body = document.getElementById('confirm-roles-body');
+    if (!body) return;
+    var boardRoles = allRoles
+      .filter(function (r) { return r.category === 'board' && r.status === 'active'; })
+      .sort(function (a, b) { return (a.display_order || 0) - (b.display_order || 0) || a.title.localeCompare(b.title); });
+    var holdersByRole = {};
+    holders.forEach(function (h) {
+      if (!holdersByRole[h.role_id]) holdersByRole[h.role_id] = [];
+      holdersByRole[h.role_id].push(h);
+    });
+    var isConfirmed = confirms.some(function (c) { return c.school_year === year; });
+    var userIsComms = (typeof getWorkspaceRoles === 'function')
+      && getWorkspaceRoles().indexOf('Communications Director') !== -1;
+
+    var h = '<div class="confirm-roles-year-banner">School year <strong>' + escapeHtml(year) + '</strong>';
+    if (isConfirmed) h += ' &middot; <span class="confirm-roles-state-yes">✓ Confirmed</span>';
+    else h += ' &middot; <span class="confirm-roles-state-no">Not yet confirmed</span>';
+    h += '</div>';
+
+    if (boardRoles.length === 0) {
+      h += '<p class="ws-empty">No active board roles found.</p>';
+    } else {
+      h += '<ul class="confirm-roles-list">';
+      boardRoles.forEach(function (r) {
+        var held = holdersByRole[r.id] || [];
+        h += '<li class="confirm-roles-row">';
+        h += '<span class="confirm-roles-title">' + escapeHtml(r.title) + '</span>';
+        h += '<span class="confirm-roles-holders">';
+        if (held.length === 0) {
+          h += '<span class="confirm-roles-empty">Unassigned</span>';
+        } else {
+          h += held.map(function (hh) {
+            var name = hh.person_name || hh.email || '';
+            return '<span class="confirm-roles-chip">' + escapeHtml(name) + '</span>';
+          }).join(' ');
+        }
+        h += '</span>';
+        h += '</li>';
+      });
+      h += '</ul>';
+    }
+
+    h += '<div class="confirm-roles-actions">';
+    if (userIsComms) {
+      if (isConfirmed) {
+        h += '<button id="confirm-roles-undo" class="btn btn-outline-dark btn-sm">↺ Undo confirmation</button>';
+      } else {
+        h += '<button id="confirm-roles-confirm" class="btn btn-primary btn-sm">✓ Mark ' + escapeHtml(year) + ' as confirmed</button>';
+      }
+      h += '<button id="confirm-roles-edit" class="btn btn-outline-dark btn-sm">Edit assignments…</button>';
+    } else {
+      h += '<p class="ws-empty" style="margin:0;">Only the Communications Director can confirm or change board-role assignments.</p>';
+    }
+    h += '</div>';
+
+    body.innerHTML = h;
+    wireConfirmRoleHoldersBody(year);
+  }
+
+  function wireConfirmRoleHoldersBody(year) {
+    var confirmBtn = document.getElementById('confirm-roles-confirm');
+    var undoBtn = document.getElementById('confirm-roles-undo');
+    var editBtn = document.getElementById('confirm-roles-edit');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Saving…';
+        fetch('/api/cleaning?action=role-confirm', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({ school_year: year })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not confirm.');
+              confirmBtn.disabled = false;
+              confirmBtn.textContent = '✓ Mark ' + year + ' as confirmed';
+              return;
+            }
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+            loadConfirmRoleHolders(year);
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            confirmBtn.disabled = false;
+          });
+      });
+    }
+    if (undoBtn) {
+      undoBtn.addEventListener('click', function () {
+        if (!confirm('Un-confirm ' + year + '? The To Do reminder will reappear.')) return;
+        undoBtn.disabled = true;
+        fetch('/api/cleaning?action=role-confirm&school_year=' + encodeURIComponent(year), {
+          method: 'DELETE',
+          headers: rwAuthHeaders()
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (r) {
+            if (!r.ok) {
+              alert(r.data && r.data.error ? r.data.error : 'Could not un-confirm.');
+              undoBtn.disabled = false;
+              return;
+            }
+            if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
+            loadConfirmRoleHolders(year);
+          })
+          .catch(function (err) {
+            alert('Network error: ' + (err.message || 'unknown'));
+            undoBtn.disabled = false;
+          });
+      });
+    }
+    if (editBtn) {
+      editBtn.addEventListener('click', function () {
+        // Close this modal then open Roles Assignments. The Comms
+        // Director gets the full board-roles tree (per the updated
+        // scopeRolesToUser).
+        if (typeof closeAnyOpenDetailCard === 'function') closeAnyOpenDetailCard();
+        if (personDetail) personDetail.style.display = 'none';
+        if (typeof showRolesManagerModal === 'function') showRolesManagerModal();
+      });
+    }
+  }
 
   // NOTE (2026-07-05): the Session Dates drawer was retired — sessions now
   // edit INLINE on the Admin Calendar's rows (Sessions view), the same way
@@ -17425,7 +17667,7 @@
   }
   function welcomeInProgress(f) { return welcomeStage(f) < 2; }
   // Persists the "Welcome New Members" To Do count/visibility across
-  // workspace re-renders (like _coopCalTodoState).
+  // workspace re-renders (like _coopCalTodoState / _roleHolderTodoState).
   // Cross-page-load instant paint is handled generically by
   // snapshotTodoState/restoreTodoSnapshot.
   var _welcomeTodoState = { visible: false, count: 0 };
@@ -19202,6 +19444,7 @@
   // subsequent render reads from here before deciding the initial
   // visibility (instead of re-defaulting to hidden).
   var _coopCalTodoState    = { visible: false, count: 0, label: 'Set co-op calendar' };
+  var _roleHolderTodoState = { visible: false, count: 0, label: 'Confirm role holders' };
 
   // President + VP To Do item: "Set [year] session dates". Triggered
   // once we're 2 weeks past the previous year's latest session end AND
@@ -19274,6 +19517,114 @@
       item.hidden = true;
     }
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  // Communications Director To Do: "Confirm role holders for [year]".
+  // Roles switch at the end of Field Day (the Wednesday after Session 5
+  // ends). After that, the active school year needs its holders
+  // reviewed. This nag fires when:
+  //   1. Today is past Field Day of the most recent completed year, AND
+  //   2. The active year does NOT have a row in role_holder_confirmations.
+  // Comms ticks "Mark as confirmed" in the Roles Assignments modal once
+  // she's done reviewing; that inserts the row and the nag goes away.
+  // The badge count shows how many holders are missing compared to last
+  // year (best-effort indicator of remaining work) — primary signal is
+  // the boolean confirmation, count is informational only.
+  function loadRoleHolderNagCount() {
+    var item = document.getElementById('ws-todo-role-holders-item');
+    if (!item) return;
+    var pill = document.getElementById('ws-role-holders-count');
+    var label = document.getElementById('ws-role-holders-label');
+
+    // Step 1: compute Field Day of the most recent completed school
+    // year, using _allCoopSessions if available, falling back to the
+    // current SESSION_DATES (always the year just ended in summer).
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var all = Array.isArray(_allCoopSessions) ? _allCoopSessions : [];
+    var byYear = {};
+    all.forEach(function (s) {
+      if (!byYear[s.school_year]) byYear[s.school_year] = [];
+      byYear[s.school_year].push(s);
+    });
+    var years = Object.keys(byYear).sort();
+    var previousYear = null;
+    var previousLatestEnd = null;
+    for (var i = years.length - 1; i >= 0; i--) {
+      var ends = byYear[years[i]].map(function (s) { return s.end_date; }).sort();
+      var maxEnd = ends[ends.length - 1];
+      if (todayStr > maxEnd) { previousYear = years[i]; previousLatestEnd = maxEnd; break; }
+    }
+    if (!previousYear) {
+      // Fall back to SESSION_DATES (last year ended, currently in
+      // summer). Year label is ACTIVE_SESSION_YEAR which the picker
+      // sets to the most-recent-completed year in summer.
+      var fbEnds = Object.keys(SESSION_DATES)
+        .map(function (k) { return SESSION_DATES[k] && SESSION_DATES[k].end; })
+        .filter(Boolean);
+      if (fbEnds.length === 0) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+      previousLatestEnd = fbEnds.sort().pop();
+      if (todayStr <= previousLatestEnd) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+      previousYear = ACTIVE_SESSION_YEAR;
+    }
+    // Field Day = Wednesday strictly after previousLatestEnd. Same
+    // snap-to-Wednesday rule as the summer-break detection.
+    var endDt = new Date(previousLatestEnd + 'T00:00:00');
+    var dow = endDt.getDay();
+    var daysToFieldDay = (3 - dow + 7) % 7;
+    if (daysToFieldDay === 0) daysToFieldDay = 7;
+    endDt.setDate(endDt.getDate() + daysToFieldDay);
+    var fieldDayStr = endDt.toISOString().slice(0, 10);
+    if (todayStr <= fieldDayStr) {
+      item.hidden = true;
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      return;
+    }
+
+    // Step 2: compare role-holder counts for previous vs active year.
+    // Active year per the April-1 pivot — that's what the Roles
+    // Assignments modal opens to by default, so the count we compare
+    // against is the one Comms would actually be editing.
+    var activeYear = (typeof activeSchoolYear === 'function')
+      ? activeSchoolYear().label
+      : ACTIVE_SESSION_YEAR;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+
+    Promise.all([
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(activeYear), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(previousYear), { headers: rwAuthHeaders() }),
+      fetch('/api/cleaning?action=role-confirm', { headers: rwAuthHeaders() })
+    ])
+      .then(function (responses) {
+        return Promise.all(responses.map(function (r) { return r.ok ? r.json() : null; }));
+      })
+      .then(function (results) {
+        var activeCount   = (results[0] && Array.isArray(results[0].holders)) ? results[0].holders.length : 0;
+        var previousCount = (results[1] && Array.isArray(results[1].holders)) ? results[1].holders.length : 0;
+        var confirms = (results[2] && Array.isArray(results[2].confirmations)) ? results[2].confirmations : [];
+        var isConfirmed = confirms.some(function (c) { return c.school_year === activeYear; });
+        if (!isConfirmed) {
+          // Count badge is informational — how many seats are still
+          // empty compared to last year. Always shows at least 1 so
+          // there's a visible badge even when previous-year data is
+          // sparse.
+          var diff = previousCount > activeCount
+            ? previousCount - activeCount
+            : Math.max(1, activeCount === 0 ? Math.max(1, previousCount) : 0);
+          if (diff < 1) diff = 1;
+          _roleHolderTodoState.visible = true;
+          _roleHolderTodoState.count = diff;
+          _roleHolderTodoState.label = 'Confirm ' + activeYear + ' role holders';
+          if (pill)  pill.textContent  = String(diff);
+          if (label) label.textContent = _roleHolderTodoState.label;
+          item.hidden = false;
+        } else {
+          _roleHolderTodoState.visible = false;
+          item.hidden = true;
+        }
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { /* silent — item stays hidden */ });
   }
 
   function loadTreasurerPendingCount() {

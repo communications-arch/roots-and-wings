@@ -16,6 +16,9 @@
 // GET    /api/cleaning?action=sessions           → co-op calendar (current + next year)
 // POST   /api/cleaning?action=sessions           → upsert a session (President/VP)
 // DELETE /api/cleaning?action=sessions&id=N      → remove a session (President/VP)
+// GET    /api/cleaning?action=role-confirm       → confirmed years (Comms-controlled)
+// POST   /api/cleaning?action=role-confirm       → mark a year as confirmed (Comms gated)
+// DELETE /api/cleaning?action=role-confirm       → un-confirm a year (Comms gated)
 
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
@@ -217,7 +220,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -769,9 +772,52 @@ module.exports = async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // (2026-07-06) role-confirm action retired — roles have no lifecycle;
-    // assignments roll with the term. role_holder_confirmations table
-    // remains in the DB (unused) to keep migrations additive.
+    // ── Role-holder confirmations ──
+    // Per-year tick the Communications Director sets once she's done
+    // reviewing role holders for the new school year. Used by the To Do
+    // widget to stop nagging — the existence of a row IS the affirmative
+    // signal. Any signed-in @rootsandwingsindy.com user can read (the
+    // dashboard surfaces the state). Only the Comms Director (or a
+    // super user impersonating her via View-As) can write.
+    if (action === 'role-confirm') {
+      if (req.method === 'GET') {
+        const rows = await sql`
+          SELECT school_year, confirmed_at, confirmed_by_email
+          FROM role_holder_confirmations
+          ORDER BY school_year
+        `;
+        return res.status(200).json({ confirmations: rows });
+      }
+      const canConfirm = await canEditAsRole(user.email, 'Communications Director');
+      if (!canConfirm) {
+        return res.status(403).json({ error: 'Only the Communications Director can confirm role holders.' });
+      }
+      if (req.method === 'POST') {
+        const body = req.body || {};
+        const schoolYear = String(body.school_year || '').trim();
+        if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+          return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
+        }
+        const inserted = await sql`
+          INSERT INTO role_holder_confirmations (school_year, confirmed_at, confirmed_by_email)
+          VALUES (${schoolYear}, NOW(), ${user.email})
+          ON CONFLICT (school_year) DO UPDATE
+            SET confirmed_at = NOW(),
+                confirmed_by_email = EXCLUDED.confirmed_by_email
+          RETURNING school_year, confirmed_at, confirmed_by_email
+        `;
+        return res.status(200).json({ confirmation: inserted[0] });
+      }
+      if (req.method === 'DELETE') {
+        const schoolYear = String(req.query.school_year || '').trim();
+        if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+          return res.status(400).json({ error: 'school_year query parameter is required.' });
+        }
+        await sql`DELETE FROM role_holder_confirmations WHERE school_year = ${schoolYear}`;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
     // ── Role Holders (v2) ──
     // Reads from role_holders_v2 + people. Response preserves the legacy
