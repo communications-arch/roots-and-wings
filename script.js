@@ -7152,6 +7152,13 @@
     // getWorkspaceRoles, and still render zero widgets — the silent
     // failure mode that hid Merchandise Manager from Lime Narwhal.
     function widgetListFor(role) {
+      // Age-group class liaisons ("Pigeons Class Liaison", …) build their
+      // group's morning schedule — give them the Class Scheduling card
+      // (the builder itself scopes them to their group). Exact-title roles
+      // like Afternoon Class Liaison keep their explicit defaults below.
+      if (!WORKSPACE_DEFAULTS[role] && /class liaison$/i.test(role)) {
+        return ['pm-scheduling'];
+      }
       var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
       if (explicit) {
@@ -20391,6 +20398,15 @@
       scheduleBuilderState.approvals = (data && data.session_approvals) || {};
       scheduleBuilderState.signupWindows = (data && data.signup_windows) || {};
       scheduleBuilderState.members = (data && data.members) || [];
+      scheduleBuilderState.reviewerScope = (data && data.reviewer_scope) || 'all';
+      // Scoped liaisons live in the Morning lens — land them there.
+      if (Array.isArray(scheduleBuilderState.reviewerScope) && !scheduleBuilderState._scopeLensSet) {
+        scheduleBuilderState._scopeLensSet = true;
+        scheduleBuilderState.period = 'AM';
+        document.querySelectorAll('.sb-period-pill').forEach(function (b) {
+          b.classList.toggle('is-active', b.getAttribute('data-period') === 'AM');
+        });
+      }
       scheduleBuilderState.loaded = true;
       renderScheduleBuilder();
     })
@@ -20442,8 +20458,12 @@
     var lensWord = period === 'AM' ? 'Morning' : 'Afternoon';
     var approval = sbApprovalFor(sess, period);
     var isApproved = !!approval;
+    // Group liaisons build their slots but don't flip session approval or
+    // sign-up windows — those stay VP / Afternoon Class Liaison.
     html += '<div class="sb-workflow sb-workflow-action-only">';
-    if (isApproved) {
+    if (!sbScopeAll()) {
+      if (isApproved) html += '<span class="sb-approved-badge">✓ Session ' + sess + ' ' + lensWord + ' Approved</span>';
+    } else if (isApproved) {
       var when = '';
       try {
         var d = new Date(approval.approved_at);
@@ -20460,7 +20480,7 @@
     // VP / Afternoon Liaison set the window dates that drive when the parent
     // My Family widget appears. While the window is open, shows the dates +
     // a Close button; before that, shows two date inputs + Open.
-    if (period === 'PM' && isApproved) {
+    if (period === 'PM' && isApproved && sbScopeAll()) {
       var win = sbSignupWindowFor(sess);
       var winStatus = win && win.status;
       var winStart = (win && win.signup_start_date) || '';
@@ -20519,7 +20539,9 @@
       var amState = amFull ? 'filled' : count >= 1 ? (am1 ? 'hour 2 open' : 'hour 1 open') : 'open';
       var s = '<div class="sb-cell' + (isAmBlock ? ' sb-cell-am' : '') + '" data-hour="' + hour + '">';
       s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? amState : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span></div>';
-      if (!isApproved && !(isAmBlock && amFull)) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      // Scoped liaisons only get "+ Add" on their own group's morning slot.
+      var scopeOk = isAmBlock ? sbScopeAllowsGroup(String(hour).split(':')[1] || '') : sbScopeAll();
+      if (!isApproved && !(isAmBlock && amFull) && scopeOk) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       list.forEach(function (c) {
         // Scheduled age range can be a VP override (scheduled_age_range);
         // fall back to the teacher's submitted age_groups when not set.
@@ -20645,7 +20667,7 @@
       + '<span>Available classes (' + palette.length + ')</span>'
       // Liaisons often recruit teachers in conversation — let them enter a
       // class here (topic can stay TBD until right before the session).
-      + '<button type="button" class="sc-btn" id="sbNewClassBtn" style="font-size:0.8rem;">+ New Class</button>'
+      + ((period === 'AM' || sbScopeAll()) ? '<button type="button" class="sc-btn" id="sbNewClassBtn" style="font-size:0.8rem;">+ New Class</button>' : '')
       + '</div>';
     paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
     if (palette.length === 0) {
@@ -20841,6 +20863,7 @@
   // Declined & withdrawn rows, and the submission-detail modal).
   function sbDeclineSubmission(id) {
     var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+    if (sub && !sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
     var name = sub ? sub.class_name : 'this class';
     if (!confirm('Decline “' + name + '”?\nThe submitter will see “Declined” on their dashboard. You can re-queue it from “Declined & withdrawn” below the inbox.')) return;
     patchReviewAction(id, { status: 'declined', reviewer_notes: (sub && sub.reviewer_notes) || '' })
@@ -20854,6 +20877,7 @@
 
   function sbRequeueSubmission(id) {
     var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+    if (sub && !sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
     patchReviewAction(id, { status: 'submitted', reviewer_notes: (sub && sub.reviewer_notes) || '' })
       .then(function () {
         closeSbSubmissionDetail();
@@ -21003,6 +21027,22 @@
 
   var _sbDragId = null;
 
+  // Reviewer scope (2026-07-06): 'all' = VP / Afternoon Class Liaison /
+  // super; an array of lowercase group names = age-group liaison, who can
+  // only touch MORNING classes for their group(s). Server enforces too.
+  function sbScopeAll() {
+    return !Array.isArray(scheduleBuilderState.reviewerScope);
+  }
+  function sbScopeAllowsGroup(groupName) {
+    if (sbScopeAll()) return true;
+    return scheduleBuilderState.reviewerScope.indexOf(String(groupName || '').toLowerCase()) !== -1;
+  }
+  function sbCanTouchSub(s) {
+    if (sbScopeAll()) return true;
+    return !!s && s.class_period === 'AM' && sbScopeAllowsGroup(sbAmGroupOf(s));
+  }
+  var SB_SCOPE_MSG = 'Your liaison role covers a different age group — you can only place, edit, or decline morning classes for your own group.';
+
   // Morning submission's target group ('oaks' → 'Oaks') — single by rule.
   function sbAmGroupOf(s) {
     var v = String(((s && s.age_groups) || [])[0] || '');
@@ -21045,6 +21085,7 @@
   function assignDroppedSub(subId, hour) {
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
+    if (!sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
     var subPeriod = sub.class_period === 'AM' ? 'AM' : 'PM';
     if (sbIsSessionApproved(scheduleBuilderState.session, subPeriod)) {
       alert('Session ' + scheduleBuilderState.session + '\'s ' + (subPeriod === 'AM' ? 'morning' : 'afternoon') + ' side is approved. Reopen it for editing first.');
@@ -21203,6 +21244,7 @@
       html += '<select class="cl-input" id="sbNewAmGroup"><option value="">— pick the age group —</option>';
       AGE_GROUP_VALUES.forEach(function (v) {
         if (v === 'all-ages') return;
+        if (!sbScopeAllowsGroup(v)) return; // scoped liaison: own group(s) only
         html += '<option value="' + v + '">' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
       });
       html += '</select></div>';
@@ -21431,6 +21473,7 @@
         // submission's hour preference requires it. Morning picks route to
         // the class's OWN group slot, which must be free (one per session).
         var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+        if (sub && !sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
         var scheduledHour = isAmPick ? sbAmHourFor(sub) : hour;
         if (isAmPick && sub) {
           var grp = sbAmGroupOf(sub);
@@ -21492,7 +21535,8 @@
     if (document.getElementById('sbEditOverlay')) return;
     // Read-only when this class's session is approved for ITS period —
     // editing requires reopening that side from the Class Builder header.
-    var locked = sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, sub.class_period === 'AM' ? 'AM' : 'PM');
+    var locked = (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, sub.class_period === 'AM' ? 'AM' : 'PM'))
+      || !sbCanTouchSub(sub); // out-of-scope liaison → read-only view
 
     // Preference values come straight from the submission (what the teacher
     // asked for). The "Scheduled" values are what the VP placed and may

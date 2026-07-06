@@ -69,6 +69,27 @@ function formatTodayMDY() {
     year: 'numeric'
   }).format(new Date());
 }
+// Season-boundary school year for the cleaning rota: the year of the next
+// co-op session that hasn't ended yet (Indianapolis "today"), so it flips
+// the day after the season's last session — NOT at April's billing pivot
+// and NOT when next year's sessions get seeded in May. Falls back to the
+// newest seeded year, then null (no filter) pre-seed.
+async function activeCleaningYear(sql) {
+  try {
+    const rows = await sql`
+      SELECT school_year FROM co_op_sessions
+      WHERE end_date >= (NOW() AT TIME ZONE 'America/Indiana/Indianapolis')::date
+      ORDER BY start_date ASC LIMIT 1
+    `;
+    if (rows.length) return rows[0].school_year;
+    const mx = await sql`SELECT MAX(school_year) AS sy FROM co_op_sessions`;
+    return mx[0] ? mx[0].sy : null;
+  } catch (e) {
+    console.error('activeCleaningYear failed:', e.message);
+    return null;
+  }
+}
+
 // Categories are validated client-side AND server-side. Roles v2 dropped
 // 'cleaning_area' and 'class' — cleaning lives in cleaning_areas /
 // cleaning_assignments, classes have a separate home, and `roles` covers
@@ -204,11 +225,16 @@ module.exports = async function handler(req, res) {
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
       `;
+      // Rota is year-scoped (2026-07-06, Erin: cleaning resets each school
+      // year). Reader and writer share activeCleaningYear() so they can't
+      // disagree on which year "now" belongs to.
+      const rotaYear = await activeCleaningYear(sql);
       const assignments = await sql`
         SELECT ca.id, ca.session_number, ca.cleaning_area_id, ca.family_name, ca.sort_order,
                a.floor_key, a.area_name
         FROM cleaning_assignments ca
         JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
+        WHERE ${rotaYear} IS NULL OR ca.school_year = ${rotaYear}
         ORDER BY ca.session_number, a.sort_order, ca.sort_order
       `;
       // Liaison name is now derived from role_holders_v2 — the
@@ -937,9 +963,10 @@ module.exports = async function handler(req, res) {
         if (session_number < 1 || session_number > 5) {
           return res.status(400).json({ error: 'session_number must be 1-5' });
         }
+        const yr = await activeCleaningYear(sql);
         const inserted = await sql`
-          INSERT INTO cleaning_assignments (session_number, cleaning_area_id, family_name, updated_by)
-          VALUES (${session_number}, ${cleaning_area_id}, ${String(family_name).trim()}, ${user.email})
+          INSERT INTO cleaning_assignments (session_number, cleaning_area_id, family_name, updated_by, school_year)
+          VALUES (${session_number}, ${cleaning_area_id}, ${String(family_name).trim()}, ${user.email}, ${yr})
           RETURNING id, session_number, cleaning_area_id, family_name
         `;
         return res.status(201).json({ assignment: inserted[0] });

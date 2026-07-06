@@ -428,35 +428,46 @@ function normalizeReviewerPatch(body) {
   };
 }
 
-// VP, Afternoon Class Liaison, and the super user can review all submissions.
-async function canReviewSubmissions(email) {
-  if (!email) return false;
-  if (isSuperUser(email)) return true;
-  if (await canEditAsRole(email, 'Vice President')) return true;
-  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
-  // Age-group class liaisons build the MORNING schedule (2026-07-06,
-  // Erin: "the people that actually build the classes are the class
-  // liaison for each age group"). Any active holder of a role titled
-  // "… Class Liaison" (e.g. a future "Pigeons Class Liaison") gets
-  // reviewer access; per-group scoping can tighten later — the co-op is
-  // small and the builder's group slots make the boundaries obvious.
+// Reviewer scope (2026-07-06, per-group liaison scoping):
+//   { all: true }                  — super user, VP, Afternoon Class Liaison
+//   { all: false, groups: [...] } — age-group class liaisons ("Pigeons Class
+//                                    Liaison" → ['pigeons']); may only build
+//                                    the MORNING schedule for their group(s)
+//   null                           — not a reviewer
+const LIAISON_GROUPS = ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples', 'birch', 'willows', 'cedars', 'pigeons'];
+async function reviewerScope(email) {
+  if (!email) return null;
+  if (isSuperUser(email)) return { all: true };
+  if (await canEditAsRole(email, 'Vice President')) return { all: true };
+  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return { all: true };
+  // Role titled "<Group> Class Liaison" (singular or plural group word)
+  // scopes the holder to that age group's morning slots.
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT 1
+      SELECT r.title
       FROM role_holders_v2 h
       JOIN roles r ON r.id = h.role_id
       WHERE LOWER(h.person_email) = LOWER(${email})
         AND h.ended_at IS NULL
         AND r.status = 'active'
         AND r.title ILIKE '%class liaison'
-      LIMIT 1
     `;
-    if (rows.length) return true;
+    const groups = [];
+    rows.forEach(r => {
+      const prefix = String(r.title || '').toLowerCase().replace(/\s*class liaison\s*$/, '').trim();
+      LIAISON_GROUPS.forEach(g => {
+        if ((prefix === g || prefix + 's' === g || prefix === g + 's') && groups.indexOf(g) === -1) groups.push(g);
+      });
+    });
+    if (groups.length) return { all: false, groups };
   } catch (e) {
-    console.error('canReviewSubmissions liaison lookup failed:', e.message);
+    console.error('reviewerScope liaison lookup failed:', e.message);
   }
-  return false;
+  return null;
+}
+async function canReviewSubmissions(email) {
+  return !!(await reviewerScope(email));
 }
 
 // View-As aware reviewer gate. True when the real caller is a reviewer
@@ -466,13 +477,25 @@ async function canReviewSubmissions(email) {
 // reviewer flows via View-As; no prod behavior change (real reviewers and
 // super users already pass the first check). view_as comes from the query
 // (GET) or body (POST), matching resolveSubmitterEmail's mechanism.
-async function isReviewerReq(user, req) {
+async function reviewerScopeReq(user, req) {
   const realEmail = user && user.email;
-  if (await canReviewSubmissions(realEmail)) return true;
-  if (!canImpersonate(realEmail)) return false;
+  const s = await reviewerScope(realEmail);
+  if (s) return s;
+  if (!canImpersonate(realEmail)) return null;
   const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
-  if (!va || (va.split('@')[1] || '') !== ALLOWED_DOMAIN) return false;
-  return await canReviewSubmissions(va);
+  if (!va || (va.split('@')[1] || '') !== ALLOWED_DOMAIN) return null;
+  return await reviewerScope(va);
+}
+async function isReviewerReq(user, req) {
+  return !!(await reviewerScopeReq(user, req));
+}
+// Can this scope touch (schedule/edit/decline/delete) this submission row?
+function scopeAllowsSub(scope, row) {
+  if (!scope) return false;
+  if (scope.all) return true;
+  if (String(row.class_period || 'PM') !== 'AM') return false;
+  const g = String(((row.age_groups || [])[0]) || '').toLowerCase();
+  return scope.groups.indexOf(g) !== -1;
 }
 
 // Resolve the PM Assistant's current email from the volunteer sheet. Returns
@@ -646,7 +669,8 @@ module.exports = async function handler(req, res) {
       if (action === 'class-submissions') {
         const scope = (req.query.scope || 'mine').toLowerCase();
         if (scope === 'all') {
-          if (!(await isReviewerReq(user, req))) {
+          const rscope = await reviewerScopeReq(user, req);
+          if (!rscope) {
             return res.status(403).json({ error: 'Reviewer access only' });
           }
           // Schedule Builder needs per-session approval state to lock the UI
@@ -715,7 +739,10 @@ module.exports = async function handler(req, res) {
             session_approvals,
             signup_windows,
             members,
-            is_reviewer: true
+            is_reviewer: true,
+            // 'all' for VP/ACL/super; a lowercase group list for scoped
+            // age-group liaisons — the builder greys out everything else.
+            reviewer_scope: rscope.all ? 'all' : rscope.groups
           });
         }
         // scope=mine — super users may impersonate via ?view_as= so the
@@ -972,7 +999,11 @@ module.exports = async function handler(req, res) {
         // intended teacher's name kept visible.
         const behalfEmail = String((req.body || {}).on_behalf_email || '').trim().toLowerCase();
         const behalfName = String((req.body || {}).on_behalf_name || '').trim().slice(0, 120);
-        if ((behalfEmail || behalfName) && await isReviewerReq(user, req)) {
+        const behalfScope = (behalfEmail || behalfName) ? await reviewerScopeReq(user, req) : null;
+        if (behalfScope && !scopeAllowsSub(behalfScope, clean)) {
+          return res.status(403).json({ error: 'Your liaison role covers a different age group — you can only add morning classes for your own group.' });
+        }
+        if (behalfScope) {
           if (behalfEmail && (behalfEmail.split('@')[1] || '') === ALLOWED_DOMAIN) {
             submitterEmail = behalfEmail;
             submitterName = behalfName;
@@ -1031,7 +1062,10 @@ module.exports = async function handler(req, res) {
       // false. The Schedule Builder reads this state via the
       // class-submissions response and uses it to make the grid read-only.
       if (action === 'session-approval') {
-        if (!(await isReviewerReq(user, req))) {
+        // Full-scope reviewers only — group liaisons build their slots but
+        // don't flip a whole session's approval.
+        const apScope = await reviewerScopeReq(user, req);
+        if (!apScope || !apScope.all) {
           return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can approve a session.', youAre: user.email });
         }
         const body = req.body || {};
@@ -1074,7 +1108,9 @@ module.exports = async function handler(req, res) {
       // and a (start, end) date range so the parent My Family widget knows
       // when to show itself.
       if (action === 'class-signup-window') {
-        if (!(await isReviewerReq(user, req))) {
+        // Sign-ups are an afternoon concern — full-scope reviewers only.
+        const swScope = await reviewerScopeReq(user, req);
+        if (!swScope || !swScope.all) {
           return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can manage sign-ups.', youAre: user.email });
         }
         const body = req.body || {};
@@ -1258,11 +1294,15 @@ module.exports = async function handler(req, res) {
       // touching the submitter's 13 form fields.
       if (action === 'class-submission' && req.query.review === '1') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
-        if (!(await isReviewerReq(user, req))) {
+        const rvScope = await reviewerScopeReq(user, req);
+        if (!rvScope) {
           return res.status(403).json({ error: 'Reviewer access only' });
         }
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
+        if (!scopeAllowsSub(rvScope, existing[0])) {
+          return res.status(403).json({ error: 'Your liaison role covers a different age group — this class isn’t yours to schedule.' });
+        }
         if (existing[0].status === 'withdrawn') {
           return res.status(409).json({ error: 'Submission was withdrawn by the submitter; contact them before rescheduling.' });
         }
@@ -1313,8 +1353,9 @@ module.exports = async function handler(req, res) {
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
         const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
-        const isReviewer = await isReviewerReq(user, req);
-        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer can edit this submission.' });
+        const edScope = await reviewerScopeReq(user, req);
+        const isReviewer = !!(edScope && (isOwner || scopeAllowsSub(edScope, row)));
+        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can edit this submission.' });
         // Owners can edit only before the VP/PMA approves (keeps the inbox
         // stable). Reviewers can edit at any status so they can correct
         // details on already-placed classes from the Schedule Builder.
@@ -1416,8 +1457,9 @@ module.exports = async function handler(req, res) {
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
         const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
-        const isReviewer = await isReviewerReq(user, req);
-        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer can remove this submission.' });
+        const delScope = await reviewerScopeReq(user, req);
+        const isReviewer = !!(delScope && scopeAllowsSub(delScope, row));
+        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can remove this submission.' });
         if (isReviewer) {
           // Reviewer "Delete Class": hard-delete from the system entirely.
           // Cascades wipe any class_signup_picks referencing this submission.
