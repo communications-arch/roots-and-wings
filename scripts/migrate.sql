@@ -1398,3 +1398,28 @@ FROM (
 ) v
 WHERE t.role_key LIKE '%_morning_class_liaison'
   AND t.parent_role_id IS NULL;
+
+
+-- 2026-07-07 (Erin): group the nine age-group liaison roles UNDER the
+-- generic "Morning Class Liaison" role (restored to active as the group
+-- heading + description holder, itself under the VP), and shorten their
+-- titles to "<Group> Liaison". All idempotent.
+UPDATE roles
+SET status = 'active',
+    parent_role_id = COALESCE(parent_role_id,
+      (SELECT id FROM roles r2 WHERE LOWER(REPLACE(r2.title, '-', ' ')) = 'vice president' AND r2.category = 'board' LIMIT 1)),
+    updated_at = NOW(), updated_by = 'migration'
+WHERE LOWER(title) = 'morning class liaison'
+  AND (status <> 'active' OR parent_role_id IS NULL);
+
+UPDATE roles
+SET title = REPLACE(title, ' Morning Class Liaison', ' Liaison'),
+    updated_at = NOW(), updated_by = 'migration'
+WHERE role_key LIKE '%_morning_class_liaison'
+  AND title LIKE '% Morning Class Liaison';
+
+UPDATE roles t
+SET parent_role_id = g.id, updated_at = NOW(), updated_by = 'migration'
+FROM (SELECT id FROM roles WHERE LOWER(title) = 'morning class liaison' AND status = 'active' LIMIT 1) g
+WHERE t.role_key LIKE '%_morning_class_liaison'
+  AND t.parent_role_id IS DISTINCT FROM g.id;

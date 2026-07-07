@@ -7198,7 +7198,7 @@
       // group-named titles only: the legacy generic "Morning Class
       // Liaison" role and exact titles like Afternoon Class Liaison
       // (explicit defaults below) stay out.
-      if (!WORKSPACE_DEFAULTS[role] && /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+(morning\s+)?class liaison$/i.test(role)) {
+      if (!WORKSPACE_DEFAULTS[role] && /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+((morning\s+)?class\s+)?liaison$/i.test(role)) {
         return ['pm-scheduling'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
@@ -17322,7 +17322,14 @@
         for (var i = 0; i < kids.length; i++) { if (kids[i].committee) { named = kids[i].committee; break; } }
         h += '<div class="org-col-roles">';
         if (named) h += '<div class="org-col-cat">' + escapeHtml(named) + '</div>';
-        kids.forEach(function (k) { h += orgItem(k, 'mini'); });
+        kids.forEach(function (k) {
+          h += orgItem(k, 'mini');
+          // One more level: e.g. the "<Group> Liaison" roles grouped under
+          // Morning Class Liaison in the VP's column (2026-07-07).
+          (childrenOf[k.id] || []).forEach(function (g) {
+            h += '<div class="org-mini-sub">' + orgItem(g, 'mini') + '</div>';
+          });
+        });
         h += '</div>';
       }
       h += '</div>';
@@ -18707,9 +18714,23 @@
     // committee) so she can manage the Google Workspace-tied board
     // assignments. Mirror the server's canEditRoleHolders gate.
     var isComms = userRoles.indexOf('Communications Director') !== -1;
+    // Include the whole subtree under the user's board role(s), not just
+    // direct children — the age-group liaisons sit two levels down
+    // (VP → Morning Class Liaison → "<Group> Liaison", 2026-07-07).
+    var included = {};
+    Object.keys(userBoardIds).forEach(function (id) { included[id] = true; });
+    var grew = true;
+    while (grew) {
+      grew = false;
+      allRoles.forEach(function (r) {
+        if (!included[r.id] && r.parent_role_id && included[r.parent_role_id]) {
+          included[r.id] = true;
+          grew = true;
+        }
+      });
+    }
     return allRoles.filter(function (r) {
-      if (userBoardIds[r.id]) return true;
-      if (r.parent_role_id && userBoardIds[r.parent_role_id]) return true;
+      if (included[r.id]) return true;
       if (isComms && r.category === 'board') return true;
       return false;
     });

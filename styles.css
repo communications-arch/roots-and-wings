@@ -13036,6 +13036,10 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-text-light);
 }
 
+/* Third org-chart level: roles grouped under a committee role (e.g. the
+   "<Group> Liaison" nine under Morning Class Liaison in the VP column). */
+.org-mini-sub { margin-left: 14px; }
+
 /* Description-only roles (staffed via the class schedule) — neutral pill
    so they don't read as vacant seats in the org chart. */
 .org-ref-pill {

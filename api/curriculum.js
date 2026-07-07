@@ -440,10 +440,14 @@ async function reviewerScope(email) {
   if (isSuperUser(email)) return { all: true };
   if (await canEditAsRole(email, 'Vice President')) return { all: true };
   if (await canEditAsRole(email, 'Afternoon Class Liaison')) return { all: true };
-  // Role titled "<Group> Morning Class Liaison" (or "<Group> Class
-  // Liaison"; singular or plural group word) scopes the holder to that
-  // age group's morning slots. The VP assigns these via Roles
-  // Assignments; the liaison then builds that group's classes.
+  // Role titled "<Group> Liaison" (also accepts the older "<Group>
+  // Morning Class Liaison" / "<Group> Class Liaison" spellings; singular
+  // or plural group word) scopes the holder to that age group's morning
+  // slots. The VP assigns these via Roles Assignments (grouped under the
+  // generic Morning Class Liaison heading); the liaison then builds that
+  // group's classes. Non-group liaisons ("Afternoon Class Liaison",
+  // "Cleaning Crew Liaison"…) never match a group word, so the broader
+  // ILIKE is safe.
   try {
     const sql = getSql();
     const rows = await sql`
@@ -453,11 +457,11 @@ async function reviewerScope(email) {
       WHERE LOWER(h.person_email) = LOWER(${email})
         AND h.ended_at IS NULL
         AND r.status = 'active'
-        AND r.title ILIKE '%class liaison'
+        AND r.title ILIKE '%liaison'
     `;
     const groups = [];
     rows.forEach(r => {
-      const prefix = String(r.title || '').toLowerCase().replace(/\s*(morning\s+)?class liaison\s*$/, '').trim();
+      const prefix = String(r.title || '').toLowerCase().replace(/\s*(morning\s+)?(class\s+)?liaison\s*$/, '').trim();
       LIAISON_GROUPS.forEach(g => {
         if ((prefix === g || prefix + 's' === g || prefix === g + 's') && groups.indexOf(g) === -1) groups.push(g);
       });
