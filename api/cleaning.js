@@ -145,6 +145,10 @@ async function canEditRoleHolders(userEmail, sql, roleId) {
   if (category === 'board') {
     return await canEditAsRole(userEmail, 'Communications Director');
   }
+  // The VP can assign ANY committee/volunteer role, not just her own
+  // subtree (Erin 2026-07-07). Board seats stay Comms-managed above —
+  // they're tied to Google Workspace accounts.
+  if (await canEditAsRole(userEmail, 'Vice President')) return true;
   return await canEditRoleContent(userEmail, sql, roleId);
 }
 

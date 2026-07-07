@@ -1349,7 +1349,7 @@ SELECT
   v.key, v.title, 'committee_role',
   (SELECT id FROM roles WHERE LOWER(REPLACE(title, '-', ' ')) = 'vice president' AND category = 'board' LIMIT 1),
   v.ord, '1 year',
-  'Builds the ' || v.grp || ' morning class schedule — recruits teachers for each session and places their classes in the Class Builder (Morning lens).',
+  '',  -- description lives on the Morning Class Liaison heading only
   E'🌅', 'migration'
 FROM (VALUES
   ('greenhouse_morning_class_liaison', 'Greenhouse Morning Class Liaison', 'Greenhouse', 300),
@@ -1365,24 +1365,8 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
 
 
--- 2026-07-06: the archived generic "Morning Class Liaison" role carries
--- the real job description (it existed for description upkeep, not
--- assignment). Copy its overview/duties/playbook onto the nine per-group
--- liaison roles so tapping one in the org chart shows the actual job.
--- Only fills roles still wearing the seeded placeholder text, so later
--- hand edits are never clobbered.
-UPDATE roles t
-SET overview   = CASE WHEN l.overview <> '' THEN l.overview ELSE t.overview END,
-    duties     = CASE WHEN COALESCE(array_length(l.duties, 1), 0) > 0 THEN l.duties ELSE t.duties END,
-    playbook   = CASE WHEN l.playbook <> '' THEN l.playbook ELSE t.playbook END,
-    updated_at = NOW(),
-    updated_by = 'migration'
-FROM roles l
-WHERE LOWER(l.title) = 'morning class liaison'
-  AND t.role_key LIKE '%_morning_class_liaison'
-  AND t.role_key <> l.role_key
-  AND COALESCE(array_length(t.duties, 1), 0) = 0
-  AND (t.overview = '' OR t.overview LIKE 'Builds the %');
+-- (2026-07-07) The 2026-07-06 description-copy block was removed: the job
+-- description lives ONLY on the generic Morning Class Liaison heading.
 
 
 -- 2026-07-07: the VP board role is titled 'Vice-President' (hyphen), so
@@ -1423,3 +1407,17 @@ SET parent_role_id = g.id, updated_at = NOW(), updated_by = 'migration'
 FROM (SELECT id FROM roles WHERE LOWER(title) = 'morning class liaison' AND status = 'active' LIMIT 1) g
 WHERE t.role_key LIKE '%_morning_class_liaison'
   AND t.parent_role_id IS DISTINCT FROM g.id;
+
+
+-- 2026-07-07 (Erin): the per-group liaison roles carry NO description of
+-- their own - the job description lives only on the Morning Class
+-- Liaison heading. Clear the copied/seeded text; anything hand-written
+-- since (not matching the generic's text or the seed placeholder) stays.
+UPDATE roles t
+SET overview = '', duties = '{}', playbook = '',
+    updated_at = NOW(), updated_by = 'migration'
+FROM (SELECT overview, duties, playbook FROM roles WHERE LOWER(title) = 'morning class liaison' LIMIT 1) g
+WHERE t.role_key LIKE '%_morning_class_liaison'
+  AND (t.overview = g.overview OR t.overview LIKE 'Builds the %' OR t.overview = '')
+  AND (t.duties = g.duties OR COALESCE(array_length(t.duties, 1), 0) = 0)
+  AND (t.overview <> '' OR COALESCE(array_length(t.duties, 1), 0) > 0 OR t.playbook <> '');

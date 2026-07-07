@@ -17304,7 +17304,15 @@
         i += '</ul>';
       }
       if (!r.overview && !(r.duties && r.duties.length > 0)) {
-        i += '<p class="ws-empty">No description written for this role yet.</p>';
+        // Sub-roles deliberately carry no text of their own — the job
+        // description lives once on their committee-role parent (e.g. the
+        // "<Group> Liaison" nine under Morning Class Liaison, 2026-07-07).
+        var descParent = r.parent_role_id && byId[r.parent_role_id];
+        if (descParent && descParent.category !== 'board' && (descParent.overview || (descParent.duties && descParent.duties.length > 0))) {
+          i += '<p class="ws-empty">Job description: see “' + escapeHtml(descParent.title) + '” above.</p>';
+        } else {
+          i += '<p class="ws-empty">No description written for this role yet.</p>';
+        }
       }
       i += '</div></div>';
       return i;
@@ -18704,6 +18712,10 @@
     var userRoles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
     if (userRoles.indexOf('President') !== -1) return allRoles;
     function normalize(t) { return String(t || '').toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ').trim(); }
+    // The VP can assign any committee/volunteer role (2026-07-07), so she
+    // sees the whole tree like the President. Board rows still render
+    // their Assign controls for Comms only (canManageThisRow).
+    if (userRoles.some(function (t) { return normalize(t) === 'vice president'; })) return allRoles;
     var roleSet = {};
     userRoles.forEach(function (t) { roleSet[normalize(t)] = true; });
     var userBoardIds = {};
