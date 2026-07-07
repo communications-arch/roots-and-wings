@@ -11033,7 +11033,12 @@
   function renderParticipationReport() {
     var body = personDetailCard && personDetailCard.querySelector('#ws-participation-body');
     if (!body || !_participationReport) return;
-    var members = _participationReport.members || [];
+    // Least points first (Erin 2026-07-07) — the members who need a nudge
+    // surface at the top; ties break alphabetically.
+    var members = (_participationReport.members || []).slice().sort(function (a, b) {
+      return (a.weightedTotal || 0) - (b.weightedTotal || 0)
+        || String(a.displayName || '').localeCompare(String(b.displayName || ''));
+    });
     var season = _participationReport.season || '';
     var statusCounts = { on_track: 0, near: 0, behind: 0, 'new': 0, exempt: 0 };
     members.forEach(function (m) {
