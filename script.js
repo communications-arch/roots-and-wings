@@ -7115,19 +7115,21 @@
     // 'source-sheets' merged into 'admin-consoles', and the VP's
     // pm-scheduling + special-events folded into the 'roles' card as
     // rows — VP dropped from 7 role cards to 4, Comms from 7 to 5.
-    'President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Treasurer': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Secretary': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-    'Special Events Liaison': ['special-events', 'my-links', 'ways-to-help', 'resources'],
-    'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources'],
-    'Merchandise Manager': ['reports', 'my-links', 'ways-to-help', 'resources'],
-    'Supply Coordinator': ['supply-closet-mgmt', 'my-links', 'ways-to-help', 'resources'],
-    'Welcome Coordinator': ['todos', 'upcoming-events', 'my-links', 'ways-to-help', 'resources'],
-    '*': ['my-links', 'members-summary', 'ways-to-help', 'resources']
+    // (2026-07-07, Erin) 'my-links' dropped from every default for now —
+    // the widget code stays; re-add the key here to bring the card back.
+    'President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Treasurer': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Secretary': ['reports', 'roles', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['reports', 'roles', 'ways-to-help', 'resources'],
+    'Special Events Liaison': ['special-events', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'ways-to-help', 'resources'],
+    'Merchandise Manager': ['reports', 'ways-to-help', 'resources'],
+    'Supply Coordinator': ['supply-closet-mgmt', 'ways-to-help', 'resources'],
+    'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
+    '*': ['members-summary', 'ways-to-help', 'resources']
   };
 
   // Resolve the ordered widget list for a user: union of defaults for each
