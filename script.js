@@ -11034,8 +11034,10 @@
     var body = personDetailCard && personDetailCard.querySelector('#ws-participation-body');
     if (!body || !_participationReport) return;
     // Least points first (Erin 2026-07-07) — the members who need a nudge
-    // surface at the top; ties break alphabetically.
-    var members = (_participationReport.members || []).slice().sort(function (a, b) {
+    // surface at the top; ties break alphabetically. Sorted in place on
+    // the shared report object so CSV export and print match the table.
+    var members = _participationReport.members || [];
+    members.sort(function (a, b) {
       return (a.weightedTotal || 0) - (b.weightedTotal || 0)
         || String(a.displayName || '').localeCompare(String(b.displayName || ''));
     });
