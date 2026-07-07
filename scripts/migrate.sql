@@ -1347,7 +1347,7 @@ CREATE INDEX IF NOT EXISTS cleaning_assignments_year_idx ON cleaning_assignments
 INSERT INTO roles (role_key, title, category, parent_role_id, display_order, term_length, overview, icon_emoji, updated_by)
 SELECT
   v.key, v.title, 'committee_role',
-  (SELECT id FROM roles WHERE title = 'Vice President' AND category = 'board' LIMIT 1),
+  (SELECT id FROM roles WHERE LOWER(REPLACE(title, '-', ' ')) = 'vice president' AND category = 'board' LIMIT 1),
   v.ord, '1 year',
   'Builds the ' || v.grp || ' morning class schedule — recruits teachers for each session and places their classes in the Class Builder (Morning lens).',
   E'🌅', 'migration'
@@ -1383,3 +1383,18 @@ WHERE LOWER(l.title) = 'morning class liaison'
   AND t.role_key <> l.role_key
   AND COALESCE(array_length(t.duties, 1), 0) = 0
   AND (t.overview = '' OR t.overview LIKE 'Builds the %');
+
+
+-- 2026-07-07: the VP board role is titled 'Vice-President' (hyphen), so
+-- the liaison seed above originally parented nothing. Re-parent any
+-- orphaned per-group liaison roles under the VP (idempotent no-op once
+-- they have a parent).
+UPDATE roles t
+SET parent_role_id = v.id, updated_at = NOW(), updated_by = 'migration'
+FROM (
+  SELECT id FROM roles
+  WHERE LOWER(REPLACE(title, '-', ' ')) = 'vice president' AND category = 'board'
+  LIMIT 1
+) v
+WHERE t.role_key LIKE '%_morning_class_liaison'
+  AND t.parent_role_id IS NULL;
