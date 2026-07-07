@@ -13103,6 +13103,9 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   gap: 6px;
   padding-top: 8px;
 }
+/* display:flex above would defeat the hidden attribute (author styles
+   beat the UA's [hidden]{display:none}) — restate it explicitly. */
+.roles-row-detail[hidden] { display: none; }
 .roles-row { padding: 8px 12px; }
 .roles-branch {
   margin: 14px 0 4px;
