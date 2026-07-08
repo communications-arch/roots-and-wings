@@ -6624,6 +6624,12 @@
           }
 
           h += '</div>'; // /.ws-part-panel
+        } else if (_participationMine && _participationMine.fetchError) {
+          // The lookup itself failed (server error / offline) — say so
+          // rather than pretending nothing is recorded.
+          h += '<div class="ws-part-panel ws-part-panel-empty">';
+          h += '<p class="ws-part-meter-caption">Couldn’t load your participation right now — refresh to try again.</p>';
+          h += '</div>';
         } else if (_participationMine) {
           // Fetch completed but you're not on the participation roster yet
           // (e.g. a backup coach, or no AM/PM/cleaning/role activity recorded
@@ -6761,7 +6767,11 @@
       // Server-side data fetches stay role-scoped via the /api/tour?
       // list=registrations endpoint each loader hits.
       title: 'To Do',
-      roleGate: ['Treasurer', 'Communications Director', 'Membership Director', 'President', 'Vice President', 'Welcome Coordinator'],
+      // '*' = every ROLE section gets a To Do card (Erin 2026-07-07);
+      // roles with no wired loaders show the "all caught up" empty state.
+      // (Plain members without roles still don't get one — the universal
+      // '*' defaults list is separate.)
+      roleGate: ['*'],
       render: function (prefs, roles, role) {
         var h = '<p class="ws-body-hint">Quick links to anything waiting on you.</p>';
         h += '<ul class="ws-link-list" id="ws-todo-list">';
@@ -7041,7 +7051,7 @@
       { key: 'membership', title: 'Membership' },
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
-    'Merchandise Manager': [
+    'Merchandise Manager': ['todos', 
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
     'Membership Director': [
@@ -7064,10 +7074,10 @@
     'President': [
       { key: 'membership', title: 'Membership' }
     ],
-    'Secretary': [
+    'Secretary': ['todos', 
       { key: 'membership', title: 'Membership' }
     ],
-    'Sustaining Director': [
+    'Sustaining Director': ['todos', 
       { key: 'membership', title: 'Membership' }
     ],
     'Vice President': [
@@ -7076,7 +7086,7 @@
     // Listed with an empty array so the widget's roleGate (derived below)
     // picks it up. Member Participation is injected dynamically inside
     // the render fn for this role.
-    'Afternoon Class Liaison': []
+    'Afternoon Class Liaison': ['todos', ]
   };
   var ROLE_FORMS = {
     'Communications Director': [
@@ -7124,10 +7134,10 @@
     'Vice President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Secretary': ['reports', 'roles', 'ways-to-help', 'resources'],
     'Sustaining Director': ['reports', 'roles', 'ways-to-help', 'resources'],
-    'Special Events Liaison': ['special-events', 'ways-to-help', 'resources'],
+    'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['reports', 'ways-to-help', 'resources'],
-    'Supply Coordinator': ['supply-closet-mgmt', 'ways-to-help', 'resources'],
+    'Supply Coordinator': ['todos', 'supply-closet-mgmt', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     '*': ['members-summary', 'ways-to-help', 'resources']
   };
@@ -7199,7 +7209,7 @@
       // Liaison" role and exact titles like Afternoon Class Liaison
       // (explicit defaults below) stay out.
       if (!WORKSPACE_DEFAULTS[role] && /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+((morning\s+)?class\s+)?liaison$/i.test(role)) {
-        return ['pm-scheduling'];
+        return ['todos', 'pm-scheduling'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
@@ -7207,16 +7217,17 @@
         explicit.forEach(function (type) {
           var w = WORKSPACE_WIDGETS[type];
           if (!w || !w.roleGate) return; // universal handled separately
-          if (w.roleGate.indexOf(role) === -1) return;
+          if (w.roleGate.indexOf(role) === -1 && w.roleGate.indexOf('*') === -1) return;
           if (out.indexOf(type) === -1) out.push(type);
         });
         return out;
       }
-      // No explicit ordering — include every widget gated for this role.
+      // No explicit ordering — include every widget gated for this role
+      // ('*' gates match any role section).
       Object.keys(WORKSPACE_WIDGETS).forEach(function (type) {
         var w = WORKSPACE_WIDGETS[type];
         if (!w || !w.roleGate) return;
-        if (w.roleGate.indexOf(role) === -1) return;
+        if (w.roleGate.indexOf(role) === -1 && w.roleGate.indexOf('*') === -1) return;
         if (out.indexOf(type) === -1) out.push(type);
       });
       return out;
@@ -10910,7 +10921,14 @@
     })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
-        if (!data || _participationMineEmail !== email) return; // stale response
+        if (_participationMineEmail !== email) return; // stale response
+        if (!data) {
+          // Server said no (4xx/5xx). Surface a visible state instead of
+          // leaving the Ways to Help panel on "Loading…" forever.
+          _participationMine = { member: null, fetchError: true };
+          refreshWorkspaceWidget('ways-to-help');
+          return;
+        }
         _participationMine = data;
         // Temporary diagnostic: surface status/tier/totals on the badge as
         // data-* attributes + a console.debug line. Lets us eyeball why a
@@ -10935,7 +10953,12 @@
         // the entire tab (To Do included) to flicker ~1s after load.
         refreshWorkspaceWidget('ways-to-help');
       })
-      .catch(function () { /* silent — badge stays hidden on error */ });
+      .catch(function () {
+        // Network failure — same visible fallback as a server error.
+        if (_participationMineEmail !== email) return;
+        _participationMine = { member: null, fetchError: true };
+        refreshWorkspaceWidget('ways-to-help');
+      });
   }
 
   // ══════════════════════════════════════════════

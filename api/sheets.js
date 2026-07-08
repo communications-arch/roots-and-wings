@@ -1918,6 +1918,15 @@ async function loadFamiliesFromProfiles(sql) {
   });
 }
 
+// Participation only touches Google Sheets on PROD (the Master read below
+// is env-gated) — so off-prod, don't even parse the service-account key.
+// A missing/malformed key in a preview env would otherwise 500 every
+// participation call before the DB was ever consulted (2026-07-07).
+function participationSheetsClient() {
+  if (process.env.VERCEL_ENV !== 'production') return null;
+  return google.sheets({ version: 'v4', auth: getAuth() });
+}
+
 async function participationFetchSheetData(sheetsClient) {
   var masterSheetId = process.env.MASTER_SHEET_ID;
 
@@ -2537,8 +2546,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
       ? String(familyRow.family_email || '').toLowerCase()
       : targetEmail;
 
-    var auth = getAuth();
-    var sheetsClient = google.sheets({ version: 'v4', auth: auth });
+    var sheetsClient = participationSheetsClient();
     var data = await participationFetchSheetData(sheetsClient);
     var report = await buildParticipationReport(sql, data);
     var familyMembers = (report.members || []).filter(function (m) {
@@ -2599,8 +2607,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
   if (!canRead) return res.status(403).json({ error: 'Not authorized' });
 
   if (action === 'participation-report' && req.method === 'GET') {
-    var auth = getAuth();
-    var sheetsClient = google.sheets({ version: 'v4', auth: auth });
+    var sheetsClient = participationSheetsClient();
     var data = await participationFetchSheetData(sheetsClient);
     var report = await buildParticipationReport(sql, data);
     return res.status(200).json(report);
