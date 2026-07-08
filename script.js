@@ -7051,7 +7051,7 @@
       { key: 'membership', title: 'Membership' },
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
-    'Merchandise Manager': ['todos', 
+    'Merchandise Manager': [
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
     'Membership Director': [
@@ -7074,10 +7074,10 @@
     'President': [
       { key: 'membership', title: 'Membership' }
     ],
-    'Secretary': ['todos', 
+    'Secretary': [
       { key: 'membership', title: 'Membership' }
     ],
-    'Sustaining Director': ['todos', 
+    'Sustaining Director': [
       { key: 'membership', title: 'Membership' }
     ],
     'Vice President': [
@@ -7086,7 +7086,7 @@
     // Listed with an empty array so the widget's roleGate (derived below)
     // picks it up. Member Participation is injected dynamically inside
     // the render fn for this role.
-    'Afternoon Class Liaison': ['todos', ]
+    'Afternoon Class Liaison': []
   };
   var ROLE_FORMS = {
     'Communications Director': [
@@ -7132,11 +7132,11 @@
     'Membership Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Treasurer': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Vice President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Secretary': ['reports', 'roles', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['reports', 'roles', 'ways-to-help', 'resources'],
+    'Secretary': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
-    'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'ways-to-help', 'resources'],
-    'Merchandise Manager': ['reports', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'ways-to-help', 'resources'],
+    'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
     'Supply Coordinator': ['todos', 'supply-closet-mgmt', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     '*': ['members-summary', 'ways-to-help', 'resources']
