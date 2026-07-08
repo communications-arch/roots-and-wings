@@ -11126,8 +11126,11 @@
           };
         }
       });
+      // NOTE: the key must be a COLUMN key ('progress'), not a row field —
+      // an unknown key makes renderSortableTable fall back to column 0
+      // (Member), which is exactly the "isn't sorting by points" bug.
       renderSortableTable(tableTarget, cols, filteredRows(), {
-        initialSort: { key: 'weightedTotal', dir: 'desc' },
+        initialSort: { key: 'progress', dir: 'asc' },
         expandable: true,
         renderDetail: renderParticipationTimeline
       });
@@ -11164,13 +11167,10 @@
         }
       },
       { key: 'progress', label: 'Progress', type: 'number',
-        // Sort by how far along the member is toward THEIR expected
-        // points (exemption/new-member adjusted), not raw totals — so
-        // "most behind" sorts together regardless of baseline.
+        // Sort by raw points (Erin 2026-07-07: least points to most) —
+        // whoever has done the least tops the default view.
         sortValue: function (r) {
-          var exp = r.expectedPoints || 0;
-          if (exp > 0) return (r.weightedTotal || 0) / exp;
-          return (r.weightedTotal || 0) > 0 ? 1 : 0;
+          return r.weightedTotal || 0;
         },
         render: function (r) {
           var w = r.weightedTotal || 0;
