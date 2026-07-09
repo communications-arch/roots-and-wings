@@ -8088,6 +8088,37 @@ button.staff-role:hover {
 .se-note { font-size: 0.76rem; color: var(--color-text-light); margin: 0 0 8px; }
 .se-people-save { margin-top: 4px; }
 
+/* ── Volunteer Assignments lenses (Roles Assignments, 2026-07-09) ──
+   Read-only AM / PM-helper / Cleaning coverage views. Tables reuse the
+   .mcb-teach grid family; count pills reuse .ws-track-count + .ws-wv-*. */
+.ra-lens-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 6px;
+}
+.ra-counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ra-cell-open { background: rgba(var(--color-coral-rgb), 0.09); }
+.ra-cell-partial { background: rgba(224, 181, 44, 0.12); }
+.ra-open-note {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #b3381a;
+}
+.ra-draft-tag { font-size: 0.7rem; color: var(--color-text-light); font-style: italic; font-weight: 400; }
+.ra-row-gap td { background: rgba(var(--color-coral-rgb), 0.05); }
+.ra-floor-head {
+  background: rgba(var(--color-primary-rgb), 0.10);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary-dark);
+  text-align: left;
+}
+
 .sb-overlay {
   position: fixed;
   inset: 0;

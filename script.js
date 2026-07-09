@@ -17033,11 +17033,16 @@
 
   function showRolesManagerModal(opts) {
     opts = opts || {};
-    // Two lenses (2026-07-05, Erin: "assigning roles in lots of places
-    // made it complicated"): Board & Committees (the role tree) and
-    // Special Events (lead + assistants). Entry points can pre-focus —
-    // the Special Events Liaison's card lands straight on her view.
-    _rolesMgrState.view = opts.view === 'special-events' ? 'special-events' : 'roles';
+    // Lenses (2026-07-05, Erin: "assigning roles in lots of places made
+    // it complicated"; extended 2026-07-09 into the VP Volunteer
+    // Assignments hub): Board & Committees (the role tree), Special
+    // Events (lead + assistants), plus read-only assignment views for
+    // Morning Classes, Afternoon Helpers, and Cleaning — every volunteer
+    // commitment for the year on one surface, with open slots flagged
+    // and a doorway to the tool that owns each category. Entry points
+    // can pre-focus — the Special Events Liaison's card lands straight
+    // on her view.
+    _rolesMgrState.view = ROLES_MGR_VIEW_IDS[opts.view] ? opts.view : 'roles';
     var icons = [
       { label: 'Add Role',   icon: ICON_SVG.add,      aria: 'Add a new role',                       action: function () { showRoleEditModal(null); } },
       { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } }
@@ -17074,10 +17079,20 @@
       // Hidden until the SEL/VP-gated special-events fetch succeeds — other
       // board chairs never see the second lens.
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="special-events" id="roles-mgr-se-pill" hidden>🎉 Special Events</button>'
+      // Volunteer Assignments hub lenses (2026-07-09) — hidden until the
+      // class-submissions reviewer fetch confirms FULL scope (VP /
+      // Afternoon Class Liaison / super). Group-scoped liaisons and
+      // other board chairs never see these.
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="am" id="roles-mgr-am-pill" hidden>🌅 Morning Classes</button>'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="pm" id="roles-mgr-pm-pill" hidden>🌇 Afternoon Helpers</button>'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="cleaning" id="roles-mgr-cl-pill" hidden>🧹 Cleaning</button>'
       + '</div>';
     body.innerHTML = toolbar + viewPills
       + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>'
-      + '<div id="roles-mgr-events" hidden></div>';
+      + '<div id="roles-mgr-events" hidden></div>'
+      + '<div id="roles-mgr-am" hidden></div>'
+      + '<div id="roles-mgr-pm" hidden></div>'
+      + '<div id="roles-mgr-cleaning" hidden></div>';
 
     document.getElementById('roles-show-archived').addEventListener('change', function () {
       _rolesMgrState.showArchived = this.checked;
@@ -17087,6 +17102,11 @@
       _rolesMgrState.schoolYear = this.value;
       loadRolesManagerTree();
       loadRolesMgrSpecialEvents();
+      // Assignment lenses: submissions cover all years (client-side
+      // filter), cleaning is fetched per year.
+      renderRolesMgrAmLens();
+      renderRolesMgrPmLens();
+      if (_rolesMgrAsgState.reviewer) loadRolesMgrCleaning();
     });
     body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -17096,15 +17116,25 @@
     rolesMgrSetView(_rolesMgrState.view);
     loadRolesManagerTree();
     loadRolesMgrSpecialEvents();
+    loadRolesMgrAssignments();
   }
 
-  // Flip between the role tree and the special-events people view.
+  // Lens key → body container id. Also the allowlist for opts.view.
+  var ROLES_MGR_VIEW_IDS = {
+    'roles': 'roles-mgr-tree',
+    'special-events': 'roles-mgr-events',
+    'am': 'roles-mgr-am',
+    'pm': 'roles-mgr-pm',
+    'cleaning': 'roles-mgr-cleaning'
+  };
+
+  // Flip between the role tree and the assignment lenses.
   function rolesMgrSetView(view) {
-    _rolesMgrState.view = view === 'special-events' ? 'special-events' : 'roles';
-    var tree = document.getElementById('roles-mgr-tree');
-    var events = document.getElementById('roles-mgr-events');
-    if (tree) tree.hidden = _rolesMgrState.view !== 'roles';
-    if (events) events.hidden = _rolesMgrState.view !== 'special-events';
+    _rolesMgrState.view = ROLES_MGR_VIEW_IDS[view] ? view : 'roles';
+    Object.keys(ROLES_MGR_VIEW_IDS).forEach(function (key) {
+      var el = document.getElementById(ROLES_MGR_VIEW_IDS[key]);
+      if (el) el.hidden = _rolesMgrState.view !== key;
+    });
     document.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
       btn.classList.toggle('is-active', btn.getAttribute('data-roles-view') === _rolesMgrState.view);
     });
@@ -17206,6 +17236,340 @@
             peopleSave.disabled = false;
             if (statusEl) { statusEl.className = 'se-save-status ws-wv-err'; statusEl.textContent = (err && err.message) || 'Network error'; }
           });
+      });
+    });
+  }
+
+  // ── Volunteer Assignments lenses (inside Roles Assignments) ──
+  // The VP hub Erin picked (2026-06-29 "category summary + expand",
+  // folded into the one-surface pills 2026-07-05): every volunteer
+  // commitment for the year — Morning Classes, Afternoon Helpers,
+  // Cleaning — visible in one place with OPEN slots flagged. These
+  // lenses are read-only; each links to the tool that owns its data
+  // (Class Builder, Cleaning Crew Management) so there's still exactly
+  // one editing surface per category. Gated to FULL reviewer scope
+  // (VP / Afternoon Class Liaison / super) via class-submissions
+  // scope=all — a 403 or a group-scoped liaison leaves the pills hidden.
+  var _rolesMgrAsgState = {
+    reviewer: false,     // full-scope reviewer confirmed?
+    loaded: false,       // submissions fetch resolved OK
+    submissions: [],     // ALL years — lenses filter by the year picker
+    cleaning: null,      // { areas, assignments, year } for the picked year
+    cleaningLoading: false
+  };
+
+  function loadRolesMgrAssignments() {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        // Group-scoped age-group liaisons get reviewer_scope as an array —
+        // the hub is for the people who plan the whole year, so they (and
+        // 403s) keep the default: pills hidden, no cleaning fetch.
+        if (!data || data.reviewer_scope !== 'all') {
+          if (['am', 'pm', 'cleaning'].indexOf(_rolesMgrState.view) !== -1) {
+            rolesMgrSetView('roles');
+          }
+          return;
+        }
+        _rolesMgrAsgState.reviewer = true;
+        _rolesMgrAsgState.loaded = true;
+        _rolesMgrAsgState.submissions = Array.isArray(data.submissions) ? data.submissions : [];
+        ['roles-mgr-am-pill', 'roles-mgr-pm-pill', 'roles-mgr-cl-pill'].forEach(function (id) {
+          var pill = document.getElementById(id);
+          if (pill) pill.hidden = false;
+        });
+        renderRolesMgrAmLens();
+        renderRolesMgrPmLens();
+        loadRolesMgrCleaning();
+      })
+      .catch(function () { /* silent — pills stay hidden */ });
+  }
+
+  function loadRolesMgrCleaning() {
+    var wrap = document.getElementById('roles-mgr-cleaning');
+    if (!wrap) return;
+    var year = _rolesMgrState.schoolYear;
+    _rolesMgrAsgState.cleaningLoading = true;
+    wrap.innerHTML = '<p class="ws-empty">Loading cleaning rota…</p>';
+    fetch('/api/cleaning?school_year=' + encodeURIComponent(year), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        _rolesMgrAsgState.cleaningLoading = false;
+        if (!data) {
+          wrap.innerHTML = '<p class="ws-empty">Could not load the cleaning rota — close and reopen to retry.</p>';
+          return;
+        }
+        _rolesMgrAsgState.cleaning = {
+          areas: Array.isArray(data.areas) ? data.areas : [],
+          assignments: Array.isArray(data.assignments) ? data.assignments : [],
+          year: data.school_year || year
+        };
+        renderRolesMgrCleaningLens();
+      })
+      .catch(function () {
+        _rolesMgrAsgState.cleaningLoading = false;
+        wrap.innerHTML = '<p class="ws-empty">Could not load the cleaning rota — close and reopen to retry.</p>';
+      });
+  }
+
+  // Which hours of a group's morning do these placed classes cover?
+  // 'AM' = one both-hours class; otherwise AM1 + AM2 fill separately.
+  // Returns { state: 'full'|'partial'|'open', openHours: ['AM1'|'AM2'…] }.
+  function raAmSlotState(entries) {
+    var h1 = false, h2 = false;
+    (entries || []).forEach(function (s) {
+      var h = s.scheduled_hour || 'AM';
+      if (h === 'AM') { h1 = true; h2 = true; }
+      else if (h === 'AM1') h1 = true;
+      else if (h === 'AM2') h2 = true;
+    });
+    if (h1 && h2) return { state: 'full', openHours: [] };
+    if (!h1 && !h2) return { state: 'open', openHours: ['AM1', 'AM2'] };
+    return { state: 'partial', openHours: h1 ? ['AM2'] : ['AM1'] };
+  }
+
+  // How many more helpers does a scheduled class still need? Teachers
+  // pick a range ("1 or 2 assistants") — the minimum satisfies the ask.
+  function raPmHelpersNeeded(sub) {
+    var counts = (sub && sub.assistant_count) || [];
+    var min = counts.length ? Math.min.apply(null, counts) : 1;
+    var have = ((sub && sub.helpers) || []).length;
+    return Math.max(0, min - have);
+  }
+
+  // Placed (scheduled or drafted) submissions for a period + the picked year.
+  function raPlacedSubs(period) {
+    var year = _rolesMgrState.schoolYear;
+    return (_rolesMgrAsgState.submissions || []).filter(function (s) {
+      return (s.class_period === 'AM' ? 'AM' : 'PM') === period
+        && s.school_year === year
+        && (s.status === 'scheduled' || s.status === 'drafted')
+        && s.scheduled_session;
+    });
+  }
+
+  function raHourLabel(h) {
+    if (h === 'AM1') return 'Hour 1';
+    if (h === 'AM2') return 'Hour 2';
+    if (h === 'AM' || h === 'both') return 'Both hours';
+    if (h === 'PM1') return 'Hour 1';
+    if (h === 'PM2') return 'Hour 2';
+    return h || '';
+  }
+
+  function raCountPill(cls, text) {
+    return '<span class="ws-track-count ' + cls + '">' + text + '</span>';
+  }
+
+  // Lens header: count pills on the left, the owning tool's doorway on
+  // the right. `manage` = { label, action } or null.
+  function raLensHead(pills, manage) {
+    var h = '<div class="ra-lens-head"><div class="ra-counts">' + pills.join('') + '</div>';
+    if (manage) {
+      h += '<button type="button" class="sc-btn ra-manage" data-ra-manage="' + manage.action + '">' + manage.label + '</button>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function raClassLine(s) {
+    var teacher = s.submitted_by_name || s.submitted_by_email || 'TBD';
+    var line = '<span class="mcb-teach-lead">' + escapeHtmlWs(teacher)
+      + (s.status === 'drafted' ? ' <span class="ra-draft-tag">(draft)</span>' : '') + '</span>';
+    line += '<span class="mcb-teach-assists">' + escapeHtmlWs(raHourLabel(s.scheduled_hour || 'AM'))
+      + ' · ' + escapeHtmlWs(s.class_name || '') + '</span>';
+    var helperNames = (s.helpers || []).map(function (hh) { return hh.name || hh.email; }).filter(Boolean);
+    if (helperNames.length) {
+      line += '<span class="mcb-teach-assists">w/ ' + escapeHtmlWs(helperNames.join(', ')) + '</span>';
+    }
+    return line;
+  }
+
+  function renderRolesMgrAmLens() {
+    var wrap = document.getElementById('roles-mgr-am');
+    if (!wrap) return;
+    if (!_rolesMgrAsgState.loaded) { wrap.innerHTML = '<p class="ws-empty">Loading assignments…</p>'; return; }
+    var subs = raPlacedSubs('AM');
+    var byKey = {};
+    subs.forEach(function (s) {
+      var key = sbAmGroupOf(s) + '|' + s.scheduled_session;
+      (byKey[key] || (byKey[key] = [])).push(s);
+    });
+    var full = 0, partial = 0, open = 0;
+    var rows = '';
+    BRAND_AGE_GROUPS.forEach(function (grp) {
+      rows += '<tr><th class="mcb-teach-grp"><span class="' + ageGroupClass(grp) + '">'
+        + ageGroupEmoji(grp) + ' ' + grp + '</span></th>';
+      for (var sess = 1; sess <= 5; sess++) {
+        var entries = (byKey[grp + '|' + sess] || []).sort(function (a, b) {
+          return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
+        });
+        var cov = raAmSlotState(entries);
+        if (cov.state === 'full') full++;
+        else if (cov.state === 'partial') partial++;
+        else open++;
+        var cell = '';
+        entries.forEach(function (s) { cell += raClassLine(s); });
+        if (cov.state === 'open') {
+          cell += '<span class="ra-open-note">OPEN ⚠</span>';
+        } else {
+          cov.openHours.forEach(function (hh) {
+            cell += '<span class="ra-open-note">' + raHourLabel(hh) + ' open ⚠</span>';
+          });
+        }
+        rows += '<td class="mcb-teach-cell' + (cov.state === 'partial' ? ' ra-cell-partial' : cov.state === 'open' ? ' ra-cell-open' : '') + '">' + cell + '</td>';
+      }
+      rows += '</tr>';
+    });
+    var pills = [
+      raCountPill('ws-wv-ok', full + ' covered'),
+      raCountPill('ws-wv-pending', partial + ' hour open'),
+      raCountPill('ws-wv-resent', open + ' open')
+    ];
+    var h = raLensHead(pills, { label: 'Open Class Builder', action: 'builder-am' });
+    h += '<p class="ws-body-hint">Each age group’s morning per session — one both-hours class, or an Hour 1 + Hour 2 pair. Placements are managed in the Class Builder.</p>';
+    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th></th>';
+    for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
+    h += '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    wrap.innerHTML = h;
+    raWireManage(wrap);
+  }
+
+  function renderRolesMgrPmLens() {
+    var wrap = document.getElementById('roles-mgr-pm');
+    if (!wrap) return;
+    if (!_rolesMgrAsgState.loaded) { wrap.innerHTML = '<p class="ws-empty">Loading assignments…</p>'; return; }
+    var subs = raPlacedSubs('PM');
+    var classCount = subs.length, needClasses = 0, needSpots = 0;
+    subs.forEach(function (s) {
+      var gap = raPmHelpersNeeded(s);
+      if (gap > 0) { needClasses++; needSpots += gap; }
+    });
+    var pills = [raCountPill('ws-wv-ok', classCount + ' scheduled')];
+    pills.push(needSpots > 0
+      ? raCountPill('ws-wv-resent', needSpots + ' helper spot' + (needSpots === 1 ? '' : 's') + ' to fill')
+      : raCountPill('ws-wv-ok', 'all helped'));
+    var h = raLensHead(pills, { label: 'Open Class Builder', action: 'builder-pm' });
+    h += '<p class="ws-body-hint">Helper coverage for every scheduled afternoon class — helpers are assigned in the Class Builder’s class editor and feed participation points.</p>';
+    if (classCount === 0) {
+      h += '<p class="ws-empty">No afternoon classes scheduled for ' + escapeHtmlWs(_rolesMgrState.schoolYear) + ' yet.</p>';
+    }
+    for (var sess = 1; sess <= 5; sess++) {
+      var inSess = subs.filter(function (s) { return s.scheduled_session === sess; })
+        .sort(function (a, b) {
+          var ord = { PM1: 0, both: 1, PM2: 2 };
+          var d = (ord[a.scheduled_hour] || 0) - (ord[b.scheduled_hour] || 0);
+          return d !== 0 ? d : String(a.class_name || '').localeCompare(String(b.class_name || ''));
+        });
+      if (inSess.length === 0) continue;
+      h += '<h4 class="roles-mgr-se-head">Session ' + sess + '</h4>';
+      h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Class</th><th>Hour</th><th>Teacher</th><th>Helpers</th></tr></thead><tbody>';
+      inSess.forEach(function (s) {
+        var gap = raPmHelpersNeeded(s);
+        var names = (s.helpers || []).map(function (hh) { return hh.name || hh.email; }).filter(Boolean);
+        var asked = (s.assistant_count || []).join(' or ');
+        var helperCell = names.length ? escapeHtmlWs(names.join(', ')) : '<span class="mcb-teach-empty">none yet</span>';
+        helperCell += '<span class="mcb-teach-assists">wants ' + escapeHtmlWs(asked || '1') + '</span>';
+        if (gap > 0) helperCell += '<span class="ra-open-note">needs ' + gap + ' more ⚠</span>';
+        h += '<tr' + (gap > 0 ? ' class="ra-row-gap"' : '') + '>';
+        h += '<td><span class="mcb-teach-lead">' + escapeHtmlWs(s.class_name || '')
+          + (s.status === 'drafted' ? ' <span class="ra-draft-tag">(draft)</span>' : '') + '</span></td>';
+        h += '<td>' + escapeHtmlWs(raHourLabel(s.scheduled_hour)) + '</td>';
+        h += '<td>' + escapeHtmlWs(s.submitted_by_name || s.submitted_by_email || '') + '</td>';
+        h += '<td>' + helperCell + '</td>';
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    wrap.innerHTML = h;
+    raWireManage(wrap);
+  }
+
+  function renderRolesMgrCleaningLens() {
+    var wrap = document.getElementById('roles-mgr-cleaning');
+    if (!wrap) return;
+    var cl = _rolesMgrAsgState.cleaning;
+    if (!cl) {
+      if (!_rolesMgrAsgState.cleaningLoading) wrap.innerHTML = '<p class="ws-empty">Loading cleaning rota…</p>';
+      return;
+    }
+    var byArea = {};
+    cl.assignments.forEach(function (a) {
+      var key = a.cleaning_area_id + '|' + a.session_number;
+      (byArea[key] || (byArea[key] = [])).push(a.family_name);
+    });
+    var floors = [
+      { key: 'mainFloor', label: 'Main Floor' },
+      { key: 'upstairs', label: 'Upstairs' },
+      { key: 'outside', label: 'Outside' },
+      { key: 'floater', label: 'Floaters' }
+    ];
+    var filled = 0, open = 0;
+    var rows = '';
+    floors.forEach(function (fl) {
+      var areas = cl.areas.filter(function (a) { return a.floor_key === fl.key; });
+      if (areas.length === 0) return;
+      rows += '<tr><th class="ra-floor-head" colspan="6">' + escapeHtmlWs(fl.label) + '</th></tr>';
+      areas.forEach(function (a) {
+        rows += '<tr><th class="mcb-teach-grp">' + escapeHtmlWs(a.area_name) + '</th>';
+        for (var sess = 1; sess <= 5; sess++) {
+          var fams = byArea[a.id + '|' + sess] || [];
+          if (fams.length) {
+            filled++;
+            rows += '<td class="mcb-teach-cell">' + fams.map(function (f) {
+              return '<span class="mcb-teach-lead">' + escapeHtmlWs(f) + '</span>';
+            }).join('') + '</td>';
+          } else {
+            open++;
+            rows += '<td class="mcb-teach-cell ra-cell-open"><span class="ra-open-note">OPEN ⚠</span></td>';
+          }
+        }
+        rows += '</tr>';
+      });
+    });
+    var pills = [
+      raCountPill('ws-wv-ok', filled + ' filled'),
+      raCountPill(open > 0 ? 'ws-wv-resent' : 'ws-wv-ok', open + ' open')
+    ];
+    // The management modal always edits the ACTIVE year's rota, so the
+    // doorway only shows when the picker is on it.
+    var manage = (cl.year === ACTIVE_SESSION_YEAR)
+      ? { label: 'Manage Cleaning Crew', action: 'cleaning' } : null;
+    var h = raLensHead(pills, manage);
+    h += '<p class="ws-body-hint">One family per area per session' + (manage ? ' — assignments are managed in Cleaning Crew Management.' : '. Viewing ' + escapeHtmlWs(cl.year) + ' (read-only — editing always opens the current year).') + '</p>';
+    if (cl.areas.length === 0) {
+      h += '<p class="ws-empty">No cleaning areas defined' + (cl.year !== ACTIVE_SESSION_YEAR ? ' for ' + escapeHtmlWs(cl.year) : '') + '.</p>';
+    } else {
+      h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th></th>';
+      for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
+      h += '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+    wrap.innerHTML = h;
+    raWireManage(wrap);
+  }
+
+  // Doorways to the owning tools. The Class Builder is its own overlay,
+  // so the report modal closes first; Cleaning Crew Management repaints
+  // the same detail container top-level (its own standard).
+  function raWireManage(scopeEl) {
+    scopeEl.querySelectorAll('.ra-manage').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var action = this.getAttribute('data-ra-manage');
+        if (action === 'builder-am' || action === 'builder-pm') {
+          scheduleBuilderState.period = action === 'builder-am' ? 'AM' : 'PM';
+          if (scheduleBuilderState.schoolYear !== _rolesMgrState.schoolYear) {
+            scheduleBuilderState.schoolYear = _rolesMgrState.schoolYear;
+            scheduleBuilderState.loaded = false;
+          }
+          closeDetail();
+          showScheduleBuilder();
+        } else if (action === 'cleaning') {
+          showCleaningManagementModal();
+        }
       });
     });
   }

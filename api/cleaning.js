@@ -231,8 +231,13 @@ module.exports = async function handler(req, res) {
       `;
       // Rota is year-scoped (2026-07-06, Erin: cleaning resets each school
       // year). Reader and writer share activeCleaningYear() so they can't
-      // disagree on which year "now" belongs to.
-      const rotaYear = await activeCleaningYear(sql);
+      // disagree on which year "now" belongs to. An explicit ?school_year=
+      // overrides it for read-only views pinned to a picker (the Roles
+      // Assignments cleaning lens) — writes still land on the active year.
+      const yearParam = String(req.query.school_year || '').trim();
+      const rotaYear = /^\d{4}-\d{4}$/.test(yearParam)
+        ? yearParam
+        : await activeCleaningYear(sql);
       const assignments = await sql`
         SELECT ca.id, ca.session_number, ca.cleaning_area_id, ca.family_name, ca.sort_order,
                a.floor_key, a.area_name
@@ -275,6 +280,7 @@ module.exports = async function handler(req, res) {
 
       return res.status(200).json({
         liaison: (liaisonRows[0] && liaisonRows[0].person_name) || '',
+        school_year: rotaYear,
         areas,
         assignments,
         sessions
