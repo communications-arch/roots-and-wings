@@ -1837,6 +1837,7 @@
     loadCleaningData();
     loadRoleDescriptions();
     loadCoopSessions();
+    loadCapabilityGrants();
     // Render with whatever data is available (live if preloaded, static otherwise)
     setTimeout(function () {
       if (typeof renderMyFamily === 'function') renderMyFamily();
@@ -6678,8 +6679,12 @@
       title: 'Admin Consoles &amp; Sources',
       roleGate: ['Communications Director'],
       render: function () {
-        var h = '<p class="ws-body-hint">External dashboards and the source Google Sheets powering the site.</p>';
+        var h = '<p class="ws-body-hint">Site administration, external dashboards, and the source Google Sheets powering the site.</p>';
         h += '<ul class="ws-link-list">';
+        // Permissions admin (2026-07-09, Erin: "view and edit permissions
+        // in one place") — who can use which feature, seeded to match the
+        // long-standing hardcoded gates.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
         WORKSPACE_ADMIN_CONSOLES.forEach(function (l) {
           h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + l.icon + '</span>' + l.title + '</a></li>';
         });
@@ -6957,12 +6962,14 @@
       roleGate: [],
       render: function (prefs, roles, role) {
         var items = (ROLE_REPORTS[role] || []).slice();
-        // Member Participation belongs to the VP + Afternoon Class Liaison
-        // (PM coordinator). Super users see it only when they View-As into
-        // one of those roles — handled implicitly because `role` resolves
-        // from the active (impersonated) email.
+        // Member Participation follows the 'participation_view' grant
+        // (defaults: VP + Afternoon Class Liaison). Super users see it
+        // only when they View-As into a granted role — handled implicitly
+        // because `role` resolves from the active (impersonated) email.
         var sharedParticipation = { key: 'participation', title: 'Member Participation' };
-        if (role === 'Vice President' || role === 'Afternoon Class Liaison') {
+        var partTitles = (typeof grantTitlesFor === 'function' && grantTitlesFor('participation_view'))
+          || ['Vice President', 'Afternoon Class Liaison'];
+        if (partTitles.map(normalizeWorkspaceTitle).indexOf(role) !== -1) {
           if (!items.some(function (r) { return r.key === 'participation'; })) {
             items.unshift(sharedParticipation);
           }
@@ -7105,7 +7112,11 @@
   // WORKSPACE_WIDGETS.reports.roleGate required. Mirrors the broader
   // [[feedback_role_perms_pattern]] checklist item #8 — make the gate
   // and the data the same source of truth so nothing silently hides.
-  if (WORKSPACE_WIDGETS.reports) {
+  // Extracted into a function (2026-07-09) because the Permissions admin
+  // grants can rewrite ROLE_REPORTS/ROLE_FORMS after load — the gate
+  // re-derives whenever applyGrantsToWorkspace() reconciles them.
+  function refreshReportsRoleGate() {
+    if (!WORKSPACE_WIDGETS.reports) return;
     // Union of both maps: a role with only forms configured still sees
     // the merged Reports & Forms card.
     var _rfGate = Object.keys(ROLE_REPORTS);
@@ -7114,6 +7125,7 @@
     });
     WORKSPACE_WIDGETS.reports.roleGate = _rfGate;
   }
+  refreshReportsRoleGate();
 
   // Each board chair now defaults to the 'roles' widget so they can
   // manage their own committee (server-side gate in api/cleaning.js
@@ -7141,6 +7153,161 @@
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     '*': ['members-summary', 'ways-to-help', 'resources']
   };
+
+  // ══════════════════════════════════════════════
+  // Capability grants (Permissions admin, 2026-07-09)
+  // ══════════════════════════════════════════════
+  // The server enforces feature access through capability grants
+  // (api/_capabilities.js — defaults match the old hardcoded gates; the
+  // Comms Director edits them in Workspace → Admin Consoles → Permissions).
+  // The client fetches the effective map at load so what people SEE
+  // (report rows, workspace cards, edit affordances) follows the same
+  // grants the server enforces. Until the fetch lands, every mirror
+  // falls back to its legacy hardcoded behavior — which equals the
+  // registry defaults, so nothing flashes or changes on day one.
+  var CAPABILITY_GRANTS = null; // { capability_key: [role titles] }
+
+  function grantTitlesFor(key) {
+    if (!CAPABILITY_GRANTS || !Array.isArray(CAPABILITY_GRANTS[key])) return null;
+    return CAPABILITY_GRANTS[key];
+  }
+
+  // Do the active user's workspace roles include any granted title?
+  // `fallbackTitles` = the legacy hardcoded list, used until grants load.
+  function clientHasCapability(key, fallbackTitles) {
+    var titles = grantTitlesFor(key) || fallbackTitles || [];
+    var mine = getWorkspaceRoles();
+    for (var i = 0; i < titles.length; i++) {
+      if (mine.indexOf(normalizeWorkspaceTitle(titles[i])) !== -1) return true;
+    }
+    return false;
+  }
+
+  // Which workspace surface each grant controls. Reports/forms are rows in
+  // the Reports & Forms card (per-role lists); widgets are whole cards.
+  // Capabilities without a client surface (e.g. registration_decline —
+  // buttons inside a report) are enforced by the server + per-feature
+  // render checks and need no entry here.
+  var CAPABILITY_SURFACES = {
+    'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Tour Pipeline' }] },
+    'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Morning Classes' }] },
+    'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
+                               forms:   [{ key: 'send-waiver', title: 'Send One-Off Waiver' }] },
+    'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise Orders' }] },
+    'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
+    'special_events_manage': { widgets: ['special-events'] },
+    'supply_closet_edit':    { widgets: ['supply-closet-mgmt'] },
+    'class_review':          { widgets: ['pm-scheduling'] },
+    'welcome_manage':        { widgets: ['upcoming-events'] }
+  };
+
+  // Pristine snapshots of the hardcoded maps, taken at load. Every apply
+  // resets to these and layers the grants on top, so repeated applies
+  // can't drift and revoked defaults genuinely disappear.
+  var _pristineRoleReports = JSON.parse(JSON.stringify(ROLE_REPORTS));
+  var _pristineRoleForms = JSON.parse(JSON.stringify(ROLE_FORMS));
+  var _pristineDefaults = JSON.parse(JSON.stringify(WORKSPACE_DEFAULTS));
+  var _pristineWidgetGates = {};
+  Object.keys(WORKSPACE_WIDGETS).forEach(function (type) {
+    var g = WORKSPACE_WIDGETS[type] && WORKSPACE_WIDGETS[type].roleGate;
+    if (Array.isArray(g)) _pristineWidgetGates[type] = g.slice();
+  });
+  var _lastAppliedGrantsSig = '';
+
+  function applyGrantsToWorkspace() {
+    if (!CAPABILITY_GRANTS) return;
+    var sig = JSON.stringify(CAPABILITY_GRANTS);
+    if (sig === _lastAppliedGrantsSig) return;
+    _lastAppliedGrantsSig = sig;
+
+    // Reset to pristine.
+    Object.keys(ROLE_REPORTS).forEach(function (r) { delete ROLE_REPORTS[r]; });
+    Object.keys(_pristineRoleReports).forEach(function (r) { ROLE_REPORTS[r] = JSON.parse(JSON.stringify(_pristineRoleReports[r])); });
+    Object.keys(ROLE_FORMS).forEach(function (r) { delete ROLE_FORMS[r]; });
+    Object.keys(_pristineRoleForms).forEach(function (r) { ROLE_FORMS[r] = JSON.parse(JSON.stringify(_pristineRoleForms[r])); });
+    Object.keys(WORKSPACE_DEFAULTS).forEach(function (r) { delete WORKSPACE_DEFAULTS[r]; });
+    Object.keys(_pristineDefaults).forEach(function (r) { WORKSPACE_DEFAULTS[r] = _pristineDefaults[r].slice(); });
+    Object.keys(_pristineWidgetGates).forEach(function (type) {
+      if (WORKSPACE_WIDGETS[type]) WORKSPACE_WIDGETS[type].roleGate = _pristineWidgetGates[type].slice();
+    });
+
+    Object.keys(CAPABILITY_SURFACES).forEach(function (capKey) {
+      var titles = grantTitlesFor(capKey);
+      if (!titles) return; // not in the payload — leave defaults
+      var granted = titles.map(normalizeWorkspaceTitle);
+      var surface = CAPABILITY_SURFACES[capKey];
+
+      (surface.reports || []).forEach(function (item) { reconcileRoleRows(ROLE_REPORTS, item, granted); });
+      (surface.forms || []).forEach(function (item) { reconcileRoleRows(ROLE_FORMS, item, granted); });
+
+      (surface.widgets || []).forEach(function (type) {
+        var w = WORKSPACE_WIDGETS[type];
+        if (!w || !Array.isArray(w.roleGate) || w.roleGate.indexOf('*') !== -1) return;
+        w.roleGate = granted.slice();
+        // Keep WORKSPACE_DEFAULTS in step: granted roles gain the card
+        // (right after To Do, where role tools sit); revoked roles lose
+        // it. Roles with NO explicit defaults (new committee roles) are
+        // covered by widgetListFor's role-scan fallback via the updated
+        // roleGate — no defaults entry needed.
+        Object.keys(WORKSPACE_DEFAULTS).forEach(function (role) {
+          if (role === '*') return;
+          var list = WORKSPACE_DEFAULTS[role];
+          var at = list.indexOf(type);
+          if (granted.indexOf(role) === -1) {
+            if (at !== -1) list.splice(at, 1);
+          } else if (at === -1) {
+            var todoAt = list.indexOf('todos');
+            list.splice(todoAt === -1 ? 0 : todoAt + 1, 0, type);
+          }
+        });
+      });
+    });
+
+    refreshReportsRoleGate();
+    if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+  }
+
+  // Ensure `item` ({key,title}) appears in map[role] for every granted
+  // role and nowhere else. Preserves each list's existing ordering for
+  // rows that stay.
+  function reconcileRoleRows(map, item, granted) {
+    Object.keys(map).forEach(function (role) {
+      var list = map[role];
+      for (var i = list.length - 1; i >= 0; i--) {
+        if (list[i].key === item.key && granted.indexOf(role) === -1) list.splice(i, 1);
+      }
+    });
+    granted.forEach(function (role) {
+      if (!map[role]) map[role] = [];
+      var has = map[role].some(function (r) { return r.key === item.key; });
+      if (!has) map[role].push({ key: item.key, title: item.title });
+    });
+  }
+
+  var CAPABILITY_GRANTS_CACHE_KEY = 'rw_capability_grants';
+
+  function loadCapabilityGrants() {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    // Cached copy applies instantly (no card flicker on reload); the
+    // fetch refreshes in the background.
+    try {
+      var cached = JSON.parse(localStorage.getItem(CAPABILITY_GRANTS_CACHE_KEY) || 'null');
+      if (cached && typeof cached === 'object') {
+        CAPABILITY_GRANTS = cached;
+        applyGrantsToWorkspace();
+      }
+    } catch (e) { /* stale cache — ignore */ }
+    fetch('/api/cleaning?action=capabilities', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !data.grants) return;
+        CAPABILITY_GRANTS = data.grants;
+        try { localStorage.setItem(CAPABILITY_GRANTS_CACHE_KEY, JSON.stringify(data.grants)); } catch (e) { /* full */ }
+        applyGrantsToWorkspace();
+      })
+      .catch(function () { /* offline — legacy defaults keep working */ });
+  }
 
   // Resolve the ordered widget list for a user: union of defaults for each
   // role they hold, plus the universal '*' defaults, preserving first-seen
@@ -10988,12 +11155,12 @@
   };
 
   function participationCanWrite() {
-    // VP, Afternoon Class Liaison, or super user (communications@) — backend
-    // re-checks. The super-user shortcut lets communications@ act for the report.
+    // Follows the 'participation_edit' grant (defaults: VP + Afternoon
+    // Class Liaison) — backend re-checks. The super-user shortcut lets
+    // communications@ act for the report.
     if (isCommsUser()) return true;
     if (isVP()) return true;
-    return (typeof getWorkspaceRoles === 'function') &&
-      getWorkspaceRoles().indexOf('Afternoon Class Liaison') !== -1;
+    return clientHasCapability('participation_edit', ['Vice President', 'Afternoon Class Liaison']);
   }
 
   function showParticipationReportModal() {
@@ -11990,13 +12157,12 @@
     // while impersonating via View As.
     var realEmail = localStorage.getItem('rw_user_email');
     if (isSuperUserEmail(realEmail)) return true;
-    // Roles-UI path: committee assignment via Org & Roles (role_holders_v2)
-    // — the same source that gates the workspace "Supply Closet" card and
-    // that the server's canEditAsRole checks on write. Without this, a
+    // Grant path (defaults: Supply Coordinator): committee assignment via
+    // Org & Roles (role_holders_v2) — the same source the server's
+    // 'supply_closet_edit' capability checks on write. Without this, a
     // coordinator assigned in the Roles UI (no legacy sheet row) would see
     // the card but open the closet read-only.
-    if (typeof getWorkspaceRoles === 'function' &&
-        getWorkspaceRoles().indexOf('Supply Coordinator') !== -1) return true;
+    if (clientHasCapability('supply_closet_edit', ['Supply Coordinator'])) return true;
     // Legacy fallback: last-name match against the Volunteer Committees
     // sheet data (pre-Roles-UI assignments).
     var email = getActiveEmail();
@@ -14727,6 +14893,7 @@
     else if (action === 'roles-manager' && typeof showRolesManagerModal === 'function') {
       showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
     }
+    else if (action === 'permissions-admin' && typeof showPermissionsAdminModal === 'function') showPermissionsAdminModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {
       // Session dates live inline on the Admin Calendar now — the To Do
@@ -17570,6 +17737,200 @@
         } else if (action === 'cleaning') {
           showCleaningManagementModal();
         }
+      });
+    });
+  }
+
+  // ══════════════════════════════════════════════
+  // Permissions admin (Comms — Admin Consoles card)
+  // ══════════════════════════════════════════════
+  // One CRUD table for "which roles can use which feature" (Erin,
+  // 2026-07-09). Rows come from the server registry (api/_capabilities.js)
+  // grouped by area; each shows the granted roles as removable chips plus
+  // an add-role picker. Zero-config default = today's behavior; a
+  // customized row gets a badge + "Reset to default". Structural rules
+  // (super users, board mailboxes, chairs' own committees, group
+  // liaisons) display read-only at the bottom so the whole story is on
+  // one screen. Server gate: Comms Director / super only.
+  var _permAdminState = { capabilities: [], lockedRules: [], roleOptions: [], loaded: false };
+
+  function showPermissionsAdminModal() {
+    var body = renderReportModal({
+      title: 'Permissions',
+      subtitle: 'Who can use which feature. Changes apply immediately for everyone; each feature starts on its built-in default until you customize it.',
+      meta: '',
+      icons: [],
+      bodyId: 'perm-admin-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading permissions…</p>'
+    });
+    if (!body) return;
+    loadPermissionsAdmin();
+  }
+
+  function loadPermissionsAdmin() {
+    var body = document.getElementById('perm-admin-body');
+    if (!body) return;
+    fetch('/api/cleaning?action=permissions', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtmlWs((res.data && res.data.error) || 'Could not load permissions.') + '</p>';
+          return;
+        }
+        _permAdminState.capabilities = res.data.capabilities || [];
+        _permAdminState.lockedRules = res.data.lockedRules || [];
+        _permAdminState.roleOptions = res.data.roleOptions || [];
+        _permAdminState.loaded = true;
+        renderPermissionsAdmin();
+      })
+      .catch(function () {
+        body.innerHTML = '<p class="ws-empty">Could not load permissions — check your connection and reopen.</p>';
+      });
+  }
+
+  function renderPermissionsAdmin() {
+    var body = document.getElementById('perm-admin-body');
+    if (!body) return;
+    var caps = _permAdminState.capabilities;
+    var h = '<p class="ws-body-hint">Super users (communications@, vicepresident@) always have full access — these settings govern everyone else, by role.</p>';
+    var lastArea = null;
+    caps.forEach(function (cap) {
+      if (cap.area !== lastArea) {
+        lastArea = cap.area;
+        h += '<h4 class="roles-mgr-se-head">' + escapeHtmlWs(cap.area) + '</h4>';
+      }
+      h += '<div class="perm-row" data-cap="' + escapeHtmlWs(cap.key) + '">';
+      h += '<div class="perm-head"><span class="perm-label">' + escapeHtmlWs(cap.label) + '</span>';
+      if (cap.custom) h += '<span class="perm-custom-badge">customized</span>';
+      h += '</div>';
+      if (cap.desc) h += '<p class="perm-desc">' + escapeHtmlWs(cap.desc) + '</p>';
+      h += '<div class="perm-chips">';
+      cap.roles.forEach(function (t) {
+        h += '<span class="perm-chip">' + escapeHtmlWs(t)
+          + '<button type="button" class="perm-chip-x" data-role="' + escapeHtmlWs(t) + '" aria-label="Remove ' + escapeHtmlWs(t) + '">&times;</button></span>';
+      });
+      if (cap.roles.length === 0) {
+        h += '<span class="perm-none">No roles — super users only</span>';
+      }
+      // Picker offers every active role not already granted, plus the
+      // defaults (so e.g. "Vice President" is offered even if the roles
+      // table spells it "Vice-President").
+      var offered = [];
+      _permAdminState.roleOptions.concat(cap.defaultRoles).forEach(function (t) {
+        if (offered.indexOf(t) === -1 && cap.roles.indexOf(t) === -1) offered.push(t);
+      });
+      offered.sort();
+      h += '<select class="perm-add"><option value="">+ Add role…</option>';
+      offered.forEach(function (t) { h += '<option value="' + escapeHtmlWs(t) + '">' + escapeHtmlWs(t) + '</option>'; });
+      h += '</select>';
+      if (cap.custom) h += '<button type="button" class="perm-reset">Reset to default</button>';
+      h += '</div>';
+      h += '<span class="perm-status" aria-live="polite"></span>';
+      h += '</div>';
+    });
+    if (_permAdminState.lockedRules.length) {
+      h += '<h4 class="roles-mgr-se-head">🔒 Fixed rules</h4>';
+      h += '<p class="ws-body-hint">Built into the system — shown here so the whole permission story is in one place.</p>';
+      _permAdminState.lockedRules.forEach(function (rule) {
+        h += '<div class="perm-row perm-row-locked">';
+        h += '<div class="perm-head"><span class="perm-label">🔒 ' + escapeHtmlWs(rule.label) + '</span></div>';
+        h += '<p class="perm-desc">' + escapeHtmlWs(rule.desc) + '</p>';
+        h += '</div>';
+      });
+    }
+    body.innerHTML = h;
+    wirePermissionsAdmin(body);
+  }
+
+  function permCapByKey(key) {
+    return _permAdminState.capabilities.filter(function (c) { return c.key === key; })[0] || null;
+  }
+
+  // POST the new grant set for one capability, then sync the local grant
+  // cache so the workspace re-renders with the change straight away.
+  function permSaveRoles(row, cap, roles) {
+    var statusEl = row.querySelector('.perm-status');
+    row.classList.add('perm-saving');
+    fetch('/api/cleaning?action=permissions', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+      body: JSON.stringify({ capability_key: cap.key, roles: roles })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        row.classList.remove('perm-saving');
+        if (!res.ok) {
+          if (statusEl) { statusEl.className = 'perm-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; }
+          renderPermissionsAdmin(); // revert the optimistic chips
+          return;
+        }
+        cap.roles = res.data.roles || roles;
+        cap.custom = true;
+        permSyncGrantCache(cap.key, cap.roles);
+        renderPermissionsAdmin();
+        var freshRow = document.querySelector('.perm-row[data-cap="' + cap.key + '"] .perm-status');
+        if (freshRow) { freshRow.className = 'perm-status ws-wv-ok'; freshRow.textContent = 'Saved ✓'; }
+      })
+      .catch(function () {
+        row.classList.remove('perm-saving');
+        if (statusEl) { statusEl.className = 'perm-status ws-wv-err'; statusEl.textContent = 'Network error'; }
+        renderPermissionsAdmin();
+      });
+  }
+
+  function permSyncGrantCache(key, roles) {
+    if (!CAPABILITY_GRANTS) CAPABILITY_GRANTS = {};
+    CAPABILITY_GRANTS[key] = roles.slice();
+    try { localStorage.setItem(CAPABILITY_GRANTS_CACHE_KEY, JSON.stringify(CAPABILITY_GRANTS)); } catch (e) { /* full */ }
+    applyGrantsToWorkspace();
+  }
+
+  function wirePermissionsAdmin(body) {
+    body.querySelectorAll('.perm-row[data-cap]').forEach(function (row) {
+      var cap = permCapByKey(row.getAttribute('data-cap'));
+      if (!cap) return;
+
+      row.querySelectorAll('.perm-chip-x').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var role = this.getAttribute('data-role');
+          var next = cap.roles.filter(function (t) { return t !== role; });
+          if (next.length === 0 && !confirm('Remove the last role? Only super users will be able to use "' + cap.label + '" until you add a role back.')) {
+            return;
+          }
+          permSaveRoles(row, cap, next);
+        });
+      });
+
+      var add = row.querySelector('.perm-add');
+      if (add) add.addEventListener('change', function () {
+        var role = this.value;
+        if (!role) return;
+        if (cap.roles.indexOf(role) !== -1) { this.value = ''; return; }
+        permSaveRoles(row, cap, cap.roles.concat([role]));
+      });
+
+      var reset = row.querySelector('.perm-reset');
+      if (reset) reset.addEventListener('click', function () {
+        fetch('/api/cleaning?action=permissions&key=' + encodeURIComponent(cap.key), {
+          method: 'DELETE',
+          headers: rwAuthHeaders()
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              var st = row.querySelector('.perm-status');
+              if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Reset failed'; }
+              return;
+            }
+            cap.roles = res.data.roles || cap.defaultRoles.slice();
+            cap.custom = false;
+            permSyncGrantCache(cap.key, cap.roles);
+            renderPermissionsAdmin();
+          })
+          .catch(function () {
+            var st = row.querySelector('.perm-status');
+            if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = 'Network error'; }
+          });
       });
     });
   }

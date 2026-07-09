@@ -16,6 +16,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { Resend } = require('./_resend');
 const { ALLOWED_ORIGINS, emailSubject } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImpersonate } = require('./_permissions');
+const { hasCapability } = require('./_capabilities');
 const { resolveFamily, canActAs } = require('./_family');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -438,8 +439,10 @@ const LIAISON_GROUPS = ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples',
 async function reviewerScope(email) {
   if (!email) return null;
   if (isSuperUser(email)) return { all: true };
-  if (await canEditAsRole(email, 'Vice President')) return { all: true };
-  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return { all: true };
+  // 'class_review' capability — defaults to VP + Afternoon Class Liaison;
+  // editable in the Permissions admin table. The per-group liaison path
+  // below is structural and stays fixed.
+  if (await hasCapability(email, 'class_review')) return { all: true };
   // Role titled "<Group> Liaison" (also accepts the older "<Group>
   // Morning Class Liaison" / "<Group> Class Liaison" spellings; singular
   // or plural group word) scopes the holder to that age group's morning

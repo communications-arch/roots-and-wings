@@ -9,6 +9,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { sendToUser } = require('./_push');
 const { canEditAsRole } = require('./_permissions');
+const { hasCapability } = require('./_capabilities');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -27,10 +28,10 @@ async function verifyGoogleAuth(req) {
   } catch (e) { return null; }
 }
 
-// VP is resolved from the volunteer sheet ("Chair: Vice President - <name>"),
-// so Colleen's personal @rootsandwingsindy.com login authorizes automatically
-// — no env var update needed when the role changes hands.
-function isVP(email) { return canEditAsRole(email, 'Vice President'); }
+// Routed through the 'coverage_admin' capability (defaults to the VP;
+// Permissions-table editable). The holder's personal login authorizes
+// automatically via role_holders_v2 — the function name predates the table.
+function isVP(email) { return hasCapability(email, 'coverage_admin'); }
 
 function getSql() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');

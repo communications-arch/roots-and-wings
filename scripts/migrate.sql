@@ -1421,3 +1421,19 @@ WHERE t.role_key LIKE '%_morning_class_liaison'
   AND (t.overview = g.overview OR t.overview LIKE 'Builds the %' OR t.overview = '')
   AND (t.duties = g.duties OR COALESCE(array_length(t.duties, 1), 0) = 0)
   AND (t.overview <> '' OR COALESCE(array_length(t.duties, 1), 0) > 0 OR t.playbook <> '');
+
+
+-- 2026-07-09 (Erin): Permissions admin — feature access per role, editable
+-- by the Comms Director. Zero rows for a capability = the hardcoded
+-- defaults in api/_capabilities.js apply (seeded behavior unchanged);
+-- any rows = that row set IS the granted role list. The reserved
+-- role_title '__none__' marks a capability customized down to no roles
+-- (super users always pass everything regardless).
+CREATE TABLE IF NOT EXISTS capability_grants (
+  id SERIAL PRIMARY KEY,
+  capability_key TEXT NOT NULL,
+  role_title TEXT NOT NULL,
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (capability_key, role_title)
+);

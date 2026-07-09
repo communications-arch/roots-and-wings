@@ -24,6 +24,10 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
+const {
+  CAPABILITIES, LOCKED_RULES, NONE_SENTINEL,
+  capabilityRoles, hasCapability, invalidateGrantsCache
+} = require('./_capabilities');
 
 // Editing a role_descriptions row is gated by which bucket of fields
 // you're touching. Meta = title / hierarchy / lifecycle, reserved for
@@ -105,7 +109,9 @@ const VALID_STATUSES = ['active', 'archived'];
 // edits scoped to the role you're effectively acting as.
 async function canEditRoleMeta(userEmail) {
   if (!userEmail) return false;
-  return await canEditAsRole(userEmail, 'President');
+  // 'roles_structure' capability — defaults to the President; editable
+  // in the Permissions admin table.
+  return await hasCapability(userEmail, 'roles_structure');
 }
 
 // Walks up parent_role_id (max depth 5 — really 3 in practice) on the
@@ -143,12 +149,14 @@ async function canEditRoleHolders(userEmail, sql, roleId) {
   const row = await sql`SELECT category FROM roles WHERE id = ${roleId}`;
   const category = row[0] && row[0].category;
   if (category === 'board') {
-    return await canEditAsRole(userEmail, 'Communications Director');
+    // 'board_roles_assign' — defaults to Comms (she owns the Workspace
+    // mailbox setup those seats are tied to); Permissions-table editable.
+    return await hasCapability(userEmail, 'board_roles_assign');
   }
-  // The VP can assign ANY committee/volunteer role, not just her own
-  // subtree (Erin 2026-07-07). Board seats stay Comms-managed above —
-  // they're tied to Google Workspace accounts.
-  if (await canEditAsRole(userEmail, 'Vice President')) return true;
+  // 'committee_roles_assign' — defaults to the VP (Erin 2026-07-07: VP
+  // assigns ANY committee/volunteer role, not just her own subtree).
+  // The parent-chain rule below is structural and always applies.
+  if (await hasCapability(userEmail, 'committee_roles_assign')) return true;
   return await canEditRoleContent(userEmail, sql, roleId);
 }
 
@@ -224,7 +232,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'permissions' && action !== 'capabilities') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -285,6 +293,99 @@ module.exports = async function handler(req, res) {
         assignments,
         sessions
       });
+    }
+
+    // ── Capabilities (effective grants, any member) ──
+    // Lightweight map the client fetches at load so workspace cards /
+    // report rows / edit affordances follow the SAME grants the server
+    // enforces. Titles only — descriptions live in the admin GET below.
+    if (action === 'capabilities') {
+      if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+      const grants = {};
+      for (const cap of CAPABILITIES) {
+        grants[cap.key] = await capabilityRoles(cap.key);
+      }
+      return res.status(200).json({ grants });
+    }
+
+    // ── Permissions admin (Comms Director + super user) ──
+    // The CRUD table behind Workspace → Admin Consoles → Permissions.
+    // GET returns the full registry (labels, descriptions, defaults,
+    // effective roles, locked structural rules) + the role-title picker
+    // options. POST replaces one capability's grant set; DELETE resets
+    // it to the registry default.
+    if (action === 'permissions') {
+      const isPermAdmin = isSuperUser(user.email)
+        || await canEditAsRole(user.email, 'Communications Director');
+      if (!isPermAdmin) {
+        return res.status(403).json({ error: 'Only the Communications Director can manage permissions.' });
+      }
+
+      if (req.method === 'GET') {
+        const [grantRows, roleRows] = await Promise.all([
+          sql`SELECT capability_key, role_title, created_by, created_at
+              FROM capability_grants ORDER BY capability_key, role_title`,
+          sql`SELECT DISTINCT title FROM roles WHERE status = 'active' ORDER BY title`
+        ]);
+        const byKey = {};
+        grantRows.forEach(r => {
+          (byKey[r.capability_key] || (byKey[r.capability_key] = [])).push(r.role_title);
+        });
+        const capabilities = CAPABILITIES.map(c => {
+          const custom = Array.isArray(byKey[c.key]) && byKey[c.key].length > 0;
+          const roles = custom
+            ? byKey[c.key].filter(t => t !== NONE_SENTINEL)
+            : c.defaultRoles.slice();
+          return {
+            key: c.key, area: c.area, label: c.label, desc: c.desc,
+            defaultRoles: c.defaultRoles, roles, custom
+          };
+        });
+        return res.status(200).json({
+          capabilities,
+          lockedRules: LOCKED_RULES,
+          roleOptions: roleRows.map(r => r.title)
+        });
+      }
+
+      if (req.method === 'POST') {
+        const body = req.body || {};
+        const key = String(body.capability_key || '').trim();
+        const cap = CAPABILITIES.filter(c => c.key === key)[0];
+        if (!cap) return res.status(400).json({ error: 'Unknown capability.' });
+        if (!Array.isArray(body.roles)) return res.status(400).json({ error: 'roles must be an array of role titles.' });
+        const titles = [];
+        for (const t of body.roles) {
+          const title = String(t || '').trim().slice(0, 120);
+          if (!title || title === NONE_SENTINEL) continue;
+          if (titles.indexOf(title) === -1) titles.push(title);
+        }
+        // Store the set verbatim. Matching the registry default exactly
+        // still stores rows (an explicit choice) — Reset (DELETE) is how
+        // a capability returns to tracking the default.
+        await sql`DELETE FROM capability_grants WHERE capability_key = ${key}`;
+        const toInsert = titles.length > 0 ? titles : [NONE_SENTINEL];
+        for (const title of toInsert) {
+          await sql`
+            INSERT INTO capability_grants (capability_key, role_title, created_by)
+            VALUES (${key}, ${title}, ${realUser.email})
+            ON CONFLICT (capability_key, role_title) DO NOTHING
+          `;
+        }
+        invalidateGrantsCache();
+        return res.status(200).json({ key, roles: titles, custom: true });
+      }
+
+      if (req.method === 'DELETE') {
+        const key = String(req.query.key || '').trim();
+        const cap = CAPABILITIES.filter(c => c.key === key)[0];
+        if (!cap) return res.status(400).json({ error: 'Unknown capability.' });
+        await sql`DELETE FROM capability_grants WHERE capability_key = ${key}`;
+        invalidateGrantsCache();
+        return res.status(200).json({ key, roles: cap.defaultRoles, custom: false });
+      }
+
+      return res.status(405).json({ error: 'Method not allowed' });
     }
 
     // ── Roles (v2) ──
@@ -683,9 +784,9 @@ module.exports = async function handler(req, res) {
       // through the UI.
       async function canManageCoopSessions(email) {
         if (!email) return false;
-        if (await canEditAsRole(email, 'President')) return true;
-        if (await canEditAsRole(email, 'Vice-President')) return true;
-        return false;
+        // 'session_dates_edit' — defaults to President + VP; editable in
+        // the Permissions admin table.
+        return await hasCapability(email, 'session_dates_edit');
       }
       function isReadOnlyYear(schoolYear) {
         // String compare works because "YYYY-YYYY" sorts chronologically.
@@ -798,7 +899,8 @@ module.exports = async function handler(req, res) {
         `;
         return res.status(200).json({ confirmations: rows });
       }
-      const canConfirm = await canEditAsRole(user.email, 'Communications Director');
+      // 'board_confirm' — defaults to Comms; Permissions-table editable.
+      const canConfirm = await hasCapability(user.email, 'board_confirm');
       if (!canConfirm) {
         return res.status(403).json({ error: 'Only the Communications Director can confirm role holders.' });
       }

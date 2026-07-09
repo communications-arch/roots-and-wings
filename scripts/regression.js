@@ -228,6 +228,7 @@ const unitTests = [
   'scripts/test-participation-settings.js',
   'scripts/test-welcome-lifecycle.js',
   'scripts/test-volunteer-assignments.js',
+  'scripts/test-capabilities.js',
 ];
 
 for (const rel of unitTests) {

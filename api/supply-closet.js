@@ -17,6 +17,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail } = require('./_permissions');
+const { hasCapability } = require('./_capabilities');
 const { sendToUser } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -67,7 +68,9 @@ module.exports = async function handler(req, res) {
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
   if (req.method !== 'GET' && req.method !== 'OPTIONS' && !isMemberFlag) {
-    const allowed = await canEditAsRole(user.email, 'Supply Coordinator');
+    // 'supply_closet_edit' — defaults to the Supply Coordinator; editable
+    // in the Permissions admin table.
+    const allowed = await hasCapability(user.email, 'supply_closet_edit');
     if (!allowed) {
       return res.status(403).json({ error: 'Only the Supply Coordinator can modify the supply closet.' });
     }

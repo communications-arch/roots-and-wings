@@ -15,6 +15,7 @@ const { put } = require('@vercel/blob');
 const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
+const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
 
@@ -1000,10 +1001,9 @@ async function handleList(req, res) {
   // of those roles, auth.email is the effective email so the gate
   // matches the role they're acting as. realEmail is preserved for
   // audit + the youAre field below.
-  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
-  const isComms      = !isMembership && await canEditAsRole(auth.email, 'Communications Director');
-  const isTreasurer  = !isMembership && !isComms && await canEditAsRole(auth.email, 'Treasurer');
-  const viewerCanAct = isMembership || isComms || isTreasurer;
+  // 'membership_report_act' — defaults to Membership + Comms + Treasurer;
+  // Permissions-table editable. Board-wide READ below stays structural.
+  const viewerCanAct = await hasCapability(auth.email, 'membership_report_act');
   // The full Membership Report is board-only (Erin, 2026-07-03). Committee
   // roles like Welcome Coordinator (not a voted board seat) no longer get it —
   // they use the all-members community snapshot (?community=1) instead. The
@@ -1432,7 +1432,7 @@ async function handleRegistrationDecline(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const canDecline = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Membership Director');
+    await hasCapability(auth.email, 'registration_decline');
   if (!canDecline) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
@@ -1587,7 +1587,7 @@ async function handleRegistrationMarkPaid(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const canMark = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Treasurer');
+    await hasCapability(auth.email, 'registration_mark_paid');
   if (!canMark) {
     const expected = await getRoleHolderEmail('Treasurer');
     return res.status(403).json({
@@ -1638,7 +1638,7 @@ async function handleOnboardingStep(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const isComms = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Communications Director');
+    await hasCapability(auth.email, 'member_onboarding');
   if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
@@ -1683,7 +1683,7 @@ async function handleOnboardingDismiss(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const isComms = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Communications Director');
+    await hasCapability(auth.email, 'member_onboarding');
   if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
@@ -1730,7 +1730,7 @@ async function handleSendWelcomeEmail(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const isComms = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Communications Director');
+    await hasCapability(auth.email, 'member_onboarding');
   if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
@@ -1788,7 +1788,7 @@ async function handleWaiversCounts(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   const isComms = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Communications Director');
+    await hasCapability(auth.email, 'waivers_manage');
   if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
@@ -1825,7 +1825,7 @@ async function handleWaiversReport(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   const isComms = isSuperUser(auth.email) ||
-    await canEditAsRole(auth.email, 'Communications Director');
+    await hasCapability(auth.email, 'waivers_manage');
   if (!isComms) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
@@ -1954,7 +1954,7 @@ async function handleWaiversReport(req, res) {
 async function handleWaiverSend(body, req, res) {
   const user = await verifyWorkspaceAuth(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  if (!(await canEditAsRole(user.email, 'Communications Director'))) {
+  if (!(await hasCapability(user.email, 'waivers_manage'))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can send one-off waivers.',
@@ -2035,7 +2035,7 @@ async function handleWaiverSend(body, req, res) {
 async function handleWaiverResend(body, req, res) {
   const user = await verifyWorkspaceAuth(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  if (!(await canEditAsRole(user.email, 'Communications Director'))) {
+  if (!(await hasCapability(user.email, 'waivers_manage'))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can resend waivers.',
@@ -2127,9 +2127,8 @@ async function handleWaiverResend(body, req, res) {
 async function handleRegistrationInvite(body, req, res) {
   const user = await verifyWorkspaceAuth(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  const isMembership = await canEditAsRole(user.email, 'Membership Director');
-  const isComms = !isMembership && await canEditAsRole(user.email, 'Communications Director');
-  if (!isMembership && !isComms) {
+  const canInvite = await hasCapability(user.email, 'registration_invite');
+  if (!canInvite) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership or Communications Director can send registration links.',
@@ -3045,7 +3044,7 @@ async function handleTourList(req, res) {
   // impersonated target (the role holder) so the gate matches; on prod
   // only canImpersonate() super users may do this. auth.realEmail is
   // preserved for the youAre field.
-  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
+  const isMembership = await hasCapability(auth.email, 'tours_view');
   if (!isMembership) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
@@ -3089,7 +3088,7 @@ async function handleTourUpdate(body, req, res) {
   // View-As-aware role gate (see handleTourList). The action itself is
   // still attributed to the real signed-in person via auth.realEmail in
   // updated_by + the status-history `by` field below.
-  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
+  const isMembership = await hasCapability(auth.email, 'tours_manage');
   if (!isMembership) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
@@ -3222,8 +3221,9 @@ async function handleTourUpdate(body, req, res) {
 // canEditAsRole automatically.
 async function canManageMerch(email) {
   if (!email) return false;
-  return (await canEditAsRole(email, 'Communications Director'))
-      || (await canEditAsRole(email, 'Merchandise Manager'));
+  // 'merch_manage' — defaults to Comms (parent role) + Merchandise
+  // Manager; editable in the Permissions admin table.
+  return await hasCapability(email, 'merch_manage');
 }
 
 async function handleMerchOrder(body, res) {
@@ -3652,7 +3652,7 @@ function morningGateOpen(schoolYear) {
 async function requireMembershipDirector(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-  const ok = await canEditAsRole(auth.email, 'Membership Director');
+  const ok = await hasCapability(auth.email, 'morning_builder_place');
   if (!ok) {
     const expected = await getRoleHolderEmail('Membership Director');
     res.status(403).json({
@@ -3673,9 +3673,12 @@ async function requireMembershipDirector(req, res) {
 async function morningBuilderAccess(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-  const isMembership = await canEditAsRole(auth.email, 'Membership Director');
-  const isVP = !isMembership && await canEditAsRole(auth.email, 'Vice President');
-  if (!isMembership && !isVP) {
+  // 'morning_builder' opens the builder; 'morning_builder_place' also
+  // unlocks kid placement + seed. Both Permissions-table editable
+  // (defaults: view = Membership + VP; place = Membership only).
+  const canPlace = await hasCapability(auth.email, 'morning_builder_place');
+  const canView = canPlace || await hasCapability(auth.email, 'morning_builder');
+  if (!canView) {
     const expected = await getRoleHolderEmail('Membership Director');
     res.status(403).json({
       error: 'Only the Membership Director or Vice President can use the Morning Class Builder.',
@@ -3684,7 +3687,7 @@ async function morningBuilderAccess(req, res) {
     });
     return null;
   }
-  auth.canPlaceKids = isMembership; // VP: teaching only
+  auth.canPlaceKids = canPlace; // default: VP sees teaching only
   return auth;
 }
 
@@ -4055,8 +4058,9 @@ const SPECIAL_EVENT_SEED = [
 async function requireSpecialEventsEditor(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-  const ok = (await canEditAsRole(auth.email, 'Special Events Liaison'))
-    || (await canEditAsRole(auth.email, 'Vice President'));
+  // 'special_events_manage' — defaults to SEL + VP; Permissions-table
+  // editable.
+  const ok = await hasCapability(auth.email, 'special_events_manage');
   if (!ok) {
     res.status(403).json({
       error: 'Only the Special Events Liaison or Vice President can manage special events.',
@@ -4426,9 +4430,11 @@ async function handleBoardCalendarGet(req, res) {
   // SEL/VP gate (requireSpecialEventsEditor).
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-  const isSEL = await canEditAsRole(auth.email, 'Special Events Liaison');
+  // isSEL follows the 'special_events_manage' grant so anyone granted
+  // event management can also READ the calendar their dates live on.
+  const isSEL = await hasCapability(auth.email, 'special_events_manage');
   const canRead = await isBoardMember(auth.email) ||
-    await canEditAsRole(auth.email, 'Welcome Coordinator') || isSEL;
+    await hasCapability(auth.email, 'welcome_manage') || isSEL;
   if (!canRead) {
     return res.status(403).json({
       error: 'Only board members, the Welcome Coordinator, and the Special Events Liaison can view the calendar.',
@@ -4513,8 +4519,9 @@ async function handleBoardCalendarGet(req, res) {
       // ones added via "+ Add event" can.
       seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
     }));
-    const viewerCanEditSpecialEvents = isSEL ||
-      await canEditAsRole(auth.email, 'Vice President');
+    // isSEL already IS the 'special_events_manage' capability check
+    // (defaults include the VP), so no separate VP branch needed.
+    const viewerCanEditSpecialEvents = isSEL;
 
     return res.status(200).json({
       events,
@@ -4606,16 +4613,17 @@ async function handleBoardCalendarDelete(body, req, res) {
 // the welcome_outreach table. Deliberately independent of the Comms
 // Director's onboarding queue so the two roles don't step on each other.
 
-// Read access: Welcome Coordinator, any board member, or a super user.
+// Read access: Welcome Coordinator (via the 'welcome_manage' grant), any
+// board member, or a super user.
 async function canViewWelcomeList(email) {
   if (isSuperUser(email)) return true;
-  if (await canEditAsRole(email, 'Welcome Coordinator')) return true;
+  if (await hasCapability(email, 'welcome_manage')) return true;
   return isBoardMember(email);
 }
-// Write access (mark/un-mark welcomed): Welcome Coordinator or super user.
+// Write access (mark/un-mark welcomed): 'welcome_manage' grant or super user.
 async function canActWelcomeList(email) {
   if (isSuperUser(email)) return true;
-  return canEditAsRole(email, 'Welcome Coordinator');
+  return hasCapability(email, 'welcome_manage');
 }
 
 // GET ?welcome=1[&season=YYYY-YYYY] — new families + welcomed status.

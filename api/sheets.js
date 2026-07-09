@@ -3,6 +3,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser, canImpersonate } = require('./_permissions');
+const { hasCapability } = require('./_capabilities');
 const { resolveFamily } = require('./_family');
 
 function getDb() {
@@ -1428,22 +1429,19 @@ async function applyMemberProfileOverlay(families) {
 // Coverage Given is reported separately without a weight so the "assigned
 // responsibility" score can't be gamed by swapping slots.
 
+// Both gates route through the Permissions admin table (capabilities
+// 'participation_view' / 'participation_edit', defaults VP + Afternoon
+// Class Liaison). Super user keeps its longstanding shortcut here.
 async function participationCanRead(email) {
   if (!email) return false;
   if (isSuperUser(email)) return true;
-  if (await canEditAsRole(email, 'Vice President')) return true;
-  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
-  return false;
+  return await hasCapability(email, 'participation_view');
 }
 
 async function participationCanWrite(email) {
   if (!email) return false;
   if (isSuperUser(email)) return true;
-  if (await canEditAsRole(email, 'Vice President')) return true;
-  // Afternoon Class Liaison (the "Afternoon Coordinator") reviews + edits
-  // participation points alongside the VP.
-  if (await canEditAsRole(email, 'Afternoon Class Liaison')) return true;
-  return false;
+  return await hasCapability(email, 'participation_edit');
 }
 
 function participationNormName(s) {
