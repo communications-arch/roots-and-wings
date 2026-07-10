@@ -6742,6 +6742,13 @@
           // VP already has on this card — no separate special-events row.
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
         }
+        // Facilities — rooms admin lives HERE, not inside the Class
+        // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).
+        // Capability-gated (facilities_manage; defaults Pres/VP/ACL).
+        if (typeof clientHasCapability === 'function'
+            && clientHasCapability('facilities_manage', ['President', 'Vice President', 'Afternoon Class Liaison'])) {
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">🏫</span>Facilities — Rooms</button></li>';
+        }
         h += '</ul>';
         return h;
       },
@@ -22932,8 +22939,6 @@
     // with who's in them. Saves immediately (independent of Save below).
     var canAssignRoom = typeof clientHasCapability === 'function'
       && clientHasCapability('room_assign', ['President', 'Vice President', 'Afternoon Class Liaison']);
-    var canManageRooms = typeof clientHasCapability === 'function'
-      && clientHasCapability('facilities_manage', ['President', 'Vice President', 'Afternoon Class Liaison']);
     html += '<div class="cls-field"><label class="cls-label">Room</label>';
     if (canAssignRoom && !locked) {
       var activeRooms = (scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active'; });
@@ -22953,8 +22958,9 @@
       }
       html += '</select>';
       html += ' <span class="perm-status" id="sbEditRoomStatus" aria-live="polite"></span>';
-      if (activeRooms.length === 0) html += '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">No rooms defined yet' + (canManageRooms ? ' — add them via Manage rooms below.' : ' — ask a Facilities manager to add them.') + '</div>';
-      if (canManageRooms) html += '<button type="button" class="ws-inline-link" id="sbEditManageRooms">Manage rooms…</button>';
+      // Rooms are MANAGED from Co-op Management → Facilities, not here
+      // (Erin, 2026-07-10) — the builder just selects them.
+      if (activeRooms.length === 0) html += '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">No rooms defined yet — add them under Co-op Management → Facilities.</div>';
     } else {
       html += '<div>' + (sub.scheduled_room ? escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">—</span>') + '</div>';
     }
@@ -23036,11 +23042,6 @@
           if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = 'Network error'; }
           roomSel.value = String(sub.scheduled_room || '');
         });
-    });
-    var manageRoomsBtn = document.getElementById('sbEditManageRooms');
-    if (manageRoomsBtn) manageRoomsBtn.addEventListener('click', function () {
-      close(); // the report modal renders under this overlay otherwise
-      if (typeof showFacilitiesAdminModal === 'function') showFacilitiesAdminModal();
     });
 
     function currentForm() {
