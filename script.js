@@ -4672,6 +4672,13 @@
       h += '</div>';
       // Right-aligned actions area
       h += '<div class="mf-duty-actions">';
+      // Leading a class → build its lesson plan (2026-07-11, Erin). The
+      // duty text is "<Class> — Leading"; the button opens the Curriculum
+      // Library editor prefilled with that class.
+      if (isTeacher && /—\s*Leading$/.test(String(d.text || ''))) {
+        var planName = String(d.text).replace(/\s*—\s*Leading$/, '');
+        h += '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (d.block === 'AM' ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
+      }
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
         h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -5023,8 +5030,18 @@
         // Don't trigger detail if Manage button, Cancel button, or info button was clicked
         if (e.target.closest('.mf-manage-btn')) return;
         if (e.target.closest('.mf-duty-cancel-cover')) return;
+        if (e.target.closest('.mf-duty-plan')) return;
         var idx = parseInt(this.getAttribute('data-duty-idx'), 10);
         if (duties[idx]) showDutyDetail(duties[idx]);
+      });
+    });
+
+    // 📖 Plan on Leading duties → Curriculum editor prefilled (2026-07-11).
+    grid.querySelectorAll('.mf-duty-plan').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (typeof startLessonPlanForClass !== 'function') return;
+        startLessonPlanForClass(this.getAttribute('data-plan-name') || '', '', this.getAttribute('data-plan-block') || '');
       });
     });
 
