@@ -21407,15 +21407,17 @@
     }
 
     // Open blocks for PM1 and PM2 — classes get dropped in and sort by age
-    // (youngest first). 'both' (2-hour) classes appear in the PM1 column with
-    // a "Both hours" badge, since they start at PM1 and occupy PM2 implicitly.
+    // (youngest first). 'both' (2-hour) classes appear in BOTH columns with
+    // a "Both" badge — one class occupying the whole afternoon (Erin,
+    // 2026-07-10: a class submitted for both PM hours must be placeable —
+    // and readable — in both).
     function sortByAgeThenName(a, b) {
       var ax = minAgeOrder(a.age_groups), bx = minAgeOrder(b.age_groups);
       if (ax !== bx) return ax - bx;
       return String(a.class_name || '').localeCompare(String(b.class_name || ''));
     }
     var pm1List = classesInSession.filter(function (c) { return c.scheduled_hour === 'PM1' || c.scheduled_hour === 'both'; });
-    var pm2List = classesInSession.filter(function (c) { return c.scheduled_hour === 'PM2'; });
+    var pm2List = classesInSession.filter(function (c) { return c.scheduled_hour === 'PM2' || c.scheduled_hour === 'both'; });
     pm1List.sort(sortByAgeThenName);
     pm2List.sort(sortByAgeThenName);
 
@@ -22002,8 +22004,16 @@
         return;
       }
     } else {
+      // Teacher asked for both PM hours: 'kids commit to both' always spans;
+      // 'kids can take one or both' offers the span, falling back to just
+      // the hour the class was dropped on.
       scheduledHour = hour;
-      if ((sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+      var pmPrefs = sub.hour_preference || [];
+      if (pmPrefs.indexOf('2hr-required') !== -1) scheduledHour = 'both';
+      else if (pmPrefs.indexOf('2hr-optional') !== -1
+        && confirm('“' + sub.class_name + '” was submitted for both PM hours (kids can take one or both).\n\nOK = place it in BOTH hours\nCancel = just ' + (hour === 'PM1' ? 'Hour 1' : 'Hour 2'))) {
+        scheduledHour = 'both';
+      }
     }
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     patchReviewAction(subId, {
@@ -22379,7 +22389,14 @@
             return;
           }
         }
-        if (!isAmPick && sub && (sub.hour_preference || []).indexOf('2hr-required') !== -1) scheduledHour = 'both';
+        if (!isAmPick && sub) {
+          var pmPickPrefs = sub.hour_preference || [];
+          if (pmPickPrefs.indexOf('2hr-required') !== -1) scheduledHour = 'both';
+          else if (pmPickPrefs.indexOf('2hr-optional') !== -1
+            && confirm('“' + sub.class_name + '” was submitted for both PM hours (kids can take one or both).\n\nOK = place it in BOTH hours\nCancel = just ' + (hour === 'PM1' ? 'Hour 1' : 'Hour 2'))) {
+            scheduledHour = 'both';
+          }
+        }
         btn.disabled = true; btn.textContent = 'Assigning…';
         patchReviewAction(subId, {
           status: 'scheduled',
@@ -22466,7 +22483,7 @@
     // be one 2-hour class or two 1-hour classes); afternoon keeps PM1/PM2/both.
     var hourChoices = isAmSub
       ? [['AM', 'Both hours (10:00–12:00)'], ['AM1', 'Hour 1 (10:00–10:55)'], ['AM2', 'Hour 2 (11:00–11:55)']]
-      : [['PM1', 'PM1'], ['PM2', 'PM2'], ['both', 'both']];
+      : [['PM1', 'Hour 1 (1:00–1:55)'], ['PM2', 'Hour 2 (2:00–2:55)'], ['both', 'Both hours (1:00–2:55)']];
     var curHour = sub.scheduled_hour || (isAmSub ? 'AM' : '');
     var hourOptions = hourChoices.map(function (h) {
       return '<option value="' + h[0] + '"' + (curHour === h[0] ? ' selected' : '') + '>' + h[1] + '</option>';
