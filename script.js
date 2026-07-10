@@ -22314,6 +22314,17 @@
       return '<option value="' + n + '"' + (n === sess ? ' selected' : '') + '>Session ' + n + '</option>';
     }).join('');
     html += '<div class="cls-field"><label class="cls-label">Session</label><select class="cl-input" id="sbNewSess">' + sessOpts + '</select></div>';
+
+    // Helpers / assistants right in the create form (Erin, 2026-07-10) —
+    // same member-datalist pattern as the class editor; they save onto the
+    // class immediately after it's created.
+    html += '<div class="cls-field"><label class="cls-label">Helpers / assistants (optional)</label>';
+    html += '<div id="sbNewHelperList">';
+    html += '<input type="text" class="cl-input sbNewHelper" maxlength="120" list="sbNewTeacherList" value="" placeholder="Helper name…">';
+    html += '</div>';
+    html += '<button type="button" class="ws-inline-link" id="sbNewAddHelper">+ add another helper</button>';
+    html += '</div>';
+
     html += '<div class="cls-field"><label class="cls-cb-label"><input type="checkbox" id="sbNewPlace" checked> Place into the schedule now (unchecked = goes to the inbox)</label></div>';
 
     html += '<div class="cls-field"><label class="cls-label">Description</label>';
@@ -22330,6 +22341,11 @@
     document.getElementById('sbNewCloseBtn').addEventListener('click', close);
     document.getElementById('sbNewCancelBtn').addEventListener('click', close);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var newAddHelper = document.getElementById('sbNewAddHelper');
+    if (newAddHelper) newAddHelper.addEventListener('click', function () {
+      document.getElementById('sbNewHelperList').insertAdjacentHTML('beforeend',
+        '<input type="text" class="cl-input sbNewHelper" maxlength="120" list="sbNewTeacherList" value="" placeholder="Helper name…">');
+    });
 
     document.getElementById('sbNewSaveBtn').addEventListener('click', function () {
       var errEl = document.getElementById('sbNewError');
@@ -22368,6 +22384,18 @@
         }
       }
 
+      // Helpers → {email,name}; resolve email when the typed name matches
+      // a member (same resolution as the class editor).
+      var helperNameMap = {};
+      (scheduleBuilderState.members || []).forEach(function (mm) { helperNameMap[String(mm.name || '').toLowerCase()] = mm; });
+      var newHelpers = [];
+      overlay.querySelectorAll('.sbNewHelper').forEach(function (inp) {
+        var v = String(inp.value || '').trim();
+        if (!v) return;
+        var mm = helperNameMap[v.toLowerCase()];
+        newHelpers.push(mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v });
+      });
+
       // Teacher name → member email when it matches; otherwise name-only.
       var match = (scheduleBuilderState.members || []).filter(function (m) {
         return String(m.name || '').toLowerCase() === teacher.toLowerCase();
@@ -22401,15 +22429,32 @@
       }).then(function (res) {
         if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not add the class.');
         var created = res.data && res.data.submission;
-        if (!placeNow || !created) return null;
-        return patchReviewAction(created.id, {
-          status: 'scheduled',
-          scheduled_session: sessSel,
-          scheduled_hour: hourSel,
-          scheduled_age_range: prettyAgesClient(ageGroups, '') || '',
-          scheduled_room: '',
-          reviewer_notes: ''
-        });
+        if (!created) return null;
+        if (placeNow) {
+          return patchReviewAction(created.id, {
+            status: 'scheduled',
+            scheduled_session: sessSel,
+            scheduled_hour: hourSel,
+            scheduled_age_range: prettyAgesClient(ageGroups, '') || '',
+            scheduled_room: '',
+            reviewer_notes: '',
+            helpers: newHelpers
+          });
+        }
+        // Inbox path: still attach any helpers entered (status stays
+        // 'submitted'; the PATCH just replaces the helper roster).
+        if (newHelpers.length) {
+          return patchReviewAction(created.id, {
+            status: 'submitted',
+            scheduled_session: null,
+            scheduled_hour: null,
+            scheduled_age_range: '',
+            scheduled_room: '',
+            reviewer_notes: '',
+            helpers: newHelpers
+          });
+        }
+        return null;
       }).then(function () {
         close();
         loadScheduleBuilder();

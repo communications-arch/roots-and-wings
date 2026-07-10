@@ -501,6 +501,14 @@ async function reviewerScopeReq(user, req) {
   }
   return await reviewerScope(realEmail);
 }
+// The email whose permissions applied to this request — the View-As
+// target when impersonating, else the real login. For error messages.
+function actingEmailFor(user, req) {
+  const realEmail = (user && user.email) || '';
+  const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
+  if (va && (va.split('@')[1] || '') === ALLOWED_DOMAIN && canImpersonate(realEmail)) return va;
+  return realEmail;
+}
 async function isReviewerReq(user, req) {
   return !!(await reviewerScopeReq(user, req));
 }
@@ -1315,12 +1323,12 @@ module.exports = async function handler(req, res) {
         if (!id) return res.status(400).json({ error: 'id query param required' });
         const rvScope = await reviewerScopeReq(user, req);
         if (!rvScope) {
-          return res.status(403).json({ error: 'Reviewer access only' });
+          return res.status(403).json({ error: 'Reviewer access only. (You are acting as ' + actingEmailFor(user, req) + '.)' });
         }
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         if (!scopeAllowsSub(rvScope, existing[0])) {
-          return res.status(403).json({ error: 'Your liaison role covers a different age group — this class isn’t yours to schedule.' });
+          return res.status(403).json({ error: 'Your liaison role covers a different age group — this class isn’t yours to schedule. (You are acting as ' + actingEmailFor(user, req) + (rvScope.all ? '' : ' — ' + rvScope.groups.join('/') + ' only') + '.)' });
         }
         if (existing[0].status === 'withdrawn') {
           return res.status(409).json({ error: 'Submission was withdrawn by the submitter; contact them before rescheduling.' });
@@ -1478,7 +1486,11 @@ module.exports = async function handler(req, res) {
         const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
         const delScope = await reviewerScopeReq(user, req);
         const isReviewer = !!(delScope && scopeAllowsSub(delScope, row));
-        if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can remove this submission.' });
+        if (!isOwner && !isReviewer) {
+          // Name the acting identity — View-As testers kept hitting this
+          // when the impersonation had reset between actions (2026-07-10).
+          return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can remove this submission. (You are acting as ' + actingEmailFor(user, req) + (delScope && !delScope.all ? ' — ' + delScope.groups.join('/') + ' only' : '') + '.)' });
+        }
         if (isReviewer) {
           // Reviewer "Delete Class": hard-delete from the system entirely.
           // Cascades wipe any class_signup_picks referencing this submission.
