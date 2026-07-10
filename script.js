@@ -17759,7 +17759,10 @@
       title: 'Permissions',
       subtitle: 'Who can use which feature. Changes apply immediately for everyone; each feature starts on its built-in default until you customize it.',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Print',      icon: ICON_SVG.print,    aria: 'Print the permissions list',           action: function () { printPermissionsReport(); } },
+        { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the permissions list as CSV', action: function () { exportPermissionsCSV(); } }
+      ],
       bodyId: 'perm-admin-body',
       bodyPlaceholder: '<p class="ws-empty">Loading permissions…</p>'
     });
@@ -17933,6 +17936,73 @@
           });
       });
     });
+  }
+
+  // One CSV row per feature — roles joined with "; " so the sheet stays
+  // one-line-per-feature like the on-screen table. Fixed rules ride along
+  // at the bottom so the export tells the whole permission story too.
+  function exportPermissionsCSV() {
+    if (!_permAdminState.loaded) return;
+    var headers = ['Area', 'Feature', 'Description', 'Roles', 'Setting'];
+    function esc(v) {
+      var s = String(v == null ? '' : v);
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    var lines = [headers.join(',')];
+    _permAdminState.capabilities.forEach(function (cap) {
+      lines.push([
+        esc(cap.area), esc(cap.label), esc(cap.desc || ''),
+        esc(cap.roles.length ? cap.roles.join('; ') : 'Super users only'),
+        esc(cap.custom ? 'Customized' : 'Default')
+      ].join(','));
+    });
+    _permAdminState.lockedRules.forEach(function (rule) {
+      lines.push([esc('Fixed rules'), esc(rule.label), esc(rule.desc || ''), esc('Built-in'), esc('Locked')].join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'permissions-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function printPermissionsReport() {
+    if (!_permAdminState.loaded) return;
+    var caps = _permAdminState.capabilities;
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Permissions</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}th.area{background:#ece4d6;font-size:12px;text-transform:none;letter-spacing:0;}span.desc{color:#666;font-size:11px;}</style>';
+    doc += '</head><body>';
+    doc += '<h1>Permissions</h1>';
+    doc += '<p class="meta">Who can use which feature · super users (communications@, vicepresident@) always have full access · printed ' + new Date().toLocaleDateString() + '</p>';
+    doc += '<table><thead><tr><th style="width:40%;">Feature</th><th>Roles</th><th style="width:12%;">Setting</th></tr></thead><tbody>';
+    var lastArea = null;
+    caps.forEach(function (cap) {
+      if (cap.area !== lastArea) {
+        lastArea = cap.area;
+        doc += '<tr><th class="area" colspan="3">' + escapeHtmlWs(cap.area) + '</th></tr>';
+      }
+      doc += '<tr>';
+      doc += '<td><strong>' + escapeHtmlWs(cap.label) + '</strong>' + (cap.desc ? '<br><span class="desc">' + escapeHtmlWs(cap.desc) + '</span>' : '') + '</td>';
+      doc += '<td>' + (cap.roles.length ? escapeHtmlWs(cap.roles.join(', ')) : '<em>Super users only</em>') + '</td>';
+      doc += '<td>' + (cap.custom ? 'Customized' : 'Default') + '</td>';
+      doc += '</tr>';
+    });
+    if (_permAdminState.lockedRules.length) {
+      doc += '<tr><th class="area" colspan="3">🔒 Fixed rules (built into the system)</th></tr>';
+      _permAdminState.lockedRules.forEach(function (rule) {
+        doc += '<tr>';
+        doc += '<td><strong>' + escapeHtmlWs(rule.label) + '</strong>' + (rule.desc ? '<br><span class="desc">' + escapeHtmlWs(rule.desc) + '</span>' : '') + '</td>';
+        doc += '<td><em>Built-in</em></td><td>Locked</td>';
+        doc += '</tr>';
+      });
+    }
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
   }
 
   // ──────────────────────────────────────────────
