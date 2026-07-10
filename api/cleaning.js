@@ -317,7 +317,7 @@ module.exports = async function handler(req, res) {
     if (action === 'rooms') {
       if (req.method === 'GET') {
         const rows = await sql`
-          SELECT id, name, builder_note, details, sort_order, status
+          SELECT id, name, builder_note, details, sort_order, status, is_outdoor
           FROM rooms ORDER BY sort_order, LOWER(name)`;
         return res.status(200).json({ rooms: rows });
       }
@@ -345,8 +345,8 @@ module.exports = async function handler(req, res) {
           return res.status(200).json({ room: updated[0] });
         }
         const inserted = await sql`
-          INSERT INTO rooms (name, builder_note, details, sort_order, updated_by)
-          VALUES (${roomName}, ${note}, ${details}, ${sort}, ${realUser.email})
+          INSERT INTO rooms (name, builder_note, details, sort_order, is_outdoor, updated_by)
+          VALUES (${roomName}, ${note}, ${details}, ${sort}, ${!!b.is_outdoor}, ${realUser.email})
           RETURNING id, name, builder_note, details, sort_order, status, is_outdoor`;
         return res.status(201).json({ room: inserted[0] });
       }
