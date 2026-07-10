@@ -22010,10 +22010,18 @@
       });
     });
 
-    // Wire class-item clicks → edit / unschedule modal
+    // Wire class-item clicks. One editing surface (Erin, 2026-07-10):
+    // a placed tile opens the PREFILLED class submission form — same as
+    // the inbox cards — with the builder-only actions (helpers, send
+    // back, delete) appended at the bottom. Locked (approved-session)
+    // and out-of-scope tiles keep the read-only placement view.
     body.querySelectorAll('.sb-cell-class').forEach(function (el) {
       el.addEventListener('click', function () {
         var subId = parseInt(el.getAttribute('data-sub-id'), 10);
+        var tsub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+        var tLocked = !tsub || !sbCanTouchSub(tsub)
+          || (tsub.scheduled_session && sbIsSessionApproved(tsub.scheduled_session, tsub.class_period === 'AM' ? 'AM' : 'PM'));
+        if (!tLocked) { sbOpenPlacedClassForm(tsub); return; }
         showScheduleEntryEditor(subId);
       });
     });
@@ -22927,6 +22935,86 @@
     });
     if (other) parts.push(escClsHtml(other));
     return parts.join(', ');
+  }
+
+  // Placed-tile click → the PREFILLED class submission form (one editing
+  // surface, Erin 2026-07-10) with the builder-only bits appended into
+  // the same modal: helpers, Send back to Inbox, Delete Class. Placement
+  // itself (session/hour/room) is drag-driven in the grid.
+  function sbOpenPlacedClassForm(sub) {
+    showClassSubmissionModal(sub, { onSaved: loadScheduleBuilder });
+    var modal = document.querySelector('#classSubOverlay .cls-modal');
+    if (!modal) return;
+    var bar = document.createElement('div');
+    bar.className = 'cls-field';
+    bar.style.cssText = 'border-top:1px solid var(--color-border);margin-top:12px;padding-top:12px;';
+    var hHtml = '<label class="cls-label">Helpers / assistants</label><div id="sbFormHelperList">';
+    (Array.isArray(sub.helpers) ? sub.helpers : []).forEach(function (hp) {
+      hHtml += '<input type="text" class="cl-input sbFormHelper" maxlength="120" list="sbFormMemberList" value="' + escClsAttr(hp.name || hp.email || '') + '" placeholder="Helper name…">';
+    });
+    hHtml += '<input type="text" class="cl-input sbFormHelper" maxlength="120" list="sbFormMemberList" value="" placeholder="Helper name…">';
+    hHtml += '</div><datalist id="sbFormMemberList">';
+    (scheduleBuilderState.members || []).forEach(function (mm) { hHtml += '<option value="' + escClsAttr(mm.name) + '"></option>'; });
+    hHtml += '</datalist>';
+    hHtml += '<div class="cls-actions" style="justify-content:flex-start;flex-wrap:wrap;margin-top:8px;">';
+    hHtml += '<button type="button" class="sc-btn" id="sbFormSaveHelpers">Save helpers</button>';
+    hHtml += '<button type="button" class="sc-btn sc-btn-del" id="sbFormUnsched">Send back to Inbox</button>';
+    hHtml += '<button type="button" class="sc-btn sc-btn-del" id="sbFormDelete">Delete Class</button>';
+    hHtml += '<span class="perm-status" id="sbFormStatus" aria-live="polite"></span>';
+    hHtml += '</div>';
+    bar.innerHTML = hHtml;
+    modal.appendChild(bar);
+    function closeForm() {
+      var ov = document.getElementById('classSubOverlay');
+      if (ov) ov.remove();
+    }
+    function keepFields(status) {
+      return {
+        status: status,
+        scheduled_session: status === 'submitted' ? null : sub.scheduled_session,
+        scheduled_hour: status === 'submitted' ? null : sub.scheduled_hour,
+        scheduled_age_range: status === 'submitted' ? '' : (sub.scheduled_age_range || ''),
+        scheduled_room: status === 'submitted' ? '' : (sub.scheduled_room || ''),
+        reviewer_notes: sub.reviewer_notes || ''
+      };
+    }
+    document.getElementById('sbFormSaveHelpers').addEventListener('click', function () {
+      var nameMap = {};
+      (scheduleBuilderState.members || []).forEach(function (mm) { nameMap[String(mm.name || '').toLowerCase()] = mm; });
+      var helpers = [];
+      bar.querySelectorAll('.sbFormHelper').forEach(function (inp) {
+        var v = String(inp.value || '').trim();
+        if (!v) return;
+        var mm = nameMap[v.toLowerCase()];
+        helpers.push(mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v });
+      });
+      var st = document.getElementById('sbFormStatus');
+      var payload = keepFields(sub.status === 'drafted' ? 'drafted' : 'scheduled');
+      payload.helpers = helpers;
+      patchReviewAction(sub.id, payload)
+        .then(function () { if (st) { st.className = 'perm-status ws-wv-ok'; st.textContent = 'Helpers saved ✓'; } loadScheduleBuilder(); })
+        .catch(function (err) { if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = err.message || 'Could not save'; } });
+    });
+    document.getElementById('sbFormUnsched').addEventListener('click', function () {
+      patchReviewAction(sub.id, keepFields('submitted'))
+        .then(function () { closeForm(); loadScheduleBuilder(); })
+        .catch(function (err) { alert('Could not unschedule: ' + (err.message || 'error')); });
+    });
+    document.getElementById('sbFormDelete').addEventListener('click', function () {
+      if (!confirm('Delete this class entirely? This removes "' + (sub.class_name || '') + '" from the system. This cannot be undone.')) return;
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/curriculum?action=class-submission&id=' + sub.id + notifViewAsSuffix(), {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + cred }
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert((res.data && res.data.error) || 'Could not delete.'); return; }
+          publishedSchedule.loaded = false;
+          closeForm();
+          loadScheduleBuilder();
+        })
+        .catch(function (err) { alert(err.message || 'Could not delete.'); });
+    });
   }
 
   // Editor modal for a class already in the grid. Lets VP/PMA change hour,
