@@ -5351,9 +5351,10 @@
   // Published (approved) schedules from the Class Builder DB (2026-07-06):
   // once the VP approves a session's morning or afternoon side, any member
   // sees it here — replacing the Master-sheet session data.
-  var publishedSchedule = { loaded: false, loading: false, sessions: {} };
-  function loadPublishedSchedule() {
-    if (publishedSchedule.loading || publishedSchedule.loaded) return;
+  var publishedSchedule = { loaded: false, loading: false, fetchedAt: 0, sessions: {} };
+  function loadPublishedSchedule(force) {
+    if (publishedSchedule.loading) return;
+    if (publishedSchedule.loaded && !force) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     publishedSchedule.loading = true;
@@ -5366,6 +5367,7 @@
         if (!d) return;
         publishedSchedule.sessions = d.sessions || {};
         publishedSchedule.loaded = true;
+        publishedSchedule.fetchedAt = Date.now();
         renderSessionTab();
       })
       .catch(function () { publishedSchedule.loading = false; });
@@ -5375,7 +5377,12 @@
     var container = document.getElementById('sessionTabContent');
     if (!container) return;
 
+    // Cache-then-revalidate (2026-07-10, Erin: "the current session is not
+    // loading data") — paint from the snapshot, but refetch when it's over
+    // a minute old so builder changes land here without a full reload.
+    // Builder mutations also invalidate directly (patch/delete/assign-room).
     if (!publishedSchedule.loaded) loadPublishedSchedule();
+    else if (Date.now() - publishedSchedule.fetchedAt > 60000) loadPublishedSchedule(true);
     var dbSess = publishedSchedule.sessions[String(sessionTabView)] || null;
 
     // Summer-break: no current session to show. The pager + Session 5
@@ -22420,6 +22427,7 @@
       return r.json().then(function (d) { return { ok: r.ok, data: d }; });
     }).then(function (res) {
       if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not update approval.');
+      publishedSchedule.loaded = false; // approval publishes/unpublishes the PM side
       loadScheduleBuilder();
     }).catch(function (err) {
       alert(err.message || 'Could not update approval.');
@@ -23021,6 +23029,7 @@
           }
           sub.scheduled_room = (res.data && res.data.room) || '';
           if (st) { st.className = 'perm-status ws-wv-ok'; st.textContent = sub.scheduled_room ? 'Room saved ✓' : 'Room cleared ✓'; }
+          publishedSchedule.loaded = false; // room shows on the published schedule
           renderScheduleBuilder(); // refresh the 📍 chips behind the overlay
         })
         .catch(function () {
@@ -23112,6 +23121,7 @@
           errEl.style.display = '';
           return;
         }
+        publishedSchedule.loaded = false; // Co-op Coordination refetches
         close();
         loadScheduleBuilder();
       }).catch(function (err) {
@@ -23138,6 +23148,9 @@
     }).then(function (r) {
       return r.json().then(function (d) {
         if (!r.ok) throw new Error(d.error || 'Request failed (' + r.status + ')');
+        // Any schedule change makes Co-op Coordination's published
+        // snapshot stale — next Session-tab render refetches.
+        publishedSchedule.loaded = false;
         return d;
       });
     });
