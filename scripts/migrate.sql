@@ -1437,3 +1437,14 @@ CREATE TABLE IF NOT EXISTS capability_grants (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (capability_key, role_title)
 );
+
+
+-- 2026-07-10 (Erin): no morning programming is offered for the Greenhouse
+-- (0-2) age group - babies stay with their parents - so there is no
+-- Greenhouse Liaison job to fill. Archive the seeded role. (The liaison
+-- seed above is keyed on role_key and this row still exists, so archiving
+-- also stops it re-seeding.) Idempotent.
+UPDATE roles
+SET status = 'archived', updated_at = NOW(), updated_by = 'migration'
+WHERE role_key = 'greenhouse_morning_class_liaison'
+  AND status <> 'archived';
