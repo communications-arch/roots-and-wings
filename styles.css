@@ -8189,6 +8189,9 @@ button.staff-role:hover {
 }
 .perm-status { display: inline-block; margin-top: 6px; font-size: 0.76rem; }
 
+/* Schedule Builder morning cell heads: the group's liaison name(s). */
+.sb-cell-liaison { width: 100%; font-size: 0.72rem; color: var(--color-text-light); }
+
 .sb-overlay {
   position: fixed;
   inset: 0;
@@ -8264,6 +8267,7 @@ button.staff-role:hover {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap; /* liaison name line wraps below the label */
   font-size: 0.8rem;
   color: var(--color-text-light);
 }

@@ -1338,6 +1338,7 @@
         applyCoopSessionsData(data);
         updateCoopCalendarBadge();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
+        if (typeof loadLiaisonClassTodo === 'function') loadLiaisonClassTodo();
         // Re-render anything that reads SESSION_DATES / currentSession /
         // isSummerBreak so the spring-to-fall handoff happens
         // automatically without a page reload.
@@ -6845,6 +6846,15 @@
           var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
           h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
+        // Age-group Morning Class Liaisons ("Oaks Liaison", …): nag when a
+        // session is within 2 weeks of starting and their group has no
+        // placed morning class for it (Erin, 2026-07-10). Driven by
+        // loadLiaisonClassTodo; the id carries the group so the snapshot
+        // cache stays distinct if one person holds two groups.
+        var liaisonGrp = (typeof liaisonGroupOfRole === 'function') ? liaisonGroupOfRole(role) : '';
+        if (liaisonGrp) {
+          h += '<li id="ws-todo-liaison-' + liaisonGrp + '-item" data-liaison-group="' + liaisonGrp + '" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">🌅</span><span class="ws-todo-liaison-label">Set your group’s morning class</span></button></li>';
+        }
         h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
         h += '</ul>';
         // Welcome Coordinator: the "get connected" share block lives here on
@@ -6868,6 +6878,7 @@
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
+        if (typeof loadLiaisonClassTodo === 'function') loadLiaisonClassTodo();
         // Welcome Coordinator: per-stage counts on the To Do card + the
         // date-gated pre-co-op outreach nudge.
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
@@ -17124,15 +17135,15 @@
     members: [],       // [{name,email}] for the PM helper picker (Phase B2)
     loaded: false
   };
-  // Per-period approvals (2026-07-06): the Morning lens locks on
-  // am_approved_*; Afternoon keeps approved_* (which also gate sign-ups).
-  // Callers pass the period they're asking about; default = 'PM'.
+  // Session approvals gate the AFTERNOON side only (approve → lock →
+  // publish → sign-ups). The morning side has NO approval flow (Erin,
+  // 2026-07-10): liaisons place their group's class and it's simply live
+  // — so 'AM' always reads unapproved/unlocked here, which unlocks every
+  // AM call site (drag, editor, + Add) in one place.
   function sbApprovalFor(sess, period) {
+    if (period === 'AM') return null;
     var a = scheduleBuilderState.approvals[scheduleBuilderState.schoolYear + '|' + sess] || null;
     if (!a) return null;
-    if (period === 'AM') {
-      return a.am_approved_at ? { approved_at: a.am_approved_at, approved_by: a.am_approved_by || '' } : null;
-    }
     return a.approved_at ? { approved_at: a.approved_at, approved_by: a.approved_by || '' } : null;
   }
   function sbIsSessionApproved(sess, period) { return !!sbApprovalFor(sess, period); }
@@ -18767,6 +18778,79 @@
     _welcomeOutreachTodoState.visible = show;
     item.hidden = !show;
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  // ── Group-liaison morning-class nag ──────────────────────────────
+  // "<Group> Liaison" To Do: shows when a session is within 2 weeks of
+  // its start (through the session's end) and the group has no placed
+  // morning class for it (Erin, 2026-07-10). Click opens the Class
+  // Builder — scoped liaisons land on the Morning lens automatically.
+  // Same group-word matching as widgetListFor's liaison card rule.
+  function liaisonGroupOfRole(role) {
+    var m = /^(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+((morning\s+)?class\s+)?liaison$/i.exec(String(role || '').trim());
+    if (!m) return '';
+    var w = m[1].toLowerCase();
+    var gs = ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples', 'birch', 'willows', 'cedars', 'pigeons'];
+    for (var i = 0; i < gs.length; i++) {
+      if (w === gs[i] || w + 's' === gs[i] || w === gs[i] + 's') return gs[i];
+    }
+    return '';
+  }
+  function loadLiaisonClassTodo() {
+    var items = document.querySelectorAll('li[data-liaison-group]');
+    if (!items.length) return; // no group-liaison role section on this page
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    // Sessions currently in the nag window: 14 days before the start,
+    // through the session's end (a missing class mid-session still needs
+    // fixing). Date-only string compares — no Date() UTC backshift.
+    var windowSessions = (Array.isArray(_allCoopSessions) ? _allCoopSessions : [])
+      .filter(function (s) {
+        if (s.school_year !== ACTIVE_SESSION_YEAR || !s.start_date || !s.end_date) return false;
+        var start = String(s.start_date).slice(0, 10);
+        var end = String(s.end_date).slice(0, 10);
+        return today >= welcomeDaysBefore(start, 14) && today <= end;
+      })
+      .sort(function (a, b) { return Number(a.session_number) - Number(b.session_number); });
+    function hideAll() {
+      items.forEach(function (li) { li.hidden = true; });
+      if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+    }
+    if (windowSessions.length === 0) { hideAll(); return; }
+    fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) { hideAll(); return; } // e.g. 403 — not a reviewer
+        var subs = Array.isArray(data.submissions) ? data.submissions : [];
+        items.forEach(function (li) {
+          var grp = li.getAttribute('data-liaison-group');
+          // Earliest in-window session with no placed class for this group.
+          var missing = windowSessions.filter(function (sess) {
+            return !subs.some(function (s) {
+              return s.class_period === 'AM'
+                && s.school_year === ACTIVE_SESSION_YEAR
+                && Number(s.scheduled_session) === Number(sess.session_number)
+                && (s.status === 'scheduled' || s.status === 'drafted')
+                && String((s.age_groups || [])[0] || '').toLowerCase() === grp;
+            });
+          })[0];
+          li.hidden = !missing;
+          if (missing) {
+            var label = li.querySelector('.ws-todo-liaison-label');
+            var pretty = grp.charAt(0).toUpperCase() + grp.slice(1);
+            var startStr = String(missing.start_date).slice(0, 10);
+            if (label) {
+              label.textContent = 'No ' + pretty + ' morning class for Session ' + missing.session_number + ' yet'
+                + (today < startStr ? ' — starts ' + boardCalFmtDate(startStr) : '');
+            }
+          }
+        });
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { /* keep the snapshot state; next render retries */ });
   }
 
   // filter: 0 = To Welcome, 1 = Orientation, 2 = done, null/undefined = all.
@@ -21279,6 +21363,29 @@
     if (!cred) return;
     var body = document.getElementById('sbBody');
     if (body) body.innerHTML = '<em style="color:var(--color-text-light);">Loading submissions…</em>';
+    // Group-liaison names for the morning cell heads (Erin, 2026-07-10):
+    // resolve "<Group> Liaison" holders for the builder's year in parallel
+    // with the submissions. Failure just leaves the heads name-less.
+    fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(scheduleBuilderState.schoolYear), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var byGroup = {};
+        var byRoleId = {};
+        (roleDescriptions || []).forEach(function (role) {
+          if (role.status && role.status !== 'active') return;
+          var g = (typeof liaisonGroupOfRole === 'function') ? liaisonGroupOfRole(role.title) : '';
+          if (g) byRoleId[role.id] = g;
+        });
+        ((d && d.holders) || []).forEach(function (hd) {
+          var g = byRoleId[hd.role_id];
+          if (!g) return;
+          var nm = hd.person_name || hd.email || '';
+          if (nm && (byGroup[g] || (byGroup[g] = [])).indexOf(nm) === -1) byGroup[g].push(nm);
+        });
+        scheduleBuilderState.liaisonsByGroup = byGroup;
+        if (scheduleBuilderState.loaded) renderScheduleBuilder();
+      })
+      .catch(function () { /* heads render without names */ });
     fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
@@ -21343,34 +21450,34 @@
           && periodOf(s) === period;
     });
 
-    // Session workflow bar. "Approve Session" locks the grid for that session
-    // so accidental drag/drop, +Add, and class edits can't change a finalized
-    // schedule. While locked, the same button flips to "Reopen Session N for
-    // editing" and an Approved badge surfaces who locked it + when.
+    // Session workflow bar — AFTERNOON only. "Approve Session" locks the
+    // grid so accidental drag/drop, +Add, and class edits can't change a
+    // finalized schedule (and approval is what publishes the PM side +
+    // allows sign-ups). The MORNING side has no approval flow at all
+    // (Erin, 2026-07-10): liaisons place their group's class and it's
+    // simply live.
     var placedCount = classesInSession.length;
-    // Approval is per lens (2026-07-06): Morning locks independently of
-    // Afternoon — age-assigned morning classes carry no sign-up timing
-    // stakes, so the VP can finalize each side on its own clock.
-    var lensWord = period === 'AM' ? 'Morning' : 'Afternoon';
-    var approval = sbApprovalFor(sess, period);
+    var approval = period === 'PM' ? sbApprovalFor(sess, 'PM') : null;
     var isApproved = !!approval;
     // Group liaisons build their slots but don't flip session approval or
     // sign-up windows — those stay VP / Afternoon Class Liaison.
-    html += '<div class="sb-workflow sb-workflow-action-only">';
-    if (!sbScopeAll()) {
-      if (isApproved) html += '<span class="sb-approved-badge">✓ Session ' + sess + ' ' + lensWord + ' Approved</span>';
-    } else if (isApproved) {
-      var when = '';
-      try {
-        var d = new Date(approval.approved_at);
-        when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } catch (e) { /* ignore */ }
-      html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' ' + lensWord + ' Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
-      html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable ' + lensWord.toLowerCase() + ' editing for Session ' + sess + '.">Reopen Session ' + sess + ' ' + lensWord + '</button>';
-    } else {
-      html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock the ' + lensWord.toLowerCase() + ' side of Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + ' — ' + lensWord + '</button>';
+    if (period === 'PM') {
+      html += '<div class="sb-workflow sb-workflow-action-only">';
+      if (!sbScopeAll()) {
+        if (isApproved) html += '<span class="sb-approved-badge">✓ Session ' + sess + ' Afternoon Approved</span>';
+      } else if (isApproved) {
+        var when = '';
+        try {
+          var d = new Date(approval.approved_at);
+          when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        } catch (e) { /* ignore */ }
+        html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' Afternoon Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
+        html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable afternoon editing for Session ' + sess + '.">Reopen Session ' + sess + ' Afternoon</button>';
+      } else {
+        html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock the afternoon side of Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + ' — Afternoon</button>';
+      }
+      html += '</div>';
     }
-    html += '</div>';
 
     // Sign-ups panel — only meaningful once the session is approved. Lets the
     // VP / Afternoon Liaison set the window dates that drive when the parent
@@ -21436,7 +21543,15 @@
         : (count >= 3 ? '🟢' : count >= 1 ? '🟡' : '🔴');
       var amState = amFull ? 'filled' : count >= 1 ? (am1 ? 'hour 2 open' : 'hour 1 open') : 'open';
       var s = '<div class="sb-cell' + (isAmBlock ? ' sb-cell-am' : '') + '" data-hour="' + hour + '">';
-      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? amState : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span></div>';
+      s += '<div class="sb-cell-head"><span class="sb-cell-marker">' + marker + '</span><strong>' + label + '</strong><span class="sb-cell-count">' + (isAmBlock ? amState : (count + ' class' + (count === 1 ? '' : 'es'))) + '</span>';
+      // Morning heads carry the group's liaison name(s) so the VP can see
+      // who owns each slot without opening Roles (Erin, 2026-07-10).
+      if (isAmBlock) {
+        var cellGroup = (typeof liaisonGroupOfRole === 'function') ? liaisonGroupOfRole((String(hour).split(':')[1] || '') + ' Liaison') : '';
+        var lnames = (scheduleBuilderState.liaisonsByGroup || {})[cellGroup] || [];
+        s += '<span class="sb-cell-liaison">' + (lnames.length ? '🧭 ' + escClsHtml(lnames.join(', ')) : '<em>Liaison: open</em>') + '</span>';
+      }
+      s += '</div>';
       // Scoped liaisons only get "+ Add" on their own group's morning slot.
       var scopeOk = isAmBlock ? sbScopeAllowsGroup(String(hour).split(':')[1] || '') : sbScopeAll();
       if (!isApproved && !(isAmBlock && amFull) && scopeOk) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
@@ -21503,6 +21618,12 @@
         s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
         s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
         if (c.co_teachers) s += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
+        // Helpers assigned in the class editor show on the tile too, so
+        // coverage reads at a glance without opening every class (Erin,
+        // 2026-07-10).
+        var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
+          .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
+        if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
         s += '<div class="sb-pref-line">';
         s += '<span class="sb-pref-label">Pref:</span> ';
         s += prefSessChips;
@@ -21804,6 +21925,9 @@
     html += '<div><strong>Period:</strong> ' + (isAmSub ? '🌅 Morning' : '🌇 Afternoon') + '</div>';
     html += '<div><strong>Teacher:</strong> ' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (s.submitted_by_email && s.submitted_by_name ? ' <span class="sb-subdetail-dim">(' + escClsHtml(s.submitted_by_email) + ')</span>' : '') + '</div>';
     if (s.co_teachers) html += '<div><strong>Co-leader:</strong> ' + escClsHtml(s.co_teachers) + '</div>';
+    var detHelpers = (Array.isArray(s.helpers) ? s.helpers : [])
+      .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
+    if (detHelpers.length) html += '<div><strong>Helper' + (detHelpers.length === 1 ? '' : 's') + ':</strong> ' + escClsHtml(detHelpers.join(', ')) + '</div>';
     if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
     var amPref0 = (s.hour_preference || [])[0];
     var amPrefWord = amPref0 === 'first' ? '1st hour (10:00–10:55)' : amPref0 === 'last' ? '2nd hour (11:00–11:55)' : 'Both hours (10:00–12:00)';
@@ -22497,6 +22621,9 @@
     html += '<button class="detail-close" id="sbEditCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + escClsHtml(sub.class_name) + '</h3>';
     html += '<p class="cls-help" style="margin:0 0 0.75rem;">Submitted by ' + escClsHtml(sub.submitted_by_name || sub.submitted_by_email) + '</p>';
+    // The class description, right where the placement decisions happen
+    // (Erin, 2026-07-10) — editable via "Edit class details" below.
+    if (sub.description) html += '<p class="sb-subdetail-desc" style="margin:0 0 0.75rem;">' + escClsHtml(sub.description) + '</p>';
 
     if (locked) {
       html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Class Builder header to make changes.</div>';

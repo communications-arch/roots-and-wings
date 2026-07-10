@@ -1384,43 +1384,18 @@ WHERE t.role_key LIKE '%_morning_class_liaison'
   AND t.parent_role_id IS NULL;
 
 
--- 2026-07-07 (Erin): group the nine age-group liaison roles UNDER the
--- generic "Morning Class Liaison" role (restored to active as the group
--- heading + description holder, itself under the VP), and shorten their
--- titles to "<Group> Liaison". All idempotent.
-UPDATE roles
-SET status = 'active',
-    parent_role_id = COALESCE(parent_role_id,
-      (SELECT id FROM roles r2 WHERE LOWER(REPLACE(r2.title, '-', ' ')) = 'vice president' AND r2.category = 'board' LIMIT 1)),
-    updated_at = NOW(), updated_by = 'migration'
-WHERE LOWER(title) = 'morning class liaison'
-  AND (status <> 'active' OR parent_role_id IS NULL);
-
+-- 2026-07-07 (Erin): shorten the per-group titles to "<Group> Liaison".
+-- (The other 07-07 liaison blocks that lived here — restore the generic
+-- "Morning Class Liaison" as an active heading, re-parent the nine under
+-- it, and clear the per-group descriptions in its favor — were
+-- SUPERSEDED 2026-07-10: the generic role is retired entirely and the
+-- description lives on each group role. See the 2026-07-10 block at the
+-- end of this file.)
 UPDATE roles
 SET title = REPLACE(title, ' Morning Class Liaison', ' Liaison'),
     updated_at = NOW(), updated_by = 'migration'
 WHERE role_key LIKE '%_morning_class_liaison'
   AND title LIKE '% Morning Class Liaison';
-
-UPDATE roles t
-SET parent_role_id = g.id, updated_at = NOW(), updated_by = 'migration'
-FROM (SELECT id FROM roles WHERE LOWER(title) = 'morning class liaison' AND status = 'active' LIMIT 1) g
-WHERE t.role_key LIKE '%_morning_class_liaison'
-  AND t.parent_role_id IS DISTINCT FROM g.id;
-
-
--- 2026-07-07 (Erin): the per-group liaison roles carry NO description of
--- their own - the job description lives only on the Morning Class
--- Liaison heading. Clear the copied/seeded text; anything hand-written
--- since (not matching the generic's text or the seed placeholder) stays.
-UPDATE roles t
-SET overview = '', duties = '{}', playbook = '',
-    updated_at = NOW(), updated_by = 'migration'
-FROM (SELECT overview, duties, playbook FROM roles WHERE LOWER(title) = 'morning class liaison' LIMIT 1) g
-WHERE t.role_key LIKE '%_morning_class_liaison'
-  AND (t.overview = g.overview OR t.overview LIKE 'Builds the %' OR t.overview = '')
-  AND (t.duties = g.duties OR COALESCE(array_length(t.duties, 1), 0) = 0)
-  AND (t.overview <> '' OR COALESCE(array_length(t.duties, 1), 0) > 0 OR t.playbook <> '');
 
 
 -- 2026-07-09 (Erin): Permissions admin — feature access per role, editable
@@ -1447,4 +1422,43 @@ CREATE TABLE IF NOT EXISTS capability_grants (
 UPDATE roles
 SET status = 'archived', updated_at = NOW(), updated_by = 'migration'
 WHERE role_key = 'greenhouse_morning_class_liaison'
+  AND status <> 'archived';
+
+
+-- 2026-07-10 (Erin): retire the generic "Morning Class Liaison" heading
+-- role - only the age-specific "<Group> Liaison" roles should exist in
+-- Roles (a holder had been assigned to the heading, which is not a real
+-- job). Order matters: copy the heading's description down to any group
+-- liaison still blank, end any holders on the heading, re-parent the
+-- group liaisons directly under the VP, then archive the heading. All
+-- idempotent; every step no-ops if the heading is already gone.
+UPDATE roles t
+SET overview = g.overview, duties = g.duties, playbook = g.playbook,
+    updated_at = NOW(), updated_by = 'migration'
+FROM (SELECT overview, duties, playbook FROM roles
+      WHERE LOWER(title) = 'morning class liaison' LIMIT 1) g
+WHERE t.role_key LIKE '%_morning_class_liaison'
+  AND t.status = 'active'
+  AND COALESCE(t.overview, '') = ''
+  AND COALESCE(array_length(t.duties, 1), 0) = 0
+  AND COALESCE(t.playbook, '') = ''
+  AND (COALESCE(g.overview, '') <> '' OR COALESCE(array_length(g.duties, 1), 0) > 0 OR COALESCE(g.playbook, '') <> '');
+
+UPDATE role_holders_v2 h
+SET ended_at = NOW()
+FROM roles r
+WHERE r.id = h.role_id
+  AND LOWER(r.title) = 'morning class liaison'
+  AND h.ended_at IS NULL;
+
+UPDATE roles t
+SET parent_role_id = v.id, updated_at = NOW(), updated_by = 'migration'
+FROM (SELECT id FROM roles
+      WHERE LOWER(REPLACE(title, '-', ' ')) = 'vice president' AND category = 'board' LIMIT 1) v
+WHERE t.role_key LIKE '%_morning_class_liaison'
+  AND t.parent_role_id IN (SELECT id FROM roles WHERE LOWER(title) = 'morning class liaison');
+
+UPDATE roles
+SET status = 'archived', updated_at = NOW(), updated_by = 'migration'
+WHERE LOWER(title) = 'morning class liaison'
   AND status <> 'archived';

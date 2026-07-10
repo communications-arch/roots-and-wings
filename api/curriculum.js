@@ -804,7 +804,7 @@ module.exports = async function handler(req, res) {
         });
         const approved = {};
         approvalRows.forEach(r => {
-          approved[r.session_number] = { am: !!r.am_approved_at, pm: !!r.approved_at };
+          approved[r.session_number] = { pm: !!r.approved_at };
         });
         const sessions = {};
         function bucketFor(n) {
@@ -813,7 +813,10 @@ module.exports = async function handler(req, res) {
         classRows.forEach(r => {
           const ap = approved[r.scheduled_session];
           const isAM = r.class_period === 'AM';
-          if (!ap || (isAM ? !ap.am : !ap.pm)) return; // period not approved yet
+          // The MORNING side has no approval flow (Erin, 2026-07-10):
+          // a placed morning class is live immediately. Afternoon keeps
+          // the approve → publish → sign-ups gate.
+          if (!isAM && (!ap || !ap.pm)) return; // afternoon not approved yet
           const bucket = bucketFor(r.scheduled_session);
           const list = isAM ? (bucket.am || (bucket.am = [])) : (bucket.pm || (bucket.pm = []));
           list.push({
@@ -833,9 +836,10 @@ module.exports = async function handler(req, res) {
           });
         });
         approvalRows.forEach(r => {
-          if (!r.am_approved_at && !r.approved_at) return;
           const bucket = bucketFor(r.session_number);
-          if (r.am_approved_at && !bucket.am) bucket.am = [];
+          // Morning is always "published": [] = live but nothing placed
+          // yet, so the client renders the morning section either way.
+          if (!bucket.am) bucket.am = [];
           if (r.approved_at && !bucket.pm) bucket.pm = [];
         });
         return res.status(200).json({ school_year: year, sessions });
