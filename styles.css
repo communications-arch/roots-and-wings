@@ -8215,11 +8215,14 @@ button.staff-role:hover {
   font-style: italic;
   padding: 6px 2px;
 }
-/* Off-preference placement: coral outline + tint (not just the ⚠). */
+/* Off-preference placement: unmistakable red outline + pink fill —
+   the subtle tint blended into the builder background (Erin, 2026-07-10). */
 .sb-cell-class.sb-offpref {
-  border: 1px solid rgba(var(--color-coral-rgb), 0.65);
-  background: rgba(var(--color-coral-rgb), 0.08);
+  border: 2px solid #c0392b;
+  background: #fbe4e0;
+  box-shadow: 0 0 0 1px rgba(192, 57, 43, 0.25);
 }
+.sb-cell-class.sb-offpref .sb-pref-warn { color: #c0392b; font-weight: 700; }
 
 .sb-overlay {
   position: fixed;
