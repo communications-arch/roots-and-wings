@@ -22096,11 +22096,16 @@
       el.addEventListener('dragstart', sbDragStart);
       el.addEventListener('dragend', sbDragEnd);
     });
+    // Depth-counted highlight: dragging over child tiles/cards fires
+    // enter/leave pairs constantly — the counter stops the flicker
+    // (2026-07-11, Erin: dragging below an existing class was glitchy).
     body.querySelectorAll('.sb-cell').forEach(function (cell) {
-      cell.addEventListener('dragover', function (e) { e.preventDefault(); cell.classList.add('sb-cell-drop'); });
-      cell.addEventListener('dragleave', function () { cell.classList.remove('sb-cell-drop'); });
+      cell._dragDepth = 0;
+      cell.addEventListener('dragenter', function (e) { e.preventDefault(); cell._dragDepth++; cell.classList.add('sb-cell-drop'); });
+      cell.addEventListener('dragleave', function () { if (--cell._dragDepth <= 0) { cell._dragDepth = 0; cell.classList.remove('sb-cell-drop'); } });
+      cell.addEventListener('dragover', function (e) { e.preventDefault(); });
       cell.addEventListener('drop', function (e) {
-        e.preventDefault(); cell.classList.remove('sb-cell-drop');
+        e.preventDefault(); cell._dragDepth = 0; cell.classList.remove('sb-cell-drop');
         var id = (e.dataTransfer && parseInt(e.dataTransfer.getData('text/plain'), 10)) || _sbDragId;
         var cellHour = cell.getAttribute('data-hour');
         // PM columns: the open area = "no room" (dropping a roomed class
@@ -22109,9 +22114,12 @@
         if (id) assignDroppedSub(id, cellHour, String(cellHour).indexOf('AM') === 0 ? undefined : '');
       });
     });
-    // Room cards: drop a class ON a room to seat it there (PM only).
-    // stopPropagation keeps the parent cell's drop from also firing.
+    // Room cards: drop a class ON an AVAILABLE room to seat it there (PM
+    // only). Occupied cards are NOT drop targets — the drop falls through
+    // to the hour column instead of erroring, so dropping "below/on"
+    // another class still places the class in the hour.
     body.querySelectorAll('.sb-room-card').forEach(function (card) {
+      if (card.classList.contains('sb-room-occupied')) return;
       card.addEventListener('dragover', function (e) {
         e.preventDefault(); e.stopPropagation();
         card.classList.add('sb-room-drop');
