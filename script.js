@@ -6717,23 +6717,29 @@
       // api/cleaning.js are the real enforcement; the role-aware render
       // here just hides links the user can't act on.
       title: 'Co-op Management',
+      // Afternoon Class Liaison joins for the Facilities row only (Erin,
+      // 2026-07-10) — the board-facing rows below stay board-only.
       roleGate: [
         'President', 'Vice President', 'Treasurer', 'Secretary',
-        'Membership Director', 'Sustaining Director', 'Communications Director'
+        'Membership Director', 'Sustaining Director', 'Communications Director',
+        'Afternoon Class Liaison'
       ],
       render: function (prefs, roles, role) {
-        var h = '<p class="ws-body-hint">Manage role descriptions, terms, and current holders for your committee.</p>';
+        var isAclCard = role === 'Afternoon Class Liaison';
+        var h = '<p class="ws-body-hint">' + (isAclCard ? 'Co-op facilities for class scheduling.' : 'Manage role descriptions, terms, and current holders for your committee.') + '</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
-        // Board Calendar — any board member can view/edit the standalone
-        // date-driven events. Server gate (isBoardMember) is the real
-        // enforcement; shown to every board chair on this card.
-        // Session Dates merged into the Admin Calendar (⚙ drawer there,
-        // 2026-07-05) — the "Set up" nudge badge rides on this row now,
-        // only for the two roles that can actually set the dates.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar'
-          + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
-          + '</button></li>';
+        if (!isAclCard) {
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
+          // Board Calendar — any board member can view/edit the standalone
+          // date-driven events. Server gate (isBoardMember) is the real
+          // enforcement; shown to every board chair on this card.
+          // Session Dates merged into the Admin Calendar (⚙ drawer there,
+          // 2026-07-05) — the "Set up" nudge badge rides on this row now,
+          // only for the two roles that can actually set the dates.
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar'
+            + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
+            + '</button></li>';
+        }
         if (role === 'Vice President') {
           // VP consolidation (2026-07-05 workspace review): the Afternoon
           // Class Builder folds in here (the Submissions Report merged into
@@ -7176,7 +7182,7 @@
     'Secretary': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Sustaining Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
-    'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'roles', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
     'Supply Coordinator': ['todos', 'supply-closet-mgmt', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
@@ -21703,6 +21709,92 @@
     pm1List.sort(sortByAgeThenName);
     pm2List.sort(sortByAgeThenName);
 
+    // One placed-class tile — shared by the hour columns' loose list and
+    // the PM room cards (2026-07-10). showRoom controls the 📍 line
+    // (redundant inside a room card; morning tiles never show rooms —
+    // AM rooms are fixed for the year and managed off-builder).
+    function sbTileHtml(c, showRoom) {
+      // Scheduled age range can be a VP override (scheduled_age_range);
+      // fall back to the teacher's submitted age_groups when not set.
+      var schedAges = c.scheduled_age_range || prettyAgesClient(c.age_groups, c.age_groups_other);
+      var prefAges = prettyAgesClient(c.age_groups, c.age_groups_other);
+      // Preference summary: session prefs + hour pref. Used to flag
+      // mismatches at a glance so the VP can spot off-preference placements.
+      var prefSessChips = (c.session_preferences || []).map(function (x) {
+        if (x === 'flexible') return '<span class="sb-sess-chip sb-sess-flex">Flex</span>';
+        var match = parseInt(x, 10) === sess;
+        return '<span class="sb-sess-chip' + (match ? ' sb-sess-match' : '') + '">S' + escClsHtml(x) + '</span>';
+      }).join('');
+      if (!prefSessChips) prefSessChips = '<span class="sb-sess-chip sb-sess-none">any</span>';
+      var hourPrefShort = (c.hour_preference || []).map(function (h) {
+        if (c.class_period === 'AM') return h === 'first' ? 'Hr 1' : h === 'last' ? 'Hr 2' : 'Both';
+        if (h === 'first') return 'PM1';
+        if (h === 'last') return 'PM2';
+        if (h === 'flexible') return 'Either';
+        if (h === '2hr-required') return '2hr req';
+        if (h === '2hr-optional') return '2hr opt';
+        return h;
+      }).join(', ');
+      function hourMatches() {
+        if (c.class_period === 'AM') {
+          var ap = (c.hour_preference || [])[0] || 'both';
+          var ah = c.scheduled_hour || 'AM';
+          return ap === 'both' ? ah === 'AM' : ap === 'first' ? ah === 'AM1' : ah === 'AM2';
+        }
+        var prefs = c.hour_preference || [];
+        if (prefs.indexOf('flexible') !== -1) return true;
+        if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
+        if (c.scheduled_hour === 'both') return prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1;
+        if (c.scheduled_hour === 'PM1') return prefs.indexOf('first') !== -1;
+        if (c.scheduled_hour === 'PM2') return prefs.indexOf('last') !== -1;
+        return false;
+      }
+      function sessionMatches() {
+        var prefs = c.session_preferences || [];
+        if (!prefs.length) return true;
+        if (prefs.indexOf('flexible') !== -1) return true;
+        return prefs.indexOf(String(c.scheduled_session)) !== -1;
+      }
+      var sessOff = !sessionMatches();
+      var hourOff = !hourMatches();
+      var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
+
+      // Age groups shown as colored words. Placing a class auto-sets
+      // scheduled_age_range to the pretty age_groups string, so only treat
+      // it as a plain-text override when it actually DIFFERS from that —
+      // otherwise a moved class keeps its colored age range.
+      var agesWords = (c.scheduled_age_range && c.scheduled_age_range !== prefAges)
+        ? escClsHtml(c.scheduled_age_range)
+        : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
+      // Off-preference placements get a coral outline + tint, not just
+      // the small ⚠ (Erin, 2026-07-10: make it more visible).
+      var s = '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + ((sessOff || hourOff) ? ' sb-offpref' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
+      var topBadge = c.scheduled_hour === 'both' ? 'Both'
+        : c.scheduled_hour === 'AM1' ? 'Hour 1 · 10:00'
+        : c.scheduled_hour === 'AM2' ? 'Hour 2 · 11:00'
+        : (c.class_period === 'AM' ? 'Both hours' : '');
+      if (topBadge) s += '<div class="sb-class-top"><span class="sb-both-badge">' + topBadge + '</span></div>';
+      if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
+      s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
+      s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
+      if (c.co_teachers) s += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
+      // Helpers assigned in the class editor show on the tile too, so
+      // coverage reads at a glance without opening every class.
+      var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
+        .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
+      if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
+      if (showRoom && c.class_period !== 'AM' && c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + '</div>';
+      s += '<div class="sb-pref-line">';
+      s += '<span class="sb-pref-label">Pref:</span> ';
+      s += prefSessChips;
+      if (hourPrefShort) s += ' <span class="sb-pref-hour' + (hourOff ? ' sb-pref-off' : '') + '">' + escClsHtml(hourPrefShort) + '</span>';
+      if (prefAges && prefAges !== schedAges) s += ' <span class="sb-pref-ages">Ages: ' + escClsHtml(prefAges) + '</span>';
+      s += warnMark;
+      s += '</div>';
+      s += '</div>';
+      return s;
+    }
+
     function renderBlock(hour, label, list) {
       var count = list.length;
       // Morning group slots: the morning is covered by one 2-hour class OR
@@ -21730,83 +21822,26 @@
       // Scoped liaisons only get "+ Add" on their own group's morning slot.
       var scopeOk = isAmBlock ? sbScopeAllowsGroup(String(hour).split(':')[1] || '') : sbScopeAll();
       if (!isApproved && !(isAmBlock && amFull) && scopeOk) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
-      list.forEach(function (c) {
-        // Scheduled age range can be a VP override (scheduled_age_range);
-        // fall back to the teacher's submitted age_groups when not set.
-        var schedAges = c.scheduled_age_range || prettyAgesClient(c.age_groups, c.age_groups_other);
-        var prefAges = prettyAgesClient(c.age_groups, c.age_groups_other);
-        // Preference summary: session prefs + hour pref. Used to flag
-        // mismatches at a glance so the VP can spot off-preference placements.
-        var prefSessChips = (c.session_preferences || []).map(function (x) {
-          if (x === 'flexible') return '<span class="sb-sess-chip sb-sess-flex">Flex</span>';
-          var match = parseInt(x, 10) === sess;
-          return '<span class="sb-sess-chip' + (match ? ' sb-sess-match' : '') + '">S' + escClsHtml(x) + '</span>';
-        }).join('');
-        if (!prefSessChips) prefSessChips = '<span class="sb-sess-chip sb-sess-none">any</span>';
-        var hourPrefShort = (c.hour_preference || []).map(function (h) {
-          if (c.class_period === 'AM') return h === 'first' ? 'Hr 1' : h === 'last' ? 'Hr 2' : 'Both';
-          if (h === 'first') return 'PM1';
-          if (h === 'last') return 'PM2';
-          if (h === 'flexible') return 'Either';
-          if (h === '2hr-required') return '2hr req';
-          if (h === '2hr-optional') return '2hr opt';
-          return h;
-        }).join(', ');
-        function hourMatches() {
-          if (c.class_period === 'AM') {
-            var ap = (c.hour_preference || [])[0] || 'both';
-            var ah = c.scheduled_hour || 'AM';
-            return ap === 'both' ? ah === 'AM' : ap === 'first' ? ah === 'AM1' : ah === 'AM2';
-          }
-          var prefs = c.hour_preference || [];
-          if (prefs.indexOf('flexible') !== -1) return true;
-          if (prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1) return true;
-          if (c.scheduled_hour === 'both') return prefs.indexOf('2hr-required') !== -1 || prefs.indexOf('2hr-optional') !== -1;
-          if (c.scheduled_hour === 'PM1') return prefs.indexOf('first') !== -1;
-          if (c.scheduled_hour === 'PM2') return prefs.indexOf('last') !== -1;
-          return false;
-        }
-        function sessionMatches() {
-          var prefs = c.session_preferences || [];
-          if (!prefs.length) return true;
-          if (prefs.indexOf('flexible') !== -1) return true;
-          return prefs.indexOf(String(c.scheduled_session)) !== -1;
-        }
-        var sessOff = !sessionMatches();
-        var hourOff = !hourMatches();
-        var warnMark = (sessOff || hourOff) ? ' <span class="sb-pref-warn" title="Scheduled outside the teacher\'s preference">⚠</span>' : '';
-
-        // Age groups shown as colored words. Placing a class auto-sets
-        // scheduled_age_range to the pretty age_groups string, so only treat
-        // it as a plain-text override when it actually DIFFERS from that —
-        // otherwise a moved class keeps its colored age range.
-        var agesWords = (c.scheduled_age_range && c.scheduled_age_range !== prefAges)
-          ? escClsHtml(c.scheduled_age_range)
-          : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
-        s += '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
-        var topBadge = c.scheduled_hour === 'both' ? 'Both'
-          : c.scheduled_hour === 'AM1' ? 'Hour 1 · 10:00'
-          : c.scheduled_hour === 'AM2' ? 'Hour 2 · 11:00'
-          : (c.class_period === 'AM' ? 'Both hours' : '');
-        if (topBadge) s += '<div class="sb-class-top"><span class="sb-both-badge">' + topBadge + '</span></div>';
-        if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
-        s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
-        s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
-        if (c.co_teachers) s += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
-        // Helpers assigned in the class editor show on the tile too, so
-        // coverage reads at a glance without opening every class (Erin,
-        // 2026-07-10).
-        var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
-          .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
-        if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
-        if (c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + '</div>';
-        s += '<div class="sb-pref-line">';
-        s += '<span class="sb-pref-label">Pref:</span> ';
-        s += prefSessChips;
-        if (hourPrefShort) s += ' <span class="sb-pref-hour' + (hourOff ? ' sb-pref-off' : '') + '">' + escClsHtml(hourPrefShort) + '</span>';
-        if (prefAges && prefAges !== schedAges) s += ' <span class="sb-pref-ages">Ages: ' + escClsHtml(prefAges) + '</span>';
-        s += warnMark;
+      if (isAmBlock) {
+        list.forEach(function (c) { s += sbTileHtml(c, false); });
         s += '</div>';
+        return s;
+      }
+      // PM: rooms render as CARDS inside each hour column (Erin,
+      // 2026-07-10) — drag a class onto an available room to seat it
+      // there. The loose list above the rooms holds placed-but-unroomed
+      // classes (including ones whose room text isn't in the rooms DB).
+      var activeRooms = (scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active'; });
+      var roomNames = {};
+      activeRooms.forEach(function (r) { roomNames[String(r.name).toLowerCase()] = true; });
+      var loose = list.filter(function (c) { return !c.scheduled_room || !roomNames[String(c.scheduled_room).toLowerCase()]; });
+      loose.forEach(function (c) { s += sbTileHtml(c, true); });
+      activeRooms.forEach(function (r) {
+        var occ = list.filter(function (c) { return String(c.scheduled_room || '').toLowerCase() === String(r.name).toLowerCase(); })[0];
+        s += '<div class="sb-room-card' + (occ ? ' sb-room-occupied' : '') + '" data-hour="' + hour + '" data-room="' + escClsAttr(r.name) + '">';
+        s += '<div class="sb-room-head">📍 <strong>' + escClsHtml(r.name) + '</strong>' + (r.builder_note ? ' <span class="sb-room-note">' + escClsHtml(r.builder_note) + '</span>' : '') + '</div>';
+        if (occ) s += sbTileHtml(occ, false);
+        else s += '<div class="sb-room-empty">' + (isApproved ? '—' : 'Available — drag a class here') + '</div>';
         s += '</div>';
       });
       s += '</div>';
@@ -21893,6 +21928,14 @@
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
         if (s.co_teachers) paletteHtml += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(s.co_teachers) + '</div>';
+        // Room/space preferences from the teacher's submission, so the
+        // right room card is pickable without opening the class (Erin,
+        // 2026-07-10). PM only — morning classes have no space request.
+        if (s.class_period !== 'AM') {
+          var spaceParts = (s.space_request || []).map(function (v) { return SPACE_REQ_LABELS[v] || v; });
+          if (s.space_request_other) spaceParts.push(s.space_request_other);
+          if (spaceParts.length) paletteHtml += '<div class="sb-coleader">📍 Wants: ' + escClsHtml(spaceParts.join(', ')) + '</div>';
+        }
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
         paletteHtml += '</div>';
       });
@@ -21995,7 +22038,26 @@
       cell.addEventListener('drop', function (e) {
         e.preventDefault(); cell.classList.remove('sb-cell-drop');
         var id = (e.dataTransfer && parseInt(e.dataTransfer.getData('text/plain'), 10)) || _sbDragId;
-        if (id) assignDroppedSub(id, cell.getAttribute('data-hour'));
+        var cellHour = cell.getAttribute('data-hour');
+        // PM columns: the open area = "no room" (dropping a roomed class
+        // here un-assigns its room but keeps/sets the hour). Rooms are
+        // assigned by dropping onto a room card below (2026-07-10).
+        if (id) assignDroppedSub(id, cellHour, String(cellHour).indexOf('AM') === 0 ? undefined : '');
+      });
+    });
+    // Room cards: drop a class ON a room to seat it there (PM only).
+    // stopPropagation keeps the parent cell's drop from also firing.
+    body.querySelectorAll('.sb-room-card').forEach(function (card) {
+      card.addEventListener('dragover', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        card.classList.add('sb-room-drop');
+      });
+      card.addEventListener('dragleave', function () { card.classList.remove('sb-room-drop'); });
+      card.addEventListener('drop', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        card.classList.remove('sb-room-drop');
+        var id = (e.dataTransfer && parseInt(e.dataTransfer.getData('text/plain'), 10)) || _sbDragId;
+        if (id) assignDroppedSub(id, card.getAttribute('data-hour'), card.getAttribute('data-room') || '');
       });
     });
     var paletteEl = document.getElementById('sbPalette');
@@ -22028,16 +22090,15 @@
       el.addEventListener('click', function (e) {
         if (e.target.closest('.sb-palette-decline')) return;
         var cardSubId = parseInt(el.getAttribute('data-sub-id'), 10);
-        // Scoped liaisons jump straight to the PREFILLED class form for
-        // their own group's cards (Erin, 2026-07-10) — the read-only
-        // detail view was a dead end for them. Full reviewers keep the
-        // detail popup (decline/status actions live there).
-        if (!sbScopeAll()) {
-          var cardSub = scheduleBuilderState.submissions.filter(function (s) { return s.id === cardSubId; })[0];
-          if (cardSub && sbCanTouchSub(cardSub) && (cardSub.status === 'submitted' || cardSub.status === 'drafted')) {
-            showClassSubmissionModal(cardSub, { onSaved: loadScheduleBuilder });
-            return;
-          }
+        // Tapping an inbox card opens the PREFILLED, EDITABLE class form
+        // for every reviewer (Erin, 2026-07-10) — one surface, not a
+        // separate read-only detail view. Out-of-scope liaison cards and
+        // declined/withdrawn rows keep the detail popup (read-only /
+        // re-queue actions live there).
+        var cardSub = scheduleBuilderState.submissions.filter(function (s) { return s.id === cardSubId; })[0];
+        if (cardSub && sbCanTouchSub(cardSub) && (cardSub.status === 'submitted' || cardSub.status === 'drafted')) {
+          showClassSubmissionModal(cardSub, { onSaved: loadScheduleBuilder });
+          return;
         }
         showSbSubmissionDetail(cardSubId);
       });
@@ -22323,7 +22384,10 @@
   // The grid is now hour-based open blocks (no preset age sections), so the
   // age range comes from the submission's own age_groups. 2-hour-required
   // classes auto-set hour='both'.
-  function assignDroppedSub(subId, hour) {
+  // roomSpec (PM drops only): '' = the column's open area (no room /
+  // un-assign), a room name = the room card the class was dropped on,
+  // undefined = AM drop (rooms don't apply to the morning builder).
+  function assignDroppedSub(subId, hour, roomSpec) {
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (!sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
@@ -22357,17 +22421,39 @@
         && confirm('“' + sub.class_name + '” was submitted for both PM hours (kids can take one or both).\n\nOK = place it in BOTH hours\nCancel = just ' + (hour === 'PM1' ? 'Hour 1' : 'Hour 2'))) {
         scheduledHour = 'both';
       }
+      // Dropped on a room card: the room must be free for the FINAL hour
+      // ('both' needs it free in both columns). The server re-checks.
+      if (roomSpec) {
+        var occ = sbRoomOccupant(roomSpec, { id: subId, class_period: 'PM', scheduled_session: scheduleBuilderState.session, scheduled_hour: scheduledHour });
+        if (occ) {
+          alert('“' + roomSpec + '” is already taken that hour by “' + occ.class_name + '”. Drag that one out first, or pick another room.');
+          return;
+        }
+      }
     }
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
     patchReviewAction(subId, {
       status: 'scheduled',
       scheduled_session: scheduleBuilderState.session,
       scheduled_hour: scheduledHour,
-      scheduled_age_range: ageRange,
-      scheduled_room: sub.scheduled_room || '',
+      // PM drops: the drop target IS the room (open area clears it).
+      // AM drops leave whatever room data the row already carried.
+      scheduled_room: roomSpec === undefined ? (sub.scheduled_room || '') : '',
       reviewer_notes: sub.reviewer_notes || ''
+    }).then(function () {
+      if (!roomSpec) return null;
+      // Seat it in the dropped room — the endpoint 409s on a race.
+      var cred = localStorage.getItem('rw_google_credential');
+      return fetch('/api/curriculum?action=assign-room' + notifViewAsSuffix(), {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: subId, room: roomSpec })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) alert((res.data && res.data.error) || 'Could not assign the room — the class was placed without one.');
+        });
     }).then(function () { loadScheduleBuilder(); })
-      .catch(function (err) { alert('Could not place class: ' + (err.message || 'error')); });
+      .catch(function (err) { alert('Could not place class: ' + (err.message || 'error')); loadScheduleBuilder(); });
   }
 
   // POST a sign-up window change (open with dates, or close). The API gates
@@ -22933,38 +23019,16 @@
       return '<label class="cls-cb-label"><input type="checkbox" class="sbEditAgeCb" value="' + v + '"' + (schedAgeSet[v] ? ' checked' : '') + disAttr + '> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
     }).join('');
     html += '<div class="cls-field"><label class="cls-label">Ages</label><div class="cls-cb-group">' + sbAgeCbs + '</div>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Check the age groups for this placement — leave all unchecked to fall back to the preferred ages.</div>') + '</div>';
-    // Room assignment (2026-07-10, Erin): DB-backed picker, gated by the
-    // room_assign capability (President / VP / Afternoon Class Liaison by
-    // default). One class per room per hour — taken rooms are disabled
-    // with who's in them. Saves immediately (independent of Save below).
-    var canAssignRoom = typeof clientHasCapability === 'function'
-      && clientHasCapability('room_assign', ['President', 'Vice President', 'Afternoon Class Liaison']);
-    html += '<div class="cls-field"><label class="cls-label">Room</label>';
-    if (canAssignRoom && !locked) {
-      var activeRooms = (scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active'; });
-      var curRoom = String(sub.scheduled_room || '');
-      var curListed = false;
-      html += '<select class="cl-input" id="sbEditRoomSel">';
-      html += '<option value="">— no room —</option>';
-      activeRooms.forEach(function (r) {
-        var isCur = curRoom.toLowerCase() === String(r.name).toLowerCase();
-        if (isCur) curListed = true;
-        var occ = isCur ? null : sbRoomOccupant(r.name, sub);
-        var optText = r.name + (r.builder_note ? ' — ' + r.builder_note : '') + (occ ? ' · taken: ' + (occ.class_name || '') : '');
-        html += '<option value="' + escClsAttr(r.name) + '"' + (isCur ? ' selected' : '') + (occ ? ' disabled' : '') + '>' + escClsHtml(optText) + '</option>';
-      });
-      if (curRoom && !curListed) {
-        html += '<option value="' + escClsAttr(curRoom) + '" selected>' + escClsHtml(curRoom + ' (not in the rooms list)') + '</option>';
-      }
-      html += '</select>';
-      html += ' <span class="perm-status" id="sbEditRoomStatus" aria-live="polite"></span>';
-      // Rooms are MANAGED from Co-op Management → Facilities, not here
-      // (Erin, 2026-07-10) — the builder just selects them.
-      if (activeRooms.length === 0) html += '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">No rooms defined yet — add them under Co-op Management → Facilities.</div>';
-    } else {
-      html += '<div>' + (sub.scheduled_room ? escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">—</span>') + '</div>';
+    // Rooms (PM only, 2026-07-10): assignment happens by DRAGGING the
+    // class onto a room card in the builder's hour columns — this editor
+    // just shows where it currently sits. Morning classes carry no room
+    // info here at all (AM rooms are fixed for the year).
+    if (!isAmSub) {
+      html += '<div class="cls-field"><label class="cls-label">Room</label>';
+      html += '<div>' + (sub.scheduled_room ? '📍 ' + escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">— none —</span>')
+        + (locked ? '' : ' <span class="cls-help" style="font-size:0.78rem;">(drag the class onto a room card in the builder to change)</span>') + '</div>';
+      html += '</div>';
     }
-    html += '</div>';
 
     // Helpers / assistants (Phase B2) — feeds participation pm_assist. Member
     // datalist comes from the Schedule Builder load; free text is allowed and
@@ -23014,35 +23078,6 @@
         '<input type="text" class="cl-input sbEditHelper" maxlength="120" list="sbMemberList" value="" placeholder="Helper name…">');
     });
 
-    // Room picker: saves on change via assign-room; the server re-checks
-    // the one-class-per-room-per-hour rule, so a race just errors here.
-    var roomSel = document.getElementById('sbEditRoomSel');
-    if (roomSel) roomSel.addEventListener('change', function () {
-      var room = this.value;
-      var st = document.getElementById('sbEditRoomStatus');
-      if (st) { st.className = 'perm-status'; st.textContent = 'Saving…'; }
-      var roomCred = localStorage.getItem('rw_google_credential');
-      fetch('/api/curriculum?action=assign-room' + notifViewAsSuffix(), {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + roomCred, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: subId, room: room })
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-        .then(function (res) {
-          if (!res.ok) {
-            if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Could not save.'; }
-            roomSel.value = String(sub.scheduled_room || '');
-            return;
-          }
-          sub.scheduled_room = (res.data && res.data.room) || '';
-          if (st) { st.className = 'perm-status ws-wv-ok'; st.textContent = sub.scheduled_room ? 'Room saved ✓' : 'Room cleared ✓'; }
-          publishedSchedule.loaded = false; // room shows on the published schedule
-          renderScheduleBuilder(); // refresh the 📍 chips behind the overlay
-        })
-        .catch(function () {
-          if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = 'Network error'; }
-          roomSel.value = String(sub.scheduled_room || '');
-        });
-    });
 
     function currentForm() {
       // No buckets checked → fall back to the teacher's submitted ages so the

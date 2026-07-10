@@ -8192,6 +8192,35 @@ button.staff-role:hover {
 /* Schedule Builder morning cell heads: the group's liaison name(s). */
 .sb-cell-liaison { width: 100%; font-size: 0.72rem; color: var(--color-text-light); }
 
+/* ── Room cards in the PM hour columns (2026-07-10) ──
+   Rooms render as drop targets; a class dragged onto one is seated
+   there. Occupied cards hold the class tile under the room header. */
+.sb-room-card {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  margin-top: 8px;
+  background: rgba(var(--color-primary-rgb), 0.03);
+}
+.sb-room-card.sb-room-occupied { border-style: solid; background: var(--color-white); }
+.sb-room-card.sb-room-drop {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.10);
+}
+.sb-room-head { font-size: 0.78rem; color: var(--color-primary-dark); }
+.sb-room-note { color: var(--color-text-light); font-style: italic; font-size: 0.72rem; }
+.sb-room-empty {
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  font-style: italic;
+  padding: 6px 2px;
+}
+/* Off-preference placement: coral outline + tint (not just the ⚠). */
+.sb-cell-class.sb-offpref {
+  border: 1px solid rgba(var(--color-coral-rgb), 0.65);
+  background: rgba(var(--color-coral-rgb), 0.08);
+}
+
 .sb-overlay {
   position: fixed;
   inset: 0;
