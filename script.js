@@ -21935,6 +21935,8 @@
           var spaceParts = (s.space_request || []).map(function (v) { return SPACE_REQ_LABELS[v] || v; });
           if (s.space_request_other) spaceParts.push(s.space_request_other);
           if (spaceParts.length) paletteHtml += '<div class="sb-coleader">📍 Wants: ' + escClsHtml(spaceParts.join(', ')) + '</div>';
+          // Class size the submitter asked for (Erin, 2026-07-10).
+          if (s.max_students) paletteHtml += '<div class="sb-coleader">👥 Up to ' + escClsHtml(String(s.max_students)) + ' kids</div>';
         }
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
         paletteHtml += '</div>';
