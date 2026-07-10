@@ -13620,6 +13620,22 @@
     });
   }
 
+  // "Build a lesson plan" from a scheduled class or Class Idea
+  // (2026-07-11, Erin) — opens the curriculum editor prefilled with the
+  // class's name/ages/block, skipping the library hop.
+  function startLessonPlanForClass(className, ageRange, block) {
+    loadClosetItemsForEditor().then(function () {
+      var d = blankDraft();
+      d.title = String(className || '');
+      d.age_range = String(ageRange || '');
+      d.block = String(block || '');
+      curriculumState.draft = d;
+      curriculumState.editingId = null;
+      curriculumState.view = 'editor';
+      renderCurriculumModal();
+    });
+  }
+
   function startEditCurriculum() {
     if (!curriculumState.current) return;
     loadClosetItemsForEditor().then(function () {
@@ -16518,12 +16534,16 @@
         html += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
         html += periodTag + ' · For: ' + escClsHtml(sessText);
         html += '</div>';
+        html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
         if (canEdit) {
-          html += '<div style="margin-top:0.5rem;display:flex;gap:6px;">';
           html += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
           html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">Withdraw</button>';
-          html += '</div>';
-        } else if (s.status === 'drafted' || s.status === 'scheduled') {
+        }
+        // Build a lesson plan straight from the idea (2026-07-11, Erin) —
+        // opens the Curriculum Library editor prefilled with this class.
+        html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">📖 Lesson Plan</button>';
+        html += '</div>';
+        if (!canEdit && (s.status === 'drafted' || s.status === 'scheduled')) {
           html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
           html += 'The VP / PM Assistant is planning this one. Contact them for changes.';
           html += '</div>';
@@ -16554,6 +16574,16 @@
         var id = parseInt(btn.getAttribute('data-id'), 10);
         if (!confirm('Withdraw this class submission? The VP and PM Assistant will be notified it was cancelled.')) return;
         withdrawClassSubmission(id);
+      });
+    });
+    body.querySelectorAll('.mf-classsubs-plan').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var sub = myClassSubmissions.filter(function (s) { return s.id === id; })[0];
+        if (!sub || typeof startLessonPlanForClass !== 'function') return;
+        startLessonPlanForClass(sub.class_name,
+          (typeof prettyAgesClient === 'function' ? prettyAgesClient(sub.age_groups, sub.age_groups_other) : ''),
+          sub.class_period === 'AM' ? 'AM' : 'PM');
       });
     });
   }
