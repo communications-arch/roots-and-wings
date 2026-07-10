@@ -479,21 +479,24 @@ async function canReviewSubmissions(email) {
   return !!(await reviewerScope(email));
 }
 
-// View-As aware reviewer gate. True when the real caller is a reviewer
-// (super / VP / Afternoon Class Liaison), OR they can impersonate (super on
-// prod; any signed-in @rootsandwingsindy.com on dev/preview) AND are
-// viewing-as an email that is itself a reviewer. Lets testers exercise the
-// reviewer flows via View-As; no prod behavior change (real reviewers and
-// super users already pass the first check). view_as comes from the query
-// (GET) or body (POST), matching resolveSubmitterEmail's mechanism.
+// View-As aware reviewer gate. While impersonating, the VIEWED email's
+// scope applies — matching resolveSubmitterEmail (the submission files
+// under the viewed member) and the identity swap every other endpoint
+// does. The old real-scope-first order broke View-As for any tester
+// whose OWN account holds a liaison role: their real (narrower) scope
+// pinned them to their own age group no matter who they viewed as, and
+// adds for the impersonated liaison's group 403'd (Erin, 2026-07-10 —
+// "liaisons are not allowed to add classes even when they should").
+// Not impersonating (or not allowed to): the real email's scope, so
+// real liaisons and reviewers on prod are unchanged. view_as comes from
+// the query (GET) or body (POST), matching resolveSubmitterEmail.
 async function reviewerScopeReq(user, req) {
   const realEmail = user && user.email;
-  const s = await reviewerScope(realEmail);
-  if (s) return s;
-  if (!canImpersonate(realEmail)) return null;
   const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
-  if (!va || (va.split('@')[1] || '') !== ALLOWED_DOMAIN) return null;
-  return await reviewerScope(va);
+  if (va && (va.split('@')[1] || '') === ALLOWED_DOMAIN && canImpersonate(realEmail)) {
+    return await reviewerScope(va);
+  }
+  return await reviewerScope(realEmail);
 }
 async function isReviewerReq(user, req) {
   return !!(await reviewerScopeReq(user, req));
