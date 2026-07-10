@@ -6686,6 +6686,10 @@
         // in one place") — who can use which feature, seeded to match the
         // long-standing hardcoded gates.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
+        // Facilities (2026-07-10): rooms + the notes the Class Builder's
+        // room picker shows. Also reachable from the builder's class
+        // editor via "Manage rooms…" for Facilities managers.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">🏫</span>Facilities — Rooms</button></li>';
         WORKSPACE_ADMIN_CONSOLES.forEach(function (l) {
           h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + l.icon + '</span>' + l.title + '</a></li>';
         });
@@ -14905,6 +14909,7 @@
       showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
     }
     else if (action === 'permissions-admin' && typeof showPermissionsAdminModal === 'function') showPermissionsAdminModal();
+    else if (action === 'facilities-admin' && typeof showFacilitiesAdminModal === 'function') showFacilitiesAdminModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {
       // Session dates live inline on the Admin Calendar now — the To Do
@@ -17947,6 +17952,148 @@
             var st = row.querySelector('.perm-status');
             if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = 'Network error'; }
           });
+      });
+    });
+  }
+
+  // ══════════════════════════════════════════════
+  // Facilities admin — rooms (2026-07-10, Erin)
+  // ══════════════════════════════════════════════
+  // CRUD for the rooms the Class Builder assigns. builder_note is the
+  // short hint the room picker shows; details holds longer facilities
+  // info. Archive hides a room from the picker without touching past
+  // assignments (scheduled_room keeps the name string). Server gate:
+  // facilities_manage capability. Reached from Admin Consoles (Comms)
+  // and "Manage rooms…" in the builder's class editor.
+  var _facAdminState = { rooms: [], loaded: false };
+
+  function showFacilitiesAdminModal() {
+    var body = renderReportModal({
+      title: 'Facilities — Rooms',
+      subtitle: 'The rooms the Class Builder can assign. The note shows right in the room picker; details are for anything longer.',
+      meta: '',
+      icons: [],
+      bodyId: 'fac-admin-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading rooms…</p>'
+    });
+    if (!body) return;
+    loadFacilitiesAdmin();
+  }
+
+  function loadFacilitiesAdmin() {
+    var body = document.getElementById('fac-admin-body');
+    if (!body) return;
+    fetch('/api/cleaning?action=rooms', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtmlWs((res.data && res.data.error) || 'Could not load rooms.') + '</p>';
+          return;
+        }
+        _facAdminState.rooms = res.data.rooms || [];
+        _facAdminState.loaded = true;
+        renderFacilitiesAdmin();
+      })
+      .catch(function () {
+        body.innerHTML = '<p class="ws-empty">Could not load rooms — check your connection and reopen.</p>';
+      });
+  }
+
+  function facRoomRowHtml(r) {
+    var h = '<div class="perm-row" data-room-id="' + (r.id || 'new') + '">';
+    h += '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(r.name || '') + '"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(r.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="2" maxlength="2000">' + escapeHtmlWs(r.details || '') + '</textarea></div>';
+    h += '<div class="perm-chips">';
+    h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (r.id ? 'Save' : 'Add room') + '</button>';
+    if (r.id) h += '<button type="button" class="sc-btn sc-btn-del fac-archive">Archive</button>';
+    h += '<span class="perm-status fac-status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderFacilitiesAdmin() {
+    var body = document.getElementById('fac-admin-body');
+    if (!body) return;
+    var active = _facAdminState.rooms.filter(function (r) { return r.status === 'active'; });
+    var archived = _facAdminState.rooms.filter(function (r) { return r.status === 'archived'; });
+    var h = '<p class="ws-body-hint">Rooms feed the Class Builder’s room picker — one class per room per hour. Archiving hides a room from the picker without touching past assignments.</p>';
+    if (active.length === 0) h += '<p class="ws-empty">No rooms yet — add the first one below.</p>';
+    active.forEach(function (r) { h += facRoomRowHtml(r); });
+    h += '<h4 class="roles-mgr-se-head">+ Add a room</h4>';
+    h += facRoomRowHtml({});
+    if (archived.length) {
+      h += '<details style="margin-top:14px;"><summary style="cursor:pointer;font-weight:600;">Archived (' + archived.length + ')</summary>';
+      archived.forEach(function (r) {
+        h += '<div class="perm-row perm-row-locked"><div class="perm-head"><span class="perm-label">' + escapeHtmlWs(r.name) + '</span></div>'
+          + (r.builder_note ? '<p class="perm-desc">' + escapeHtmlWs(r.builder_note) + '</p>' : '')
+          + '<button type="button" class="sc-btn fac-restore" data-room-id="' + r.id + '">Restore</button></div>';
+      });
+      h += '</details>';
+    }
+    body.innerHTML = h;
+    wireFacilitiesAdmin(body);
+  }
+
+  function facSaveRoom(payload, statusEl, btn) {
+    if (btn) btn.disabled = true;
+    fetch('/api/cleaning?action=rooms', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (btn) btn.disabled = false;
+        if (!res.ok) {
+          if (statusEl) { statusEl.className = 'perm-status fac-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; }
+          return;
+        }
+        scheduleBuilderState.rooms = []; // stale — builder refetches on next open
+        loadFacilitiesAdmin();
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        if (statusEl) { statusEl.className = 'perm-status fac-status ws-wv-err'; statusEl.textContent = 'Network error'; }
+      });
+  }
+
+  function wireFacilitiesAdmin(body) {
+    body.querySelectorAll('.perm-row[data-room-id]').forEach(function (row) {
+      var idAttr = row.getAttribute('data-room-id');
+      var id = idAttr === 'new' ? null : parseInt(idAttr, 10);
+      var st = row.querySelector('.fac-status');
+      var saveBtn = row.querySelector('.fac-save');
+      if (saveBtn) saveBtn.addEventListener('click', function () {
+        var name = row.querySelector('.fac-name').value.trim();
+        if (!name) { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'A room name is required'; } return; }
+        var payload = {
+          name: name,
+          builder_note: row.querySelector('.fac-note').value.trim(),
+          details: row.querySelector('.fac-details').value.trim()
+        };
+        if (id) payload.id = id;
+        facSaveRoom(payload, st, saveBtn);
+      });
+      var archBtn = row.querySelector('.fac-archive');
+      if (archBtn) archBtn.addEventListener('click', function () {
+        if (!confirm('Archive this room? It disappears from the room picker; classes already assigned to it keep the name.')) return;
+        fetch('/api/cleaning?action=rooms&id=' + id, { method: 'DELETE', headers: rwAuthHeaders() })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Archive failed'; } return; }
+            scheduleBuilderState.rooms = [];
+            loadFacilitiesAdmin();
+          })
+          .catch(function () { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'Network error'; } });
+      });
+    });
+    body.querySelectorAll('.fac-restore').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var rid = parseInt(btn.getAttribute('data-room-id'), 10);
+        var room = _facAdminState.rooms.filter(function (r) { return r.id === rid; })[0];
+        if (!room) return;
+        facSaveRoom({ id: room.id, name: room.name, builder_note: room.builder_note, details: room.details, sort_order: room.sort_order, status: 'active' }, null, btn);
       });
     });
   }
@@ -21394,6 +21541,12 @@
         if (scheduleBuilderState.loaded) renderScheduleBuilder();
       })
       .catch(function () { /* heads render without names */ });
+    // Rooms for the class editor's room picker (2026-07-10) — any member
+    // can read the list; assignment itself is capability-gated.
+    fetch('/api/cleaning?action=rooms', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { scheduleBuilderState.rooms = (d && d.rooms) || []; })
+      .catch(function () { /* picker shows an empty-list hint */ });
     fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
       headers: { 'Authorization': 'Bearer ' + cred }
     })
@@ -21632,6 +21785,7 @@
         var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
           .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
         if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
+        if (c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + '</div>';
         s += '<div class="sb-pref-line">';
         s += '<span class="sb-pref-label">Pref:</span> ';
         s += prefSessChips;
@@ -21942,7 +22096,7 @@
     html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))
       + ' · <strong>Hour:</strong> ' + escClsHtml(isAmSub ? amPrefWord : pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
     if (!isAmSub && s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
-    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(isAmSub ? sbAmHourLabel(s.scheduled_hour) : s.scheduled_hour) : '') + '</div>';
+    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(isAmSub ? sbAmHourLabel(s.scheduled_hour) : s.scheduled_hour) : '') + (s.scheduled_room ? ' · 📍 ' + escClsHtml(s.scheduled_room) : '') + '</div>';
     html += '</div>';
     if (s.description) {
       html += '<h4 class="sb-pick-section-title" style="margin-top:0.75rem;">Description</h4>';
@@ -22072,6 +22226,37 @@
     return !!s && s.class_period === 'AM' && sbScopeAllowsGroup(sbAmGroupOf(s));
   }
   var SB_SCOPE_MSG = 'Your liaison role covers a different age group — you can only place, edit, or decline morning classes for your own group.';
+
+  // ── Room occupancy (2026-07-10) ──
+  // One class per room per hour. Mirrors the server's assign-room check:
+  // same session + same period with overlapping hours ('AM'/blank and
+  // 'both' span both of their period's hours).
+  function sbHoursOverlap(period, a, b) {
+    a = String(a || ''); b = String(b || '');
+    if (period === 'AM') {
+      if (!a || a === 'AM' || !b || b === 'AM') return true;
+      return a === b;
+    }
+    if (a === 'both' || b === 'both') return true;
+    return a === b;
+  }
+  // The placed class already sitting in `roomName` during `sub`'s slot
+  // (excluding sub itself), or null when the room is free.
+  function sbRoomOccupant(roomName, sub) {
+    var occ = null;
+    var want = String(roomName || '').toLowerCase();
+    if (!want) return null;
+    (scheduleBuilderState.submissions || []).forEach(function (s) {
+      if (occ || s.id === sub.id) return;
+      if (s.status !== 'scheduled' && s.status !== 'drafted') return;
+      if (s.scheduled_session !== sub.scheduled_session) return;
+      if ((s.class_period === 'AM' ? 'AM' : 'PM') !== (sub.class_period === 'AM' ? 'AM' : 'PM')) return;
+      if (String(s.scheduled_room || '').toLowerCase() !== want) return;
+      if (!sbHoursOverlap(sub.class_period === 'AM' ? 'AM' : 'PM', sub.scheduled_hour, s.scheduled_hour)) return;
+      occ = s;
+    });
+    return occ;
+  }
 
   // Morning submission's target group ('oaks' → 'Oaks') — single by rule.
   function sbAmGroupOf(s) {
@@ -22721,7 +22906,39 @@
       return '<label class="cls-cb-label"><input type="checkbox" class="sbEditAgeCb" value="' + v + '"' + (schedAgeSet[v] ? ' checked' : '') + disAttr + '> ' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</label>';
     }).join('');
     html += '<div class="cls-field"><label class="cls-label">Ages</label><div class="cls-cb-group">' + sbAgeCbs + '</div>' + (locked ? '' : '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">Check the age groups for this placement — leave all unchecked to fall back to the preferred ages.</div>') + '</div>';
-    if (!isAmSub) html += '<div class="cls-field"><label class="cls-label">Room (optional)</label><input class="cl-input" id="sbEditRoom" type="text" maxlength="100" value="' + escClsAttr(sub.scheduled_room || '') + '"' + disAttr + '></div>';
+    // Room assignment (2026-07-10, Erin): DB-backed picker, gated by the
+    // room_assign capability (President / VP / Afternoon Class Liaison by
+    // default). One class per room per hour — taken rooms are disabled
+    // with who's in them. Saves immediately (independent of Save below).
+    var canAssignRoom = typeof clientHasCapability === 'function'
+      && clientHasCapability('room_assign', ['President', 'Vice President', 'Afternoon Class Liaison']);
+    var canManageRooms = typeof clientHasCapability === 'function'
+      && clientHasCapability('facilities_manage', ['President', 'Vice President', 'Afternoon Class Liaison']);
+    html += '<div class="cls-field"><label class="cls-label">Room</label>';
+    if (canAssignRoom && !locked) {
+      var activeRooms = (scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active'; });
+      var curRoom = String(sub.scheduled_room || '');
+      var curListed = false;
+      html += '<select class="cl-input" id="sbEditRoomSel">';
+      html += '<option value="">— no room —</option>';
+      activeRooms.forEach(function (r) {
+        var isCur = curRoom.toLowerCase() === String(r.name).toLowerCase();
+        if (isCur) curListed = true;
+        var occ = isCur ? null : sbRoomOccupant(r.name, sub);
+        var optText = r.name + (r.builder_note ? ' — ' + r.builder_note : '') + (occ ? ' · taken: ' + (occ.class_name || '') : '');
+        html += '<option value="' + escClsAttr(r.name) + '"' + (isCur ? ' selected' : '') + (occ ? ' disabled' : '') + '>' + escClsHtml(optText) + '</option>';
+      });
+      if (curRoom && !curListed) {
+        html += '<option value="' + escClsAttr(curRoom) + '" selected>' + escClsHtml(curRoom + ' (not in the rooms list)') + '</option>';
+      }
+      html += '</select>';
+      html += ' <span class="perm-status" id="sbEditRoomStatus" aria-live="polite"></span>';
+      if (activeRooms.length === 0) html += '<div class="cls-help" style="margin-top:4px;font-size:0.78rem;">No rooms defined yet' + (canManageRooms ? ' — add them via Manage rooms below.' : ' — ask a Facilities manager to add them.') + '</div>';
+      if (canManageRooms) html += '<button type="button" class="ws-inline-link" id="sbEditManageRooms">Manage rooms…</button>';
+    } else {
+      html += '<div>' + (sub.scheduled_room ? escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">—</span>') + '</div>';
+    }
+    html += '</div>';
 
     // Helpers / assistants (Phase B2) — feeds participation pm_assist. Member
     // datalist comes from the Schedule Builder load; free text is allowed and
@@ -22769,6 +22986,40 @@
     if (addHelperBtn) addHelperBtn.addEventListener('click', function () {
       document.getElementById('sbEditHelperList').insertAdjacentHTML('beforeend',
         '<input type="text" class="cl-input sbEditHelper" maxlength="120" list="sbMemberList" value="" placeholder="Helper name…">');
+    });
+
+    // Room picker: saves on change via assign-room; the server re-checks
+    // the one-class-per-room-per-hour rule, so a race just errors here.
+    var roomSel = document.getElementById('sbEditRoomSel');
+    if (roomSel) roomSel.addEventListener('change', function () {
+      var room = this.value;
+      var st = document.getElementById('sbEditRoomStatus');
+      if (st) { st.className = 'perm-status'; st.textContent = 'Saving…'; }
+      var roomCred = localStorage.getItem('rw_google_credential');
+      fetch('/api/curriculum?action=assign-room' + notifViewAsSuffix(), {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + roomCred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: subId, room: room })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Could not save.'; }
+            roomSel.value = String(sub.scheduled_room || '');
+            return;
+          }
+          sub.scheduled_room = (res.data && res.data.room) || '';
+          if (st) { st.className = 'perm-status ws-wv-ok'; st.textContent = sub.scheduled_room ? 'Room saved ✓' : 'Room cleared ✓'; }
+          renderScheduleBuilder(); // refresh the 📍 chips behind the overlay
+        })
+        .catch(function () {
+          if (st) { st.className = 'perm-status ws-wv-err'; st.textContent = 'Network error'; }
+          roomSel.value = String(sub.scheduled_room || '');
+        });
+    });
+    var manageRoomsBtn = document.getElementById('sbEditManageRooms');
+    if (manageRoomsBtn) manageRoomsBtn.addEventListener('click', function () {
+      close(); // the report modal renders under this overlay otherwise
+      if (typeof showFacilitiesAdminModal === 'function') showFacilitiesAdminModal();
     });
 
     function currentForm() {

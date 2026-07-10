@@ -57,6 +57,20 @@ const CAPABILITIES = [
     desc: 'Set each session’s start and end dates on the Admin Calendar (drives the whole year: billing windows, participation reset, derived board tasks).',
     defaultRoles: ['President', 'Vice President']
   },
+  {
+    key: 'room_assign',
+    area: 'Classes & Scheduling',
+    label: 'Classrooms — assign to classes',
+    desc: 'Pick which room each placed class meets in, from the class editor in the Class Builder. A room can only host one class per hour.',
+    defaultRoles: ['President', 'Vice President', 'Afternoon Class Liaison']
+  },
+  {
+    key: 'facilities_manage',
+    area: 'Classes & Scheduling',
+    label: 'Facilities — manage rooms',
+    desc: 'Add, edit, and archive rooms plus the notes the Class Builder shows (“smaller class”, “has sinks”, …).',
+    defaultRoles: ['President', 'Vice President', 'Afternoon Class Liaison']
+  },
 
   // ── Participation ──
   {

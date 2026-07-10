@@ -1462,3 +1462,23 @@ UPDATE roles
 SET status = 'archived', updated_at = NOW(), updated_by = 'migration'
 WHERE LOWER(title) = 'morning class liaison'
   AND status <> 'archived';
+
+
+-- 2026-07-10 (Erin): rooms + Facilities admin. Rooms are picked in the
+-- Class Builder's class editor (one class per room per hour; assignment
+-- gated by the room_assign capability); the Facilities admin
+-- (facilities_manage) maintains the list. builder_note is the short hint
+-- the picker shows ("smaller class", "has sinks"); details holds longer
+-- facilities info. Assignments keep living in
+-- class_submissions.scheduled_room as the room NAME, so every existing
+-- surface (published schedule, prints, editor) keeps working unchanged.
+CREATE TABLE IF NOT EXISTS rooms (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  builder_note TEXT NOT NULL DEFAULT '',
+  details      TEXT NOT NULL DEFAULT '',
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  updated_by   TEXT NOT NULL DEFAULT '',
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -862,7 +862,8 @@ module.exports = async function handler(req, res) {
         const rows = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
         if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const r = rows[0];
-        const isOwner = String(r.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
+        const viewOwnEmails = [user.email.toLowerCase(), actingEmailFor(user, req).toLowerCase()];
+        const isOwner = viewOwnEmails.indexOf(String(r.submitted_by_email || '').toLowerCase()) !== -1;
         if (!isOwner && !(await isReviewerReq(user, req))) {
           return res.status(403).json({ error: 'Not allowed to view this submission' });
         }
@@ -1081,6 +1082,63 @@ module.exports = async function handler(req, res) {
           RETURNING id, session_number, class_key, curriculum_id, attached_by, attached_at
         `;
         return res.status(201).json({ link: inserted[0] });
+      }
+
+      // ── Room assignment (2026-07-10, Erin) ──
+      // Assign / reassign / clear a placed class's room, gated by the
+      // room_assign capability (defaults President / VP / Afternoon Class
+      // Liaison). A room hosts ONE class per hour: conflicts check the
+      // same year + session + period with hour overlap ('both' and 'AM'
+      // span both hours). Stores the room NAME in scheduled_room so all
+      // existing surfaces keep reading it unchanged.
+      if (action === 'assign-room') {
+        const actingEmail = actingEmailFor(user, req);
+        const mayAssign = isSuperUser(actingEmail) || await hasCapability(actingEmail, 'room_assign');
+        if (!mayAssign) {
+          return res.status(403).json({ error: 'Only the President, VP, or Afternoon Class Liaison can assign rooms. (You are acting as ' + actingEmail + '.)' });
+        }
+        const body = req.body || {};
+        const subId = parseInt(body.id, 10);
+        if (!Number.isFinite(subId)) return res.status(400).json({ error: 'id required' });
+        const room = String(body.room || '').trim().slice(0, 100);
+        const rows = await sql`
+          SELECT id, class_name, class_period, school_year, scheduled_session, scheduled_hour, status
+          FROM class_submissions WHERE id = ${subId}`;
+        if (rows.length === 0) return res.status(404).json({ error: 'Class not found.' });
+        const target = rows[0];
+        if (room && !target.scheduled_session) {
+          return res.status(409).json({ error: 'Place the class into a session first — rooms attach to a scheduled slot.' });
+        }
+        if (room) {
+          const hoursOverlap = (a, b) => {
+            const A = String(a || ''), B = String(b || '');
+            if (target.class_period === 'AM') {
+              // '' / 'AM' = both morning hours.
+              if (!A || A === 'AM' || !B || B === 'AM') return true;
+              return A === B;
+            }
+            if (A === 'both' || B === 'both') return true;
+            return A === B;
+          };
+          const occupants = await sql`
+            SELECT id, class_name, scheduled_hour FROM class_submissions
+            WHERE school_year = ${target.school_year}
+              AND scheduled_session = ${target.scheduled_session}
+              AND class_period = ${target.class_period}
+              AND status IN ('scheduled', 'drafted')
+              AND id <> ${subId}
+              AND LOWER(scheduled_room) = LOWER(${room})`;
+          const clash = occupants.find(o => hoursOverlap(target.scheduled_hour, o.scheduled_hour));
+          if (clash) {
+            return res.status(409).json({ error: '“' + room + '” is already taken that hour by “' + clash.class_name + '”. Unassign it there first, or pick another room.' });
+          }
+        }
+        const updated = await sql`
+          UPDATE class_submissions
+          SET scheduled_room = ${room}, updated_at = NOW()
+          WHERE id = ${subId}
+          RETURNING id, scheduled_room`;
+        return res.status(200).json({ ok: true, id: updated[0].id, room: updated[0].scheduled_room });
       }
 
       // VP / Afternoon Class Liaison toggle a Schedule Builder session's
@@ -1379,7 +1437,9 @@ module.exports = async function handler(req, res) {
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
-        const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
+        // Acting identity counts as owner too (View-As symmetry, 2026-07-10).
+        const edOwnEmails = [user.email.toLowerCase(), actingEmailFor(user, req).toLowerCase()];
+        const isOwner = edOwnEmails.indexOf(String(row.submitted_by_email || '').toLowerCase()) !== -1;
         const edScope = await reviewerScopeReq(user, req);
         const isReviewer = !!(edScope && (isOwner || scopeAllowsSub(edScope, row)));
         if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can edit this submission.' });
@@ -1480,10 +1540,16 @@ module.exports = async function handler(req, res) {
       // case they want to reach out to the submitter.
       if (action === 'class-submission') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
-        const existing = await sql`SELECT submitted_by_email, status FROM class_submissions WHERE id = ${id}`;
+        // class_period + age_groups MUST ride along: scopeAllowsSub reads
+        // them, and without them every group-scoped liaison's delete
+        // denied as "PM/no-group" — even for their own class (2026-07-10).
+        const existing = await sql`SELECT submitted_by_email, status, class_period, age_groups FROM class_submissions WHERE id = ${id}`;
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = existing[0];
-        const isOwner = String(row.submitted_by_email || '').toLowerCase() === user.email.toLowerCase();
+        // Owner = the ACTING identity too: a View-As'd submission files
+        // under the impersonated member, so they can withdraw it as well.
+        const ownEmails = [user.email.toLowerCase(), actingEmailFor(user, req).toLowerCase()];
+        const isOwner = ownEmails.indexOf(String(row.submitted_by_email || '').toLowerCase()) !== -1;
         const delScope = await reviewerScopeReq(user, req);
         const isReviewer = !!(delScope && scopeAllowsSub(delScope, row));
         if (!isOwner && !isReviewer) {

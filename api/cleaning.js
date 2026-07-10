@@ -232,7 +232,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'permissions' && action !== 'capabilities') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -306,6 +306,57 @@ module.exports = async function handler(req, res) {
         grants[cap.key] = await capabilityRoles(cap.key);
       }
       return res.status(200).json({ grants });
+    }
+
+    // ── Rooms / Facilities (2026-07-10, Erin) ──
+    // GET: any signed-in member — feeds the Class Builder's room picker.
+    // POST (create/update) + DELETE (archive): facilities_manage
+    // capability (defaults President / VP / Afternoon Class Liaison;
+    // editable in the Permissions admin). Assignments themselves live on
+    // class_submissions.scheduled_room via api/curriculum assign-room.
+    if (action === 'rooms') {
+      if (req.method === 'GET') {
+        const rows = await sql`
+          SELECT id, name, builder_note, details, sort_order, status
+          FROM rooms ORDER BY sort_order, LOWER(name)`;
+        return res.status(200).json({ rooms: rows });
+      }
+      const canManageRooms = isSuperUser(realUser.email) || await hasCapability(user.email, 'facilities_manage');
+      if (!canManageRooms) {
+        return res.status(403).json({ error: 'Only Facilities managers can edit rooms. (You are acting as ' + user.email + '.)' });
+      }
+      if (req.method === 'POST') {
+        const b = req.body || {};
+        const roomName = String(b.name || '').trim().slice(0, 120);
+        if (!roomName) return res.status(400).json({ error: 'A room name is required.' });
+        const note = String(b.builder_note || '').trim().slice(0, 200);
+        const details = String(b.details || '').trim().slice(0, 2000);
+        const sort = Number.isFinite(parseInt(b.sort_order, 10)) ? parseInt(b.sort_order, 10) : 0;
+        const roomId = b.id ? parseInt(b.id, 10) : null;
+        if (roomId) {
+          const updated = await sql`
+            UPDATE rooms
+            SET name = ${roomName}, builder_note = ${note}, details = ${details},
+                sort_order = ${sort}, status = ${b.status === 'archived' ? 'archived' : 'active'},
+                updated_by = ${realUser.email}, updated_at = NOW()
+            WHERE id = ${roomId}
+            RETURNING id, name, builder_note, details, sort_order, status`;
+          if (updated.length === 0) return res.status(404).json({ error: 'Room not found.' });
+          return res.status(200).json({ room: updated[0] });
+        }
+        const inserted = await sql`
+          INSERT INTO rooms (name, builder_note, details, sort_order, updated_by)
+          VALUES (${roomName}, ${note}, ${details}, ${sort}, ${realUser.email})
+          RETURNING id, name, builder_note, details, sort_order, status`;
+        return res.status(201).json({ room: inserted[0] });
+      }
+      if (req.method === 'DELETE') {
+        const roomId = parseInt(req.query.id, 10);
+        if (!Number.isFinite(roomId)) return res.status(400).json({ error: 'id required' });
+        await sql`UPDATE rooms SET status = 'archived', updated_by = ${realUser.email}, updated_at = NOW() WHERE id = ${roomId}`;
+        return res.status(200).json({ ok: true, id: roomId });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
     }
 
     // ── Permissions admin (Comms Director + super user) ──
