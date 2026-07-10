@@ -22013,7 +22013,19 @@
     body.querySelectorAll('.sb-palette-card').forEach(function (el) {
       el.addEventListener('click', function (e) {
         if (e.target.closest('.sb-palette-decline')) return;
-        showSbSubmissionDetail(parseInt(el.getAttribute('data-sub-id'), 10));
+        var cardSubId = parseInt(el.getAttribute('data-sub-id'), 10);
+        // Scoped liaisons jump straight to the PREFILLED class form for
+        // their own group's cards (Erin, 2026-07-10) — the read-only
+        // detail view was a dead end for them. Full reviewers keep the
+        // detail popup (decline/status actions live there).
+        if (!sbScopeAll()) {
+          var cardSub = scheduleBuilderState.submissions.filter(function (s) { return s.id === cardSubId; })[0];
+          if (cardSub && sbCanTouchSub(cardSub) && (cardSub.status === 'submitted' || cardSub.status === 'drafted')) {
+            showClassSubmissionModal(cardSub, { onSaved: loadScheduleBuilder });
+            return;
+          }
+        }
+        showSbSubmissionDetail(cardSubId);
       });
     });
 
