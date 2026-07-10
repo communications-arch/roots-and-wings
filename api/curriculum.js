@@ -1057,12 +1057,28 @@ module.exports = async function handler(req, res) {
           RETURNING *
         `;
         const sub = inserted[0];
+        // Assistants identified at submission time (2026-07-10, Erin:
+        // co-leaders and assistants are separate) land straight on the
+        // helpers roster — same table the builder's helper edits use.
+        let subHelpers;
+        if (Array.isArray(req.body.helpers)) {
+          const hs = req.body.helpers
+            .filter(h => h && (h.name || h.email))
+            .map(h => ({ email: String(h.email || '').trim().toLowerCase(), name: String(h.name || '').trim() }));
+          for (let i = 0; i < hs.length; i++) {
+            await sql`
+              INSERT INTO class_assignment_helpers
+                (class_submission_id, person_email, person_name, sort_order, updated_by)
+              VALUES (${sub.id}, ${hs[i].email}, ${hs[i].name}, ${i}, ${user.email})`;
+          }
+          subHelpers = hs;
+        }
         // Fire-and-forget confirmation email (errors logged, not surfaced).
         // Name-only on-behalf rows skip it — it would just email the liaison
         // about her own entry; a real member still gets their confirmation.
         const nameOnlyBehalf = !!behalfName && (!behalfEmail || (behalfEmail.split('@')[1] || '') !== ALLOWED_DOMAIN);
         if (!nameOnlyBehalf) await sendSubmissionConfirmation(sub);
-        return res.status(201).json({ submission: serializeSubmission(sub) });
+        return res.status(201).json({ submission: serializeSubmission(sub, subHelpers) });
       }
 
       // Link a curriculum to a class
@@ -1478,7 +1494,23 @@ module.exports = async function handler(req, res) {
           WHERE id = ${id}
           RETURNING *
         `;
-        return res.status(200).json({ submission: serializeSubmission(updated[0]) });
+        // Assistants field (2026-07-10): the form sends helpers alongside
+        // the 13 columns — replace the roster like the review PATCH does.
+        let editHelpers;
+        if (Array.isArray(req.body.helpers)) {
+          await sql`DELETE FROM class_assignment_helpers WHERE class_submission_id = ${id}`;
+          const ehs = req.body.helpers
+            .filter(h => h && (h.name || h.email))
+            .map(h => ({ email: String(h.email || '').trim().toLowerCase(), name: String(h.name || '').trim() }));
+          for (let i = 0; i < ehs.length; i++) {
+            await sql`
+              INSERT INTO class_assignment_helpers
+                (class_submission_id, person_email, person_name, sort_order, updated_by)
+              VALUES (${id}, ${ehs[i].email}, ${ehs[i].name}, ${i}, ${user.email})`;
+          }
+          editHelpers = ehs;
+        }
+        return res.status(200).json({ submission: serializeSubmission(updated[0], editHelpers) });
       }
 
       // Reviewer-only: toggle the ⭐ favorite flag on a curriculum. Dedicated

@@ -16672,14 +16672,31 @@
       });
       return names.sort(function (a, b) { return a.localeCompare(b); });
     })();
+    // Co-leaders and Assistants are SEPARATE fields (2026-07-10, Erin):
+    // not every class has a co-leader, but every class should end up with
+    // at least one assistant. Co-leaders keep the co_teachers column;
+    // assistants save to the helpers roster (class_assignment_helpers).
     html += '<div class="cls-field">';
-    html += '<label class="cls-label">Co-teachers or assistants already identified?</label>';
-    html += '<p class="cls-help">Tap the box to browse the Main Learning Coaches, or type to filter — add as many as you like.</p>';
+    html += '<label class="cls-label">Co-leader(s) — optional</label>';
+    html += '<p class="cls-help">Someone sharing the teaching with you. Tap the box to browse the Main Learning Coaches, or type to filter.</p>';
     html += '<div class="cls-chiprow" id="clsCoTeacherChips"></div>';
     html += '<div class="cls-picker" id="clsCoTeacherPicker">';
-    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="120" placeholder="Add a co-teacher…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">';
+    html += '<input class="cl-input cls-input" type="text" id="clsCoTeachers" maxlength="120" placeholder="Add a co-leader…" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">';
     html += '<div class="cls-picker-panel" id="clsCoTeacherPanel" hidden></div>';
     html += '</div>';
+    html += '</div>';
+
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">Assistants already identified?</label>';
+    html += '<p class="cls-help">Every class runs with at least one assistant — add anyone you’ve already lined up (more can be assigned later).</p>';
+    html += '<div id="clsAssistList">';
+    (Array.isArray(cur.helpers) ? cur.helpers : []).forEach(function (hp) {
+      html += '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="' + escClsAttr(hp.name || hp.email || '') + '" placeholder="Assistant name…">';
+    });
+    html += '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="" placeholder="Assistant name…">';
+    html += '</div>';
+    html += '<button type="button" class="ws-inline-link" id="clsAddAssist">+ add another assistant</button>';
+    html += '<datalist id="clsAssistNames"></datalist>';
     html += '</div>';
 
     // 7. Space request (afternoon only — morning rooms are assigned for the year)
@@ -16761,6 +16778,16 @@
     document.getElementById('clsCloseBtn').addEventListener('click', closeCls);
     document.getElementById('clsCancelBtn').addEventListener('click', closeCls);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCls(); });
+
+    // Assistants field (2026-07-10): + add another, and the same MLC
+    // name list the co-leader picker browses, as a datalist.
+    var addAssistBtn = document.getElementById('clsAddAssist');
+    if (addAssistBtn) addAssistBtn.addEventListener('click', function () {
+      document.getElementById('clsAssistList').insertAdjacentHTML('beforeend',
+        '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="" placeholder="Assistant name…">');
+    });
+    var assistDl = document.getElementById('clsAssistNames');
+    if (assistDl) assistDl.innerHTML = mlcNames.map(function (nm) { return '<option value="' + escClsAttr(nm) + '"></option>'; }).join('');
 
     // ── Co-teacher chips ──
     // Seed from the stored comma-joined string on edit; the payload joins
@@ -16953,6 +16980,16 @@
           var all = coTeacherList.slice();
           if (pending && !all.some(function (x) { return x.toLowerCase() === pending.toLowerCase(); })) all.push(pending);
           return all.join(', ');
+        })(),
+        // Assistants (2026-07-10): separate from co-leaders; the server
+        // saves these onto the helpers roster.
+        helpers: (function () {
+          var hs = [];
+          overlay.querySelectorAll('.clsAssistInput').forEach(function (inp) {
+            var v = String(inp.value || '').trim();
+            if (v) hs.push({ email: '', name: v });
+          });
+          return hs;
         })(),
         space_request: period === 'AM' ? [] : collectChecked('space_request'),
         space_request_other: period === 'AM' ? '' : document.getElementById('clsSpaceOther').value.trim(),
