@@ -3338,6 +3338,25 @@
     // description clearly belongs to the chair, not the committee below it.
     if (boardRosterHtml) html += boardRosterHtml;
 
+    // Teaching duty → "Build a Lesson Plan" (2026-07-11, Erin): opens the
+    // Curriculum Library editor prefilled with this class. Shown when the
+    // duty is a Leading/Teaching one (My Responsibilities rows).
+    var planClassName = '';
+    if (/^(Leading|Teaching)/.test(String(duty.text || ''))) {
+      if (p.type === 'amClass') {
+        var planCls = AM_CLASSES[p.group];
+        var planSess = planCls ? planCls.sessions[p.session] : null;
+        planClassName = (planSess && planSess.topic) || (groupWithAge ? groupWithAge(p.group) : p.group);
+      } else if (p.type === 'elective') {
+        planClassName = p.name || String(duty.text).replace(/^(Leading|Teaching)\s*/, '');
+      } else {
+        planClassName = String(duty.text).replace(/^(Leading|Teaching)\s*/, '');
+      }
+    }
+    if (planClassName) {
+      html += '<div style="margin-top:14px;"><button type="button" class="sc-btn" id="dutyLessonPlanBtn">📖 Build a Lesson Plan</button></div>';
+    }
+
     html += '</div>';
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
@@ -3348,6 +3367,13 @@
     });
     var printBtn = personDetailCard.querySelector('.duty-print-btn');
     if (printBtn) printBtn.addEventListener('click', function () { printDetailCard(duty.text || 'My Responsibility'); });
+    var planBtn = document.getElementById('dutyLessonPlanBtn');
+    if (planBtn) planBtn.addEventListener('click', function () {
+      if (typeof startLessonPlanForClass !== 'function') return;
+      startLessonPlanForClass(planClassName,
+        p.type === 'amClass' ? (typeof groupWithAge === 'function' ? groupWithAge(p.group) : '') : '',
+        p.type === 'amClass' ? 'AM' : 'PM');
+    });
   }
 
   // Board-only detail (when person isn't in directory data yet)
