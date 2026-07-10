@@ -337,17 +337,17 @@ module.exports = async function handler(req, res) {
           const updated = await sql`
             UPDATE rooms
             SET name = ${roomName}, builder_note = ${note}, details = ${details},
-                sort_order = ${sort}, status = ${b.status === 'archived' ? 'archived' : 'active'},
+                sort_order = ${sort}, is_outdoor = ${!!b.is_outdoor}, status = ${b.status === 'archived' ? 'archived' : 'active'},
                 updated_by = ${realUser.email}, updated_at = NOW()
             WHERE id = ${roomId}
-            RETURNING id, name, builder_note, details, sort_order, status`;
+            RETURNING id, name, builder_note, details, sort_order, status, is_outdoor`;
           if (updated.length === 0) return res.status(404).json({ error: 'Room not found.' });
           return res.status(200).json({ room: updated[0] });
         }
         const inserted = await sql`
           INSERT INTO rooms (name, builder_note, details, sort_order, updated_by)
           VALUES (${roomName}, ${note}, ${details}, ${sort}, ${realUser.email})
-          RETURNING id, name, builder_note, details, sort_order, status`;
+          RETURNING id, name, builder_note, details, sort_order, status, is_outdoor`;
         return res.status(201).json({ room: inserted[0] });
       }
       if (req.method === 'DELETE') {

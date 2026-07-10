@@ -16632,16 +16632,7 @@
     html += '</div></div>';
 
     // 5. Number of assistants
-    html += '<div class="cls-field">';
-    html += '<label class="cls-label">How many helpers? <span class="cls-req">*</span></label>';
-    html += '<div class="cls-cb-group cls-cb-inline">';
-    ASSISTANT_COUNT_VALUES.forEach(function (n) { html += checkbox('assistant_count', String(n), n + ' Classroom assistant' + (n > 1 ? 's' : '')); });
-    html += '</div>';
-    html += '<label class="cls-cb-label" style="margin-top:8px;">';
-    html += '<input type="checkbox" id="clsTeenAssist"' + (cur.open_to_teen_assistant ? ' checked' : '') + '> ';
-    html += 'Willing to host a Cedars or Pigeons (12+) assistant';
-    html += '</label>';
-    html += '</div>';
+
 
     // 6. Co-teachers — multi-select from the Main Learning Coaches
     // (2026-07-05, Erin): chips + a custom autocomplete panel (native
@@ -16697,6 +16688,17 @@
     html += '</div>';
     html += '<button type="button" class="ws-inline-link" id="clsAddAssist">+ add another assistant</button>';
     html += '<datalist id="clsAssistNames"></datalist>';
+    html += '</div>';
+
+    html += '<div class="cls-field">';
+    html += '<label class="cls-label">How many assistants do you need? <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    ASSISTANT_COUNT_VALUES.forEach(function (n) { html += checkbox('assistant_count', String(n), n + ' Classroom assistant' + (n > 1 ? 's' : '')); });
+    html += '</div>';
+    html += '<label class="cls-cb-label" style="margin-top:8px;">';
+    html += '<input type="checkbox" id="clsTeenAssist"' + (cur.open_to_teen_assistant ? ' checked' : '') + '> ';
+    html += 'Willing to host a Cedars or Pigeons (12+) assistant';
+    html += '</label>';
     html += '</div>';
 
     // 7. Space request (afternoon only — morning rooms are assigned for the year)
@@ -18061,6 +18063,7 @@
     h += '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(r.name || '') + '"></div>';
     h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(r.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
     h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="2" maxlength="2000">' + escapeHtmlWs(r.details || '') + '</textarea></div>';
+    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (r.is_outdoor ? ' checked' : '') + '> \uD83C\uDF33 Outdoor space \u2014 needs an indoor rain backup when assigned</label>';
     h += '<div class="perm-chips">';
     h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (r.id ? 'Save' : 'Add room') + '</button>';
     if (r.id) h += '<button type="button" class="sc-btn sc-btn-del fac-archive">Archive</button>';
@@ -18127,7 +18130,8 @@
         var payload = {
           name: name,
           builder_note: row.querySelector('.fac-note').value.trim(),
-          details: row.querySelector('.fac-details').value.trim()
+          details: row.querySelector('.fac-details').value.trim(),
+          is_outdoor: !!(row.querySelector('.fac-outdoor') && row.querySelector('.fac-outdoor').checked)
         };
         if (id) payload.id = id;
         facSaveRoom(payload, st, saveBtn);
@@ -18150,7 +18154,7 @@
         var rid = parseInt(btn.getAttribute('data-room-id'), 10);
         var room = _facAdminState.rooms.filter(function (r) { return r.id === rid; })[0];
         if (!room) return;
-        facSaveRoom({ id: room.id, name: room.name, builder_note: room.builder_note, details: room.details, sort_order: room.sort_order, status: 'active' }, null, btn);
+        facSaveRoom({ id: room.id, name: room.name, builder_note: room.builder_note, details: room.details, sort_order: room.sort_order, is_outdoor: room.is_outdoor, status: 'active' }, null, btn);
       });
     });
   }
@@ -21820,7 +21824,7 @@
       var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
         .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
       if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
-      if (showRoom && c.class_period !== 'AM' && c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + '</div>';
+      if (showRoom && c.class_period !== 'AM' && c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + (c.scheduled_backup_room ? ' (☔ ' + escClsHtml(c.scheduled_backup_room) + ')' : '') + '</div>';
       s += '<div class="sb-pref-line">';
       s += '<span class="sb-pref-label">Pref:</span> ';
       s += prefSessChips;
@@ -21874,11 +21878,22 @@
       var loose = list.filter(function (c) { return !c.scheduled_room || !roomNames[String(c.scheduled_room).toLowerCase()]; });
       loose.forEach(function (c) { s += sbTileHtml(c, true); });
       activeRooms.forEach(function (r) {
-        var occ = list.filter(function (c) { return String(c.scheduled_room || '').toLowerCase() === String(r.name).toLowerCase(); })[0];
-        s += '<div class="sb-room-card' + (occ ? ' sb-room-occupied' : '') + '" data-hour="' + hour + '" data-room="' + escClsAttr(r.name) + '">';
-        s += '<div class="sb-room-head">📍 <strong>' + escClsHtml(r.name) + '</strong>' + (r.builder_note ? ' <span class="sb-room-note">' + escClsHtml(r.builder_note) + '</span>' : '') + '</div>';
-        if (occ) s += sbTileHtml(occ, false);
-        else s += '<div class="sb-room-empty">' + (isApproved ? '—' : 'Available — drag a class here') + '</div>';
+        var rname = String(r.name).toLowerCase();
+        var occ = list.filter(function (c) { return String(c.scheduled_room || '').toLowerCase() === rname; })[0];
+        // An indoor room can be RESERVED as an outdoor class's rain
+        // backup — it reads occupied but the tile stays in the outdoor
+        // card (2026-07-11).
+        var backupOcc = occ ? null : list.filter(function (c) { return String(c.scheduled_backup_room || '').toLowerCase() === rname; })[0];
+        s += '<div class="sb-room-card' + ((occ || backupOcc) ? ' sb-room-occupied' : '') + '" data-hour="' + hour + '" data-room="' + escClsAttr(r.name) + '">';
+        s += '<div class="sb-room-head">' + (r.is_outdoor ? '🌳' : '📍') + ' <strong>' + escClsHtml(r.name) + '</strong>' + (r.is_outdoor ? ' <span class="sb-room-note">outdoor</span>' : '') + (r.builder_note ? ' <span class="sb-room-note">' + escClsHtml(r.builder_note) + '</span>' : '') + '</div>';
+        if (occ) {
+          s += sbTileHtml(occ, false);
+          if (occ.scheduled_backup_room) s += '<div class="sb-room-note">☔ Rain backup: ' + escClsHtml(occ.scheduled_backup_room) + '</div>';
+        } else if (backupOcc) {
+          s += '<div class="sb-room-empty">☔ Reserved — rain backup for “' + escClsHtml(backupOcc.class_name) + '” (' + escClsHtml(backupOcc.scheduled_room || '') + ')</div>';
+        } else {
+          s += '<div class="sb-room-empty">' + (isApproved ? '—' : (r.is_outdoor ? 'Available — drop a class seated in an indoor room' : 'Available — drag a class here')) + '</div>';
+        }
         s += '</div>';
       });
       s += '</div>';
@@ -22061,7 +22076,9 @@
         var tLocked = !tsub || !sbCanTouchSub(tsub)
           || (tsub.scheduled_session && sbIsSessionApproved(tsub.scheduled_session, tsub.class_period === 'AM' ? 'AM' : 'PM'));
         if (!tLocked) { sbOpenPlacedClassForm(tsub); return; }
-        showScheduleEntryEditor(subId);
+        // Locked / out-of-scope: a clean read-only view of the submission
+        // (Erin, 2026-07-11: the old placement editor read as 'weird').
+        showSbSubmissionDetail(subId);
       });
     });
 
@@ -22107,6 +22124,26 @@
         if (id) assignDroppedSub(id, card.getAttribute('data-hour'), card.getAttribute('data-room') || '');
       });
     });
+    // Auto-scroll while dragging (2026-07-11, Erin): HTML5 drag doesn't
+    // scroll the builder panel on its own, so room cards below the fold
+    // were unreachable mid-drag.
+    var sbScroller = (function () {
+      var el = body;
+      while (el && el !== document.body) {
+        if (el.scrollHeight > el.clientHeight + 20) return el;
+        el = el.parentElement;
+      }
+      return null;
+    })();
+    if (sbScroller && !sbScroller._sbAutoScroll) {
+      sbScroller._sbAutoScroll = true;
+      sbScroller.addEventListener('dragover', function (e) {
+        var r = sbScroller.getBoundingClientRect();
+        if (e.clientY < r.top + 80) sbScroller.scrollTop -= 20;
+        else if (e.clientY > r.bottom - 80) sbScroller.scrollTop += 20;
+      });
+    }
+
     var paletteEl = document.getElementById('sbPalette');
     if (paletteEl) {
       paletteEl.addEventListener('dragover', function (e) { e.preventDefault(); paletteEl.classList.add('sb-palette-drop'); });
@@ -22385,7 +22422,9 @@
       if (s.status !== 'scheduled' && s.status !== 'drafted') return;
       if (s.scheduled_session !== sub.scheduled_session) return;
       if ((s.class_period === 'AM' ? 'AM' : 'PM') !== (sub.class_period === 'AM' ? 'AM' : 'PM')) return;
-      if (String(s.scheduled_room || '').toLowerCase() !== want) return;
+      var holdsIt = String(s.scheduled_room || '').toLowerCase() === want
+        || String(s.scheduled_backup_room || '').toLowerCase() === want; // reserved rain backup counts
+      if (!holdsIt) return;
       if (!sbHoursOverlap(sub.class_period === 'AM' ? 'AM' : 'PM', sub.scheduled_hour, s.scheduled_hour)) return;
       occ = s;
     });
@@ -22431,6 +22470,23 @@
   // The grid is now hour-based open blocks (no preset age sections), so the
   // age range comes from the submission's own age_groups. 2-hour-required
   // classes auto-set hour='both'.
+  // POST one room assignment (primary + optional rain backup); the
+  // endpoint 409s on conflicts / outdoor-without-backup.
+  function sbAssignRoomCall(subId, room, backupRoom) {
+    var cred = localStorage.getItem('rw_google_credential');
+    return fetch('/api/curriculum?action=assign-room' + notifViewAsSuffix(), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: subId, room: room, backup_room: backupRoom || '' })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) alert((res.data && res.data.error) || 'Could not assign the room.');
+        publishedSchedule.loaded = false;
+        loadScheduleBuilder();
+      })
+      .catch(function () { alert('Network error assigning the room.'); loadScheduleBuilder(); });
+  }
+
   // roomSpec (PM drops only): '' = the column's open area (no room /
   // un-assign), a room name = the room card the class was dropped on,
   // undefined = AM drop (rooms don't apply to the morning builder).
@@ -22468,6 +22524,23 @@
         && confirm('“' + sub.class_name + '” was submitted for both PM hours (kids can take one or both).\n\nOK = place it in BOTH hours\nCancel = just ' + (hour === 'PM1' ? 'Hour 1' : 'Hour 2'))) {
         scheduledHour = 'both';
       }
+      // Outdoor target: the class must ALREADY be seated in an indoor
+      // room for this exact slot \u2014 that room becomes the reserved rain
+      // backup and the outdoor space becomes primary (2026-07-11).
+      var outMeta = roomSpec ? ((scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active' && String(r.name).toLowerCase() === String(roomSpec).toLowerCase(); })[0] || null) : null;
+      if (outMeta && outMeta.is_outdoor) {
+        var curMeta = (scheduleBuilderState.rooms || []).filter(function (r) { return r.status === 'active' && !r.is_outdoor && String(r.name).toLowerCase() === String(sub.scheduled_room || '').toLowerCase(); })[0] || null;
+        var placedHere = sub.scheduled_session === scheduleBuilderState.session && sub.scheduled_hour === scheduledHour;
+        if (!placedHere || !curMeta) {
+          alert('\u201C' + roomSpec + '\u201D is an outdoor space \u2014 seat \u201C' + sub.class_name + '\u201D in an INDOOR room for this hour first. That room then stays reserved as its rain backup.');
+          return;
+        }
+        var occOut = sbRoomOccupant(roomSpec, { id: subId, class_period: 'PM', scheduled_session: scheduleBuilderState.session, scheduled_hour: scheduledHour });
+        if (occOut) { alert('\u201C' + roomSpec + '\u201D is already taken that hour by \u201C' + occOut.class_name + '\u201D.'); return; }
+        if (!confirm('\u201C' + roomSpec + '\u201D is outdoor.\n\u201C' + curMeta.name + '\u201D stays reserved as the rain backup.\n\nMake \u201C' + roomSpec + '\u201D the primary spot?')) return;
+        sbAssignRoomCall(subId, roomSpec, curMeta.name);
+        return;
+      }
       // Dropped on a room card: the room must be free for the FINAL hour
       // ('both' needs it free in both columns). The server re-checks.
       if (roomSpec) {
@@ -22486,6 +22559,7 @@
       // PM drops: the drop target IS the room (open area clears it).
       // AM drops leave whatever room data the row already carried.
       scheduled_room: roomSpec === undefined ? (sub.scheduled_room || '') : '',
+      scheduled_backup_room: roomSpec === undefined ? (sub.scheduled_backup_room || '') : '',
       reviewer_notes: sub.reviewer_notes || ''
     }).then(function () {
       if (!roomSpec) return null;
@@ -23014,6 +23088,7 @@
         scheduled_hour: status === 'submitted' ? null : sub.scheduled_hour,
         scheduled_age_range: status === 'submitted' ? '' : (sub.scheduled_age_range || ''),
         scheduled_room: status === 'submitted' ? '' : (sub.scheduled_room || ''),
+        scheduled_backup_room: status === 'submitted' ? '' : (sub.scheduled_backup_room || ''),
         reviewer_notes: sub.reviewer_notes || ''
       };
     }

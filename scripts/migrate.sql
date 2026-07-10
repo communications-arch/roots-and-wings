@@ -1482,3 +1482,10 @@ CREATE TABLE IF NOT EXISTS rooms (
   updated_by   TEXT NOT NULL DEFAULT '',
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+
+-- 2026-07-11 (Erin): outdoor spaces. Rooms carry is_outdoor; assigning a
+-- class to an outdoor PRIMARY requires picking an indoor BACKUP (rain
+-- plan), which stays reserved for that hour. Backup lives per class.
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_outdoor BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS scheduled_backup_room TEXT NOT NULL DEFAULT '';

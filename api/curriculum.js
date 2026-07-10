@@ -410,6 +410,10 @@ function normalizeReviewerPatch(body) {
     }
     scheduled_hour = h;
   }
+  let scheduled_backup_room = '';
+  if (typeof body.scheduled_backup_room === 'string') {
+    scheduled_backup_room = body.scheduled_backup_room.trim().slice(0, 100);
+  }
   if (typeof body.scheduled_age_range === 'string') {
     scheduled_age_range = body.scheduled_age_range.trim().slice(0, 100);
   }
@@ -659,6 +663,7 @@ function serializeSubmission(r, helpers) {
     scheduled_hour: r.scheduled_hour,
     scheduled_age_range: r.scheduled_age_range,
     scheduled_room: r.scheduled_room,
+    scheduled_backup_room: r.scheduled_backup_room || '',
     reviewer_notes: r.reviewer_notes || '',
     reviewed_by_email: r.reviewed_by_email,
     reviewed_at: r.reviewed_at,
@@ -1117,6 +1122,9 @@ module.exports = async function handler(req, res) {
         const subId = parseInt(body.id, 10);
         if (!Number.isFinite(subId)) return res.status(400).json({ error: 'id required' });
         const room = String(body.room || '').trim().slice(0, 100);
+        // Outdoor primaries carry an indoor BACKUP (rain plan) that stays
+        // reserved for the hour (2026-07-11, Erin).
+        let backup = String(body.backup_room || '').trim().slice(0, 100);
         const rows = await sql`
           SELECT id, class_name, class_period, school_year, scheduled_session, scheduled_hour, status
           FROM class_submissions WHERE id = ${subId}`;
@@ -1126,6 +1134,17 @@ module.exports = async function handler(req, res) {
           return res.status(409).json({ error: 'Place the class into a session first — rooms attach to a scheduled slot.' });
         }
         if (room) {
+          const roomRows = await sql`SELECT name, is_outdoor FROM rooms WHERE status = 'active'`;
+          const roomMeta = {};
+          roomRows.forEach(r => { roomMeta[String(r.name).toLowerCase()] = r; });
+          const primaryMeta = roomMeta[room.toLowerCase()];
+          if (primaryMeta && primaryMeta.is_outdoor) {
+            const backupMeta = backup ? roomMeta[backup.toLowerCase()] : null;
+            if (!backupMeta) return res.status(409).json({ error: '“' + room + '” is an outdoor space — pick an indoor backup room for it.' });
+            if (backupMeta.is_outdoor) return res.status(409).json({ error: 'The backup for an outdoor space must be an INDOOR room.' });
+          } else {
+            backup = ''; // indoor primary needs no backup
+          }
           const hoursOverlap = (a, b) => {
             const A = String(a || ''), B = String(b || '');
             if (target.class_period === 'AM') {
@@ -1136,25 +1155,32 @@ module.exports = async function handler(req, res) {
             if (A === 'both' || B === 'both') return true;
             return A === B;
           };
+          // A room is taken when any same-slot class holds it as PRIMARY
+          // or has it reserved as a rain BACKUP.
           const occupants = await sql`
-            SELECT id, class_name, scheduled_hour FROM class_submissions
+            SELECT id, class_name, scheduled_hour, scheduled_room, scheduled_backup_room
+            FROM class_submissions
             WHERE school_year = ${target.school_year}
               AND scheduled_session = ${target.scheduled_session}
               AND class_period = ${target.class_period}
               AND status IN ('scheduled', 'drafted')
-              AND id <> ${subId}
-              AND LOWER(scheduled_room) = LOWER(${room})`;
-          const clash = occupants.find(o => hoursOverlap(target.scheduled_hour, o.scheduled_hour));
+              AND id <> ${subId}`;
+          const wanted = [room, backup].filter(Boolean).map(x => x.toLowerCase());
+          const clash = occupants.find(o => hoursOverlap(target.scheduled_hour, o.scheduled_hour)
+            && (wanted.indexOf(String(o.scheduled_room || '').toLowerCase()) !== -1
+              || wanted.indexOf(String(o.scheduled_backup_room || '').toLowerCase()) !== -1));
           if (clash) {
-            return res.status(409).json({ error: '“' + room + '” is already taken that hour by “' + clash.class_name + '”. Unassign it there first, or pick another room.' });
+            return res.status(409).json({ error: 'That room is already taken (or reserved as a rain backup) that hour by “' + clash.class_name + '”. Pick another.' });
           }
+        } else {
+          backup = '';
         }
         const updated = await sql`
           UPDATE class_submissions
-          SET scheduled_room = ${room}, updated_at = NOW()
+          SET scheduled_room = ${room}, scheduled_backup_room = ${backup}, updated_at = NOW()
           WHERE id = ${subId}
-          RETURNING id, scheduled_room`;
-        return res.status(200).json({ ok: true, id: updated[0].id, room: updated[0].scheduled_room });
+          RETURNING id, scheduled_room, scheduled_backup_room`;
+        return res.status(200).json({ ok: true, id: updated[0].id, room: updated[0].scheduled_room, backup_room: updated[0].scheduled_backup_room });
       }
 
       // VP / Afternoon Class Liaison toggle a Schedule Builder session's
