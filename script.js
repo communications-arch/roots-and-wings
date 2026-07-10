@@ -16697,6 +16697,7 @@
     html += '<option value="">— pick the age group —</option>';
     AGE_GROUP_VALUES.forEach(function (v) {
       if (v === 'all-ages') return; // afternoon-only
+      if (v === 'greenhouse') return; // no morning programming for 0–2 (2026-07-10)
       html += '<option value="' + v + '"' + (amGroupCur === v ? ' selected' : '') + '>' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
     });
     html += '</select>';
@@ -17580,6 +17581,7 @@
     var full = 0, partial = 0, open = 0;
     var rows = '';
     BRAND_AGE_GROUPS.forEach(function (grp) {
+      if (grp === 'Greenhouse') return; // no morning programming for 0–2 (2026-07-10)
       rows += '<tr><th class="mcb-teach-grp"><span class="' + ageGroupClass(grp) + '">'
         + ageGroupEmoji(grp) + ' ' + grp + '</span></th>';
       for (var sess = 1; sess <= 5; sess++) {
@@ -18840,10 +18842,10 @@
           li.hidden = !missing;
           if (missing) {
             var label = li.querySelector('.ws-todo-liaison-label');
-            var pretty = grp.charAt(0).toUpperCase() + grp.slice(1);
             var startStr = String(missing.start_date).slice(0, 10);
             if (label) {
-              label.textContent = 'No ' + pretty + ' morning class for Session ' + missing.session_number + ' yet'
+              // "Select …", not "No … yet" — action-phrased (Erin, 2026-07-10).
+              label.textContent = 'Select Morning Class for Session ' + missing.session_number
                 + (today < startStr ? ' — starts ' + boardCalFmtDate(startStr) : '');
             }
           }
@@ -20892,6 +20894,12 @@
     { name: 'Pigeons',    emoji: '🕊️', range: '14+',   min: 14, max: 200 }
   ];
   // Suggested group for an age (first-match, mirrors the server groupForAge).
+  // Class-programming surfaces skip Greenhouse (Erin, 2026-07-10): no
+  // morning programming is offered for 0–2 — toddlers stay with their
+  // parents. The kid-placement columns above KEEP Greenhouse (it's the
+  // nursery roster); only scheduling/teaching views drop it.
+  var MORNING_PROGRAM_GROUPS = MORNING_GROUP_ORDER.filter(function (g) { return g.name !== 'Greenhouse'; });
+
   // Used to hint which class a pending kid would likely land in.
   function mcbGroupForAge(age) {
     if (age == null) return '';
@@ -21148,7 +21156,7 @@
     h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Group</th>';
     for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
     h += '</tr></thead><tbody>';
-    MORNING_GROUP_ORDER.forEach(function (g) {
+    MORNING_PROGRAM_GROUPS.forEach(function (g) {
       h += '<tr><th class="mcb-teach-grp">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</th>';
       for (var s2 = 1; s2 <= 5; s2++) {
         var cell = map[g.name + '|' + s2] || { lead: null, assists: [] };
@@ -21642,7 +21650,7 @@
       // and only one class fits a group per session — 🟢 filled / 🔴 open
       // reads as the session's morning coverage at a glance.
       html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
-      MORNING_GROUP_ORDER.forEach(function (g) {
+      MORNING_PROGRAM_GROUPS.forEach(function (g) {
         var list = classesInSession.filter(function (c) { return sbAmGroupOf(c) === g.name; });
         // Hour 1 (or both-hours) above Hour 2 so the tiles read in day order.
         list.sort(function (a, b) {
@@ -22246,7 +22254,9 @@
   // teacher's behalf (workspace member → filed under them; plain name →
   // filed under the liaison with the name kept visible) and optionally
   // places it straight into the session being built.
-  function showSbNewClassModal(period) {
+  // presetGroup (optional, lowercase age-group value): pre-selects the
+  // morning age group when opened from a specific cell's Add picker.
+  function showSbNewClassModal(period, presetGroup) {
     if (document.getElementById('sbNewOverlay')) return;
     var sess = scheduleBuilderState.session;
     var isAM = period === 'AM';
@@ -22274,8 +22284,9 @@
       html += '<select class="cl-input" id="sbNewAmGroup"><option value="">— pick the age group —</option>';
       AGE_GROUP_VALUES.forEach(function (v) {
         if (v === 'all-ages') return;
+        if (v === 'greenhouse') return; // no morning programming for 0–2 (2026-07-10)
         if (!sbScopeAllowsGroup(v)) return; // scoped liaison: own group(s) only
-        html += '<option value="' + v + '">' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
+        html += '<option value="' + v + '"' + (presetGroup === v ? ' selected' : '') + '>' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
       });
       html += '</select></div>';
       html += '<div class="cls-field"><label class="cls-label">Hour</label>';
@@ -22486,7 +22497,13 @@
       html += '</details>';
     }
 
-    html += '<div class="cls-actions"><button type="button" class="sc-btn" id="sbPickerCancelBtn">Close</button></div>';
+    // "+ New Class" straight from the cell's Add flow (Erin, 2026-07-10):
+    // nothing suitable in the inbox → create one on the spot, pre-scoped
+    // to this cell's group (morning) and the current session.
+    html += '<div class="cls-actions">';
+    html += '<button type="button" class="sc-btn" id="sbPickerNewClass">+ New Class</button>';
+    html += '<button type="button" class="sc-btn" id="sbPickerCancelBtn">Close</button>';
+    html += '</div>';
     html += '</div></div>';
 
     document.body.insertAdjacentHTML('beforeend', html);
@@ -22494,6 +22511,11 @@
     function close() { overlay.remove(); }
     document.getElementById('sbPickerCloseBtn').addEventListener('click', close);
     document.getElementById('sbPickerCancelBtn').addEventListener('click', close);
+    var pickerNewBtn = document.getElementById('sbPickerNewClass');
+    if (pickerNewBtn) pickerNewBtn.addEventListener('click', function () {
+      close();
+      showSbNewClassModal(pickerPeriod, isAmPick ? amGroup.toLowerCase() : '');
+    });
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
 
     overlay.querySelectorAll('.sb-pick-assign').forEach(function (btn) {

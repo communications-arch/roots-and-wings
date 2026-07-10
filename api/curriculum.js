@@ -335,6 +335,9 @@ function normalizeSubmission(body) {
     if (age_groups.length !== 1 || age_groups[0] === 'all-ages') {
       throw new Error('Morning classes are for exactly one age group.');
     }
+    if (age_groups[0] === 'greenhouse') {
+      throw new Error('No morning programming is offered for the Greenhouse (0–2) group — toddlers stay with their parents.');
+    }
   } else {
     if (age_groups.indexOf('greenhouse') !== -1) {
       throw new Error('Greenhouse is a morning-only age group.');
