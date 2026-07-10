@@ -4128,6 +4128,29 @@
       .catch(function (e) { alert(e.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = orig; });
   }
 
+  // Finalized morning placements for the ACTIVE family's kids (2026-07-11,
+  // Erin: the Kids' Schedule card shows each kid's class once the
+  // Membership Director finalizes). Map: kid first name (lower) -> group.
+  var _kidPlacements = {};
+  var _kidPlacementsFor = '';
+  function loadKidPlacements(fam) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred || !fam || !fam.email) return;
+    if (_kidPlacementsFor === fam.email) return; // cached for this family
+    fetch('/api/curriculum?action=my-kid-placements&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        _kidPlacementsFor = fam.email;
+        _kidPlacements = {};
+        (d.placements || []).forEach(function (pl) { _kidPlacements[String(pl.kid || '').toLowerCase()] = pl.group; });
+        if (Object.keys(_kidPlacements).length) renderMyFamily();
+      })
+      .catch(function () { /* card just shows last-known groups */ });
+  }
+
   function renderMyFamily() {
     var email = getActiveEmail();
     var section = document.getElementById('myFamily');
@@ -4687,7 +4710,10 @@
         // Returning members get a "(this past year)" reference; brand-new
         // families whose kids have no prior group placement skip it so
         // the line doesn't claim history that doesn't exist.
-        if (kid.group) {
+        var placedGroup = _kidPlacements[String(kid.name || '').toLowerCase()];
+        if (placedGroup) {
+          html += '<span class="mf-sched-class" style="font-size:0.9rem;">' + groupWithAge(placedGroup) + ' <span style="color:var(--color-teal);font-weight:600;">(placed for ' + ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || 'next year') + ')</span></span>';
+        } else if (kid.group) {
           html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + groupWithAge(kid.group) + ' (this past year)</span>';
         }
         html += '</div>';
@@ -4697,7 +4723,9 @@
     } else {
     html += '<h3 class="mf-card-title">Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
     fam.kids.forEach(function (kid) {
-      var staff = AM_CLASSES[kid.group];
+      // Finalized morning placement wins over the directory's stale group.
+      var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
+      var staff = AM_CLASSES[kidGroup];
       var sess = staff ? staff.sessions[currentSession] : null;
       var room = sess ? sess.room : '';
       var teacher = sess ? sess.teacher : 'TBD';
@@ -4713,7 +4741,7 @@
       html += '<div class="mf-kid-bar">';
       html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
       html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
-      html += '<button class="mf-class-link" data-group="' + kid.group + '">View Classmates &rarr;</button>';
+      html += '<button class="mf-class-link" data-group="' + kidGroup + '">View Classmates &rarr;</button>';
       html += '</div>';
 
       // Schedule table
@@ -4722,7 +4750,7 @@
       // Morning
       html += '<div class="mf-sched-row">';
       html += '<span class="mf-sched-time">AM</span>';
-      html += '<span class="mf-sched-class">' + groupWithAge(kid.group) + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
+      html += '<span class="mf-sched-class">' + groupWithAge(kidGroup) + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
       html += '<span class="mf-sched-room">' + room + '</span>';
       html += '<span class="mf-sched-teacher">' + teacher + '</span>';
       html += '</div>';
@@ -4937,6 +4965,9 @@
     // Afternoon class sign-ups card — loads async; hides itself when nothing
     // is open for sign-ups and the viewer isn't a reviewer (VP/Liaison).
     if (typeof loadClassSignupCard === 'function') loadClassSignupCard(fam);
+
+    // Kids' finalized morning placements (re-renders once when they land).
+    if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
 
     // Class Ideas card — ALWAYS refresh on a My Family render. The shell
     // above resets the body to "Loading…", and renders triggered by tab
@@ -5368,6 +5399,7 @@
         publishedSchedule.sessions = d.sessions || {};
         publishedSchedule.loaded = true;
         publishedSchedule.fetchedAt = Date.now();
+        publishedSchedule.year = yr;
         renderSessionTab();
       })
       .catch(function () { publishedSchedule.loading = false; });
@@ -5382,7 +5414,12 @@
     // a minute old so builder changes land here without a full reload.
     // Builder mutations also invalidate directly (patch/delete/assign-room).
     if (!publishedSchedule.loaded) loadPublishedSchedule();
-    else if (Date.now() - publishedSchedule.fetchedAt > 60000) loadPublishedSchedule(true);
+    // Refetch when the snapshot is stale OR was fetched for a different
+    // school year — the first fetch can race ahead of the sessions load
+    // and grab the fallback '2025-2026' (Erin's empty Session tab,
+    // 2026-07-11).
+    else if (publishedSchedule.year !== ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || publishedSchedule.year)
+      || Date.now() - publishedSchedule.fetchedAt > 60000) loadPublishedSchedule(true);
     var dbSess = publishedSchedule.sessions[String(sessionTabView)] || null;
 
     // Summer-break: no current session to show. The pager + Session 5

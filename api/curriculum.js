@@ -861,6 +861,26 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ school_year: year, sessions });
       }
 
+      // Family-facing: the acting family's kids' FINALIZED morning
+      // placements (2026-07-11, Erin: the Kids' Schedule card shows each
+      // kid's class once the Membership Director finalizes). Group names
+      // only — no other family's data is reachable.
+      if (action === 'my-kid-placements') {
+        const famEmail = resolveSubmitterEmail(user, req.query.view_as);
+        const famRec = await resolveFamily(famEmail);
+        const keyEmail = (famRec && famRec.email) || famEmail;
+        const pYear = String(req.query.school_year || '').trim().slice(0, 20) || activeSchoolYear();
+        const pRows = await sql`
+          SELECT kid_first_name, class_group, finalized
+          FROM morning_class_assignments
+          WHERE school_year = ${pYear} AND LOWER(family_email) = LOWER(${keyEmail})`;
+        return res.status(200).json({
+          school_year: pYear,
+          placements: pRows.filter(r => r.finalized && r.class_group)
+            .map(r => ({ kid: r.kid_first_name, group: r.class_group }))
+        });
+      }
+
       // Single submission fetch — owner or reviewer can view.
       if (action === 'class-submission') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
