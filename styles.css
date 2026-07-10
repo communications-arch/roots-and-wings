@@ -13678,12 +13678,15 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15);
 }
+/* Keep this a real table-cell (no flex): a flexed td stops painting the
+   row background/border across the full cell height and won't
+   vertical-center, which broke the Auto/Approve cells on tall rows. */
 .coop-cal-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  text-align: right;
   white-space: nowrap;
 }
+.coop-cal-actions .btn { vertical-align: middle; }
+.coop-cal-actions .btn + .btn { margin-left: 6px; }
 .coop-cal-add-row {
   margin-top: 12px;
   display: flex;
