@@ -4279,8 +4279,50 @@
       sec.appendChild(row);
     });
 
-    // ── The panel below lists ONLY what's still open + cleaning. ──
-    var h = '<div class="mf-vol-panel">';
+    // ── Pickers inject INLINE into their sections (Erin, 2026-07-11:
+    // one flow — Morning, PM hours, Cleaning — not a panel below).
+    // Current session only; the chips in the strip preview others.
+    function injectRow(sectionKey, innerHtml) {
+      var sec = document.querySelector('.mf-block-section[data-block="' + sectionKey + '"]');
+      if (!sec) return;
+      var row = document.createElement('div');
+      row.className = 'mf-duty mf-vol-inline';
+      row.innerHTML = innerHtml;
+      sec.style.display = '';
+      sec.appendChild(row);
+    }
+    if (isCurrent) {
+      openBlocks.forEach(function (blk) {
+        injectRow(blk.key,
+          '<div class="mf-duty-icon">➕</div>'
+          + '<div class="mf-duty-info"><strong>Open — sign up</strong>'
+          + '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;margin-top:4px;">' + volSlotOptionsHtml(blk.key, d) + '</select>'
+          + '</div>');
+      });
+      // Cleaning Crew section: your spot (with release) or the open areas.
+      var famName = String((fam && fam.name) || '').trim().toLowerCase();
+      var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
+      var myClean = (d.cleaning || []).filter(function (c) {
+        var f = String(c.family || '').toLowerCase();
+        return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
+      });
+      if (myClean.length) {
+        injectRow('Cleaning',
+          '<div class="mf-duty-icon">🧹</div>'
+          + '<div class="mf-duty-info"><strong>' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</strong><span>Session ' + sess + ' · optional</span></div>'
+          + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button></div>');
+      } else if ((d.cleaning_open || []).length) {
+        injectRow('Cleaning',
+          '<div class="mf-duty-icon">🧹</div>'
+          + '<div class="mf-duty-info"><strong>Optional — lend a hand after co-op</strong>'
+          + '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;margin-top:4px;"><option value="">— pick an open area… —</option>'
+          + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
+          + '</select></div>');
+      }
+    }
+
+    // ── The strip above the sections: chips + nudge + grid link. ──
+    var h = '<div class="mf-vol-panel" style="border-top:none;padding-top:0;margin-top:2px;">';
     h += '<div class="mf-block-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Session ' + sess + ' Sign-Up';
     h += '<span style="display:inline-flex;gap:4px;">';
     for (var i = 1; i <= 5; i++) {
@@ -4289,40 +4331,16 @@
     h += '</span>';
     h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;">See everyone’s sign-ups →</button>';
     h += '</div>';
-    // The nudge (Erin, 2026-07-11): open hours in the CURRENT session
-    // mean you still owe a sign-up — every coach covers all three blocks.
     if (isCurrent && openBlocks.length > 0) {
       h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>'
         + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ')
-        + '</strong> this session — every coach covers the morning and both afternoon hours.</p>';
+        + '</strong> this session — pick a spot in each hour below.</p>';
     } else if (openBlocks.length === 0) {
       h += '<p class="mf-vol-optional" style="margin:4px 0;">✓ All your hours are covered for Session ' + sess + '.</p>';
-    }
-    openBlocks.forEach(function (blk) {
-      h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">' + blk.label + '</span>';
-      h += '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
-      h += '</div>';
-    });
-    // Cleaning: optional, self-serve (2026-07-11). Your spot shows with a
-    // release button; otherwise the open areas are one pick away.
-    var famName = String((fam && fam.name) || '').trim().toLowerCase();
-    var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
-    var myClean = (d.cleaning || []).filter(function (c) {
-      var f = String(c.family || '').toLowerCase();
-      return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
-    });
-    h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">Cleaning (after co-op) — optional</span>';
-    if (myClean.length) {
-      h += '<span class="mf-vol-mine">🧹 ' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</span>';
-      h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button>';
-    } else if ((d.cleaning_open || []).length) {
-      h += '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;"><option value="">— pick an open area… —</option>'
-        + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
-        + '</select>';
     } else {
-      h += '<span class="mf-vol-optional">All areas covered for this session — thank you!</span>';
+      h += '<p class="mf-vol-optional" style="margin:4px 0;">Previewing Session ' + sess + ' — open for you: '
+        + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ') + '.</p>';
     }
-    h += '</div>';
     h += '<div class="cls-error" id="mfVolError" style="display:none;"></div>';
     h += '</div>';
     wrap.innerHTML = h;
@@ -4334,7 +4352,7 @@
     });
     var gridBtn = document.getElementById('mfVolGridBtn');
     if (gridBtn) gridBtn.addEventListener('click', function () { showVolunteerGridModal(d.session); });
-    wrap.querySelectorAll('.mf-vol-pick').forEach(function (sel) {
+    document.querySelectorAll('.mf-vol-pick').forEach(function (sel) {
       sel.addEventListener('change', function () {
         var v = this.value;
         if (!v) return;
@@ -4381,7 +4399,7 @@
       });
     });
     // Cleaning self-signup: pick an open area → claimed on the spot.
-    var cleanSel = wrap.querySelector('.mf-vol-pick-clean');
+    var cleanSel = document.querySelector('.mf-vol-pick-clean');
     if (cleanSel) cleanSel.addEventListener('change', function () {
       var areaId = parseInt(this.value, 10);
       if (!Number.isFinite(areaId)) return;
@@ -4794,7 +4812,7 @@
     // it as a duty for the active user when they're the primary family_email
     // holder — co-parents don't inherit their spouse's board role.
     if (fam.boardRole && String(fam.email || '').toLowerCase() === String(email || '').toLowerCase()) {
-      duties.push({block: 'annual', icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
+      duties.push({block: 'twoyear', icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
     }
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
       if (committee.chair && committee.chair.person) {
@@ -4950,11 +4968,11 @@
     })();
 
     // ── Render by section ──
-    var blockOrder = ['AM', 'PM1', 'PM2'];
-    if (hasCleaning) blockOrder.push('Cleaning');
-    blockOrder.push('annual');
+    // One flow in day order (Erin, 2026-07-11): Morning, both Afternoon
+    // hours, Cleaning Crew, Annual Roles, then the 2-year board roles.
+    var blockOrder = ['AM', 'PM1', 'PM2', 'Cleaning', 'annual', 'twoyear'];
 
-    var blockLabels = { AM: 'Morning (10:00\u201312:00)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning', annual: 'Annual Roles' };
+    var blockLabels = { AM: 'Morning (10:00\u201312:00)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning Crew (after co-op)', annual: 'Annual Roles', twoyear: '2-Year Roles' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
@@ -5003,6 +5021,10 @@
         html += '<p class="mf-empty">No assignments found for this session.</p>';
       }
     }
+    // Session strip (chips + nudge + everyone-grid link) sits ABOVE the
+    // sections; the sign-up pickers inject INline into their sections.
+    html += '<div id="mfVolSignup"></div>';
+
     // Compact summary in card — show count per block + first duty of each.
     // The AM/PM1/PM2 sections ALWAYS render (hidden while empty) so the
     // volunteer sign-up loader can inject pledge rows inline with the
@@ -5010,7 +5032,7 @@
     html += '<div class="mf-duties-summary">';
     blockOrder.forEach(function (blk) {
       var blockDuties = duties.filter(function (d) { return d.block === blk; });
-      var alwaysBlock = blk === 'AM' || blk === 'PM1' || blk === 'PM2';
+      var alwaysBlock = blk === 'AM' || blk === 'PM1' || blk === 'PM2' || blk === 'Cleaning';
       if (blockDuties.length === 0 && !alwaysBlock) return;
       html += '<div class="mf-block-section" data-block="' + blk + '"' + (blockDuties.length === 0 ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
       blockDuties.forEach(function (d) {
@@ -5019,12 +5041,6 @@
       html += '</div>';
     });
     html += '</div>';
-
-    // Session volunteer sign-up slots (2026-07-11, Erin's build): every
-    // MLC covers Morning + both PM hours (cleaning optional). Rendered
-    // async by loadVolunteerSignupPanel — works in summer too, since
-    // fall sign-ups happen before Session 1 starts.
-    html += '<div id="mfVolSignup"></div>';
 
     // Coverage notes + "I'll Be Out" + My Absences — all hidden during
     // summer break (no co-op days to be absent from or cover for).
