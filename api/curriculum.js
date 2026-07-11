@@ -951,7 +951,7 @@ module.exports = async function handler(req, res) {
         const vmSess = parseInt(req.query.session, 10);
         if (!Number.isFinite(vmSess) || vmSess < 1 || vmSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
         const actingEmail = actingEmailFor(user, req).toLowerCase();
-        const [clsRows, helperRows, signupRows, cleanRows, meRows] = await Promise.all([
+        const [clsRows, helperRows, signupRows, cleanRows, meRows, apprRows] = await Promise.all([
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.age_groups, c.scheduled_age_range,
                      c.submitted_by_email, c.submitted_by_name, c.co_teachers, c.assistant_count, c.scheduled_room,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
@@ -976,8 +976,14 @@ module.exports = async function handler(req, res) {
               WHERE ca.session_number = ${vmSess} AND ca.school_year = ${vmYear}
               ORDER BY a.sort_order, ca.sort_order`,
           sql`SELECT first_name, last_name FROM people
-              WHERE LOWER(email) = ${actingEmail} OR LOWER(personal_email) = ${actingEmail} LIMIT 1`
+              WHERE LOWER(email) = ${actingEmail} OR LOWER(personal_email) = ${actingEmail} LIMIT 1`,
+          sql`SELECT approved_at FROM co_op_sessions
+              WHERE school_year = ${vmYear} AND session_number = ${vmSess}`
         ]);
+        // Afternoon classes stay out of the matrix until the session's PM
+        // side is APPROVED (Erin, 2026-07-11) — same rule as the published
+        // schedule, so drafted placements never leak into sign-ups.
+        const pmApproved = !!(apprRows.length && apprRows[0].approved_at);
         const helpersBySub = {};
         helperRows.forEach(h => {
           (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
@@ -992,6 +998,7 @@ module.exports = async function handler(req, res) {
         const blocks = { AM1: { classes: [], floaters: [], board: [], prep: [] }, AM2: { classes: [], floaters: [], board: [], prep: [] }, PM1: { classes: [], floaters: [], board: [], prep: [] }, PM2: { classes: [], floaters: [], board: [], prep: [] } };
         const mine = { AM1: null, AM2: null, PM1: null, PM2: null };
         clsRows.forEach(r => {
+          if (r.class_period !== 'AM' && !pmApproved) return;
           const hs = helpersBySub[r.id] || [];
           const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
           const entry = {
@@ -1044,7 +1051,7 @@ module.exports = async function handler(req, res) {
             WHERE ca.cleaning_area_id = a.id AND ca.session_number = ${vmSess} AND ca.school_year = ${vmYear})
           ORDER BY a.sort_order, a.id`;
         const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floater: a.floor_key === 'floater' }));
-        return res.status(200).json({ school_year: vmYear, session: vmSess, blocks, mine, cleaning, cleaning_open, me: { email: actingEmail, name: meName } });
+        return res.status(200).json({ school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open, me: { email: actingEmail, name: meName } });
       }
 
       // Single submission fetch — owner or reviewer can view.

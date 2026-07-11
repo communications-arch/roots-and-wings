@@ -4411,10 +4411,17 @@
     // CURRENT session — the chips below just preview other sessions.
     var VOL_ICONS = { floater: '🦋', board: '📋', prep: '🧰' };
     document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
+    // Sign-up slots only open once there is something to sign up FOR
+    // (Erin, 2026-07-11): morning hours need placed AM classes, the
+    // afternoon hours need the session's PM schedule approved.
+    function blockAvailable(key) {
+      if (key.indexOf('AM') === 0) return ((((d.blocks || {})[key] || {}).classes) || []).length > 0;
+      return !!d.pm_approved;
+    }
     var openBlocks = [];
     VOL_BLOCKS.forEach(function (blk) {
       var mine = (d.mine || {})[blk.key];
-      if (!mine && !_mfDutyBlocks[blk.key]) openBlocks.push(blk);
+      if (!mine && !_mfDutyBlocks[blk.key] && blockAvailable(blk.key)) openBlocks.push(blk);
       if (!isCurrent || !mine) return;
       if (_mfDutyBlocks[blk.key] && (mine.kind === 'lead' || mine.kind === 'assist')) return; // already listed as a duty
       var sec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
@@ -4518,15 +4525,21 @@
     h += '</span>';
     h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;white-space:nowrap;font-size:0.78rem;">👥 Everyone’s sign-ups</button>';
     h += '</div>';
+    var unavailNotes = [];
+    if (!blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
+    if (!d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the schedule is approved.');
     if (isCurrent && openBlocks.length > 0) {
       h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>'
         + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ')
         + '</strong> this session — pick a spot in each hour below.</p>';
-    } else if (openBlocks.length === 0) {
+    } else if (openBlocks.length === 0 && unavailNotes.length === 0) {
       h += '<p class="mf-vol-optional" style="margin:4px 0;">✓ All your hours are covered for Session ' + sess + '.</p>';
-    } else {
+    } else if (!isCurrent && openBlocks.length > 0) {
       h += '<p class="mf-vol-optional" style="margin:4px 0;">Previewing Session ' + sess + ' — open for you: '
         + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ') + '.</p>';
+    }
+    if (unavailNotes.length) {
+      h += '<p class="mf-vol-optional" style="margin:4px 0;">' + unavailNotes.join(' ') + '</p>';
     }
     h += '<div class="cls-error" id="mfVolError" style="display:none;"></div>';
     h += '</div>';
