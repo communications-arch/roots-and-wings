@@ -4836,7 +4836,7 @@
       if (!sess) return;
       parentFullNames.forEach(function (full) {
         if (nameMatch(staff.liaison, full)) {
-          duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: 'Year-long role', popup: {type: 'amClass', group: groupName, session: currentSession}});
+          duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: '', popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         if (nameMatch(sess.teacher, full)) {
           duties.push({block: 'AM', icon: 'teach', text: groupName + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
@@ -5021,7 +5021,9 @@
     // it as a duty for the active user when they're the primary family_email
     // holder — co-parents don't inherit their spouse's board role.
     if (fam.boardRole && String(fam.email || '').toLowerCase() === String(email || '').toLowerCase()) {
-      duties.push({block: 'twoyear', icon: 'board', text: fam.boardRole, detail: 'Board of Directors &middot; 2-year term', popup: {type: 'board', role: fam.boardRole}});
+      // "Board" only — the 2-Yr section header already says the term
+      // (Erin, 2026-07-11), and the shorter detail keeps the title whole.
+      duties.push({block: 'twoyear', icon: 'board', text: fam.boardRole, detail: 'Board', popup: {type: 'board', role: fam.boardRole}});
     }
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
       if (committee.chair && committee.chair.person) {
@@ -5029,14 +5031,14 @@
         if (!fam.boardRole || !nameMatch(chairTitle, fam.boardRole)) {
           parentFullNames.forEach(function (full) {
             if (nameMatch(committee.chair.person, full))
-              duties.push({block: 'annual', icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board &middot; Year-long', popup: {type: 'committee', name: committee.name}});
+              duties.push({block: 'annual', icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board', popup: {type: 'committee', name: committee.name}});
           });
         }
       }
       committee.roles.forEach(function (r) {
         parentFullNames.forEach(function (full) {
           if (nameMatch(r.person, full)) {
-            var duty = {block: 'annual', icon: 'volunteer', text: r.title, detail: committee.name + ' &middot; Year-long', popup: {type: 'committee', name: committee.name}};
+            var duty = {block: 'annual', icon: 'volunteer', text: r.title, detail: committee.name, popup: {type: 'committee', name: committee.name}};
             if (r.title === 'Cleaning Crew Liaison') duty.manage = 'cleaningCrew';
             if (r.title === 'Supply Coordinator') duty.manage = 'supplyCloset';
             duties.push(duty);
@@ -5058,7 +5060,7 @@
       if (!liaisonAlreadyShown) {
         parentFullNames.forEach(function (full) {
           if (nameMatch(dbLiaison, full)) {
-            duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee &middot; Year-long', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
+            duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
           }
         });
       }
@@ -5114,7 +5116,7 @@
         var committeeName = (rd && rd.committee) || 'Committee';
         duties.push({
           block: 'annual', icon: 'volunteer', text: title,
-          detail: committeeName + ' &middot; Year-long',
+          detail: committeeName,
           popup: { type: 'role', title: title, committee: (rd && rd.committee) || '', term: (rd && rd.job_length) || '' }
         });
       });
