@@ -4854,8 +4854,10 @@ button.staff-role:hover {
   text-overflow: ellipsis;
   min-width: 0;
 }
-.mf-duty-line .mf-duty-sub { flex-shrink: 4; }
+/* Room never collapses — the class title is what truncates */
+.mf-duty-line .mf-duty-sub { flex-shrink: 0; }
 .mf-duty-line .mf-role-tag { flex-shrink: 0; }
+.mf-duty-line2 { gap: 6px; align-items: center; margin-top: 1px; }
 .mf-duty-line .mf-duty-grp {
   flex-shrink: 0;
   white-space: nowrap;

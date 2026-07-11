@@ -4301,9 +4301,9 @@
       var mcTag = mc ? groupTagHtml((mc.groups && mc.groups.length) ? mc.groups : (mc.group ? [mc.group] : [])) : '';
       var infoHtml = lblM
         ? '<span class="mf-duty-line"><strong>' + escapeHtml(lblM[2]) + '</strong>'
-          + (mcTag ? '<span class="mf-duty-grp">' + mcTag + '</span>' : '')
-          + (mcRoom ? '<span class="mf-duty-sub">· ' + escapeHtml(mcRoom) + '</span>' : '')
-          + '<span class="mf-role-tag">' + lblM[1] + '</span></span>'
+          + (mcRoom ? '<span class="mf-duty-sub">· ' + escapeHtml(mcRoom) + '</span>' : '') + '</span>'
+          + '<span class="mf-duty-line mf-duty-line2"><span class="mf-role-tag">' + lblM[1] + '</span>'
+          + (mcTag ? '<span class="mf-duty-grp">' + mcTag + '</span>' : '') + '</span>'
         : '<strong>' + escapeHtml(mine.label) + '</strong>';
       row.innerHTML = '<div class="mf-duty-icon">' + (volRoleIconImg(mine.kind) || VOL_ICONS[mine.kind] || '') + '</div>'
         + '<div class="mf-duty-info">' + infoHtml + '</div>'
@@ -5060,11 +5060,15 @@
       var roleSplit = String(d.text || '').match(/^(.*?)\s*—\s*(Leading|Co-leading|Assisting)$/);
       var titleCore = roleSplit ? roleSplit[1] : d.text;
       if (dutyGroup) titleCore = '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + titleCore + '</span>';
+      // Stacked pair (Erin, 2026-07-11): class name · room on the first
+      // line, role tag + group name on the second — the room never gets
+      // squeezed out by the tags.
+      var line2 = (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
+        + (d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>' : '');
       h += '<div class="mf-duty-info"><span class="mf-duty-line"><strong>' + titleCore + '</strong>'
-        + (d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>' : '')
         + (d.detail ? '<span class="mf-duty-sub">· ' + d.detail + '</span>' : '')
-        + (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
-        + '</span>';
+        + '</span>'
+        + (line2 ? '<span class="mf-duty-line mf-duty-line2">' + line2 + '</span>' : '');
       if (classKey && (isTeacher || d.icon === 'assist')) {
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
       }
