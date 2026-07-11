@@ -3404,7 +3404,7 @@
   var VOL_ROLE_BLURBS = {
     Leading: 'You plan and run this class. Prep the lesson and any materials, arrive with time to set up, and let your assistants know how they can help.',
     'Co-leading': 'You share the planning and teaching with the class leader.',
-    Assisting: 'You support the leader during class — setup, materials, helping kids stay engaged, and cleanup.',
+    Assisting: 'You support the leader during class — setup, materials, and helping kids stay engaged. Assistants are responsible for cleaning up afterward: put the room back the way it was and empty the trashes.',
     floater: 'You are the on-call cover for this hour. Check in when the hour starts and step in wherever someone is out or a class needs an extra hand.',
     board: 'Protected board work time during this hour.',
     prep: 'You help set up rooms and materials for upcoming classes during this hour.'
