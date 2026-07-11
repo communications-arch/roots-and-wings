@@ -4224,6 +4224,7 @@
   }
 
   var _volPanelSession = null; // defaults to currentSession on first load
+  var _mfDutyBlocks = { AM: false, PM1: false, PM2: false }; // set by renderMyFamily
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
     if (!wrap) return;
@@ -4244,6 +4245,41 @@
 
   function renderVolunteerSignupPanel(wrap, d, fam) {
     var sess = d.session;
+    var isCurrent = sess === currentSession;
+
+    function reload() { loadVolunteerSignupPanel(fam); }
+    function showErr(msg) {
+      var el = document.getElementById('mfVolError');
+      if (el) { el.textContent = msg; el.style.display = ''; }
+    }
+
+    // ── Inline rows: pledges (and any assist the duty scan missed) render
+    // INSIDE the block sections above, next to the other responsibilities
+    // (Erin, 2026-07-11: "show that inline with the others"). Only for the
+    // CURRENT session — the chips below just preview other sessions.
+    var VOL_ICONS = { floater: '🦋', board: '📋', prep: '🧰', assist: '🤝', lead: '⭐' };
+    document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
+    var openBlocks = [];
+    VOL_BLOCKS.forEach(function (blk) {
+      var mine = (d.mine || {})[blk.key];
+      if (!mine && !_mfDutyBlocks[blk.key]) openBlocks.push(blk);
+      if (!isCurrent || !mine) return;
+      if (_mfDutyBlocks[blk.key] && (mine.kind === 'lead' || mine.kind === 'assist')) return; // already listed as a duty
+      var sec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
+      if (!sec) return;
+      var row = document.createElement('div');
+      row.className = 'mf-duty mf-vol-inline';
+      var removeBtn = mine.kind === 'assist'
+        ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" title="Step out">✕</button>'
+        : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
+      row.innerHTML = '<div class="mf-duty-icon">' + (VOL_ICONS[mine.kind] || '') + '</div>'
+        + '<div class="mf-duty-info"><strong>' + escapeHtml(mine.label) + '</strong><span>Session ' + sess + ' sign-up</span></div>'
+        + '<div class="mf-duty-actions">' + removeBtn + '</div>';
+      sec.style.display = '';
+      sec.appendChild(row);
+    });
+
+    // ── The panel below lists ONLY what's still open + cleaning. ──
     var h = '<div class="mf-vol-panel">';
     h += '<div class="mf-block-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Session ' + sess + ' Sign-Up';
     h += '<span style="display:inline-flex;gap:4px;">';
@@ -4253,40 +4289,43 @@
     h += '</span>';
     h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;">See everyone’s sign-ups →</button>';
     h += '</div>';
-    VOL_BLOCKS.forEach(function (blk) {
-      var mine = (d.mine || {})[blk.key];
+    // The nudge (Erin, 2026-07-11): open hours in the CURRENT session
+    // mean you still owe a sign-up — every coach covers all three blocks.
+    if (isCurrent && openBlocks.length > 0) {
+      h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>'
+        + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ')
+        + '</strong> this session — every coach covers the morning and both afternoon hours.</p>';
+    } else if (openBlocks.length === 0) {
+      h += '<p class="mf-vol-optional" style="margin:4px 0;">✓ All your hours are covered for Session ' + sess + '.</p>';
+    }
+    openBlocks.forEach(function (blk) {
       h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">' + blk.label + '</span>';
-      if (mine) {
-        h += '<span class="mf-vol-mine">' + escapeHtml(mine.label) + '</span>';
-        if (mine.kind === 'assist') {
-          h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '">✕</button>';
-        } else if (mine.signup_id) {
-          h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '">✕</button>';
-        }
-      } else {
-        h += '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
-      }
+      h += '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
       h += '</div>';
     });
-    // Cleaning: optional — shown from the rota when this family holds a spot.
+    // Cleaning: optional, self-serve (2026-07-11). Your spot shows with a
+    // release button; otherwise the open areas are one pick away.
     var famName = String((fam && fam.name) || '').trim().toLowerCase();
+    var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
     var myClean = (d.cleaning || []).filter(function (c) {
-      return famName && String(c.family || '').toLowerCase().indexOf(famName) !== -1;
+      var f = String(c.family || '').toLowerCase();
+      return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
     });
-    h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">Cleaning (after co-op)</span>';
-    h += myClean.length
-      ? '<span class="mf-vol-mine">🧹 ' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</span>'
-      : '<span class="mf-vol-optional">Optional — the Cleaning Crew Liaison fills the rota.</span>';
+    h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">Cleaning (after co-op) — optional</span>';
+    if (myClean.length) {
+      h += '<span class="mf-vol-mine">🧹 ' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</span>';
+      h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button>';
+    } else if ((d.cleaning_open || []).length) {
+      h += '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;"><option value="">— pick an open area… —</option>'
+        + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
+        + '</select>';
+    } else {
+      h += '<span class="mf-vol-optional">All areas covered for this session — thank you!</span>';
+    }
     h += '</div>';
     h += '<div class="cls-error" id="mfVolError" style="display:none;"></div>';
     h += '</div>';
     wrap.innerHTML = h;
-
-    function reload() { loadVolunteerSignupPanel(fam); }
-    function showErr(msg) {
-      var el = document.getElementById('mfVolError');
-      if (el) { el.textContent = msg; el.style.display = ''; }
-    }
     wrap.querySelectorAll('.mf-vol-sess').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _volPanelSession = parseInt(this.getAttribute('data-sess'), 10);
@@ -4315,16 +4354,23 @@
           .catch(function () { showErr('Network error — try again.'); sel.value = ''; });
       });
     });
-    wrap.querySelectorAll('.mf-vol-remove').forEach(function (btn) {
+    // Remove buttons live in the panel AND injected inline in the duty
+    // sections above — wire document-wide, freshly each render.
+    document.querySelectorAll('.mf-vol-remove').forEach(function (btn) {
+      if (btn._volWired) return;
+      btn._volWired = true;
       btn.addEventListener('click', function () {
         if (!confirm('Remove this sign-up?')) return;
         var kind = this.getAttribute('data-kind');
         var idAttr = this.getAttribute('data-id');
         var cred = localStorage.getItem('rw_google_credential');
-        fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr + notifViewAsSuffix(), {
-          method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
-        })
+        var req = kind === 'clean'
+          ? fetch('/api/cleaning?action=cleaning-signup&id=' + idAttr, { method: 'DELETE', headers: rwAuthHeaders() })
+          : fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr + notifViewAsSuffix(), {
+              method: 'DELETE',
+              headers: { 'Authorization': 'Bearer ' + cred }
+            });
+        req
           .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
           .then(function (res) {
             if (!res.ok) { showErr((res.data && res.data.error) || 'Could not remove.'); return; }
@@ -4333,6 +4379,25 @@
           })
           .catch(function () { showErr('Network error — try again.'); });
       });
+    });
+    // Cleaning self-signup: pick an open area → claimed on the spot.
+    var cleanSel = wrap.querySelector('.mf-vol-pick-clean');
+    if (cleanSel) cleanSel.addEventListener('change', function () {
+      var areaId = parseInt(this.value, 10);
+      if (!Number.isFinite(areaId)) return;
+      var selEl = this;
+      fetch('/api/cleaning?action=cleaning-signup', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+        body: JSON.stringify({ area_id: areaId, session: d.session })
+      })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { showErr((res.data && res.data.error) || 'Could not claim that area.'); selEl.value = ''; return; }
+          reload();
+          if (typeof renderCleaningTab === 'function') renderCleaningTab();
+        })
+        .catch(function () { showErr('Network error — try again.'); selEl.value = ''; });
     });
   }
 
@@ -4937,20 +5002,23 @@
       } else {
         html += '<p class="mf-empty">No assignments found for this session.</p>';
       }
-    } else {
-      // Compact summary in card — show count per block + first duty of each
-      html += '<div class="mf-duties-summary">';
-      blockOrder.forEach(function (blk) {
-        var blockDuties = duties.filter(function (d) { return d.block === blk; });
-        if (blockDuties.length === 0) return;
-        html += '<div class="mf-block-section"><div class="mf-block-label">' + blockLabels[blk] + '</div>';
-        blockDuties.forEach(function (d) {
-          html += renderDutyRow(d, duties.indexOf(d));
-        });
-        html += '</div>';
+    }
+    // Compact summary in card — show count per block + first duty of each.
+    // The AM/PM1/PM2 sections ALWAYS render (hidden while empty) so the
+    // volunteer sign-up loader can inject pledge rows inline with the
+    // other responsibilities (Erin, 2026-07-11).
+    html += '<div class="mf-duties-summary">';
+    blockOrder.forEach(function (blk) {
+      var blockDuties = duties.filter(function (d) { return d.block === blk; });
+      var alwaysBlock = blk === 'AM' || blk === 'PM1' || blk === 'PM2';
+      if (blockDuties.length === 0 && !alwaysBlock) return;
+      html += '<div class="mf-block-section" data-block="' + blk + '"' + (blockDuties.length === 0 ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
+      blockDuties.forEach(function (d) {
+        html += renderDutyRow(d, duties.indexOf(d));
       });
       html += '</div>';
-    }
+    });
+    html += '</div>';
 
     // Session volunteer sign-up slots (2026-07-11, Erin's build): every
     // MLC covers Morning + both PM hours (cleaning optional). Rendered
@@ -5247,7 +5315,16 @@
     // Kids' finalized morning placements (re-renders once when they land).
     if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
 
-    // Volunteer sign-up slots for the current session.
+    // Volunteer sign-up slots — always opens on the CURRENT session
+    // (chips inside the panel can look ahead without re-rendering the
+    // whole card). Blocks already covered by a duty row above are
+    // skipped so the panel only shows pledges + still-open hours.
+    _volPanelSession = null;
+    _mfDutyBlocks = {
+      AM: duties.some(function (d) { return d.block === 'AM'; }),
+      PM1: duties.some(function (d) { return d.block === 'PM1'; }),
+      PM2: duties.some(function (d) { return d.block === 'PM2'; })
+    };
     if (typeof loadVolunteerSignupPanel === 'function') loadVolunteerSignupPanel(fam);
 
     // Class Ideas card — ALWAYS refresh on a My Family render. The shell

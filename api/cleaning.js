@@ -308,6 +308,59 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ grants });
     }
 
+    // ── Cleaning self-signup (2026-07-11, Erin's volunteer build) ──
+    // Any member claims an OPEN area for a session (one family per area;
+    // the Floater area always accepts more). Their display name comes
+    // from their people row, matching the rota's person-name convention.
+    // DELETE releases their own row only.
+    if (action === 'cleaning-signup') {
+      const csEmail = String(user.email || '').toLowerCase();
+      const csPeople = await sql`SELECT first_name, last_name FROM people
+        WHERE LOWER(email) = ${csEmail} OR LOWER(personal_email) = ${csEmail} LIMIT 1`;
+      const csName = csPeople.length
+        ? ((csPeople[0].first_name || '') + ' ' + (csPeople[0].last_name || '')).trim()
+        : String(user.name || '').trim();
+      if (req.method === 'POST') {
+        const areaId = parseInt((req.body || {}).area_id, 10);
+        const csSess = parseInt((req.body || {}).session, 10);
+        if (!Number.isFinite(areaId) || !Number.isFinite(csSess) || csSess < 1 || csSess > 5) {
+          return res.status(400).json({ error: 'area_id and session 1-5 required' });
+        }
+        if (!csName) return res.status(409).json({ error: 'Your member profile has no name yet — contact the Communications Director.' });
+        const areaRows = await sql`SELECT id, area_name, floor_key FROM cleaning_areas WHERE id = ${areaId}`;
+        if (!areaRows.length) return res.status(404).json({ error: 'Area not found.' });
+        const csYear = await activeCleaningYear(sql);
+        const taken = await sql`SELECT family_name FROM cleaning_assignments
+          WHERE cleaning_area_id = ${areaId} AND session_number = ${csSess} AND school_year = ${csYear}`;
+        if (areaRows[0].floor_key !== 'floater' && taken.length) {
+          return res.status(409).json({ error: '“' + areaRows[0].area_name + '” is already covered by ' + taken[0].family_name + ' for that session.' });
+        }
+        if (taken.some(t => String(t.family_name || '').trim().toLowerCase() === csName.toLowerCase())) {
+          return res.status(409).json({ error: 'You are already on that area for this session.' });
+        }
+        const ins = await sql`
+          INSERT INTO cleaning_assignments (cleaning_area_id, session_number, family_name, school_year, sort_order)
+          VALUES (${areaId}, ${csSess}, ${csName}, ${csYear}, ${taken.length})
+          RETURNING id`;
+        return res.status(201).json({ ok: true, id: ins[0].id, area: areaRows[0].area_name });
+      }
+      if (req.method === 'DELETE') {
+        const rowId = parseInt(req.query.id, 10);
+        if (!Number.isFinite(rowId)) return res.status(400).json({ error: 'id required' });
+        // Own row only: the stored name must match the acting person (or
+        // start with their family surname for legacy family-name rows).
+        const csLast = csPeople.length ? String(csPeople[0].last_name || '').trim().toLowerCase() : '';
+        const rows = await sql`SELECT id, family_name FROM cleaning_assignments WHERE id = ${rowId}`;
+        if (!rows.length) return res.status(404).json({ error: 'Assignment not found.' });
+        const nm = String(rows[0].family_name || '').trim().toLowerCase();
+        const mineRow = nm === csName.toLowerCase() || (csLast && nm.indexOf(csLast) !== -1);
+        if (!mineRow) return res.status(403).json({ error: 'That cleaning spot isn’t yours to release.' });
+        await sql`DELETE FROM cleaning_assignments WHERE id = ${rowId}`;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     // ── Rooms / Facilities (2026-07-10, Erin) ──
     // GET: any signed-in member — feeds the Class Builder's room picker.
     // POST (create/update) + DELETE (archive): facilities_manage

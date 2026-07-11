@@ -8242,6 +8242,15 @@ button.staff-role:hover {
 .mf-vol-optional { font-size: 0.82rem; color: var(--color-text-light); font-style: italic; }
 .mf-vol-pick { font-size: 0.85rem; padding: 5px 8px; }
 .mf-vol-remove { padding: 2px 8px; font-size: 0.8rem; }
+.mf-vol-nudge {
+  margin: 6px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(var(--color-coral-rgb), 0.5);
+  background: rgba(var(--color-coral-rgb), 0.08);
+  font-size: 0.85rem;
+}
+.mf-vol-inline .mf-duty-icon { font-size: 1rem; }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated

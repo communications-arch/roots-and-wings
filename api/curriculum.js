@@ -916,7 +916,7 @@ module.exports = async function handler(req, res) {
               FROM volunteer_signups
               WHERE school_year = ${vmYear} AND session_number = ${vmSess}
               ORDER BY role, created_at`,
-          sql`SELECT ca.family_name, a.area_name
+          sql`SELECT ca.id, ca.family_name, a.area_name
               FROM cleaning_assignments ca
               JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
               WHERE ca.session_number = ${vmSess} AND ca.school_year = ${vmYear}
@@ -972,8 +972,18 @@ module.exports = async function handler(req, res) {
             mine[s2.block] = { kind: s2.role, label: VM_ROLE_LABEL[s2.role], signup_id: s2.id };
           }
         });
-        const cleaning = cleanRows.map(c => ({ area: c.area_name, family: c.family_name }));
-        return res.status(200).json({ school_year: vmYear, session: vmSess, blocks, mine, cleaning, me: { email: actingEmail, name: meName } });
+        const cleaning = cleanRows.map(c => ({ id: c.id, area: c.area_name, family: c.family_name }));
+        // Open cleaning spots for self-serve sign-up (2026-07-11): every
+        // non-floater area takes ONE family per session; the Floater area
+        // always accepts more hands.
+        const openAreas = await sql`
+          SELECT a.id, a.area_name, a.floor_key FROM cleaning_areas a
+          WHERE a.floor_key = 'floater' OR NOT EXISTS (
+            SELECT 1 FROM cleaning_assignments ca
+            WHERE ca.cleaning_area_id = a.id AND ca.session_number = ${vmSess} AND ca.school_year = ${vmYear})
+          ORDER BY a.sort_order, a.id`;
+        const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floater: a.floor_key === 'floater' }));
+        return res.status(200).json({ school_year: vmYear, session: vmSess, blocks, mine, cleaning, cleaning_open, me: { email: actingEmail, name: meName } });
       }
 
       // Single submission fetch — owner or reviewer can view.
