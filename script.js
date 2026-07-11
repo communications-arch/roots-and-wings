@@ -4192,6 +4192,225 @@
       .catch(function () { /* card just shows last-known groups */ });
   }
 
+  // ── Session volunteer sign-ups (2026-07-11, Erin's build, part 2) ──
+  // Every MLC covers Morning (one both-hours block) + PM Hour 1 + PM
+  // Hour 2, with cleaning optional. Empty blocks offer: assist a class,
+  // floater, board duties, prep period (last). Caps live server-side;
+  // the labels here just show the running counts.
+  var VOL_BLOCKS = [
+    { key: 'AM',  label: 'Morning (10:00–12:00)' },
+    { key: 'PM1', label: 'Afternoon Hour 1 (1:00–1:55)' },
+    { key: 'PM2', label: 'Afternoon Hour 2 (2:00–2:55)' }
+  ];
+
+  // Pure options builder — extracted for harness testing.
+  function volSlotOptionsHtml(blockKey, d) {
+    var b = (d.blocks || {})[blockKey] || { classes: [], floaters: [], board: [], prep: [] };
+    var h = '<option value="">— sign up… —</option>';
+    var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
+    sorted.forEach(function (c) {
+      var need = c.helpers_needed || 0;
+      h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' + (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
+    });
+    var fl = b.floaters.length;
+    if (blockKey === 'AM') {
+      h += '<option value="floater"' + (fl >= 2 ? ' disabled' : '') + '>Floater — covers absences (' + fl + '/2)</option>';
+    } else {
+      h += '<option value="floater">Floater — covers absences (' + fl + ' so far)</option>';
+    }
+    h += '<option value="board"' + (b.board.length >= 2 ? ' disabled' : '') + '>Board Duties (' + b.board.length + '/2)</option>';
+    h += '<option value="prep"' + (b.prep.length >= 2 ? ' disabled' : '') + '>Prep Period (' + b.prep.length + '/2)</option>';
+    return h;
+  }
+
+  var _volPanelSession = null; // defaults to currentSession on first load
+  function loadVolunteerSignupPanel(fam) {
+    var wrap = document.getElementById('mfVolSignup');
+    if (!wrap) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    if (_volPanelSession == null) _volPanelSession = currentSession;
+    var sess = _volPanelSession;
+    fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + '&session=' + sess + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) { wrap.innerHTML = ''; return; }
+        renderVolunteerSignupPanel(wrap, d, fam);
+      })
+      .catch(function () { /* panel just stays empty */ });
+  }
+
+  function renderVolunteerSignupPanel(wrap, d, fam) {
+    var sess = d.session;
+    var h = '<div class="mf-vol-panel">';
+    h += '<div class="mf-block-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Session ' + sess + ' Sign-Up';
+    h += '<span style="display:inline-flex;gap:4px;">';
+    for (var i = 1; i <= 5; i++) {
+      h += '<button type="button" class="sb-sess-chip mf-vol-sess' + (i === sess ? ' sb-sess-match' : '') + '" data-sess="' + i + '" style="cursor:pointer;border:none;">S' + i + '</button>';
+    }
+    h += '</span>';
+    h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;">See everyone’s sign-ups →</button>';
+    h += '</div>';
+    VOL_BLOCKS.forEach(function (blk) {
+      var mine = (d.mine || {})[blk.key];
+      h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">' + blk.label + '</span>';
+      if (mine) {
+        h += '<span class="mf-vol-mine">' + escapeHtml(mine.label) + '</span>';
+        if (mine.kind === 'assist') {
+          h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '">✕</button>';
+        } else if (mine.signup_id) {
+          h += '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '">✕</button>';
+        }
+      } else {
+        h += '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
+      }
+      h += '</div>';
+    });
+    // Cleaning: optional — shown from the rota when this family holds a spot.
+    var famName = String((fam && fam.name) || '').trim().toLowerCase();
+    var myClean = (d.cleaning || []).filter(function (c) {
+      return famName && String(c.family || '').toLowerCase().indexOf(famName) !== -1;
+    });
+    h += '<div class="mf-vol-slot"><span class="mf-vol-slot-label">Cleaning (after co-op)</span>';
+    h += myClean.length
+      ? '<span class="mf-vol-mine">🧹 ' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</span>'
+      : '<span class="mf-vol-optional">Optional — the Cleaning Crew Liaison fills the rota.</span>';
+    h += '</div>';
+    h += '<div class="cls-error" id="mfVolError" style="display:none;"></div>';
+    h += '</div>';
+    wrap.innerHTML = h;
+
+    function reload() { loadVolunteerSignupPanel(fam); }
+    function showErr(msg) {
+      var el = document.getElementById('mfVolError');
+      if (el) { el.textContent = msg; el.style.display = ''; }
+    }
+    wrap.querySelectorAll('.mf-vol-sess').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _volPanelSession = parseInt(this.getAttribute('data-sess'), 10);
+        reload();
+      });
+    });
+    var gridBtn = document.getElementById('mfVolGridBtn');
+    if (gridBtn) gridBtn.addEventListener('click', function () { showVolunteerGridModal(d.session); });
+    wrap.querySelectorAll('.mf-vol-pick').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var v = this.value;
+        if (!v) return;
+        var cred = localStorage.getItem('rw_google_credential');
+        var isAssist = v.indexOf('assist:') === 0;
+        var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + notifViewAsSuffix();
+        var body = isAssist
+          ? { class_submission_id: parseInt(v.slice(7), 10) }
+          : { school_year: (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '', session: d.session, block: this.getAttribute('data-block'), role: v };
+        fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { showErr((res.data && res.data.error) || 'Could not sign up.'); sel.value = ''; return; }
+            publishedSchedule.loaded = false; // helpers show on the schedule
+            reload();
+          })
+          .catch(function () { showErr('Network error — try again.'); sel.value = ''; });
+      });
+    });
+    wrap.querySelectorAll('.mf-vol-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!confirm('Remove this sign-up?')) return;
+        var kind = this.getAttribute('data-kind');
+        var idAttr = this.getAttribute('data-id');
+        var cred = localStorage.getItem('rw_google_credential');
+        fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr + notifViewAsSuffix(), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + cred }
+        })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { showErr((res.data && res.data.error) || 'Could not remove.'); return; }
+            publishedSchedule.loaded = false;
+            reload();
+          })
+          .catch(function () { showErr('Network error — try again.'); });
+      });
+    });
+  }
+
+  // Everyone's sign-ups for a session — the spreadsheet view, live.
+  function showVolunteerGridModal(session) {
+    var body = renderReportModal({
+      title: 'Session Sign-Ups',
+      subtitle: 'Who’s where each hour — classes, floaters, board duties, prep, and cleaning. Pick a session below.',
+      meta: '',
+      icons: [],
+      bodyId: 'vol-grid-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading sign-ups…</p>'
+    });
+    if (!body) return;
+    loadVolunteerGrid(session || currentSession);
+  }
+
+  function loadVolunteerGrid(sess) {
+    var body = document.getElementById('vol-grid-body');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + '&session=' + sess + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) { body.innerHTML = '<p class="ws-empty">Could not load sign-ups.</p>'; return; }
+        renderVolunteerGrid(body, d);
+      })
+      .catch(function () { body.innerHTML = '<p class="ws-empty">Could not load sign-ups — check your connection.</p>'; });
+  }
+
+  function renderVolunteerGrid(body, d) {
+    var h = '<div class="board-cal-views">';
+    for (var i = 1; i <= 5; i++) {
+      h += '<button type="button" class="board-cal-view-pill vol-grid-sess' + (i === d.session ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
+    }
+    h += '</div>';
+    var BLOCK_TITLES = { AM: '🌅 Morning — 10:00–12:00', PM1: '🌇 Afternoon Hour 1 — 1:00–1:55', PM2: '🌇 Afternoon Hour 2 — 2:00–2:55' };
+    ['AM', 'PM1', 'PM2'].forEach(function (bk) {
+      var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
+      h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + '</h4>';
+      if (b.classes.length === 0) {
+        h += '<p class="ws-empty">No classes placed yet.</p>';
+      } else {
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (bk === 'AM' ? 'Group' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        b.classes.forEach(function (c) {
+          var first = bk === 'AM'
+            ? ageGroupIconHtml(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + ' <span class="ag-name ' + ageGroupClass(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + '">' + escapeHtmlWs(c.class_name) + '</span>'
+            : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
+          var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
+          if (c.co_teachers) helpers = '🤝 ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
+          h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
+            + (c.helpers_needed > 0 ? ' <span class="ra-open-note">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+      function pledgeLine(icon, label, list, cap) {
+        return '<div class="ws-body-hint" style="margin:4px 0;">' + icon + ' <strong>' + label + ':</strong> '
+          + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
+          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '') + '</div>';
+      }
+      h += pledgeLine('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0);
+      h += pledgeLine('📋', 'Board Duties', b.board, 2);
+      h += pledgeLine('🧰', 'Prep Period', b.prep, 2);
+    });
+    h += '<h4 class="roles-mgr-se-head">🧹 Cleaning (after co-op)</h4>';
+    if ((d.cleaning || []).length === 0) {
+      h += '<p class="ws-empty">No cleaning assignments for this session yet.</p>';
+    } else {
+      h += '<div class="ws-body-hint">' + d.cleaning.map(function (c) { return escapeHtmlWs(c.area) + ' — <strong>' + escapeHtmlWs(c.family) + '</strong>'; }).join(' · ') + '</div>';
+    }
+    body.innerHTML = h;
+    body.querySelectorAll('.vol-grid-sess').forEach(function (btn) {
+      btn.addEventListener('click', function () { loadVolunteerGrid(parseInt(this.getAttribute('data-sess'), 10)); });
+    });
+  }
+
   function renderMyFamily() {
     var email = getActiveEmail();
     var section = document.getElementById('myFamily');
@@ -4732,6 +4951,13 @@
       });
       html += '</div>';
     }
+
+    // Session volunteer sign-up slots (2026-07-11, Erin's build): every
+    // MLC covers Morning + both PM hours (cleaning optional). Rendered
+    // async by loadVolunteerSignupPanel — works in summer too, since
+    // fall sign-ups happen before Session 1 starts.
+    html += '<div id="mfVolSignup"></div>';
+
     // Coverage notes + "I'll Be Out" + My Absences — all hidden during
     // summer break (no co-op days to be absent from or cover for).
     if (!isSummerBreak) {
@@ -5020,6 +5246,9 @@
 
     // Kids' finalized morning placements (re-renders once when they land).
     if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
+
+    // Volunteer sign-up slots for the current session.
+    if (typeof loadVolunteerSignupPanel === 'function') loadVolunteerSignupPanel(fam);
 
     // Class Ideas card — ALWAYS refresh on a My Family render. The shell
     // above resets the body to "Loading…", and renders triggered by tab

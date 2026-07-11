@@ -8218,6 +8218,31 @@ button.staff-role:hover {
 /* Group marks sitting in the My Responsibilities duty-icon slot. */
 .mf-duty-icon .ag-icon { height: 18px; vertical-align: middle; }
 
+/* ── Session volunteer sign-up slots (2026-07-11) ── */
+.mf-vol-panel {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+.mf-vol-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(var(--color-primary-rgb), 0.12);
+}
+.mf-vol-slot-label {
+  flex: 0 0 220px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
+.mf-vol-mine { font-size: 0.88rem; font-weight: 600; }
+.mf-vol-optional { font-size: 0.82rem; color: var(--color-text-light); font-style: italic; }
+.mf-vol-pick { font-size: 0.85rem; padding: 5px 8px; }
+.mf-vol-remove { padding: 2px 8px; font-size: 0.8rem; }
+
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated
    there. Occupied cards hold the class tile under the room header. */
