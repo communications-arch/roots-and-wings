@@ -8192,6 +8192,30 @@ button.staff-role:hover {
 /* Schedule Builder morning cell heads: the group's liaison name(s). */
 .sb-cell-liaison { width: 100%; font-size: 0.72rem; color: var(--color-text-light); }
 
+/* ── Brand marks (2026-07-11, Erin's illustrated asset set) ──
+   .ag-icon = the nine age-group marks, sized to ride inline wherever
+   the group emoji used to be. .brand-accent = the small decorative
+   secondary marks used in friendly empty states. */
+.ag-icon {
+  height: 1.15em;
+  width: auto;
+  vertical-align: -0.18em;
+  display: inline-block;
+}
+.age-group-emoji img {
+  height: 1em;
+  width: auto;
+  display: inline-block;
+  vertical-align: baseline;
+}
+.brand-accent {
+  height: 20px;
+  width: auto;
+  vertical-align: -0.3em;
+  margin-right: 4px;
+  display: inline-block;
+}
+
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated
    there. Occupied cards hold the class tile under the room header. */

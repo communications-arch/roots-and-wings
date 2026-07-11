@@ -2335,6 +2335,16 @@
     var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
     return (BRAND_AGE_GROUPS.indexOf(g) !== -1) ? ('ag-' + g) : '';
   }
+  // Brand group marks (2026-07-11, Erin's asset set): illustrated icons
+  // replace the group emoji wherever they render as HTML. Emoji stays
+  // the fallback for non-brand labels and plain-text contexts.
+  function ageGroupIconHtml(name) {
+    var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
+    if (BRAND_AGE_GROUPS.indexOf(g) !== -1) {
+      return '<img class="ag-icon" src="brand/group-' + g.toLowerCase() + '.png" alt="" loading="lazy">';
+    }
+    return AGE_GROUP_EMOJI[g] || '';
+  }
   function ageGroupEmoji(name) {
     var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
     return AGE_GROUP_EMOJI[g] || '';
@@ -5474,7 +5484,7 @@
     if (isSummerBreak && !dbSess) {
       container.innerHTML =
         '<div class="session-summer-state" style="padding:32px 16px;text-align:center;">' +
-        '<h4 class="session-section-title" style="margin-top:0;">Summer break</h4>' +
+        '<h4 class="session-section-title" style="margin-top:0;"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Summer break</h4>' +
         '<p style="color:var(--color-text-light);max-width:480px;margin:0 auto;">' +
         'Co-op resumes in the fall. Session-by-session schedules will appear here once the new school year’s dates are set.' +
         '</p>' +
@@ -6959,7 +6969,7 @@
         if (liaisonGrp) {
           h += '<li id="ws-todo-liaison-' + liaisonGrp + '-item" data-liaison-group="' + liaisonGrp + '" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">🌅</span><span class="ws-todo-liaison-label">Set your group’s morning class</span></button></li>';
         }
-        h += '<li id="ws-todo-empty" class="ws-empty">All caught up — nothing pending.</li>';
+        h += '<li id="ws-todo-empty" class="ws-empty"><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> All caught up — nothing pending.</li>';
         h += '</ul>';
         // Welcome Coordinator: the "get connected" share block lives here on
         // the To Do card (helping new families onto our comms channels).
@@ -17757,7 +17767,7 @@
     BRAND_AGE_GROUPS.forEach(function (grp) {
       if (grp === 'Greenhouse') return; // no morning programming for 0–2 (2026-07-10)
       rows += '<tr><th class="mcb-teach-grp"><span class="' + ageGroupClass(grp) + '">'
-        + ageGroupEmoji(grp) + ' ' + grp + '</span></th>';
+        + ageGroupIconHtml(grp) + ' ' + grp + '</span></th>';
       for (var sess = 1; sess <= 5; sess++) {
         var entries = (byKey[grp + '|' + sess] || []).sort(function (a, b) {
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
@@ -21072,7 +21082,7 @@
       if (f.coach) h += '<span class="ws-roster-coach">' + escapeHtml(f.coach) + '</span>';
       kidsWithNames.forEach(function (k) {
         var agCls = ageGroupClass(k.class);
-        var emoji = ageGroupEmoji(k.class);
+        var emoji = ageGroupIconHtml(k.class);
         h += '<span class="ws-roster-kid' + (agCls ? ' ' + agCls : '') + '">';
         if (emoji) h += '<span class="ws-roster-kid-emoji">' + emoji + '</span>';
         h += '<span class="ws-roster-kid-name">' + escapeHtml(k.name) + '</span>';
@@ -21437,7 +21447,7 @@
       var autoRange = mcbGroupAgeRange(members);
       html += '<div class="mcb-group ' + ageGroupClass(g.name) + '">';
       html += '<div class="mcb-col-head">';
-      html += '<span class="mcb-group-name">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</span>';
+      html += '<span class="mcb-group-name">' + ageGroupIconHtml(g.name) + ' ' + escapeHtmlWs(g.name) + '</span>';
       html += '<span class="mcb-count ' + flags[i] + '">' + members.length + '</span>';
       html += '</div>';
       html += '<div class="mcb-group-range">' + (autoRange ? escapeHtmlWs(autoRange) : '<span class="mcb-range-default">typ. ' + g.range + '</span>') + '</div>';
@@ -21475,7 +21485,7 @@
     for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
     h += '</tr></thead><tbody>';
     MORNING_PROGRAM_GROUPS.forEach(function (g) {
-      h += '<tr><th class="mcb-teach-grp">' + g.emoji + ' ' + escapeHtmlWs(g.name) + '</th>';
+      h += '<tr><th class="mcb-teach-grp">' + ageGroupIconHtml(g.name) + ' ' + escapeHtmlWs(g.name) + '</th>';
       for (var s2 = 1; s2 <= 5; s2++) {
         var cell = map[g.name + '|' + s2] || { lead: null, assists: [] };
         var hasLead = cell.lead && (cell.lead.name || cell.lead.email);
@@ -22021,7 +22031,7 @@
         list.sort(function (a, b) {
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += renderBlock('AM:' + g.name, g.emoji + ' ' + g.name + ' · ' + g.range, list);
+        html += renderBlock('AM:' + g.name, ageGroupIconHtml(g.name) + ' ' + g.name + ' · ' + g.range, list);
       });
       html += '</div>';
     } else {
@@ -22063,7 +22073,7 @@
       + '</div>';
     paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
     if (palette.length === 0) {
-      paletteHtml += '<p class="sb-palette-empty">No submissions waiting — they’ll appear here as members submit classes.</p>';
+      paletteHtml += '<p class="sb-palette-empty"><img class="brand-accent" src="brand/secondary/accent-40.png" alt=""> No submissions waiting — they’ll appear here as members submit classes.</p>';
     } else {
       paletteHtml += '<div class="sb-palette-cards">';
       palette.forEach(function (s) {
