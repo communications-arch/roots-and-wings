@@ -2313,6 +2313,11 @@
   // not AM_CLASSES — AM_CLASSES is populated from the Master sheet's
   // AM Volunteer tab and stays empty on dev/preview, which used to
   // make "Saplings"-style filters silently fall through to "Everyone".
+  var AM_GROUP_ROOMS = {
+    Saplings: 'Love', Sassafras: 'Trust', Oaks: 'Patience', Maples: 'Faithfulness',
+    Birch: 'MPR', Willows: 'Goodness', Pigeons: 'MYF', Cedars: 'JYF'
+  };
+
   var BRAND_AGE_GROUPS = [
     'Greenhouse', 'Saplings', 'Sassafras', 'Oaks',
     'Maples', 'Birch', 'Willows', 'Cedars', 'Pigeons'
@@ -5108,7 +5113,7 @@
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
       var staff = AM_CLASSES[kidGroup];
       var sess = staff ? staff.sessions[currentSession] : null;
-      var room = sess ? sess.room : '';
+      var room = (sess && sess.room) || AM_GROUP_ROOMS[kidGroup] || '';
       var teacher = sess ? sess.teacher : 'TBD';
       var topic = sess ? sess.topic : '';
       var displayLast = kid.lastName || fam.name;
@@ -5890,7 +5895,7 @@
           html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
           html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
           html += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
-          html += '<td>' + escapeHtml(c.scheduled_room || '') + '</td>';
+          html += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
           html += '</tr>';
         });
         html += '</tbody></table></div>';
