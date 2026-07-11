@@ -5541,7 +5541,8 @@
               || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
           });
           html += '<tr class="' + (isMyRow ? 'coord-my-row' : '') + '">';
-          html += '<td><span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
+          // Group mark beside the colored name (Erin, 2026-07-11).
+          html += '<td>' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
           html += '<td>' + escapeHtml(meta ? meta.g.range : (c.scheduled_age_range || '')) + '</td>';
           html += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
           html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
