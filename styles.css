@@ -7727,7 +7727,7 @@ button.staff-role:hover {
 @media (min-width: 481px) {
   .mf-duties-summary .mf-block-section {
     display: grid;
-    grid-template-columns: 48px 1fr;
+    grid-template-columns: 40px 1fr;
     column-gap: 12px;
     align-items: center;
   }

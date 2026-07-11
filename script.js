@@ -5037,7 +5037,7 @@
 
     // Short gutter labels (design pass 2026-07-11): name + start time
     // only \u2014 full time ranges already live in the duty subtitles.
-    var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Cleaning', annual: 'Annual', twoyear: '2-Yr' };
+    var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Clning', annual: 'Annual', twoyear: '2-Yr' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
