@@ -4477,7 +4477,15 @@
     var BLOCK_TITLES = { AM: '🌅 Morning — 10:00–12:00', PM1: '🌇 Afternoon Hour 1 — 1:00–1:55', PM2: '🌇 Afternoon Hour 2 — 2:00–2:55' };
     ['AM', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
-      h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + '</h4>';
+      function pledgeBit(icon, label, list, cap) {
+        return icon + ' <strong>' + label + ':</strong> '
+          + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
+          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
+      }
+      var pledges = pledgeBit('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0) + ' · '
+        + pledgeBit('📋', 'Board', b.board, 2) + ' · '
+        + pledgeBit('🧰', 'Prep', b.prep, 2);
+      h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
@@ -4493,15 +4501,6 @@
         });
         h += '</tbody></table></div>';
       }
-      function pledgeBit(icon, label, list, cap) {
-        return icon + ' <strong>' + label + ':</strong> '
-          + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
-          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
-      }
-      h += '<div class="ws-body-hint vol-grid-pledges">'
-        + pledgeBit('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0) + ' · '
-        + pledgeBit('📋', 'Board', b.board, 2) + ' · '
-        + pledgeBit('🧰', 'Prep', b.prep, 2) + '</div>';
     });
     h += '<h4 class="roles-mgr-se-head">🧹 Cleaning (after co-op)</h4>';
     if ((d.cleaning || []).length === 0) {

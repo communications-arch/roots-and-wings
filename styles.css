@@ -8258,6 +8258,7 @@ button.staff-role:hover {
 .vol-grid .mcb-teach-wrap { margin: 0; }
 .vol-grid .board-cal-views { margin: 0 0 6px; }
 .vol-grid-pledges { margin: 3px 0 0; font-size: 0.78rem; line-height: 1.5; }
+.vol-grid-pledges-head { display: inline; margin-left: 10px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--color-text-light); }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated
