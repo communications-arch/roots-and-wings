@@ -4285,7 +4285,7 @@
         ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" title="Step out">✕</button>'
         : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
       row.innerHTML = '<div class="mf-duty-icon">' + (volRoleIconImg(mine.kind) || VOL_ICONS[mine.kind] || '') + '</div>'
-        + '<div class="mf-duty-info"><strong>' + escapeHtml(mine.label) + '</strong><span>Session ' + sess + ' sign-up</span></div>'
+        + '<div class="mf-duty-info"><strong>' + escapeHtml(mine.label) + '</strong></div>'
         + '<div class="mf-duty-actions">' + removeBtn + '</div>';
       sec.style.display = '';
       sec.appendChild(row);
@@ -4328,7 +4328,7 @@
       if (myClean.length) {
         injectRow('Cleaning',
           '<div class="mf-duty-icon">🧹</div>'
-          + '<div class="mf-duty-info"><strong>' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</strong><span>Session ' + sess + ' · optional</span></div>'
+          + '<div class="mf-duty-info"><strong>' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</strong><span>Optional</span></div>'
           + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button></div>');
       } else if ((d.cleaning_open || []).length) {
         injectRow('Cleaning',
@@ -4672,11 +4672,11 @@
           duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: 'Year-long role', popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         if (nameMatch(sess.teacher, full)) {
-          duties.push({block: 'AM', icon: 'teach', text: groupWithAge(groupName) + ' \u2014 Leading', detail: '10:00\u201312:00 \u00b7 ' + (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+          duties.push({block: 'AM', icon: 'teach', text: groupWithAge(groupName) + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         sess.assistants.forEach(function (a) {
           if (nameMatch(a, full)) {
-            duties.push({block: 'AM', icon: 'assist', text: groupWithAge(groupName) + ' \u2014 Assisting', detail: '10:00\u201312:00 \u00b7 ' + (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+            duties.push({block: 'AM', icon: 'assist', text: groupWithAge(groupName) + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
           }
         });
       });
@@ -4744,15 +4744,15 @@
       if (dup) return;
       if (s.class_period === 'AM') {
         // AM1/AM2 = a 1-hour morning slot; plain 'AM' = both hours.
-        var amWhen = s.scheduled_hour === 'AM1' ? '10:00–10:55'
-          : s.scheduled_hour === 'AM2' ? '11:00–11:55' : 'Morning';
+        // Times/"Morning" dropped from details (Erin, 2026-07-11) — the
+        // gutter label beside the row already says the hour.
         var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
-        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: amWhen + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: (s.scheduled_age_range || ''), popup: null });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
-        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', detail: '1:00–1:55' + (s.scheduled_room ? ' · ' + s.scheduled_room : ''), popup: null });
-        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', detail: '2:00–2:55' + (s.scheduled_room ? ' · ' + s.scheduled_room : ''), popup: null });
+        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', detail: (s.scheduled_room || ''), popup: null });
+        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', detail: (s.scheduled_room || ''), popup: null });
       }
     });
 
