@@ -4324,6 +4324,8 @@
           + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
           + '</select>',
           { prepend: true, bare: true });
+      } else {
+        injectRow('Cleaning', '<span class="mf-vol-optional">Optional — all areas are covered for this session. Thank you!</span>', { prepend: true, bare: true });
       }
     }
 
@@ -5040,7 +5042,8 @@
       var blockDuties = duties.filter(function (d) { return d.block === blk; });
       var alwaysBlock = blk === 'AM' || blk === 'PM1' || blk === 'PM2' || blk === 'Cleaning';
       if (blockDuties.length === 0 && !alwaysBlock) return;
-      html += '<div class="mf-block-section" data-block="' + blk + '"' + (blockDuties.length === 0 ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
+      var hideEmpty = blockDuties.length === 0 && blk !== 'Cleaning';
+      html += '<div class="mf-block-section" data-block="' + blk + '"' + (hideEmpty ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
       blockDuties.forEach(function (d) {
         html += renderDutyRow(d, duties.indexOf(d));
       });
