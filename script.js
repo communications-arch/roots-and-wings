@@ -4337,13 +4337,13 @@
 
     // ── The strip above the sections: chips + nudge + grid link. ──
     var h = '<div class="mf-vol-panel" style="border-top:none;padding-top:0;margin-top:2px;">';
-    h += '<div class="mf-block-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">Session ' + sess + ' Sign-Up';
+    h += '<div class="mf-block-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">Sign-Up';
     h += '<span style="display:inline-flex;gap:4px;">';
     for (var i = 1; i <= 5; i++) {
       h += '<button type="button" class="sb-sess-chip mf-vol-sess' + (i === sess ? ' sb-sess-match' : '') + '" data-sess="' + i + '" style="cursor:pointer;border:none;">S' + i + '</button>';
     }
     h += '</span>';
-    h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;">See everyone’s sign-ups →</button>';
+    h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;white-space:nowrap;font-size:0.78rem;">👥 Everyone’s sign-ups</button>';
     h += '</div>';
     if (isCurrent && openBlocks.length > 0) {
       h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>'
