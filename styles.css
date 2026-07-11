@@ -4856,6 +4856,15 @@ button.staff-role:hover {
 }
 .mf-duty-line .mf-duty-sub { flex-shrink: 4; }
 .mf-duty-line .mf-role-tag { flex-shrink: 0; }
+.mf-duty-line .mf-duty-grp {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.mf-duty-grp .ag-icon { height: 15px; }
 
 /* Role tag — separates "Leading / Assisting" from the class title
    (Erin, 2026-07-11) */

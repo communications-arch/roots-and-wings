@@ -944,6 +944,7 @@ module.exports = async function handler(req, res) {
           const entry = {
             id: r.id, class_name: r.class_name,
             group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
+            groups: r.age_groups || [],
             ages: r.scheduled_age_range || '',
             teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
             teacher_email: (r.submitted_by_email || '').toLowerCase(),

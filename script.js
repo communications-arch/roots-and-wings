@@ -4208,6 +4208,15 @@
     return f ? '<img class="ag-icon" src="brand/secondary/' + f + '.png" alt="">' : '';
   }
 
+  // Group tag for class rows (Erin, 2026-07-11): group mark + colored
+  // name(s), shown between the class title and its room.
+  function groupTagHtml(groups) {
+    return (groups || []).filter(function (g) { return g && g !== 'all-ages'; }).map(function (g) {
+      var G = String(g).charAt(0).toUpperCase() + String(g).slice(1);
+      return ageGroupIconHtml(G) + '<span class="ag-name ' + ageGroupClass(G) + '">' + G + '</span>';
+    }).join(' ');
+  }
+
   var VOL_BLOCKS = [
     { key: 'AM1', label: 'Morning Hour 1 (10:00–10:55)' },
     { key: 'AM2', label: 'Morning Hour 2 (11:00–11:55)' },
@@ -4289,9 +4298,10 @@
       var lblM = String(mine.label).match(/^(Leading|Assisting)\s+“(.+)”$/);
       var mc = lblM ? (((d.blocks || {})[blk.key] || {}).classes || []).filter(function (c) { return c.id === mine.class_id; })[0] : null;
       var mcRoom = mc ? (mc.room || (mc.group ? (AM_GROUP_ROOMS[mc.group.charAt(0).toUpperCase() + mc.group.slice(1)] || '') : '')) : '';
-      var mcAgCls = mc && mc.group ? ageGroupClass(mc.group.charAt(0).toUpperCase() + mc.group.slice(1)) : '';
+      var mcTag = mc ? groupTagHtml((mc.groups && mc.groups.length) ? mc.groups : (mc.group ? [mc.group] : [])) : '';
       var infoHtml = lblM
-        ? '<span class="mf-duty-line"><strong>' + (mcAgCls ? '<span class="ag-name ' + mcAgCls + '">' : '') + escapeHtml(lblM[2]) + (mcAgCls ? '</span>' : '') + '</strong>'
+        ? '<span class="mf-duty-line"><strong>' + escapeHtml(lblM[2]) + '</strong>'
+          + (mcTag ? '<span class="mf-duty-grp">' + mcTag + '</span>' : '')
           + (mcRoom ? '<span class="mf-duty-sub">· ' + escapeHtml(mcRoom) + '</span>' : '')
           + '<span class="mf-role-tag">' + lblM[1] + '</span></span>'
         : '<strong>' + escapeHtml(mine.label) + '</strong>';
@@ -4761,12 +4771,12 @@
         var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
         var amGrp = String((s.age_groups || [])[0] || '');
         var amRoom = s.scheduled_room || (amGrp ? (AM_GROUP_ROOMS[amGrp.charAt(0).toUpperCase() + amGrp.slice(1)] || '') : '');
-        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: amRoom, popup: null });
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: amRoom, popup: null });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
-        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', detail: (s.scheduled_room || ''), popup: null });
-        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', detail: (s.scheduled_room || ''), popup: null });
+        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: null });
+        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: null });
       }
     });
 
@@ -5051,6 +5061,7 @@
       var titleCore = roleSplit ? roleSplit[1] : d.text;
       if (dutyGroup) titleCore = '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + titleCore + '</span>';
       h += '<div class="mf-duty-info"><span class="mf-duty-line"><strong>' + titleCore + '</strong>'
+        + (d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>' : '')
         + (d.detail ? '<span class="mf-duty-sub">· ' + d.detail + '</span>' : '')
         + (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
         + '</span>';
