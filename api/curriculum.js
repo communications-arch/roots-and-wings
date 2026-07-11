@@ -954,11 +954,12 @@ module.exports = async function handler(req, res) {
           blocksOf(r).forEach(b => {
             blocks[b].classes.push(entry);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
-              mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
+              var hourWord = r.scheduled_hour === 'AM1' ? ' (Hour 1)' : r.scheduled_hour === 'AM2' ? ' (Hour 2)' : '';
+              mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”' + hourWord, class_id: r.id };
             }
             if (!mine[b]) {
               const hit = hs.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
-              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”', class_id: r.id };
+              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”' + (r.scheduled_hour === 'AM1' ? ' (Hour 1)' : r.scheduled_hour === 'AM2' ? ' (Hour 2)' : ''), class_id: r.id };
             }
           });
         });

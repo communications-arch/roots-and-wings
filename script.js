@@ -4494,12 +4494,32 @@
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
         h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (bk === 'AM' ? 'Group' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        // Morning stacks per hour like the old sheet (Erin, 2026-07-11):
+        // a both-hours class repeats on Hour 1 + Hour 2; a group split
+        // into two 1-hour classes shows each hour's own staffing.
+        var gridRows = [];
         b.classes.forEach(function (c) {
+          if (bk !== 'AM') { gridRows.push({ c: c, hourWord: '' }); return; }
+          var hrs = (c.hour === 'AM1') ? ['Hour 1 (10–11)'] : (c.hour === 'AM2') ? ['Hour 2 (11–12)'] : ['Hour 1 (10–11)', 'Hour 2 (11–12)'];
+          hrs.forEach(function (hw) { gridRows.push({ c: c, hourWord: hw }); });
+        });
+        if (bk === 'AM') {
+          var gOrd = {};
+          MORNING_GROUP_ORDER.forEach(function (g, gi) { gOrd[g.name.toLowerCase()] = gi; });
+          gridRows.sort(function (x, y) {
+            var dgo = (gOrd[String(x.c.group || '').toLowerCase()] || 99) - (gOrd[String(y.c.group || '').toLowerCase()] || 99);
+            if (dgo) return dgo;
+            return x.hourWord.localeCompare(y.hourWord);
+          });
+        }
+        gridRows.forEach(function (gr) {
+          var c = gr.c;
           var first = bk === 'AM'
             ? ageGroupIconHtml(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + ' <span class="ag-name ' + ageGroupClass(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + '">' + escapeHtmlWs(c.class_name) + '</span>'
             : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           if (c.co_teachers) helpers = '🤝 ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
+          if (gr.hourWord) first += ' <span class="sb-subdetail-dim">· ' + gr.hourWord + '</span>';
           h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
             + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
         });
