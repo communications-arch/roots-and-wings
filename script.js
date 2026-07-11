@@ -3024,6 +3024,12 @@
   function showDutyDetail(duty) {
     if (!duty.popup || !personDetail || !personDetailCard) return;
     var p = duty.popup;
+    // DB-scheduled classes get the live class-info card (2026-07-11).
+    if (p.type === 'dbClass') {
+      var dbRole = (String(duty.text || '').match(/—\s*(Leading|Co-leading|Assisting)$/) || [])[1] || '';
+      showDbClassPopup(p.id, dbRole);
+      return;
+    }
     // Board committee roster is built here but appended AFTER the role
     // description (below), so the description reads as the chair's — not the
     // committee's. Empty for non-board popups.
@@ -3389,6 +3395,131 @@
         p.type === 'amClass' ? (typeof groupWithAge === 'function' ? groupWithAge(p.group) : '') : '',
         p.type === 'amClass' ? 'AM' : 'PM');
     });
+  }
+
+  // ── DB class detail popup (2026-07-11, Erin) ─────────────────────
+  // One card answering "what is this class, where is it, who's in it,
+  // what am I responsible for, is there a lesson plan?" for any
+  // scheduled class row in My Responsibilities.
+  var VOL_ROLE_BLURBS = {
+    Leading: 'You plan and run this class. Prep the lesson and any materials, arrive with time to set up, and let your assistants know how they can help.',
+    'Co-leading': 'You share the planning and teaching with the class leader.',
+    Assisting: 'You support the leader during class — setup, materials, helping kids stay engaged, and cleanup.',
+    floater: 'You are the on-call cover for this hour. Check in when the hour starts and step in wherever someone is out or a class needs an extra hand.',
+    board: 'Protected board work time during this hour.',
+    prep: 'You help set up rooms and materials for upcoming classes during this hour.'
+  };
+
+  function classHourLabel(period, hour) {
+    if (period === 'AM') {
+      return hour === 'AM1' ? 'Hour 1 · 10:00–10:55' : hour === 'AM2' ? 'Hour 2 · 11:00–11:55' : '10:00–12:00';
+    }
+    return hour === 'PM1' ? '1:00–1:55' : hour === 'PM2' ? '2:00–2:55' : '1:00–2:55';
+  }
+
+  function showDbClassPopup(classId, roleWord) {
+    if (!personDetail || !personDetailCard) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?action=class-info&id=' + classId + notifViewAsSuffix(), { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.class) return;
+        var c = d.class;
+        var html = '<div class="detail-actions no-print">'
+          + '<button type="button" class="sc-btn duty-print-btn" aria-label="Print this class info">⎙ Print</button></div>';
+        html += '<button class="detail-close" aria-label="Close">&times;</button>';
+        html += '<div class="elective-detail">';
+        html += '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">';
+        html += '<h3 style="margin:0;">' + escapeHtml(c.class_name) + '</h3>';
+        html += '<span class="mf-duty-grp">' + groupTagHtml(c.groups) + '</span>';
+        html += '</div>';
+        html += '<div class="elective-meta">';
+        html += '<span>Session ' + c.session + '</span>';
+        html += '<span>' + classHourLabel(c.class_period, c.hour) + '</span>';
+        if (c.room) html += '<span>' + escapeHtml(c.room) + (c.backup_room ? ' (rain backup: ' + escapeHtml(c.backup_room) + ')' : '') + '</span>';
+        if (c.ages) html += '<span>' + escapeHtml(c.ages) + '</span>';
+        html += '</div>';
+        if (c.description) html += '<p class="elective-description">' + escapeHtml(c.description) + '</p>';
+        html += '<div class="elective-staff-list">';
+        function staffRow(name, label) {
+          var pRec = typeof lookupPerson === 'function' ? lookupPerson(name) : null;
+          html += '<div class="elective-teacher">';
+          html += '<div class="staff-dot" style="background:' + faceColor(name) + ';width:36px;height:36px;overflow:hidden;">' + (typeof photoHtml === 'function' ? photoHtml(name, name, pRec ? pRec.email : '', pRec ? pRec.family : '') : '<span>' + escapeHtml(String(name).charAt(0)) + '</span>') + '</div>';
+          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + escapeHtml(name) + '</strong><small style="color:var(--color-text-light);">' + label + '</small></div>';
+          html += '</div>';
+        }
+        if (c.teacher) staffRow(c.teacher, 'Leading');
+        String(c.co_teachers || '').split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean).forEach(function (n) { staffRow(n, 'Co-leading'); });
+        (c.helpers || []).forEach(function (n) { staffRow(n, 'Assisting'); });
+        html += '</div>';
+        if (c.helpers_needed > 0) html += '<p class="ra-open-note" style="display:inline-block;">needs ' + c.helpers_needed + ' more assistant' + (c.helpers_needed === 1 ? '' : 's') + ' ⚠</p>';
+        if (c.class_period === 'AM') {
+          html += '<h4 style="margin:14px 0 4px;">Kids' + (d.kids.length ? ' (' + d.kids.length + ')' : '') + '</h4>';
+          html += d.kids.length
+            ? '<p style="margin:0;color:var(--color-text-light);">' + d.kids.map(escapeHtml).join(', ') + '</p>'
+            : '<p style="margin:0;color:var(--color-text-light);">Placements aren’t finalized yet.</p>';
+        } else if (c.pre_enroll_kids) {
+          html += '<h4 style="margin:14px 0 4px;">Pre-enrolled</h4><p style="margin:0;color:var(--color-text-light);">' + escapeHtml(c.pre_enroll_kids) + '</p>';
+        }
+        if (roleWord && VOL_ROLE_BLURBS[roleWord]) {
+          html += '<h4 style="margin:14px 0 4px;">Your role — ' + roleWord + '</h4><p style="margin:0;color:var(--color-text-light);">' + VOL_ROLE_BLURBS[roleWord] + '</p>';
+        }
+        var linkKey = c.class_period === 'AM'
+          ? String((c.groups || [])[0] || '').replace(/^./, function (ch) { return ch.toUpperCase(); })
+          : 'PM:' + c.class_name;
+        var link = classLinks ? classLinks[linkKey] : null;
+        if (link || roleWord === 'Leading') {
+          html += '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">';
+          if (link) html += '<button type="button" class="sc-btn" id="dbClassViewPlanBtn" data-curriculum-id="' + link.curriculum_id + '">📖 View Lesson Plan</button>';
+          else html += '<button type="button" class="sc-btn" id="dbClassBuildPlanBtn">📖 Build a Lesson Plan</button>';
+          html += '</div>';
+        }
+        html += '</div>';
+        personDetailCard.innerHTML = html;
+        personDetail.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+        personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+        var pr = personDetailCard.querySelector('.duty-print-btn');
+        if (pr) pr.addEventListener('click', function () { printDetailCard(c.class_name); });
+        var vb = document.getElementById('dbClassViewPlanBtn');
+        if (vb) vb.addEventListener('click', function () {
+          var currId = parseInt(vb.getAttribute('data-curriculum-id'), 10);
+          if (!currId) return;
+          closeDetail();
+          fetch('/api/curriculum?id=' + currId, { headers: { 'Authorization': 'Bearer ' + cred } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.curriculum) { curriculumState.current = data.curriculum; curriculumState.view = 'detail'; renderCurriculumModal(); }
+            });
+        });
+        var bb = document.getElementById('dbClassBuildPlanBtn');
+        if (bb) bb.addEventListener('click', function () {
+          closeDetail();
+          if (typeof startLessonPlanForClass === 'function') startLessonPlanForClass(c.class_name, c.ages || '', c.class_period === 'AM' ? 'AM' : 'PM');
+        });
+      })
+      .catch(function () {});
+  }
+
+  // Pledge rows (Floater / Board / Prep) — the "what is this job?"
+  // popup (Erin, 2026-07-11). Role docs append when a title matches.
+  function showPledgePopup(kind, title) {
+    if (!personDetail || !personDetailCard) return;
+    var blurb = VOL_ROLE_BLURBS[kind];
+    if (!blurb) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail">';
+    html += '<h3 style="margin:0 0 6px;">' + escapeHtml(title) + '</h3>';
+    html += '<p style="margin:0;color:var(--color-text-light);">' + blurb + '</p>';
+    var rk = getRoleKeyForDuty(title);
+    if (rk) html += renderRoleDescriptionSection(rk);
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
   }
 
   // Board-only detail (when person isn't in directory data yet)
@@ -4308,6 +4439,21 @@
       row.innerHTML = '<div class="mf-duty-icon">' + (volRoleIconImg(mine.kind) || VOL_ICONS[mine.kind] || '') + '</div>'
         + '<div class="mf-duty-info">' + infoHtml + '</div>'
         + '<div class="mf-duty-actions">' + removeBtn + '</div>';
+      // Rows open their detail card (2026-07-11): class rows show the
+      // live class info, pledge rows the what-is-this-job blurb.
+      if (lblM && mine.class_id) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function (e) {
+          if (e.target.closest('.mf-vol-remove')) return;
+          showDbClassPopup(mine.class_id, lblM[1]);
+        });
+      } else if (VOL_ROLE_BLURBS[mine.kind]) {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function (e) {
+          if (e.target.closest('.mf-vol-remove')) return;
+          showPledgePopup(mine.kind, mine.label);
+        });
+      }
       sec.style.display = '';
       sec.appendChild(row);
     });
@@ -4771,12 +4917,12 @@
         var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
         var amGrp = String((s.age_groups || [])[0] || '');
         var amRoom = s.scheduled_room || (amGrp ? (AM_GROUP_ROOMS[amGrp.charAt(0).toUpperCase() + amGrp.slice(1)] || '') : '');
-        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: amRoom, popup: null });
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: amRoom, popup: { type: 'dbClass', id: s.id } });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
-        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: null });
-        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: null });
+        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id } });
+        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id } });
       }
     });
 

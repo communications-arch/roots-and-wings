@@ -887,6 +887,59 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // ── Class info (2026-07-11, Erin): the member-visible detail card
+      // behind every class row in My Responsibilities — what the class is,
+      // where it meets, who's in it (staff + finalized morning kids), so
+      // any coach can answer "what am I walking into?" Only scheduled/
+      // drafted classes resolve; no reviewer internals are exposed.
+      if (action === 'class-info') {
+        const ciId = parseInt(String(req.query.id || ''), 10);
+        if (!Number.isFinite(ciId)) return res.status(400).json({ error: 'id required' });
+        const ciRows = await sql`
+          SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.scheduled_session, c.school_year,
+                 c.age_groups, c.scheduled_age_range, c.scheduled_room, c.scheduled_backup_room,
+                 c.description, c.co_teachers, c.assistant_count, c.submitted_by_email, c.submitted_by_name,
+                 c.pre_enroll_kids, c.status,
+                 (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                   WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                      OR LOWER(p.personal_email) = LOWER(c.submitted_by_email)
+                   LIMIT 1) AS person_name
+          FROM class_submissions c WHERE c.id = ${ciId}`;
+        if (!ciRows.length || ['scheduled', 'drafted'].indexOf(ciRows[0].status) === -1) {
+          return res.status(404).json({ error: 'That class is not on the schedule.' });
+        }
+        const ci = ciRows[0];
+        const ciHelpers = await sql`SELECT person_name, person_email FROM class_assignment_helpers
+          WHERE class_submission_id = ${ciId} ORDER BY sort_order`;
+        let ciKids = [];
+        if (ci.class_period === 'AM') {
+          const ciGroup = String((ci.age_groups || [])[0] || '');
+          if (ciGroup) {
+            const kidRows = await sql`SELECT kid_first_name FROM morning_class_assignments
+              WHERE school_year = ${ci.school_year} AND finalized = TRUE
+                AND LOWER(class_group) = LOWER(${ciGroup})
+              ORDER BY kid_first_name`;
+            ciKids = kidRows.map(r => r.kid_first_name);
+          }
+        }
+        const ciWants = Math.min.apply(null, (ci.assistant_count && ci.assistant_count.length) ? ci.assistant_count : [1]);
+        return res.status(200).json({
+          class: {
+            id: ci.id, class_name: ci.class_name, class_period: ci.class_period,
+            hour: ci.scheduled_hour || '', session: ci.scheduled_session,
+            groups: ci.age_groups || [], ages: ci.scheduled_age_range || '',
+            room: ci.scheduled_room || '', backup_room: ci.scheduled_backup_room || '',
+            description: ci.description || '',
+            teacher: ci.person_name || ci.submitted_by_name || String(ci.submitted_by_email || '').split('@')[0],
+            co_teachers: ci.co_teachers || '',
+            helpers: ciHelpers.map(h => h.person_name || String(h.person_email || '').split('@')[0]),
+            helpers_needed: Math.max(0, ciWants - ciHelpers.length),
+            pre_enroll_kids: ci.pre_enroll_kids || ''
+          },
+          kids: ciKids
+        });
+      }
+
       // ── Volunteer matrix (2026-07-11, Erin's session sign-up build) ──
       // One member-visible picture of a session: every placed class per
       // block (AM1 / AM2 / PM1 / PM2 — morning split per hour, Erin
