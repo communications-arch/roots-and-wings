@@ -4489,7 +4489,7 @@
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           if (c.co_teachers) helpers = '🤝 ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
           h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
-            + (c.helpers_needed > 0 ? ' <span class="ra-open-note">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
+            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
         });
         h += '</tbody></table></div>';
       }
