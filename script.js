@@ -4197,6 +4197,12 @@
   // Hour 2, with cleaning optional. Empty blocks offer: assist a class,
   // floater, board duties, prep period (last). Caps live server-side;
   // the labels here just show the running counts.
+  var VOL_ROLE_ICON_FILES = { lead: 'accent-58', colead: 'accent-30', assist: 'accent-18' };
+  function volRoleIconImg(kind) {
+    var f = VOL_ROLE_ICON_FILES[kind];
+    return f ? '<img class="ag-icon" src="brand/secondary/' + f + '.png" alt="">' : '';
+  }
+
   var VOL_BLOCKS = [
     { key: 'AM',  label: 'Morning (10:00–12:00)' },
     { key: 'PM1', label: 'Afternoon Hour 1 (1:00–1:55)' },
@@ -4257,7 +4263,7 @@
     // INSIDE the block sections above, next to the other responsibilities
     // (Erin, 2026-07-11: "show that inline with the others"). Only for the
     // CURRENT session — the chips below just preview other sessions.
-    var VOL_ICONS = { floater: '🦋', board: '📋', prep: '🧰', assist: '🤝', lead: '⭐' };
+    var VOL_ICONS = { floater: '🦋', board: '📋', prep: '🧰' };
     document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
     var openBlocks = [];
     VOL_BLOCKS.forEach(function (blk) {
@@ -4272,7 +4278,7 @@
       var removeBtn = mine.kind === 'assist'
         ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" title="Step out">✕</button>'
         : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
-      row.innerHTML = '<div class="mf-duty-icon">' + (VOL_ICONS[mine.kind] || '') + '</div>'
+      row.innerHTML = '<div class="mf-duty-icon">' + (volRoleIconImg(mine.kind) || VOL_ICONS[mine.kind] || '') + '</div>'
         + '<div class="mf-duty-info"><strong>' + escapeHtml(mine.label) + '</strong><span>Session ' + sess + ' sign-up</span></div>'
         + '<div class="mf-duty-actions">' + removeBtn + '</div>';
       sec.style.display = '';
@@ -4992,7 +4998,12 @@
       // Group-tied duties wear their group's brand mark in the icon slot
       // (Erin, 2026-07-11); everything else keeps its duty-type icon.
       var dutyGroup = String(d.text || '').match(/^(Greenhouse|Saplings|Sassafras|Oaks|Maples|Birch|Willows|Cedars|Pigeons|Teens)\b/);
-      h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (DUTY_ICONS[d.icon] || '')) + '</div>';
+      // Role marks (Erin, 2026-07-11): group mark first, then the
+      // Leading / Co-leading / Assisting brand marks, then the svg.
+      var roleKind = /—\s*Leading$/.test(String(d.text || '')) ? 'lead'
+        : /—\s*Assisting$/.test(String(d.text || '')) ? 'assist'
+        : /co-?lead/i.test(String(d.text || '')) ? 'colead' : '';
+      h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (roleKind ? volRoleIconImg(roleKind) : (DUTY_ICONS[d.icon] || ''))) + '</div>';
       h += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
       if (classKey && (isTeacher || d.icon === 'assist')) {
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
