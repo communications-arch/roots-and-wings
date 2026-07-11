@@ -4282,22 +4282,29 @@
     // ── Pickers inject INLINE into their sections (Erin, 2026-07-11:
     // one flow — Morning, PM hours, Cleaning — not a panel below).
     // Current session only; the chips in the strip preview others.
-    function injectRow(sectionKey, innerHtml) {
+    function injectRow(sectionKey, innerHtml, opts) {
+      opts = opts || {};
       var sec = document.querySelector('.mf-block-section[data-block="' + sectionKey + '"]');
       if (!sec) return;
       var row = document.createElement('div');
-      row.className = 'mf-duty mf-vol-inline';
+      row.className = opts.bare ? 'mf-vol-inline mf-vol-pickrow' : 'mf-duty mf-vol-inline';
       row.innerHTML = innerHtml;
       sec.style.display = '';
-      sec.appendChild(row);
+      // Pickers sit right under the section header (Erin, 2026-07-11);
+      // committed rows append after the existing duty rows.
+      if (opts.prepend) {
+        var lbl = sec.querySelector('.mf-block-label');
+        if (lbl && lbl.nextSibling) sec.insertBefore(row, lbl.nextSibling);
+        else sec.appendChild(row);
+      } else {
+        sec.appendChild(row);
+      }
     }
     if (isCurrent) {
       openBlocks.forEach(function (blk) {
         injectRow(blk.key,
-          '<div class="mf-duty-icon">➕</div>'
-          + '<div class="mf-duty-info"><strong>Open — sign up</strong>'
-          + '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;margin-top:4px;">' + volSlotOptionsHtml(blk.key, d) + '</select>'
-          + '</div>');
+          '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>',
+          { prepend: true, bare: true });
       });
       // Cleaning Crew section: your spot (with release) or the open areas.
       var famName = String((fam && fam.name) || '').trim().toLowerCase();
@@ -4313,11 +4320,10 @@
           + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button></div>');
       } else if ((d.cleaning_open || []).length) {
         injectRow('Cleaning',
-          '<div class="mf-duty-icon">🧹</div>'
-          + '<div class="mf-duty-info"><strong>Optional — lend a hand after co-op</strong>'
-          + '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;margin-top:4px;"><option value="">— pick an open area… —</option>'
+          '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;"><option value="">— optional: pick an open area… —</option>'
           + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
-          + '</select></div>');
+          + '</select>',
+          { prepend: true, bare: true });
       }
     }
 
@@ -8509,11 +8515,11 @@
     },
     { key: 'status', label: 'Status', type: 'string',
       sortValue: function (t) {
-        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, joined: 4, declined: 5, ghosted: 6 };
+        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, joined: 4, declined: 5, ghosted: 6 };
         return String(order[t.status] != null ? order[t.status] : 9);
       },
       render: function (t) {
-        return '<span class="ws-tour-status ws-tour-status-' + escapeHtmlWs(t.status) + '">' + escapeHtmlWs(t.status) + '</span>';
+        return '<span class="ws-tour-status ws-tour-status-' + escapeHtmlWs(t.status) + '">' + escapeHtmlWs(String(t.status || '').replace(/_/g, ' ')) + '</span>';
       }
     },
     { key: 'preferred_slot', label: 'Preferred', type: 'string',
@@ -8551,14 +8557,16 @@
           // A general inquiry: turn it into a tour, or close it out once
           // it's been answered (Ghost = no further action needed).
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
+          btns += '<button type="button" class="sc-btn ws-tour-fup-btn" data-tour-id="' + t.id + '">Followed up</button>';
           btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Close out</button>';
         } else if (t.status === 'requested') {
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
+          btns += '<button type="button" class="sc-btn ws-tour-fup-btn" data-tour-id="' + t.id + '">Followed up</button>';
           btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Ghost</button>';
         } else if (t.status === 'scheduled') {
           btns += '<button type="button" class="sc-btn ws-tour-toured-btn" data-tour-id="' + t.id + '">Mark toured</button>';
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Reschedule&hellip;</button>';
-        } else if (t.status === 'toured') {
+        } else if (t.status === 'toured' || t.status === 'followed_up') {
           btns += '<button type="button" class="sc-btn ws-tour-joined-btn" data-tour-id="' + t.id + '">Joined</button>';
           btns += '<button type="button" class="sc-btn sc-btn-del ws-tour-decline-btn" data-tour-id="' + t.id + '">Declined&hellip;</button>';
           btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Ghost</button>';
@@ -8671,7 +8679,7 @@
     var tableTarget = body.querySelector('#ws-tours-table-target');
 
       function computeCounts() {
-        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, joined: 0, declined: 0, ghosted: 0 };
+        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, joined: 0, declined: 0, ghosted: 0 };
         (_toursCache || []).forEach(function (t) { if (counts[t.status] != null) counts[t.status] += 1; });
         return counts;
       }
@@ -8680,7 +8688,7 @@
         if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
         if (_toursFilter === 'all') return _toursCache;
         if (_toursFilter === 'open') return _toursCache.filter(function (t) {
-          return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
+          return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
         });
         return _toursCache.filter(function (t) { return t.status === _toursFilter; });
       }
@@ -8714,6 +8722,7 @@
           s += '<span class="ws-tour-status ws-tour-status-requested">' + counts.requested + ' Requested</span>';
           s += '<span class="ws-tour-status ws-tour-status-scheduled">' + counts.scheduled + ' Scheduled</span>';
           s += '<span class="ws-tour-status ws-tour-status-toured">'    + counts.toured    + ' Toured</span>';
+          if (counts.followed_up) s += '<span class="ws-tour-status ws-tour-status-toured">' + counts.followed_up + ' Followed up</span>';
           s += '<span class="ws-tour-status ws-tour-status-joined">'    + counts.joined    + ' Joined</span>';
           s += '<span class="ws-tour-status ws-tour-status-declined">'  + counts.declined  + ' Declined</span>';
           s += '<span class="ws-tour-status ws-tour-status-ghosted">'   + counts.ghosted   + ' Ghosted</span>';
@@ -8740,7 +8749,7 @@
           });
           return;
         }
-        var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured;
+        var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured + counts.followed_up;
         var cols = TOURS_TABLE_COLS.slice();
         cols.forEach(function (col) {
           if (col.key === 'status') {
@@ -8756,6 +8765,7 @@
                 { value: 'requested', label: 'Requested', count: counts.requested },
                 { value: 'scheduled', label: 'Scheduled', count: counts.scheduled },
                 { value: 'toured',    label: 'Toured',    count: counts.toured },
+                { value: 'followed_up', label: 'Followed Up', count: counts.followed_up },
                 { value: 'joined',    label: 'Joined',    count: counts.joined },
                 { value: 'declined',  label: 'Declined',  count: counts.declined },
                 { value: 'ghosted',   label: 'Ghosted',   count: counts.ghosted }
@@ -8855,6 +8865,8 @@
         }
         var touredBtn = e.target.closest('.ws-tour-toured-btn');
         if (touredBtn) { tourQuickAction(parseInt(touredBtn.getAttribute('data-tour-id'), 10), 'toured', 'Mark this family as toured?'); return; }
+        var fupBtn = e.target.closest('.ws-tour-fup-btn');
+        if (fupBtn) { tourQuickAction(parseInt(fupBtn.getAttribute('data-tour-id'), 10), 'followed_up', 'Mark as followed up — contact made, but not via a tour?'); return; }
         var joinedBtn = e.target.closest('.ws-tour-joined-btn');
         if (joinedBtn) { tourQuickAction(parseInt(joinedBtn.getAttribute('data-tour-id'), 10), 'joined', 'Mark this family as joined? They should now appear in the Membership Report once they register.'); return; }
         var ghostBtn = e.target.closest('.ws-tour-ghost-btn');
@@ -8995,11 +9007,8 @@
         // Membership Director to pick. Past sessions silently drop.
         var prefDate = t.scheduled_date || t.preferred_date || '';
         var prefTime = t.scheduled_time || t.preferred_time || '';
-        var dateOpts = '<option value="">Pick a Wednesday…</option>';
-        slots.dates.forEach(function (d) {
-          var sel = (d.date === prefDate) ? ' selected' : '';
-          dateOpts += '<option value="' + d.date + '"' + sel + '>' + escapeHtmlWs(d.label) + '</option>';
-        });
+        // General date picker (2026-07-11, Erin): summer tours happen on
+        // non-co-op days, so any calendar date is fair game here.
         var timeOpts = '<option value="">Pick a time…</option>';
         slots.times.forEach(function (tt) {
           var sel = (tt.value === prefTime) ? ' selected' : '';
@@ -9009,7 +9018,7 @@
         h += '<div class="ws-reg-detail-section ws-tour-schedule-form">';
         h += '<p class="ws-reg-decline-hint"><strong>' + headline + '</strong> for ' + escapeHtmlWs(t.family_name || '') + '. The family gets a confirmation email with the date, time, and any note you add below.</p>';
         h += '<div class="ws-tour-sched-row">';
-        h += '<label>Date<select class="rd-input ws-tour-sched-date">' + dateOpts + '</select></label>';
+        h += '<label>Date<input type="date" class="rd-input ws-tour-sched-date" value="' + escapeHtmlWs(prefDate || '') + '"></label>';
         h += '<label>Time<select class="rd-input ws-tour-sched-time">' + timeOpts + '</select></label>';
         h += '</div>';
         h += '<label>Note for the family (optional)<textarea class="rd-textarea ws-tour-sched-note" rows="2" placeholder="What to expect, what to bring, parking tips&hellip;"></textarea></label>';
@@ -9082,7 +9091,7 @@
     if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
     if (_toursFilter === 'all') return _toursCache;
     if (_toursFilter === 'open') return _toursCache.filter(function (t) {
-      return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured';
+      return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
     });
     return _toursCache.filter(function (t) { return t.status === _toursFilter; });
   }

@@ -195,7 +195,7 @@ const TOUR_TIME_VALUES = TOUR_TIME_SLOTS.map(s => s.value);
 // 'contact-form'). It's a separate bucket from 'requested' (a tour ask) so
 // general questions don't inflate the Tour Requests to-do; Membership can
 // move an inquiry into 'scheduled' if it turns into a tour, or close it out.
-const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'joined', 'declined', 'ghosted'];
+const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'joined', 'declined', 'ghosted'];
 
 // Compute every future Wednesday that falls inside an active session
 // range (inclusive). Returns chronological order. Today is excluded —
@@ -3067,6 +3067,7 @@ async function handleTourList(req, res) {
           WHEN 'requested' THEN 1
           WHEN 'scheduled' THEN 2
           WHEN 'toured'    THEN 3
+          WHEN 'followed_up' THEN 3
           WHEN 'joined'    THEN 4
           WHEN 'declined'  THEN 5
           WHEN 'ghosted'   THEN 6
@@ -3117,12 +3118,18 @@ async function handleTourUpdate(body, req, res) {
   // email's friendly slot label further down.
   const sessionsForUpdate = await loadSessionDatesFromDb(getSql());
 
-  // If a scheduled slot is being set, validate it the same way as the
-  // public form — Wednesday in an active session, time in the 10-2:30
-  // grid. Both required (or both blank to clear).
+  // Membership scheduling accepts ANY calendar date (2026-07-11, Erin:
+  // summer tours have no co-op Wednesdays to offer) — only the PUBLIC
+  // request form keeps the Wednesday-in-session rule. Time stays on the
+  // 10–2:30 grid. Both required, or both blank to clear.
   if (scheduledDate !== undefined || scheduledTime !== undefined) {
-    const slotErr = validateTourSlot(scheduledDate || null, scheduledTime || null, sessionsForUpdate);
-    if (slotErr) return res.status(400).json({ error: slotErr });
+    const sdVal = scheduledDate || null;
+    const stVal = scheduledTime || null;
+    if (sdVal || stVal) {
+      if (!sdVal || !stVal) return res.status(400).json({ error: 'Please pick both a date and a time, or leave both blank.' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(sdVal)) return res.status(400).json({ error: 'Date must be a valid calendar date.' });
+      if (TOUR_TIME_VALUES.indexOf(stVal) === -1) return res.status(400).json({ error: 'That time slot is not available.' });
+    }
   }
 
   try {
