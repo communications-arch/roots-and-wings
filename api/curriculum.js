@@ -889,7 +889,8 @@ module.exports = async function handler(req, res) {
 
       // ── Volunteer matrix (2026-07-11, Erin's session sign-up build) ──
       // One member-visible picture of a session: every placed class per
-      // block (AM / PM1 / PM2) with its leader + helpers, the floater /
+      // block (AM1 / AM2 / PM1 / PM2 — morning split per hour, Erin
+      // 2026-07-11) with its leader + helpers, the floater /
       // board-duties / prep pledges, the cleaning rota, and what the
       // ACTING person is already committed to per block.
       if (action === 'volunteer-matrix') {
@@ -931,11 +932,12 @@ module.exports = async function handler(req, res) {
         });
         const meName = meRows.length ? ((meRows[0].first_name || '') + ' ' + (meRows[0].last_name || '')).trim() : (user.name || '');
         const meNameLc = meName.toLowerCase();
-        const blocksOf = r => r.class_period === 'AM' ? ['AM']
+        const blocksOf = r => r.class_period === 'AM'
+          ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
           : r.scheduled_hour === 'both' ? ['PM1', 'PM2']
           : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
-        const blocks = { AM: { classes: [], floaters: [], board: [], prep: [] }, PM1: { classes: [], floaters: [], board: [], prep: [] }, PM2: { classes: [], floaters: [], board: [], prep: [] } };
-        const mine = { AM: null, PM1: null, PM2: null };
+        const blocks = { AM1: { classes: [], floaters: [], board: [], prep: [] }, AM2: { classes: [], floaters: [], board: [], prep: [] }, PM1: { classes: [], floaters: [], board: [], prep: [] }, PM2: { classes: [], floaters: [], board: [], prep: [] } };
+        const mine = { AM1: null, AM2: null, PM1: null, PM2: null };
         clsRows.forEach(r => {
           const hs = helpersBySub[r.id] || [];
           const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
@@ -954,24 +956,28 @@ module.exports = async function handler(req, res) {
           blocksOf(r).forEach(b => {
             blocks[b].classes.push(entry);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
-              var hourWord = r.scheduled_hour === 'AM1' ? ' (Hour 1)' : r.scheduled_hour === 'AM2' ? ' (Hour 2)' : '';
-              mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”' + hourWord, class_id: r.id };
+              mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
             }
             if (!mine[b]) {
               const hit = hs.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
-              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”' + (r.scheduled_hour === 'AM1' ? ' (Hour 1)' : r.scheduled_hour === 'AM2' ? ' (Hour 2)' : ''), class_id: r.id };
+              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”', class_id: r.id };
             }
           });
         });
         const VM_ROLE_LABEL = { floater: 'Floater', board: 'Board Duties', prep: 'Prep Period' };
         signupRows.forEach(s2 => {
-          const bucket = blocks[s2.block];
-          if (!bucket) return;
-          const list = s2.role === 'floater' ? bucket.floaters : s2.role === 'board' ? bucket.board : bucket.prep;
-          list.push(s2.person_name || s2.person_email);
-          if ((s2.person_email || '').toLowerCase() === actingEmail) {
-            mine[s2.block] = { kind: s2.role, label: VM_ROLE_LABEL[s2.role], signup_id: s2.id };
-          }
+          // Legacy 'AM' rows (whole-morning pledges from the first build)
+          // read as covering both hours.
+          const sBlocks = s2.block === 'AM' ? ['AM1', 'AM2'] : [s2.block];
+          sBlocks.forEach(sb => {
+            const bucket = blocks[sb];
+            if (!bucket) return;
+            const list = s2.role === 'floater' ? bucket.floaters : s2.role === 'board' ? bucket.board : bucket.prep;
+            list.push(s2.person_name || s2.person_email);
+            if ((s2.person_email || '').toLowerCase() === actingEmail) {
+              mine[sb] = { kind: s2.role, label: VM_ROLE_LABEL[s2.role], signup_id: s2.id };
+            }
+          });
         });
         const cleaning = cleanRows.map(c => ({ id: c.id, area: c.area_name, family: c.family_name }));
         // Open cleaning spots for self-serve sign-up (2026-07-11): every
@@ -1240,9 +1246,11 @@ module.exports = async function handler(req, res) {
       // existing surfaces keep reading it unchanged.
       // ── Volunteer sign-up (2026-07-11): floater / board / prep pledge ──
       // Self-serve for the acting member. One commitment per block per
-      // session (a lead/assist in that block also counts). Caps: board 2,
-      // prep 2 per block; floater AM 2; floater PM uncapped BUT gated on
-      // every placed class in that hour having its helper spots covered.
+      // session (a lead/assist in that block also counts). Blocks are
+      // per-hour: AM1 / AM2 / PM1 / PM2 (morning split 2026-07-11).
+      // Caps: board 2, prep 2 per block; floater AM 2 per hour; floater
+      // PM uncapped BUT gated on every placed class in that hour having
+      // its helper spots covered.
       if (action === 'volunteer-signup') {
         const vsBody = req.body || {};
         const vsYear = String(vsBody.school_year || '').trim().slice(0, 20) || activeSchoolYear();
@@ -1250,20 +1258,24 @@ module.exports = async function handler(req, res) {
         const vsBlock = String(vsBody.block || '').trim();
         const vsRole = String(vsBody.role || '').trim();
         if (!Number.isFinite(vsSess) || vsSess < 1 || vsSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
-        if (['AM', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM, PM1, or PM2' });
+        if (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM1, AM2, PM1, or PM2' });
         if (['floater', 'board', 'prep'].indexOf(vsRole) === -1) return res.status(400).json({ error: 'role must be floater, board, or prep' });
         const vsEmail = actingEmailFor(user, req).toLowerCase();
         const vsPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${vsEmail} OR LOWER(personal_email) = ${vsEmail} LIMIT 1`;
         const vsName = vsPeople.length ? ((vsPeople[0].first_name || '') + ' ' + (vsPeople[0].last_name || '')).trim() : (user.name || vsEmail);
-        // One commitment per block: existing pledge?
+        // One commitment per block: existing pledge? (legacy 'AM' rows
+        // count against both morning hours)
+        const vsDupeBlocks = vsBlock.indexOf('AM') === 0 ? ['AM', vsBlock] : [vsBlock];
         const dupe = await sql`SELECT id, role FROM volunteer_signups
-          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ${vsBlock}
+          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks})
             AND LOWER(person_email) = ${vsEmail}`;
         if (dupe.length) return res.status(409).json({ error: 'You already have a ' + dupe[0].role + ' pledge for that hour — remove it first.' });
         // ...or a lead/assist already occupying the block?
-        const vsHour = vsBlock === 'AM' ? ['AM', 'AM1', 'AM2', ''] : vsBlock === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
-        const vsPeriod = vsBlock === 'AM' ? 'AM' : 'PM';
+        const vsHour = vsBlock === 'AM1' ? ['AM', 'AM1', '']
+          : vsBlock === 'AM2' ? ['AM', 'AM2', '']
+          : vsBlock === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
+        const vsPeriod = vsBlock.indexOf('AM') === 0 ? 'AM' : 'PM';
         const busy = await sql`
           SELECT c.class_name FROM class_submissions c
           WHERE c.school_year = ${vsYear} AND c.scheduled_session = ${vsSess}
@@ -1277,12 +1289,12 @@ module.exports = async function handler(req, res) {
         if (busy.length) return res.status(409).json({ error: 'You are already with “' + busy[0].class_name + '” that hour.' });
         // Caps.
         const capCount = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
-          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ${vsBlock} AND role = ${vsRole}`;
+          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks}) AND role = ${vsRole}`;
         const n = capCount[0].n;
         if (vsRole === 'board' && n >= 2) return res.status(409).json({ error: 'Board Duties is full for that hour (2 max).' });
         if (vsRole === 'prep' && n >= 2) return res.status(409).json({ error: 'Prep Period is full for that hour (2 max).' });
-        if (vsRole === 'floater' && vsBlock === 'AM' && n >= 2) return res.status(409).json({ error: 'Morning floaters are full (2 max).' });
-        if (vsRole === 'floater' && vsBlock !== 'AM') {
+        if (vsRole === 'floater' && vsPeriod === 'AM' && n >= 2) return res.status(409).json({ error: 'Morning floaters are full for that hour (2 max).' });
+        if (vsRole === 'floater' && vsPeriod === 'PM') {
           // PM gate: floaters open only once every placed class that hour
           // has its helper spots covered.
           const uncovered = await sql`
@@ -1324,9 +1336,13 @@ module.exports = async function handler(req, res) {
           WHERE LOWER(email) = ${vaEmail} OR LOWER(personal_email) = ${vaEmail} LIMIT 1`;
         const vaName = vaPeople.length ? ((vaPeople[0].first_name || '') + ' ' + (vaPeople[0].last_name || '')).trim() : (user.name || vaEmail);
         // One commitment per block the class occupies.
-        const vaBlocks = vc.class_period === 'AM' ? ['AM'] : vc.scheduled_hour === 'both' ? ['PM1', 'PM2'] : vc.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        const vaBlocks = vc.class_period === 'AM'
+          ? (vc.scheduled_hour === 'AM1' ? ['AM1'] : vc.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+          : vc.scheduled_hour === 'both' ? ['PM1', 'PM2'] : vc.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
         for (const b of vaBlocks) {
-          const bHours = b === 'AM' ? ['AM', 'AM1', 'AM2', ''] : b === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
+          const bHours = b === 'AM1' ? ['AM', 'AM1', '']
+            : b === 'AM2' ? ['AM', 'AM2', '']
+            : b === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
           const clash = await sql`
             SELECT c.class_name FROM class_submissions c
             WHERE c.school_year = ${vc.school_year} AND c.scheduled_session = ${vc.scheduled_session}
@@ -1339,9 +1355,10 @@ module.exports = async function handler(req, res) {
                              AND (LOWER(h.person_email) = ${vaEmail} OR LOWER(h.person_name) = LOWER(${vaName}))))
             LIMIT 1`;
           if (clash.length) return res.status(409).json({ error: 'You are already with “' + clash[0].class_name + '” that hour.' });
+          const vaPledgeBlocks = b.indexOf('AM') === 0 ? ['AM', b] : [b];
           const pledged = await sql`SELECT role FROM volunteer_signups
             WHERE school_year = ${vc.school_year} AND session_number = ${vc.scheduled_session}
-              AND block = ${b} AND LOWER(person_email) = ${vaEmail}`;
+              AND block = ANY(${vaPledgeBlocks}) AND LOWER(person_email) = ${vaEmail}`;
           if (pledged.length) return res.status(409).json({ error: 'You already have a ' + pledged[0].role + ' pledge that hour — remove it first.' });
         }
         const already = await sql`SELECT id FROM class_assignment_helpers

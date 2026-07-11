@@ -1525,3 +1525,13 @@ CREATE TABLE IF NOT EXISTS volunteer_signups (
 );
 CREATE INDEX IF NOT EXISTS volunteer_signups_slot_idx
   ON volunteer_signups (school_year, session_number, block);
+
+-- Morning volunteer sign-ups split per hour (Erin, 2026-07-11): the AM
+-- block becomes AM1 (10:00-10:55) + AM2 (11:00-11:55) so floater /
+-- board / prep pledges can differ between the morning hours. Legacy
+-- whole-morning 'AM' rows stay valid and read as covering both hours.
+-- (DROP CONSTRAINT IF EXISTS + ADD is the idempotent pair the guard
+-- whitelists for widening a CHECK.)
+ALTER TABLE volunteer_signups DROP CONSTRAINT IF EXISTS volunteer_signups_block_check;
+ALTER TABLE volunteer_signups ADD CONSTRAINT volunteer_signups_block_check
+  CHECK (block IN ('AM','AM1','AM2','PM1','PM2'));

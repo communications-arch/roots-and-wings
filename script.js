@@ -4209,7 +4209,8 @@
   }
 
   var VOL_BLOCKS = [
-    { key: 'AM',  label: 'Morning (10:00–12:00)' },
+    { key: 'AM1', label: 'Morning Hour 1 (10:00–10:55)' },
+    { key: 'AM2', label: 'Morning Hour 2 (11:00–11:55)' },
     { key: 'PM1', label: 'Afternoon Hour 1 (1:00–1:55)' },
     { key: 'PM2', label: 'Afternoon Hour 2 (2:00–2:55)' }
   ];
@@ -4224,7 +4225,7 @@
       h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' + (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
     });
     var fl = b.floaters.length;
-    if (blockKey === 'AM') {
+    if (blockKey.indexOf('AM') === 0) {
       h += '<option value="floater"' + (fl >= 2 ? ' disabled' : '') + '>Floater — covers absences (' + fl + '/2)</option>';
     } else {
       h += '<option value="floater">Floater — covers absences (' + fl + ' so far)</option>';
@@ -4235,7 +4236,7 @@
   }
 
   var _volPanelSession = null; // defaults to currentSession on first load
-  var _mfDutyBlocks = { AM: false, PM1: false, PM2: false }; // set by renderMyFamily
+  var _mfDutyBlocks = { AM1: false, AM2: false, PM1: false, PM2: false }; // set by renderMyFamily
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
     if (!wrap) return;
@@ -4478,48 +4479,40 @@
     // the sunburst opens the morning, the warm petals the afternoon.
     var amMark = '<img class="ag-icon" src="brand/secondary/accent-64.png" alt="">';
     var pmMark = '<img class="ag-icon" src="brand/secondary/accent-5.png" alt="">';
-    var BLOCK_TITLES = { AM: amMark + ' Morning (10:00–12:00)', PM1: pmMark + ' Afternoon Hour 1 (1:00–1:55)', PM2: pmMark + ' Afternoon Hour 2 (2:00–2:55)' };
-    ['AM', 'PM1', 'PM2'].forEach(function (bk) {
+    var BLOCK_TITLES = { AM1: amMark + ' Morning Hour 1 (10:00–10:55)', AM2: amMark + ' Morning Hour 2 (11:00–11:55)', PM1: pmMark + ' Afternoon Hour 1 (1:00–1:55)', PM2: pmMark + ' Afternoon Hour 2 (2:00–2:55)' };
+    ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
       function pledgeBit(icon, label, list, cap) {
         return icon + ' <strong>' + label + ':</strong> '
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
           + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
       }
-      var pledges = pledgeBit('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0) + ' · '
+      var pledges = pledgeBit('🦋', 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0) + ' · '
         + pledgeBit('📋', 'Board', b.board, 2) + ' · '
         + pledgeBit('🧰', 'Prep', b.prep, 2);
       h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (bk === 'AM' ? 'Group' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
-        // Morning stacks per hour like the old sheet (Erin, 2026-07-11):
-        // a both-hours class repeats on Hour 1 + Hour 2; a group split
-        // into two 1-hour classes shows each hour's own staffing.
-        var gridRows = [];
-        b.classes.forEach(function (c) {
-          if (bk !== 'AM') { gridRows.push({ c: c, hourWord: '' }); return; }
-          var hrs = (c.hour === 'AM1') ? ['Hour 1 (10–11)'] : (c.hour === 'AM2') ? ['Hour 2 (11–12)'] : ['Hour 1 (10–11)', 'Hour 2 (11–12)'];
-          hrs.forEach(function (hw) { gridRows.push({ c: c, hourWord: hw }); });
-        });
-        if (bk === 'AM') {
+        var isAmBk = bk.indexOf('AM') === 0;
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Group' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        // Sections are per hour (Erin, 2026-07-11) — a both-hours class
+        // appears in each hour's section, so no extra stacking is needed;
+        // morning rows sort in age-group order.
+        var gridClasses = b.classes.slice();
+        if (isAmBk) {
           var gOrd = {};
           MORNING_GROUP_ORDER.forEach(function (g, gi) { gOrd[g.name.toLowerCase()] = gi; });
-          gridRows.sort(function (x, y) {
-            var dgo = (gOrd[String(x.c.group || '').toLowerCase()] || 99) - (gOrd[String(y.c.group || '').toLowerCase()] || 99);
-            if (dgo) return dgo;
-            return x.hourWord.localeCompare(y.hourWord);
+          gridClasses.sort(function (x, y) {
+            return (gOrd[String(x.group || '').toLowerCase()] || 99) - (gOrd[String(y.group || '').toLowerCase()] || 99);
           });
         }
-        gridRows.forEach(function (gr) {
-          var c = gr.c;
-          var first = bk === 'AM'
+        gridClasses.forEach(function (c) {
+          var first = isAmBk
             ? ageGroupIconHtml(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + ' <span class="ag-name ' + ageGroupClass(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + '">' + escapeHtmlWs(c.class_name) + '</span>'
             : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           if (c.co_teachers) helpers = '🤝 ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
-          if (gr.hourWord) first += ' <span class="sb-subdetail-dim">· ' + gr.hourWord + '</span>';
           h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
             + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
         });
@@ -4753,7 +4746,8 @@
         // AM1/AM2 = a 1-hour morning slot; plain 'AM' = both hours.
         var amWhen = s.scheduled_hour === 'AM1' ? '10:00–10:55'
           : s.scheduled_hour === 'AM2' ? '11:00–11:55' : 'Morning';
-        duties.push({ block: 'AM', icon: 'teach', text: s.class_name + ' — Leading', detail: amWhen + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
+        var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: amWhen + (s.scheduled_age_range ? ' · ' + s.scheduled_age_range : ''), popup: null });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
@@ -5015,9 +5009,9 @@
     // ── Render by section ──
     // One flow in day order (Erin, 2026-07-11): Morning, both Afternoon
     // hours, Cleaning Crew, Annual Roles, then the 2-year board roles.
-    var blockOrder = ['AM', 'PM1', 'PM2', 'Cleaning', 'annual', 'twoyear'];
+    var blockOrder = ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning', 'annual', 'twoyear'];
 
-    var blockLabels = { AM: 'Morning (10:00\u201312:00)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning Crew (after co-op)', annual: 'Annual Roles', twoyear: '2-Year Roles' };
+    var blockLabels = { AM1: 'Morning Hour 1 (10:00\u201310:55)', AM2: 'Morning Hour 2 (11:00\u201311:55)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning Crew (after co-op)', annual: 'Annual Roles', twoyear: '2-Year Roles' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
@@ -5047,7 +5041,7 @@
       // Library editor prefilled with that class.
       if (isTeacher && /—\s*Leading$/.test(String(d.text || ''))) {
         var planName = String(d.text).replace(/\s*—\s*Leading$/, '');
-        h += '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (d.block === 'AM' ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
+        h += '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (String(d.block).indexOf('AM') === 0 ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
       }
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
@@ -5081,8 +5075,12 @@
     // other responsibilities (Erin, 2026-07-11).
     html += '<div class="mf-duties-summary">';
     blockOrder.forEach(function (blk) {
-      var blockDuties = duties.filter(function (d) { return d.block === blk; });
-      var alwaysBlock = blk === 'AM' || blk === 'PM1' || blk === 'PM2' || blk === 'Cleaning';
+      // Both-hours morning duties (block 'AM') cover Hour 1 AND Hour 2,
+      // so they appear under each hour section (Erin, 2026-07-11).
+      var blockDuties = duties.filter(function (d) {
+        return d.block === blk || (d.block === 'AM' && (blk === 'AM1' || blk === 'AM2'));
+      });
+      var alwaysBlock = blk === 'AM1' || blk === 'AM2' || blk === 'PM1' || blk === 'PM2' || blk === 'Cleaning';
       if (blockDuties.length === 0 && !alwaysBlock) return;
       var hideEmpty = blockDuties.length === 0 && blk !== 'Cleaning';
       html += '<div class="mf-block-section" data-block="' + blk + '"' + (hideEmpty ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
@@ -5388,7 +5386,8 @@
     // skipped so the panel only shows pledges + still-open hours.
     _volPanelSession = null;
     _mfDutyBlocks = {
-      AM: duties.some(function (d) { return d.block === 'AM'; }),
+      AM1: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM1'; }),
+      AM2: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM2'; }),
       PM1: duties.some(function (d) { return d.block === 'PM1'; }),
       PM2: duties.some(function (d) { return d.block === 'PM2'; })
     };
