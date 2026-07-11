@@ -1502,3 +1502,26 @@ VALUES
   ('class_review', 'Afternoon Class Liaison', 'migration'),
   ('class_review', 'President', 'migration')
 ON CONFLICT (capability_key, role_title) DO NOTHING;
+
+
+-- 2026-07-11 (Erin): per-session volunteer sign-ups for Main Learning
+-- Coaches. Each MLC covers Morning (one both-hours block), PM Hour 1,
+-- and PM Hour 2, with cleaning optional. Leads come from placed class
+-- submissions and assists live on class_assignment_helpers (existing
+-- pipelines) -- this table stores only the self-serve FLOATER / BOARD
+-- DUTIES / PREP PERIOD pledges. Caps enforced in the API: floater AM 2,
+-- board 2, prep 2 per block; PM floaters are uncapped but gated on all
+-- placed classes in that hour having their helper spots covered.
+CREATE TABLE IF NOT EXISTS volunteer_signups (
+  id             SERIAL PRIMARY KEY,
+  school_year    TEXT NOT NULL,
+  session_number INTEGER NOT NULL CHECK (session_number BETWEEN 1 AND 5),
+  block          TEXT NOT NULL CHECK (block IN ('AM','PM1','PM2')),
+  role           TEXT NOT NULL CHECK (role IN ('floater','board','prep')),
+  person_email   TEXT NOT NULL,
+  person_name    TEXT NOT NULL DEFAULT '',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, session_number, block, person_email)
+);
+CREATE INDEX IF NOT EXISTS volunteer_signups_slot_idx
+  ON volunteer_signups (school_year, session_number, block);

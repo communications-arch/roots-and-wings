@@ -881,6 +881,91 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // ── Volunteer matrix (2026-07-11, Erin's session sign-up build) ──
+      // One member-visible picture of a session: every placed class per
+      // block (AM / PM1 / PM2) with its leader + helpers, the floater /
+      // board-duties / prep pledges, the cleaning rota, and what the
+      // ACTING person is already committed to per block.
+      if (action === 'volunteer-matrix') {
+        const vmYear = String(req.query.school_year || '').trim().slice(0, 20) || activeSchoolYear();
+        const vmSess = parseInt(req.query.session, 10);
+        if (!Number.isFinite(vmSess) || vmSess < 1 || vmSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
+        const actingEmail = actingEmailFor(user, req).toLowerCase();
+        const [clsRows, helperRows, signupRows, cleanRows, meRows] = await Promise.all([
+          sql`SELECT id, class_name, class_period, scheduled_hour, age_groups, scheduled_age_range,
+                     submitted_by_email, submitted_by_name, co_teachers, assistant_count, scheduled_room
+              FROM class_submissions
+              WHERE school_year = ${vmYear} AND scheduled_session = ${vmSess}
+                AND status IN ('scheduled', 'drafted')`,
+          sql`SELECT h.class_submission_id, h.person_email, h.person_name
+              FROM class_assignment_helpers h
+              JOIN class_submissions c ON c.id = h.class_submission_id
+              WHERE c.school_year = ${vmYear} AND c.scheduled_session = ${vmSess}
+              ORDER BY h.class_submission_id, h.sort_order`,
+          sql`SELECT id, block, role, person_email, person_name
+              FROM volunteer_signups
+              WHERE school_year = ${vmYear} AND session_number = ${vmSess}
+              ORDER BY role, created_at`,
+          sql`SELECT ca.family_name, a.area_name
+              FROM cleaning_assignments ca
+              JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
+              WHERE ca.session_number = ${vmSess} AND ca.school_year = ${vmYear}
+              ORDER BY a.sort_order, ca.sort_order`,
+          sql`SELECT first_name, last_name FROM people
+              WHERE LOWER(email) = ${actingEmail} OR LOWER(personal_email) = ${actingEmail} LIMIT 1`
+        ]);
+        const helpersBySub = {};
+        helperRows.forEach(h => {
+          (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
+            .push({ email: (h.person_email || '').toLowerCase(), name: h.person_name || '' });
+        });
+        const meName = meRows.length ? ((meRows[0].first_name || '') + ' ' + (meRows[0].last_name || '')).trim() : (user.name || '');
+        const meNameLc = meName.toLowerCase();
+        const blocksOf = r => r.class_period === 'AM' ? ['AM']
+          : r.scheduled_hour === 'both' ? ['PM1', 'PM2']
+          : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        const blocks = { AM: { classes: [], floaters: [], board: [], prep: [] }, PM1: { classes: [], floaters: [], board: [], prep: [] }, PM2: { classes: [], floaters: [], board: [], prep: [] } };
+        const mine = { AM: null, PM1: null, PM2: null };
+        clsRows.forEach(r => {
+          const hs = helpersBySub[r.id] || [];
+          const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+          const entry = {
+            id: r.id, class_name: r.class_name,
+            group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
+            ages: r.scheduled_age_range || '',
+            teacher: r.submitted_by_name || r.submitted_by_email || '',
+            teacher_email: (r.submitted_by_email || '').toLowerCase(),
+            co_teachers: r.co_teachers || '',
+            helpers: hs.map(h => h.name || h.email),
+            helpers_needed: Math.max(0, wants - hs.length),
+            room: r.scheduled_room || '',
+            hour: r.scheduled_hour || ''
+          };
+          blocksOf(r).forEach(b => {
+            blocks[b].classes.push(entry);
+            if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
+              mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
+            }
+            if (!mine[b]) {
+              const hit = hs.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
+              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”', class_id: r.id };
+            }
+          });
+        });
+        const VM_ROLE_LABEL = { floater: 'Floater', board: 'Board Duties', prep: 'Prep Period' };
+        signupRows.forEach(s2 => {
+          const bucket = blocks[s2.block];
+          if (!bucket) return;
+          const list = s2.role === 'floater' ? bucket.floaters : s2.role === 'board' ? bucket.board : bucket.prep;
+          list.push(s2.person_name || s2.person_email);
+          if ((s2.person_email || '').toLowerCase() === actingEmail) {
+            mine[s2.block] = { kind: s2.role, label: VM_ROLE_LABEL[s2.role], signup_id: s2.id };
+          }
+        });
+        const cleaning = cleanRows.map(c => ({ area: c.area_name, family: c.family_name }));
+        return res.status(200).json({ school_year: vmYear, session: vmSess, blocks, mine, cleaning, me: { email: actingEmail, name: meName } });
+      }
+
       // Single submission fetch — owner or reviewer can view.
       if (action === 'class-submission') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
@@ -1132,6 +1217,122 @@ module.exports = async function handler(req, res) {
       // same year + session + period with hour overlap ('both' and 'AM'
       // span both hours). Stores the room NAME in scheduled_room so all
       // existing surfaces keep reading it unchanged.
+      // ── Volunteer sign-up (2026-07-11): floater / board / prep pledge ──
+      // Self-serve for the acting member. One commitment per block per
+      // session (a lead/assist in that block also counts). Caps: board 2,
+      // prep 2 per block; floater AM 2; floater PM uncapped BUT gated on
+      // every placed class in that hour having its helper spots covered.
+      if (action === 'volunteer-signup') {
+        const vsBody = req.body || {};
+        const vsYear = String(vsBody.school_year || '').trim().slice(0, 20) || activeSchoolYear();
+        const vsSess = parseInt(vsBody.session, 10);
+        const vsBlock = String(vsBody.block || '').trim();
+        const vsRole = String(vsBody.role || '').trim();
+        if (!Number.isFinite(vsSess) || vsSess < 1 || vsSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
+        if (['AM', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM, PM1, or PM2' });
+        if (['floater', 'board', 'prep'].indexOf(vsRole) === -1) return res.status(400).json({ error: 'role must be floater, board, or prep' });
+        const vsEmail = actingEmailFor(user, req).toLowerCase();
+        const vsPeople = await sql`SELECT first_name, last_name FROM people
+          WHERE LOWER(email) = ${vsEmail} OR LOWER(personal_email) = ${vsEmail} LIMIT 1`;
+        const vsName = vsPeople.length ? ((vsPeople[0].first_name || '') + ' ' + (vsPeople[0].last_name || '')).trim() : (user.name || vsEmail);
+        // One commitment per block: existing pledge?
+        const dupe = await sql`SELECT id, role FROM volunteer_signups
+          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ${vsBlock}
+            AND LOWER(person_email) = ${vsEmail}`;
+        if (dupe.length) return res.status(409).json({ error: 'You already have a ' + dupe[0].role + ' pledge for that hour — remove it first.' });
+        // ...or a lead/assist already occupying the block?
+        const vsHour = vsBlock === 'AM' ? ['AM', 'AM1', 'AM2', ''] : vsBlock === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
+        const vsPeriod = vsBlock === 'AM' ? 'AM' : 'PM';
+        const busy = await sql`
+          SELECT c.class_name FROM class_submissions c
+          WHERE c.school_year = ${vsYear} AND c.scheduled_session = ${vsSess}
+            AND c.class_period = ${vsPeriod} AND c.status IN ('scheduled', 'drafted')
+            AND COALESCE(c.scheduled_hour, '') = ANY(${vsHour})
+            AND (LOWER(c.submitted_by_email) = ${vsEmail}
+              OR EXISTS (SELECT 1 FROM class_assignment_helpers h
+                         WHERE h.class_submission_id = c.id
+                           AND (LOWER(h.person_email) = ${vsEmail} OR LOWER(h.person_name) = LOWER(${vsName}))))
+          LIMIT 1`;
+        if (busy.length) return res.status(409).json({ error: 'You are already with “' + busy[0].class_name + '” that hour.' });
+        // Caps.
+        const capCount = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
+          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ${vsBlock} AND role = ${vsRole}`;
+        const n = capCount[0].n;
+        if (vsRole === 'board' && n >= 2) return res.status(409).json({ error: 'Board Duties is full for that hour (2 max).' });
+        if (vsRole === 'prep' && n >= 2) return res.status(409).json({ error: 'Prep Period is full for that hour (2 max).' });
+        if (vsRole === 'floater' && vsBlock === 'AM' && n >= 2) return res.status(409).json({ error: 'Morning floaters are full (2 max).' });
+        if (vsRole === 'floater' && vsBlock !== 'AM') {
+          // PM gate: floaters open only once every placed class that hour
+          // has its helper spots covered.
+          const uncovered = await sql`
+            SELECT c.class_name,
+                   GREATEST(0, (SELECT MIN(x) FROM UNNEST(c.assistant_count) AS x)
+                     - (SELECT COUNT(*)::int FROM class_assignment_helpers h WHERE h.class_submission_id = c.id)) AS gap
+            FROM class_submissions c
+            WHERE c.school_year = ${vsYear} AND c.scheduled_session = ${vsSess}
+              AND c.class_period = 'PM' AND c.status IN ('scheduled', 'drafted')
+              AND COALESCE(c.scheduled_hour, '') = ANY(${vsHour})`;
+          const needy = uncovered.find(u => Number(u.gap) > 0);
+          if (needy) return res.status(409).json({ error: '“' + needy.class_name + '” still needs an assistant that hour — classes fill before floaters.' });
+        }
+        const insertedVs = await sql`
+          INSERT INTO volunteer_signups (school_year, session_number, block, role, person_email, person_name)
+          VALUES (${vsYear}, ${vsSess}, ${vsBlock}, ${vsRole}, ${vsEmail}, ${vsName})
+          RETURNING id, block, role`;
+        return res.status(201).json({ ok: true, signup: insertedVs[0] });
+      }
+
+      // ── Volunteer assist (2026-07-11): join a class as an assistant ──
+      // Writes the existing class_assignment_helpers roster, so builder
+      // tiles, the published schedule, and participation credit all see
+      // it immediately.
+      if (action === 'volunteer-assist') {
+        const vaSubId = parseInt((req.body || {}).class_submission_id, 10);
+        if (!Number.isFinite(vaSubId)) return res.status(400).json({ error: 'class_submission_id required' });
+        const vaEmail = actingEmailFor(user, req).toLowerCase();
+        const vaCls = await sql`SELECT id, class_name, class_period, scheduled_hour, school_year, scheduled_session, status, submitted_by_email
+          FROM class_submissions WHERE id = ${vaSubId}`;
+        if (!vaCls.length || !vaCls[0].scheduled_session || ['scheduled', 'drafted'].indexOf(vaCls[0].status) === -1) {
+          return res.status(409).json({ error: 'That class is not on the schedule.' });
+        }
+        const vc = vaCls[0];
+        if ((vc.submitted_by_email || '').toLowerCase() === vaEmail) {
+          return res.status(409).json({ error: 'You lead this class — no need to assist it too.' });
+        }
+        const vaPeople = await sql`SELECT first_name, last_name FROM people
+          WHERE LOWER(email) = ${vaEmail} OR LOWER(personal_email) = ${vaEmail} LIMIT 1`;
+        const vaName = vaPeople.length ? ((vaPeople[0].first_name || '') + ' ' + (vaPeople[0].last_name || '')).trim() : (user.name || vaEmail);
+        // One commitment per block the class occupies.
+        const vaBlocks = vc.class_period === 'AM' ? ['AM'] : vc.scheduled_hour === 'both' ? ['PM1', 'PM2'] : vc.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        for (const b of vaBlocks) {
+          const bHours = b === 'AM' ? ['AM', 'AM1', 'AM2', ''] : b === 'PM1' ? ['PM1', 'both'] : ['PM2', 'both'];
+          const clash = await sql`
+            SELECT c.class_name FROM class_submissions c
+            WHERE c.school_year = ${vc.school_year} AND c.scheduled_session = ${vc.scheduled_session}
+              AND c.class_period = ${vc.class_period === 'AM' ? 'AM' : 'PM'} AND c.status IN ('scheduled', 'drafted')
+              AND c.id <> ${vaSubId}
+              AND COALESCE(c.scheduled_hour, '') = ANY(${bHours})
+              AND (LOWER(c.submitted_by_email) = ${vaEmail}
+                OR EXISTS (SELECT 1 FROM class_assignment_helpers h
+                           WHERE h.class_submission_id = c.id
+                             AND (LOWER(h.person_email) = ${vaEmail} OR LOWER(h.person_name) = LOWER(${vaName}))))
+            LIMIT 1`;
+          if (clash.length) return res.status(409).json({ error: 'You are already with “' + clash[0].class_name + '” that hour.' });
+          const pledged = await sql`SELECT role FROM volunteer_signups
+            WHERE school_year = ${vc.school_year} AND session_number = ${vc.scheduled_session}
+              AND block = ${b} AND LOWER(person_email) = ${vaEmail}`;
+          if (pledged.length) return res.status(409).json({ error: 'You already have a ' + pledged[0].role + ' pledge that hour — remove it first.' });
+        }
+        const already = await sql`SELECT id FROM class_assignment_helpers
+          WHERE class_submission_id = ${vaSubId}
+            AND (LOWER(person_email) = ${vaEmail} OR LOWER(person_name) = LOWER(${vaName}))`;
+        if (already.length) return res.status(409).json({ error: 'You are already helping this class.' });
+        const sortRows = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM class_assignment_helpers WHERE class_submission_id = ${vaSubId}`;
+        await sql`INSERT INTO class_assignment_helpers (class_submission_id, person_email, person_name, sort_order, updated_by)
+          VALUES (${vaSubId}, ${vaEmail}, ${vaName}, ${sortRows[0].next}, ${user.email})`;
+        return res.status(201).json({ ok: true, class_id: vaSubId, class_name: vc.class_name });
+      }
+
       if (action === 'assign-room') {
         const actingEmail = actingEmailFor(user, req);
         const mayAssign = isSuperUser(actingEmail) || await hasCapability(actingEmail, 'room_assign');
@@ -1613,6 +1814,31 @@ module.exports = async function handler(req, res) {
 
     // ── DELETE ──
     if (req.method === 'DELETE') {
+      // Volunteer sign-ups (2026-07-11): drop your own floater/board/prep
+      // pledge, or step out of a class you're assisting.
+      if (action === 'volunteer-signup') {
+        const dsId = parseInt(req.query.id, 10);
+        if (!Number.isFinite(dsId)) return res.status(400).json({ error: 'id required' });
+        const dsEmail = actingEmailFor(user, req).toLowerCase();
+        const gone = await sql`DELETE FROM volunteer_signups
+          WHERE id = ${dsId} AND LOWER(person_email) = ${dsEmail} RETURNING id`;
+        if (!gone.length) return res.status(404).json({ error: 'Pledge not found (or not yours).' });
+        return res.status(200).json({ ok: true });
+      }
+      if (action === 'volunteer-assist') {
+        const daSubId = parseInt(req.query.id, 10);
+        if (!Number.isFinite(daSubId)) return res.status(400).json({ error: 'id required' });
+        const daEmail = actingEmailFor(user, req).toLowerCase();
+        const daPeople = await sql`SELECT first_name, last_name FROM people
+          WHERE LOWER(email) = ${daEmail} OR LOWER(personal_email) = ${daEmail} LIMIT 1`;
+        const daName = daPeople.length ? ((daPeople[0].first_name || '') + ' ' + (daPeople[0].last_name || '')).trim() : (user.name || '');
+        const goneH = await sql`DELETE FROM class_assignment_helpers
+          WHERE class_submission_id = ${daSubId}
+            AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
+          RETURNING id`;
+        if (!goneH.length) return res.status(404).json({ error: 'You are not on that class’s helper list.' });
+        return res.status(200).json({ ok: true });
+      }
       // Withdraw own PM class submission. We keep the row (status='withdrawn')
       // rather than hard-delete so the VP/PMA can still see it was there, in
       // case they want to reach out to the submitter.
