@@ -803,13 +803,17 @@ module.exports = async function handler(req, res) {
         const [approvalRows, classRows, helperRows] = await Promise.all([
           sql`SELECT session_number, approved_at, am_approved_at
               FROM co_op_sessions WHERE school_year = ${year}`,
-          sql`SELECT id, class_period, class_name, description,
-                     submitted_by_name, submitted_by_email, co_teachers,
-                     age_groups, age_groups_other, max_students,
-                     scheduled_session, scheduled_hour, scheduled_age_range, scheduled_room
-              FROM class_submissions
-              WHERE status = 'scheduled' AND school_year = ${year}
-                AND scheduled_session IS NOT NULL`,
+          sql`SELECT c.id, c.class_period, c.class_name, c.description,
+                     c.submitted_by_name, c.submitted_by_email, c.co_teachers,
+                     c.age_groups, c.age_groups_other, c.max_students,
+                     c.scheduled_session, c.scheduled_hour, c.scheduled_age_range, c.scheduled_room,
+                     (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                       WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                          OR LOWER(p.personal_email) = LOWER(c.submitted_by_email)
+                       LIMIT 1) AS person_name
+              FROM class_submissions c
+              WHERE c.status = 'scheduled' AND c.school_year = ${year}
+                AND c.scheduled_session IS NOT NULL`,
           sql`SELECT class_submission_id, person_name
               FROM class_assignment_helpers ORDER BY class_submission_id, sort_order`
         ]);
@@ -840,7 +844,9 @@ module.exports = async function handler(req, res) {
             class_period: r.class_period,
             class_name: r.class_name,
             description: r.description || '',
-            teacher: r.submitted_by_name || r.submitted_by_email || '',
+            // Real name first (people join), then the submitted name; the
+            // raw email never shows to members (Erin, 2026-07-11).
+            teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
             co_teachers: r.co_teachers || '',
             helpers: (helpersBySub[r.id] || []).filter(Boolean),
             age_groups: r.age_groups || [],
@@ -892,11 +898,15 @@ module.exports = async function handler(req, res) {
         if (!Number.isFinite(vmSess) || vmSess < 1 || vmSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
         const actingEmail = actingEmailFor(user, req).toLowerCase();
         const [clsRows, helperRows, signupRows, cleanRows, meRows] = await Promise.all([
-          sql`SELECT id, class_name, class_period, scheduled_hour, age_groups, scheduled_age_range,
-                     submitted_by_email, submitted_by_name, co_teachers, assistant_count, scheduled_room
-              FROM class_submissions
-              WHERE school_year = ${vmYear} AND scheduled_session = ${vmSess}
-                AND status IN ('scheduled', 'drafted')`,
+          sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.age_groups, c.scheduled_age_range,
+                     c.submitted_by_email, c.submitted_by_name, c.co_teachers, c.assistant_count, c.scheduled_room,
+                     (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                       WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                          OR LOWER(p.personal_email) = LOWER(c.submitted_by_email)
+                       LIMIT 1) AS person_name
+              FROM class_submissions c
+              WHERE c.school_year = ${vmYear} AND c.scheduled_session = ${vmSess}
+                AND c.status IN ('scheduled', 'drafted')`,
           sql`SELECT h.class_submission_id, h.person_email, h.person_name
               FROM class_assignment_helpers h
               JOIN class_submissions c ON c.id = h.class_submission_id
@@ -933,7 +943,7 @@ module.exports = async function handler(req, res) {
             id: r.id, class_name: r.class_name,
             group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
             ages: r.scheduled_age_range || '',
-            teacher: r.submitted_by_name || r.submitted_by_email || '',
+            teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
             teacher_email: (r.submitted_by_email || '').toLowerCase(),
             co_teachers: r.co_teachers || '',
             helpers: hs.map(h => h.name || h.email),
