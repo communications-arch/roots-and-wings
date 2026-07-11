@@ -4869,8 +4869,11 @@ button.staff-role:hover {
 .mf-duty-grp .ag-icon { height: 15px; }
 
 /* Role text — same font style/size as the other duty titles
-   (Maples Liaison, Communications Director, ...) per Erin 2026-07-11 */
-.mf-role-tag {
+   (Maples Liaison, Communications Director, ...) per Erin 2026-07-11.
+   The .mf-duty-info selector is needed to outrank the generic
+   `.mf-duty-info span` subtitle rule (0.78rem, light). */
+.mf-role-tag,
+.mf-duty-info .mf-role-tag {
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--color-text);
