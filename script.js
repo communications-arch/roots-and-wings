@@ -4289,8 +4289,11 @@
       var lblM = String(mine.label).match(/^(Leading|Assisting)\s+“(.+)”$/);
       var mc = lblM ? (((d.blocks || {})[blk.key] || {}).classes || []).filter(function (c) { return c.id === mine.class_id; })[0] : null;
       var mcRoom = mc ? (mc.room || (mc.group ? (AM_GROUP_ROOMS[mc.group.charAt(0).toUpperCase() + mc.group.slice(1)] || '') : '')) : '';
+      var mcAgCls = mc && mc.group ? ageGroupClass(mc.group.charAt(0).toUpperCase() + mc.group.slice(1)) : '';
       var infoHtml = lblM
-        ? '<strong>' + escapeHtml(lblM[2]) + ' <span class="mf-role-tag">' + lblM[1] + '</span></strong>' + (mcRoom ? '<span>' + escapeHtml(mcRoom) + '</span>' : '')
+        ? '<span class="mf-duty-line"><strong>' + (mcAgCls ? '<span class="ag-name ' + mcAgCls + '">' : '') + escapeHtml(lblM[2]) + (mcAgCls ? '</span>' : '') + '</strong>'
+          + (mcRoom ? '<span class="mf-duty-sub">· ' + escapeHtml(mcRoom) + '</span>' : '')
+          + '<span class="mf-role-tag">' + lblM[1] + '</span></span>'
         : '<strong>' + escapeHtml(mine.label) + '</strong>';
       row.innerHTML = '<div class="mf-duty-icon">' + (volRoleIconImg(mine.kind) || VOL_ICONS[mine.kind] || '') + '</div>'
         + '<div class="mf-duty-info">' + infoHtml + '</div>'
@@ -4680,11 +4683,11 @@
           duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: 'Year-long role', popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         if (nameMatch(sess.teacher, full)) {
-          duties.push({block: 'AM', icon: 'teach', text: groupWithAge(groupName) + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+          duties.push({block: 'AM', icon: 'teach', text: groupName + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
         }
         sess.assistants.forEach(function (a) {
           if (nameMatch(a, full)) {
-            duties.push({block: 'AM', icon: 'assist', text: groupWithAge(groupName) + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+            duties.push({block: 'AM', icon: 'assist', text: groupName + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
           }
         });
       });
@@ -4758,7 +4761,7 @@
         var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
         var amGrp = String((s.age_groups || [])[0] || '');
         var amRoom = s.scheduled_room || (amGrp ? (AM_GROUP_ROOMS[amGrp.charAt(0).toUpperCase() + amGrp.slice(1)] || '') : '');
-        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: [amRoom, s.scheduled_age_range].filter(Boolean).join(' · '), popup: null });
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', detail: amRoom, popup: null });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
@@ -5024,7 +5027,7 @@
 
     // Short gutter labels (design pass 2026-07-11): name + start time
     // only \u2014 full time ranges already live in the duty subtitles.
-    var blockLabels = { AM1: 'AM 1 (10:00)', AM2: 'AM 2 (11:00)', PM1: 'PM 1 (1:00)', PM2: 'PM 2 (2:00)', Cleaning: 'Cleaning (after co-op)', annual: 'Annual (all year)', twoyear: '2-Year (board term)' };
+    var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Cleaning', annual: 'Annual', twoyear: '2-Yr' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
@@ -5042,11 +5045,15 @@
         : /—\s*Assisting$/.test(String(d.text || '')) ? 'assist'
         : /co-?lead/i.test(String(d.text || '')) ? 'colead' : '';
       h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (roleKind ? volRoleIconImg(roleKind) : (DUTY_ICONS[d.icon] || ''))) + '</div>';
-      // Role rendered as a soft tag beside the class title instead of
-      // "Title — Leading" run together (Erin, 2026-07-11).
+      // One-line row (Erin, 2026-07-11): title · room/detail, role as a
+      // soft tag, ellipsis when tight; group names wear their group color.
       var roleSplit = String(d.text || '').match(/^(.*?)\s*—\s*(Leading|Co-leading|Assisting)$/);
-      var titleHtml = roleSplit ? roleSplit[1] + ' <span class="mf-role-tag">' + roleSplit[2] + '</span>' : d.text;
-      h += '<div class="mf-duty-info"><strong>' + titleHtml + '</strong>' + (d.detail ? '<span>' + d.detail + '</span>' : '');
+      var titleCore = roleSplit ? roleSplit[1] : d.text;
+      if (dutyGroup) titleCore = '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + titleCore + '</span>';
+      h += '<div class="mf-duty-info"><span class="mf-duty-line"><strong>' + titleCore + '</strong>'
+        + (d.detail ? '<span class="mf-duty-sub">· ' + d.detail + '</span>' : '')
+        + (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
+        + '</span>';
       if (classKey && (isTeacher || d.icon === 'assist')) {
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
       }
