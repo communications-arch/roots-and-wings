@@ -8215,6 +8215,8 @@ button.staff-role:hover {
   margin-right: 4px;
   display: inline-block;
 }
+/* Group marks sitting in the My Responsibilities duty-icon slot. */
+.mf-duty-icon .ag-icon { height: 18px; vertical-align: middle; }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated

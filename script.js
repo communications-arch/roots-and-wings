@@ -4674,7 +4674,10 @@
       var hasRoleDesc = !!(getRoleKeyForDuty(d.text) && getRoleByKey(getRoleKeyForDuty(d.text)));
       var isClickable = d.popup || hasRoleDesc;
       var h = '<div class="mf-duty' + (isClickable ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (isClickable ? ' style="cursor:pointer;"' : '') + '>';
-      h += '<div class="mf-duty-icon">' + (DUTY_ICONS[d.icon] || '') + '</div>';
+      // Group-tied duties wear their group's brand mark in the icon slot
+      // (Erin, 2026-07-11); everything else keeps its duty-type icon.
+      var dutyGroup = String(d.text || '').match(/^(Greenhouse|Saplings|Sassafras|Oaks|Maples|Birch|Willows|Cedars|Pigeons|Teens)\b/);
+      h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (DUTY_ICONS[d.icon] || '')) + '</div>';
       h += '<div class="mf-duty-info"><strong>' + d.text + '</strong><span>' + d.detail + '</span>';
       if (classKey && (isTeacher || d.icon === 'assist')) {
         h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
@@ -4755,9 +4758,9 @@
         // the line doesn't claim history that doesn't exist.
         var placedGroup = _kidPlacements[String(kid.name || '').toLowerCase()];
         if (placedGroup) {
-          html += '<span class="mf-sched-class" style="font-size:0.9rem;">' + groupWithAge(placedGroup) + ' <span style="color:var(--color-teal);font-weight:600;">(placed for ' + ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || 'next year') + ')</span></span>';
+          html += '<span class="mf-sched-class" style="font-size:0.9rem;">' + ageGroupIconHtml(placedGroup) + ' <span class="ag-name ' + ageGroupClass(placedGroup) + '">' + groupWithAge(placedGroup) + '</span> <span style="color:var(--color-teal);font-weight:600;">(placed for ' + ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || 'next year') + ')</span></span>';
         } else if (kid.group) {
-          html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + groupWithAge(kid.group) + ' (this past year)</span>';
+          html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + ageGroupIconHtml(kid.group) + ' ' + groupWithAge(kid.group) + ' (this past year)</span>';
         }
         html += '</div>';
         html += '</div>';
@@ -4793,7 +4796,8 @@
       // Morning
       html += '<div class="mf-sched-row">';
       html += '<span class="mf-sched-time">AM</span>';
-      html += '<span class="mf-sched-class">' + groupWithAge(kidGroup) + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
+      // Group mark + brand color on the morning row (Erin, 2026-07-11).
+      html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
       html += '<span class="mf-sched-room">' + room + '</span>';
       html += '<span class="mf-sched-teacher">' + teacher + '</span>';
       html += '</div>';
