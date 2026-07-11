@@ -4474,7 +4474,11 @@
       h += '<button type="button" class="board-cal-view-pill vol-grid-sess' + (i === d.session ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
     }
     h += '</div>';
-    var BLOCK_TITLES = { AM: '🌅 Morning — 10:00–12:00', PM1: '🌇 Afternoon Hour 1 — 1:00–1:55', PM2: '🌇 Afternoon Hour 2 — 2:00–2:55' };
+    // Brand marks for the time-of-day headings (Erin, 2026-07-11):
+    // the sunburst opens the morning, the warm petals the afternoon.
+    var amMark = '<img class="ag-icon" src="brand/secondary/accent-64.png" alt="">';
+    var pmMark = '<img class="ag-icon" src="brand/secondary/accent-5.png" alt="">';
+    var BLOCK_TITLES = { AM: amMark + ' Morning (10:00–12:00)', PM1: pmMark + ' Afternoon Hour 1 (1:00–1:55)', PM2: pmMark + ' Afternoon Hour 2 (2:00–2:55)' };
     ['AM', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
       function pledgeBit(icon, label, list, cap) {
