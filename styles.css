@@ -7668,6 +7668,49 @@ button.staff-role:hover {
 .mf-block-section:last-child {
   margin-bottom: 0;
 }
+/* Condensed layout (Erin, 2026-07-11): inside the duties summary the
+   block label sits BESIDE its rows — a slim left column with the hour
+   name over its time — instead of a full-width bar above them. */
+.mf-duties-summary .mf-block-section {
+  display: grid;
+  grid-template-columns: 138px 1fr;
+  column-gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.mf-duties-summary .mf-block-section > .mf-block-label {
+  grid-column: 1;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 0;
+  padding: 6px 10px;
+}
+.mf-duties-summary .mf-block-section > *:not(.mf-block-label) {
+  grid-column: 2;
+}
+.mf-block-time {
+  font-weight: 400;
+  font-size: 0.7rem;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-text-light);
+}
+.mf-duties-summary .mf-duty {
+  padding: 6px 10px;
+}
+@media (max-width: 560px) {
+  .mf-duties-summary .mf-block-section {
+    grid-template-columns: 1fr;
+  }
+  .mf-duties-summary .mf-block-section > *:not(.mf-block-label) {
+    grid-column: 1;
+  }
+  .mf-duties-summary .mf-block-section > .mf-block-label {
+    margin-bottom: 4px;
+  }
+}
 
 /* "I'll Be Out" button */
 .btn-absence {

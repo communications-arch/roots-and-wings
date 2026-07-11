@@ -5083,7 +5083,11 @@
       var alwaysBlock = blk === 'AM1' || blk === 'AM2' || blk === 'PM1' || blk === 'PM2' || blk === 'Cleaning';
       if (blockDuties.length === 0 && !alwaysBlock) return;
       var hideEmpty = blockDuties.length === 0 && blk !== 'Cleaning';
-      html += '<div class="mf-block-section" data-block="' + blk + '"' + (hideEmpty ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + blockLabels[blk] + '</div>';
+      // Label sits BESIDE the rows (Erin, 2026-07-11: condense the card)
+      // — name on top, the parenthesized time tucked under it.
+      var lblName = blockLabels[blk].split(' (')[0];
+      var lblTime = (blockLabels[blk].match(/\(([^)]+)\)/) || [])[1] || '';
+      html += '<div class="mf-block-section" data-block="' + blk + '"' + (hideEmpty ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + lblName + (lblTime ? '<span class="mf-block-time">' + lblTime + '</span>' : '') + '</div>';
       blockDuties.forEach(function (d) {
         html += renderDutyRow(d, duties.indexOf(d));
       });
