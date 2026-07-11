@@ -4468,7 +4468,8 @@
   }
 
   function renderVolunteerGrid(body, d) {
-    var h = '<div class="board-cal-views">';
+    var h = '<div class="vol-grid">';
+    h += '<div class="board-cal-views">';
     for (var i = 1; i <= 5; i++) {
       h += '<button type="button" class="board-cal-view-pill vol-grid-sess' + (i === d.session ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
     }
@@ -4492,14 +4493,15 @@
         });
         h += '</tbody></table></div>';
       }
-      function pledgeLine(icon, label, list, cap) {
-        return '<div class="ws-body-hint" style="margin:4px 0;">' + icon + ' <strong>' + label + ':</strong> '
+      function pledgeBit(icon, label, list, cap) {
+        return icon + ' <strong>' + label + ':</strong> '
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
-          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '') + '</div>';
+          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
       }
-      h += pledgeLine('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0);
-      h += pledgeLine('📋', 'Board Duties', b.board, 2);
-      h += pledgeLine('🧰', 'Prep Period', b.prep, 2);
+      h += '<div class="ws-body-hint vol-grid-pledges">'
+        + pledgeBit('🦋', 'Floaters', b.floaters, bk === 'AM' ? 2 : 0) + ' · '
+        + pledgeBit('📋', 'Board', b.board, 2) + ' · '
+        + pledgeBit('🧰', 'Prep', b.prep, 2) + '</div>';
     });
     h += '<h4 class="roles-mgr-se-head">🧹 Cleaning (after co-op)</h4>';
     if ((d.cleaning || []).length === 0) {
@@ -4507,6 +4509,7 @@
     } else {
       h += '<div class="ws-body-hint">' + d.cleaning.map(function (c) { return escapeHtmlWs(c.area) + ' — <strong>' + escapeHtmlWs(c.family) + '</strong>'; }).join(' · ') + '</div>';
     }
+    h += '</div>';
     body.innerHTML = h;
     body.querySelectorAll('.vol-grid-sess').forEach(function (btn) {
       btn.addEventListener('click', function () { loadVolunteerGrid(parseInt(this.getAttribute('data-sess'), 10)); });

@@ -8252,6 +8252,12 @@ button.staff-role:hover {
 }
 .mf-vol-inline .mf-duty-icon { font-size: 1rem; }
 .mf-vol-pickrow { padding: 4px 0 8px; }
+/* Everyone's sign-ups modal — compact spacing (2026-07-11). */
+.vol-grid .roles-mgr-se-head { margin: 12px 0 4px; padding-top: 6px; }
+.vol-grid .mcb-teach th, .vol-grid .mcb-teach td { padding: 4px 8px; font-size: 0.8rem; }
+.vol-grid .mcb-teach-wrap { margin: 0; }
+.vol-grid .board-cal-views { margin: 0 0 6px; }
+.vol-grid-pledges { margin: 3px 0 0; font-size: 0.78rem; line-height: 1.5; }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated
