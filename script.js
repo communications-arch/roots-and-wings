@@ -5011,7 +5011,9 @@
     // hours, Cleaning Crew, Annual Roles, then the 2-year board roles.
     var blockOrder = ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning', 'annual', 'twoyear'];
 
-    var blockLabels = { AM1: 'Morning Hour 1 (10:00\u201310:55)', AM2: 'Morning Hour 2 (11:00\u201311:55)', PM1: 'Afternoon Hour 1 (1:00\u20131:55)', PM2: 'Afternoon Hour 2 (2:00\u20132:55)', Cleaning: 'Cleaning Crew (after co-op)', annual: 'Annual Roles', twoyear: '2-Year Roles' };
+    // Short gutter labels (design pass 2026-07-11): name + start time
+    // only \u2014 full time ranges already live in the duty subtitles.
+    var blockLabels = { AM1: 'Morning 1 (10:00)', AM2: 'Morning 2 (11:00)', PM1: 'Afternoon 1 (1:00)', PM2: 'Afternoon 2 (2:00)', Cleaning: 'Cleaning (after co-op)', annual: 'Annual (all year)', twoyear: '2-Year (board term)' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
