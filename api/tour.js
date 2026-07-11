@@ -1062,9 +1062,20 @@ async function handleList(req, res) {
         const billingTabs = await fetchSheet(sheetsClient, process.env.BILLING_SHEET_ID);
         const parsed = parseBillingSheet(billingTabs, season);
         for (const reg of pendingRegs) {
-          const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
-          if (!famName) continue;
-          const entry = parsed.families[famName.toLowerCase()];
+          // Try every name the registration offers: derived family name,
+          // the raw existing_family_name, and the Main LC's surname —
+          // whichever finds a (unique) sheet row wins.
+          const mlcWords = String(reg.main_learning_coach || '').trim().split(/\s+/);
+          const nameCandidates = [
+            deriveFamilyName(reg.main_learning_coach, reg.existing_family_name),
+            String(reg.existing_family_name || '').trim(),
+            mlcWords[mlcWords.length - 1] || ''
+          ].filter(Boolean);
+          let entry = null;
+          for (const cand of nameCandidates) {
+            entry = billingEntryFor(parsed, cand);
+            if (entry) break;
+          }
           if (!entry || !entry.fall || entry.fall.deposit !== 'Paid') continue;
           // Sheet shows Paid for this family — flip DB + send email.
           // Mutate the row in `rows` so the response reflects the new
@@ -1074,7 +1085,7 @@ async function handleList(req, res) {
             const target = rows.find(r => r.id === reg.id);
             if (target) target.payment_status = 'paid';
           } catch (innerErr) {
-            console.error(`Auto-reconcile failed for reg ${reg.id} (${famName}):`, innerErr);
+            console.error(`Auto-reconcile failed for reg ${reg.id} (${nameCandidates[0] || '?'}):`, innerErr);
           }
         }
       } catch (recErr) {
@@ -2243,6 +2254,28 @@ function deriveFamilyEmail(mainLcName, familyName) {
   const lastInitial = fam.charAt(0).toLowerCase();
   if (!firstFirst || !lastInitial) return null;
   return firstFirst + lastInitial + '@rootsandwingsindy.com';
+}
+
+// Billing-sheet lookup tolerant of family-name drift (2026-07-11, Erin:
+// Treasurer's Paid flag wasn't reconciling — the sheet says "Van Dyke" /
+// "O'Connor Gading" while the registration derives "Dyke" / "Gading").
+// Exact lowercase match first; otherwise a word-level containment match
+// that must be UNIQUE — an ambiguous name must never auto-mark a family
+// paid (that also fires the payment-received email).
+function billingEntryFor(parsed, famName) {
+  const target = String(famName || '').trim().toLowerCase();
+  if (!target || !parsed || !parsed.families) return null;
+  if (parsed.families[target]) return parsed.families[target];
+  const targetWords = target.split(/[^a-z']+/).filter(Boolean);
+  if (!targetWords.length) return null;
+  const hits = [];
+  for (const key of Object.keys(parsed.families)) {
+    const keyWords = key.split(/[^a-z']+/).filter(Boolean);
+    const contains = targetWords.every(w => keyWords.indexOf(w) !== -1)
+      || (keyWords.length > 0 && keyWords.every(w => targetWords.indexOf(w) !== -1));
+    if (contains) hits.push(parsed.families[key]);
+  }
+  return hits.length === 1 ? hits[0] : null;
 }
 
 // If existing_family_name was supplied, use it; otherwise take the last token
