@@ -3869,8 +3869,13 @@
     volunteer: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>'
   };
 
-  // Helper: find a kid's afternoon electives for the current session
+  // Helper: find a kid's afternoon electives for the current session.
+  // RETIRED with the season flip (2026-07-11, Erin's prod bug): the
+  // sheet-era PM_ELECTIVES rosters are last year's, so name-matching
+  // kids against them claimed stale enrollments. Returns none until
+  // DB class sign-ups land; the card shows "No electives yet".
   function getKidElectives(kidFullName) {
+    return [];
     var sessElectives = PM_ELECTIVES[currentSession] || [];
     var result = [];
     var parts = kidFullName.toLowerCase().split(/\s+/);
@@ -3987,7 +3992,7 @@
     if (status !== 'open' || !withinDates) { card.style.display = 'none'; return; }
     card.style.display = '';
 
-    var h = '<h3 class="mf-card-title">Afternoon Class Sign-ups</h3>';
+    var h = '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Afternoon Class Sign-ups</h3>';
 
     if (reviewer) {
       h += '<div class="signup-admin">';
@@ -4279,7 +4284,7 @@
     // Hidden during summer break — no co-op days = no coverage to claim.
     if (!isSummerBreak) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
-      html += '<summary class="mf-card-title mf-coverage-summary">Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
+      html += '<summary class="mf-card-title mf-coverage-summary"><img class="brand-accent" src="brand/secondary/accent-33.png" alt=""> Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
       html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
       html += '<div id="coverageBoardContent"></div>';
       html += '</details>';
@@ -4287,7 +4292,7 @@
 
     // ──── Responsibilities card (first on mobile) ────
     html += '<div class="mf-card">';
-    html += '<h3 class="mf-card-title">My Responsibilities</h3>';
+    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-8.png" alt=""> My Responsibilities</h3>';
     var duties = [];
 
     // Match against the LOGGED-IN PERSON, not "any parent in this family".
@@ -4746,7 +4751,7 @@
       // Each kid's CURRENT group is shown as reference; placements for
       // the next school year happen later in summer and will appear
       // automatically once SESSION_DATES rolls forward.
-      html += '<h3 class="mf-card-title">Kids\' Schedule</h3>';
+      html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule</h3>';
       html += '<p class="mf-empty" style="margin-bottom:12px;">Co-op resumes in the fall — class assignments for the next school year will be posted closer to the start.</p>';
       fam.kids.forEach(function (kid) {
         html += '<div class="mf-kid">';
@@ -4767,7 +4772,7 @@
       });
       html += '</div>';
     } else {
-    html += '<h3 class="mf-card-title">Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
+    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
     fam.kids.forEach(function (kid) {
       // Finalized morning placement wins over the directory's stale group.
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
@@ -4827,7 +4832,7 @@
 
     // ──── Billing card ────
     html += '<div class="mf-card mf-billing-card">';
-    html += '<h3 class="mf-card-title">Billing &amp; Fees</h3>';
+    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-46.png" alt=""> Billing &amp; Fees</h3>';
 
     var semKeys = ['fall', 'spring'];
 
@@ -4999,7 +5004,7 @@
     // Card is always visible; body is populated by renderClassSubsCardBody()
     // after loadMyClassSubmissions() fills `myClassSubmissions`.
     html += '<div class="mf-card mf-classsubs-card" id="mfClassSubsCard">';
-    html += '<h3 class="mf-card-title">Class Ideas</h3>';
+    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-2.png" alt=""> Class Ideas</h3>';
     html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
     html += '</p>';
@@ -5587,21 +5592,13 @@
         dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
       }
-    } else if (electives.length > 0) {
-      var hour1 = electives.filter(function (e) { return e.hour === 1 || e.hour === 'both'; });
-      var hour2 = electives.filter(function (e) { return e.hour === 2 || e.hour === 'both'; });
-
-      html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>';
-      html += '<div class="elective-card-grid">';
-      hour1.forEach(function (e) { html += buildElectiveCard(e, myNames); });
-      html += '</div>';
-
-      html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 2: 2:00\u20132:55</h4>';
-      html += '<div class="elective-card-grid">';
-      hour2.forEach(function (e) { html += buildElectiveCard(e, myNames); });
-      html += '</div>';
     } else {
-      html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>Afternoon elective sign-ups not yet available for this session.</em></p>';
+      // No published PM side for this session. The old fallback rendered
+      // the sheet-era PM_ELECTIVES here, which after the season flip is
+      // LAST YEAR'S data (Erin's prod bug, 2026-07-11) \u2014 so the sheet
+      // list is retired from this surface; the afternoon appears when
+      // the VP approves the session in the Class Builder.
+      html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>Afternoon electives will be posted here once the session\u2019s schedule is approved.</em></p>';
     }
 
     container.innerHTML = html;
@@ -7634,11 +7631,15 @@
 
         visible.forEach(function (type) {
           var w = WORKSPACE_WIDGETS[type];
+          // Decorative brand accent per card (2026-07-11, Erin's asset
+          // set) — purely ornamental, the title carries the meaning.
+          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40' };
+          var wsAccent = WS_ACCENTS[type] ? '<img class="brand-accent" src="brand/secondary/' + WS_ACCENTS[type] + '.png" alt=""> ' : '';
           // Tap the header to minimize — the card shrinks to a chip in
           // the strip below the grid, freeing its slot.
           s += '<div class="mf-card workspace-card" data-widget-type="' + type + '">';
           s += '<div class="workspace-card-header ws-card-toggle" data-widget="' + type + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">';
-          s += '<h4>' + w.title + '</h4>';
+          s += '<h4>' + wsAccent + w.title + '</h4>';
           s += '<span class="ws-min-caret" aria-hidden="true">▾</span>';
           s += '</div>';
           s += '<div class="workspace-card-body">' + w.render(prefs, roles, heading) + '</div>';

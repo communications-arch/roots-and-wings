@@ -1489,3 +1489,16 @@ CREATE TABLE IF NOT EXISTS rooms (
 -- plan), which stays reserved for that hour. Backup lives per class.
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_outdoor BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS scheduled_backup_room TEXT NOT NULL DEFAULT '';
+
+
+-- 2026-07-11 (Erin): give the President Class Builder access. Grant rows
+-- REPLACE the registry defaults for a key, so the default holders (VP +
+-- Afternoon Class Liaison) ride along explicitly. Idempotent via the
+-- (capability_key, role_title) unique constraint. Shows as "customized"
+-- on the Permissions admin row, which is accurate.
+INSERT INTO capability_grants (capability_key, role_title, created_by)
+VALUES
+  ('class_review', 'Vice President', 'migration'),
+  ('class_review', 'Afternoon Class Liaison', 'migration'),
+  ('class_review', 'President', 'migration')
+ON CONFLICT (capability_key, role_title) DO NOTHING;
