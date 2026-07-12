@@ -4380,6 +4380,14 @@
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
     if (!wrap) return;
+    // Summer break = the old year ended and the new calendar isn't
+    // posted yet. Last year's Session 5 must not present itself as
+    // "current" for sign-ups (Erin, 2026-07-12 prod) — one quiet line
+    // until the President enters the new session dates.
+    if (isSummerBreak) {
+      wrap.innerHTML = '<p class="mf-vol-optional" style="margin:4px 0;">Session sign-ups open once the new co-op calendar is posted.</p>';
+      return;
+    }
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     if (_volPanelSession == null) _volPanelSession = currentSession;
