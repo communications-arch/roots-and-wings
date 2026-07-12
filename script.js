@@ -6072,9 +6072,12 @@
     // schedule would be stale, so flip to a friendly empty state and
     // surface the year's annual volunteer slate from the Volunteers tab
     // as a hint of where co-op life continues year-round.
-    // Exception: an APPROVED schedule for the upcoming year renders
-    // anyway — parents want to see the fall line-up as soon as it posts.
-    if (isSummerBreak && !dbSess) {
+    // No dbSess exception (2026-07-12, Erin: prod showed last spring's
+    // Session 5 morning classes) — while isSummerBreak is true the
+    // active year IS the ended one, so any published data here is last
+    // year's. Seeding the new calendar clears isSummerBreak, which is
+    // when the fall line-up starts rendering.
+    if (isSummerBreak) {
       container.innerHTML =
         '<div class="session-summer-state" style="padding:32px 16px;text-align:center;">' +
         '<h4 class="session-section-title" style="margin-top:0;"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Summer break</h4>' +
