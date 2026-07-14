@@ -157,7 +157,7 @@
 
   <header class="reg-hero">
     <h1>Fall Membership Registration — 2026–2027 School Year</h1>
-    <p>Welcome! Complete this form to secure your family's spot for the 2026–2027 co-op year. Registration includes the member agreement, liability waiver, and a $40 Fall Membership Fee.</p>
+    <p>Welcome! Complete this form to secure your family's spot for the 2026–2027 co-op year. Registration includes the member agreement, liability waiver, and a $40 Fall Membership Fee (paying online adds a small PayPal processing fee).</p>
   </header>
 
   <main class="reg-container">
@@ -328,7 +328,8 @@
 
       <div class="reg-summary">
         <div class="reg-summary-row"><span>Fall Membership Fee</span><span>$40.00</span></div>
-        <div class="reg-summary-row total"><span>Total due</span><span>$40.00</span></div>
+        <div class="reg-summary-row" id="reg-summary-fee-row"><span>PayPal processing fee (1.99% + 49&cent;)</span><span id="reg-summary-fee">$1.32</span></div>
+        <div class="reg-summary-row total"><span>Total due</span><span id="reg-summary-total">$41.32</span></div>
       </div>
 
       <fieldset class="reg-pay-method" id="reg-pay-method">
@@ -440,6 +441,13 @@
 
     var GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
     var REGISTRATION_FEE = 40;
+    // PayPal processing fee passed through to the payer (same rate and
+    // gross-up formula as the My Family billing card) so the co-op nets
+    // the full membership fee. Cash/check payments skip it.
+    var PAYPAL_FEE_RATE = 0.0199;
+    var PAYPAL_FEE_FIXED = 0.49;
+    var PAYPAL_FEE = Math.ceil(((REGISTRATION_FEE + PAYPAL_FEE_FIXED) / (1 - PAYPAL_FEE_RATE) - REGISTRATION_FEE) * 100) / 100;
+    var PAYPAL_TOTAL = Math.round((REGISTRATION_FEE + PAYPAL_FEE) * 100) / 100;
     var SEASON = '2026-2027';
 
     // Invited-family open tracking: when the Membership Director emails a
@@ -1051,7 +1059,9 @@
         return;
       }
 
-      var amountStr = REGISTRATION_FEE.toFixed(2);
+      // Fee-inclusive charge so the co-op nets the full $40 after PayPal
+      // takes its cut.
+      var amountStr = PAYPAL_TOTAL.toFixed(2);
       try {
         paypal_sdk.Buttons({
           // Lock the widget to the PayPal wallet only — Venmo / PayPal Credit /
@@ -1131,18 +1141,27 @@
 
     document.getElementById('reg-paypal-retry').addEventListener('click', function () { wirePaypal(); });
 
-    // Toggle PayPal vs cash/check sub-sections based on radio choice.
+    // Toggle PayPal vs cash/check sub-sections based on radio choice, and
+    // keep the summary honest: the PayPal processing fee row only applies
+    // to online payment (cash/check pays the flat fee).
     function syncPayMethodUi() {
       var method = (document.querySelector('input[name="reg-pay-method"]:checked') || {}).value || 'paypal';
       var paypalSection = document.getElementById('reg-paypal-section');
       var cashSection = document.getElementById('reg-cashcheck-section');
       if (paypalSection) paypalSection.style.display = method === 'paypal' ? '' : 'none';
       if (cashSection) cashSection.style.display = method === 'cash_check' ? '' : 'none';
+      var feeRow = document.getElementById('reg-summary-fee-row');
+      var feeEl = document.getElementById('reg-summary-fee');
+      var totalEl = document.getElementById('reg-summary-total');
+      if (feeRow) feeRow.style.display = method === 'paypal' ? '' : 'none';
+      if (feeEl) feeEl.textContent = '$' + PAYPAL_FEE.toFixed(2);
+      if (totalEl) totalEl.textContent = '$' + (method === 'paypal' ? PAYPAL_TOTAL : REGISTRATION_FEE).toFixed(2);
       clearError('reg-pay-error');
     }
     document.querySelectorAll('input[name="reg-pay-method"]').forEach(function (r) {
       r.addEventListener('change', syncPayMethodUi);
     });
+    syncPayMethodUi();
 
     // Cash/check submit — no PayPal capture, registration goes in as pending.
     document.getElementById('reg-cashcheck-submit').addEventListener('click', function () {
@@ -1170,7 +1189,9 @@
         season: SEASON,
         payment_method: method,
         paypal_transaction_id: paypalTxnId || '',
-        payment_amount: REGISTRATION_FEE
+        // Record what was actually charged: fee-inclusive for PayPal,
+        // flat fee for cash/check.
+        payment_amount: method === 'paypal' ? PAYPAL_TOTAL : REGISTRATION_FEE
       });
       return fetch('/api/tour', {
         method: 'POST',

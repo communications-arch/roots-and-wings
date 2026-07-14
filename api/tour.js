@@ -1066,14 +1066,15 @@ async function handleList(req, res) {
         const billingTabs = await fetchSheet(sheetsClient, process.env.BILLING_SHEET_ID);
         const parsed = parseBillingSheet(billingTabs, season);
         for (const reg of pendingRegs) {
-          // Try every name the registration offers: derived family name,
-          // the raw existing_family_name, and the Main LC's surname —
+          // The Treasurer keys Family Payment Tracking rows by the Main
+          // Learning Coach's LAST NAME (Erin, 2026-07-14) — try that
+          // first, then the derived/stated family names as fallbacks;
           // whichever finds a (unique) sheet row wins.
           const mlcWords = String(reg.main_learning_coach || '').trim().split(/\s+/);
           const nameCandidates = [
+            mlcWords[mlcWords.length - 1] || '',
             deriveFamilyName(reg.main_learning_coach, reg.existing_family_name),
-            String(reg.existing_family_name || '').trim(),
-            mlcWords[mlcWords.length - 1] || ''
+            String(reg.existing_family_name || '').trim()
           ].filter(Boolean);
           let entry = null;
           for (const cand of nameCandidates) {
@@ -1195,15 +1196,26 @@ async function handleReconcileCron(req, res) {
 
     const reconciled = [];
     for (const reg of pending) {
-      const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
-      if (!famName) continue;
-      const entry = parsed.families[famName.toLowerCase()];
+      // Same candidate order as the Membership Report reconcile: the
+      // Treasurer keys sheet rows by the Main LC's LAST NAME, with the
+      // derived/stated family names as fallbacks.
+      const mlcWords = String(reg.main_learning_coach || '').trim().split(/\s+/);
+      const nameCandidates = [
+        mlcWords[mlcWords.length - 1] || '',
+        deriveFamilyName(reg.main_learning_coach, reg.existing_family_name),
+        String(reg.existing_family_name || '').trim()
+      ].filter(Boolean);
+      let entry = null;
+      for (const cand of nameCandidates) {
+        entry = billingEntryFor(parsed, cand);
+        if (entry) break;
+      }
       if (!entry || !entry.fall || entry.fall.deposit !== 'Paid') continue;
       try {
         await applyMarkPaid(sql, reg, '');
-        reconciled.push({ id: reg.id, family: famName });
+        reconciled.push({ id: reg.id, family: nameCandidates[0] });
       } catch (innerErr) {
-        console.error(`Cron reconcile failed for reg ${reg.id} (${famName}):`, innerErr);
+        console.error(`Cron reconcile failed for reg ${reg.id} (${nameCandidates[0]}):`, innerErr);
       }
     }
 

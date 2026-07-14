@@ -869,19 +869,26 @@ function parseClassIdeas(rows) {
 // ══════════════════════════════════════════════
 // BILLING
 // ══════════════════════════════════════════════
-// Billing spreadsheet layout:
+// Billing spreadsheet layout (the Treasurer links a NEW workbook each
+// school year — e.g. "Treasurer 26-27" — via the BILLING_SHEET_ID env
+// var; swap the var when the new year's workbook goes live):
 //   "Family Payment Tracking" tab:
 //     Row 1 = headers, rows 2+ = data.
 //     A = Family Name (always).
 //     Current-year columns: B = Fall Deposit, C = Fall Fees,
 //       D = Spring Deposit, E = Spring Fees.
 //     F = "Fall Deposit (Next Year)" — Treasurer's working column for
-//       upcoming-year registration deposits (e.g. tracking 26/27 deposits
-//       while 25/26 is still the current year). When billing is requested
-//       for the next school year, fall.deposit reads from F instead of B.
+//       upcoming-year registration deposits (tracking next year's
+//       deposits before that year's workbook exists). When billing is
+//       requested for a school year AFTER the workbook's own year,
+//       fall.deposit reads from F instead of B.
 //     Cell value "Paid" (case-insensitive) means paid; anything else → not paid.
-//   "Morning Classes" tab: H2 = Sem1 rate, H3 = Sem2 rate.
-//   "Afternoons" tab:     H2 = Sem1 rate, H3 = Sem2 rate.
+//   Rates: a "Semester 1 Rate" / "Semester 2 Rate" label cell with the
+//     dollar amount in the cell to its right — "Morning Classes" tab for
+//     AM rates, "Afternoons" tab for PM rates. Scanned by label so the
+//     Treasurer can move them (26-27 workbook: Morning N2/O2-N3/O3,
+//     Afternoons H2/I2-H3/I3; the 25-26 workbook kept bare values in
+//     H2/H3, which the fallback still reads).
 
 function numFromCell(raw) {
   if (raw === undefined || raw === null || raw === '') return 0;
@@ -890,12 +897,48 @@ function numFromCell(raw) {
   return isFinite(n) ? n : 0;
 }
 
-// Column indexes for the Family Payment Tracking tab. Switches the Fall
-// Deposit column based on requested school year because the Treasurer
-// uses "Fall Deposit (Next Year)" (col F) for the upcoming year while
-// the current-year columns (B-E) cover this year.
-function billingColumnsFor(schoolYear) {
-  if (schoolYear === '2026-2027') {
+// Find a "Semester N Rate" label anywhere in the tab's first rows and
+// return the amount in the cell to its right. 0 when not found.
+function rateFromTab(tab, semNum) {
+  var re = new RegExp('^\\s*Semester\\s*' + semNum + '\\s*Rate\\s*$', 'i');
+  for (var r = 0; r < tab.length && r < 25; r++) {
+    var row = tab[r] || [];
+    for (var c = 0; c < row.length; c++) {
+      if (re.test(String(row[c] || ''))) return numFromCell(row[c + 1]);
+    }
+  }
+  return 0;
+}
+
+// The workbook's own school year: its transactions-register tab is named
+// after it ("2026-2027"). Empty string if no such tab (legacy workbooks).
+function billingSheetYear(tabs) {
+  for (var name in tabs) {
+    if (/^\d{4}-\d{4}$/.test(String(name).trim())) return String(name).trim();
+  }
+  return '';
+}
+
+// Column indexes for the Family Payment Tracking tab. The linked workbook
+// is always the current year's, so current-year columns (B-E) serve its
+// own school year; requesting a LATER year reads the Treasurer's "Fall
+// Deposit (Next Year)" working column (F). Self-describing via the
+// workbook's year tab — no per-year hardcoding to update at handover.
+function billingColumnsFor(schoolYear, tabs) {
+  var sheetYear = billingSheetYear(tabs || {});
+  if (!sheetYear) {
+    // Workbook has no year-named register tab — the legacy 25-26 shape.
+    // Preserve the old hardcoded rule (26/27 deposits live in its "Fall
+    // Deposit (Next Year)" column) so this code is safe to deploy while
+    // the old workbook is still the linked BILLING_SHEET_ID. Without
+    // this, a 2026-2027 read of the old workbook would pull LAST year's
+    // col-B paid marks and auto-mark-paid (+email) the wrong families.
+    if (schoolYear === '2026-2027') {
+      return { fallDeposit: 5, fallClassFee: -1, springDeposit: -1, springClassFee: -1 };
+    }
+    return { fallDeposit: 1, fallClassFee: 2, springDeposit: 3, springClassFee: 4 };
+  }
+  if (String(schoolYear) > sheetYear) {
     return { fallDeposit: 5, fallClassFee: -1, springDeposit: -1, springClassFee: -1 };
   }
   return { fallDeposit: 1, fallClassFee: 2, springDeposit: 3, springClassFee: 4 };
@@ -910,15 +953,17 @@ function parseBillingSheet(tabs, schoolYear) {
     families: {}
   };
 
+  // Label-driven rate scan, with the legacy bare-H2/H3 read as fallback
+  // (the 25-26 workbook had no label cells).
   var amTab = tabs['Morning Classes'] || [];
-  if (amTab[1]) out.rates.fall.amRate = numFromCell(amTab[1][7]);
-  if (amTab[2]) out.rates.spring.amRate = numFromCell(amTab[2][7]);
+  out.rates.fall.amRate = rateFromTab(amTab, 1) || (amTab[1] ? numFromCell(amTab[1][7]) : 0);
+  out.rates.spring.amRate = rateFromTab(amTab, 2) || (amTab[2] ? numFromCell(amTab[2][7]) : 0);
 
   var pmTab = tabs['Afternoons'] || [];
-  if (pmTab[1]) out.rates.fall.pmRate = numFromCell(pmTab[1][7]);
-  if (pmTab[2]) out.rates.spring.pmRate = numFromCell(pmTab[2][7]);
+  out.rates.fall.pmRate = rateFromTab(pmTab, 1) || (pmTab[1] ? numFromCell(pmTab[1][7]) : 0);
+  out.rates.spring.pmRate = rateFromTab(pmTab, 2) || (pmTab[2] ? numFromCell(pmTab[2][7]) : 0);
 
-  var cols = billingColumnsFor(schoolYear);
+  var cols = billingColumnsFor(schoolYear, tabs);
   var payTab = tabs['Family Payment Tracking'] || [];
   for (var r = 1; r < payTab.length; r++) {
     var row = payTab[r];
