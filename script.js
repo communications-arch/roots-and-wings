@@ -9154,9 +9154,15 @@
           var noteEl = sCWrap.querySelector('.ws-tour-sched-note');
           var statusEl = sCWrap.querySelector('.ws-tour-sched-status');
           if (!dateEl.value || !timeEl.value) {
-            statusEl.textContent = 'Pick both a date and a time before confirming.';
+            // Make the nothing-happened failure mode impossible: error
+            // styling, and call out WHICH field is missing.
+            statusEl.classList.add('ws-wv-err');
+            statusEl.textContent = !dateEl.value && !timeEl.value
+              ? 'Pick both a date and a time before confirming.'
+              : (!dateEl.value ? 'Pick a date before confirming.' : 'Pick a time before confirming.');
             return;
           }
+          statusEl.classList.remove('ws-wv-err');
           var sNote = noteEl ? noteEl.value : '';
           _toursPendingAction = null;
           applyTourUpdate(sCId, {
@@ -9267,6 +9273,12 @@
         var prefTime = t.scheduled_time || t.preferred_time || '';
         // General date picker (2026-07-11, Erin): summer tours happen on
         // non-co-op days, so any calendar date is fair game here.
+        // DATE columns arrive JSON-serialized as full ISO timestamps
+        // ("2026-09-30T04:00:00.000Z") which <input type="date"> silently
+        // rejects, leaving the field BLANK — slice to YYYY-MM-DD. (The UTC
+        // offset for Indianapolis never shifts the date part.) Third bite
+        // of the date-column serialization landmine.
+        prefDate = String(prefDate || '').slice(0, 10);
         var timeOpts = '<option value="">Pick a time…</option>';
         slots.times.forEach(function (tt) {
           var sel = (tt.value === prefTime) ? ' selected' : '';
