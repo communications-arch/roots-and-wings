@@ -1066,16 +1066,12 @@ async function handleList(req, res) {
         const billingTabs = await fetchSheet(sheetsClient, process.env.BILLING_SHEET_ID);
         const parsed = parseBillingSheet(billingTabs, season);
         for (const reg of pendingRegs) {
-          // The Treasurer keys Family Payment Tracking rows by the Main
-          // Learning Coach's LAST NAME (Erin, 2026-07-14) — try that
-          // first, then the derived/stated family names as fallbacks;
-          // whichever finds a (unique) sheet row wins.
-          const mlcWords = String(reg.main_learning_coach || '').trim().split(/\s+/);
-          const nameCandidates = [
-            mlcWords[mlcWords.length - 1] || '',
-            deriveFamilyName(reg.main_learning_coach, reg.existing_family_name),
-            String(reg.existing_family_name || '').trim()
-          ].filter(Boolean);
+          // MLC surname first (how the Treasurer keys the sheet), then
+          // derived/stated family names, then backup-coach + kid
+          // surnames (mixed-surname households); whichever finds a
+          // (unique) sheet row wins. reg.backup_coaches is the
+          // waiver_signatures JSON already selected for the report.
+          const nameCandidates = reconcileNameCandidates(reg, reg.backup_coaches);
           let entry = null;
           for (const cand of nameCandidates) {
             entry = billingEntryFor(parsed, cand);
@@ -1175,12 +1171,22 @@ async function handleReconcileCron(req, res) {
   const sql = getSql();
   try {
     const pending = await sql`
-      SELECT id, season, email, existing_family_name, main_learning_coach,
-             payment_amount, payment_status
-      FROM registrations
-      WHERE season = ${season}
-        AND LOWER(payment_status) <> 'paid'
-        AND declined_at IS NULL
+      SELECT r.id, r.season, r.email, r.existing_family_name, r.main_learning_coach,
+             r.payment_amount, r.payment_status, r.kids,
+             (
+               SELECT COALESCE(json_agg(x.name), '[]'::json)
+               FROM (
+                 SELECT ws.person_name AS name FROM waiver_signatures ws
+                 WHERE ws.registration_id = r.id AND ws.role = 'backup_coach'
+                 UNION
+                 SELECT bw.name FROM backup_coach_waivers bw
+                 WHERE bw.registration_id = r.id
+               ) x
+             ) AS backup_names
+      FROM registrations r
+      WHERE r.season = ${season}
+        AND LOWER(r.payment_status) <> 'paid'
+        AND r.declined_at IS NULL
     `;
     if (pending.length === 0) {
       return res.status(200).json({ ok: true, season, pending: 0, reconciled: 0 });
@@ -1196,15 +1202,10 @@ async function handleReconcileCron(req, res) {
 
     const reconciled = [];
     for (const reg of pending) {
-      // Same candidate order as the Membership Report reconcile: the
-      // Treasurer keys sheet rows by the Main LC's LAST NAME, with the
-      // derived/stated family names as fallbacks.
-      const mlcWords = String(reg.main_learning_coach || '').trim().split(/\s+/);
-      const nameCandidates = [
-        mlcWords[mlcWords.length - 1] || '',
-        deriveFamilyName(reg.main_learning_coach, reg.existing_family_name),
-        String(reg.existing_family_name || '').trim()
-      ].filter(Boolean);
+      // Same candidate list as the Membership Report reconcile: MLC
+      // surname first, then family names, then backup-coach + kid
+      // surnames (mixed-surname households).
+      const nameCandidates = reconcileNameCandidates(reg, reg.backup_names);
       let entry = null;
       for (const cand of nameCandidates) {
         entry = billingEntryFor(parsed, cand);
@@ -2598,6 +2599,37 @@ function deriveFamilyName(mainLcName, existingFamilyName) {
   const mlc = String(mainLcName || '').trim();
   const words = mlc.split(/\s+/);
   return words[words.length - 1] || '';
+}
+
+// Candidate surnames for matching a registration to the Treasurer's
+// Family Payment Tracking rows. The sheet is keyed by the Main LC's last
+// name, but mixed-surname households sometimes land under the other
+// parent's (backup coach's) or the kids' last name — a real prod miss on
+// 2026-07-14. Order: MLC surname, derived/stated family name, then
+// backup-coach and kid surnames. billingEntryFor's unique-match rule
+// keeps the extra candidates from grabbing the wrong row. backupNames
+// accepts strings or {name}/{person_name} objects; kids is the
+// registrations.kids JSONB array.
+function reconcileNameCandidates(reg, backupNames) {
+  const out = [];
+  const push = (v) => {
+    const s = String(v || '').trim();
+    if (s && !out.some(x => x.toLowerCase() === s.toLowerCase())) out.push(s);
+  };
+  const lastWord = (full) => {
+    const words = String(full || '').trim().split(/\s+/);
+    return words[words.length - 1] || '';
+  };
+  push(lastWord(reg.main_learning_coach));
+  push(deriveFamilyName(reg.main_learning_coach, reg.existing_family_name));
+  push(String(reg.existing_family_name || '').trim());
+  (Array.isArray(backupNames) ? backupNames : []).forEach(b => {
+    const n = (b && typeof b === 'object') ? (b.name || b.person_name) : b;
+    push(lastWord(n));
+  });
+  const kids = Array.isArray(reg.kids) ? reg.kids : [];
+  kids.forEach(k => push(k && k.last_name));
+  return out;
 }
 
 // Build a kid's displayed "First Last" for the Morning Class Builder. Prefers
@@ -5281,3 +5313,4 @@ module.exports.fieldDayForYear = fieldDayForYear;
 module.exports.iceCreamSocialForYear = iceCreamSocialForYear;
 module.exports.calAddDays = calAddDays;
 module.exports.calSnapWed = calSnapWed;
+module.exports.reconcileNameCandidates = reconcileNameCandidates;
