@@ -315,6 +315,90 @@ async function findOpenTourByEmail(sql, email) {
   `;
   return rows[0] || null;
 }
+
+// Self-heal: merge duplicate OPEN pipeline rows sharing an email. The
+// repeat-contact intake merge above prevents NEW duplicates, but rows
+// created before it shipped (Erin, 2026-07-14: "still a dupe line for a
+// person that requested tour 2x") need combining: the MOST RECENT
+// request is the main row; older rows fold their history, message, and
+// any missing contact fields into it — and the furthest pipeline stage
+// wins (an older 'toured' row must not reset to 'requested'). Older rows
+// are then deleted. Runs at the top of every pipeline list read;
+// no-ops when there are no duplicates.
+const TOUR_STAGE_RANK = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 4 };
+async function mergeDuplicateOpenTours(sql) {
+  const dupeEmails = await sql`
+    SELECT LOWER(family_email) AS em
+    FROM tours
+    WHERE family_email <> ''
+      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+    GROUP BY LOWER(family_email)
+    HAVING COUNT(*) > 1
+  `;
+  const merged = [];
+  for (const d of dupeEmails) {
+    const rows = await sql`
+      SELECT id, family_name, family_email, phone, num_kids, ages,
+             preferred_date, preferred_time, scheduled_date, scheduled_time,
+             status, internal_notes, message, status_history, created_at
+      FROM tours
+      WHERE LOWER(family_email) = ${d.em}
+        AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+      ORDER BY created_at DESC, id DESC
+    `;
+    if (rows.length < 2) continue;
+    const survivor = rows[0];
+    const others = rows.slice(1);
+    let best = survivor;
+    for (const r of others) {
+      if ((TOUR_STAGE_RANK[r.status] || 0) > (TOUR_STAGE_RANK[best.status] || 0)) best = r;
+    }
+    // Survivor's value wins; fall back to the next-most-recent row that
+    // has one (an older request often carries the kid count/phone the
+    // newer quick inquiry left blank).
+    const pick = (field) => {
+      if (survivor[field] != null && survivor[field] !== '') return survivor[field];
+      for (const r of others) { if (r[field] != null && r[field] !== '') return r[field]; }
+      return survivor[field] != null ? survivor[field] : null;
+    };
+    // Timeline reads oldest request first, then a merge marker.
+    const oldestFirst = rows.slice().reverse();
+    const mergedHist = [].concat(...oldestFirst.map(r => Array.isArray(r.status_history) ? r.status_history : []));
+    mergedHist.push({
+      at: new Date().toISOString(),
+      by: 'system',
+      via: 'dedupe',
+      from: survivor.status,
+      to: best.status,
+      note: 'Merged ' + rows.length + ' pipeline rows for this email into one (most recent request kept as the main row)'
+    });
+    const dedupeJoin = (field) => {
+      const vals = oldestFirst.map(r => String(r[field] || '').trim()).filter(Boolean);
+      return vals.filter((v, i) => vals.indexOf(v) === i).join('\n— — —\n').slice(0, 4000);
+    };
+    await sql`
+      UPDATE tours
+      SET status = ${best.status},
+          scheduled_date = ${best.scheduled_date || survivor.scheduled_date || null},
+          scheduled_time = ${best.scheduled_time || survivor.scheduled_time || null},
+          phone = ${pick('phone')},
+          num_kids = ${pick('num_kids')},
+          ages = ${pick('ages')},
+          preferred_date = ${pick('preferred_date')},
+          preferred_time = ${pick('preferred_time')},
+          message = ${dedupeJoin('message')},
+          internal_notes = ${dedupeJoin('internal_notes')},
+          status_history = ${JSON.stringify(mergedHist)}::jsonb,
+          updated_at = NOW()
+      WHERE id = ${survivor.id}
+    `;
+    for (const r of others) {
+      await sql`DELETE FROM tours WHERE id = ${r.id}`;
+    }
+    merged.push({ kept: survivor.id, removed: others.map(r => r.id) });
+  }
+  return merged;
+}
 // preferred_date/preferred_time are optional from the family's POV —
 // if they leave them blank, the row lands in the pipeline as
 // "requested" without a proposed slot, and Membership coordinates via
@@ -3566,6 +3650,14 @@ async function handleTourList(req, res) {
   }
   try {
     const sql = getSql();
+    // Fold pre-existing duplicate open rows (same email) into one before
+    // listing — non-fatal, no-ops when clean.
+    try {
+      const deduped = await mergeDuplicateOpenTours(sql);
+      if (deduped.length) console.log('Member Pipeline dedupe merged:', JSON.stringify(deduped));
+    } catch (mErr) {
+      console.error('Member Pipeline dedupe error (non-fatal):', mErr);
+    }
     const rows = await sql`
       SELECT id, family_name, family_email, phone, num_kids, ages,
              preferred_date, preferred_time, scheduled_date, scheduled_time,
@@ -5468,3 +5560,4 @@ module.exports.iceCreamSocialForYear = iceCreamSocialForYear;
 module.exports.calAddDays = calAddDays;
 module.exports.calSnapWed = calSnapWed;
 module.exports.reconcileNameCandidates = reconcileNameCandidates;
+module.exports.mergeDuplicateOpenTours = mergeDuplicateOpenTours;
