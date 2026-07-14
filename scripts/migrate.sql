@@ -1595,3 +1595,8 @@ ALTER TABLE registration_invites ADD COLUMN IF NOT EXISTS sent_via TEXT NOT NULL
 -- events leave them NULL. Additive.
 ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS start_time TIME;
 ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS end_time TIME;
+
+-- Google Calendar sync (Erin, 2026-07-14): General + Field Trip events
+-- publish to the co-op Google Calendar (board tasks explicitly do NOT).
+-- gcal_event_id links the row to its Google event for update/delete.
+ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';

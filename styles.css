@@ -13975,6 +13975,23 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 }
 .board-cal-field textarea { max-width: 100%; resize: vertical; }
 .board-cal-field input[type="date"] { max-width: 200px; }
+.board-cal-field input[type="time"] { max-width: 150px; }
+/* Radios are NOT text inputs — the width:100% rule above was scattering
+   the Type row across the panel (Erin's screenshot, 2026-07-14). Keep
+   each radio snug against its label, options flowing inline. */
+.board-cal-field input[type="radio"] {
+  width: auto;
+  max-width: none;
+  margin: 0 6px 0 0;
+  vertical-align: -1px;
+}
+#board-cal-type-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+#board-cal-type-row label { display: inline-flex; align-items: center; white-space: nowrap; margin: 0; }
+.board-cal-type-lbl { font-weight: 600; font-size: 0.9rem; }
+/* Date→end-date and start→end-time pairs sit side by side, wrapping on
+   narrow screens instead of stacking mid-label. */
+.board-cal-fields-row { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: flex-start; }
+.board-cal-fields-row label { flex: 0 0 auto; }
 .board-cal-opt { font-weight: 400; color: var(--color-text-muted, #777); font-size: 0.82rem; }
 .board-cal-legend { font-size: 0.82rem; color: var(--color-text-muted, #777); margin: 4px 0 10px; line-height: 1.4; }
 .board-cal-derived-row td { background: #f7f5fb; }

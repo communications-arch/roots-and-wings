@@ -20656,8 +20656,10 @@
       if (id.indexOf('derived:session') === 0) return 'session';
       if (id.indexOf('derived:icecream:') === 0 || id.indexOf('derived:fieldday:') === 0) return 'special';
       // Manual rows split by event_type (Erin, 2026-07-14): 'general'
-      // co-op events get their own pill; everything else stays a task.
-      if (String(e.event_type || '') === 'general') return 'general';
+      // co-op events + 'field_trip' outings get their own pills;
+      // everything else stays a board task.
+      var et = String(e.event_type || '');
+      if (et === 'general' || et === 'field_trip') return et;
       return 'task';
     }
     var seByName = {};
@@ -20723,7 +20725,7 @@
 
     // View pills — one list, four lenses.
     h += '<div class="board-cal-views" role="group" aria-label="Calendar view">';
-    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['general', 'General'], ['task', 'Board Tasks']].forEach(function (v) {
+    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['field_trip', 'Field Trips'], ['general', 'General'], ['task', 'Board Tasks']].forEach(function (v) {
       h += '<button type="button" class="board-cal-view-pill' + (view === v[0] ? ' is-active' : '') + '" data-cal-view="' + v[0] + '">' + v[1] + '</button>';
     });
     h += '</div>';
@@ -20772,7 +20774,7 @@
         if (sessEditing) {
           h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
         } else {
-          h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : '')) + escapeHtml(e.title) + '</td>';
+          h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
         }
         // Notes cell (+ status chip for special events).
         var notes = escapeHtml(e.note || '');
@@ -21014,30 +21016,33 @@
     // be re-typed on edit.
     var canSEForm = !!_boardCalState.canEditSpecialEvents;
     var boardForm = boardCalViewerIsBoard();
-    var evType = (ev && String(ev.event_type || '') === 'general') ? 'general' : 'task';
+    var evRawType = ev ? String(ev.event_type || '') : '';
+    var evType = (evRawType === 'general' || evRawType === 'field_trip') ? evRawType : 'task';
     var h = '<div class="board-cal-form">';
     h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
     if (boardForm) {
-      h += '<div class="board-cal-field" id="board-cal-type-row">Type:&nbsp; ';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task"' + (evType === 'task' ? ' checked' : '') + '> 📌 Board task</label>&nbsp;&nbsp;';
+      h += '<div class="board-cal-field" id="board-cal-type-row"><span class="board-cal-type-lbl">Type:</span>';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task"' + (evType === 'task' ? ' checked' : '') + '> 📌 Board task</label>';
       h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="general"' + (evType === 'general' ? ' checked' : '') + '> 🗓 General event</label>';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="field_trip"' + (evType === 'field_trip' ? ' checked' : '') + '> 🚌 Field trip</label>';
       if (!isEdit && canSEForm) {
-        h += '&nbsp;&nbsp;<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
+        h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
       }
       h += '</div>';
+      h += '<p class="board-cal-legend" style="margin:0 0 10px;">General events and field trips also publish to the co-op Google Calendar; board tasks stay internal.</p>';
     } else if (!isEdit && canSEForm && !boardForm) {
       // SEL-only viewer: special events are the only kind she can add.
       h += '<input type="hidden" name="board-cal-f-type" value="special" id="board-cal-f-type-fixed">';
       h += '<p class="board-cal-legend" style="margin:0 0 8px;">🎉 Adding a special event (it lands under the Special Events view).</p>';
     }
     h += '<div class="board-cal-field"><label>Event name<br><input type="text" id="board-cal-f-title" maxlength="200" value="' + escapeHtml(v.title) + '" placeholder="e.g. Registration opens" /></label></div>';
-    h += '<div class="board-cal-field"><label>Date' + (isEdit ? '' : ' <span class="board-cal-opt" id="board-cal-date-opt" hidden>(optional — special events can start undated)</span>') + '<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
-    h += ' <label id="board-cal-end-wrap">End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
+    h += '<div class="board-cal-field board-cal-fields-row"><label>Date' + (isEdit ? '' : ' <span class="board-cal-opt" id="board-cal-date-opt" hidden>(optional — special events can start undated)</span>') + '<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
+    h += '<label id="board-cal-end-wrap">End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
     // Optional times (Erin, 2026-07-14) — a General event at 6:30 PM, a
     // board task with a meeting slot, etc. Date-only events leave blank.
-    h += '<div class="board-cal-field" id="board-cal-times-wrap">';
+    h += '<div class="board-cal-field board-cal-fields-row" id="board-cal-times-wrap">';
     h += '<label>Start time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-stime" value="' + escapeHtml(String(v.start_time || '').slice(0, 5)) + '" /></label>';
-    h += ' <label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-etime" value="' + escapeHtml(String(v.end_time || '').slice(0, 5)) + '" /></label>';
+    h += '<label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-etime" value="' + escapeHtml(String(v.end_time || '').slice(0, 5)) + '" /></label>';
     h += '</div>';
     h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
     h += '<div class="coop-cal-save-bar">';
@@ -21121,8 +21126,9 @@
       note: (document.getElementById('board-cal-f-note').value || '').trim(),
       start_time: (document.getElementById('board-cal-f-stime') || {}).value || '',
       end_time: (document.getElementById('board-cal-f-etime') || {}).value || '',
-      // 'task' or 'general' — which pill the row lands under.
-      event_type: boardCalFormType() === 'general' ? 'general' : 'task'
+      // Which pill the row lands under (general + field_trip also sync
+      // to the co-op Google Calendar; tasks stay internal).
+      event_type: (function (bt) { return (bt === 'general' || bt === 'field_trip') ? bt : 'task'; })(boardCalFormType())
     };
     var idAttr = saveBtn.getAttribute('data-id');
     if (idAttr) payload.id = parseInt(idAttr, 10);

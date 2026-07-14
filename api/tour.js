@@ -5156,6 +5156,104 @@ async function handleBoardCalendarGet(req, res) {
   }
 }
 
+// ── Google Calendar sync for member-facing Admin Calendar events ──
+// General + Field Trip events publish to the co-op Google Calendar so
+// members see them where they already look; board tasks NEVER sync
+// (Erin, 2026-07-14). Writes impersonate communications@ via domain-wide
+// delegation (client ID 117854419582883083714, scope …/auth/calendar,
+// authorized in Google Admin + round-trip verified the same day).
+// Non-fatal by design: a Google hiccup must never block the DB save.
+const RW_GCAL_ID = 'c_fdc0b20caba65262b9aac95ac1df638ab892fcdf1ee1ad79a1880dcc2a95b291@group.calendar.google.com';
+const GCAL_SYNCED_TYPES = ['general', 'field_trip'];
+
+function getCalendarWriteClient() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '';
+  let credentials;
+  try {
+    credentials = JSON.parse(raw);
+  } catch (e) {
+    // Local .env copies of the key carry raw newlines inside the
+    // private_key string (invalid strict JSON; Vercel's env value parses
+    // fine) — extract the two fields leniently so local test scripts work.
+    const emailM = raw.match(/"client_email"\s*:\s*"([^"]+)"/);
+    const keyM = raw.match(/"private_key"\s*:\s*"([\s\S]*?-----END PRIVATE KEY-----(?:\\n|\n)?)"/);
+    if (!emailM || !keyM) throw e;
+    credentials = { client_email: emailM[1], private_key: keyM[1] };
+  }
+  const jwt = new google.auth.JWT({
+    email: credentials.client_email,
+    key: String(credentials.private_key).replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/calendar'],
+    subject: 'communications@rootsandwingsindy.com'
+  });
+  return google.calendar({ version: 'v3', auth: jwt });
+}
+
+// Google event body from a board_calendar_events row. All-day events use
+// Google's EXCLUSIVE end-date convention; timed events carry the Indy
+// timezone; a start time without an end time defaults to one hour.
+function gcalBodyFromEvent(row) {
+  const date = calDateStr(row.event_date);
+  const endDate = calDateStr(row.end_date);
+  const st = String(row.start_time || '').slice(0, 5);
+  const et = String(row.end_time || '').slice(0, 5);
+  const body = {
+    summary: row.title || 'Co-op event',
+    description: row.note || ''
+  };
+  if (st && !endDate) {
+    let end = et;
+    if (!end) {
+      const h = String(Math.min(23, parseInt(st.slice(0, 2), 10) + 1)).padStart(2, '0');
+      end = h + st.slice(2);
+    }
+    body.start = { dateTime: `${date}T${st}:00`, timeZone: 'America/Indianapolis' };
+    body.end = { dateTime: `${date}T${end}:00`, timeZone: 'America/Indianapolis' };
+  } else {
+    const plusOne = (d) => {
+      const t = new Date(d + 'T00:00:00Z');
+      t.setUTCDate(t.getUTCDate() + 1);
+      return t.toISOString().slice(0, 10);
+    };
+    body.start = { date: date };
+    body.end = { date: plusOne(endDate || date) };
+  }
+  return body;
+}
+
+// Upsert (or remove) the Google event for a row; returns the linked
+// Google event id ('' when the row doesn't sync). Keeps gcal_event_id
+// in step in the DB.
+async function syncEventToGoogleCalendar(sql, row) {
+  const cal = getCalendarWriteClient();
+  const synced = GCAL_SYNCED_TYPES.indexOf(row.event_type) !== -1;
+  const gid = String(row.gcal_event_id || '');
+  if (!synced) {
+    // Re-typed to a board task (or never synced): remove any lingering
+    // Google event so members don't see internal tasks.
+    if (gid) {
+      try { await cal.events.delete({ calendarId: RW_GCAL_ID, eventId: gid }); } catch (e) { /* already gone */ }
+      await sql`UPDATE board_calendar_events SET gcal_event_id = '' WHERE id = ${row.id}`;
+    }
+    return '';
+  }
+  const body = gcalBodyFromEvent(row);
+  if (gid) {
+    try {
+      await cal.events.patch({ calendarId: RW_GCAL_ID, eventId: gid, requestBody: body });
+      return gid;
+    } catch (e) {
+      // Linked event vanished (deleted by hand on Google) — recreate.
+    }
+  }
+  const ins = await cal.events.insert({ calendarId: RW_GCAL_ID, requestBody: body });
+  const newId = (ins.data && ins.data.id) || '';
+  if (newId && newId !== gid) {
+    await sql`UPDATE board_calendar_events SET gcal_event_id = ${newId} WHERE id = ${row.id}`;
+  }
+  return newId;
+}
+
 // POST kind='calendar-save' — insert a new event, or update an existing one
 // when body.id is present. Any board member may write.
 async function handleBoardCalendarSave(body, req, res) {
@@ -5168,8 +5266,10 @@ async function handleBoardCalendarSave(body, req, res) {
   const eventDate = String(body.event_date).trim();
   const endDate = String(body.end_date || '').trim() || null;
   const note = String(body.note || '').trim();
-  // 'task' (board tasks pill) or 'general' (general co-op events pill).
-  const eventType = String(body.event_type || 'task').trim() === 'general' ? 'general' : 'task';
+  // 'task' (board tasks pill), 'general', or 'field_trip' — the latter
+  // two are member-facing and sync to the co-op Google Calendar.
+  const rawType = String(body.event_type || 'task').trim();
+  const eventType = (rawType === 'general' || rawType === 'field_trip') ? rawType : 'task';
   const startTime = String(body.start_time || '').trim() || null;
   const endTime = String(body.end_time || '').trim() || null;
   const id = body.id != null ? parseInt(body.id, 10) : null;
@@ -5184,7 +5284,7 @@ async function handleBoardCalendarSave(body, req, res) {
             start_time = ${startTime}, end_time = ${endTime},
             updated_at = NOW(), updated_by = ${auth.realEmail}
         WHERE id = ${id}
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, gcal_event_id, updated_at, updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Event not found.' });
       row = updated[0];
@@ -5193,11 +5293,20 @@ async function handleBoardCalendarSave(body, req, res) {
         INSERT INTO board_calendar_events
           (school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by)
         VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, ${startTime}, ${endTime}, NOW(), ${auth.realEmail})
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, gcal_event_id, updated_at, updated_by
       `;
       row = inserted[0];
     }
+    // Member-facing types publish to the co-op Google Calendar; board
+    // tasks never do (and re-typing to task removes the Google event).
+    let gcalSynced = false;
+    try {
+      gcalSynced = !!(await syncEventToGoogleCalendar(sql, row));
+    } catch (gErr) {
+      console.error('Google Calendar sync error (non-fatal):', (gErr && gErr.message) || gErr);
+    }
     return res.status(200).json({
+      gcal_synced: gcalSynced,
       event: {
         id: row.id,
         school_year: row.school_year,
@@ -5228,9 +5337,18 @@ async function handleBoardCalendarDelete(body, req, res) {
   }
   try {
     const sql = getSql();
-    const existing = await sql`SELECT id FROM board_calendar_events WHERE id = ${id}`;
+    const existing = await sql`SELECT id, gcal_event_id FROM board_calendar_events WHERE id = ${id}`;
     if (existing.length === 0) return res.status(404).json({ error: 'Event not found.' });
     await sql`DELETE FROM board_calendar_events WHERE id = ${id}`;
+    // Take the linked Google event with it (non-fatal).
+    const gid = String(existing[0].gcal_event_id || '');
+    if (gid) {
+      try {
+        await getCalendarWriteClient().events.delete({ calendarId: RW_GCAL_ID, eventId: gid });
+      } catch (gErr) {
+        console.error('Google Calendar delete error (non-fatal):', (gErr && gErr.message) || gErr);
+      }
+    }
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('board-calendar delete error:', err);
@@ -5561,3 +5679,5 @@ module.exports.calAddDays = calAddDays;
 module.exports.calSnapWed = calSnapWed;
 module.exports.reconcileNameCandidates = reconcileNameCandidates;
 module.exports.mergeDuplicateOpenTours = mergeDuplicateOpenTours;
+module.exports.syncEventToGoogleCalendar = syncEventToGoogleCalendar;
+module.exports.gcalBodyFromEvent = gcalBodyFromEvent;
