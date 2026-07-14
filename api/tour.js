@@ -4809,6 +4809,13 @@ function validateBoardCalendarEvent(p) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return 'A valid date is required.';
   if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return 'End date must be YYYY-MM-DD.';
   if (endDate && endDate < eventDate) return 'End date must be on or after the start date.';
+  const startTime = String(p.start_time || '').trim();
+  const endTime = String(p.end_time || '').trim();
+  if (startTime && !/^\d{2}:\d{2}(:\d{2})?$/.test(startTime)) return 'Start time must be HH:MM.';
+  if (endTime && !/^\d{2}:\d{2}(:\d{2})?$/.test(endTime)) return 'End time must be HH:MM.';
+  if (endTime && !startTime) return 'An end time needs a start time.';
+  // Same-day events must end after they start; multi-day windows are free.
+  if (startTime && endTime && !endDate && endTime <= startTime) return 'End time must be after the start time.';
   if (String(p.note || '').length > 1000) return 'Note is too long (1000 characters max).';
   return '';
 }
@@ -4963,9 +4970,10 @@ async function handleBoardCalendarGet(req, res) {
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
+      SELECT id, school_year, title, event_date, end_date, note, event_type,
+             start_time, end_time, updated_at, updated_by
       FROM board_calendar_events
-      ORDER BY event_date, id
+      ORDER BY event_date, start_time NULLS FIRST, id
     `;
     const manual = rows.map(r => ({
       id: r.id,
@@ -4975,6 +4983,8 @@ async function handleBoardCalendarGet(req, res) {
       end_date: calDateStr(r.end_date),
       note: r.note || '',
       event_type: r.event_type || 'task',
+      start_time: r.start_time ? String(r.start_time).slice(0, 5) : '',
+      end_time: r.end_time ? String(r.end_time).slice(0, 5) : '',
       derived: false,
       updated_at: r.updated_at,
       updated_by: r.updated_by
@@ -5068,6 +5078,8 @@ async function handleBoardCalendarSave(body, req, res) {
   const note = String(body.note || '').trim();
   // 'task' (board tasks pill) or 'general' (general co-op events pill).
   const eventType = String(body.event_type || 'task').trim() === 'general' ? 'general' : 'task';
+  const startTime = String(body.start_time || '').trim() || null;
+  const endTime = String(body.end_time || '').trim() || null;
   const id = body.id != null ? parseInt(body.id, 10) : null;
   try {
     const sql = getSql();
@@ -5077,18 +5089,19 @@ async function handleBoardCalendarSave(body, req, res) {
         UPDATE board_calendar_events
         SET school_year = ${schoolYear}, title = ${title}, event_date = ${eventDate},
             end_date = ${endDate}, note = ${note}, event_type = ${eventType},
+            start_time = ${startTime}, end_time = ${endTime},
             updated_at = NOW(), updated_by = ${auth.realEmail}
         WHERE id = ${id}
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Event not found.' });
       row = updated[0];
     } else {
       const inserted = await sql`
         INSERT INTO board_calendar_events
-          (school_year, title, event_date, end_date, note, event_type, updated_at, updated_by)
-        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, NOW(), ${auth.realEmail})
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
+          (school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by)
+        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, ${startTime}, ${endTime}, NOW(), ${auth.realEmail})
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by
       `;
       row = inserted[0];
     }
@@ -5101,6 +5114,8 @@ async function handleBoardCalendarSave(body, req, res) {
         end_date: calDateStr(row.end_date),
         note: row.note || '',
         event_type: row.event_type || 'task',
+        start_time: row.start_time ? String(row.start_time).slice(0, 5) : '',
+        end_time: row.end_time ? String(row.end_time).slice(0, 5) : '',
         updated_at: row.updated_at,
         updated_by: row.updated_by
       }

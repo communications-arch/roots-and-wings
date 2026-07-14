@@ -1589,3 +1589,9 @@ ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS event_type TEXT NOT N
 -- email fires and there's no token, so opens aren't tracked for these.
 -- sent_via: 'email' (app-sent) | 'other' (logged manually).
 ALTER TABLE registration_invites ADD COLUMN IF NOT EXISTS sent_via TEXT NOT NULL DEFAULT 'email';
+
+-- Event times (Erin, 2026-07-14): manual Admin Calendar events (board
+-- tasks + general events) can carry an optional start/end time. Date-only
+-- events leave them NULL. Additive.
+ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS start_time TIME;
+ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS end_time TIME;

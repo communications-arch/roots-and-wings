@@ -20570,6 +20570,12 @@
     return boardCalFmtDate(start) + (end ? ' – ' + boardCalFmtDate(end) : '');
   }
 
+  // "6:30 PM – 8:00 PM" for events that carry times (manual rows only).
+  function boardCalFmtTimeRange(st, et) {
+    if (!st) return '';
+    return formatTourTime(st) + (et ? ' – ' + formatTourTime(et) : '');
+  }
+
   function showBoardCalendarModal(opts) {
     opts = opts || {};
     // Entry points can pre-focus a view (e.g. the Special Events
@@ -20754,7 +20760,10 @@
         } else if (r.kind === 'special' && !r.autoDate && canSE) {
           h += '<td style="white-space:nowrap;"><input type="date" class="cl-input board-cal-se-date" data-se-id="' + r.seRow.id + '" value="' + escapeHtml(e.event_date || '') + '"></td>';
         } else {
-          h += '<td style="white-space:nowrap;">' + (e.event_date ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date)) : '<span class="board-cal-se-unset">—</span>') + '</td>';
+          h += '<td style="white-space:nowrap;">' + (e.event_date
+            ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
+              + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
+            : '<span class="board-cal-se-unset">—</span>') + '</td>';
         }
         if (sessEditable) {
           h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
@@ -20998,6 +21007,12 @@
     h += '<div class="board-cal-field"><label>Event name<br><input type="text" id="board-cal-f-title" maxlength="200" value="' + escapeHtml(v.title) + '" placeholder="e.g. Registration opens" /></label></div>';
     h += '<div class="board-cal-field"><label>Date' + (isEdit ? '' : ' <span class="board-cal-opt" id="board-cal-date-opt" hidden>(optional — special events can start undated)</span>') + '<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
     h += ' <label id="board-cal-end-wrap">End date <span class="board-cal-opt">(optional, for a window)</span><br><input type="date" id="board-cal-f-end" value="' + escapeHtml(v.end_date || '') + '" /></label></div>';
+    // Optional times (Erin, 2026-07-14) — a General event at 6:30 PM, a
+    // board task with a meeting slot, etc. Date-only events leave blank.
+    h += '<div class="board-cal-field" id="board-cal-times-wrap">';
+    h += '<label>Start time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-stime" value="' + escapeHtml(String(v.start_time || '').slice(0, 5)) + '" /></label>';
+    h += ' <label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-etime" value="' + escapeHtml(String(v.end_time || '').slice(0, 5)) + '" /></label>';
+    h += '</div>';
     h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
@@ -21032,9 +21047,11 @@
     var isSpecial = boardCalFormType() === 'special';
     var endWrap = document.getElementById('board-cal-end-wrap');
     var noteWrap = document.getElementById('board-cal-note-wrap');
+    var timesWrap = document.getElementById('board-cal-times-wrap');
     var dateOpt = document.getElementById('board-cal-date-opt');
     if (endWrap) endWrap.hidden = isSpecial;
     if (noteWrap) noteWrap.hidden = isSpecial;
+    if (timesWrap) timesWrap.hidden = isSpecial;
     if (dateOpt) dateOpt.hidden = !isSpecial;
   }
 
@@ -21076,6 +21093,8 @@
       event_date: document.getElementById('board-cal-f-date').value || '',
       end_date: document.getElementById('board-cal-f-end').value || '',
       note: (document.getElementById('board-cal-f-note').value || '').trim(),
+      start_time: (document.getElementById('board-cal-f-stime') || {}).value || '',
+      end_time: (document.getElementById('board-cal-f-etime') || {}).value || '',
       // 'task' or 'general' — which pill the row lands under.
       event_type: boardCalFormType() === 'general' ? 'general' : 'task'
     };
@@ -21086,6 +21105,10 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.event_date)) { boardCalShowMsg('A valid date is required.'); return; }
     if (payload.end_date && payload.end_date < payload.event_date) {
       boardCalShowMsg('End date must be on or after the start date.'); return;
+    }
+    if (payload.end_time && !payload.start_time) { boardCalShowMsg('An end time needs a start time.'); return; }
+    if (payload.start_time && payload.end_time && !payload.end_date && payload.end_time <= payload.start_time) {
+      boardCalShowMsg('End time must be after the start time.'); return;
     }
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     boardCalShowMsg('');
