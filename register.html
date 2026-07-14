@@ -441,6 +441,19 @@
     var GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
     var REGISTRATION_FEE = 40;
     var SEASON = '2026-2027';
+
+    // Invited-family open tracking: when the Membership Director emails a
+    // registration link it carries ?inv=<token>. Ping the server once so
+    // the invite shows as "Opened" on her To Do funnel. Fire-and-forget —
+    // registration must never depend on this.
+    (function () {
+      try {
+        var inv = new URLSearchParams(window.location.search).get('inv');
+        if (inv && /^[a-f0-9]{32}$/i.test(inv)) {
+          fetch('/api/tour?invite-open=' + encodeURIComponent(inv)).catch(function () {});
+        }
+      } catch (e) { /* tracking only */ }
+    })();
     var MAX_BIRTH_DATE = new Date().toISOString().slice(0, 10);
     var MIN_BIRTH_DATE = '1995-01-01';
     var ADULT_CUTOFF_YEARS = 18;

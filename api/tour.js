@@ -2326,7 +2326,35 @@ async function handleRegistrationInvite(body, req, res) {
   const baseUrl = (req.headers['x-forwarded-proto'] && req.headers.host)
     ? `${req.headers['x-forwarded-proto']}://${req.headers.host}`
     : 'https://roots-and-wings-topaz.vercel.app';
-  const link = `${baseUrl}/register.html`;
+
+  // Log the send so the Membership To Do can track the funnel
+  // (Sent → Opened → Registered). One row per family per season; a
+  // resend upserts the same row (bumps last_sent_at/send_count, keeps
+  // the original token so the earlier emailed link stays live) and
+  // revives a dismissed invite. The token makes the link unique —
+  // register.html pings ?invite-open=<token> on load to stamp opened_at.
+  // Non-fatal: a logging hiccup must never block the actual send.
+  let token = '';
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      INSERT INTO registration_invites (email, name, note, season, token, sent_by)
+      VALUES (${email}, ${name}, ${note}, ${DEFAULT_SEASON}, ${crypto.randomUUID().replace(/-/g, '')}, ${user.realEmail || user.email})
+      ON CONFLICT (LOWER(email), season)
+      DO UPDATE SET name = EXCLUDED.name,
+                    note = EXCLUDED.note,
+                    sent_by = EXCLUDED.sent_by,
+                    last_sent_at = NOW(),
+                    send_count = registration_invites.send_count + 1,
+                    dismissed_at = NULL,
+                    dismissed_by = ''
+      RETURNING token
+    `;
+    token = (rows[0] && rows[0].token) || '';
+  } catch (logErr) {
+    console.error('Registration invite logging error (non-fatal):', logErr);
+  }
+  const link = `${baseUrl}/register.html${token ? '?inv=' + token : ''}`;
 
   let emailed = false;
   try {
@@ -2353,6 +2381,102 @@ async function handleRegistrationInvite(body, req, res) {
   }
 
   return res.status(200).json({ success: true, emailed, link });
+}
+
+// GET ?invite-open=<token> — public, unauthenticated. register.html pings
+// this on load when its URL carries ?inv=<token>, stamping the invite as
+// Opened in the Membership funnel. The 128-bit random token IS the
+// credential; unknown or malformed tokens no-op. Always 200 — the public
+// register page must never break over tracking.
+async function handleInviteOpenPing(req, res) {
+  const token = String(req.query['invite-open'] || '').trim();
+  if (/^[a-f0-9]{32}$/i.test(token)) {
+    try {
+      const sql = getSql();
+      await sql`
+        UPDATE registration_invites
+        SET opened_at = COALESCE(opened_at, NOW()),
+            open_count = open_count + 1
+        WHERE token = ${token}
+      `;
+    } catch (err) {
+      console.error('Invite open-ping error (non-fatal):', err);
+    }
+  }
+  return res.status(200).json({ ok: true });
+}
+
+// GET ?list=registration-invites — every registration link sent this
+// season, with funnel status. "Registered" is derived at read time by
+// joining registrations on LOWER(email)+season (declined rows excluded —
+// and the partial unique index guarantees at most one active match), so
+// completing the form needs no write-back here.
+async function handleRegistrationInvitesList(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canView = await hasCapability(auth.email, 'registration_invite');
+  if (!canView) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    return res.status(403).json({
+      error: 'Only the Membership or Communications Director can view sent registration links.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT i.id, i.email, i.name, i.note, i.season,
+             i.sent_by, i.first_sent_at, i.last_sent_at, i.send_count,
+             i.opened_at, i.dismissed_at, i.dismissed_by,
+             r.id AS registration_id, r.created_at AS registered_at
+      FROM registration_invites i
+      LEFT JOIN registrations r
+        ON LOWER(r.email) = LOWER(i.email)
+       AND r.season = i.season
+       AND r.declined_at IS NULL
+      WHERE i.season = ${DEFAULT_SEASON}
+      ORDER BY i.last_sent_at DESC
+    `;
+    return res.status(200).json({ invites: rows });
+  } catch (err) {
+    console.error('Registration invites list error:', err);
+    return res.status(500).json({ error: 'Could not load sent registration links.' });
+  }
+}
+
+// kind=registration-invite-dismiss | registration-invite-restore.
+// Dismiss clears a family who went quiet out of the Awaiting Registration
+// To Do count (they stay visible behind the Dismissed filter); restore
+// undoes it. A resend also revives a dismissed invite (see the upsert).
+async function handleRegistrationInviteDismiss(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canAct = await hasCapability(auth.email, 'registration_invite');
+  if (!canAct) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    return res.status(403).json({
+      error: 'Only the Membership or Communications Director can update sent registration links.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id is required.' });
+  const restore = String(body.kind || '').toLowerCase() === 'registration-invite-restore';
+  try {
+    const sql = getSql();
+    const rows = restore
+      ? await sql`UPDATE registration_invites SET dismissed_at = NULL, dismissed_by = ''
+                  WHERE id = ${id} RETURNING id, dismissed_at`
+      : await sql`UPDATE registration_invites SET dismissed_at = NOW(), dismissed_by = ${auth.realEmail}
+                  WHERE id = ${id} RETURNING id, dismissed_at`;
+    if (!rows.length) return res.status(404).json({ error: 'Invite not found.' });
+    return res.status(200).json({ success: true, dismissed_at: rows[0].dismissed_at || null });
+  } catch (err) {
+    console.error('Registration invite dismiss error:', err);
+    return res.status(500).json({ error: 'Could not update the invite.' });
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -5063,6 +5187,8 @@ module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
     if (req.query.list === 'registrations') return handleList(req, res);
     if (req.query.list === 'tours') return handleTourList(req, res);
+    if (req.query.list === 'registration-invites') return handleRegistrationInvitesList(req, res);
+    if (req.query['invite-open']) return handleInviteOpenPing(req, res);
     if (req.query.config === '1' || req.query.config === 'true') return handleConfig(res);
     if (req.query.backup_waiver_token) return handleBackupWaiverInfo(req, res);
     if (req.query.waivers_report === '1') return handleWaiversReport(req, res);
@@ -5101,6 +5227,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'waiver-send') return handleWaiverSend(body, req, res);
     if (kind === 'waiver-resend') return handleWaiverResend(body, req, res);
     if (kind === 'registration-invite') return handleRegistrationInvite(body, req, res);
+    if (kind === 'registration-invite-dismiss' ||
+        kind === 'registration-invite-restore') return handleRegistrationInviteDismiss(body, req, res);
     if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);

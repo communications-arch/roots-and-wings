@@ -1548,3 +1548,33 @@ CREATE INDEX IF NOT EXISTS volunteer_signups_slot_idx
 ALTER TABLE volunteer_signups DROP CONSTRAINT IF EXISTS volunteer_signups_block_check;
 ALTER TABLE volunteer_signups ADD CONSTRAINT volunteer_signups_block_check
   CHECK (block IN ('AM','AM1','AM2','PM1','PM2'));
+
+-- ──────────────────────────────────────────────
+-- Registration-link invites (Erin, 2026-07-14). One row per prospective
+-- family per season, logged when the Membership/Comms Director emails the
+-- registration link (kind=registration-invite). Resends upsert the same
+-- row (bump last_sent_at/send_count). token makes the emailed link unique
+-- (/register.html?inv=<token>) so opening the page can stamp opened_at —
+-- self-hosted open tracking, no email pixels. "Registered" is derived at
+-- read time by joining registrations on LOWER(email)+season (declined rows
+-- excluded), not stored. dismissed_at lets Membership clear a family who
+-- went quiet so the To Do count doesn't nag forever.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS registration_invites (
+  id            SERIAL PRIMARY KEY,
+  email         TEXT NOT NULL,
+  name          TEXT NOT NULL DEFAULT '',
+  note          TEXT NOT NULL DEFAULT '',
+  season        TEXT NOT NULL,
+  token         TEXT NOT NULL UNIQUE,
+  sent_by       TEXT NOT NULL DEFAULT '',
+  first_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_sent_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  send_count    INTEGER NOT NULL DEFAULT 1,
+  opened_at     TIMESTAMPTZ,
+  open_count    INTEGER NOT NULL DEFAULT 0,
+  dismissed_at  TIMESTAMPTZ,
+  dismissed_by  TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS registration_invites_email_season_idx
+  ON registration_invites (LOWER(email), season);

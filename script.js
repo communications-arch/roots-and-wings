@@ -7528,6 +7528,12 @@
           h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
+          // Registration-link funnel (inquire/tour → meet → send link →
+          // register): toured families who still need the link, then links
+          // sent and awaiting a completed registration. Counts painted by
+          // updateRegInviteTodoItems() from _toursCache × _regInvitesCache.
+          h += '<li id="ws-todo-reginv-send-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-send"><span class="ws-link-count" id="ws-reginv-send-count">0</span><span class="ws-link-icon">🔗</span><span id="ws-reginv-send-label">Send Registration Link</span></button></li>';
+          h += '<li id="ws-todo-reginv-wait-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-wait"><span class="ws-link-count" id="ws-reginv-wait-count">0</span><span class="ws-link-icon">📨</span><span id="ws-reginv-wait-label">Awaiting Registration</span></button></li>';
           // Morning class setup — one workflow nudge, gated to on/after
           // June 1 of the season's fall year (building morning classes is a
           // summer task) and hidden once finalized. Label/icon adapt as work
@@ -7578,6 +7584,7 @@
         if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
+        if (typeof loadRegInviteTodoCounts === 'function') loadRegInviteTodoCounts();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
@@ -8810,6 +8817,12 @@
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (t) {
         if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Registration-link funnel stamp: once this family's email has
+        // been sent the link, show where it stands (Sent → Opened →
+        // Registered) right on the row. Reads _regInvitesCache (loaded
+        // by the To Do loader / invites modal); no cache yet = no stamp.
+        var inv = t.family_email ? regInviteForEmail(t.family_email) : null;
+        var invStamp = inv ? '<div class="ws-wv-context">🔗 ' + escapeHtmlWs(regInviteStampLabel(inv)) + '</div>' : '';
         var btns = '';
         if (t.status === 'inquiry') {
           // A general inquiry: turn it into a tour, or close it out once
@@ -8825,13 +8838,20 @@
           btns += '<button type="button" class="sc-btn ws-tour-toured-btn" data-tour-id="' + t.id + '">Mark toured</button>';
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Reschedule&hellip;</button>';
         } else if (t.status === 'toured' || t.status === 'followed_up') {
+          // The natural next step after a tour/meet-up: send the family
+          // the registration link. Hidden once a link is already logged
+          // for their email (the stamp shows instead; resends live in
+          // the Registration Links list).
+          if (t.family_email && !inv) {
+            btns += '<button type="button" class="sc-btn ws-tour-sendlink-btn" data-tour-id="' + t.id + '">Send reg link</button>';
+          }
           btns += '<button type="button" class="sc-btn ws-tour-joined-btn" data-tour-id="' + t.id + '">Joined</button>';
           btns += '<button type="button" class="sc-btn sc-btn-del ws-tour-decline-btn" data-tour-id="' + t.id + '">Declined&hellip;</button>';
           btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Ghost</button>';
         } else {
-          return '<span class="ws-srt-actions-empty">&mdash;</span>';
+          return invStamp || '<span class="ws-srt-actions-empty">&mdash;</span>';
         }
-        return '<div class="ws-srt-actions">' + btns + '</div>';
+        return '<div class="ws-srt-actions">' + btns + '</div>' + invStamp;
       }
     }
   ];
@@ -9101,6 +9121,26 @@
       // Delegated click handler for action buttons + the in-expansion
       // confirm UI for Schedule / Decline.
       body.addEventListener('click', function (e) {
+        var slBtn = e.target.closest('.ws-tour-sendlink-btn');
+        if (slBtn) {
+          var slId = parseInt(slBtn.getAttribute('data-tour-id'), 10);
+          var slRow = (_toursCache || []).filter(function (t) { return t.id === slId; })[0];
+          if (!slRow || !slRow.family_email) return;
+          if (!confirm('Email the registration link to ' + (slRow.family_name || 'this family') + ' (' + slRow.family_email + ')?')) return;
+          slBtn.disabled = true; slBtn.textContent = 'Sending…';
+          sendRegInvite(slRow.family_name || '', slRow.family_email, '', function (ok, msg) {
+            if (!ok) {
+              slBtn.disabled = false; slBtn.textContent = 'Send reg link';
+              alert(msg || 'Send failed.');
+              return;
+            }
+            // sendRegInvite upserted the invites cache — re-render so the
+            // button gives way to the "Link sent" stamp.
+            refreshAll();
+            if (msg) alert(msg); // non-fatal delivery warning w/ manual link
+          });
+          return;
+        }
         var schedBtn = e.target.closest('.ws-tour-schedule-btn');
         if (schedBtn) {
           var sId = parseInt(schedBtn.getAttribute('data-tour-id'), 10);
@@ -12805,12 +12845,16 @@
     return html;
   }
 
-  function showSendRegistrationFormModal() {
+  // opts.name / opts.email prefill the form (the Tour Pipeline's "Send reg
+  // link" button sends directly; this form is the free-standing path for
+  // families met outside the pipeline).
+  function showSendRegistrationFormModal(opts) {
     if (!personDetail || !personDetailCard) return;
+    opts = opts || {};
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
     html += '<h3 class="rd-title">Send Registration Form</h3>';
-    html += '<p class="rd-subtitle">Email the registration link to a prospective family. They\u2019ll fill out <code>/register.html</code> themselves.</p>';
+    html += '<p class="rd-subtitle">Email the registration link to a prospective family. They\u2019ll fill out <code>/register.html</code> themselves. Every send is tracked &mdash; watch it move Sent &rarr; Opened &rarr; Registered in <button type="button" class="ws-inline-link" id="ws-ri-viewlinks">Registration Links</button>.</p>';
     html += '<div class="ws-waiver-form">';
     html += '<label>Recipient name<input type="text" id="ws-ri-name" maxlength="200" placeholder="Jane Doe"></label>';
     html += '<label>Recipient email<input type="email" id="ws-ri-email" maxlength="200" placeholder="jane@example.com"></label>';
@@ -12824,6 +12868,11 @@
     document.body.style.overflow = 'hidden';
     personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
     personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+    personDetailCard.querySelector('#ws-ri-viewlinks').addEventListener('click', function () {
+      showRegInvitesModal(); // replaces this form in the shared overlay
+    });
+    if (opts.name) personDetailCard.querySelector('#ws-ri-name').value = opts.name;
+    if (opts.email) personDetailCard.querySelector('#ws-ri-email').value = opts.email;
 
     var sendBtn = personDetailCard.querySelector('#ws-ri-send');
     sendBtn.addEventListener('click', function () {
@@ -12837,33 +12886,18 @@
       if (!name || !emailVal) { statusEl.className = 'ws-wv-status ws-wv-err'; statusEl.textContent = 'Name and email are required.'; return; }
       sendBtn.disabled = true; var orig = sendBtn.textContent; sendBtn.textContent = 'Sending\u2026';
       statusEl.className = 'ws-wv-status'; statusEl.textContent = '';
-      fetch('/api/tour', {
-        method: 'POST',
-        headers: rwAuthHeaders(true),
-        body: JSON.stringify({ kind: 'registration-invite', name: name, email: emailVal, note: note })
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
+      // Shared helper — also upserts the invites cache + To Do counts, and
+      // folds the youAre/expected auth diagnostic into its error message.
+      sendRegInvite(name, emailVal, note, function (ok, msg) {
         sendBtn.disabled = false; sendBtn.textContent = orig;
-        if (!res.ok) {
+        if (!ok) {
           statusEl.className = 'ws-wv-status ws-wv-err';
-          var msg = (res.data && res.data.error) || 'Send failed.';
-          // Surface the auth diagnostic so a board member who's blocked
-          // can see who the server thinks they are vs. who it expected.
-          if (res.data && res.data.youAre) {
-            msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
-          }
           statusEl.textContent = msg;
           return;
         }
         statusEl.className = 'ws-wv-status ws-wv-ok';
-        statusEl.textContent = res.data.emailed
-          ? 'Sent. They\u2019ll get the registration link by email shortly.'
-          : 'Email delivery hiccupped — copy this link to them: ' + res.data.link;
+        statusEl.textContent = msg || 'Sent. They’ll get the registration link by email shortly.';
         nameEl.value = ''; emailEl.value = ''; noteEl.value = '';
-      }).catch(function (err) {
-        sendBtn.disabled = false; sendBtn.textContent = orig;
-        statusEl.className = 'ws-wv-status ws-wv-err';
-        statusEl.textContent = 'Network error: ' + ((err && err.message) || 'unknown');
       });
     });
   }
@@ -15779,6 +15813,12 @@
       // General Contact Us inquiries — the lean, dedicated Inquiries view.
       showTourPipelineModal({ mode: 'inquiry' });
     }
+    else if (action === 'membership-reginv-send' && typeof showTourPipelineModal === 'function') {
+      // Toured families who still need the registration link — the
+      // "Send reg link" button lives on their pipeline rows.
+      showTourPipelineModal({ initialFilter: 'toured' });
+    }
+    else if (action === 'membership-reginv-wait' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
   });
 
   // Render all coordination tabs
@@ -19911,6 +19951,335 @@
     loadWelcomeList();
   }
 
+  // ── Registration-link invites (Membership Director) ────────────────
+  // The funnel after a tour/meet-up: send the family the registration
+  // link (logged server-side in registration_invites, tokenized so
+  // register.html can stamp opens), then watch it move Sent → Opened →
+  // Registered. Feeds two Membership To Do items — "Send Registration
+  // Link" (toured families with no link yet) and "Awaiting Registration"
+  // (link sent, registration not in yet) — plus the pipeline row stamps
+  // and the Registration Links modal (resend / dismiss).
+  var _regInvitesCache = null;   // null = not loaded; [] = loaded, empty
+  var _regInvitesFilter = null;  // null = all, else 'waiting'|'registered'|'dismissed'
+
+  function regInviteForEmail(email) {
+    if (!email || !Array.isArray(_regInvitesCache)) return null;
+    var e = String(email).toLowerCase().trim();
+    return _regInvitesCache.filter(function (i) {
+      return String(i.email || '').toLowerCase().trim() === e;
+    })[0] || null;
+  }
+
+  // Funnel status of an invite row (pure — see scripts/test-reg-invites.js).
+  // registered wins over dismissed: if the family registered anyway, that's
+  // the truth that matters.
+  function regInviteStatus(inv) {
+    if (!inv) return '';
+    if (inv.registered_at) return 'registered';
+    if (inv.dismissed_at) return 'dismissed';
+    if (inv.opened_at) return 'opened';
+    return 'sent';
+  }
+  // Still counts toward "Awaiting Registration".
+  function regInviteAwaiting(inv) {
+    var s = regInviteStatus(inv);
+    return s === 'sent' || s === 'opened';
+  }
+  // Bucket for the list filter pills (sent+opened collapse to 'waiting').
+  function regInviteBucket(inv) {
+    var s = regInviteStatus(inv);
+    return (s === 'sent' || s === 'opened') ? 'waiting' : s;
+  }
+
+  // One-line funnel summary for pipeline row stamps.
+  function regInviteStampLabel(inv) {
+    var s = 'Link sent ' + welcomeFmtDate(inv.last_sent_at);
+    if (Number(inv.send_count) > 1) s += ' (×' + inv.send_count + ')';
+    var st = regInviteStatus(inv);
+    if (st === 'registered') s += ' · Registered ✓';
+    else if (st === 'opened') s += ' · Opened';
+    else if (st === 'dismissed') s += ' · Dismissed';
+    else s += ' · Not opened yet';
+    return s;
+  }
+
+  // Shared send/resend POST (Tour Pipeline button, Send Registration Form,
+  // and the Registration Links modal's Resend all funnel through here so
+  // the local cache + To Do counts stay in lockstep). cb(ok, msg): on
+  // ok=false msg is the error; on ok=true msg is '' or a non-fatal
+  // delivery warning containing the manual link.
+  function sendRegInvite(name, email, note, cb) {
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: 'registration-invite', name: name, email: email, note: note || '' })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || 'Send failed.';
+          if (res.data && res.data.youAre) {
+            msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+          }
+          cb(false, msg);
+          return;
+        }
+        // Optimistically upsert the local cache (mirrors the server's
+        // upsert; a resend keeps its row, bumps the count, and revives a
+        // dismissed invite). New rows carry id 0 until the next refetch —
+        // dismiss stays hidden for them until then.
+        if (Array.isArray(_regInvitesCache)) {
+          var existing = regInviteForEmail(email);
+          var now = new Date().toISOString();
+          if (existing) {
+            existing.last_sent_at = now;
+            existing.send_count = Number(existing.send_count || 1) + 1;
+            existing.dismissed_at = null;
+            existing.dismissed_by = '';
+            if (name) existing.name = name;
+          } else {
+            _regInvitesCache.unshift({
+              id: 0, email: email, name: name, note: note || '', sent_by: '',
+              first_sent_at: now, last_sent_at: now, send_count: 1,
+              opened_at: null, dismissed_at: null,
+              registered_at: null, registration_id: null
+            });
+          }
+        }
+        updateRegInviteTodoItems();
+        cb(true, res.data.emailed ? '' : ('Email delivery hiccupped — copy this link to them: ' + res.data.link));
+      })
+      .catch(function (err) { cb(false, 'Network error: ' + ((err && err.message) || 'unknown')); });
+  }
+
+  // Paints both Membership To Do items from the caches. "Send Registration
+  // Link" needs BOTH _toursCache (toured families) and _regInvitesCache
+  // (who already got one) — until both have loaded the item keeps its
+  // snapshot state. Called from this loader AND from
+  // updateMembershipTourTodoCounts so tour status changes re-count too.
+  function updateRegInviteTodoItems() {
+    var sendItem = document.getElementById('ws-todo-reginv-send-item');
+    var waitItem = document.getElementById('ws-todo-reginv-wait-item');
+    if (!sendItem && !waitItem) return;
+    if (sendItem && Array.isArray(_regInvitesCache) && Array.isArray(_toursCache)) {
+      // Only status 'toured' — a followed_up row may be an answered
+      // inquiry that never visited, and the To Do opens the pipeline
+      // filtered to Toured, so count and view stay in agreement.
+      var needLink = _toursCache.filter(function (t) {
+        return t.status === 'toured' && t.family_email && !regInviteForEmail(t.family_email);
+      }).length;
+      var sPill = document.getElementById('ws-reginv-send-count');
+      if (sPill) sPill.textContent = String(needLink);
+      var sLabel = document.getElementById('ws-reginv-send-label');
+      if (sLabel) sLabel.textContent = 'Send Registration Link' + (needLink === 1 ? '' : 's');
+      sendItem.hidden = needLink <= 0;
+    }
+    if (waitItem && Array.isArray(_regInvitesCache)) {
+      var awaiting = _regInvitesCache.filter(regInviteAwaiting).length;
+      var wPill = document.getElementById('ws-reginv-wait-count');
+      if (wPill) wPill.textContent = String(awaiting);
+      waitItem.hidden = awaiting <= 0;
+    }
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  function loadRegInviteTodoCounts() {
+    var sendItem = document.getElementById('ws-todo-reginv-send-item');
+    var waitItem = document.getElementById('ws-todo-reginv-wait-item');
+    if (!sendItem && !waitItem) return; // not the Membership Director's tab
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/tour?list=registration-invites', { headers: rwAuthHeaders() })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
+          .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
+          if (res.data && res.data.youAre) msg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+          console.warn('[loadRegInviteTodoCounts] ' + msg);
+          return;
+        }
+        _regInvitesCache = Array.isArray(res.data.invites) ? res.data.invites : [];
+        updateRegInviteTodoItems();
+      })
+      .catch(function (err) { console.warn('[loadRegInviteTodoCounts] network error:', err); });
+  }
+
+  function showRegInvitesModal() {
+    var body = renderReportModal({
+      title: 'Registration Links',
+      subtitle: 'Every registration link sent to a prospective family this season, and where each stands: Sent → Opened → Registered. Resend a link, or dismiss a family who went quiet.',
+      meta: '',
+      icons: [],
+      bodyId: 'ws-reginv-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading sent links…</p>'
+    });
+    if (!body) return;
+    // Paint from cache instantly if we have one; refresh regardless.
+    if (Array.isArray(_regInvitesCache)) renderRegInvitesBody();
+    loadRegInvitesList();
+  }
+
+  function loadRegInvitesList() {
+    var body = document.getElementById('ws-reginv-body');
+    if (!body) return;
+    fetch('/api/tour?list=registration-invites', { headers: rwAuthHeaders() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) {
+          var msg = (r.data && r.data.error) || 'Could not load the list.';
+          if (r.data && r.data.youAre) msg += ' (logged in as ' + r.data.youAre + ', expected ' + r.data.expected + ')';
+          body.innerHTML = '<p class="ws-empty">' + escapeHtml(msg) + '</p>';
+          return;
+        }
+        _regInvitesCache = Array.isArray(r.data.invites) ? r.data.invites : [];
+        renderRegInvitesBody();
+        updateRegInviteTodoItems();
+      })
+      .catch(function (err) {
+        body.innerHTML = '<p class="ws-empty">Network error: ' + escapeHtml(err.message || 'unknown') + '</p>';
+      });
+  }
+
+  var REGINV_FILTERS = [
+    { key: 'waiting',    label: 'Waiting',    pill: 'is-new' },
+    { key: 'registered', label: 'Registered', pill: 'is-done' },
+    { key: 'dismissed',  label: 'Dismissed',  pill: 'is-muted' }
+  ];
+  var REGINV_STAGE = {
+    sent:       { label: 'Sent',       pill: 'is-new' },
+    opened:     { label: 'Opened',     pill: 'is-welcomed' },
+    registered: { label: 'Registered', pill: 'is-done' },
+    dismissed:  { label: 'Dismissed',  pill: 'is-muted' }
+  };
+
+  function renderRegInvitesBody() {
+    var body = document.getElementById('ws-reginv-body');
+    if (!body) return;
+    var invites = (_regInvitesCache || []).slice();
+    // Action-relevant first (waiting), then dismissed, then registered;
+    // most recent send first within a bucket.
+    var bucketOrder = { waiting: 0, dismissed: 1, registered: 2 };
+    invites.sort(function (a, b) {
+      var ba = bucketOrder[regInviteBucket(a)], bb = bucketOrder[regInviteBucket(b)];
+      if (ba !== bb) return ba - bb;
+      return String(b.last_sent_at || '').localeCompare(String(a.last_sent_at || ''));
+    });
+    if (invites.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No registration links sent yet this season. Send one from a toured family’s row in the Tour Pipeline, or with the Send Registration Form.</p>';
+      return;
+    }
+    var bucketCounts = { waiting: 0, registered: 0, dismissed: 0 };
+    invites.forEach(function (inv) { bucketCounts[regInviteBucket(inv)]++; });
+    // Same header + count-pill-filter chrome as the Welcome List.
+    var h = '<div class="ws-welcome-head-row">';
+    h += '<h4 class="ws-welcome-h">Links sent this season <button type="button" class="ws-welcome-count' + (_regInvitesFilter === null ? ' is-active' : '') + '" data-reginv-filter="all">' + invites.length + '</button></h4>';
+    h += '</div>';
+    h += '<div class="ws-welcome-counts">';
+    REGINV_FILTERS.forEach(function (m) {
+      var active = (_regInvitesFilter === m.key) ? ' is-active' : '';
+      h += '<button type="button" class="ws-welcome-cpill ' + m.pill + active + '" data-reginv-filter="' + m.key + '"><strong>' + bucketCounts[m.key] + '</strong> ' + m.label + '</button>';
+    });
+    h += '</div>';
+    var shown = invites.filter(function (inv) {
+      return _regInvitesFilter === null || regInviteBucket(inv) === _regInvitesFilter;
+    });
+    if (shown.length === 0) h += '<p class="ws-empty">No families in this group right now.</p>';
+    h += '<ul class="ws-welcome-list">';
+    shown.forEach(function (inv) {
+      var st = regInviteStatus(inv);
+      var stage = REGINV_STAGE[st] || REGINV_STAGE.sent;
+      var done = (st === 'registered' || st === 'dismissed');
+      h += '<li class="ws-welcome-item' + (done ? ' ws-welcome-done' : '') + '">';
+      h += '<div class="ws-welcome-head">';
+      h += '<span class="ws-welcome-name">' + escapeHtml(inv.name || '(no name)') + '</span>';
+      h += '<span class="ws-welcome-stage ' + stage.pill + '">' + stage.label + '</span>';
+      h += '</div>';
+      if (inv.email) h += '<div class="ws-welcome-contact"><a href="mailto:' + escapeHtml(inv.email) + '">' + escapeHtml(inv.email) + '</a></div>';
+      var sent = 'Sent ' + welcomeFmtDate(inv.last_sent_at);
+      if (Number(inv.send_count) > 1) sent += ' (×' + inv.send_count + ', first ' + welcomeFmtDate(inv.first_sent_at) + ')';
+      if (inv.sent_by) sent += ' by ' + inv.sent_by;
+      h += '<div class="ws-welcome-sub">' + escapeHtml(sent) + '</div>';
+      if (inv.note) h += '<div class="ws-welcome-sub"><em>' + escapeHtml(inv.note) + '</em></div>';
+      if (inv.opened_at) h += '<div class="ws-welcome-stamp">✓ Opened ' + escapeHtml(welcomeFmtDate(inv.opened_at)) + '</div>';
+      if (inv.registered_at) h += '<div class="ws-welcome-stamp">✓ Registered ' + escapeHtml(welcomeFmtDate(inv.registered_at)) + '</div>';
+      if (st === 'dismissed') h += '<div class="ws-welcome-sub">✕ Dismissed ' + escapeHtml(welcomeFmtDate(inv.dismissed_at)) + (inv.dismissed_by ? ' by ' + escapeHtml(inv.dismissed_by) : '') + '</div>';
+      var acts = '';
+      if (st !== 'registered') {
+        acts += '<button type="button" class="btn btn-sm btn-outline-dark ws-reginv-act" data-email="' + escapeHtml(inv.email) + '" data-act="resend">Resend link</button>';
+        if (inv.id) {
+          acts += (st === 'dismissed')
+            ? '<button type="button" class="btn btn-sm btn-outline-dark ws-reginv-act" data-id="' + inv.id + '" data-act="restore">Restore</button>'
+            : '<button type="button" class="btn btn-sm btn-outline-dark ws-reginv-act" data-id="' + inv.id + '" data-act="dismiss">Dismiss</button>';
+        }
+      }
+      if (acts) h += '<div class="ws-welcome-action">' + acts + '</div>';
+      h += '</li>';
+    });
+    h += '</ul>';
+    body.innerHTML = h;
+    body.querySelectorAll('[data-reginv-filter]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var v = this.getAttribute('data-reginv-filter');
+        _regInvitesFilter = (v === 'all') ? null : v;
+        renderRegInvitesBody();
+      });
+    });
+    body.querySelectorAll('.ws-reginv-act').forEach(function (btn) {
+      btn.addEventListener('click', function () { regInviteListAction(btn); });
+    });
+  }
+
+  function regInviteListAction(btn) {
+    var act = btn.getAttribute('data-act');
+    if (act === 'resend') {
+      var email = btn.getAttribute('data-email') || '';
+      var inv = regInviteForEmail(email);
+      if (!inv) return;
+      if (!confirm('Resend the registration link to ' + (inv.name || email) + '?')) return;
+      btn.disabled = true;
+      var orig = btn.textContent;
+      btn.textContent = 'Sending…';
+      sendRegInvite(inv.name || '', email, inv.note || '', function (ok, msg) {
+        if (!ok) {
+          btn.disabled = false; btn.textContent = orig;
+          alert(msg || 'Send failed.');
+          return;
+        }
+        renderRegInvitesBody();
+        if (msg) alert(msg);
+      });
+      return;
+    }
+    // dismiss / restore
+    var id = parseInt(btn.getAttribute('data-id'), 10);
+    if (!id) return;
+    btn.disabled = true;
+    var prev = btn.textContent;
+    btn.textContent = 'Saving…';
+    fetch('/api/tour', {
+      method: 'POST',
+      headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: act === 'restore' ? 'registration-invite-restore' : 'registration-invite-dismiss', id: id })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          btn.disabled = false; btn.textContent = prev;
+          alert((res.data && res.data.error) || 'Could not update.');
+          return;
+        }
+        var row = (_regInvitesCache || []).filter(function (i) { return i.id === id; })[0];
+        if (row) row.dismissed_at = res.data.dismissed_at || null;
+        renderRegInvitesBody();
+        updateRegInviteTodoItems();
+      })
+      .catch(function (err) {
+        btn.disabled = false; btn.textContent = prev;
+        alert('Network error: ' + ((err && err.message) || 'unknown'));
+      });
+  }
+
   // ── Upcoming Events (read-only, from the co-op Google Calendar) ────
   // The actual scheduled co-op events (socials, meetings, field trips, …)
   // pulled from the shared Google Calendar via /api/calendar — the same
@@ -21318,6 +21687,8 @@
         // in the schedule form) sees consistent shapes.
         _toursCache = tours.map(normalizeTourRow);
         updateMembershipTourTodoCounts();
+        // "Send Registration Link" cross-refs toured rows × sent invites.
+        updateRegInviteTodoItems();
       })
       .catch(function (err) { console.warn('[loadMembershipTourRequestsCount] network error:', err); });
   }
@@ -21406,6 +21777,9 @@
         if (listEl2) listEl2.innerHTML = '';
       }
     }
+    // Marking a tour toured/joined changes who still needs the
+    // registration link — recount that item off the same cache.
+    if (typeof updateRegInviteTodoItems === 'function') updateRegInviteTodoItems();
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 

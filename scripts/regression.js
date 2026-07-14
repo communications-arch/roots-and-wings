@@ -227,6 +227,7 @@ const unitTests = [
   'scripts/test-participation-season.js',
   'scripts/test-participation-settings.js',
   'scripts/test-welcome-lifecycle.js',
+  'scripts/test-reg-invites.js',
   'scripts/test-volunteer-assignments.js',
   'scripts/test-capabilities.js',
 ];
