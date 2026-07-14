@@ -1395,11 +1395,11 @@
         try { localStorage.setItem(CACHE_CLEANING_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
         applyCleaningData(data);
         var shell = pendingShell();
-        if (shell && typeof renderCleaningModal === 'function') {
+        if (shell && typeof renderCleaningManager === 'function') {
           try {
-            renderCleaningModal();
+            renderCleaningManager();
           } catch (rErr) {
-            console.error('[renderCleaningModal]', rErr);
+            console.error('[renderCleaningManager]', rErr);
             shell.innerHTML = '<p class="ws-empty">Could not draw the assignments: ' + escapeHtml((rErr && rErr.message) || 'unknown error') + '</p>';
           }
         }
@@ -6707,28 +6707,35 @@
   var cleaningModalSession = currentSession;
 
   var _cleaningModalPending = false;
+  // Folded into Roles Assignments (Erin, 2026-07-15): every legacy entry
+  // point (My Family Manage, the liaison's To Do + Reports row) lands on
+  // the hub's Cleaning lens; editing happens in its Manage drawer.
   function showCleaningManagementModal() {
-    if (!personDetail || !personDetailCard) return;
+    showRolesManagerModal({ view: 'cleaning' });
+  }
+
+  // The manager itself — the settings drawer over the Cleaning lens
+  // (liaison / VP / super; the server gates writes the same way).
+  function openCleaningManagerDrawer() {
+    openReportDrawer({
+      title: 'Cleaning Crew Management',
+      bodyId: 'cleaning-mgmt-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading assignments…</p>',
+      onClose: function () {
+        // Reflect drawer edits in the lens grid behind it.
+        if (typeof loadRolesMgrCleaning === 'function') loadRolesMgrCleaning();
+      }
+    });
     cleaningModalSession = currentSession;
     if (!cleaningDB.loaded) {
-      // Open a loading shell now and render when the data lands —
-      // previously the click silently no-oped until a second tap.
-      renderReportModal({
-        title: 'Cleaning Crew Management',
-        subtitle: 'Assign families to each cleaning area per session. Tap a chip’s × to remove a family; Copy pulls a whole session’s assignments across.',
-        meta: '',
-        icons: [],
-        bodyId: 'cleaning-mgmt-body',
-        bodyPlaceholder: '<p class="ws-empty">Loading assignments…</p>'
-      });
       _cleaningModalPending = true;
       loadCleaningData();
       return;
     }
-    renderCleaningModal();
+    renderCleaningManager();
   }
 
-  function renderCleaningModal() {
+  function renderCleaningManager() {
     var viewSess = cleaningModalSession;
     var sessClean = CLEANING_CREW.sessions[viewSess];
 
@@ -6752,19 +6759,12 @@
         familyOptions += '<option value="' + escapeAttr(n) + '"></option>';
       });
 
-    // Standard report shell (UI audit item #1, 2026-07-15) — chrome
-    // close + backdrop teardown come from renderReportModal; the
-    // assignment grid renders into its body below.
-    var shellBody = renderReportModal({
-      title: 'Cleaning Crew Management',
-      subtitle: 'Assign families to each cleaning area per session. Tap a chip’s × to remove a family; Copy pulls a whole session’s assignments across.',
-      meta: '',
-      icons: [],
-      bodyId: 'cleaning-mgmt-body',
-      bodyPlaceholder: ''
-    });
+    // Renders into the Cleaning Crew Management drawer's body (the
+    // settings drawer over the Roles Assignments Cleaning lens).
+    var shellBody = document.getElementById('cleaning-mgmt-body');
     if (!shellBody) return;
-    var html = '<div class="sc-modal">';
+    var html = '<p class="ws-body-hint">Assign families to each cleaning area per session. Tap a chip’s × to remove a family; Copy pulls a whole session’s assignments across.</p>';
+    html += '<div class="sc-modal">';
     html += '<datalist id="cle-families-datalist">' + familyOptions + '</datalist>';
 
     // Session pills — the same lens strip the Admin Calendar and
@@ -6858,10 +6858,10 @@
     shellBody.innerHTML = html;
 
     // Wire session pills
-    personDetailCard.querySelectorAll('.cle-sess-pill').forEach(function (btn) {
+    shellBody.querySelectorAll('.cle-sess-pill').forEach(function (btn) {
       btn.onclick = function () {
         cleaningModalSession = parseInt(this.getAttribute('data-sess'), 10);
-        renderCleaningModal();
+        renderCleaningManager();
       };
     });
 
@@ -6871,7 +6871,7 @@
     // sheet data (no DB id yet), first migrate the whole session into the DB
     // so that every existing chip becomes a real, deletable row — then delete
     // the one the user clicked.
-    personDetailCard.querySelectorAll('.cle-chip-x').forEach(function (btn) {
+    shellBody.querySelectorAll('.cle-chip-x').forEach(function (btn) {
       btn.onclick = function (e) {
         e.stopPropagation();
         var rawId = btn.getAttribute('data-assign-id');
@@ -6890,7 +6890,7 @@
 
         promise.then(function () {
           loadCleaningData();
-          setTimeout(renderCleaningModal, 300);
+          setTimeout(renderCleaningManager, 300);
         }).catch(function (err) { alert('Error removing: ' + (err && err.message || err)); });
       };
     });
@@ -6899,7 +6899,7 @@
     // derived chips but no DB rows, migrate them all to the DB before
     // inserting the new name, so the UI doesn't lose the existing chips when
     // applyCleaningData() overwrites CLEANING_CREW.sessions[s] from the DB.
-    personDetailCard.querySelectorAll('.cle-btn-add').forEach(function (btn) {
+    shellBody.querySelectorAll('.cle-btn-add').forEach(function (btn) {
       btn.onclick = function () {
         var input = btn.parentElement.querySelector('.cle-add-input');
         var name = input.value.trim();
@@ -6921,7 +6921,7 @@
           .then(function (r) {
             if (r && r.error) { alert(r.error); btn.disabled = false; btn.textContent = originalText; return; }
             loadCleaningData();
-            setTimeout(renderCleaningModal, 300);
+            setTimeout(renderCleaningManager, 300);
           })
           .catch(function (err) {
             alert('Error saving: ' + (err && err.message || err));
@@ -6932,7 +6932,7 @@
     });
 
     // Wire task editor toggles
-    personDetailCard.querySelectorAll('.cle-tasks-toggle').forEach(function (btn) {
+    shellBody.querySelectorAll('.cle-tasks-toggle').forEach(function (btn) {
       btn.onclick = function () {
         var areaId = btn.getAttribute('data-area-id');
         var editor = document.getElementById('clmTasksEditor-' + areaId);
@@ -6970,7 +6970,7 @@
             for (var i = 0; i < cleaningDB.areas.length; i++) {
               if (cleaningDB.areas[i].id === parseInt(areaId, 10)) { cleaningDB.areas[i].tasks = newTasks; break; }
             }
-            renderCleaningModal();
+            renderCleaningManager();
           });
         };
       };
@@ -6987,7 +6987,7 @@
         if (!confirm('Copy ' + fromAssignments.length + ' assignments from session ' + fromSess + ' to session ' + toSess + '?')) return;
         Promise.all(fromAssignments.map(function (a) {
           return cleaningApiCall('POST', 'action=assignment', { session_number: toSess, cleaning_area_id: a.cleaning_area_id, family_name: a.family_name });
-        })).then(function () { loadCleaningData(); setTimeout(renderCleaningModal, 300); });
+        })).then(function () { loadCleaningData(); setTimeout(renderCleaningManager, 300); });
       };
     }
   }
@@ -11507,13 +11507,19 @@
   // "All caught up" only when every visible-by-default item ended up
   // hidden. Each loader calls this after toggling its own item.
   function recomputeTodoEmptyState() {
-    var emptyEl = document.getElementById('ws-todo-empty');
-    var list = document.getElementById('ws-todo-list');
-    if (!emptyEl || !list) return;
-    var items = list.querySelectorAll('li[id$="-item"]');
-    var anyVisible = false;
-    items.forEach(function (li) { if (!li.hidden) anyVisible = true; });
-    emptyEl.hidden = anyVisible;
+    // EVERY role section renders its own To Do card with the same ids
+    // (pre-existing quirk), so recompute each list — getElementById only
+    // reached the FIRST card, leaving "All caught up" under real items
+    // on later cards (Erin, 2026-07-15).
+    var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
+    if (!lists.length) return;
+    lists.forEach(function (list) {
+      var emptyEl = list.querySelector('li[id="ws-todo-empty"]');
+      if (!emptyEl) return;
+      var anyVisible = false;
+      list.querySelectorAll('li[id$="-item"]').forEach(function (li) { if (!li.hidden) anyVisible = true; });
+      emptyEl.hidden = anyVisible;
+    });
     // Persist the settled state so the next page load can paint the list
     // immediately instead of flashing "All caught up" while the per-item
     // fetches run (~1s on prod cold starts). See restoreTodoSnapshot.
@@ -11529,14 +11535,17 @@
   // then the loaders refresh it (cache-then-revalidate). Merges by id so a
   // super-user's View-As across roles keeps each role's items remembered.
   function snapshotTodoState() {
-    var list = document.getElementById('ws-todo-list');
-    if (!list) return;
+    // All To Do cards (one per role section), not just the first.
+    var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
+    if (!lists.length) return;
     var snap;
     try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || '{}'); } catch (e) { snap = {}; }
     if (!snap || typeof snap !== 'object') snap = {};
-    list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
-      var pre = li.querySelector('.ws-link-count');
-      snap[li.id] = { hidden: !!li.hidden, count: pre ? pre.textContent : '' };
+    lists.forEach(function (list) {
+      list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
+        var pre = li.querySelector('.ws-link-count');
+        snap[li.id] = { hidden: !!li.hidden, count: pre ? pre.textContent : '' };
+      });
     });
     try { localStorage.setItem('rw_todo_state', JSON.stringify(snap)); } catch (e) { /* quota */ }
   }
@@ -18464,10 +18473,16 @@
     // can pre-focus — the Special Events Liaison's card lands straight
     // on her view.
     _rolesMgrState.view = ROLES_MGR_VIEW_IDS[opts.view] ? opts.view : 'roles';
-    var icons = [
-      { label: 'Add Role',   icon: ICON_SVG.add,      aria: 'Add a new role',                       action: function () { showRoleEditModal(null); } },
-      { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } }
-    ];
+    // Add Role only for viewers who can actually edit the org structure —
+    // lens-scoped visitors (Cleaning Crew Liaison, SEL) don't get a
+    // button the server would refuse (2026-07-15).
+    var myRolesForIcons = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    var canAddRole = isCommsUser() || myRolesForIcons.some(function (r) {
+      return ['President', 'Vice President', 'Communications Director'].indexOf(r) !== -1;
+    });
+    var icons = [];
+    if (canAddRole) icons.push({ label: 'Add Role', icon: ICON_SVG.add, aria: 'Add a new role', action: function () { showRoleEditModal(null); } });
+    icons.push({ label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } });
     var body = renderReportModal({
       title: 'Roles & Committees',
       subtitle: 'Every job description, term, and hierarchy in one place. Edits are stamped with who and when.',
@@ -18527,7 +18542,7 @@
       // filter), cleaning is fetched per year.
       renderRolesMgrAmLens();
       renderRolesMgrPmLens();
-      if (_rolesMgrAsgState.reviewer) loadRolesMgrCleaning();
+      if (_rolesMgrAsgState.reviewer || rolesMgrViewerCanCleaning()) loadRolesMgrCleaning();
     });
     body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -18538,6 +18553,14 @@
     loadRolesManagerTree();
     loadRolesMgrSpecialEvents();
     loadRolesMgrAssignments();
+    // The Cleaning Crew Liaison gets the Cleaning lens without full
+    // reviewer scope (Erin, 2026-07-15) — pill + rota load immediately;
+    // the reviewer path re-runs the load for VP/super harmlessly.
+    if (rolesMgrViewerCanCleaning()) {
+      var clPillNow = document.getElementById('roles-mgr-cl-pill');
+      if (clPillNow) clPillNow.hidden = false;
+      loadRolesMgrCleaning();
+    }
   }
 
   // Lens key → body container id. Also the allowlist for opts.view.
@@ -18679,6 +18702,16 @@
     cleaningLoading: false
   };
 
+  // Cleaning writes belong to the Cleaning Crew Liaison (plus VP's
+  // volunteer super-scope and super users) — Erin, 2026-07-15. The
+  // liaison reaches ONLY the Cleaning lens this way; the other hub
+  // lenses stay reviewer-gated. Server enforces the same gate.
+  function rolesMgrViewerCanCleaning() {
+    if (isCommsUser()) return true;
+    var roles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    return roles.indexOf('Cleaning Crew Liaison') !== -1 || roles.indexOf('Vice President') !== -1;
+  }
+
   function loadRolesMgrAssignments() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -18691,7 +18724,10 @@
         // the hub is for the people who plan the whole year, so they (and
         // 403s) keep the default: pills hidden, no cleaning fetch.
         if (!data || data.reviewer_scope !== 'all') {
-          if (['am', 'pm', 'cleaning'].indexOf(_rolesMgrState.view) !== -1) {
+          // Don't kick a cleaning-capable viewer (the liaison) off the
+          // Cleaning lens just because they lack full reviewer scope.
+          var kick = rolesMgrViewerCanCleaning() ? ['am', 'pm'] : ['am', 'pm', 'cleaning'];
+          if (kick.indexOf(_rolesMgrState.view) !== -1) {
             rolesMgrSetView('roles');
           }
           return;
@@ -18957,12 +18993,13 @@
       raCountPill('ws-wv-ok', filled + ' filled'),
       raCountPill(open > 0 ? 'ws-wv-resent' : 'ws-wv-ok', open + ' open')
     ];
-    // The management modal always edits the ACTIVE year's rota, so the
-    // doorway only shows when the picker is on it.
-    var manage = (cl.year === ACTIVE_SESSION_YEAR)
+    // The manager drawer always edits the ACTIVE year's rota, so the
+    // doorway only shows when the picker is on it AND the viewer can
+    // write cleaning (liaison / VP / super).
+    var manage = (cl.year === ACTIVE_SESSION_YEAR && rolesMgrViewerCanCleaning())
       ? { label: 'Manage Cleaning Crew', action: 'cleaning' } : null;
     var h = raLensHead(pills, manage);
-    h += '<p class="ws-body-hint">One family per area per session' + (manage ? ' — assignments are managed in Cleaning Crew Management.' : '. Viewing ' + escapeHtmlWs(cl.year) + ' (read-only — editing always opens the current year).') + '</p>';
+    h += '<p class="ws-body-hint">One family per area per session' + (manage ? ' — tap Manage to assign families right here.' : '. Viewing ' + escapeHtmlWs(cl.year) + ' (read-only' + (cl.year !== ACTIVE_SESSION_YEAR ? ' — editing always opens the current year' : '') + ').') + '</p>';
     if (cl.areas.length === 0) {
       h += '<p class="ws-empty">No cleaning areas defined' + (cl.year !== ACTIVE_SESSION_YEAR ? ' for ' + escapeHtmlWs(cl.year) : '') + '.</p>';
     } else {
@@ -18990,7 +19027,8 @@
           closeDetail();
           showScheduleBuilder();
         } else if (action === 'cleaning') {
-          showCleaningManagementModal();
+          // Drawer over the lens — the report stays visible behind it.
+          openCleaningManagerDrawer();
         }
       });
     });

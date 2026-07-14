@@ -1198,6 +1198,22 @@ module.exports = async function handler(req, res) {
 
     // ── Assignment CRUD ──
     if (action === 'assignment') {
+      // Write gate (Erin, 2026-07-15): cleaning assignments are the
+      // Cleaning Crew Liaison's to manage (plus VP's volunteer
+      // super-scope and super users via View-As). Previously any
+      // signed-in member could write. Reads stay member-open. VP title
+      // is checked both ways — roles-v2 stores it hyphenated.
+      const canManageCleaning =
+        (await canEditAsRole(user.email, 'Cleaning Crew Liaison')) ||
+        (await canEditAsRole(user.email, 'Vice President')) ||
+        (await canEditAsRole(user.email, 'Vice-President')) ||
+        isSuperUser(user.email);
+      if (!canManageCleaning) {
+        return res.status(403).json({
+          error: 'Only the Cleaning Crew Liaison (or the VP) can manage cleaning assignments.',
+          youAre: (user.viewedBy || user.email)
+        });
+      }
       if (req.method === 'POST') {
         const { session_number, cleaning_area_id, family_name } = req.body || {};
         if (!session_number || !cleaning_area_id || !family_name) {
