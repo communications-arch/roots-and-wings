@@ -535,14 +535,20 @@ async function getPmAssistantEmail() {
 function prettySessionPrefs(a) {
   return a.map(s => s === 'flexible' ? 'any session' : 'Session ' + s).join(', ');
 }
-function prettyHourPrefs(a) {
-  const map = {
-    'first': 'PM1 (first hour)',
-    'last': 'PM2 (last hour)',
-    'flexible': 'Either PM1 or PM2',
-    '2hr-required': 'Both PM1 & PM2 (required)',
-    '2hr-optional': 'Both PM1 & PM2 (one or both)'
-  };
+function prettyHourPrefs(a, isAM) {
+  const map = isAM
+    ? {
+        'both': 'Both morning hours (10:00–11:55)',
+        'first': 'Hour 1 (10:00–10:55)',
+        'last': 'Hour 2 (11:00–11:55)'
+      }
+    : {
+        'first': 'PM1 (first hour)',
+        'last': 'PM2 (last hour)',
+        'flexible': 'Either PM1 or PM2',
+        '2hr-required': 'Both PM1 & PM2 (required)',
+        '2hr-optional': 'Both PM1 & PM2 (one or both)'
+      };
   return a.map(v => map[v] || v).join(', ');
 }
 function prettySpace(a, other) {
@@ -586,25 +592,36 @@ function prettyAges(a, other) {
 async function sendSubmissionConfirmation(sub) {
   if (!process.env.RESEND_API_KEY) return;
   const resend = new Resend(process.env.RESEND_API_KEY);
+  // Morning and afternoon ideas share this pipeline since the one-builder
+  // merge — the wording follows the submission's period (Erin, 2026-07-15:
+  // a morning submission's email said "PM class").
+  const isAM = String(sub.class_period || 'PM').toUpperCase() === 'AM';
+  const periodWord = isAM ? 'Morning' : 'Afternoon';
   const pmEmail = await getPmAssistantEmail();
 
   const cc = ['vicepresident@rootsandwingsindy.com'];
-  if (pmEmail && pmEmail.toLowerCase() !== sub.submitted_by_email.toLowerCase()) {
+  // The Afternoon Class Liaison is only copied on afternoon ideas.
+  if (!isAM && pmEmail && pmEmail.toLowerCase() !== sub.submitted_by_email.toLowerCase()) {
     cc.push(pmEmail);
   }
 
   const rows = [
     ['Class name',       escapeHtml(sub.class_name)],
     ['Sessions',         escapeHtml(prettySessionPrefs(sub.session_preferences))],
-    ['Hour preference',  escapeHtml(prettyHourPrefs(sub.hour_preference))],
+    ['Hour preference',  escapeHtml(prettyHourPrefs(sub.hour_preference, isAM))],
     ['Assistants',       escapeHtml(sub.assistant_count.join(' or ') + ' helper(s)')],
     ['Co-teachers',      escapeHtml(sub.co_teachers || '—')],
-    ['Space request',    escapeHtml(prettySpace(sub.space_request, sub.space_request_other))],
-    ['Max students',     escapeHtml(String(sub.max_students))],
     ['Age groups',       escapeHtml(prettyAges(sub.age_groups, sub.age_groups_other))],
     ['Teen assistant OK', sub.open_to_teen_assistant ? 'Yes — willing to host a Cedars or Pigeons (12+) assistant' : 'No'],
     ['Prerequisites',    escapeHtml(sub.prerequisites || '—')]
   ];
+  // Space + class-size only apply to afternoon electives (morning classes
+  // are whole-group with no size cap — the form doesn't collect these).
+  if (!isAM) {
+    rows.splice(5, 0,
+      ['Space request',  escapeHtml(prettySpace(sub.space_request, sub.space_request_other))],
+      ['Max students',   escapeHtml(String(sub.max_students))]);
+  }
   const rowsHtml = rows.map(
     ([k, v]) => `<tr><td style="padding:6px 16px 6px 0;font-weight:bold;vertical-align:top;">${k}</td><td>${v}</td></tr>`
   ).join('');
@@ -615,10 +632,12 @@ async function sendSubmissionConfirmation(sub) {
       to: sub.submitted_by_email,
       cc,
       replyTo: 'vicepresident@rootsandwingsindy.com',
-      subject: emailSubject(`PM Class Submission Received — ${sub.class_name}`),
+      subject: emailSubject(`${periodWord} Class Submission Received — ${sub.class_name}`),
       html: `
-        <h2>Thanks for submitting a PM class!</h2>
-        <p>Your submission has been logged. The VP and Afternoon Class Liaison have been copied on this email and will reach out when they're planning the next session.</p>
+        <h2>Thanks for submitting a ${periodWord.toLowerCase()} class!</h2>
+        <p>Your submission has been logged. ${isAM
+          ? 'The VP has been copied on this email, and the class review team will reach out when they’re planning the next session.'
+          : 'The VP and Afternoon Class Liaison have been copied on this email and will reach out when they’re planning the next session.'}</p>
         <table style="border-collapse:collapse;font-family:sans-serif;">${rowsHtml}</table>
         <h3 style="margin-top:18px;">Description</h3>
         <p style="white-space:pre-wrap;">${escapeHtml(sub.description)}</p>
