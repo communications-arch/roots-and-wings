@@ -12640,8 +12640,11 @@
     }).join('');
     var h = '<div class="ws-waiver-form">';
     h += '<label>Member<select class="ws-part-exempt-member">' + opts + '</select></label>';
-    h += '<label>Start date<input type="date" class="ws-part-exempt-start" value="' + escapeHtmlWs(existing.start_date || '') + '"></label>';
-    h += '<label>End date <span class="ws-part-weight-desc">(optional, blank = ongoing)</span><input type="date" class="ws-part-exempt-end" value="' + escapeHtmlWs(existing.end_date || '') + '"></label>';
+    // DATE columns serialize as full ISO timestamps, which a date input
+    // silently rejects (blank field) — slice to YYYY-MM-DD. Same landmine
+    // as the Tour Pipeline reschedule form.
+    h += '<label>Start date<input type="date" class="ws-part-exempt-start" value="' + escapeHtmlWs(String(existing.start_date || '').slice(0, 10)) + '"></label>';
+    h += '<label>End date <span class="ws-part-weight-desc">(optional, blank = ongoing)</span><input type="date" class="ws-part-exempt-end" value="' + escapeHtmlWs(String(existing.end_date || '').slice(0, 10)) + '"></label>';
     h += '<label>Reason<select class="ws-part-exempt-reason">' + reasonOpts + '</select></label>';
     h += '<label>Note <span class="ws-part-weight-desc">(optional)</span><textarea class="ws-part-exempt-note" rows="2" maxlength="500">' + escapeHtmlWs(existing.note || '') + '</textarea></label>';
     h += '<input type="hidden" class="ws-part-exempt-id" value="' + escapeHtmlWs(existing.id || '') + '">';
