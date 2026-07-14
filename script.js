@@ -6607,8 +6607,10 @@
         html += '</ul></div>';
         personDetailCard.innerHTML = html;
         personDetail.style.display = 'flex';
-        personDetailCard.querySelector('.detail-close').onclick = function () { personDetail.style.display = 'none'; };
-        personDetail.onclick = function (ev) { if (ev.target === personDetail) personDetail.style.display = 'none'; };
+        document.body.style.overflow = 'hidden';
+        // Shared teardown (restores body scroll; UI audit, 2026-07-15).
+        personDetailCard.querySelector('.detail-close').onclick = closeDetail;
+        personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
       };
     });
   }
@@ -6747,10 +6749,13 @@
 
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
 
-    // Wire close
-    personDetailCard.querySelector('.detail-close').onclick = function () { personDetail.style.display = 'none'; };
-    personDetail.onclick = function (e) { if (e.target === personDetail) personDetail.style.display = 'none'; };
+    // Wire close through the shared teardown (restores body scroll and
+    // clears any open drawer — bypassing it left the page unscrollable;
+    // UI audit, 2026-07-15).
+    personDetailCard.querySelector('.detail-close').onclick = closeDetail;
+    personDetail.onclick = function (e) { if (e.target === personDetail) closeDetail(); };
 
     // Wire session buttons
     personDetailCard.querySelectorAll('.cle-sess-btn').forEach(function (btn) {
@@ -9035,6 +9040,15 @@
       + '<div id="ws-tours-table-target"></div>';
     var stripEl = body.querySelector('#ws-tours-counts-strip');
     var tableTarget = body.querySelector('#ws-tours-table-target');
+    // Strip pills filter the table (toggle back to All on re-tap). Bound
+    // once here — refreshAll only swaps the strip's innerHTML.
+    stripEl.addEventListener('click', function (e) {
+      var p = e.target.closest('[data-strip-filter]');
+      if (!p) return;
+      var v = p.getAttribute('data-strip-filter');
+      _toursFilter = (_toursFilter === v) ? 'all' : v;
+      refreshAll();
+    });
 
       function computeCounts() {
         // Counted on DISPLAY status so the Link Sent / Reg Expired
@@ -9073,21 +9087,26 @@
         var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
         if (metaEl) metaEl.textContent = total + ' tour' + (total === 1 ? '' : 's');
 
-        // Counts strip — replace the inner pills only so the parent
-        // <div class="rd-counts"> wrapper (and its sibling table) stay
-        // attached.
+        // Counts strip — CLICKABLE filter pills (Erin, 2026-07-15): tap a
+        // stage to scope the table to it, tap it again to go back to All.
+        // Replace the inner pills only so the parent <div class="rd-counts">
+        // wrapper (and its sibling table) stay attached.
         if (stripEl) {
+          var pill = function (filterVal, cls, label) {
+            var active = _toursFilter === filterVal ? ' is-active' : '';
+            return '<button type="button" class="ws-tour-status ws-tour-status-' + cls + active + '" data-strip-filter="' + filterVal + '" aria-pressed="' + (active ? 'true' : 'false') + '">' + label + '</button>';
+          };
           var s = '';
-          s += '<span class="ws-tour-status ws-tour-status-inquiry">'   + counts.inquiry   + ' Inquiry</span>';
-          s += '<span class="ws-tour-status ws-tour-status-requested">' + counts.requested + ' Requested</span>';
-          s += '<span class="ws-tour-status ws-tour-status-scheduled">' + counts.scheduled + ' Scheduled</span>';
-          s += '<span class="ws-tour-status ws-tour-status-toured">'    + counts.toured    + ' Toured</span>';
-          if (counts.followed_up) s += '<span class="ws-tour-status ws-tour-status-toured">' + counts.followed_up + ' Followed up</span>';
-          s += '<span class="ws-tour-status ws-tour-status-link_sent">' + counts.link_sent + ' Link Sent</span>';
-          if (counts.reg_expired) s += '<span class="ws-tour-status ws-tour-status-reg_expired">' + counts.reg_expired + ' Reg Expired</span>';
-          s += '<span class="ws-tour-status ws-tour-status-joined">'    + counts.joined    + ' Joined</span>';
-          s += '<span class="ws-tour-status ws-tour-status-declined">'  + counts.declined  + ' Declined</span>';
-          s += '<span class="ws-tour-status ws-tour-status-ghosted">'   + counts.ghosted   + ' Ghosted</span>';
+          s += pill('inquiry', 'inquiry', counts.inquiry + ' Inquiry');
+          s += pill('requested', 'requested', counts.requested + ' Requested');
+          s += pill('scheduled', 'scheduled', counts.scheduled + ' Scheduled');
+          s += pill('toured', 'toured', counts.toured + ' Toured');
+          if (counts.followed_up) s += pill('followed_up', 'toured', counts.followed_up + ' Followed up');
+          s += pill('link_sent', 'link_sent', counts.link_sent + ' Link Sent');
+          if (counts.reg_expired) s += pill('reg_expired', 'reg_expired', counts.reg_expired + ' Reg Expired');
+          s += pill('joined', 'joined', counts.joined + ' Joined');
+          s += pill('declined', 'declined', counts.declined + ' Declined');
+          s += pill('ghosted', 'ghosted', counts.ghosted + ' Ghosted');
           stripEl.innerHTML = s;
         }
 
@@ -19078,7 +19097,7 @@
   function showFacilitiesAdminModal() {
     var body = renderReportModal({
       title: 'Facilities — Rooms',
-      subtitle: 'The rooms the Class Builder can assign. The note shows right in the room picker; details are for anything longer.',
+      subtitle: 'The rooms the Class Builder can assign — one class per room per hour. The builder note shows right in the room picker; details are for anything longer. Archiving hides a room from the picker without touching past assignments.',
       meta: '',
       icons: [],
       bodyId: 'fac-admin-body',
@@ -19107,44 +19126,136 @@
       });
   }
 
-  function facRoomRowHtml(r) {
-    var h = '<div class="perm-row" data-room-id="' + (r.id || 'new') + '">';
-    h += '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(r.name || '') + '"></div>';
-    h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(r.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
-    h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="2" maxlength="2000">' + escapeHtmlWs(r.details || '') + '</textarea></div>';
-    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (r.is_outdoor ? ' checked' : '') + '> \uD83C\uDF33 Outdoor space \u2014 needs an indoor rain backup when assigned</label>';
-    h += '<div class="perm-chips">';
-    h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (r.id ? 'Save' : 'Add room') + '</button>';
-    if (r.id) h += '<button type="button" class="sc-btn sc-btn-del fac-archive">Archive</button>';
-    h += '<span class="perm-status fac-status" aria-live="polite"></span>';
-    h += '</div></div>';
-    return h;
-  }
+  // Rebuilt to the standard report shape (Erin's UI audit, 2026-07-15):
+  // sortable table + status pills + column funnel filter, with add/edit
+  // in the shared settings drawer. Replaces the old stack of always-open
+  // edit forms (which also carried a broken '\api\cleaning' fetch URL).
+  var FAC_ROOM_COLS = [
+    { key: 'name', label: 'Room', type: 'string',
+      sortValue: function (r) { return String(r.name || '').toLowerCase(); },
+      render: function (r) { return escapeHtmlWs(r.name || ''); }
+    },
+    { key: 'status', label: 'Status', type: 'string',
+      sortValue: function (r) { return r.status === 'active' ? '0' : '1'; },
+      render: function (r) {
+        return r.status === 'active'
+          ? '<span class="ws-welcome-stage is-done">Active</span>'
+          : '<span class="ws-welcome-stage is-muted">Archived</span>';
+      }
+    },
+    { key: 'builder_note', label: 'Builder note', type: 'string',
+      render: function (r) { return r.builder_note ? escapeHtmlWs(r.builder_note) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'is_outdoor', label: 'Outdoor', type: 'string',
+      sortValue: function (r) { return r.is_outdoor ? '0' : '1'; },
+      render: function (r) { return r.is_outdoor ? '🌳 Outdoor' : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'details', label: 'Details', type: 'string', sortable: false,
+      render: function (r) {
+        var d = String(r.details || '').trim();
+        if (!d) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        var short = d.length > 90 ? d.slice(0, 90).replace(/\s+\S*$/, '') + '…' : d;
+        return '<span class="ws-inq-msg">' + escapeHtmlWs(short) + '</span>';
+      }
+    },
+    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
+      render: function (r) {
+        var btns = '';
+        if (r.status === 'active') {
+          btns += '<button type="button" class="sc-btn fac-edit" data-room-id="' + r.id + '">Edit</button>';
+          btns += '<button type="button" class="sc-btn sc-btn-del fac-archive" data-room-id="' + r.id + '">Archive</button>';
+        } else {
+          btns += '<button type="button" class="sc-btn fac-restore" data-room-id="' + r.id + '">Restore</button>';
+        }
+        return '<div class="ws-srt-actions">' + btns + '</div>';
+      }
+    }
+  ];
 
   function renderFacilitiesAdmin() {
     var body = document.getElementById('fac-admin-body');
     if (!body) return;
-    var active = _facAdminState.rooms.filter(function (r) { return r.status === 'active'; });
-    var archived = _facAdminState.rooms.filter(function (r) { return r.status === 'archived'; });
-    var h = '<p class="ws-body-hint">Rooms feed the Class Builder’s room picker — one class per room per hour. Archiving hides a room from the picker without touching past assignments.</p>';
-    if (active.length === 0) h += '<p class="ws-empty">No rooms yet — add the first one below.</p>';
-    active.forEach(function (r) { h += facRoomRowHtml(r); });
-    h += '<h4 class="roles-mgr-se-head">+ Add a room</h4>';
-    h += facRoomRowHtml({});
-    if (archived.length) {
-      h += '<details style="margin-top:14px;"><summary style="cursor:pointer;font-weight:600;">Archived (' + archived.length + ')</summary>';
-      archived.forEach(function (r) {
-        h += '<div class="perm-row perm-row-locked"><div class="perm-head"><span class="perm-label">' + escapeHtmlWs(r.name) + '</span></div>'
-          + (r.builder_note ? '<p class="perm-desc">' + escapeHtmlWs(r.builder_note) + '</p>' : '')
-          + '<button type="button" class="sc-btn fac-restore" data-room-id="' + r.id + '">Restore</button></div>';
-      });
-      h += '</details>';
+    var rooms = _facAdminState.rooms || [];
+    var activeCount = rooms.filter(function (r) { return r.status === 'active'; }).length;
+    var archivedCount = rooms.length - activeCount;
+    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+    if (metaEl) metaEl.textContent = activeCount + ' active room' + (activeCount === 1 ? '' : 's');
+    body.innerHTML = '<div class="coop-cal-toolbar">'
+      + '<span></span><button id="fac-add-room" class="btn btn-outline-dark btn-sm" type="button">+ Add room</button>'
+      + '</div>'
+      + '<div id="fac-rooms-table"></div>';
+    var addBtn = document.getElementById('fac-add-room');
+    if (addBtn) addBtn.addEventListener('click', function () { facOpenRoomDrawer(null); });
+    var tableTarget = document.getElementById('fac-rooms-table');
+    if (rooms.length === 0) {
+      tableTarget.innerHTML = '<p class="ws-empty">No rooms yet — add the first one with “+ Add room”.</p>';
+      return;
     }
-    body.innerHTML = h;
-    wireFacilitiesAdmin(body);
+    var filter = _facAdminState.filter || 'active';
+    var cols = FAC_ROOM_COLS.map(function (c) {
+      if (c.key !== 'status') return c;
+      var col = Object.assign({}, c);
+      col.filter = {
+        options: [
+          { value: 'active', label: 'Active', count: activeCount },
+          { value: 'archived', label: 'Archived', count: archivedCount },
+          { value: 'all', label: 'Any', count: rooms.length }
+        ],
+        current: filter,
+        onChange: function (v) { _facAdminState.filter = v; renderFacilitiesAdmin(); }
+      };
+      return col;
+    });
+    var shown = rooms.filter(function (r) { return filter === 'all' || r.status === filter; });
+    if (shown.length === 0) {
+      tableTarget.innerHTML = '<p class="ws-empty">No ' + (filter === 'all' ? '' : filter + ' ') + 'rooms right now.</p>';
+      return;
+    }
+    renderSortableTable(tableTarget, cols, shown, {
+      initialSort: { key: 'name', dir: 'asc' }
+    });
+    wireFacilitiesAdmin(tableTarget);
   }
 
-  function facSaveRoom(payload, statusEl, btn) {
+  // Add/Edit lives in the shared settings drawer over the rooms table —
+  // the site standard for admin sub-views of an open modal.
+  function facOpenRoomDrawer(room) {
+    var isEdit = !!(room && room.id);
+    openReportDrawer({
+      title: isEdit ? 'Edit room' : 'Add a room',
+      bodyId: 'fac-room-drawer',
+      bodyPlaceholder: ''
+    });
+    var el = document.getElementById('fac-room-drawer');
+    if (!el) return;
+    var v = room || {};
+    var h = '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(v.name || '') + '"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(v.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="3" maxlength="2000">' + escapeHtmlWs(v.details || '') + '</textarea></div>';
+    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> 🌳 Outdoor space — needs an indoor rain backup when assigned</label>';
+    h += '<div class="perm-chips" style="margin-top:12px;">';
+    h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (isEdit ? 'Save changes' : 'Add room') + '</button>';
+    h += '<span class="perm-status fac-status" aria-live="polite"></span>';
+    h += '</div>';
+    el.innerHTML = h;
+    var nameInp = el.querySelector('.fac-name');
+    if (nameInp) nameInp.focus();
+    el.querySelector('.fac-save').addEventListener('click', function () {
+      var st = el.querySelector('.fac-status');
+      var name = el.querySelector('.fac-name').value.trim();
+      if (!name) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'A room name is required'; return; }
+      var payload = {
+        name: name,
+        builder_note: el.querySelector('.fac-note').value.trim(),
+        details: el.querySelector('.fac-details').value.trim(),
+        is_outdoor: !!el.querySelector('.fac-outdoor').checked
+      };
+      if (isEdit) payload.id = room.id;
+      facSaveRoom(payload, st, this, function () { closeReportDrawer(true); });
+    });
+  }
+
+  function facSaveRoom(payload, statusEl, btn, onOk) {
     if (btn) btn.disabled = true;
     fetch('/api/cleaning?action=rooms', {
       method: 'POST',
@@ -19159,6 +19270,7 @@
           return;
         }
         scheduleBuilderState.rooms = []; // stale — builder refetches on next open
+        if (typeof onOk === 'function') onOk();
         loadFacilitiesAdmin();
       })
       .catch(function () {
@@ -19167,41 +19279,34 @@
       });
   }
 
-  function wireFacilitiesAdmin(body) {
-    body.querySelectorAll('.perm-row[data-room-id]').forEach(function (row) {
-      var idAttr = row.getAttribute('data-room-id');
-      var id = idAttr === 'new' ? null : parseInt(idAttr, 10);
-      var st = row.querySelector('.fac-status');
-      var saveBtn = row.querySelector('.fac-save');
-      if (saveBtn) saveBtn.addEventListener('click', function () {
-        var name = row.querySelector('.fac-name').value.trim();
-        if (!name) { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'A room name is required'; } return; }
-        var payload = {
-          name: name,
-          builder_note: row.querySelector('.fac-note').value.trim(),
-          details: row.querySelector('.fac-details').value.trim(),
-          is_outdoor: !!(row.querySelector('.fac-outdoor') && row.querySelector('.fac-outdoor').checked)
-        };
-        if (id) payload.id = id;
-        facSaveRoom(payload, st, saveBtn);
+  function wireFacilitiesAdmin(container) {
+    if (!container) return;
+    container.querySelectorAll('.fac-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var rid = parseInt(btn.getAttribute('data-room-id'), 10);
+        var room = (_facAdminState.rooms || []).filter(function (r) { return r.id === rid; })[0];
+        if (room) facOpenRoomDrawer(room);
       });
-      var archBtn = row.querySelector('.fac-archive');
-      if (archBtn) archBtn.addEventListener('click', function () {
+    });
+    container.querySelectorAll('.fac-archive').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var rid = parseInt(btn.getAttribute('data-room-id'), 10);
         if (!confirm('Archive this room? It disappears from the room picker; classes already assigned to it keep the name.')) return;
-        fetch('/api/cleaning?action=rooms&id=' + id, { method: 'DELETE', headers: rwAuthHeaders() })
+        btn.disabled = true;
+        fetch('/api/cleaning?action=rooms&id=' + rid, { method: 'DELETE', headers: rwAuthHeaders() })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
-            if (!res.ok) { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Archive failed'; } return; }
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Archive failed.'); return; }
             scheduleBuilderState.rooms = [];
             loadFacilitiesAdmin();
           })
-          .catch(function () { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'Network error'; } });
+          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
       });
     });
-    body.querySelectorAll('.fac-restore').forEach(function (btn) {
+    container.querySelectorAll('.fac-restore').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var rid = parseInt(btn.getAttribute('data-room-id'), 10);
-        var room = _facAdminState.rooms.filter(function (r) { return r.id === rid; })[0];
+        var room = (_facAdminState.rooms || []).filter(function (r) { return r.id === rid; })[0];
         if (!room) return;
         facSaveRoom({ id: room.id, name: room.name, builder_note: room.builder_note, details: room.details, sort_order: room.sort_order, is_outdoor: room.is_outdoor, status: 'active' }, null, btn);
       });
@@ -19698,7 +19803,7 @@
         // Director gets the full board-roles tree (per the updated
         // scopeRolesToUser).
         if (typeof closeAnyOpenDetailCard === 'function') closeAnyOpenDetailCard();
-        if (personDetail) personDetail.style.display = 'none';
+        closeDetail();
         if (typeof showRolesManagerModal === 'function') showRolesManagerModal();
       });
     }
@@ -20587,12 +20692,72 @@
       title: 'Admin Calendar',
       subtitle: 'Every co-op date in one place: sessions, special events, and the dates that trigger admin & board tasks. Session and special-event dates edit right in their rows (for the roles that own them); any board member can add one-off events. (Afternoon sign-up windows live in the Afternoon Class Builder; scheduled events like board meetings live on the Google Calendar.)',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the visible calendar view', action: function () { printBoardCalendar(); } }
+      ],
       bodyId: 'board-cal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading calendar…</p>'
     });
     if (!body) return;
     loadBoardCalendar();
+  }
+
+  // Print the Admin Calendar as currently scoped (selected year + view
+  // pill). Re-derives display rows from _boardCalState with the same
+  // kind rules the renderer uses — sessions, special events (incl. the
+  // two session-derived ones), field trips, general events, board tasks.
+  function boardCalPrintRows(year, view) {
+    function kindOf(e) {
+      var id = String(e.id || '');
+      if (id.indexOf('derived:session') === 0) return 'session';
+      if (id.indexOf('derived:icecream:') === 0 || id.indexOf('derived:fieldday:') === 0) return 'special';
+      var et = String(e.event_type || '');
+      if (et === 'general' || et === 'field_trip') return et;
+      return 'task';
+    }
+    var rows = (_boardCalState.events || [])
+      .filter(function (e) { return e.school_year === year; })
+      .map(function (e) { return { ev: e, kind: kindOf(e) }; });
+    (_boardCalState.specialEvents || []).forEach(function (s) {
+      if (s.school_year !== year || s.date_from_calendar) return;
+      rows.push({
+        ev: {
+          title: s.name, event_date: s.event_date || '', end_date: '',
+          note: s.date_status === 'approved' ? 'Approved' : 'Proposed', icon: '🎉'
+        },
+        kind: 'special'
+      });
+    });
+    rows.sort(function (a, b) {
+      return (a.ev.event_date || '9999-99-99').localeCompare(b.ev.event_date || '9999-99-99');
+    });
+    return rows.filter(function (r) { return view === 'all' || r.kind === view; });
+  }
+
+  function printBoardCalendar() {
+    var year = _boardCalState.schoolYear || boardCalDefaultYear();
+    var view = _boardCalState.view || 'all';
+    var viewNames = { all: 'All dates', session: 'Sessions', special: 'Special Events', field_trip: 'Field Trips', general: 'General events', task: 'Board Tasks' };
+    var rows = boardCalPrintRows(year, view);
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Admin Calendar</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
+    doc += '</head><body>';
+    doc += '<h1>Admin Calendar — ' + escapeHtml(year) + '</h1>';
+    doc += '<p class="meta">' + escapeHtml(viewNames[view] || view) + ' · ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + ' · printed ' + new Date().toLocaleDateString() + '</p>';
+    doc += '<table><thead><tr><th>Date</th><th>Event</th><th>Notes</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var e = r.ev;
+      var when = e.event_date ? boardCalFmtRange(e.event_date, e.end_date) : '—';
+      if (e.start_time) when += ' · ' + boardCalFmtTimeRange(e.start_time, e.end_time);
+      var notes = [e.note || '', e.role || ''].filter(Boolean).join(' · ');
+      doc += '<tr>';
+      doc += '<td style="white-space:nowrap;">' + escapeHtml(when) + '</td>';
+      doc += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title || '') + '</td>';
+      doc += '<td>' + escapeHtml(notes) + '</td>';
+      doc += '</tr>';
+    });
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
   }
 
   function loadBoardCalendar() {

@@ -11377,6 +11377,11 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
    link out, waiting on the family; red = the 2-week window lapsed. */
 .ws-tour-status-link_sent   { background: rgba(38, 132, 132, 0.14);  color: #1d5c5c; }
 .ws-tour-status-reg_expired { background: rgba(217, 95, 59, 0.16);   color: #8A2222; }
+/* Member Pipeline counts-strip pills are clickable filters (2026-07-15) —
+   same tap-to-scope behavior as the Welcome List count pills. */
+button.ws-tour-status { cursor: pointer; border: 0; font-family: inherit; }
+button.ws-tour-status:hover { filter: brightness(0.95); }
+button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 /* "Inquiry" tag on Tour Pipeline rows that came from the Contact Us form
    rather than the Schedule a Tour form. */
 /* Truncated message preview in the lean Inquiries table. */
