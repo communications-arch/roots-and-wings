@@ -8561,10 +8561,9 @@
         var orig = rb.textContent;
         rb.disabled = true;
         rb.textContent = 'Sending\u2026';
-        var cred2 = localStorage.getItem('rw_google_credential');
         fetch('/api/tour', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred2 },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify({ kind: 'waiver-resend', source: src, id: rId })
         }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
           .then(function (rres) {
@@ -10687,10 +10686,9 @@
       if (!name || !emailVal) { statusEl.className = 'ws-wv-status ws-wv-err'; statusEl.textContent = 'Name and email are required.'; return; }
       sendBtn.disabled = true; var orig = sendBtn.textContent; sendBtn.textContent = 'Sending\u2026';
       statusEl.className = 'ws-wv-status'; statusEl.textContent = '';
-      var cred = localStorage.getItem('rw_google_credential');
       fetch('/api/tour', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        headers: rwAuthHeaders(true),
         body: JSON.stringify({ kind: 'waiver-send', name: name, email: emailVal, note: note })
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
@@ -11022,10 +11020,9 @@
           var statusEl = cWrap.querySelector('.ws-decline-status');
           statusEl.textContent = 'Processing…';
           cBtn.disabled = true;
-          var cred = localStorage.getItem('rw_google_credential');
           fetch('/api/tour', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ kind: 'registration-decline', id: parseInt(declineId, 10), note: note })
           }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
             .then(function (rres) {
@@ -11075,10 +11072,9 @@
           var uStatusEl = uWrap.querySelector('.ws-decline-status');
           uStatusEl.textContent = 'Processing…';
           uBtn.disabled = true;
-          var uCred = localStorage.getItem('rw_google_credential');
           fetch('/api/tour', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + uCred },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ kind: 'registration-undecline', id: parseInt(undeclineId, 10), note: uNote })
           }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
             .then(function (rres) {
@@ -11494,10 +11490,9 @@
         var done = this.checked;
         var that = this;
         that.disabled = true;
-        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/tour', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify({ kind: 'onboarding-step', id: id, field: field, done: done })
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
@@ -11555,10 +11550,9 @@
           }
           sendBtn.disabled = true;
           statusEl.textContent = 'Sending…';
-          var cred = localStorage.getItem('rw_google_credential');
           fetch('/api/tour', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cred },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ kind: 'send-welcome-email', id: id, subject: subj, html: bod })
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
             .then(function (res) {
@@ -12828,10 +12822,9 @@
       if (!name || !emailVal) { statusEl.className = 'ws-wv-status ws-wv-err'; statusEl.textContent = 'Name and email are required.'; return; }
       sendBtn.disabled = true; var orig = sendBtn.textContent; sendBtn.textContent = 'Sending\u2026';
       statusEl.className = 'ws-wv-status'; statusEl.textContent = '';
-      var cred = localStorage.getItem('rw_google_credential');
       fetch('/api/tour', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        headers: rwAuthHeaders(true),
         body: JSON.stringify({ kind: 'registration-invite', name: name, email: emailVal, note: note })
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {

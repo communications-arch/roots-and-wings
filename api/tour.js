@@ -1447,7 +1447,10 @@ async function handleBackupWaiverSign(body, req, res) {
 // makes undo lossless. Treasurer issues the refund manually against the
 // PayPal transaction ID included in the email.
 async function handleRegistrationDecline(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  // View-As aware: the gate runs on the impersonated identity; audit
+  // fields (declined_by) use realEmail so the action stays attributed
+  // to the actual signed-in person.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const canDecline = isSuperUser(auth.email) ||
@@ -1456,7 +1459,7 @@ async function handleRegistrationDecline(body, req, res) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership Director can decline registrations.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
   }
@@ -1494,7 +1497,7 @@ async function handleRegistrationDecline(body, req, res) {
     // rows stay put so an Undo restores the family losslessly.
     await sql`
       UPDATE registrations
-      SET declined_at = NOW(), declined_by = ${auth.email}, decline_note = ${note},
+      SET declined_at = NOW(), declined_by = ${auth.realEmail || auth.email}, decline_note = ${note},
           updated_at = NOW()
       WHERE id = ${id}
     `;
@@ -1549,7 +1552,8 @@ async function handleRegistrationDecline(body, req, res) {
 // Treasurer, and Membership so everyone who saw the decline email sees the
 // reversal too).
 async function handleRegistrationUndecline(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  // View-As aware, same as decline.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const canDecline = isSuperUser(auth.email) ||
@@ -1558,7 +1562,7 @@ async function handleRegistrationUndecline(body, req, res) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership Director can undo a declined registration.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
   }
@@ -1744,7 +1748,8 @@ async function applyMarkPaid(sql, reg, note) {
 // and emails the family + Membership/Communications a payment-received
 // confirmation.
 async function handleRegistrationMarkPaid(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Treasurer.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const canMark = isSuperUser(auth.email) ||
@@ -1753,7 +1758,7 @@ async function handleRegistrationMarkPaid(body, req, res) {
     const expected = await getRoleHolderEmail('Treasurer');
     return res.status(403).json({
       error: 'Only the Treasurer can mark registrations as paid.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
   }
@@ -1798,7 +1803,8 @@ const ONBOARDING_FIELDS = new Set([
   // welcome_email_sent_at is stamped by send-welcome-email, not toggled here
 ]);
 async function handleOnboardingStep(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Comms.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const isComms = isSuperUser(auth.email) ||
@@ -1807,7 +1813,7 @@ async function handleOnboardingStep(body, req, res) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can update onboarding status.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
   }
@@ -1890,7 +1896,8 @@ async function handleOnboardingDismiss(body, req, res) {
 // stamps welcome_email_sent_at so the row drops out of the onboarding
 // queue.
 async function handleSendWelcomeEmail(body, req, res) {
-  const auth = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Comms.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   const isComms = isSuperUser(auth.email) ||
@@ -1899,7 +1906,7 @@ async function handleSendWelcomeEmail(body, req, res) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can send the welcome email.',
-      youAre: auth.email,
+      youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
   }
@@ -2120,13 +2127,14 @@ async function handleWaiversReport(req, res) {
 
 // ── Comms Workspace: send a one-off waiver to an ad-hoc adult ──
 async function handleWaiverSend(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Comms.
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
   if (!(await hasCapability(user.email, 'waivers_manage'))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can send one-off waivers.',
-      youAre: user.email,
+      youAre: user.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
@@ -2156,7 +2164,7 @@ async function handleWaiverSend(body, req, res) {
         pending_token, sent_at, sent_by_email, note
       ) VALUES (
         ${season}, 'one_off', ${name}, ${email},
-        ${token}, NOW(), ${user.email}, ${note}
+        ${token}, NOW(), ${user.realEmail || user.email}, ${note}
       )
       ON CONFLICT DO NOTHING
     `;
@@ -2201,13 +2209,14 @@ async function handleWaiverSend(body, req, res) {
 // link still works) and stamps last_sent_at so the report's Sent column
 // shows the latest send timestamp. Refuses signed waivers.
 async function handleWaiverResend(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Comms.
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
   if (!(await hasCapability(user.email, 'waivers_manage'))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
       error: 'Only the Communications Director can resend waivers.',
-      youAre: user.email,
+      youAre: user.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
@@ -2293,14 +2302,15 @@ async function handleWaiverResend(body, req, res) {
 
 // ── Membership Workspace: email a registration link to a prospective family ──
 async function handleRegistrationInvite(body, req, res) {
-  const user = await verifyWorkspaceAuth(req);
+  // View-As aware so super users / dev testers can act as Membership.
+  const user = await verifyWorkspaceAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
   const canInvite = await hasCapability(user.email, 'registration_invite');
   if (!canInvite) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
       error: 'Only the Membership or Communications Director can send registration links.',
-      youAre: user.email,
+      youAre: user.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
   }
