@@ -1606,3 +1606,22 @@ ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NO
 -- start Wednesday through its end date. gcal_event_id links the session
 -- to its recurring Google event for updates.
 ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';
+
+-- One-time import (Erin, 2026-07-14): the summer 2026 outings lived only
+-- on the Google Calendar — surface them under the Admin Calendar's Field
+-- Trips pill. Each row is PRE-LINKED to its existing Google event via
+-- gcal_event_id, so the calendar sync PATCHES that event on future edits
+-- instead of creating a duplicate. WHERE NOT EXISTS keeps deploy re-runs
+-- no-ops. Times are America/Indianapolis locals from the Google events.
+INSERT INTO board_calendar_events (school_year, title, event_date, note, event_type, start_time, end_time, gcal_event_id, updated_by)
+SELECT '2026-2027', 'Pool Day', '2026-07-16', 'Murphy Aquatic Park, Avon — group rate $8/person', 'field_trip', '11:00', '18:00', '3ejokhuipki4q57pgnbopg6bts', 'gcal-import'
+WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '3ejokhuipki4q57pgnbopg6bts');
+INSERT INTO board_calendar_events (school_year, title, event_date, note, event_type, start_time, end_time, gcal_event_id, updated_by)
+SELECT '2026-2027', 'Inlow Park & Splash Pad', '2026-07-29', 'Lawrence W. Inlow Park, Carmel', 'field_trip', '13:00', '14:00', '0urv0r5pf8en8qeki841bl9ihu', 'gcal-import'
+WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '0urv0r5pf8en8qeki841bl9ihu');
+INSERT INTO board_calendar_events (school_year, title, event_date, note, event_type, start_time, end_time, gcal_event_id, updated_by)
+SELECT '2026-2027', 'First Thursday at Newfields', '2026-08-06', 'Newfields, Indianapolis', 'field_trip', '10:00', '20:00', '4go697arpi5877jbin29pchsao', 'gcal-import'
+WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '4go697arpi5877jbin29pchsao');
+INSERT INTO board_calendar_events (school_year, title, event_date, note, event_type, start_time, end_time, gcal_event_id, updated_by)
+SELECT '2026-2027', 'Westermeier Playground and Splash Pad', '2026-08-12', 'Westermeier Commons Playground, Carmel', 'field_trip', '13:00', '15:00', '547k4ddksdj8l7nn0jfo2h537g', 'gcal-import'
+WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '547k4ddksdj8l7nn0jfo2h537g');
