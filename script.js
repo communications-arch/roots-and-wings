@@ -3038,7 +3038,7 @@
     // in the top-right corner (see `.detail-actions` in styles.css). This
     // is the shared navigation pattern used across all modals with actions.
     var html = '<div class="detail-actions no-print">';
-    html += '<button type="button" class="sc-btn duty-print-btn" aria-label="Print this role and class info">\u2399 Print</button>';
+    html += '<button type="button" class="rd-icon duty-print-btn" aria-label="Print this role and class info" title="Print">' + ICON_SVG.print + '</button>';
     html += '</div>';
     html += '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
@@ -3426,7 +3426,7 @@
         if (!d || !d.class) return;
         var c = d.class;
         var html = '<div class="detail-actions no-print">'
-          + '<button type="button" class="sc-btn duty-print-btn" aria-label="Print this class info">⎙ Print</button></div>';
+          + '<button type="button" class="rd-icon duty-print-btn" aria-label="Print this class info" title="Print">' + ICON_SVG.print + '</button></div>';
         html += '<button class="detail-close" aria-label="Close">&times;</button>';
         html += '<div class="elective-detail">';
         html += '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">';
@@ -4633,12 +4633,56 @@
       title: 'Session Sign-Ups',
       subtitle: 'Who’s where each hour — classes, floaters, board duties, prep, and cleaning. Pick a session below.',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the selected session’s sign-ups', action: function () { printVolunteerGrid(); } }
+      ],
       bodyId: 'vol-grid-body',
       bodyPlaceholder: '<p class="ws-empty">Loading sign-ups…</p>'
     });
     if (!body) return;
     loadVolunteerGrid(session || currentSession);
+  }
+
+  // Last-fetched matrix, kept for the Print chrome (prints the session
+  // currently shown in the modal).
+  var _volGridLast = null;
+  function printVolunteerGrid() {
+    var d = _volGridLast;
+    if (!d) return;
+    var BLOCK_TITLES = { AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)' };
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Session Sign-Ups</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}h2{font-size:14px;margin:18px 0 6px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}p.pledges{color:#444;margin:0 0 6px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
+    doc += '</head><body><h1>Session ' + escapeHtml(String(d.session || '')) + ' Sign-Ups</h1>';
+    doc += '<p class="meta">printed ' + new Date().toLocaleDateString() + '</p>';
+    ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
+      var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
+      doc += '<h2>' + BLOCK_TITLES[bk] + '</h2>';
+      var bits = [];
+      bits.push('Floaters: ' + ((b.floaters || []).join(', ') || 'open'));
+      bits.push('Board: ' + ((b.board || []).join(', ') || 'open'));
+      bits.push('Prep: ' + ((b.prep || []).join(', ') || 'open'));
+      doc += '<p class="pledges">' + escapeHtml(bits.join(' · ')) + '</p>';
+      if (!(b.classes || []).length) {
+        doc += '<p class="pledges"><em>No classes placed yet.</em></p>';
+      } else {
+        doc += '<table><thead><tr><th>' + (bk.indexOf('AM') === 0 ? 'Group / Class' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        b.classes.forEach(function (c) {
+          var first = (bk.indexOf('AM') === 0 && c.group) ? (c.group.charAt(0).toUpperCase() + c.group.slice(1) + ' — ' + (c.class_name || '')) : (c.class_name || '');
+          if (c.room) first += ' (' + c.room + ')';
+          var helpers = (c.helpers || []).join(', ');
+          if (c.co_teachers) helpers = c.co_teachers + (helpers ? ', ' + helpers : '');
+          if (c.helpers_needed > 0) helpers += (helpers ? ', ' : '') + 'needs ' + c.helpers_needed + ' more';
+          doc += '<tr><td>' + escapeHtml(first) + '</td><td>' + escapeHtml(c.teacher || '') + '</td><td>' + escapeHtml(helpers || '—') + '</td></tr>';
+        });
+        doc += '</tbody></table>';
+      }
+    });
+    doc += '<h2>Cleaning (after co-op)</h2>';
+    doc += '<p class="pledges">' + ((d.cleaning || []).length
+      ? escapeHtml(d.cleaning.map(function (c) { return c.area + ' — ' + c.family; }).join(' · '))
+      : '<em>No cleaning assignments yet.</em>') + '</p>';
+    doc += '</body></html>';
+    openPrintIframe(doc);
   }
 
   function loadVolunteerGrid(sess) {
@@ -4651,6 +4695,7 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) { body.innerHTML = '<p class="ws-empty">Could not load sign-ups.</p>'; return; }
+        _volGridLast = d; // Print chrome reads the session on screen
         renderVolunteerGrid(body, d);
       })
       .catch(function () { body.innerHTML = '<p class="ws-empty">Could not load sign-ups — check your connection.</p>'; });
@@ -6654,16 +6699,26 @@
         familyOptions += '<option value="' + escapeAttr(n) + '"></option>';
       });
 
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail sc-modal">';
+    // Standard report shell (UI audit item #1, 2026-07-15) — chrome
+    // close + backdrop teardown come from renderReportModal; the
+    // assignment grid renders into its body below.
+    var shellBody = renderReportModal({
+      title: 'Cleaning Crew Management',
+      subtitle: 'Assign families to each cleaning area per session. Tap a chip’s × to remove a family; Copy pulls a whole session’s assignments across.',
+      meta: '',
+      icons: [],
+      bodyId: 'cleaning-mgmt-body',
+      bodyPlaceholder: ''
+    });
+    if (!shellBody) return;
+    var html = '<div class="sc-modal">';
     html += '<datalist id="cle-families-datalist">' + familyOptions + '</datalist>';
-    html += '<h3>Cleaning Crew Management</h3>';
 
-    // Session selector
-    html += '<div class="cle-modal-session-row">';
-    html += '<label>Session:</label>';
+    // Session pills — the same lens strip the Admin Calendar and
+    // Session Sign-Ups use (replaces the little numbered circles).
+    html += '<div class="board-cal-views" role="group" aria-label="Session">';
     for (var s = 1; s <= 5; s++) {
-      html += '<button class="cle-sess-btn' + (s === viewSess ? ' cle-sess-active' : '') + '" data-sess="' + s + '">' + s + '</button>';
+      html += '<button type="button" class="board-cal-view-pill cle-sess-pill' + (s === viewSess ? ' is-active' : '') + '" data-sess="' + s + '">Session ' + s + '</button>';
     }
     html += '</div>';
 
@@ -6747,18 +6802,10 @@
 
     html += '</div>';
 
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    shellBody.innerHTML = html;
 
-    // Wire close through the shared teardown (restores body scroll and
-    // clears any open drawer — bypassing it left the page unscrollable;
-    // UI audit, 2026-07-15).
-    personDetailCard.querySelector('.detail-close').onclick = closeDetail;
-    personDetail.onclick = function (e) { if (e.target === personDetail) closeDetail(); };
-
-    // Wire session buttons
-    personDetailCard.querySelectorAll('.cle-sess-btn').forEach(function (btn) {
+    // Wire session pills
+    personDetailCard.querySelectorAll('.cle-sess-pill').forEach(function (btn) {
       btn.onclick = function () {
         cleaningModalSession = parseInt(this.getAttribute('data-sess'), 10);
         renderCleaningModal();
@@ -14548,7 +14595,7 @@
       // Unified modal header: Print lives next to the close X (same pattern
       // as Class Pack and duty-detail — see `.detail-actions` in styles.css).
       html += '<div class="detail-actions no-print">';
-      html += '<button type="button" class="sc-btn" id="cl-print-btn" aria-label="Print">\u2399 Print</button>';
+      html += '<button type="button" class="rd-icon" id="cl-print-btn" aria-label="Print" title="Print">' + ICON_SVG.print + '</button>';
       html += '</div>';
     }
     html += '<button class="detail-close" aria-label="Close">&times;</button>';
@@ -15913,42 +15960,37 @@
   }
 
   function showWaiverModal() {
-    if (!personDetail || !personDetailCard) return;
-    // Unified modal header: Print lives next to the close X (same pattern as
-    // Class Pack / duty-detail — see `.detail-actions` in styles.css).
-    var html = '<div class="detail-actions no-print">';
-    html += '<button type="button" class="sc-btn" id="waiverModalPrint" aria-label="Print">\u2399 Print</button>';
-    html += '</div>';
-    html += '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail wv-modal" id="waiverModalBody">';
-    html += '<div style="text-align:center;color:#777;padding:40px 0;">Loading Member Agreement…</div>';
-    html += '</div>';
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
-    personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
-    var printBtn = document.getElementById('waiverModalPrint');
-    if (printBtn) printBtn.addEventListener('click', printWaiverInNewWindow);
+    // Standard report shell — Print rides in the chrome like every other
+    // report (was a text "⎙ Print" button in a hand-rolled header; UI
+    // audit item #3, 2026-07-15).
+    var body = renderReportModal({
+      title: 'Member Agreement & Waivers',
+      subtitle: 'Reference copy of the agreement families accept when registering.',
+      meta: '',
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the Member Agreement', action: function () { printWaiverInNewWindow(); } }
+      ],
+      bodyId: 'waiverModalBody',
+      bodyPlaceholder: '<div style="text-align:center;color:#777;padding:40px 0;">Loading Member Agreement…</div>'
+    });
+    if (!body) return;
 
     loadWaiverHtml().then(function (inner) {
-      var body = document.getElementById('waiverModalBody');
-      if (!body) return;
+      var bodyEl = document.getElementById('waiverModalBody');
+      if (!bodyEl) return;
       if (!inner) {
-        body.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
+        bodyEl.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
         return;
       }
-      body.innerHTML =
-        '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 8px;">Member Agreement &amp; Waivers</h2>' +
-        '<p style="color:#555;margin:0 0 16px;">Reference copy of the agreement families accept when registering.</p>' +
-        '<div id="waiverModalContent">' + inner + '</div>';
+      // Keep the wv-modal wrapper class — the fetched wv-card styles key off it.
+      bodyEl.innerHTML = '<div class="wv-modal" id="waiverModalContent">' + inner + '</div>';
       // Suppress the inline "Print / Save as PDF" and "Back to Member Portal"
       // buttons that live inside the fetched wv-card — they don't make sense
       // inside the modal.
-      body.querySelectorAll('.wv-actions').forEach(function (el) { el.style.display = 'none'; });
+      bodyEl.querySelectorAll('.wv-actions').forEach(function (el) { el.style.display = 'none'; });
     }).catch(function () {
-      var body = document.getElementById('waiverModalBody');
-      if (body) body.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
+      var bodyEl = document.getElementById('waiverModalBody');
+      if (bodyEl) bodyEl.innerHTML = '<p style="color:#b93a33;">Could not load the waiver. <a href="waiver.html" target="_blank" rel="noopener">Open in a new tab instead</a>.</p>';
     });
   }
 
@@ -20224,7 +20266,9 @@
       title: 'Welcome New Members',
       subtitle: 'New families this season move through the welcome lifecycle: reach out to welcome them, then log an Orientation.',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the welcome list', action: function () { printWelcomeList(); } }
+      ],
       bodyId: 'ws-welcome-list-body',
       bodyPlaceholder: '<p class="ws-empty">Loading new families…</p>'
     });
@@ -20419,7 +20463,9 @@
       title: 'Registration Links',
       subtitle: 'Every registration link sent to a prospective family this season, and where each stands: Sent → Opened → Registered. Links expire 2 weeks after the last send — resending restarts the window. Dismiss a family who went quiet.',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the registration links as CSV', action: function () { exportRegInvitesCSV(); } }
+      ],
       bodyId: 'ws-reginv-body',
       bodyPlaceholder: '<p class="ws-empty">Loading sent links…</p>'
     });
@@ -20545,6 +20591,58 @@
     body.querySelectorAll('.ws-reginv-act').forEach(function (btn) {
       btn.addEventListener('click', function () { regInviteListAction(btn); });
     });
+  }
+
+  // CSV of every tracked link this season, funnel status included.
+  function exportRegInvitesCSV() {
+    var invites = _regInvitesCache || [];
+    var headers = ['Name', 'Email', 'Status', 'Sent via', 'First sent', 'Last sent', 'Sends', 'Opened', 'Registered', 'Dismissed'];
+    function esc(v) {
+      var s = String(v == null ? '' : v);
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    function day(v) { return v ? String(v).slice(0, 10) : ''; }
+    var lines = [headers.join(',')];
+    invites.forEach(function (inv) {
+      lines.push([
+        esc(inv.name), esc(inv.email), esc(regInviteStatus(inv)),
+        esc(inv.sent_via === 'other' ? 'outside the app' : 'email'),
+        esc(day(inv.first_sent_at)), esc(day(inv.last_sent_at)), esc(inv.send_count || 1),
+        esc(day(inv.opened_at)), esc(day(inv.registered_at)), esc(day(inv.dismissed_at))
+      ].join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'registration-links-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // Print the welcome lifecycle list (all stages, sorted like the modal).
+  function printWelcomeList() {
+    var fams = (_welcomeListState.families || []).slice().sort(function (a, b) {
+      var sa = welcomeStage(a), sb = welcomeStage(b);
+      if (sa !== sb) return sa - sb;
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+    var STAGE = ['New', 'Welcomed', 'Oriented'];
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Welcome New Members</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
+    doc += '</head><body><h1>Welcome New Members</h1>';
+    doc += '<p class="meta">' + fams.length + ' new famil' + (fams.length === 1 ? 'y' : 'ies') + ' this season · printed ' + new Date().toLocaleDateString() + '</p>';
+    doc += '<table><thead><tr><th>Family</th><th>Contact</th><th>Track</th><th>Kids</th><th>Stage</th><th>Welcomed</th><th>Oriented</th></tr></thead><tbody>';
+    fams.forEach(function (f) {
+      var kids = (f.kids || []).map(function (k) { return k.name || k.first_name || ''; }).filter(Boolean).join(', ');
+      var contact = [f.email, f.phone].filter(Boolean).join(' · ');
+      doc += '<tr><td>' + escapeHtml(f.name || '') + '</td><td>' + escapeHtml(contact) + '</td><td>' + escapeHtml(f.track || '') + '</td><td>' + escapeHtml(kids) + '</td><td>' + STAGE[welcomeStage(f)] + '</td><td>' + escapeHtml(f.welcomed_at ? welcomeFmtDate(f.welcomed_at) : '') + '</td><td>' + escapeHtml(f.met_at ? welcomeFmtDate(f.met_at) : '') + '</td></tr>';
+    });
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
   }
 
   function regInviteListAction(btn) {
@@ -22569,12 +22667,33 @@
       title: titleWord,
       subtitle: 'Families in our co-op community this season, with their morning/afternoon track.',
       meta: '',
-      icons: [],
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print this roster', action: function () { printCommunityRoster(filter, titleWord); } }
+      ],
       bodyId: 'ws-community-roster-body',
       bodyPlaceholder: '<p class="ws-empty">Loading families…</p>'
     });
     if (!body) return;
     renderCommunityRosterBody(filter);
+  }
+
+  function printCommunityRoster(filter, titleWord) {
+    var fams = (_communityRoster || []).filter(function (f) {
+      if (filter === 'new') return !!f.isNewMember;
+      if (filter === 'returning') return !f.isNewMember;
+      return true;
+    }).sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(titleWord || 'Our Families') + '</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
+    doc += '</head><body><h1>' + escapeHtml(titleWord || 'Our Families') + '</h1>';
+    doc += '<p class="meta">' + fams.length + ' famil' + (fams.length === 1 ? 'y' : 'ies') + ' · printed ' + new Date().toLocaleDateString() + '</p>';
+    doc += '<table><thead><tr><th>Family</th><th>Learning Coach</th><th>Kids</th><th>Track</th><th></th></tr></thead><tbody>';
+    fams.forEach(function (f) {
+      var kids = (f.kids || []).map(function (k) { return k.name || ''; }).filter(Boolean).join(', ');
+      doc += '<tr><td>' + escapeHtml(f.name || '') + '</td><td>' + escapeHtml(f.coach || '') + '</td><td>' + escapeHtml(kids) + '</td><td>' + escapeHtml(f.trackLabel || '') + '</td><td>' + (f.isNewMember ? 'New this year' : '') + '</td></tr>';
+    });
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
   }
 
   var COMMUNITY_TRACK_PILL = { am: 'is-am', pm: 'is-pm', both: 'is-both', other: 'is-other' };
