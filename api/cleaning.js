@@ -246,12 +246,15 @@ module.exports = async function handler(req, res) {
       const rotaYear = /^\d{4}-\d{4}$/.test(yearParam)
         ? yearParam
         : await activeCleaningYear(sql);
+      // ::text cast is load-bearing: Postgres can't infer a parameter's
+      // type in a bare `$1 IS NULL`, so this query THREW on every call
+      // (client silently fell back to cached data) until 2026-07-15.
       const assignments = await sql`
         SELECT ca.id, ca.session_number, ca.cleaning_area_id, ca.family_name, ca.sort_order,
                a.floor_key, a.area_name
         FROM cleaning_assignments ca
         JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
-        WHERE ${rotaYear} IS NULL OR ca.school_year = ${rotaYear}
+        WHERE ${rotaYear}::text IS NULL OR ca.school_year = ${rotaYear}
         ORDER BY ca.session_number, a.sort_order, ca.sort_order
       `;
       // Liaison name is now derived from role_holders_v2 — the
