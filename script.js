@@ -7552,11 +7552,13 @@
           h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
         }
         if (role === 'Membership Director') {
-          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
           // General inquiries from the public Contact Us form — a separate
           // bucket from tour requests so questions don't mix into the tour
-          // queue. Opens the pipeline scoped to inquiries.
+          // queue. Opens the pipeline scoped to inquiries. Listed FIRST,
+          // before tours (Erin, 2026-07-14): inquiries are the top of the
+          // member funnel.
           h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
+          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
           // Scheduled Tours entry has both the button (opens Pipeline
           // scoped to scheduled) AND a sibling <ul> rendered by
           // updateMembershipTourTodoCounts() — a glance-view list of
