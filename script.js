@@ -20748,10 +20748,14 @@
       visibleRows.forEach(function (r) {
         var e = r.ev;
         var sessEditable = r.kind === 'session' && canEditSessions;
+        // Entered session dates rest read-only with an Edit button
+        // (Erin, 2026-07-14) — inline pickers render only for sessions
+        // still missing dates, or the one row Edit was tapped on.
+        var sessEditing = sessEditable && (!e.event_date || _boardCalState.editingSessNum === r.sessNum);
         h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + (sessEditable ? ' data-sess-num="' + r.sessNum + '"' : '') + '>';
         // Date cell: inline pickers for editable session rows (start → end)
         // and editable special events; plain text otherwise.
-        if (sessEditable) {
+        if (sessEditing) {
           h += '<td style="white-space:nowrap;">'
             + '<input type="date" class="cl-input board-cal-sess-start" value="' + escapeHtml(e.event_date || '') + '" aria-label="Session ' + r.sessNum + ' start">'
             + ' <span class="board-cal-se-unset">→</span> '
@@ -20765,7 +20769,7 @@
               + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
             : '<span class="board-cal-se-unset">—</span>') + '</td>';
         }
-        if (sessEditable) {
+        if (sessEditing) {
           h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
         } else {
           h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : '')) + escapeHtml(e.title) + '</td>';
@@ -20779,8 +20783,13 @@
         h += '<td>' + notes + '</td>';
         // Actions cell by kind.
         if (r.kind === 'session') {
-          if (sessEditable) {
-            h += '<td class="coop-cal-actions"><button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button></td>';
+          if (sessEditing) {
+            h += '<td class="coop-cal-actions" style="white-space:nowrap;">'
+              + '<button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button>'
+              + (e.event_date ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-canceledit" data-sess-num="' + r.sessNum + '">Cancel</button>' : '')
+              + '</td>';
+          } else if (sessEditable) {
+            h += '<td class="coop-cal-actions"><button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-editbtn" data-sess-num="' + r.sessNum + '">Edit</button></td>';
           } else {
             h += '<td></td>';
           }
@@ -20847,6 +20856,8 @@
           if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
           return;
         }
+        // Saved — the row rests read-only again on the reload below.
+        _boardCalState.editingSessNum = null;
         // Session dates ripple everywhere: the dashboard's SESSION_DATES
         // cache, every derived trigger date, and the To Do nudge.
         localStorage.removeItem(CACHE_SESSIONS_KEY);
@@ -20913,6 +20924,21 @@
     body.querySelectorAll('.board-cal-view-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _boardCalState.view = this.getAttribute('data-cal-view');
+        renderBoardCalendarBody();
+      });
+    });
+
+    // Entered sessions rest read-only; Edit swaps the row to inline
+    // pickers, Cancel puts it back untouched.
+    body.querySelectorAll('.board-cal-sess-editbtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _boardCalState.editingSessNum = parseInt(this.getAttribute('data-sess-num'), 10);
+        renderBoardCalendarBody();
+      });
+    });
+    body.querySelectorAll('.board-cal-sess-canceledit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _boardCalState.editingSessNum = null;
         renderBoardCalendarBody();
       });
     });
