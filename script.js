@@ -5369,14 +5369,30 @@
       // Schedule table
       html += '<div class="mf-schedule">';
 
-      // Morning
-      html += '<div class="mf-sched-row">';
-      html += '<span class="mf-sched-time">AM</span>';
-      // Group mark + brand color on the morning row (Erin, 2026-07-11).
-      html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
-      html += '<span class="mf-sched-room">' + room + '</span>';
-      html += '<span class="mf-sched-teacher">' + teacher + '</span>';
-      html += '</div>';
+      // Morning — DB-first: the published Class Builder schedule owns
+      // morning classes now (one both-hours class OR an AM1+AM2 pair per
+      // group). The sheet-era AM_CLASSES teacher/topic below only speaks
+      // for 2025-2026 (server gates it off in newer seasons).
+      var pubAm = (typeof publishedAmForGroup === 'function') ? publishedAmForGroup(currentSession, kidGroup) : [];
+      if (pubAm.length > 0) {
+        var amHourLabel = { AM: 'AM', AM1: 'AM 1', AM2: 'AM 2' };
+        pubAm.forEach(function (c) {
+          html += '<div class="mf-sched-row">';
+          html += '<span class="mf-sched-time">' + (amHourLabel[c.scheduled_hour] || 'AM') + '</span>';
+          html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (c.class_name ? '<br><em style="font-weight:400;">' + escapeHtml(c.class_name) + '</em>' : '') + '</span>';
+          html += '<span class="mf-sched-room">' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[kidGroup] || '') + '</span>';
+          html += '<span class="mf-sched-teacher">' + escapeHtml(c.teacher || 'TBD') + '</span>';
+          html += '</div>';
+        });
+      } else {
+        html += '<div class="mf-sched-row">';
+        html += '<span class="mf-sched-time">AM</span>';
+        // Group mark + brand color on the morning row (Erin, 2026-07-11).
+        html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
+        html += '<span class="mf-sched-room">' + room + '</span>';
+        html += '<span class="mf-sched-teacher">' + teacher + '</span>';
+        html += '</div>';
+      }
 
       // Afternoon electives
       if (electives.length > 0) {
@@ -6029,6 +6045,25 @@
   // once the VP approves a session's morning or afternoon side, any member
   // sees it here — replacing the Master-sheet session data.
   var publishedSchedule = { loaded: false, loading: false, fetchedAt: 0, sessions: {} };
+  // Published (approved) morning classes for one age group + session,
+  // AM1 before AM2. Used by the My Family Kids' Schedule card so a kid's
+  // morning row shows the REAL approved class from the Class Builder —
+  // the sheet-era AM_CLASSES fallback only speaks for 2025-2026 and is
+  // season-gated off server-side (Erin's prod report, 2026-07-14).
+  // Kicks off the fetch when the cache is cold; renderMyFamily re-runs
+  // when it lands.
+  function publishedAmForGroup(sessionNum, groupName) {
+    if (!publishedSchedule.loaded) { loadPublishedSchedule(); return []; }
+    var sess = publishedSchedule.sessions[String(sessionNum)];
+    if (!sess || !Array.isArray(sess.am)) return [];
+    var g = String(groupName || '').toLowerCase().trim();
+    if (!g) return [];
+    return sess.am.filter(function (c) {
+      return String((c.age_groups || [])[0] || '').toLowerCase().trim() === g;
+    }).sort(function (a, b) {
+      return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
+    });
+  }
   function loadPublishedSchedule(force) {
     if (publishedSchedule.loading) return;
     if (publishedSchedule.loaded && !force) return;
@@ -6047,6 +6082,9 @@
         publishedSchedule.fetchedAt = Date.now();
         publishedSchedule.year = yr;
         renderSessionTab();
+        // The My Family Kids' Schedule card reads this cache too
+        // (publishedAmForGroup) — repaint it now that data landed.
+        if (typeof renderMyFamily === 'function') renderMyFamily();
       })
       .catch(function () { publishedSchedule.loading = false; });
   }

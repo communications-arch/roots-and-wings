@@ -2935,27 +2935,46 @@ module.exports = async function handler(req, res) {
       }
     });
 
-    // ── AM Classes ──
-    var amTab = null;
-    for (var key in masterTabs) {
-      if (key.match(/AM.*Volunteer/i)) { amTab = masterTabs[key]; break; }
+    // ── AM Classes / PM Electives (legacy Master sheet, season-gated) ──
+    // The Master sheet's class tabs only speak for 2025-2026 — class data
+    // went DB-native (class_submissions → published-schedule) for 26/27.
+    // Once the co-op season flips past the sheet's last year, serving
+    // these would resurface LAST YEAR's teachers/rosters on My Family's
+    // Kids' Schedule and My Responsibilities (Erin's prod report,
+    // 2026-07-14: stale classes appeared the moment the new class list
+    // was approved and the summer empty-state yielded). Same cutoff
+    // constant the participation report uses; on season-resolve failure
+    // participationSeasonInfo falls back to the month heuristic, which
+    // post-August also lands 2026-2027 → gated.
+    var sheetClassesEra = true;
+    try {
+      var classSeason = await participationSeasonInfo(sql);
+      sheetClassesEra = !classSeason.seasonLabel
+        || classSeason.seasonLabel <= PARTICIPATION_LAST_SHEET_SEASON;
+    } catch (seasonErr) {
+      console.error('Sheet-classes season gate failed (defaulting to gated):', seasonErr);
+      sheetClassesEra = false;
     }
-    if (amTab) {
-      var amParsed = parseAMClasses(amTab);
-      result.amClasses = amParsed.classes;
-      result.amSupportRoles = amParsed.supportRoles;
-    }
-
-    // ── PM Electives (one tab per session) ──
     result.pmElectives = {};
     result.pmSupportRoles = {};
-    for (var key in masterTabs) {
-      var pmMatch = key.match(/PM.*Session\s*(\d+)/i);
-      if (pmMatch) {
-        var sessionNum = parseInt(pmMatch[1]);
-        var pmParsed = parsePMElectives(masterTabs[key]);
-        result.pmElectives[sessionNum] = pmParsed.electives;
-        result.pmSupportRoles[sessionNum] = pmParsed.supportRoles;
+    if (sheetClassesEra) {
+      var amTab = null;
+      for (var key in masterTabs) {
+        if (key.match(/AM.*Volunteer/i)) { amTab = masterTabs[key]; break; }
+      }
+      if (amTab) {
+        var amParsed = parseAMClasses(amTab);
+        result.amClasses = amParsed.classes;
+        result.amSupportRoles = amParsed.supportRoles;
+      }
+      for (var key in masterTabs) {
+        var pmMatch = key.match(/PM.*Session\s*(\d+)/i);
+        if (pmMatch) {
+          var sessionNum = parseInt(pmMatch[1]);
+          var pmParsed = parsePMElectives(masterTabs[key]);
+          result.pmElectives[sessionNum] = pmParsed.electives;
+          result.pmSupportRoles[sessionNum] = pmParsed.supportRoles;
+        }
       }
     }
 
