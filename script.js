@@ -1377,21 +1377,43 @@
     fetch('/api/cleaning', { headers: rwAuthHeaders() })
       .then(function (res) { return res.json(); })
       .then(function (data) {
-        if (data.error) return;
+        // A management modal waiting on this fetch must never strand on
+        // its loading shell — surface errors there, and fill it FIRST
+        // (before the heavier tab/family repaints, so a hiccup in those
+        // can't block it).
+        function pendingShell() {
+          if (!_cleaningModalPending) return null;
+          _cleaningModalPending = false;
+          return document.getElementById('cleaning-mgmt-body');
+        }
+        if (data.error) {
+          console.warn('[loadCleaningData] ' + data.error);
+          var errShell = pendingShell();
+          if (errShell) errShell.innerHTML = '<p class="ws-empty">' + escapeHtml(data.error) + '</p>';
+          return;
+        }
         try { localStorage.setItem(CACHE_CLEANING_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
         applyCleaningData(data);
-        if (typeof renderCleaningTab === 'function') renderCleaningTab();
-        if (typeof renderMyFamily === 'function') renderMyFamily();
-        // A management modal opened before the data landed shows a
-        // loading shell — fill it now (skip if it was closed meanwhile).
-        if (_cleaningModalPending) {
-          _cleaningModalPending = false;
-          if (document.getElementById('cleaning-mgmt-body') && typeof renderCleaningModal === 'function') {
+        var shell = pendingShell();
+        if (shell && typeof renderCleaningModal === 'function') {
+          try {
             renderCleaningModal();
+          } catch (rErr) {
+            console.error('[renderCleaningModal]', rErr);
+            shell.innerHTML = '<p class="ws-empty">Could not draw the assignments: ' + escapeHtml((rErr && rErr.message) || 'unknown error') + '</p>';
           }
         }
+        if (typeof renderCleaningTab === 'function') renderCleaningTab();
+        if (typeof renderMyFamily === 'function') renderMyFamily();
       })
-      .catch(function () { /* fall back to cached/hardcoded */ });
+      .catch(function (err) {
+        console.warn('[loadCleaningData] network error:', err);
+        if (_cleaningModalPending) {
+          _cleaningModalPending = false;
+          var netShell = document.getElementById('cleaning-mgmt-body');
+          if (netShell) netShell.innerHTML = '<p class="ws-empty">Could not load assignments — check your connection and reopen.</p>';
+        }
+      });
   }
 
   // ── Profile Photos from Google Workspace ──
