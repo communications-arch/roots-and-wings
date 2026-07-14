@@ -1600,3 +1600,9 @@ ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS end_time TIME;
 -- publish to the co-op Google Calendar (board tasks explicitly do NOT).
 -- gcal_event_id links the row to its Google event for update/delete.
 ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';
+
+-- Session days on the Google Calendar (Erin, 2026-07-14): each co-op
+-- session publishes as a weekly recurring event 9:40 AM-3:15 PM from its
+-- start Wednesday through its end date. gcal_event_id links the session
+-- to its recurring Google event for updates.
+ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';

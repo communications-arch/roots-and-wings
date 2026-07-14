@@ -5084,7 +5084,7 @@ async function handleBoardCalendarGet(req, res) {
 
     // Derived (read-only) trigger dates computed off the session calendar.
     const sessRows = await sql`
-      SELECT school_year, session_number, name, start_date, end_date
+      SELECT id, school_year, session_number, name, start_date, end_date, gcal_event_id
       FROM co_op_sessions
     `;
     const sessions = sessRows.map(s => ({
@@ -5098,6 +5098,24 @@ async function handleBoardCalendarGet(req, res) {
     // (so a not-yet-scheduled upcoming year still shows the June-1 morning
     // build prompt). De-duped.
     const active = activeSchoolYear();
+    // Backfill-on-first-sight (Erin, 2026-07-14): current/upcoming
+    // sessions that aren't on the Google Calendar yet publish now, so
+    // already-entered dates appear without a re-save. Follows the same
+    // co_op_sessions rows the Admin Calendar edits — a date change there
+    // re-syncs via the sessions save hook in api/cleaning.js. Production
+    // only: dev shares the one real calendar but has its own DB copy of
+    // the sessions, so a dev backfill would double-publish everything.
+    if (process.env.VERCEL_ENV === 'production') {
+      for (const s of sessRows) {
+        if (String(s.school_year) < active) continue;
+        if (String(s.gcal_event_id || '')) continue;
+        try {
+          await syncSessionToGoogleCalendar(sql, s);
+        } catch (gErr) {
+          console.error('Session calendar backfill error (non-fatal):', (gErr && gErr.message) || gErr);
+        }
+      }
+    }
     const F = parseInt(active.slice(0, 4), 10);
     const nextYr = (F + 1) + '-' + (F + 2);
     const years = Array.from(new Set(
@@ -5252,6 +5270,50 @@ async function syncEventToGoogleCalendar(sql, row) {
     await sql`UPDATE board_calendar_events SET gcal_event_id = ${newId} WHERE id = ${row.id}`;
   }
   return newId;
+}
+
+// Co-op sessions publish as WEEKLY RECURRING co-op days, 9:40 AM –
+// 3:15 PM (Erin, 2026-07-14), from the session's start Wednesday
+// through its end date. Same patch-or-insert pattern as board events;
+// gcal_event_id lives on co_op_sessions. IMPORTANT: callers gate this
+// to VERCEL_ENV==='production' — dev + prod share the ONE real Google
+// Calendar but have separate DBs, so an ungated dev sync would publish
+// every session twice.
+async function syncSessionToGoogleCalendar(sql, sess) {
+  const start = calDateStr(sess.start_date);
+  const end = calDateStr(sess.end_date);
+  if (!start || !end) return '';
+  const cal = getCalendarWriteClient();
+  const body = {
+    summary: 'Co-op — ' + (sess.name || ('Session ' + sess.session_number)),
+    description: 'Roots & Wings co-op day, 9:40 AM – 3:15 PM',
+    start: { dateTime: start + 'T09:40:00', timeZone: 'America/Indianapolis' },
+    end: { dateTime: start + 'T15:15:00', timeZone: 'America/Indianapolis' },
+    recurrence: ['RRULE:FREQ=WEEKLY;UNTIL=' + end.replace(/-/g, '') + 'T235959Z']
+  };
+  const gid = String(sess.gcal_event_id || '');
+  if (gid) {
+    try {
+      await cal.events.patch({ calendarId: RW_GCAL_ID, eventId: gid, requestBody: body });
+      return gid;
+    } catch (e) {
+      // Linked event vanished — recreate below.
+    }
+  }
+  const ins = await cal.events.insert({ calendarId: RW_GCAL_ID, requestBody: body });
+  const newId = (ins.data && ins.data.id) || '';
+  if (newId && newId !== gid) {
+    await sql`UPDATE co_op_sessions SET gcal_event_id = ${newId} WHERE id = ${sess.id}`;
+  }
+  return newId;
+}
+
+// Best-effort removal of a linked Google event (used by session delete).
+async function deleteGoogleCalendarEvent(gid) {
+  if (!gid) return;
+  try {
+    await getCalendarWriteClient().events.delete({ calendarId: RW_GCAL_ID, eventId: gid });
+  } catch (e) { /* already gone */ }
 }
 
 // POST kind='calendar-save' — insert a new event, or update an existing one
@@ -5681,3 +5743,5 @@ module.exports.reconcileNameCandidates = reconcileNameCandidates;
 module.exports.mergeDuplicateOpenTours = mergeDuplicateOpenTours;
 module.exports.syncEventToGoogleCalendar = syncEventToGoogleCalendar;
 module.exports.gcalBodyFromEvent = gcalBodyFromEvent;
+module.exports.syncSessionToGoogleCalendar = syncSessionToGoogleCalendar;
+module.exports.deleteGoogleCalendarEvent = deleteGoogleCalendarEvent;

@@ -942,9 +942,22 @@ module.exports = async function handler(req, res) {
                 updated_at = NOW(),
                 updated_by = EXCLUDED.updated_by
           RETURNING id, school_year, session_number, name, start_date, end_date,
-                    updated_at, updated_by
+                    gcal_event_id, updated_at, updated_by
         `;
         const r = inserted[0];
+        // Publish/refresh the session's weekly co-op-day event (9:40 AM –
+        // 3:15 PM) on the Google Calendar so it always follows the dates
+        // set here. Production only — dev shares the one real calendar
+        // but has its own DB rows, so a dev save would double-publish.
+        // Non-fatal: a Google hiccup never blocks the session save.
+        if (process.env.VERCEL_ENV === 'production') {
+          try {
+            const { syncSessionToGoogleCalendar } = require('./tour.js');
+            await syncSessionToGoogleCalendar(sql, r);
+          } catch (gErr) {
+            console.error('Session gcal sync error (non-fatal):', (gErr && gErr.message) || gErr);
+          }
+        }
         return res.status(200).json({
           session: {
             id: r.id,
@@ -973,7 +986,7 @@ module.exports = async function handler(req, res) {
         }
         // Look up the row first so we can enforce the past-year guard
         // (and surface a 404 cleanly instead of a silent no-op delete).
-        const existing = await sql`SELECT school_year FROM co_op_sessions WHERE id = ${id}`;
+        const existing = await sql`SELECT school_year, gcal_event_id FROM co_op_sessions WHERE id = ${id}`;
         if (existing.length === 0) {
           return res.status(404).json({ error: 'Session not found.' });
         }
@@ -981,6 +994,15 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'Past school years are read-only history.' });
         }
         await sql`DELETE FROM co_op_sessions WHERE id = ${id}`;
+        // Take the recurring Google event with it (prod only, non-fatal).
+        if (process.env.VERCEL_ENV === 'production' && existing[0].gcal_event_id) {
+          try {
+            const { deleteGoogleCalendarEvent } = require('./tour.js');
+            await deleteGoogleCalendarEvent(existing[0].gcal_event_id);
+          } catch (gErr) {
+            console.error('Session gcal delete error (non-fatal):', (gErr && gErr.message) || gErr);
+          }
+        }
         return res.status(200).json({ ok: true });
       }
 
