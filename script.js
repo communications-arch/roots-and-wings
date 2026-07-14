@@ -8486,6 +8486,7 @@
         else if (key === 'tour-pipeline') showTourPipelineModal();
         else if (key === 'morning-classes') showMorningClassBuilder();
         else if (key === 'merch-orders') showMerchOrdersModal();
+        else if (key === 'cleaning-crew') showCleaningManagementModal();
       });
     });
 
@@ -8495,7 +8496,6 @@
         var key = this.getAttribute('data-form-key');
         if (key === 'send-waiver') showSendWaiverModal();
         else if (key === 'send-registration') showSendRegistrationFormModal();
-        else if (key === 'cleaning-crew') showCleaningManagementModal();
       });
     });
   }
