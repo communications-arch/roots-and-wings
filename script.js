@@ -18626,22 +18626,72 @@
     return mm ? { email: mm.email || '', name: mm.name } : { email: '', name: v };
   }
 
+  // Lens = at-a-glance report; editing lives in the Manage drawer —
+  // the same shape as the Cleaning lens (Erin, 2026-07-15: "make
+  // cleaning crew mgmt and special events function the same"). The GET
+  // feeding this is already gated to SEL/VP/super, so anyone who can
+  // see the lens can also manage it.
   function renderRolesMgrSpecialEvents() {
     var wrap = document.getElementById('roles-mgr-events');
     if (!wrap) return;
     var events = _rolesMgrEventsState.events || [];
     if (events.length === 0) { wrap.innerHTML = ''; return; }
+    var staffed = 0, needLead = 0;
+    events.forEach(function (ev) { if (ev.lead && (ev.lead.name || ev.lead.email)) staffed++; else needLead++; });
+    var pills = [
+      raCountPill('ws-wv-ok', staffed + ' with a lead'),
+      raCountPill(needLead > 0 ? 'ws-wv-resent' : 'ws-wv-ok', needLead + ' need a lead')
+    ];
+    var h = raLensHead(pills, { label: 'Manage Special Events', action: 'special-events' });
+    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar; tap Manage to assign people right here.</p>';
+    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th></tr></thead><tbody>';
+    events.forEach(function (ev) {
+      var assists = (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
+      h += '<tr>';
+      h += '<th class="mcb-teach-grp">' + escapeHtmlWs(ev.name) + '</th>';
+      h += '<td class="mcb-teach-cell">'
+        + (ev.event_date ? escapeHtmlWs(boardCalFmtDate(ev.event_date)) : '<span class="ws-srt-actions-empty">&mdash;</span>')
+        + ' <span class="se-status se-status-' + escapeHtmlWs(ev.date_status || 'proposed') + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></td>';
+      h += '<td class="mcb-teach-cell">' + (ev.lead && (ev.lead.name || ev.lead.email)
+        ? '<span class="mcb-teach-lead">' + escapeHtmlWs(ev.lead.name || ev.lead.email) + '</span>'
+        : '<span class="ra-open-note">OPEN ⚠</span>') + '</td>';
+      h += '<td class="mcb-teach-cell">' + (assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>') + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    wrap.innerHTML = h;
+    raWireManage(wrap);
+  }
+
+  // The editor — the standard settings drawer over the lens, mirroring
+  // Cleaning Crew Management's shape.
+  function openSpecialEventsManagerDrawer() {
+    openReportDrawer({
+      title: 'Special Events — Lead & Assistants',
+      bodyId: 'se-mgmt-body',
+      bodyPlaceholder: '',
+      onClose: function () {
+        // Reflect drawer edits in the lens table behind it.
+        if (typeof loadRolesMgrSpecialEvents === 'function') loadRolesMgrSpecialEvents();
+      }
+    });
+    renderSpecialEventsManager();
+  }
+
+  function renderSpecialEventsManager() {
+    var body = document.getElementById('se-mgmt-body');
+    if (!body) return;
+    var events = _rolesMgrEventsState.events || [];
     var h = '<datalist id="seMemberList">';
     (_rolesMgrEventsState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
     h += '</datalist>';
-    h += '<h4 class="roles-mgr-se-head">🎉 Special Events — Lead &amp; Assistants</h4>';
-    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar.</p>';
+    h += '<p class="ws-body-hint">One lead and up to four assistants per event. Saves apply per event.</p>';
     h += '<div class="se-list">';
     events.forEach(function (ev) {
       h += '<div class="se-card" data-eid="' + ev.id + '">';
       h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
       if (ev.event_date) h += '<span class="se-date-label">' + escapeHtmlWs(boardCalFmtDate(ev.event_date)) + '</span>';
-      h += '<span class="se-status se-status-' + ev.date_status + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
+      h += '<span class="se-status se-status-' + escapeHtmlWs(ev.date_status || 'proposed') + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
       h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
       h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
@@ -18654,9 +18704,9 @@
       h += '</div>';
     });
     h += '</div>';
-    wrap.innerHTML = h;
+    body.innerHTML = h;
 
-    wrap.querySelectorAll('.se-card').forEach(function (card) {
+    body.querySelectorAll('.se-card').forEach(function (card) {
       var eid = parseInt(card.getAttribute('data-eid'), 10);
       var peopleSave = card.querySelector('.se-people-save');
       if (peopleSave) peopleSave.addEventListener('click', function () {
@@ -18675,6 +18725,10 @@
             peopleSave.disabled = false;
             if (!res.ok) { if (statusEl) { statusEl.className = 'se-save-status ws-wv-err'; statusEl.textContent = (res.data && res.data.error) || 'Save failed'; } return; }
             if (statusEl) { statusEl.className = 'se-save-status ws-wv-ok'; statusEl.textContent = 'Saved ✓'; }
+            // Keep the local state in step so the lens refresh on drawer
+            // close shows the new assignments without waiting on refetch.
+            var evRow = (_rolesMgrEventsState.events || []).filter(function (x) { return x.id === eid; })[0];
+            if (evRow) { evRow.lead = lead; evRow.assists = assists; }
           })
           .catch(function (err) {
             peopleSave.disabled = false;
@@ -19029,6 +19083,8 @@
         } else if (action === 'cleaning') {
           // Drawer over the lens — the report stays visible behind it.
           openCleaningManagerDrawer();
+        } else if (action === 'special-events') {
+          openSpecialEventsManagerDrawer();
         }
       });
     });
