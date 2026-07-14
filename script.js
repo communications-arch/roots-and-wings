@@ -1382,6 +1382,14 @@
         applyCleaningData(data);
         if (typeof renderCleaningTab === 'function') renderCleaningTab();
         if (typeof renderMyFamily === 'function') renderMyFamily();
+        // A management modal opened before the data landed shows a
+        // loading shell — fill it now (skip if it was closed meanwhile).
+        if (_cleaningModalPending) {
+          _cleaningModalPending = false;
+          if (document.getElementById('cleaning-mgmt-body') && typeof renderCleaningModal === 'function') {
+            renderCleaningModal();
+          }
+        }
       })
       .catch(function () { /* fall back to cached/hardcoded */ });
   }
@@ -5131,6 +5139,17 @@
         });
       }
     }
+    // Roles-v2 is the source of truth — the name-match paths above miss a
+    // holder whose people row keys a different email than the assignment
+    // (Shell Beach, 2026-07-15). If the signed-in family holds the role
+    // per getWorkspaceRoles (resolved from committeeRoleHolders), show the
+    // duty regardless of name drift.
+    if (!duties.some(function (d) { return d.text === 'Cleaning Crew Liaison'; })) {
+      var wsRolesForDuties = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+      if (wsRolesForDuties.indexOf('Cleaning Crew Liaison') !== -1) {
+        duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
+      }
+    }
     SPECIAL_EVENTS.forEach(function (ev) {
       // Coordinator strings come from the master sheet and may include
       // "Erin" or "Erin Bogan" or even free-form ("Erin & Joey"). Match
@@ -6665,13 +6684,25 @@
   // ──────────────────────────────────────────────
   var cleaningModalSession = currentSession;
 
+  var _cleaningModalPending = false;
   function showCleaningManagementModal() {
     if (!personDetail || !personDetailCard) return;
+    cleaningModalSession = currentSession;
     if (!cleaningDB.loaded) {
+      // Open a loading shell now and render when the data lands —
+      // previously the click silently no-oped until a second tap.
+      renderReportModal({
+        title: 'Cleaning Crew Management',
+        subtitle: 'Assign families to each cleaning area per session. Tap a chip’s × to remove a family; Copy pulls a whole session’s assignments across.',
+        meta: '',
+        icons: [],
+        bodyId: 'cleaning-mgmt-body',
+        bodyPlaceholder: '<p class="ws-empty">Loading assignments…</p>'
+      });
+      _cleaningModalPending = true;
       loadCleaningData();
       return;
     }
-    cleaningModalSession = currentSession;
     renderCleaningModal();
   }
 
@@ -7589,6 +7620,12 @@
         if (role === 'Treasurer') {
           h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
         }
+        if (role === 'Cleaning Crew Liaison') {
+          // Areas with no family assigned for the current session — opens
+          // Cleaning Crew Management (Erin, 2026-07-15). Painted by
+          // loadCleaningTodoCount.
+          h += '<li id="ws-todo-cleaning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="cleaning-crew-manage"><span class="ws-link-count" id="ws-cleaning-open-count">0</span><span class="ws-link-icon">🧹</span><span id="ws-cleaning-open-label">Assign cleaning areas</span></button></li>';
+        }
         if (role === 'Communications Director') {
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
@@ -7677,6 +7714,7 @@
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadRegInviteTodoCounts === 'function') loadRegInviteTodoCounts();
+        if (typeof loadCleaningTodoCount === 'function') loadCleaningTodoCount();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
@@ -7873,6 +7911,12 @@
     ],
     'Merchandise Manager': [
       { key: 'merch-orders', title: 'Merchandise Orders' }
+    ],
+    // Cleaning Crew Management lives in My Workspace for the liaison
+    // (Erin, 2026-07-15) — the My Family duty card + Roles Assignments
+    // Cleaning lens doorway stay as secondary entry points.
+    'Cleaning Crew Liaison': [
+      { key: 'cleaning-crew', title: 'Cleaning Crew Management' }
     ],
     'Membership Director': [
       { key: 'tour-pipeline', title: 'Member Pipeline' },
@@ -8451,6 +8495,7 @@
         var key = this.getAttribute('data-form-key');
         if (key === 'send-waiver') showSendWaiverModal();
         else if (key === 'send-registration') showSendRegistrationFormModal();
+        else if (key === 'cleaning-crew') showCleaningManagementModal();
       });
     });
   }
@@ -16059,6 +16104,7 @@
       showTourPipelineModal({ initialFilter: 'toured' });
     }
     else if (action === 'membership-reginv-wait' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
+    else if (action === 'cleaning-crew-manage' && typeof showCleaningManagementModal === 'function') showCleaningManagementModal();
   });
 
   // Render all coordination tabs
@@ -20456,6 +20502,35 @@
         updateRegInviteTodoItems();
       })
       .catch(function (err) { console.warn('[loadRegInviteTodoCounts] network error:', err); });
+  }
+
+  // ── Cleaning Crew Liaison To Do: unassigned areas this session ─────
+  // Counts cleaning areas (floater excluded) with no family assigned for
+  // the current session; opens Cleaning Crew Management (Erin, 2026-07-15).
+  function loadCleaningTodoCount() {
+    var item = document.getElementById('ws-todo-cleaning-item');
+    if (!item) return; // not the liaison's tab
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/cleaning', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || data.error) { console.warn('[loadCleaningTodoCount] ' + ((data && data.error) || 'load failed')); return; }
+        var sess = currentSession;
+        var areas = (data.areas || []).filter(function (a) { return a.floor_key !== 'floater'; });
+        var bySess = (data.sessions || {})[sess] || {};
+        var open = areas.filter(function (a) {
+          var fams = (bySess[a.floor_key] || {})[a.area_name] || [];
+          return fams.length === 0;
+        }).length;
+        var pill = document.getElementById('ws-cleaning-open-count');
+        if (pill) pill.textContent = String(open);
+        var label = document.getElementById('ws-cleaning-open-label');
+        if (label) label.textContent = 'Assign cleaning area' + (open === 1 ? '' : 's') + ' — Session ' + sess;
+        item.hidden = open <= 0;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function (err) { console.warn('[loadCleaningTodoCount] network error:', err); });
   }
 
   function showRegInvitesModal() {

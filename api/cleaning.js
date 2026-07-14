@@ -264,7 +264,9 @@ module.exports = async function handler(req, res) {
           NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') AS person_name
         FROM role_holders_v2 rhv
         JOIN roles r ON r.id = rhv.role_id
-        LEFT JOIN people p ON LOWER(p.email) = LOWER(rhv.person_email)
+        LEFT JOIN people p
+          ON (LOWER(p.email) = LOWER(rhv.person_email) OR LOWER(p.family_email) = LOWER(rhv.person_email))
+          AND p.role = 'mlc'
         WHERE r.role_key = 'cleaning_crew_liaison'
           AND rhv.ended_at IS NULL
         ORDER BY rhv.school_year DESC, rhv.id ASC
