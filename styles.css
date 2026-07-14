@@ -11309,6 +11309,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-wv-ok,
 .ws-wv-pending,
 .ws-wv-resent,
+.ws-wv-declined,
 .ws-wv-new {
   display: inline-block;
   padding: 2px 9px;
@@ -11323,6 +11324,9 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-wv-ok      { background: rgba(90, 107, 57, 0.14);   color: var(--color-leaf); }
 .ws-wv-pending { background: rgba(224, 181, 44, 0.18);  color: var(--color-accent-dark); }
 .ws-wv-resent  { background: rgba(196, 80, 65, 0.14);   color: #b3381a; }
+/* Declined registrations — same coral tint as the tour-status pill so
+   "declined" reads identically across Workspace reports. */
+.ws-wv-declined { background: rgba(var(--color-coral-rgb), 0.18); color: #8A2222; }
 .ws-wv-new     { background: rgba(82, 58, 121, 0.12);   color: var(--color-primary-dark, #3d2a5c); }
 /* Photos column pills — same shape as the status pills above so the
    Waivers Report reads as one consistent badge style. Allowed = leaf
@@ -11955,6 +11959,16 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-decline-status {
   font-size: 0.88rem;
   color: var(--color-text-light);
+}
+/* Who/when/why banner shown atop the detail panel of a declined
+   registration — same coral family as the Declined pill. */
+.ws-reg-declined-banner {
+  background: rgba(var(--color-coral-rgb), 0.1);
+  border: 1px solid rgba(var(--color-coral-rgb), 0.35);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  color: #8A2222;
 }
 .ws-reg-detail-notes {
   white-space: pre-wrap;

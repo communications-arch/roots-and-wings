@@ -9442,6 +9442,7 @@
     if (state === 'paid') return '<span class="ws-wv-ok">Paid</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'signed') return '<span class="ws-wv-ok">Signed</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'resent') return '<span class="ws-wv-resent">Resent</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
+    if (state === 'declined') return '<span class="ws-wv-declined">Declined</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     return '<span class="ws-wv-pending">Pending</span>';
   }
 
@@ -10719,8 +10720,9 @@
       render: function (r) { return escapeHtmlWs(r.main_learning_coach); }
     },
     { key: 'payment_status', label: 'Paid', type: 'string',
-      sortValue: function (r) { return String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'; },
+      sortValue: function (r) { return r.declined_at ? '0' : (String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'); },
       render: function (r) {
+        if (r.declined_at) return renderStatusPill('declined', r.declined_at);
         var ok = String(r.payment_status || '').toLowerCase() === 'paid';
         return renderStatusPill(ok ? 'paid' : 'pending', null);
       }
@@ -10760,12 +10762,19 @@
     { key: 'created_at', label: 'Registered', type: 'date', mobileHide: true,
       render: function (r) { return formatReportDate(r.created_at); }
     },
-    // Actions column trailing — Membership Director's Decline only.
-    // Click opens the row's expansion and renders the confirm UI at
-    // the top of the detail panel via _membershipPendingAction.
+    // Actions column trailing — Membership Director's Decline (active rows)
+    // or Undo decline (declined rows). Click opens the row's expansion and
+    // renders the confirm UI at the top of the detail panel via
+    // _membershipPendingAction.
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (r) {
         if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        if (r.declined_at) {
+          return '<div class="ws-srt-actions">'
+            + '<button type="button" class="sc-btn ws-undecline-btn"'
+            + ' data-undecline-id="' + escapeHtmlWs(String(r.id)) + '">Undo decline&hellip;</button>'
+            + '</div>';
+        }
         return '<div class="ws-srt-actions">'
           + '<button type="button" class="sc-btn sc-btn-del ws-decline-btn"'
           + ' data-decline-id="' + escapeHtmlWs(String(r.id)) + '"'
@@ -10846,14 +10855,19 @@
         return Object.assign({}, r, { kids: kids || [], backup_coaches: backups || [] });
       });
       _membershipRegs = regs;
-      var total = regs.length;
-      var paidCount = regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; }).length;
+      // Declined rows ride along in the payload but stay out of every count
+      // and default view \u2014 they only surface behind the Declined pill/funnel.
+      var declinedCount = regs.filter(function (r) { return !!r.declined_at; }).length;
+      if (_membershipFilter === 'declined' && declinedCount === 0) _membershipFilter = 'all';
+      var activeRegs = regs.filter(function (r) { return !r.declined_at; });
+      var total = activeRegs.length;
+      var paidCount = activeRegs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; }).length;
       var pendingCount = total - paidCount;
-      var newCount = regs.filter(function (r) { return !!r.isNewMember; }).length;
+      var newCount = activeRegs.filter(function (r) { return !!r.isNewMember; }).length;
       // Per-track kid counts. Track is family-level (one value per
       // registration), so each kid inherits their family's bucket.
       var kidsAm = 0, kidsPm = 0, kidsBoth = 0;
-      regs.forEach(function (r) {
+      activeRegs.forEach(function (r) {
         var n = (r.kids || []).length;
         var t = String(r.track || '');
         if      (t === 'Morning Only')   kidsAm   += n;
@@ -10861,9 +10875,10 @@
         else if (t === 'Both')           kidsBoth += n;
       });
 
-      // Modal meta line \u2014 total registrations.
+      // Modal meta line \u2014 total registrations (+ declined, when any).
       var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-      if (metaEl) metaEl.textContent = total + ' registration' + (total === 1 ? '' : 's');
+      if (metaEl) metaEl.textContent = total + ' registration' + (total === 1 ? '' : 's')
+        + (declinedCount > 0 ? ' \u00b7 ' + declinedCount + ' declined' : '');
 
       // Board members (read-only, viewerCanAct=false) see the same
       // Membership Report table as the acting roles, minus the Actions
@@ -10891,6 +10906,10 @@
         h += countPill('am',      _membershipTrackFilter === 'am',   'ws-track-count', kidsAm + ' Kids AM only',    'Show only AM-only families');
         h += countPill('pm',      _membershipTrackFilter === 'pm',   'ws-track-count', kidsPm + ' Kids PM only',    'Show only PM-only families');
         h += countPill('both',    _membershipTrackFilter === 'both', 'ws-track-count', kidsBoth + ' Kids Both',     'Show only AM + PM families');
+        // Declined pill only exists when there's something behind it.
+        if (declinedCount > 0) {
+          h += countPill('declined', _membershipFilter === 'declined', 'ws-wv-declined', declinedCount + ' Declined', 'Show only declined registrations');
+        }
         return h;
       }
 
@@ -10909,7 +10928,7 @@
         var btn = e.target.closest('[data-mfilter]');
         if (!btn) return;
         var f = btn.getAttribute('data-mfilter');
-        if (f === 'paid' || f === 'pending') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
+        if (f === 'paid' || f === 'pending' || f === 'declined') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
         else if (f === 'new')               _membershipNewFilter = (_membershipNewFilter === 'new') ? 'all' : 'new';
         else                                _membershipTrackFilter = (_membershipTrackFilter === f) ? 'all' : f;
         renderCounts();
@@ -10922,6 +10941,11 @@
       }
       function regsForFilter() {
         return regs.filter(function (r) {
+          // Declined rows are their own bucket: hidden everywhere except
+          // behind the Declined filter, where they're the only rows shown.
+          if (_membershipFilter === 'declined') {
+            if (!r.declined_at) return false;
+          } else if (r.declined_at) return false;
           var paid = String(r.payment_status || '').toLowerCase() === 'paid';
           if (_membershipFilter === 'paid' && !paid) return false;
           if (_membershipFilter === 'pending' && paid) return false;
@@ -10943,7 +10967,7 @@
                 { value: 'all',     label: 'Any',     count: total },
                 { value: 'paid',    label: 'Paid',    count: paidCount },
                 { value: 'pending', label: 'Pending', count: pendingCount }
-              ],
+              ].concat(declinedCount > 0 ? [{ value: 'declined', label: 'Declined', count: declinedCount }] : []),
               current: _membershipFilter,
               onChange: function (v) { _membershipFilter = v; renderCounts(); renderTable(); }
             };
@@ -11019,6 +11043,61 @@
             }).catch(function (err) {
               statusEl.textContent = 'Network error: ' + ((err && err.message) || 'unknown');
               cBtn.disabled = false;
+            });
+          return;
+        }
+        // Undo-decline flow — mirrors Decline: the Actions button stamps
+        // _membershipPendingAction and expands the row; the confirm panel
+        // (rendered by renderMembershipRegDetail) hosts the apology-note
+        // textarea + confirm/cancel.
+        var undeclineBtn = e.target.closest('.ws-undecline-btn');
+        if (undeclineBtn) {
+          if (!canAct) return;
+          var udId = parseInt(undeclineBtn.getAttribute('data-undecline-id'), 10);
+          _membershipPendingAction = { regId: udId, type: 'undecline' };
+          var udRow = undeclineBtn.closest('tr');
+          var udIdx = udRow ? parseInt(udRow.getAttribute('data-row-idx'), 10) : -1;
+          if (tableTarget._expandRow && udIdx >= 0) tableTarget._expandRow(udIdx);
+          else renderTable();
+          return;
+        }
+        if (e.target.classList.contains('ws-undecline-cancel-btn')) {
+          _membershipPendingAction = null;
+          renderTable();
+          return;
+        }
+        if (e.target.classList.contains('ws-undecline-confirm-btn')) {
+          var uBtn = e.target;
+          var undeclineId = uBtn.getAttribute('data-undecline-id');
+          var uWrap = uBtn.closest('.ws-reg-decline');
+          var uNoteEl = uWrap.querySelector('.ws-undecline-note');
+          var uNote = uNoteEl ? uNoteEl.value : '';
+          var uStatusEl = uWrap.querySelector('.ws-decline-status');
+          uStatusEl.textContent = 'Processing…';
+          uBtn.disabled = true;
+          var uCred = localStorage.getItem('rw_google_credential');
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + uCred },
+            body: JSON.stringify({ kind: 'registration-undecline', id: parseInt(undeclineId, 10), note: uNote })
+          }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
+            .then(function (rres) {
+              if (!rres.ok) {
+                uStatusEl.textContent = 'Error: ' + ((rres.data && rres.data.error) || 'unknown');
+                uBtn.disabled = false;
+                return;
+              }
+              uStatusEl.textContent = (rres.data && rres.data.emailSent === false)
+                ? 'Registration restored, but the apology email failed to send — please follow up with the family directly.'
+                : 'Registration restored. Apology email sent.';
+              _membershipPendingAction = null;
+              setTimeout(function () {
+                closeDetail();
+                showMembershipReportModal();
+              }, 900);
+            }).catch(function (err) {
+              uStatusEl.textContent = 'Network error: ' + ((err && err.message) || 'unknown');
+              uBtn.disabled = false;
             });
           return;
         }
@@ -11510,6 +11589,10 @@
   // so the visible-on-screen scope and the exported scope match.
   function membershipFilteredRegs() {
     var regs = _membershipRegs || [];
+    // Same declined bucketing as the modal's regsForFilter: declined rows
+    // only print/export when the Declined filter is active.
+    if (_membershipFilter === 'declined') return regs.filter(function (r) { return !!r.declined_at; });
+    regs = regs.filter(function (r) { return !r.declined_at; });
     if (_membershipFilter === 'paid') return regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; });
     if (_membershipFilter === 'pending') return regs.filter(function (r) { return String(r.payment_status || '').toLowerCase() !== 'paid'; });
     return regs;
@@ -11634,13 +11717,36 @@
     // panel hosts the textarea + confirm/cancel flow.
     if (_membershipPendingAction && _membershipPendingAction.regId === r.id && _membershipPendingAction.type === 'decline') {
       h += '<div class="ws-reg-detail-section ws-reg-decline">' +
-        '<p class="ws-reg-decline-hint"><strong>Decline ' + escapeHtmlWs(r.main_learning_coach || '') + ' (' + escapeHtmlWs(r.email || '') + ')?</strong> An email goes to the family, Treasurer, Membership, and Communications. The registration row and any derived member_profiles row are deleted. Treasurer will issue the refund manually.</p>' +
+        '<p class="ws-reg-decline-hint"><strong>Decline ' + escapeHtmlWs(r.main_learning_coach || '') + ' (' + escapeHtmlWs(r.email || '') + ')?</strong> An email goes to the family, Treasurer, Membership, and Communications, and the family disappears from all reports and member tools. Treasurer will issue the refund manually. If this turns out to be a mistake, you can undo it from the Declined view of this report.</p>' +
         '<textarea class="rd-textarea ws-decline-note" rows="3" placeholder="Optional note to include in the decline email&hellip;"></textarea>' +
         '<div class="rd-btn-row ws-decline-btn-row">' +
           '<button type="button" class="sc-btn sc-btn-del ws-decline-confirm-btn" data-decline-id="' + escapeHtmlWs(String(r.id)) + '">Confirm decline</button>' +
           '<button type="button" class="sc-btn ws-decline-cancel-btn">Cancel</button>' +
         '</div>' +
         '<p class="ws-decline-status" aria-live="polite" style="margin-top:8px;"></p>' +
+        '</div>';
+    }
+
+    // Undo-decline confirm panel — same shell as the decline confirm.
+    if (_membershipPendingAction && _membershipPendingAction.regId === r.id && _membershipPendingAction.type === 'undecline') {
+      h += '<div class="ws-reg-detail-section ws-reg-decline">' +
+        '<p class="ws-reg-decline-hint"><strong>Undo the decline for ' + escapeHtmlWs(r.main_learning_coach || '') + ' (' + escapeHtmlWs(r.email || '') + ')?</strong> The registration is restored everywhere — payment status, waivers, and family profile included — and an apology email telling the family to disregard the decline notice goes out, cc\'ing Treasurer, Membership, and Communications.</p>' +
+        '<textarea class="rd-textarea ws-undecline-note" rows="3" placeholder="Optional personal note to include in the apology email&hellip;"></textarea>' +
+        '<div class="rd-btn-row ws-decline-btn-row">' +
+          '<button type="button" class="sc-btn ws-undecline-confirm-btn" data-undecline-id="' + escapeHtmlWs(String(r.id)) + '">Restore &amp; send apology</button>' +
+          '<button type="button" class="sc-btn ws-undecline-cancel-btn">Cancel</button>' +
+        '</div>' +
+        '<p class="ws-decline-status" aria-live="polite" style="margin-top:8px;"></p>' +
+        '</div>';
+    }
+
+    // Declined banner — who declined, when, and the note that went to the
+    // family. Shown on every declined row regardless of pending action.
+    if (r.declined_at) {
+      h += '<div class="ws-reg-detail-section ws-reg-declined-banner">' +
+        '<strong>Declined</strong> ' + escapeHtmlWs(new Date(r.declined_at).toLocaleString()) +
+        (r.declined_by ? ' by ' + escapeHtmlWs(r.declined_by) : '') +
+        (r.decline_note ? '<br><em>Note sent to family: ' + escapeHtmlWs(r.decline_note) + '</em>' : '') +
         '</div>';
     }
 

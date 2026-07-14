@@ -352,8 +352,21 @@ CREATE TABLE IF NOT EXISTS registrations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS registrations_email_season_idx
-  ON registrations (LOWER(email), season);
+-- Soft decline (2026-07-14). Declining a registration used to hard-delete the
+-- row (plus cascaded waiver_signatures); after a Membership Director declined
+-- a family by mistake there was nothing to restore. Now decline just stamps
+-- these columns and every consumer filters on declined_at IS NULL; the
+-- Membership Report shows declined rows behind a Declined filter with an
+-- Undo action that clears the stamp and sends an apology email.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS declined_at  TIMESTAMPTZ;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS declined_by  TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS decline_note TEXT DEFAULT '';
+-- Uniqueness applies to ACTIVE registrations only — a declined row must not
+-- block the same family from re-registering. DROP of the old absolute index
+-- is a no-op after the first run.
+DROP INDEX IF EXISTS registrations_email_season_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS registrations_email_season_active_idx
+  ON registrations (LOWER(email), season) WHERE declined_at IS NULL;
 CREATE INDEX IF NOT EXISTS registrations_season_idx ON registrations (season);
 CREATE INDEX IF NOT EXISTS registrations_payment_status_idx ON registrations (payment_status);
 

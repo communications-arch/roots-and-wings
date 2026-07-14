@@ -1030,6 +1030,7 @@ async function handleList(req, res) {
              r.signature_name, r.signature_date, r.student_signature,
              r.payment_status, r.paypal_transaction_id, r.payment_amount,
              r.workspace_account_created_at, r.distribution_list_added_at, r.welcome_email_sent_at,
+             r.declined_at, r.declined_by, r.decline_note,
              r.created_at, r.updated_at,
              (
                SELECT COALESCE(json_agg(json_build_object(
@@ -1055,7 +1056,10 @@ async function handleList(req, res) {
     // family's My Family billing card on the next read AND fires the
     // payment-received email — Treasurer's only action is the sheet
     // edit; no separate Mark Paid click required.
-    const pendingRegs = rows.filter(r => String(r.payment_status || '').toLowerCase() !== 'paid');
+    // Declined rows are returned (the report shows them behind a Declined
+    // filter) but never auto-reconciled — a sheet Paid mark on a declined
+    // family must not fire the payment-received email.
+    const pendingRegs = rows.filter(r => !r.declined_at && String(r.payment_status || '').toLowerCase() !== 'paid');
     if (pendingRegs.length > 0 && process.env.BILLING_SHEET_ID) {
       try {
         const sheetsClient = google.sheets({ version: 'v4', auth: getAuth() });
@@ -1175,6 +1179,7 @@ async function handleReconcileCron(req, res) {
       FROM registrations
       WHERE season = ${season}
         AND LOWER(payment_status) <> 'paid'
+        AND declined_at IS NULL
     `;
     if (pending.length === 0) {
       return res.status(200).json({ ok: true, season, pending: 0, reconciled: 0 });
@@ -1433,11 +1438,14 @@ async function handleBackupWaiverSign(body, req, res) {
 // REGISTRATION DECLINE
 // ══════════════════════════════════════════════
 // Membership Director flags a registration as declined. We email the family
-// (cc'ing Communications, Treasurer, and Membership), then hard-delete all
-// user info created by the registration: the registrations row itself,
-// waiver_signatures (cascades on registration_id), and any member_profiles row we derived at
-// registration time. Treasurer issues the refund manually against the PayPal
-// transaction ID included in the email.
+// (cc'ing Communications, Treasurer, and Membership), delete any
+// member_profiles row we derived at registration time, and stamp
+// declined_at/declined_by/decline_note on the registrations row. The row is
+// KEPT (soft delete) so the Membership Report can show declined registrations
+// and the Director can undo a mistaken decline — every other consumer filters
+// on declined_at IS NULL. waiver_signatures rows survive too, which is what
+// makes undo lossless. Treasurer issues the refund manually against the
+// PayPal transaction ID included in the email.
 async function handleRegistrationDecline(body, req, res) {
   const auth = await verifyWorkspaceAuth(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -1461,14 +1469,16 @@ async function handleRegistrationDecline(body, req, res) {
   try {
     const rows = await sql`
       SELECT id, email, main_learning_coach, existing_family_name, season,
-             paypal_transaction_id, payment_amount, kids
+             paypal_transaction_id, payment_amount, kids, declined_at
       FROM registrations WHERE id = ${id} LIMIT 1
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
     const reg = rows[0];
+    if (reg.declined_at) return res.status(200).json({ success: true, already: true });
 
     // Best-effort: delete any member_profiles row created by this registration.
     // We keyed it by derived family_email (Main LC first name + family initial).
+    // Undo re-creates it from the registration row via upsertProfileFromRegistration.
     try {
       const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
       const famEmail = deriveFamilyEmail(reg.main_learning_coach, famName);
@@ -1479,9 +1489,15 @@ async function handleRegistrationDecline(body, req, res) {
       console.error('member_profiles delete (non-fatal):', mpErr);
     }
 
-    // waiver_signatures.registration_id is ON DELETE CASCADE, so MLC + backup-coach waiver rows clear with the
-    // registration row. No separate DELETE needed.
-    await sql`DELETE FROM registrations WHERE id = ${id}`;
+    // Soft delete: stamp the decline instead of removing the row. All other
+    // registration consumers filter on declined_at IS NULL; waiver_signatures
+    // rows stay put so an Undo restores the family losslessly.
+    await sql`
+      UPDATE registrations
+      SET declined_at = NOW(), declined_by = ${auth.email}, decline_note = ${note},
+          updated_at = NOW()
+      WHERE id = ${id}
+    `;
 
     // Send the decline email. Failures here don't unwind the delete — the
     // Membership Director can always send a manual note if Resend is down.
@@ -1520,6 +1536,140 @@ async function handleRegistrationDecline(body, req, res) {
   } catch (err) {
     console.error('Registration decline error:', err);
     return res.status(500).json({ error: 'Could not decline registration.' });
+  }
+}
+
+// ══════════════════════════════════════════════
+// REGISTRATION UNDECLINE (undo a mistaken decline)
+// ══════════════════════════════════════════════
+// Same gate as decline. Clears the declined_at/declined_by/decline_note
+// stamp, re-creates the member_profiles row the decline deleted (from the
+// registration row + surviving backup-coach waiver_signatures rows), and
+// emails the family an apology/reinstatement note (cc'ing Communications,
+// Treasurer, and Membership so everyone who saw the decline email sees the
+// reversal too).
+async function handleRegistrationUndecline(body, req, res) {
+  const auth = await verifyWorkspaceAuth(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+
+  const canDecline = isSuperUser(auth.email) ||
+    await hasCapability(auth.email, 'registration_decline');
+  if (!canDecline) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    return res.status(403).json({
+      error: 'Only the Membership Director can undo a declined registration.',
+      youAre: auth.email,
+      expected: expected || '(unknown)'
+    });
+  }
+
+  const id = parseInt(body.id, 10);
+  if (!id) return res.status(400).json({ error: 'Registration id required.' });
+  const note = String(body.note || '').trim().slice(0, 2000);
+
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT id, email, main_learning_coach, existing_family_name, season,
+             phone, address, track, kids, placement_notes,
+             waiver_photo_consent, declined_at
+      FROM registrations WHERE id = ${id} LIMIT 1
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
+    const reg = rows[0];
+    if (!reg.declined_at) return res.status(200).json({ success: true, already: true });
+
+    // If the family already re-registered for this season, restoring the old
+    // row would collide with the partial unique index — surface that clearly
+    // instead of a raw constraint error.
+    const active = await sql`
+      SELECT id FROM registrations
+      WHERE LOWER(email) = LOWER(${reg.email}) AND season = ${reg.season}
+        AND declined_at IS NULL
+      LIMIT 1
+    `;
+    if (active.length > 0) {
+      return res.status(409).json({
+        error: 'This family already has an active registration for ' + reg.season +
+          ' (they may have re-registered). Leave this one declined.'
+      });
+    }
+
+    await sql`
+      UPDATE registrations
+      SET declined_at = NULL, declined_by = NULL, decline_note = '',
+          updated_at = NOW()
+      WHERE id = ${id}
+    `;
+
+    // Re-create the member_profiles row the decline deleted, from the same
+    // fields registration used. Merge-not-clobber, and non-fatal — the family
+    // can re-enter extras (photos, pronouns) via Edit My Info if needed.
+    try {
+      const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
+      const famEmail = deriveFamilyEmail(reg.main_learning_coach, famName);
+      if (famEmail) {
+        const backupRows = await sql`
+          SELECT person_name AS name, person_email AS email
+          FROM waiver_signatures
+          WHERE registration_id = ${id} AND role = 'backup_coach'
+        `;
+        let kids = reg.kids;
+        if (typeof kids === 'string') { try { kids = JSON.parse(kids); } catch (e) { kids = []; } }
+        await upsertProfileFromRegistration(sql, {
+          familyEmail: famEmail,
+          familyName: famName,
+          mlcName: reg.main_learning_coach,
+          mlcEmail: reg.email,
+          mlcPhotoConsent: reg.waiver_photo_consent === 'yes',
+          backupCoaches: backupRows.map(b => ({ name: b.name, email: b.email })),
+          kids: Array.isArray(kids) ? kids : [],
+          track: reg.track,
+          phone: reg.phone,
+          address: reg.address,
+          placementNotes: reg.placement_notes
+        });
+      }
+    } catch (profileErr) {
+      console.error('Undecline member_profiles restore (non-fatal):', profileErr);
+    }
+
+    // Apology / reinstatement email. Non-fatal — the restore stands even if
+    // Resend is down; Membership can follow up manually.
+    let emailSent = true;
+    try {
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const noteHtml = note
+        ? `<p><strong>Note from Membership:</strong><br>${escapeHtml(note).replace(/\n/g, '<br>')}</p>`
+        : '';
+      await resend.emails.send({
+        from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+        to: reg.email,
+        cc: [
+          'communications@rootsandwingsindy.com',
+          'treasurer@rootsandwingsindy.com',
+          'membership@rootsandwingsindy.com'
+        ],
+        replyTo: 'membership@rootsandwingsindy.com',
+        subject: emailSubject(`Roots & Wings ${reg.season}: Our apology — your registration is confirmed`),
+        html: `
+          <h2>Please disregard the decline notice — your registration is confirmed</h2>
+          <p>Hi ${escapeHtml(reg.main_learning_coach)},</p>
+          <p>You recently received an email saying your ${escapeHtml(reg.season)} registration with Roots &amp; Wings Homeschool Co-op had been declined. That email was sent in error, and we're very sorry for the confusion.</p>
+          <p>Your registration has been fully restored — everything you submitted (your family info, kids, and signed waivers) is intact, and <strong>no action is needed on your part</strong>. If a refund was already processed, the Treasurer will reach out to make it right.</p>
+          ${noteHtml}
+          <p style="margin-top:16px;">We're glad to have your family with us. Questions? Reply to this email and it'll reach the Membership team.</p>
+        `,
+      });
+    } catch (mailErr) {
+      emailSent = false;
+      console.error('Undecline apology email error (non-fatal):', mailErr);
+    }
+
+    return res.status(200).json({ success: true, emailSent });
+  } catch (err) {
+    console.error('Registration undecline error:', err);
+    return res.status(500).json({ error: 'Could not restore registration.' });
   }
 }
 
@@ -1616,11 +1766,14 @@ async function handleRegistrationMarkPaid(body, req, res) {
   try {
     const rows = await sql`
       SELECT id, email, main_learning_coach, existing_family_name, season,
-             payment_amount, payment_status
+             payment_amount, payment_status, declined_at
       FROM registrations WHERE id = ${id} LIMIT 1
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
     const reg = rows[0];
+    if (reg.declined_at) {
+      return res.status(409).json({ error: 'This registration is declined — undo the decline before marking it paid.' });
+    }
     if (String(reg.payment_status || '').toLowerCase() === 'paid') {
       return res.status(200).json({ success: true, already: true });
     }
@@ -1711,7 +1864,7 @@ async function handleOnboardingDismiss(body, req, res) {
   try {
     const rows = await sql`
       SELECT id, main_learning_coach, existing_family_name
-      FROM registrations WHERE id = ${id}
+      FROM registrations WHERE id = ${id} AND declined_at IS NULL
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
     if (rows[0].existing_family_name) {
@@ -1812,10 +1965,12 @@ async function handleWaiversCounts(req, res) {
     const sql = getSql();
     const rows = await sql`
       SELECT
-        COUNT(*) FILTER (WHERE signed_at IS NULL AND last_sent_at IS NULL)     AS pending,
-        COUNT(*) FILTER (WHERE signed_at IS NULL AND last_sent_at IS NOT NULL) AS resent
-      FROM waiver_signatures
-      WHERE role IN ('backup_coach', 'one_off')
+        COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NULL)     AS pending,
+        COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NOT NULL) AS resent
+      FROM waiver_signatures ws
+      LEFT JOIN registrations r ON r.id = ws.registration_id
+      WHERE ws.role IN ('backup_coach', 'one_off')
+        AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
     `;
     const r = rows[0] || {};
     return res.status(200).json({
@@ -1870,6 +2025,7 @@ async function handleWaiversReport(req, res) {
       FROM waiver_signatures ws
       LEFT JOIN registrations r ON r.id = ws.registration_id
       WHERE (${season}::text IS NULL OR ws.season = ${season})
+        AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
       ORDER BY COALESCE(ws.last_sent_at, ws.sent_at, ws.signed_at, ws.created_at) DESC
     `;
     // Re-shape into the three buckets the Waivers Report renderer
@@ -1923,6 +2079,7 @@ async function handleWaiversReport(req, res) {
              student_signature, waiver_photo_consent, created_at
       FROM registrations
       WHERE student_signature IS NOT NULL AND student_signature <> ''
+        AND declined_at IS NULL
         AND (${season}::text IS NULL OR season = ${season})
     `;
     regsForStudents.forEach(r => {
@@ -2938,6 +3095,7 @@ async function handleProfileUpdate(body, req, res) {
       const reg = await sql`
         SELECT id FROM registrations
         WHERE LOWER(email) = LOWER(${familyEmail}) AND season = ${DEFAULT_SEASON}
+          AND declined_at IS NULL
         ORDER BY created_at DESC LIMIT 1
       `;
       const registrationId = reg.length > 0 ? reg[0].id : null;
@@ -3753,6 +3911,7 @@ async function handleMorningBuilderGet(req, res) {
       FROM registrations
       WHERE season = ${schoolYear}
         AND track = ANY(${MORNING_TRACKS})
+        AND declined_at IS NULL
     `;
     const draftRows = await sql`
       SELECT family_email, kid_first_name, class_group, finalized
@@ -4688,7 +4847,7 @@ async function handleWelcomeListGet(req, res) {
              w.met_at, w.met_by
       FROM registrations r
       LEFT JOIN welcome_outreach w ON w.registration_id = r.id
-      WHERE r.season = ${season}
+      WHERE r.season = ${season} AND r.declined_at IS NULL
       ORDER BY r.created_at DESC
     `;
     // Keep only NEW families — same canonical rule as the Membership
@@ -4824,7 +4983,7 @@ async function handleCommunitySnapshot(req, res) {
       SELECT r.id, r.email, r.main_learning_coach, r.existing_family_name,
              r.kids, r.track, r.track_other, r.created_at
       FROM registrations r
-      WHERE r.season = ${season}
+      WHERE r.season = ${season} AND r.declined_at IS NULL
       ORDER BY r.main_learning_coach
     `;
     // New vs returning — same canonical rule as the Directory First-Year badge
@@ -4923,6 +5082,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'registration-decline') return handleRegistrationDecline(body, req, res);
+    if (kind === 'registration-undecline') return handleRegistrationUndecline(body, req, res);
     if (kind === 'registration-mark-paid') return handleRegistrationMarkPaid(body, req, res);
     if (kind === 'onboarding-step') return handleOnboardingStep(body, req, res);
     if (kind === 'onboarding-dismiss') return handleOnboardingDismiss(body, req, res);

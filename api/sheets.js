@@ -1723,6 +1723,7 @@ async function firstSeasonByEmail(sql) {
     var regRows = await sql`
       SELECT email, season, created_at, main_learning_coach, existing_family_name
       FROM registrations
+      WHERE declined_at IS NULL
     `;
     return firstSeasonFromRows(regRows);
   } catch (e) {
