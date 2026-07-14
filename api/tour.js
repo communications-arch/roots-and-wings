@@ -299,7 +299,22 @@ async function verifyWorkspaceAuthWithViewAs(req) {
 
 // ── Tour request ──
 // Validates input, INSERTs into tours (persistent pipeline backing the
-// Membership Director's Tour Pipeline report), then emails Membership.
+// Membership Director's Member Pipeline report), then emails Membership.
+
+// The person's open pipeline row, if any — repeat inquiries/requests from
+// the same email merge into it instead of creating duplicates (Erin,
+// 2026-07-14). Terminal statuses (joined/declined/ghosted) don't count:
+// a family who comes back later starts a fresh pass.
+async function findOpenTourByEmail(sql, email) {
+  const rows = await sql`
+    SELECT id, status, family_name, message FROM tours
+    WHERE LOWER(family_email) = ${String(email || '').toLowerCase().trim()}
+      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+  `;
+  return rows[0] || null;
+}
 // preferred_date/preferred_time are optional from the family's POV —
 // if they leave them blank, the row lands in the pipeline as
 // "requested" without a proposed slot, and Membership coordinates via
@@ -335,19 +350,56 @@ async function handleTour(body, res) {
   // DB insert — best-effort, but log loudly if it fails so we know the
   // pipeline is missing a row. The email path is the user-visible
   // confirmation; if DB drops a row, Membership still gets the alert.
+  // Repeat contacts merge (Erin, 2026-07-14): a second request from an
+  // email that already has an OPEN pipeline row ties to that same person
+  // instead of creating a duplicate — history gets an entry, fresher
+  // contact fields win, and a plain inquiry upgrades to 'requested'.
+  // Terminal rows (joined/declined/ghosted) don't reopen; those start a
+  // fresh row so a returning family gets a clean pipeline pass.
   let tourId = null;
+  let mergedIntoExisting = false;
   try {
     const sql = getSql();
-    const inserted = await sql`
-      INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
-                         preferred_date, preferred_time, status, status_history)
-      VALUES (${name}, ${email.toLowerCase()}, ${phone},
-              ${Number.isFinite(numKidsInt) ? numKidsInt : null},
-              ${ages}, ${preferredDate}, ${preferredTime}, 'requested',
-              ${JSON.stringify([{ at: new Date().toISOString(), by: 'public-form', from: null, to: 'requested' }])}::jsonb)
-      RETURNING id
-    `;
-    tourId = inserted[0] && inserted[0].id;
+    const existing = await findOpenTourByEmail(sql, email);
+    if (existing) {
+      const upgraded = existing.status === 'inquiry';
+      const newStatus = upgraded ? 'requested' : existing.status;
+      const entry = {
+        at: new Date().toISOString(),
+        by: 'public-form',
+        via: 'repeat-contact',
+        from: existing.status,
+        to: newStatus,
+        note: 'Repeat tour request from this email' +
+          (String(existing.family_name || '').trim().toLowerCase() !== name.toLowerCase() ? ' (submitted as "' + name + '")' : '') +
+          ' — merged into this row'
+      };
+      await sql`
+        UPDATE tours
+        SET status = ${newStatus},
+            phone = ${phone},
+            num_kids = ${Number.isFinite(numKidsInt) ? numKidsInt : null},
+            ages = ${ages},
+            preferred_date = ${preferredDate},
+            preferred_time = ${preferredTime},
+            status_history = COALESCE(status_history, '[]'::jsonb) || ${JSON.stringify([entry])}::jsonb,
+            updated_at = NOW()
+        WHERE id = ${existing.id}
+      `;
+      tourId = existing.id;
+      mergedIntoExisting = true;
+    } else {
+      const inserted = await sql`
+        INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                           preferred_date, preferred_time, status, status_history)
+        VALUES (${name}, ${email.toLowerCase()}, ${phone},
+                ${Number.isFinite(numKidsInt) ? numKidsInt : null},
+                ${ages}, ${preferredDate}, ${preferredTime}, 'requested',
+                ${JSON.stringify([{ at: new Date().toISOString(), by: 'public-form', from: null, to: 'requested' }])}::jsonb)
+        RETURNING id
+      `;
+      tourId = inserted[0] && inserted[0].id;
+    }
   } catch (dbErr) {
     console.error('Tour DB insert error (non-fatal — email still going):', dbErr);
   }
@@ -391,7 +443,8 @@ async function handleTour(body, res) {
           <tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Ages</td><td style="padding:8px 0;">${safeAges}</td></tr>
           ${slotRow}
         </table>
-        <p style="color:#666;font-size:0.9rem;margin-top:16px;">Open the Tour Pipeline in My Workspace to schedule, follow up, or close out this request.</p>
+        ${mergedIntoExisting ? `<p style="background:#f5f0f8;padding:8px 12px;border-left:3px solid #523A79;border-radius:4px;color:#3d2a5c;">Repeat contact — this email already had an open pipeline row, so this request was merged into it (see its status history).</p>` : ''}
+        <p style="color:#666;font-size:0.9rem;margin-top:16px;">Open the Member Pipeline in My Workspace to schedule, follow up, or close out this request.</p>
       `,
     }),
     resend.emails.send({
@@ -455,18 +508,48 @@ async function handleContact(body, res) {
 
   // DB insert first — best-effort, same rationale as handleTour: the row is
   // the source of truth for the pipeline; email is the user-visible confirm.
+  // Repeat contacts merge into the person's open pipeline row (see
+  // handleTour): the new message appends to their existing one, history
+  // gets an entry, and the row's stage is left alone (a question from a
+  // toured family must not knock them back to 'inquiry').
   let tourId = null;
+  let mergedIntoExisting = false;
   try {
     const sql = getSql();
-    const inserted = await sql`
-      INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
-                         status, source, message, status_history)
-      VALUES (${name}, ${email.toLowerCase()}, ${phone}, NULL, '',
-              'inquiry', 'contact-form', ${message},
-              ${JSON.stringify([{ at: new Date().toISOString(), by: 'contact-form', from: null, to: 'inquiry' }])}::jsonb)
-      RETURNING id
-    `;
-    tourId = inserted[0] && inserted[0].id;
+    const existing = await findOpenTourByEmail(sql, email);
+    if (existing) {
+      const entry = {
+        at: new Date().toISOString(),
+        by: 'contact-form',
+        via: 'repeat-contact',
+        from: existing.status,
+        to: existing.status,
+        note: 'New inquiry message from this email — merged into this row'
+      };
+      const mergedMessage = (String(existing.message || '').trim()
+        ? String(existing.message).trim() + '\n— — —\n' + message
+        : message).slice(0, 4000);
+      await sql`
+        UPDATE tours
+        SET message = ${mergedMessage},
+            phone = CASE WHEN ${phone} <> '' THEN ${phone} ELSE phone END,
+            status_history = COALESCE(status_history, '[]'::jsonb) || ${JSON.stringify([entry])}::jsonb,
+            updated_at = NOW()
+        WHERE id = ${existing.id}
+      `;
+      tourId = existing.id;
+      mergedIntoExisting = true;
+    } else {
+      const inserted = await sql`
+        INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                           status, source, message, status_history)
+        VALUES (${name}, ${email.toLowerCase()}, ${phone}, NULL, '',
+                'inquiry', 'contact-form', ${message},
+                ${JSON.stringify([{ at: new Date().toISOString(), by: 'contact-form', from: null, to: 'inquiry' }])}::jsonb)
+        RETURNING id
+      `;
+      tourId = inserted[0] && inserted[0].id;
+    }
   } catch (dbErr) {
     console.error('Contact DB insert error (non-fatal — email still going):', dbErr);
   }
@@ -489,7 +572,8 @@ async function handleContact(body, res) {
           ${safePhone ? `<tr><td style="padding:8px 16px 8px 0;font-weight:bold;">Phone</td><td style="padding:8px 0;">${safePhone}</td></tr>` : ''}
           ${messageBlock}
         </table>
-        <p style="color:#666;font-size:0.9rem;margin-top:16px;">This inquiry is in the Tour Pipeline in My Workspace (tagged "General inquiry"). Reply to this email to reach the family directly, or schedule them a tour from there.</p>
+        ${mergedIntoExisting ? `<p style="background:#f5f0f8;padding:8px 12px;border-left:3px solid #523A79;border-radius:4px;color:#3d2a5c;">Repeat contact — this email already had an open pipeline row, so this message was merged into it.</p>` : ''}
+        <p style="color:#666;font-size:0.9rem;margin-top:16px;">This inquiry is in the Member Pipeline in My Workspace (tagged "General inquiry"). Reply to this email to reach the family directly, or schedule them a tour from there.</p>
       `,
     }),
     resend.emails.send({
@@ -2449,7 +2533,7 @@ async function handleRegistrationInvitesList(req, res) {
     const sql = getSql();
     const rows = await sql`
       SELECT i.id, i.email, i.name, i.note, i.season,
-             i.sent_by, i.first_sent_at, i.last_sent_at, i.send_count,
+             i.sent_by, i.sent_via, i.first_sent_at, i.last_sent_at, i.send_count,
              i.opened_at, i.dismissed_at, i.dismissed_by,
              r.id AS registration_id, r.created_at AS registered_at
       FROM registration_invites i
@@ -2464,6 +2548,55 @@ async function handleRegistrationInvitesList(req, res) {
   } catch (err) {
     console.error('Registration invites list error:', err);
     return res.status(500).json({ error: 'Could not load sent registration links.' });
+  }
+}
+
+// kind=registration-invite-mark — log a registration link that was sent
+// OUTSIDE the app (text, in person, personal email). Membership enters
+// the date herself; no email fires, and there's no tokenized link in the
+// family's hands, so opens can't be tracked for these (sent_via='other').
+// Upserts the same one-row-per-family-per-season record the emailed path
+// uses, so the whole funnel (Awaiting Registration count, pipeline
+// stamps, the 2-week expiry) runs from the entered date.
+async function handleRegistrationInviteMark(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canAct = await hasCapability(auth.email, 'registration_invite');
+  if (!canAct) {
+    const expected = await getRoleHolderEmail('Membership Director');
+    return res.status(403).json({
+      error: 'Only the Membership or Communications Director can log registration links.',
+      youAre: auth.realEmail,
+      expected: expected || '(unknown)'
+    });
+  }
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const sentDate = String(body.sent_date || '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Valid email is required.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sentDate)) return res.status(400).json({ error: 'A valid sent date is required.' });
+  if (name.length > 200) return res.status(400).json({ error: 'Name too long.' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      INSERT INTO registration_invites
+        (email, name, season, token, sent_by, sent_via, first_sent_at, last_sent_at)
+      VALUES (${email}, ${name}, ${DEFAULT_SEASON}, ${crypto.randomUUID().replace(/-/g, '')},
+              ${auth.realEmail}, 'other', ${sentDate}::date, ${sentDate}::date)
+      ON CONFLICT (LOWER(email), season)
+      DO UPDATE SET name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE registration_invites.name END,
+                    sent_by = EXCLUDED.sent_by,
+                    sent_via = 'other',
+                    last_sent_at = ${sentDate}::date,
+                    send_count = registration_invites.send_count + 1,
+                    dismissed_at = NULL,
+                    dismissed_by = ''
+      RETURNING id, last_sent_at, send_count
+    `;
+    return res.status(200).json({ success: true, invite: rows[0] });
+  } catch (err) {
+    console.error('Registration invite mark error:', err);
+    return res.status(500).json({ error: 'Could not log the link.' });
   }
 }
 
@@ -4830,7 +4963,7 @@ async function handleBoardCalendarGet(req, res) {
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT id, school_year, title, event_date, end_date, note, updated_at, updated_by
+      SELECT id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
       FROM board_calendar_events
       ORDER BY event_date, id
     `;
@@ -4841,6 +4974,7 @@ async function handleBoardCalendarGet(req, res) {
       event_date: calDateStr(r.event_date),
       end_date: calDateStr(r.end_date),
       note: r.note || '',
+      event_type: r.event_type || 'task',
       derived: false,
       updated_at: r.updated_at,
       updated_by: r.updated_by
@@ -4932,6 +5066,8 @@ async function handleBoardCalendarSave(body, req, res) {
   const eventDate = String(body.event_date).trim();
   const endDate = String(body.end_date || '').trim() || null;
   const note = String(body.note || '').trim();
+  // 'task' (board tasks pill) or 'general' (general co-op events pill).
+  const eventType = String(body.event_type || 'task').trim() === 'general' ? 'general' : 'task';
   const id = body.id != null ? parseInt(body.id, 10) : null;
   try {
     const sql = getSql();
@@ -4940,18 +5076,19 @@ async function handleBoardCalendarSave(body, req, res) {
       const updated = await sql`
         UPDATE board_calendar_events
         SET school_year = ${schoolYear}, title = ${title}, event_date = ${eventDate},
-            end_date = ${endDate}, note = ${note}, updated_at = NOW(), updated_by = ${auth.realEmail}
+            end_date = ${endDate}, note = ${note}, event_type = ${eventType},
+            updated_at = NOW(), updated_by = ${auth.realEmail}
         WHERE id = ${id}
-        RETURNING id, school_year, title, event_date, end_date, note, updated_at, updated_by
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Event not found.' });
       row = updated[0];
     } else {
       const inserted = await sql`
         INSERT INTO board_calendar_events
-          (school_year, title, event_date, end_date, note, updated_at, updated_by)
-        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, NOW(), ${auth.realEmail})
-        RETURNING id, school_year, title, event_date, end_date, note, updated_at, updated_by
+          (school_year, title, event_date, end_date, note, event_type, updated_at, updated_by)
+        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, NOW(), ${auth.realEmail})
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, updated_at, updated_by
       `;
       row = inserted[0];
     }
@@ -4963,6 +5100,7 @@ async function handleBoardCalendarSave(body, req, res) {
         event_date: calDateStr(row.event_date),
         end_date: calDateStr(row.end_date),
         note: row.note || '',
+        event_type: row.event_type || 'task',
         updated_at: row.updated_at,
         updated_by: row.updated_by
       }
@@ -5282,6 +5420,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'registration-invite') return handleRegistrationInvite(body, req, res);
     if (kind === 'registration-invite-dismiss' ||
         kind === 'registration-invite-restore') return handleRegistrationInviteDismiss(body, req, res);
+    if (kind === 'registration-invite-mark') return handleRegistrationInviteMark(body, req, res);
     if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);

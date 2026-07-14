@@ -120,14 +120,14 @@ const CAPABILITIES = [
   {
     key: 'tours_view',
     area: 'Membership & Tours',
-    label: 'Tour Pipeline — view',
+    label: 'Member Pipeline — view',
     desc: 'See prospective-family tour requests and their status.',
     defaultRoles: ['Membership Director']
   },
   {
     key: 'tours_manage',
     area: 'Membership & Tours',
-    label: 'Tour Pipeline — schedule & update',
+    label: 'Member Pipeline — schedule & update',
     desc: 'Schedule tours, mark them toured/joined/declined.',
     defaultRoles: ['Membership Director']
   },

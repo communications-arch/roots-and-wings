@@ -1578,3 +1578,14 @@ CREATE TABLE IF NOT EXISTS registration_invites (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS registration_invites_email_season_idx
   ON registration_invites (LOWER(email), season);
+
+-- General calendar events (Erin, 2026-07-14): the Admin Calendar's manual
+-- rows split into Board tasks vs General co-op events, each with its own
+-- view pill. Additive; existing rows stay 'task'.
+ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'task';
+
+-- Off-platform registration-link sends (Erin, 2026-07-14): Membership can
+-- log a link she sent by text/in person, entering the date herself — no
+-- email fires and there's no token, so opens aren't tracked for these.
+-- sent_via: 'email' (app-sent) | 'other' (logged manually).
+ALTER TABLE registration_invites ADD COLUMN IF NOT EXISTS sent_via TEXT NOT NULL DEFAULT 'email';

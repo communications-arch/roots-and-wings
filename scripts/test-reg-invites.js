@@ -103,5 +103,41 @@ t('awaiting count math: only sent/opened rows count', () => {
   assert.strictEqual(invites.filter(regInviteAwaiting).length, 2);
 });
 
+// ── tourDisplayStatus: the pipeline's derived workflow stages ─────────
+// Depends on the regInviteForEmail cache lookup — stubbed per test. The
+// extracted regInviteStatus runs with the real clock here, so fixtures
+// use dates relative to actual now.
+const realDaysAgo = n => new Date(Date.now() - n * DAY).toISOString();
+function makeDisplayStatus(invByEmail) {
+  return new Function(
+    'var regInviteForEmail = function (e) { return (' + JSON.stringify(invByEmail) + ')[String(e).toLowerCase()] || null; };\n' +
+    extract('regInviteExpired') + '\n' + extract('regInviteStatus') + '\n' + extract('tourDisplayStatus') + '\n' +
+    'return tourDisplayStatus;'
+  )();
+}
+
+console.log('\ntourDisplayStatus (pipeline workflow stages)');
+t('toured with no invite stays toured', () => {
+  const ds = makeDisplayStatus({});
+  assert.strictEqual(ds({ status: 'toured', family_email: 'a@x.com' }), 'toured');
+});
+t('toured + fresh link → link_sent; 20-day-old link → reg_expired', () => {
+  const ds = makeDisplayStatus({
+    'fresh@x.com': { last_sent_at: realDaysAgo(2) },
+    'stale@x.com': { last_sent_at: realDaysAgo(20) }
+  });
+  assert.strictEqual(ds({ status: 'toured', family_email: 'fresh@x.com' }), 'link_sent');
+  assert.strictEqual(ds({ status: 'followed_up', family_email: 'stale@x.com' }), 'reg_expired');
+});
+t('registered invite falls back to base status (Joined is the explicit close-out)', () => {
+  const ds = makeDisplayStatus({ 'reg@x.com': { last_sent_at: realDaysAgo(2), registered_at: realDaysAgo(1) } });
+  assert.strictEqual(ds({ status: 'toured', family_email: 'reg@x.com' }), 'toured');
+});
+t('stages only apply post-tour; terminal statuses win', () => {
+  const ds = makeDisplayStatus({ 'a@x.com': { last_sent_at: realDaysAgo(2) } });
+  assert.strictEqual(ds({ status: 'scheduled', family_email: 'a@x.com' }), 'scheduled');
+  assert.strictEqual(ds({ status: 'joined', family_email: 'a@x.com' }), 'joined');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

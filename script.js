@@ -7821,7 +7821,7 @@
       { key: 'merch-orders', title: 'Merchandise Orders' }
     ],
     'Membership Director': [
-      { key: 'tour-pipeline', title: 'Tour Pipeline' },
+      { key: 'tour-pipeline', title: 'Member Pipeline' },
       { key: 'morning-classes', title: 'Morning Classes' },
       { key: 'membership', title: 'Membership' }
     ],
@@ -7948,7 +7948,7 @@
   // buttons inside a report) are enforced by the server + per-feature
   // render checks and need no entry here.
   var CAPABILITY_SURFACES = {
-    'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Tour Pipeline' }] },
+    'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Member Pipeline' }] },
     'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Morning Classes' }] },
     'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
                                forms:   [{ key: 'send-waiver', title: 'Send One-Off Waiver' }] },
@@ -8799,6 +8799,25 @@
     });
   }
 
+  // Display-stage for a pipeline row (Erin, 2026-07-14: "include
+  // registration link sent in the pill workflow"). DB statuses are
+  // unchanged; 'link_sent' and 'reg_expired' are DERIVED from the
+  // registration-link invites cache so the pills show where a toured
+  // family actually stands: toured → Link Sent → (2 weeks pass) →
+  // Reg Expired, which calls for a resend or an outcome. Registered
+  // invites fall back to the base status — marking Joined is the
+  // Membership Director's explicit close-out.
+  function tourDisplayStatus(t) {
+    if (t.status !== 'toured' && t.status !== 'followed_up') return t.status;
+    var inv = t.family_email ? regInviteForEmail(t.family_email) : null;
+    if (!inv) return t.status;
+    var st = regInviteStatus(inv);
+    if (st === 'expired') return 'reg_expired';
+    if (st === 'sent' || st === 'opened') return 'link_sent';
+    return t.status;
+  }
+  var TOUR_STATUS_LABELS = { link_sent: 'link sent', reg_expired: 'reg expired' };
+
   // Column spec — standard order: row identifier (Family) → Status pill
   // → domain columns (Preferred / Scheduled / Kids / Requested) → trailing
   // Actions column with stage-specific buttons.
@@ -8818,11 +8837,13 @@
     },
     { key: 'status', label: 'Status', type: 'string',
       sortValue: function (t) {
-        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, joined: 4, declined: 5, ghosted: 6 };
-        return String(order[t.status] != null ? order[t.status] : 9);
+        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, link_sent: 3.6, reg_expired: 3.8, joined: 4, declined: 5, ghosted: 6 };
+        var ds = tourDisplayStatus(t);
+        return String(order[ds] != null ? order[ds] : 9);
       },
       render: function (t) {
-        return '<span class="ws-tour-status ws-tour-status-' + escapeHtmlWs(t.status) + '">' + escapeHtmlWs(String(t.status || '').replace(/_/g, ' ')) + '</span>';
+        var ds = tourDisplayStatus(t);
+        return '<span class="ws-tour-status ws-tour-status-' + escapeHtmlWs(ds) + '">' + escapeHtmlWs(TOUR_STATUS_LABELS[ds] || String(ds || '').replace(/_/g, ' ')) + '</span>';
       }
     },
     { key: 'preferred_slot', label: 'Preferred', type: 'string',
@@ -8877,15 +8898,21 @@
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Reschedule&hellip;</button>';
         } else if (t.status === 'toured' || t.status === 'followed_up') {
           // The natural next step after a tour/meet-up: send the family
-          // the registration link. Hidden once a link is already logged
-          // for their email (the stamp shows instead; resends live in
-          // the Registration Links list).
-          if (t.family_email && !inv) {
-            btns += '<button type="button" class="sc-btn ws-tour-sendlink-btn" data-tour-id="' + t.id + '">Send reg link</button>';
+          // the registration link. Once a link is logged the stamp shows
+          // instead — until it expires (2 weeks after the last send),
+          // when a Resend button comes back (Erin, 2026-07-14). The
+          // Joined / Declined… / Ghosted buttons collapsed into one
+          // Outcome dropdown (same ask).
+          var ds = tourDisplayStatus(t);
+          if (t.family_email && (!inv || ds === 'reg_expired')) {
+            btns += '<button type="button" class="sc-btn ws-tour-sendlink-btn" data-tour-id="' + t.id + '">' + (inv ? 'Resend link' : 'Send reg link') + '</button>';
           }
-          btns += '<button type="button" class="sc-btn ws-tour-joined-btn" data-tour-id="' + t.id + '">Joined</button>';
-          btns += '<button type="button" class="sc-btn sc-btn-del ws-tour-decline-btn" data-tour-id="' + t.id + '">Declined&hellip;</button>';
-          btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Ghost</button>';
+          btns += '<select class="sc-btn ws-tour-outcome" data-tour-id="' + t.id + '" aria-label="Record the outcome for this family">';
+          btns += '<option value="">Outcome&hellip;</option>';
+          btns += '<option value="joined">Joined</option>';
+          btns += '<option value="declined">Declined&hellip;</option>';
+          btns += '<option value="ghosted">Ghosted</option>';
+          btns += '</select>';
         } else {
           return invStamp || '<span class="ws-srt-actions-empty">&mdash;</span>';
         }
@@ -8953,7 +8980,7 @@
     // the cache in the background.
     var hasCache = Array.isArray(_toursCache) && _toursCache.length > 0;
     var body = renderReportModal({
-      title: _inquiryMode ? 'Inquiries' : 'Tour Pipeline',
+      title: _inquiryMode ? 'Inquiries' : 'Member Pipeline',
       subtitle: _inquiryMode
         ? 'General questions from the website Contact form. Reply by email, turn one into a tour, or close it out once it’s handled.'
         : 'Prospective families from request through joined or closed out. Tours run on Wednesdays during active sessions, 10:00 AM – 2:30 PM.',
@@ -8963,6 +8990,19 @@
       bodyPlaceholder: hasCache ? '' : '<p class="ws-empty">Loading…</p>'
     });
     if (!body) return;
+    // The Link Sent / Reg Expired stages + row stamps derive from the
+    // invites cache — warm it if the To Do loader hasn't already, and
+    // repaint when it lands.
+    if (_regInvitesCache === null) {
+      fetch('/api/tour?list=registration-invites', { headers: rwAuthHeaders() })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) return;
+          _regInvitesCache = Array.isArray(d.invites) ? d.invites : [];
+          loadTourPipeline();
+        })
+        .catch(function () { /* stamps/stages just stay base-status */ });
+    }
     // Kick off the slots fetch (only once per session — cached for
     // reopens) WITHOUT awaiting it before loadTourPipeline. The tour
     // list fetch starts immediately, the table renders as soon as it
@@ -8995,8 +9035,10 @@
     var tableTarget = body.querySelector('#ws-tours-table-target');
 
       function computeCounts() {
-        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, joined: 0, declined: 0, ghosted: 0 };
-        (_toursCache || []).forEach(function (t) { if (counts[t.status] != null) counts[t.status] += 1; });
+        // Counted on DISPLAY status so the Link Sent / Reg Expired
+        // workflow stages (derived from the invites cache) get pills.
+        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, link_sent: 0, reg_expired: 0, joined: 0, declined: 0, ghosted: 0 };
+        (_toursCache || []).forEach(function (t) { var ds = tourDisplayStatus(t); if (counts[ds] != null) counts[ds] += 1; });
         return counts;
       }
       function rowsForFilter() {
@@ -9006,7 +9048,7 @@
         if (_toursFilter === 'open') return _toursCache.filter(function (t) {
           return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
         });
-        return _toursCache.filter(function (t) { return t.status === _toursFilter; });
+        return _toursCache.filter(function (t) { return tourDisplayStatus(t) === _toursFilter; });
       }
       function refreshAll() {
         var counts = computeCounts();
@@ -9039,6 +9081,8 @@
           s += '<span class="ws-tour-status ws-tour-status-scheduled">' + counts.scheduled + ' Scheduled</span>';
           s += '<span class="ws-tour-status ws-tour-status-toured">'    + counts.toured    + ' Toured</span>';
           if (counts.followed_up) s += '<span class="ws-tour-status ws-tour-status-toured">' + counts.followed_up + ' Followed up</span>';
+          s += '<span class="ws-tour-status ws-tour-status-link_sent">' + counts.link_sent + ' Link Sent</span>';
+          if (counts.reg_expired) s += '<span class="ws-tour-status ws-tour-status-reg_expired">' + counts.reg_expired + ' Reg Expired</span>';
           s += '<span class="ws-tour-status ws-tour-status-joined">'    + counts.joined    + ' Joined</span>';
           s += '<span class="ws-tour-status ws-tour-status-declined">'  + counts.declined  + ' Declined</span>';
           s += '<span class="ws-tour-status ws-tour-status-ghosted">'   + counts.ghosted   + ' Ghosted</span>';
@@ -9065,7 +9109,7 @@
           });
           return;
         }
-        var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured + counts.followed_up;
+        var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured + counts.followed_up + counts.link_sent + counts.reg_expired;
         var cols = TOURS_TABLE_COLS.slice();
         cols.forEach(function (col) {
           if (col.key === 'status') {
@@ -9082,6 +9126,8 @@
                 { value: 'scheduled', label: 'Scheduled', count: counts.scheduled },
                 { value: 'toured',    label: 'Toured',    count: counts.toured },
                 { value: 'followed_up', label: 'Followed Up', count: counts.followed_up },
+                { value: 'link_sent', label: 'Link Sent', count: counts.link_sent },
+                { value: 'reg_expired', label: 'Reg Expired', count: counts.reg_expired },
                 { value: 'joined',    label: 'Joined',    count: counts.joined },
                 { value: 'declined',  label: 'Declined',  count: counts.declined },
                 { value: 'ghosted',   label: 'Ghosted',   count: counts.ghosted }
@@ -9156,9 +9202,86 @@
         });
       }
 
+      // Outcome dropdown (replaces the Joined/Declined/Ghost buttons,
+      // Erin 2026-07-14). Terminal choices route through the same logic
+      // the buttons used; the select snaps back to "Outcome…" so a
+      // cancelled confirm leaves nothing half-selected.
+      body.addEventListener('change', function (e) {
+        var sel = e.target.closest('.ws-tour-outcome');
+        if (!sel) return;
+        var oId = parseInt(sel.getAttribute('data-tour-id'), 10);
+        var choice = sel.value;
+        sel.value = '';
+        if (!choice || !oId) return;
+        if (choice === 'joined') {
+          tourQuickAction(oId, 'joined', 'Mark this family as joined? They should now appear in the Membership Report once they register.');
+        } else if (choice === 'ghosted') {
+          tourQuickAction(oId, 'ghosted', 'Mark this family as ghosted (no response)?');
+        } else if (choice === 'declined') {
+          _toursPendingAction = { tourId: oId, type: 'decline' };
+          var oRow = sel.closest('tr');
+          var oIdx = oRow ? parseInt(oRow.getAttribute('data-row-idx'), 10) : -1;
+          if (tableTarget._expandRow && oIdx >= 0) tableTarget._expandRow(oIdx);
+          else renderTable();
+        }
+      });
+
       // Delegated click handler for action buttons + the in-expansion
       // confirm UI for Schedule / Decline.
       body.addEventListener('click', function (e) {
+        // "Log link sent" (row expansion): the link went out another way
+        // (text, in person) — record it with the date Membership enters
+        // so the funnel/expiry run from that date. No email fires.
+        var markBtn = e.target.closest('.ws-reginv-mark-btn');
+        if (markBtn) {
+          var mId = parseInt(markBtn.getAttribute('data-tour-id'), 10);
+          var mRow = (_toursCache || []).filter(function (t) { return t.id === mId; })[0];
+          var mWrap = markBtn.closest('.ws-reg-detail-section');
+          var mDate = mWrap ? (mWrap.querySelector('.ws-reginv-mark-date') || {}).value : '';
+          if (!mRow || !mRow.family_email) return;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(mDate || '')) { alert('Pick the date the link was sent.'); return; }
+          markBtn.disabled = true; markBtn.textContent = 'Logging…';
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'registration-invite-mark', name: mRow.family_name || '', email: mRow.family_email, sent_date: mDate })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) {
+                markBtn.disabled = false; markBtn.textContent = 'Log link sent';
+                var mMsg = (res.data && res.data.error) || 'Could not log the link.';
+                if (res.data && res.data.youAre) mMsg += ' (logged in as ' + res.data.youAre + ', expected ' + res.data.expected + ')';
+                alert(mMsg);
+                return;
+              }
+              // Mirror the server upsert into the local invites cache so
+              // the row flips to Link Sent without a refetch. Noon UTC
+              // keeps the date part stable in local formats.
+              if (!Array.isArray(_regInvitesCache)) _regInvitesCache = [];
+              var mInv = regInviteForEmail(mRow.family_email);
+              var mSent = mDate + 'T12:00:00Z';
+              if (mInv) {
+                mInv.last_sent_at = mSent;
+                mInv.send_count = Number(mInv.send_count || 1) + 1;
+                mInv.sent_via = 'other';
+                mInv.dismissed_at = null; mInv.dismissed_by = '';
+              } else {
+                _regInvitesCache.unshift({
+                  id: (res.data.invite && res.data.invite.id) || 0,
+                  email: mRow.family_email, name: mRow.family_name || '', note: '', sent_by: '', sent_via: 'other',
+                  first_sent_at: mSent, last_sent_at: mSent, send_count: 1,
+                  opened_at: null, dismissed_at: null, registered_at: null, registration_id: null
+                });
+              }
+              updateRegInviteTodoItems();
+              refreshAll();
+            })
+            .catch(function (err) {
+              markBtn.disabled = false; markBtn.textContent = 'Log link sent';
+              alert('Network error: ' + ((err && err.message) || 'unknown'));
+            });
+          return;
+        }
         var slBtn = e.target.closest('.ws-tour-sendlink-btn');
         if (slBtn) {
           var slId = parseInt(slBtn.getAttribute('data-tour-id'), 10);
@@ -9406,6 +9529,20 @@
     h += fld('Last update', t.updated_at ? escapeHtmlWs(new Date(t.updated_at).toLocaleString() + (t.updated_by ? ' · ' + t.updated_by : '')) : '');
     h += '</div>';
 
+    // Log a registration link that went out another way (text, in
+    // person). Only for toured/followed-up rows whose email has no
+    // invite yet — once logged, the row's stamp + Link Sent stage show
+    // instead (Erin, 2026-07-14).
+    if ((t.status === 'toured' || t.status === 'followed_up') && t.family_email
+        && !(typeof regInviteForEmail === 'function' && regInviteForEmail(t.family_email))) {
+      h += '<div class="ws-reg-detail-section"><h5>Registration link</h5>';
+      h += '<p class="ws-reg-decline-hint">Sent them the link another way (text, in person)? Log it so the funnel tracks them — opens can’t be tracked for links sent outside the app.</p>';
+      h += '<div class="rd-btn-row" style="align-items:center;flex-wrap:wrap;">';
+      h += '<label style="font-weight:600;">Sent on <input type="date" class="rd-input ws-reginv-mark-date" value="' + escapeHtmlWs((typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : '') + '"></label>';
+      h += '<button type="button" class="btn btn-outline-dark btn-sm ws-reginv-mark-btn" data-tour-id="' + t.id + '">Log link sent</button>';
+      h += '</div></div>';
+    }
+
     // The visitor's free-text message from the Contact Us form.
     if (t.message) {
       h += '<div class="ws-reg-detail-section"><h5>Their message</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(t.message) + '</div></div>';
@@ -9441,7 +9578,9 @@
     if (_toursFilter === 'open') return _toursCache.filter(function (t) {
       return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
     });
-    return _toursCache.filter(function (t) { return t.status === _toursFilter; });
+    // Display status so the Link Sent / Reg Expired lenses export the
+    // same rows the table shows.
+    return _toursCache.filter(function (t) { return tourDisplayStatus(t) === _toursFilter; });
   }
 
   function exportToursCSV() {
@@ -9455,7 +9594,7 @@
     var lines = [headers.join(',')];
     rows.forEach(function (t) {
       lines.push([
-        esc(t.family_name), esc(t.family_email), esc(t.phone), esc(t.status),
+        esc(t.family_name), esc(t.family_email), esc(t.phone), esc(tourDisplayStatus(t)),
         esc(tourSlotLabel(t.preferred_date, t.preferred_time)),
         esc(tourSlotLabel(t.scheduled_date, t.scheduled_time)),
         esc(t.num_kids != null ? t.num_kids : ''),
@@ -9478,16 +9617,16 @@
 
   function printToursReport() {
     var rows = toursFilteredRows();
-    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Tour Pipeline</title>';
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Member Pipeline</title>';
     doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
     doc += '</head><body>';
-    doc += '<h1>Tour Pipeline</h1>';
+    doc += '<h1>Member Pipeline</h1>';
     doc += '<p class="meta">' + rows.length + ' tour' + (rows.length === 1 ? '' : 's') + ' · printed ' + new Date().toLocaleDateString() + '</p>';
     doc += '<table><thead><tr><th>Family</th><th>Status</th><th>Preferred</th><th>Scheduled</th><th>Kids</th><th>Requested</th></tr></thead><tbody>';
     rows.forEach(function (t) {
       doc += '<tr>';
       doc += '<td>' + escapeHtml(t.family_name || '') + '<br><span style="color:#666;font-size:11px;">' + escapeHtml(t.family_email || '') + '</span></td>';
-      doc += '<td>' + String(t.status || '').toUpperCase() + '</td>';
+      doc += '<td>' + String(tourDisplayStatus(t) || '').replace(/_/g, ' ').toUpperCase() + '</td>';
       doc += '<td>' + escapeHtml(tourSlotLabel(t.preferred_date, t.preferred_time) || '—') + '</td>';
       doc += '<td>' + escapeHtml(tourSlotLabel(t.scheduled_date, t.scheduled_time) || '—') + '</td>';
       doc += '<td>' + (t.num_kids != null ? t.num_kids : '?') + (t.ages ? ' (' + escapeHtml(t.ages) + ')' : '') + '</td>';
@@ -20232,7 +20371,7 @@
       return String(b.last_sent_at || '').localeCompare(String(a.last_sent_at || ''));
     });
     if (invites.length === 0) {
-      body.innerHTML = '<p class="ws-empty">No registration links sent yet this season. Send one from a toured family’s row in the Tour Pipeline, or with the Send Registration Form.</p>';
+      body.innerHTML = '<p class="ws-empty">No registration links sent yet this season. Send one from a toured family’s row in the Member Pipeline, or with the Send Registration Form.</p>';
       return;
     }
     var bucketCounts = { waiting: 0, expired: 0, registered: 0, dismissed: 0 };
@@ -20266,6 +20405,9 @@
       var sent = 'Sent ' + welcomeFmtDate(inv.last_sent_at);
       if (Number(inv.send_count) > 1) sent += ' (×' + inv.send_count + ', first ' + welcomeFmtDate(inv.first_sent_at) + ')';
       if (inv.sent_by) sent += ' by ' + inv.sent_by;
+      // Logged manually (text/in person) — no tokenized link out there,
+      // so opens can't be tracked for this one.
+      if (inv.sent_via === 'other') sent += ' · logged (sent outside the app)';
       h += '<div class="ws-welcome-sub">' + escapeHtml(sent) + '</div>';
       if (inv.note) h += '<div class="ws-welcome-sub"><em>' + escapeHtml(inv.note) + '</em></div>';
       if (inv.opened_at) h += '<div class="ws-welcome-stamp">✓ Opened ' + escapeHtml(welcomeFmtDate(inv.opened_at)) + '</div>';
@@ -20507,6 +20649,9 @@
       var id = String(e.id || '');
       if (id.indexOf('derived:session') === 0) return 'session';
       if (id.indexOf('derived:icecream:') === 0 || id.indexOf('derived:fieldday:') === 0) return 'special';
+      // Manual rows split by event_type (Erin, 2026-07-14): 'general'
+      // co-op events get their own pill; everything else stays a task.
+      if (String(e.event_type || '') === 'general') return 'general';
       return 'task';
     }
     var seByName = {};
@@ -20572,7 +20717,7 @@
 
     // View pills — one list, four lenses.
     h += '<div class="board-cal-views" role="group" aria-label="Calendar view">';
-    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['task', 'Board Tasks']].forEach(function (v) {
+    [['all', 'All'], ['session', 'Sessions'], ['special', 'Special Events'], ['general', 'General'], ['task', 'Board Tasks']].forEach(function (v) {
       h += '<button type="button" class="board-cal-view-pill' + (view === v[0] ? ' is-active' : '') + '" data-cal-view="' + v[0] + '">' + v[1] + '</button>';
     });
     h += '</div>';
@@ -20614,7 +20759,7 @@
         if (sessEditable) {
           h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
         } else {
-          h += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title) + '</td>';
+          h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : '')) + escapeHtml(e.title) + '</td>';
         }
         // Notes cell (+ status chip for special events).
         var notes = escapeHtml(e.note || '');
@@ -20826,18 +20971,24 @@
     boardCalShowMsg('');
     var isEdit = !!ev;
     var v = ev || { title: '', event_date: '', end_date: '', note: '' };
-    // Type choice (new events only): 📌 Board task vs 🎉 Special event —
+    // Type choice: 📌 Board task / 🗓 General event / 🎉 Special event —
     // answers "which pill does this land under?". Each option renders
     // only for viewers who can actually create that kind (server
-    // re-checks): board members → tasks, SEL/VP → special events.
+    // re-checks): board members → tasks + general, SEL/VP → special
+    // events. Special is create-only (its own table); task ⇄ general can
+    // be re-typed on edit.
     var canSEForm = !!_boardCalState.canEditSpecialEvents;
     var boardForm = boardCalViewerIsBoard();
+    var evType = (ev && String(ev.event_type || '') === 'general') ? 'general' : 'task';
     var h = '<div class="board-cal-form">';
     h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
-    if (!isEdit && canSEForm && boardForm) {
+    if (boardForm) {
       h += '<div class="board-cal-field" id="board-cal-type-row">Type:&nbsp; ';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task" checked> 📌 Board task</label>&nbsp;&nbsp;';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task"' + (evType === 'task' ? ' checked' : '') + '> 📌 Board task</label>&nbsp;&nbsp;';
+      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="general"' + (evType === 'general' ? ' checked' : '') + '> 🗓 General event</label>';
+      if (!isEdit && canSEForm) {
+        h += '&nbsp;&nbsp;<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
+      }
       h += '</div>';
     } else if (!isEdit && canSEForm && !boardForm) {
       // SEL-only viewer: special events are the only kind she can add.
@@ -20924,7 +21075,9 @@
       title: (document.getElementById('board-cal-f-title').value || '').trim(),
       event_date: document.getElementById('board-cal-f-date').value || '',
       end_date: document.getElementById('board-cal-f-end').value || '',
-      note: (document.getElementById('board-cal-f-note').value || '').trim()
+      note: (document.getElementById('board-cal-f-note').value || '').trim(),
+      // 'task' or 'general' — which pill the row lands under.
+      event_type: boardCalFormType() === 'general' ? 'general' : 'task'
     };
     var idAttr = saveBtn.getAttribute('data-id');
     if (idAttr) payload.id = parseInt(idAttr, 10);
