@@ -10683,8 +10683,10 @@ button.staff-role:hover {
 .ws-welcome-cpill.is-new      { background: rgba(224, 181, 44, 0.14); color: var(--color-accent-dark); border-color: rgba(224, 181, 44, 0.4); }
 .ws-welcome-cpill.is-welcomed { background: rgba(82, 58, 121, 0.10);  color: var(--color-primary-dark, #3d2a5c); border-color: rgba(82, 58, 121, 0.3); }
 .ws-welcome-cpill.is-done     { background: rgba(90, 107, 57, 0.12);  color: var(--color-leaf); border-color: rgba(90, 107, 57, 0.35); }
-/* Registration Links list reuses the welcome pills; is-muted = Dismissed. */
+/* Registration Links list reuses the welcome pills; is-muted = Dismissed,
+   is-expired = link past its 2-week window (needs resend or dismiss). */
 .ws-welcome-cpill.is-muted    { background: rgba(90, 90, 90, 0.08);   color: #666; border-color: rgba(90, 90, 90, 0.3); }
+.ws-welcome-cpill.is-expired  { background: rgba(217, 95, 59, 0.12);  color: #8A2222; border-color: rgba(217, 95, 59, 0.4); }
 /* Clickable filter pills: cursor + a stronger ring when active. */
 button.ws-welcome-cpill { cursor: pointer; }
 button.ws-welcome-cpill:hover { filter: brightness(0.97); }
@@ -10782,6 +10784,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-welcome-stage.is-welcomed { background: rgba(82, 58, 121, 0.12);  color: var(--color-primary-dark, #3d2a5c); }
 .ws-welcome-stage.is-done     { background: rgba(90, 107, 57, 0.14);  color: var(--color-leaf); }
 .ws-welcome-stage.is-muted    { background: rgba(90, 90, 90, 0.10);   color: #666; }
+.ws-welcome-stage.is-expired  { background: rgba(217, 95, 59, 0.14);  color: #8A2222; }
 .ws-welcome-contact { font-size: 0.84rem; margin-top: 4px; word-break: break-word; }
 .ws-welcome-contact a { color: var(--color-primary); }
 .ws-welcome-sub { font-size: 0.84rem; color: var(--color-text-light); margin-top: 2px; }

@@ -19970,25 +19970,48 @@
     })[0] || null;
   }
 
+  // Links expire 14 days after the LAST send (a resend restarts the
+  // clock), matching the "within 2 weeks" promise in the invite email.
+  // Advisory, not a gate: register.html shows an expired banner but still
+  // accepts the form (the page is public — returning families use it with
+  // no token at all). nowMs is injectable for the unit tests.
+  function regInviteExpired(inv, nowMs) {
+    if (!inv || !inv.last_sent_at) return false;
+    var sent = new Date(inv.last_sent_at).getTime();
+    if (isNaN(sent)) return false;
+    var now = (nowMs != null) ? nowMs : Date.now();
+    return now - sent > 14 * 24 * 60 * 60 * 1000;
+  }
   // Funnel status of an invite row (pure — see scripts/test-reg-invites.js).
   // registered wins over dismissed: if the family registered anyway, that's
-  // the truth that matters.
-  function regInviteStatus(inv) {
+  // the truth that matters. expired outranks opened — an opened-but-stale
+  // link still needs a resend or dismiss.
+  function regInviteStatus(inv, nowMs) {
     if (!inv) return '';
     if (inv.registered_at) return 'registered';
     if (inv.dismissed_at) return 'dismissed';
+    if (regInviteExpired(inv, nowMs)) return 'expired';
     if (inv.opened_at) return 'opened';
     return 'sent';
   }
-  // Still counts toward "Awaiting Registration".
+  // Still counts toward "Awaiting Registration" (an expired invite needs
+  // Membership's attention more than a fresh one).
   function regInviteAwaiting(inv) {
     var s = regInviteStatus(inv);
-    return s === 'sent' || s === 'opened';
+    return s === 'sent' || s === 'opened' || s === 'expired';
   }
-  // Bucket for the list filter pills (sent+opened collapse to 'waiting').
+  // Bucket for the list filter pills (sent+opened collapse to 'waiting';
+  // expired gets its own bucket).
   function regInviteBucket(inv) {
     var s = regInviteStatus(inv);
     return (s === 'sent' || s === 'opened') ? 'waiting' : s;
+  }
+  // When a link stops (or stopped) being valid — last send + 14 days.
+  function regInviteExpiryDateStr(inv) {
+    if (!inv || !inv.last_sent_at) return '';
+    var t = new Date(inv.last_sent_at).getTime();
+    if (isNaN(t)) return '';
+    return new Date(t + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
 
   // One-line funnel summary for pipeline row stamps.
@@ -19997,6 +20020,7 @@
     if (Number(inv.send_count) > 1) s += ' (×' + inv.send_count + ')';
     var st = regInviteStatus(inv);
     if (st === 'registered') s += ' · Registered ✓';
+    else if (st === 'expired') s += ' · Expired';
     else if (st === 'opened') s += ' · Opened';
     else if (st === 'dismissed') s += ' · Dismissed';
     else s += ' · Not opened yet';
@@ -20109,7 +20133,7 @@
   function showRegInvitesModal() {
     var body = renderReportModal({
       title: 'Registration Links',
-      subtitle: 'Every registration link sent to a prospective family this season, and where each stands: Sent → Opened → Registered. Resend a link, or dismiss a family who went quiet.',
+      subtitle: 'Every registration link sent to a prospective family this season, and where each stands: Sent → Opened → Registered. Links expire 2 weeks after the last send — resending restarts the window. Dismiss a family who went quiet.',
       meta: '',
       icons: [],
       bodyId: 'ws-reginv-body',
@@ -20144,12 +20168,14 @@
 
   var REGINV_FILTERS = [
     { key: 'waiting',    label: 'Waiting',    pill: 'is-new' },
+    { key: 'expired',    label: 'Expired',    pill: 'is-expired' },
     { key: 'registered', label: 'Registered', pill: 'is-done' },
     { key: 'dismissed',  label: 'Dismissed',  pill: 'is-muted' }
   ];
   var REGINV_STAGE = {
     sent:       { label: 'Sent',       pill: 'is-new' },
     opened:     { label: 'Opened',     pill: 'is-welcomed' },
+    expired:    { label: 'Expired',    pill: 'is-expired' },
     registered: { label: 'Registered', pill: 'is-done' },
     dismissed:  { label: 'Dismissed',  pill: 'is-muted' }
   };
@@ -20158,9 +20184,10 @@
     var body = document.getElementById('ws-reginv-body');
     if (!body) return;
     var invites = (_regInvitesCache || []).slice();
-    // Action-relevant first (waiting), then dismissed, then registered;
-    // most recent send first within a bucket.
-    var bucketOrder = { waiting: 0, dismissed: 1, registered: 2 };
+    // Most action-relevant first (expired needs a resend-or-dismiss call,
+    // then waiting), then dismissed, then registered; most recent send
+    // first within a bucket.
+    var bucketOrder = { expired: 0, waiting: 1, dismissed: 2, registered: 3 };
     invites.sort(function (a, b) {
       var ba = bucketOrder[regInviteBucket(a)], bb = bucketOrder[regInviteBucket(b)];
       if (ba !== bb) return ba - bb;
@@ -20170,7 +20197,7 @@
       body.innerHTML = '<p class="ws-empty">No registration links sent yet this season. Send one from a toured family’s row in the Tour Pipeline, or with the Send Registration Form.</p>';
       return;
     }
-    var bucketCounts = { waiting: 0, registered: 0, dismissed: 0 };
+    var bucketCounts = { waiting: 0, expired: 0, registered: 0, dismissed: 0 };
     invites.forEach(function (inv) { bucketCounts[regInviteBucket(inv)]++; });
     // Same header + count-pill-filter chrome as the Welcome List.
     var h = '<div class="ws-welcome-head-row">';
@@ -20190,6 +20217,7 @@
     shown.forEach(function (inv) {
       var st = regInviteStatus(inv);
       var stage = REGINV_STAGE[st] || REGINV_STAGE.sent;
+      // Expired stays full-strength — it's the loudest call to action here.
       var done = (st === 'registered' || st === 'dismissed');
       h += '<li class="ws-welcome-item' + (done ? ' ws-welcome-done' : '') + '">';
       h += '<div class="ws-welcome-head">';
@@ -20203,6 +20231,7 @@
       h += '<div class="ws-welcome-sub">' + escapeHtml(sent) + '</div>';
       if (inv.note) h += '<div class="ws-welcome-sub"><em>' + escapeHtml(inv.note) + '</em></div>';
       if (inv.opened_at) h += '<div class="ws-welcome-stamp">✓ Opened ' + escapeHtml(welcomeFmtDate(inv.opened_at)) + '</div>';
+      if (st === 'expired') h += '<div class="ws-welcome-sub">⏳ Link expired ' + escapeHtml(welcomeFmtDate(regInviteExpiryDateStr(inv))) + ' — resend to restart the 2-week window, or dismiss</div>';
       if (inv.registered_at) h += '<div class="ws-welcome-stamp">✓ Registered ' + escapeHtml(welcomeFmtDate(inv.registered_at)) + '</div>';
       if (st === 'dismissed') h += '<div class="ws-welcome-sub">✕ Dismissed ' + escapeHtml(welcomeFmtDate(inv.dismissed_at)) + (inv.dismissed_by ? ' by ' + escapeHtml(inv.dismissed_by) : '') + '</div>';
       var acts = '';

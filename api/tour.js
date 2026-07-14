@@ -2369,7 +2369,7 @@ async function handleRegistrationInvite(body, req, res) {
         <p>Hi ${escapeHtml(name)},</p>
         <p>Thanks for your interest in joining our co-op. When you're ready, use the link below to complete registration for your family.</p>
         ${note ? `<p style="background:#f5f0f8;padding:10px 14px;border-left:3px solid #523A79;border-radius:4px;"><em>${escapeHtml(note)}</em></p>` : ''}
-        <p style="background:#fdf3e7;padding:10px 14px;border-left:3px solid #c8862a;border-radius:4px;"><strong>Please complete your registration within 2 weeks.</strong> After that, we can't guarantee a spot will still be available.</p>
+        <p style="background:#fdf3e7;padding:10px 14px;border-left:3px solid #c8862a;border-radius:4px;"><strong>Please complete your registration within 2 weeks — this link expires after that.</strong> If it expires, reply to this email for a fresh one; we can't guarantee a spot will still be available.</p>
         <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#523A79;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Complete registration</a></p>
         <p style="color:#666;font-size:0.9rem;">Or copy this link into your browser:<br><span style="word-break:break-all;">${escapeHtml(link)}</span></p>
         <p style="color:#666;font-size:0.9rem;margin-top:20px;">Questions? Reply to this email and it'll reach the Membership team.</p>
@@ -2388,22 +2388,31 @@ async function handleRegistrationInvite(body, req, res) {
 // Opened in the Membership funnel. The 128-bit random token IS the
 // credential; unknown or malformed tokens no-op. Always 200 — the public
 // register page must never break over tracking.
+// Returns expired:true when the link is past its 14-day window (counted
+// from the LAST send — a resend restarts the clock), matching the "within
+// 2 weeks" promise in the invite email; register.html shows a warning
+// banner. Expiry is advisory, not a gate: the register page is public
+// (returning families use it without any token), so submissions still go
+// through and Membership reviews them as usual.
 async function handleInviteOpenPing(req, res) {
   const token = String(req.query['invite-open'] || '').trim();
+  let expired = false;
   if (/^[a-f0-9]{32}$/i.test(token)) {
     try {
       const sql = getSql();
-      await sql`
+      const rows = await sql`
         UPDATE registration_invites
         SET opened_at = COALESCE(opened_at, NOW()),
             open_count = open_count + 1
         WHERE token = ${token}
+        RETURNING (last_sent_at < NOW() - INTERVAL '14 days') AS expired
       `;
+      expired = !!(rows[0] && rows[0].expired);
     } catch (err) {
       console.error('Invite open-ping error (non-fatal):', err);
     }
   }
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, expired });
 }
 
 // GET ?list=registration-invites — every registration link sent this

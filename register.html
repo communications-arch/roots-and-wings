@@ -446,11 +446,26 @@
     // registration link it carries ?inv=<token>. Ping the server once so
     // the invite shows as "Opened" on her To Do funnel. Fire-and-forget —
     // registration must never depend on this.
+    // If the server says the link is past its 14-day window, show a
+    // warning banner (advisory only — the form still works; this page is
+    // public and Membership reviews every submission anyway).
     (function () {
       try {
         var inv = new URLSearchParams(window.location.search).get('inv');
         if (inv && /^[a-f0-9]{32}$/i.test(inv)) {
-          fetch('/api/tour?invite-open=' + encodeURIComponent(inv)).catch(function () {});
+          fetch('/api/tour?invite-open=' + encodeURIComponent(inv))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !d.expired) return;
+              var main = document.querySelector('main.reg-container');
+              if (!main) return;
+              var note = document.createElement('div');
+              note.setAttribute('role', 'alert');
+              note.style.cssText = 'background:#fdf3e7;border:1px solid #c8862a;border-left:4px solid #c8862a;border-radius:8px;padding:14px 18px;margin:0 0 20px;color:#5c4a1e;';
+              note.innerHTML = '<strong>This registration link has expired</strong> (it was sent more than 2 weeks ago), so we can’t guarantee a spot is still available. Please email <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> for a fresh link before registering.';
+              main.insertBefore(note, main.firstChild);
+            })
+            .catch(function () {});
         }
       } catch (e) { /* tracking only */ }
     })();
