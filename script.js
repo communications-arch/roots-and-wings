@@ -23330,8 +23330,15 @@
               } else {
                 html += '<p class="ws-bg-none">No live counts yet</p>';
               }
-              if (t.view) {
-                html += '<button type="button" class="sc-btn ws-bg-view" data-bg-view="' + escapeHtmlWs(t.view) + '">View</button>';
+              // Every view the role's work spans — one button each (Erin,
+              // 2026-07-15: VP alone covers Morning/Afternoon/Cleaning/Events).
+              var views = Array.isArray(t.views) ? t.views : (t.view ? [{ key: t.view, label: 'View' }] : []);
+              if (views.length) {
+                html += '<div class="ws-bg-views">';
+                views.forEach(function (v) {
+                  html += '<button type="button" class="sc-btn ws-bg-view" data-bg-view="' + escapeHtmlWs(v.key) + '">' + escapeHtmlWs(v.label) + '</button>';
+                });
+                html += '</div>';
               }
               html += '</div>';
             });
@@ -23347,9 +23354,11 @@
               else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
               else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
               else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
+              else if (v === 'reg-links' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
               // Roles Assignments lenses — board members reach them
               // read-only (the manage doorways stay holder-gated).
               else if (v === 'roles-am' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'am' });
+              else if (v === 'roles-pm' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'pm' });
               else if (v === 'roles-cleaning' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'cleaning' });
               else if (v === 'roles-se' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'special-events' });
             });

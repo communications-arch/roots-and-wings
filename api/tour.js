@@ -6102,21 +6102,31 @@ async function handleBoardGlance(req, res) {
     })
   ]);
 
-  // Metrics + View target per role. `view` keys map to board-readable
-  // reports on the client; roles without one get counts only.
+  // Metrics + View targets per role. Each tile carries every view its
+  // role's work spans (Erin, 2026-07-15: "the VP View only shows one of
+  // many task views") — `views` keys map to board-readable reports and
+  // read-only Roles Assignments lenses on the client.
   const metricsFor = (title) => {
     const key = String(title || '').toLowerCase().replace(/-/g, ' ');
     if (key === 'membership director') {
       const m = [];
       if (pipeline) m.push({ label: 'in pipeline', value: pipeline.pre_tour + pipeline.post_tour });
       if (awaitingReg != null) m.push({ label: 'awaiting registration', value: awaitingReg });
-      return { metrics: m, view: 'member-pipeline' };
+      return { metrics: m, views: [
+        { key: 'member-pipeline', label: 'Pipeline' },
+        { key: 'reg-links', label: 'Reg Links' }
+      ] };
     }
     if (key === 'treasurer') {
-      return { metrics: pendingPay == null ? [] : [{ label: 'payments pending', value: pendingPay }], view: 'membership-report' };
+      return { metrics: pendingPay == null ? [] : [{ label: 'payments pending', value: pendingPay }], views: [
+        { key: 'membership-report', label: 'Payments' }
+      ] };
     }
     if (key === 'communications director') {
-      return { metrics: waivers == null ? [] : [{ label: 'waivers unsigned', value: waivers }], view: 'waivers-report' };
+      return { metrics: waivers == null ? [] : [{ label: 'waivers unsigned', value: waivers }], views: [
+        { key: 'waivers-report', label: 'Waivers' },
+        { key: 'membership-report', label: 'Members' }
+      ] };
     }
     if (key === 'vice president') {
       const m = [];
@@ -6125,19 +6135,28 @@ async function handleBoardGlance(req, res) {
         m.push({ label: 'afternoon classes scheduled', value: afternoon.scheduled });
         if (afternoon.inbox > 0) m.push({ label: 'class ideas awaiting review', value: afternoon.inbox });
       }
-      return { metrics: m, view: 'roles-am' };
+      return { metrics: m, views: [
+        { key: 'roles-am', label: 'Morning' },
+        { key: 'roles-pm', label: 'Afternoon' },
+        { key: 'roles-cleaning', label: 'Cleaning' },
+        { key: 'roles-se', label: 'Events' }
+      ] };
     }
     if (key === 'president') {
-      return { metrics: boardTasks == null ? [] : [{ label: 'board tasks next 30 days', value: boardTasks }], view: 'admin-calendar' };
+      return { metrics: boardTasks == null ? [] : [{ label: 'board tasks next 30 days', value: boardTasks }], views: [
+        { key: 'admin-calendar', label: 'Calendar' }
+      ] };
     }
     if (key === 'secretary') {
-      return { metrics: [], view: 'admin-calendar' };
+      return { metrics: [], views: [{ key: 'admin-calendar', label: 'Calendar' }] };
     }
     if (key === 'sustaining director') {
-      return { metrics: [], view: 'membership-report' };
+      return { metrics: [], views: [{ key: 'membership-report', label: 'Members' }] };
     }
     if (key === 'cleaning crew liaison') {
-      return { metrics: !cleaning ? [] : [{ label: 'areas open — Session ' + cleaning.session, value: cleaning.open }], view: 'roles-cleaning' };
+      return { metrics: !cleaning ? [] : [{ label: 'areas open — Session ' + cleaning.session, value: cleaning.open }], views: [
+        { key: 'roles-cleaning', label: 'Rota' }
+      ] };
     }
     if (key === 'special events liaison') {
       const m = [];
@@ -6145,9 +6164,9 @@ async function handleBoardGlance(req, res) {
         m.push({ label: 'events staffed', value: events.staffed + '/' + events.total });
         if (events.openTasks > 0) m.push({ label: 'planning tasks open', value: events.openTasks });
       }
-      return { metrics: m, view: 'roles-se' };
+      return { metrics: m, views: [{ key: 'roles-se', label: 'Events & people' }] };
     }
-    return { metrics: [], view: '' };
+    return { metrics: [], views: [] };
   };
 
   // One tile per role; co-holders' names join with " & ".
@@ -6163,7 +6182,7 @@ async function handleBoardGlance(req, res) {
         holder: '',
         isBoard: h.category === 'board',
         metrics: extra.metrics,
-        view: extra.view
+        views: extra.views
       };
       byRole.set(t, tile);
     }

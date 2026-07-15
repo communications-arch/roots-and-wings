@@ -11580,9 +11580,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   color: var(--color-text-light);
   margin: 4px 0 0;
 }
-.ws-bg-view {
+.ws-bg-views {
   margin-top: 8px;
-  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* Clickable stat tiles (26/27 Members card → drill into the Membership Report) */
