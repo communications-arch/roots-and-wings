@@ -386,6 +386,17 @@
     return (first + (last ? ' ' + last : '')).trim();
   }
 
+  // Display-name helper: the preferred name ("goes by", set in Edit My
+  // Info) wins over the given first name — for DISPLAY ONLY. Every
+  // matching path (responsibilities, absences, photo lookup, coverage
+  // claims, participation) keeps using the legal first/last name, so
+  // never feed nickOr() output into anything that gets stored or
+  // compared against stored names.
+  function nickOr(nickname, name) {
+    var n = String(nickname || '').trim();
+    return n || String(name || '').trim();
+  }
+
   // True when the host is a dev environment (localhost or a Vercel
   // preview deploy). In dev, every signed-in tester gets the View As
   // picker + super-user affordances so they can impersonate any role-
@@ -640,6 +651,7 @@
               allPeople.push({
                 name: personFirst,
                 lastName: personLast,
+                nickname: piHit.nickname || '',
                 type: 'parent',
                 family: fam.name,
                 familyDisplay: fam.displayName || fam.name,
@@ -665,6 +677,7 @@
               allPeople.push({
                 name: kid.name,
                 lastName: kid.lastName || fam.name,
+                nickname: kid.nickname || '',
                 type: 'kid',
                 family: fam.name,
                 familyDisplay: fam.displayName || fam.name,
@@ -2264,6 +2277,7 @@
       var piHit2 = piByFirst2[pName.trim().split(/\s+/)[0].toLowerCase()] || {};
       allPeople.push({
         name: pName.trim(),
+        nickname: piHit2.nickname || '',
         type: 'parent',
         family: fam.name,
         email: fam.email,
@@ -2285,6 +2299,7 @@
       allPeople.push({
         name: kid.name,
         lastName: kid.lastName || fam.name, // defaults to family name
+        nickname: kid.nickname || '',
         type: 'kid',
         family: fam.name,
         email: fam.email,
@@ -2504,9 +2519,10 @@
         if (person.type !== 'kid' || person.group !== activeFilter) return;
         if (person.schedule === 'afternoon') return;
 
+        var classCardFirst = nickOr(person.nickname, person.name);
         var displayName = person.lastName && person.lastName !== person.family
-          ? person.name + ' ' + person.lastName
-          : person.name;
+          ? classCardFirst + ' ' + person.lastName
+          : classCardFirst;
         var bgStyle = faceColor(person.name);
         // First-year families: green card outline (.yb-card-new) instead of a
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
@@ -2518,7 +2534,7 @@
         if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="This child is opted out of photos.">⛔ No Photos</div>';
 
         html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
-          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
+          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + classCardFirst.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + (person.age ? 'Age ' + person.age : '') + '</div>' +
           '<div class="yb-family">' + (person.familyDisplay || person.family) + ' Family</div>' +
@@ -2556,13 +2572,16 @@
         }
 
         if (query) {
-          var searchText = (person.name + ' ' + (person.lastName || person.family) + ' ' + person.family + ' ' + (person.group || '') + ' ' + person.parentNames + ' ' + (person.kidNames ? person.kidNames.join(' ') : '')).toLowerCase();
+          var searchText = (person.name + ' ' + (person.nickname || '') + ' ' + (person.lastName || person.family) + ' ' + person.family + ' ' + (person.group || '') + ' ' + person.parentNames + ' ' + (person.kidNames ? person.kidNames.join(' ') : '')).toLowerCase();
           if (searchText.indexOf(query) === -1) return;
         }
 
+        // Preferred name ("goes by") wins for display; person.name stays the
+        // given first name for photo/absence/color lookups below.
+        var displayFirstName = nickOr(person.nickname, person.name);
         var displayName = person.type === 'kid' && person.lastName && person.lastName !== person.family
-          ? person.name + ' ' + person.lastName
-          : person.name;
+          ? displayFirstName + ' ' + person.lastName
+          : displayFirstName;
         // Adult subtitle uses the MLC/BLC role label so the Directory
         // grid card matches the family-detail card (and Edit My Info).
         // 'parent' / unknown roles fall back to "Parent" — that label
@@ -2616,7 +2635,7 @@
         var isNewM = isNewMemberPerson(person);
 
         html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + (isNewM ? 'This family is in their first co-op year.' : '') + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
-          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + person.name.charAt(0) + '</span></div>' +
+          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + displayFirstName.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
           boardTag +
@@ -2846,11 +2865,14 @@
       : person.type !== 'kid'
         ? getPhotoUrl(person.name, person.email, person.family)
         : getDbPhotoForPerson(person.name, person.email, person.family);
+    // Preferred name ("goes by") for everything the eye reads; person.name
+    // stays the given first name for photo/color lookups.
+    var detailFirst = nickOr(person.nickname, person.name);
     if (detailPhotoUrl) {
       var hiResDetail = detailPhotoUrl.replace(/=s\d+-c/, '=s256-c');
-      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><img src="' + hiResDetail + '" alt="' + person.name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + person.name.charAt(0) + '</span></div>';
+      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><img src="' + hiResDetail + '" alt="' + detailFirst + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + detailFirst.charAt(0) + '</span></div>';
     } else {
-      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><span>' + person.name.charAt(0) + '</span></div>';
+      html += '<div class="detail-photo" style="background:' + faceColor(person.name) + '"><span>' + detailFirst.charAt(0) + '</span></div>';
     }
     html += '<div class="detail-info">';
     // Use the parsed sheet last-word (fam.name) here. For compound surnames
@@ -2865,7 +2887,7 @@
     // name (e.g. legacy data where someone entered "Aimee O'Connor Gading"
     // into the first-name field), don't double-append. Compares against
     // both fam.name (sheet-parsed) and fam.displayName (DB-corrected).
-    var personFullName = String(person.name || '');
+    var personFullName = String(detailFirst || '');
     var personLc = personFullName.toLowerCase();
     var lastLc = String(detailLast || '').toLowerCase();
     var displayLc = String(fam.displayName || '').toLowerCase();
@@ -2873,6 +2895,13 @@
       : (displayLc && personLc.endsWith(' ' + displayLc)) ? personFullName
       : (personFullName + ' ' + detailLast);
     html += '<h3>' + headingFull + '</h3>';
+    // When a preferred name is shown above, surface the given name in a
+    // muted line so directory lookups by legal name still make sense.
+    if (String(person.nickname || '').trim()) {
+      var givenLc = String(person.name || '').toLowerCase();
+      var givenFull = (lastLc && givenLc.endsWith(' ' + lastLc)) ? person.name : (person.name + (detailLast ? ' ' + detailLast : ''));
+      html += '<p class="detail-given-name">Given name: ' + givenFull + '</p>';
+    }
     if (boardInfo) {
       html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
     }
@@ -2884,7 +2913,11 @@
       }
       if (person.allergies) html += '<p class="detail-allergy-info">Allergies / Medical: ' + person.allergies + '</p>';
       if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — this child is opted out of photos in co-op materials.</p>';
-      html += '<p class="detail-parents">Parents: ' + fam.parents + '</p>';
+      // Parents line prefers each adult's "goes by" name when set.
+      var parentsLine = (fam.parentInfo && fam.parentInfo.length)
+        ? fam.parentInfo.map(function (pi) { return nickOr(pi.nickname, pi.firstName || String(pi.name || '').split(/\s+/)[0]); }).filter(Boolean).join(' & ')
+        : fam.parents;
+      html += '<p class="detail-parents">Parents: ' + (parentsLine || fam.parents) + '</p>';
     } else {
       // Role badge for adults: Main Learning Coach / Back Up LC / Parent
       // (P4 of directory→DB migration). Falls back to "Parent" when the
@@ -2945,30 +2978,36 @@
     // entries show the same role labels the detail card + EMI use.
     var ROLE_LABELS_FAM = { mlc: 'Main Learning Coach', blc: 'Back Up Learning Coach', parent: 'Parent' };
     var roleByFirst = {};
+    var nickByFirst = {};
     (fam.parentInfo || []).forEach(function (pi, idx) {
       var first = String(pi.firstName || (pi.name || '').split(/\s+/)[0] || '').toLowerCase();
       if (!first) return;
       roleByFirst[first] = pi.role || (idx === 0 ? 'mlc' : (idx === 1 ? 'blc' : 'parent'));
+      if (pi.nickname) nickByFirst[first] = pi.nickname;
     });
     fam.parents.split(' & ').forEach(function(pName, idx) {
       var firstLc = pName.trim().split(/\s+/)[0].toLowerCase();
       var role = roleByFirst[firstLc] || (idx === 0 ? 'mlc' : (idx === 1 ? 'blc' : 'parent'));
       var roleLabel = ROLE_LABELS_FAM[role] || 'Parent';
+      // Photos + colors + "current" highlight key on the given name; only
+      // the visible text swaps to the preferred name.
+      var pDisplay = nickOr(nickByFirst[firstLc], pName.trim());
       var pPhoto = getPhotoUrl(pName.trim(), fam.email, fam.name);
       html += '<div class="detail-member' + (pName.trim() === person.name ? ' detail-member-current' : '') + '">';
       if (pPhoto) {
         var pPhotoHi = pPhoto.replace(/=s\d+-c/, '=s128-c');
-        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><img src="' + pPhotoHi + '" alt="' + pName.trim() + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + pName.trim().charAt(0) + '</span></div>';
+        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><img src="' + pPhotoHi + '" alt="' + pDisplay + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + pDisplay.charAt(0) + '</span></div>';
       } else {
-        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><span>' + pName.trim().charAt(0) + '</span></div>';
+        html += '<div class="detail-member-dot" style="background:' + faceColor(pName.trim()) + '"><span>' + pDisplay.charAt(0) + '</span></div>';
       }
-      html += '<span>' + pName.trim() + '</span><small>' + roleLabel + '</small></div>';
+      html += '<span>' + pDisplay + '</span><small>' + roleLabel + '</small></div>';
     });
     // Kids
     fam.kids.forEach(function(kid) {
+      var kDisplay = nickOr(kid.nickname, kid.name);
       html += '<div class="detail-member' + (kid.name === person.name ? ' detail-member-current' : '') + '">';
-      html += '<div class="detail-member-dot" style="background:' + faceColor(kid.name) + '"><span>' + kid.name.charAt(0) + '</span></div>';
-      html += '<span>' + kid.name + '</span><small>' + groupWithAge(kid.group) + '</small></div>';
+      html += '<div class="detail-member-dot" style="background:' + faceColor(kid.name) + '"><span>' + kDisplay.charAt(0) + '</span></div>';
+      html += '<span>' + kDisplay + '</span><small>' + groupWithAge(kid.group) + '</small></div>';
     });
     html += '</div></div>';
 
@@ -3159,7 +3198,7 @@
           var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
           html += '<div class="elective-student' + (kid.photoConsent === false ? ' elective-student-nophoto-card' : '') + '">';
           html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, kid.email, kid.family) + '</div>';
-          html += '<div><strong>' + kid.name + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + noPhoto + '</div>';
+          html += '<div><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + noPhoto + '</div>';
           html += '</div>';
         });
         html += '</div>';
@@ -4915,7 +4954,7 @@
     // EMI). Falls back to email-prefix derivation, then to the family's
     // first listed parent. Co-parents see their own name, not the MLC's.
     var greetingPerson = getActivePerson(fam);
-    var firstName = (greetingPerson && greetingPerson.first_name)
+    var firstName = (greetingPerson && nickOr(greetingPerson.nickname, greetingPerson.first_name))
       || deriveFirstNameFromLogin(email, fam.name)
       || fam.parents.split(' & ')[0].split(' ')[0];
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
@@ -5475,7 +5514,7 @@
         html += '<div class="mf-kid">';
         html += '<div class="mf-kid-bar">';
         html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
-        html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
+        html += '<strong class="mf-kid-name">' + nickOr(kid.nickname, kid.name) + '</strong>';
         // Returning members get a "(this past year)" reference; brand-new
         // families whose kids have no prior group placement skip it so
         // the line doesn't claim history that doesn't exist.
@@ -5509,7 +5548,7 @@
       // Kid header bar
       html += '<div class="mf-kid-bar">';
       html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
-      html += '<strong class="mf-kid-name">' + kid.name + '</strong>';
+      html += '<strong class="mf-kid-name">' + nickOr(kid.nickname, kid.name) + '</strong>';
       html += '<button class="mf-class-link" data-group="' + kidGroup + '">View Classmates &rarr;</button>';
       html += '</div>';
 
@@ -26714,6 +26753,7 @@
           email: p.email || '',
           personal_email: p.personal_email || '',
           phone: p.phone || '',
+          nickname: p.nickname || '',
           nicknames: Array.isArray(p.nicknames) ? p.nicknames.slice() : [],
           _queuedPhoto: null
         };
@@ -26735,6 +26775,7 @@
           email: p.email || '',
           personal_email: p.personalEmail || '',
           phone: p.phone || '',
+          nickname: p.nickname || '',
           nicknames: Array.isArray(p.nicknames) ? p.nicknames.slice() : [],
           _queuedPhoto: null
         };
@@ -26753,12 +26794,13 @@
           email: '',
           personal_email: '',
           phone: '',
+          nickname: '',
           nicknames: [],
           _queuedPhoto: null
         };
       });
     }
-    if (parentSeed.length === 0) parentSeed.push({ name: '', first_name: '', last_name: '', pronouns: '', photo_url: '', photo_consent: true, role: 'mlc', email: '', personal_email: '', phone: '', nicknames: [], _queuedPhoto: null });
+    if (parentSeed.length === 0) parentSeed.push({ name: '', first_name: '', last_name: '', pronouns: '', photo_url: '', photo_consent: true, role: 'mlc', email: '', personal_email: '', phone: '', nickname: '', nicknames: [], _queuedPhoto: null });
 
     var state = {
       family_email: fam.email,
@@ -26775,6 +26817,7 @@
           // Per-kid last name. Empty in form = use family last name in display.
           // Useful for kids who use a different surname than the family unit.
           last_name: k.lastName && k.lastName !== fam.name ? k.lastName : '',
+          nickname: k.nickname || '',
           birth_date: k.birthDate || '',
           pronouns: k.pronouns || '',
           allergies: k.allergies || '',
@@ -26832,15 +26875,17 @@
       h += '<input class="rd-input" style="flex:3;min-width:0;" placeholder="Last name (leave blank to use family last name)" data-field="last_name" value="' + escapeHtml(p.last_name || '') + '">';
       h += '<input class="rd-input" style="flex:1.5;min-width:0;" placeholder="Pronouns" data-field="pronouns" value="' + escapeHtml(p.pronouns) + '">';
       h += '</div>';
-      // Nicknames + phone row — both compact identifiers. Placed right
-      // after the name row so they sit in the "who is this person"
-      // header before contact details. Nicknames feed participation
-      // name resolution (e.g. "Jess, Jessie" so the master sheet's
-      // "Jess Shewan" cleaning-crew entry counts toward Jessica);
-      // common forms (Becca↔Rebecca, Matt↔Matthew, etc.) are built in.
+      // Goes-by + nicknames + phone row — compact identifiers, placed right
+      // after the name row so they sit in the "who is this person" header
+      // before contact details. "Goes by" is the DISPLAY name used around
+      // the site (directory, rosters); the comma-separated nicknames feed
+      // participation name resolution only (e.g. "Jess, Jessie" so the
+      // master sheet's "Jess Shewan" cleaning-crew entry counts toward
+      // Jessica); common forms (Becca↔Rebecca, Matt↔Matthew) are built in.
       var nicksDisplay = (Array.isArray(p.nicknames) ? p.nicknames : []).join(', ');
       h += '<div class="emi-full" style="display:flex;gap:8px;min-width:0;">';
-      h += '<input class="rd-input" style="flex:2;min-width:0;" type="text" placeholder="Nicknames (comma-separated, e.g. Jess, Jessie)" data-field="nicknames" value="' + escapeHtml(nicksDisplay) + '">';
+      h += '<input class="rd-input" style="flex:1.2;min-width:0;" type="text" placeholder="Goes by (shown in directory)" data-field="nickname" value="' + escapeHtml(p.nickname || '') + '">';
+      h += '<input class="rd-input" style="flex:1.6;min-width:0;" type="text" placeholder="Nicknames (comma-separated, e.g. Jess, Jessie)" data-field="nicknames" value="' + escapeHtml(nicksDisplay) + '">';
       h += '<input class="rd-input" style="flex:1;min-width:0;" type="tel" placeholder="Phone" data-field="phone" value="' + escapeHtml(p.phone) + '">';
       h += '</div>';
       // Email row — workspace + personal side by side. MLC's workspace
@@ -26887,6 +26932,10 @@
       h += '<input class="rd-input" style="flex:3;min-width:0;" placeholder="Last name (leave blank to use family last name)" data-field="last_name" value="' + escapeHtml(k.last_name || '') + '">';
       h += '<input class="rd-input" style="flex:1.5;min-width:0;" placeholder="Pronouns" data-field="pronouns" value="' + escapeHtml(k.pronouns) + '">';
       h += '</div>';
+      // Preferred name shown in the directory / rosters / Kids' Schedule
+      // (e.g. "Junie" for Juniper). Display-only — leave blank to show the
+      // first name.
+      h += '<input class="rd-input emi-full" type="text" placeholder="Goes by (shown in directory — optional)" data-field="nickname" value="' + escapeHtml(k.nickname || '') + '">';
       h += '<label class="emi-inline-label"><span>Birthday <span style="color:#d35a48;font-weight:700;">*</span></span><input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
       // Schedule is read-only here because changing it has billing implications
       // (half-day vs. full-day dues). Members contact the Membership Director to
@@ -27192,13 +27241,13 @@
         var hasMlc = state.parents.some(function (p) { return p && p.role === 'mlc'; });
         var hasBlc = state.parents.some(function (p) { return p && p.role === 'blc'; });
         var newRole = !hasMlc ? 'mlc' : (!hasBlc ? 'blc' : 'parent');
-        state.parents.push({ name: '', first_name: '', last_name: '', pronouns: '', photo_url: '', photo_consent: true, role: newRole, email: '', personal_email: '', phone: '', _queuedPhoto: null });
+        state.parents.push({ name: '', first_name: '', last_name: '', pronouns: '', photo_url: '', photo_consent: true, role: newRole, email: '', personal_email: '', phone: '', nickname: '', nicknames: [], _queuedPhoto: null });
         render();
       });
       var addKidBtn = document.getElementById('emiAddKid');
       if (addKidBtn) addKidBtn.addEventListener('click', function () {
         syncStateFromDom();
-        state.kids.push({ name: '', last_name: '', birth_date: '', pronouns: '', allergies: '', schedule: 'all-day', photo_url: '', photo_consent: true, _queuedPhoto: null });
+        state.kids.push({ name: '', last_name: '', nickname: '', birth_date: '', pronouns: '', allergies: '', schedule: 'all-day', photo_url: '', photo_consent: true, _queuedPhoto: null });
         render();
       });
       var saveBtn = document.getElementById('emiSaveBtn');
@@ -27331,6 +27380,7 @@
             email: String(p.email || '').trim().toLowerCase(),
             personal_email: p.personal_email || '',
             phone: p.phone || '',
+            nickname: String(p.nickname || '').trim(),
             nicknames: Array.isArray(p.nicknames) ? p.nicknames : []
           };
         });
@@ -27341,7 +27391,7 @@
           phone: state.phone,
           address: state.address,
           people: people,
-          kids: state.kids.map(function (k) { return { name: k.name, last_name: k.last_name || '', birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
+          kids: state.kids.map(function (k) { return { name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
         };
         return fetch('/api/tour', {
           method: 'POST',

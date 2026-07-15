@@ -4420,6 +4420,14 @@ button.staff-role:hover {
   font-style: italic;
 }
 
+/* Muted "Given name: …" line under the heading when the person displays a
+   preferred name ("goes by") set in Edit My Info. */
+.detail-given-name {
+  font-size: 0.82rem;
+  color: var(--color-text-light);
+  margin: 2px 0 0;
+}
+
 .detail-schedule {
   font-size: 0.82rem;
   font-weight: 600;

@@ -790,6 +790,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS kids_family_first_lc_idx
 ALTER TABLE kids ADD COLUMN IF NOT EXISTS class_group TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS kids_class_group_idx ON kids (class_group)
   WHERE class_group <> '';
+-- Preferred name ("goes by") for display around the site — e.g. "Beth" for
+-- Elizabeth, "Junie" for Juniper. DISPLAY-ONLY: every matching path
+-- (responsibilities, absences, photo lookup, participation) keys on
+-- first_name/last_name; the nickname is swapped in at render time. Distinct
+-- from people.nicknames (JSONB), which is a list of match VARIANTS for
+-- participation name resolution and never displays.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS nickname TEXT NOT NULL DEFAULT '';
+ALTER TABLE kids   ADD COLUMN IF NOT EXISTS nickname TEXT NOT NULL DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders

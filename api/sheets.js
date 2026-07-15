@@ -1165,6 +1165,7 @@ function shapePersonRow(r) {
     family_email:   String(r.family_email || '').toLowerCase(),
     first_name:     r.first_name || '',
     last_name:      r.last_name || '',
+    nickname:       r.nickname || '',
     role:           r.role || 'parent',
     personal_email: r.personal_email || '',
     phone:          r.phone || '',
@@ -1192,7 +1193,7 @@ async function applyMemberProfileOverlay(families) {
 
   // Single round-trip per table; group in JS rather than N queries.
   var peopleRows = await sql`
-    SELECT email, family_email, first_name, last_name, role,
+    SELECT email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
            nicknames, sort_order
     FROM people
@@ -1206,7 +1207,7 @@ async function applyMemberProfileOverlay(families) {
   });
 
   var kidsRows = await sql`
-    SELECT id, family_email, first_name, last_name, birth_date,
+    SELECT id, family_email, first_name, last_name, nickname, birth_date,
            pronouns, allergies, schedule, photo_url, photo_consent,
            sort_order
     FROM kids
@@ -1270,6 +1271,7 @@ async function applyMemberProfileOverlay(families) {
           pronouns: (fam.parentPronouns && fam.parentPronouns[n]) || '',
           photo_url: '',
           photo_consent: true,
+          nickname: '',
           nicknames: []
         };
       });
@@ -1285,6 +1287,7 @@ async function applyMemberProfileOverlay(families) {
         name: ((pp.first_name || '') + ' ' + (pp.last_name || '')).trim(),
         firstName: pp.first_name,
         lastName: pp.last_name,
+        nickname: pp.nickname || '',
         pronouns: pp.pronouns,
         photoUrl: pp.photo_url,
         photoConsent: pp.photo_consent !== false,
@@ -1333,6 +1336,7 @@ async function applyMemberProfileOverlay(families) {
       if (ov.schedule) kid.schedule = ov.schedule;
       if (ov.photo_url) kid.photoUrl = ov.photo_url;
       if (ov.last_name) kid.lastName = ov.last_name;
+      if (ov.nickname) kid.nickname = ov.nickname;
       kid.photo_consent = ov.photo_consent !== false;
     });
     // DB-only kids (not in the sheet's classlist).
@@ -1347,6 +1351,7 @@ async function applyMemberProfileOverlay(families) {
         fam.kids.push({
           name: first,
           lastName: k.last_name || '',
+          nickname: k.nickname || '',
           group: '',
           schedule: k.schedule || 'all-day',
           pronouns: k.pronouns || '',
@@ -1792,7 +1797,10 @@ function participationBuildNameIndex(families) {
     (fam.parentInfo || []).forEach(function (pi) {
       var first = String(pi.firstName || (pi.name || '').split(/\s+/)[0] || '').toLowerCase();
       if (!first) return;
+      // The display nickname ("goes by") counts as a match variant too —
+      // if someone displays as "Beth" the master sheet will likely say Beth.
       var custom = (pi.nicknames || [])
+        .concat(pi.nickname ? [pi.nickname] : [])
         .map(function (n) { return String(n || '').trim().toLowerCase(); })
         .filter(Boolean);
       if (custom.length) perFamilyNicks[famName][first] = custom;
@@ -1886,14 +1894,14 @@ async function loadFamiliesFromProfiles(sql) {
     ORDER BY LOWER(family_name)
   `;
   var peopleRows = await sql`
-    SELECT email, family_email, first_name, last_name, role,
+    SELECT email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
            nicknames, sort_order
     FROM people
     ORDER BY family_email, sort_order, email
   `;
   var kidRows = await sql`
-    SELECT family_email, first_name, last_name, pronouns, allergies,
+    SELECT family_email, first_name, last_name, nickname, pronouns, allergies,
            schedule, class_group, photo_url, photo_consent, sort_order
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
@@ -1915,6 +1923,7 @@ async function loadFamiliesFromProfiles(sql) {
     kidsByFamily[k].push({
       name: String(kr.first_name || '').trim(),
       lastName: String(kr.last_name || '').trim(),
+      nickname: String(kr.nickname || ''),
       group: String(kr.class_group || ''),
       schedule: String(kr.schedule || 'all-day'),
       pronouns: String(kr.pronouns || ''),
@@ -1940,6 +1949,7 @@ async function loadFamiliesFromProfiles(sql) {
         name: ((pp.first_name || '') + ' ' + (pp.last_name || '')).trim(),
         firstName: fn,
         lastName: pp.last_name || '',
+        nickname: pp.nickname || '',
         nicknames: pp.nicknames || []
       });
     });
