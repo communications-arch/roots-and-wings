@@ -4446,7 +4446,6 @@
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
         var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
         if (c.hour === 'both') bits.push('fills both hours');
-        if (isPigeon && c.openToTeen) bits.push('🕊 open to a Pigeon assistant');
         var meta = bits.filter(Boolean).join(' · ');
         h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '">';
         // Explicit rank picker — the user chooses 1–4 instead of tap-order.
@@ -4471,12 +4470,14 @@
         if (c.max > 0) capBits.push('max ' + c.max + ' kids');
         h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
              (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
-        // Pigeons on a teacher-opted-in class: a ranked pick can be "as the
-        // class assistant" (last-resort option — highlighting unchanged).
-        var assistChecked = !!kidAssist[c.id];
-        if (sel && isPigeon && c.openToTeen) {
+        // Pigeons on a teacher-opted-in class: the assistant option is
+        // ALWAYS visible so it's discoverable (Erin, 2026-07-15 — it was
+        // hidden until the class was ranked and looked missing on Edit).
+        // Checking it on an unranked class auto-takes the next free choice.
+        var assistChecked = sel && !!kidAssist[c.id];
+        if (isPigeon && c.openToTeen) {
           h += '<label class="signup-assist-opt"><input type="checkbox" class="signup-assist-cb"' +
-               ' data-kid="' + escapeHtml(kid) + '" data-class="' + c.id + '"' +
+               ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' +
                (assistChecked ? ' checked' : '') + (canEdit ? '' : ' disabled') + '> 🕊 Sign up as the class assistant</label>';
         }
         // An out-of-range pick is allowed but needs a parent note for the
@@ -4585,15 +4586,32 @@
       });
     });
     // Pigeon assistant checkboxes — toggling re-renders (the note field's
-    // presence/placeholder depends on it).
+    // presence/placeholder depends on it). Checking an UNRANKED class
+    // auto-assigns its next free choice slot so the tick always "takes".
     card.querySelectorAll('.signup-assist-cb').forEach(function (cb) {
       cb.addEventListener('change', function () {
         var kid = this.getAttribute('data-kid');
-        var cid = this.getAttribute('data-class');
+        var hour = this.getAttribute('data-hour');
+        var cid = parseInt(this.getAttribute('data-class'), 10);
         if (!_signup.workingAssist) _signup.workingAssist = {};
         if (!_signup.workingAssist[kid]) _signup.workingAssist[kid] = {};
-        if (this.checked) _signup.workingAssist[kid][cid] = true;
-        else delete _signup.workingAssist[kid][cid];
+        if (this.checked) {
+          var m = _signup.working[kid][hour];
+          if (!m[cid]) {
+            var used = {};
+            Object.keys(m).forEach(function (k) { used[m[k]] = true; });
+            var free = !used[1] ? 1 : (!used[2] ? 2 : null);
+            if (free == null) {
+              alert('Both choices for this hour are already used — free one up first.');
+              this.checked = false;
+              return;
+            }
+            applyRankChange(m, cid, free);
+          }
+          _signup.workingAssist[kid][cid] = true;
+        } else {
+          delete _signup.workingAssist[kid][cid];
+        }
         renderClassSignupCard();
       });
     });
@@ -22368,8 +22386,12 @@
         // Date cell: inline pickers for editable session rows (start → end)
         // and editable special events; plain text otherwise.
         if (sessEditing) {
+          // Session 1 defaults to the first Wednesday of September (Erin,
+          // 2026-07-15) — a suggestion in the picker; nothing is real until
+          // Save, and saved dates stay "Proposed" until board approval.
+          var sessStartDefault = e.event_date || (r.sessNum === 1 ? firstWedOfSeptember(year) : '');
           h += '<td style="white-space:nowrap;">'
-            + '<input type="date" class="cl-input board-cal-sess-start" value="' + escapeHtml(e.event_date || '') + '" aria-label="Session ' + r.sessNum + ' start">'
+            + '<input type="date" class="cl-input board-cal-sess-start" value="' + escapeHtml(sessStartDefault) + '" aria-label="Session ' + r.sessNum + ' start">'
             + ' <span class="board-cal-se-unset">→</span> '
             + '<input type="date" class="cl-input board-cal-sess-end" value="' + escapeHtml(e.end_date || '') + '" aria-label="Session ' + r.sessNum + ' end">'
             + '</td>';
@@ -22393,6 +22415,11 @@
         if (r.kind === 'special' && r.seRow) {
           notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
         }
+        // Session dates carry the same Proposed/Approved chip — entered
+        // dates stay pending until the board approves them (Erin, 2026-07-15).
+        if (r.kind === 'session' && e.dates_status && e.event_date) {
+          notes = '<span class="se-status se-status-' + (e.dates_status === 'approved' ? 'approved' : 'proposed') + '">' + (e.dates_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
+        }
         h += '<td>' + notes + '</td>';
         // Actions cell by kind.
         if (r.kind === 'session') {
@@ -22402,7 +22429,9 @@
               + (e.event_date ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-canceledit" data-sess-num="' + r.sessNum + '">Cancel</button>' : '')
               + '</td>';
           } else if (sessEditable) {
-            h += '<td class="coop-cal-actions"><button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-editbtn" data-sess-num="' + r.sessNum + '">Edit</button></td>';
+            h += '<td class="coop-cal-actions" style="white-space:nowrap;">'
+              + (e.dates_status === 'proposed' && e.event_date ? '<button type="button" class="btn btn-primary btn-sm board-cal-sess-approvebtn" data-sess-num="' + r.sessNum + '">Approve</button> ' : '')
+              + '<button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-editbtn" data-sess-num="' + r.sessNum + '">Edit</button></td>';
           } else {
             h += '<td></td>';
           }
@@ -22438,6 +22467,17 @@
 
     body.innerHTML = h;
     wireBoardCalendarBody();
+  }
+
+  // Default Session 1 start: the first Wednesday of September of the
+  // school year's fall half (Erin, 2026-07-15). Pure UTC arithmetic so
+  // the browser timezone can't shift the day.
+  function firstWedOfSeptember(schoolYear) {
+    var F = parseInt(String(schoolYear || '').slice(0, 4), 10);
+    if (!F) return '';
+    var firstDow = new Date(Date.UTC(F, 8, 1)).getUTCDay();
+    var day = 1 + ((3 - firstDow + 7) % 7);
+    return F + '-09-' + ('0' + day).slice(-2);
   }
 
   // Save one session row (name + start/end) inline from the Admin
@@ -22538,6 +22578,31 @@
       btn.addEventListener('click', function () {
         _boardCalState.view = this.getAttribute('data-cal-view');
         renderBoardCalendarBody();
+      });
+    });
+
+    // Approve proposed session dates — flips dates_status and (on prod)
+    // publishes the recurring co-op-day event to the Google Calendar.
+    body.querySelectorAll('.board-cal-sess-approvebtn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var n = parseInt(this.getAttribute('data-sess-num'), 10);
+        var self = this;
+        self.disabled = true; self.textContent = 'Approving…';
+        fetch('/api/cleaning?action=session-dates-status', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ school_year: _boardCalState.schoolYear, session_number: n, status: 'approved' })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              boardCalShowMsg((res.d && res.d.error) || 'Approve failed.');
+              self.disabled = false; self.textContent = 'Approve';
+              return;
+            }
+            loadBoardCalendar();
+          }).catch(function (err) {
+            boardCalShowMsg('Network error: ' + (err.message || 'unknown'));
+            self.disabled = false; self.textContent = 'Approve';
+          });
       });
     });
 

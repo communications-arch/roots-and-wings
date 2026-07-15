@@ -5331,9 +5331,31 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
     });
   };
 
+  // Nth weekday of a month as YYYY-MM-DD (weekday 0=Sun … 3=Wed). Pure
+  // arithmetic on UTC so the server timezone can't shift the day.
+  const nthWeekdayOf = (year, month, weekday, nth) => {
+    const firstDow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    const day = 1 + ((weekday - firstDow + 7) % 7) + (nth - 1) * 7;
+    return year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+  };
+
   // Summer setup
   push('morning', 'Build morning classes', F + '-06-01', '',
     'Membership Director groups morning kids into age classes', 'Membership Director', '🌱');
+
+  // Standing meetings (Erin, 2026-07-15): a Board Meeting the 3rd Wednesday
+  // of July with the All Member Meeting one week later, and the same pair
+  // anchored to the 1st Wednesday of April in the spring.
+  const julyBoard = nthWeekdayOf(F, 7, 3, 3);
+  push('boardmtg-summer', 'Board Meeting', julyBoard, '',
+    'Summer board meeting — 3rd Wednesday of July', '', '🤝');
+  push('allmember-summer', 'All Member Meeting', calAddDays(julyBoard, 7), '',
+    'All-member meeting — one week after the summer board meeting', '', '📣');
+  const aprilBoard = nthWeekdayOf(F + 1, 4, 3, 1);
+  push('boardmtg-spring', 'Board Meeting', aprilBoard, '',
+    'Spring board meeting — 1st Wednesday of April', '', '🤝');
+  push('allmember-spring', 'All Member Meeting', calAddDays(aprilBoard, 7), '',
+    'All-member meeting — one week after the spring board meeting', '', '📣');
 
   const ics = iceCreamSocialForYear(sessions, schoolYear);
   push('removemembers', 'Remove non-returning members', calAddDays(ics, -3), '',
@@ -5350,10 +5372,12 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
     'Welcome Coordinator reaches out to each new family the week before co-op begins — welcome them and answer questions',
     'Welcome Coordinator', '💛');
 
-  // The five sessions
+  // The five sessions — each carries its approval state so the Admin
+  // Calendar can show the Proposed/Approved chip + Approve button.
   calSessionsForYear(sessions, schoolYear).forEach(s => {
     push('session' + s.session_number, s.name || ('Session ' + s.session_number),
       s.start_date, s.end_date, 'Co-op session', '', '📚');
+    out[out.length - 1].dates_status = s.dates_status || 'approved';
   });
 
   // Year-end cluster, anchored to Field Day
@@ -5446,13 +5470,14 @@ async function handleBoardCalendarGet(req, res) {
 
     // Derived (read-only) trigger dates computed off the session calendar.
     const sessRows = await sql`
-      SELECT id, school_year, session_number, name, start_date, end_date, gcal_event_id
+      SELECT id, school_year, session_number, name, start_date, end_date, dates_status, gcal_event_id
       FROM co_op_sessions
     `;
     const sessions = sessRows.map(s => ({
       school_year: s.school_year,
       session_number: s.session_number,
       name: s.name,
+      dates_status: s.dates_status || 'approved',
       start_date: calDateStr(s.start_date),
       end_date: calDateStr(s.end_date)
     }));

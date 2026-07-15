@@ -864,7 +864,7 @@ module.exports = async function handler(req, res) {
         // The dataset is small (5 rows per year), so no need to slice.
         const rows = await sql`
           SELECT id, school_year, session_number, name, start_date, end_date,
-                 updated_at, updated_by
+                 dates_status, updated_at, updated_by
           FROM co_op_sessions
           ORDER BY school_year, session_number
         `;
@@ -873,6 +873,7 @@ module.exports = async function handler(req, res) {
           school_year: r.school_year,
           session_number: r.session_number,
           name: r.name,
+          dates_status: r.dates_status || 'approved',
           start_date: r.start_date instanceof Date
             ? r.start_date.toISOString().slice(0, 10)
             : String(r.start_date).slice(0, 10),
@@ -935,11 +936,13 @@ module.exports = async function handler(req, res) {
         if (isReadOnlyYear(schoolYear)) {
           return res.status(400).json({ error: 'Past school years are read-only history.' });
         }
+        // NEW sessions land as 'proposed' — pending until board approval
+        // (Erin, 2026-07-15). Date edits keep the row's existing status.
         const inserted = await sql`
           INSERT INTO co_op_sessions
-            (school_year, session_number, name, start_date, end_date, updated_at, updated_by)
+            (school_year, session_number, name, start_date, end_date, dates_status, updated_at, updated_by)
           VALUES
-            (${schoolYear}, ${sessionNumber}, ${name}, ${startDate}, ${endDate}, NOW(), ${user.email})
+            (${schoolYear}, ${sessionNumber}, ${name}, ${startDate}, ${endDate}, 'proposed', NOW(), ${user.email})
           ON CONFLICT (school_year, session_number) DO UPDATE
             SET name = EXCLUDED.name,
                 start_date = EXCLUDED.start_date,
@@ -947,15 +950,16 @@ module.exports = async function handler(req, res) {
                 updated_at = NOW(),
                 updated_by = EXCLUDED.updated_by
           RETURNING id, school_year, session_number, name, start_date, end_date,
-                    gcal_event_id, updated_at, updated_by
+                    dates_status, gcal_event_id, updated_at, updated_by
         `;
         const r = inserted[0];
         // Publish/refresh the session's weekly co-op-day event (9:40 AM –
         // 3:15 PM) on the Google Calendar so it always follows the dates
         // set here. Production only — dev shares the one real calendar
         // but has its own DB rows, so a dev save would double-publish.
+        // Proposed sessions never publish — approval (below) does that.
         // Non-fatal: a Google hiccup never blocks the session save.
-        if (process.env.VERCEL_ENV === 'production') {
+        if (process.env.VERCEL_ENV === 'production' && r.dates_status === 'approved') {
           try {
             const { syncSessionToGoogleCalendar } = require('./tour.js');
             await syncSessionToGoogleCalendar(sql, r);
@@ -975,6 +979,7 @@ module.exports = async function handler(req, res) {
             end_date: r.end_date instanceof Date
               ? r.end_date.toISOString().slice(0, 10)
               : String(r.end_date).slice(0, 10),
+            dates_status: r.dates_status || 'approved',
             updated_at: r.updated_at,
             updated_by: r.updated_by
           }
@@ -1012,6 +1017,47 @@ module.exports = async function handler(req, res) {
       }
 
       return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // ── Session dates approval (Erin, 2026-07-15) ──
+    // Session dates are entered as 'proposed' and stay pending until the
+    // board approves them. Approving publishes the recurring co-op-day
+    // event to the Google Calendar; flipping back to proposed removes it.
+    if (action === 'session-dates-status' && req.method === 'POST') {
+      if (!(await hasCapability(user.email, 'session_dates_edit'))) {
+        return res.status(403).json({ error: 'Only the President or Vice-President can manage co-op sessions.' });
+      }
+      const body = req.body || {};
+      const schoolYear = String(body.school_year || '').trim();
+      const sessionNumber = parseInt(body.session_number, 10);
+      const status = String(body.status || '').trim();
+      if (status !== 'approved' && status !== 'proposed') {
+        return res.status(400).json({ error: 'status must be approved or proposed.' });
+      }
+      if (String(schoolYear) < activeSchoolYear()) {
+        return res.status(400).json({ error: 'Past school years are read-only history.' });
+      }
+      const updated = await sql`
+        UPDATE co_op_sessions SET dates_status = ${status}, updated_at = NOW(), updated_by = ${user.email}
+        WHERE school_year = ${schoolYear} AND session_number = ${sessionNumber}
+        RETURNING id, school_year, session_number, name, start_date, end_date, dates_status, gcal_event_id
+      `;
+      if (updated.length === 0) return res.status(404).json({ error: 'Session not found.' });
+      const r = updated[0];
+      if (process.env.VERCEL_ENV === 'production') {
+        try {
+          const tourApi = require('./tour.js');
+          if (status === 'approved') {
+            await tourApi.syncSessionToGoogleCalendar(sql, r);
+          } else if (r.gcal_event_id) {
+            await tourApi.deleteGoogleCalendarEvent(r.gcal_event_id);
+            await sql`UPDATE co_op_sessions SET gcal_event_id = '' WHERE id = ${r.id}`;
+          }
+        } catch (gErr) {
+          console.error('Session gcal status sync error (non-fatal):', (gErr && gErr.message) || gErr);
+        }
+      }
+      return res.status(200).json({ ok: true, dates_status: status });
     }
 
     // ── Role-holder confirmations ──

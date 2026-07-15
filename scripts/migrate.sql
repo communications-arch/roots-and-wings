@@ -805,6 +805,11 @@ ALTER TABLE class_signup_picks ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAU
 -- (class_submissions.open_to_teen_assistant) — any class, any age range
 -- (Erin, 2026-07-15).
 ALTER TABLE class_signup_picks ADD COLUMN IF NOT EXISTS as_assistant BOOLEAN NOT NULL DEFAULT FALSE;
+-- Session dates stay PENDING until the board approves them (Erin,
+-- 2026-07-15). Default 'approved' backfills the years already live (and
+-- already published to Google); NEW rows are inserted 'proposed' explicitly.
+-- Only approved sessions publish/refresh their Google Calendar event.
+ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS dates_status TEXT NOT NULL DEFAULT 'approved';
 
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders
