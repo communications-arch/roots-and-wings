@@ -3109,8 +3109,45 @@
         });
       }
       html += '</div>';
-      // Show kids in this group
-      var groupKids = allPeople.filter(function(person) { return person.type === 'kid' && person.group === p.group; });
+      // Show kids in this group — THIS season's roster. The community
+      // snapshot (registered families + Morning Builder placements)
+      // decides who's in the group; the directory's kid.group is last
+      // year's and includes families who never registered this year
+      // (Erin's prod bug, 2026-07-15). Matched directory records still
+      // supply avatar/pronoun/photo-consent details; snapshot-only kids
+      // (brand-new families) get name-only cards. Falls back to the old
+      // directory filter until the snapshot has loaded.
+      var _grpLower = String(p.group || '').toLowerCase();
+      var _kidKey = function (first, fam) {
+        return String(first || '').trim().split(/\s+/)[0].toLowerCase() + '|' + String(fam || '').toLowerCase();
+      };
+      var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
+      if (!snapshotReady && typeof loadMembersSummary === 'function') loadMembersSummary();
+      var seasonKids = {};
+      if (snapshotReady) {
+        _communityRoster.forEach(function (fam) {
+          (fam.kids || []).forEach(function (k) {
+            if (k.class) seasonKids[_kidKey(k.name, fam.name)] = String(k.class).toLowerCase();
+          });
+        });
+      }
+      var groupKids = allPeople.filter(function (person) {
+        if (person.type !== 'kid') return false;
+        if (!snapshotReady) return person.group === p.group;
+        return seasonKids[_kidKey(person.name, person.family || person.lastName)] === _grpLower;
+      });
+      if (snapshotReady) {
+        var haveKid = {};
+        groupKids.forEach(function (k) { haveKid[_kidKey(k.name, k.family || k.lastName)] = true; });
+        _communityRoster.forEach(function (fam) {
+          (fam.kids || []).forEach(function (k) {
+            if (String(k.class || '').toLowerCase() !== _grpLower) return;
+            if (haveKid[_kidKey(k.name, fam.name)]) return;
+            groupKids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name });
+          });
+        });
+        groupKids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+      }
       if (groupKids.length > 0) {
         var studentFullNames = groupKids.map(function (kid) { return kid.name + ' ' + (kid.lastName || kid.family); });
         html += '<h4 class="elective-roster-title">' + groupKids.length + ' Students</h4>';
