@@ -15,7 +15,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { Resend } = require('./_resend');
 const { ALLOWED_ORIGINS, emailSubject } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImpersonate } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImpersonate, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { resolveFamily, canActAs } = require('./_family');
 
@@ -716,9 +716,19 @@ module.exports = async function handler(req, res) {
       if (action === 'class-submissions') {
         const scope = (req.query.scope || 'mine').toLowerCase();
         if (scope === 'all') {
-          const rscope = await reviewerScopeReq(user, req);
+          // Reviewers (VP / ACL / group liaisons / super) get their normal
+          // scope. Board members get the same payload READ-ONLY
+          // (reviewer_scope='board-read', Board at a Glance 2026-07-15) so
+          // the Roles Assignments lenses can show them the year's classes;
+          // is_reviewer stays false and every write path keeps its own gate.
+          let rscope = await reviewerScopeReq(user, req);
+          let boardRead = false;
           if (!rscope) {
-            return res.status(403).json({ error: 'Reviewer access only' });
+            boardRead = await isBoardMember(actingEmailFor(user, req));
+            if (!boardRead) {
+              return res.status(403).json({ error: 'Reviewer access only' });
+            }
+            rscope = { all: true };
           }
           // Schedule Builder needs per-session approval state to lock the UI
           // for finalized sessions. Also returns the sign-up window per
@@ -786,10 +796,11 @@ module.exports = async function handler(req, res) {
             session_approvals,
             signup_windows,
             members,
-            is_reviewer: true,
+            is_reviewer: !boardRead,
             // 'all' for VP/ACL/super; a lowercase group list for scoped
-            // age-group liaisons — the builder greys out everything else.
-            reviewer_scope: rscope.all ? 'all' : rscope.groups
+            // age-group liaisons — the builder greys out everything else;
+            // 'board-read' for board members viewing read-only.
+            reviewer_scope: boardRead ? 'board-read' : (rscope.all ? 'all' : rscope.groups)
           });
         }
         // scope=mine — super users may impersonate via ?view_as= so the

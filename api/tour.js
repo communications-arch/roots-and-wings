@@ -4701,12 +4701,24 @@ function specialEventDateStr(v) {
 // for the year on first load, then returns each event + lead/assistants + a
 // member picker list.
 async function handleSpecialEventsGet(req, res) {
-  const auth = await requireSpecialEventsEditor(req, res);
-  if (!auth) return;
+  // Editors (SEL/VP via special_events_manage) get the full read + the
+  // seed pass; board members get the same payload READ-ONLY (Board at a
+  // Glance, 2026-07-15) — viewer_can_edit=false hides the Manage drawer
+  // client-side, and every write kind still requires the capability.
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canEdit = await hasCapability(auth.email, 'special_events_manage');
+  if (!canEdit && !(await isBoardMember(auth.email))) {
+    return res.status(403).json({
+      error: 'Only the Special Events Liaison, Vice President, or a board member can view special events.',
+      youAre: auth.realEmail
+    });
+  }
   const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
   try {
     const sql = getSql();
-    for (let i = 0; i < SPECIAL_EVENT_SEED.length; i++) {
+    // Read-only viewers never write — the seed pass is the editor's job.
+    for (let i = 0; canEdit && i < SPECIAL_EVENT_SEED.length; i++) {
       await sql`
         INSERT INTO special_events (school_year, name, sort_order, updated_by)
         VALUES (${schoolYear}, ${SPECIAL_EVENT_SEED[i]}, ${i}, ${auth.realEmail})
@@ -4759,7 +4771,7 @@ async function handleSpecialEventsGet(req, res) {
       seen.add(k);
       members.push({ name: nm, email: em });
     });
-    return res.status(200).json({ school_year: schoolYear, events: out, members });
+    return res.status(200).json({ school_year: schoolYear, events: out, members, viewer_can_edit: canEdit });
   } catch (err) {
     console.error('special-events get error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -6113,13 +6125,19 @@ async function handleBoardGlance(req, res) {
         m.push({ label: 'afternoon classes scheduled', value: afternoon.scheduled });
         if (afternoon.inbox > 0) m.push({ label: 'class ideas awaiting review', value: afternoon.inbox });
       }
-      return { metrics: m, view: '' };
+      return { metrics: m, view: 'roles-am' };
     }
     if (key === 'president') {
       return { metrics: boardTasks == null ? [] : [{ label: 'board tasks next 30 days', value: boardTasks }], view: 'admin-calendar' };
     }
+    if (key === 'secretary') {
+      return { metrics: [], view: 'admin-calendar' };
+    }
+    if (key === 'sustaining director') {
+      return { metrics: [], view: 'membership-report' };
+    }
     if (key === 'cleaning crew liaison') {
-      return { metrics: !cleaning ? [] : [{ label: 'areas open — Session ' + cleaning.session, value: cleaning.open }], view: '' };
+      return { metrics: !cleaning ? [] : [{ label: 'areas open — Session ' + cleaning.session, value: cleaning.open }], view: 'roles-cleaning' };
     }
     if (key === 'special events liaison') {
       const m = [];
@@ -6127,7 +6145,7 @@ async function handleBoardGlance(req, res) {
         m.push({ label: 'events staffed', value: events.staffed + '/' + events.total });
         if (events.openTasks > 0) m.push({ label: 'planning tasks open', value: events.openTasks });
       }
-      return { metrics: m, view: '' };
+      return { metrics: m, view: 'roles-se' };
     }
     return { metrics: [], view: '' };
   };

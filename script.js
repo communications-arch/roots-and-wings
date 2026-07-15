@@ -7809,6 +7809,10 @@
         // date-gated pre-co-op outreach nudge.
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
+        // Personal event-planning tasks (Collaboration spaces): repaint
+        // from cache instantly, then refresh from the server.
+        if (typeof updateEventTasksTodoItems === 'function') updateEventTasksTodoItems();
+        if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
         // Wire the "get connected" copy-link button on the WC To Do card.
         if (typeof wireWelcomeCopy === 'function') {
           wireWelcomeCopy(document.getElementById('workspaceTabContent') || document);
@@ -8104,13 +8108,15 @@
     // rows — VP dropped from 7 role cards to 4, Comms from 7 to 5.
     // (2026-07-07, Erin) 'my-links' dropped from every default for now —
     // the widget code stays; re-add the key here to bring the card back.
-    'President': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'reports', 'board-glance', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
-    'Treasurer': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
-    'Secretary': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    // 'board-glance' is NOT in any role list — it renders in the shared
+    // "Board" section (its own pill) for every board member.
+    'President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Treasurer': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Secretary': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'roles', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
@@ -8315,7 +8321,13 @@
 
     var roles = getWorkspaceRoles();
     var prefs = getWorkspacePrefs();
-    if (_wsRoleFilter && _wsRoleFilter !== 'Shared' && roles.indexOf(_wsRoleFilter) === -1) _wsRoleFilter = '';
+    // Board members get a "Board" section (Board at a Glance now; meeting
+    // minutes + action items are the planned next tenants) — its pill
+    // rides the bar like a role's.
+    var showBoardSection = (typeof boardCalViewerIsBoard === 'function') && boardCalViewerIsBoard();
+    if (_wsRoleFilter && _wsRoleFilter !== 'Shared'
+      && !(_wsRoleFilter === 'Board' && showBoardSection)
+      && roles.indexOf(_wsRoleFilter) === -1) _wsRoleFilter = '';
 
     // Skip a redundant full rebuild that would visibly flicker the cards.
     // loadLiveData renders once from cached /api/sheets, then again ~1s later
@@ -8384,17 +8396,21 @@
     }
     html += '</div>';
 
-    // Role pill bar — only worth showing for multi-role holders. Each
+    // Role pill bar — anyone with a role gets it (Erin, 2026-07-15: a
+    // single-role holder should still see their role + Shared). Each
     // role pill carries a To Do count badge (painted by
     // updateWsRolePillBadges as the loaders settle) so filtering to one
     // role never hides that something else needs attention.
-    if (roles.length >= 2) {
+    if (roles.length >= 1 || showBoardSection) {
       html += '<div class="board-cal-views ws-role-pillbar" role="group" aria-label="Filter workspace by role">';
       html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (!_wsRoleFilter ? ' is-active' : '') + '" data-ws-pill="">All</button>';
       roles.forEach(function (r) {
         html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === r ? ' is-active' : '') + '" data-ws-pill="' + escapeAttr(r) + '">' + escapeHtml(r)
           + '<span class="ws-pill-badge" data-ws-badge="' + escapeAttr(r) + '" hidden>0</span></button>';
       });
+      if (showBoardSection) {
+        html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === 'Board' ? ' is-active' : '') + '" data-ws-pill="Board">Board</button>';
+      }
       html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === 'Shared' ? ' is-active' : '') + '" data-ws-pill="Shared">Shared</button>';
       html += '</div>';
     }
@@ -8518,6 +8534,13 @@
       var roleKey = getRoleKeyForDuty(role);
       html += renderSection(role, roleKey, widgetListFor(role), { showNotes: !!roleKey });
     });
+
+    // "Board" section — shared board-wide surfaces, not tied to any one
+    // role (Erin, 2026-07-15: "set it up as a Board pill"). Board at a
+    // Glance today; meeting minutes + action items planned.
+    if (showBoardSection) {
+      html += renderSection('Board', null, ['board-glance'], { showNotes: false });
+    }
 
     // "Shared" bucket for universal widgets. Always render (even if empty)
     // so a brand-new member sees the My Links / Ways to Help baseline.
@@ -18667,7 +18690,7 @@
       // filter), cleaning is fetched per year.
       renderRolesMgrAmLens();
       renderRolesMgrPmLens();
-      if (_rolesMgrAsgState.reviewer || rolesMgrViewerCanCleaning()) loadRolesMgrCleaning();
+      if (_rolesMgrAsgState.reviewer || rolesMgrViewerCanCleaningRead()) loadRolesMgrCleaning();
     });
     body.querySelectorAll('.roles-mgr-view-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -18681,7 +18704,7 @@
     // The Cleaning Crew Liaison gets the Cleaning lens without full
     // reviewer scope (Erin, 2026-07-15) — pill + rota load immediately;
     // the reviewer path re-runs the load for VP/super harmlessly.
-    if (rolesMgrViewerCanCleaning()) {
+    if (rolesMgrViewerCanCleaningRead()) {
       var clPillNow = document.getElementById('roles-mgr-cl-pill');
       if (clPillNow) clPillNow.hidden = false;
       loadRolesMgrCleaning();
@@ -18784,6 +18807,9 @@
         }
         _rolesMgrEventsState.events = res.data.events || [];
         _rolesMgrEventsState.members = res.data.members || [];
+        // Board members read this lens read-only (viewer_can_edit=false
+        // hides the Manage drawer; saves stay SEL/VP-gated server-side).
+        _rolesMgrEventsState.canEdit = res.data.viewer_can_edit !== false;
         if (pill) pill.hidden = false;
         renderRolesMgrSpecialEvents();
         rolesMgrSetView(_rolesMgrState.view); // re-apply visibility post-render
@@ -18816,8 +18842,10 @@
       raCountPill('ws-wv-ok', staffed + ' with a lead'),
       raCountPill(needLead > 0 ? 'ws-wv-resent' : 'ws-wv-ok', needLead + ' need a lead')
     ];
-    var h = raLensHead(pills, { label: 'Manage Special Events', action: 'special-events' });
-    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar; tap Manage to assign people right here.</p>';
+    var canEditSE = _rolesMgrEventsState.canEdit !== false;
+    var h = raLensHead(pills, canEditSE ? { label: 'Manage Special Events', action: 'special-events' } : null);
+    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar'
+      + (canEditSE ? '; tap Manage to assign people right here.' : '. Open a planning space to see any event’s checklist.') + '</p>';
     h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th><th>Planning</th></tr></thead><tbody>';
     events.forEach(function (ev) {
       var assists = (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
@@ -19182,8 +19210,47 @@
         // Re-render once when the set changes so the duty rows appear
         // without looping (renderMyFamily calls this loader).
         if (changed && typeof renderMyFamily === 'function') renderMyFamily();
+        // Workspace To Do mirrors the same tasks (Erin, 2026-07-15: an
+        // assigned task "didn't show up in their workspace to do") —
+        // always re-inject, since a workspace re-render clears the rows.
+        updateEventTasksTodoItems();
       })
       .catch(function () { /* silent */ });
+  }
+
+  // Inject one "🎉 <event> — tasks for you" row into every To Do card
+  // from _myEventTasks. Role-agnostic: the tasks are personal, so the row
+  // rides every role section's card (same duplicate-id quirk as the rest
+  // of the To Do machinery). Members without a role keep seeing their
+  // tasks in My Responsibilities on the dashboard.
+  function updateEventTasksTodoItems() {
+    var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
+    if (!lists.length) return;
+    var byEvent = {};
+    (Array.isArray(_myEventTasks) ? _myEventTasks : []).forEach(function (t) {
+      var g = byEvent[t.event_id] || (byEvent[t.event_id] = { name: t.event_name, due: null, n: 0 });
+      g.n++;
+      if (t.due_date && (!g.due || t.due_date < g.due)) g.due = t.due_date;
+    });
+    lists.forEach(function (list) {
+      list.querySelectorAll('li.ws-todo-evt').forEach(function (li) { li.remove(); });
+      var anchor = list.querySelector('li[id="ws-todo-empty"]');
+      Object.keys(byEvent).forEach(function (eid) {
+        var g = byEvent[eid];
+        var li = document.createElement('li');
+        li.className = 'ws-todo-evt';
+        li.id = 'ws-todo-evt-' + eid + '-item';
+        li.innerHTML = '<button type="button" class="ws-link-btn">'
+          + '<span class="ws-link-count">' + g.n + '</span><span class="ws-link-icon">🎉</span>'
+          + '<span>' + escapeHtml(g.name) + ' — planning task' + (g.n === 1 ? '' : 's')
+          + (g.due ? ' · next due ' + boardCalFmtDate(g.due) : '') + '</span></button>';
+        li.querySelector('button').addEventListener('click', function () {
+          if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
+        });
+        list.insertBefore(li, anchor);
+      });
+    });
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
   // ── Volunteer Assignments lenses (inside Roles Assignments) ──
@@ -19196,6 +19263,8 @@
   // one editing surface per category. Gated to FULL reviewer scope
   // (VP / Afternoon Class Liaison / super) via class-submissions
   // scope=all — a 403 or a group-scoped liaison leaves the pills hidden.
+  // Board members get reviewer_scope='board-read' (2026-07-15): same
+  // lenses, no manage doorways.
   var _rolesMgrAsgState = {
     reviewer: false,     // full-scope reviewer confirmed?
     loaded: false,       // submissions fetch resolved OK
@@ -19214,6 +19283,14 @@
     return roles.indexOf('Cleaning Crew Liaison') !== -1 || roles.indexOf('Vice President') !== -1;
   }
 
+  // Board members read the Cleaning lens without the Manage doorway
+  // (Board at a Glance, 2026-07-15). The /api/cleaning GET is already
+  // member-readable; this only controls lens visibility.
+  function rolesMgrViewerCanCleaningRead() {
+    return rolesMgrViewerCanCleaning()
+      || ((typeof boardCalViewerIsBoard === 'function') && boardCalViewerIsBoard());
+  }
+
   function loadRolesMgrAssignments() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -19225,16 +19302,19 @@
         // Group-scoped age-group liaisons get reviewer_scope as an array —
         // the hub is for the people who plan the whole year, so they (and
         // 403s) keep the default: pills hidden, no cleaning fetch.
-        if (!data || data.reviewer_scope !== 'all') {
+        // 'board-read' = a board member reading the lenses read-only
+        // (Board at a Glance, 2026-07-15) — same tables, no doorways.
+        var scopeVal = data && data.reviewer_scope;
+        if (scopeVal !== 'all' && scopeVal !== 'board-read') {
           // Don't kick a cleaning-capable viewer (the liaison) off the
           // Cleaning lens just because they lack full reviewer scope.
-          var kick = rolesMgrViewerCanCleaning() ? ['am', 'pm'] : ['am', 'pm', 'cleaning'];
+          var kick = rolesMgrViewerCanCleaningRead() ? ['am', 'pm'] : ['am', 'pm', 'cleaning'];
           if (kick.indexOf(_rolesMgrState.view) !== -1) {
             rolesMgrSetView('roles');
           }
           return;
         }
-        _rolesMgrAsgState.reviewer = true;
+        _rolesMgrAsgState.reviewer = (scopeVal === 'all');
         _rolesMgrAsgState.loaded = true;
         _rolesMgrAsgState.submissions = Array.isArray(data.submissions) ? data.submissions : [];
         ['roles-mgr-am-pill', 'roles-mgr-pm-pill', 'roles-mgr-cl-pill'].forEach(function (id) {
@@ -19390,7 +19470,7 @@
       raCountPill('ws-wv-pending', partial + ' hour open'),
       raCountPill('ws-wv-resent', open + ' open')
     ];
-    var h = raLensHead(pills, { label: 'Open Class Builder', action: 'builder-am' });
+    var h = raLensHead(pills, _rolesMgrAsgState.reviewer ? { label: 'Open Class Builder', action: 'builder-am' } : null);
     h += '<p class="ws-body-hint">Each age group’s morning per session — one both-hours class, or an Hour 1 + Hour 2 pair. Placements are managed in the Class Builder.</p>';
     h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th></th>';
     for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
@@ -19413,7 +19493,7 @@
     pills.push(needSpots > 0
       ? raCountPill('ws-wv-resent', needSpots + ' helper spot' + (needSpots === 1 ? '' : 's') + ' to fill')
       : raCountPill('ws-wv-ok', 'all helped'));
-    var h = raLensHead(pills, { label: 'Open Class Builder', action: 'builder-pm' });
+    var h = raLensHead(pills, _rolesMgrAsgState.reviewer ? { label: 'Open Class Builder', action: 'builder-pm' } : null);
     h += '<p class="ws-body-hint">Helper coverage for every scheduled afternoon class — helpers are assigned in the Class Builder’s class editor and feed participation points.</p>';
     if (classCount === 0) {
       h += '<p class="ws-empty">No afternoon classes scheduled for ' + escapeHtmlWs(_rolesMgrState.schoolYear) + ' yet.</p>';
@@ -23267,6 +23347,11 @@
               else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
               else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
               else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
+              // Roles Assignments lenses — board members reach them
+              // read-only (the manage doorways stay holder-gated).
+              else if (v === 'roles-am' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'am' });
+              else if (v === 'roles-cleaning' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'cleaning' });
+              else if (v === 'roles-se' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'special-events' });
             });
           });
         });
