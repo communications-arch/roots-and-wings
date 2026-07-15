@@ -18607,7 +18607,10 @@
     if (!container) return;
     container.querySelectorAll('.workspace-role-section').forEach(function (sec) {
       var r = sec.getAttribute('data-ws-role') || '';
-      sec.hidden = !!(_wsRoleFilter && r !== _wsRoleFilter && r !== 'Shared');
+      // Each pill shows exactly its own section(s) — Shared has its own
+      // pill now, so it no longer tags along under role filters
+      // (Erin, 2026-07-15). All still shows everything.
+      sec.hidden = !!(_wsRoleFilter && r !== _wsRoleFilter);
     });
     container.querySelectorAll('.ws-role-pill').forEach(function (btn) {
       btn.classList.toggle('is-active', (btn.getAttribute('data-ws-pill') || '') === _wsRoleFilter);
