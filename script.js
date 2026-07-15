@@ -5214,16 +5214,20 @@
         var f = String(c.family || '').toLowerCase();
         return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
       });
-      if (myClean.length) {
+      // A family may take MORE than one area (Erin, 2026-07-15): every
+      // spot gets its own row + release ✕, and the picker below stays
+      // available while open areas remain. Cleaning stays optional.
+      myClean.forEach(function (c) {
         injectRow('Cleaning',
           '<div class="mf-duty-icon">🧹</div>'
-          + '<div class="mf-duty-info"><strong>' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</strong><span>Optional</span></div>'
-          + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button></div>');
-      } else if ((d.cleaning_open || []).length) {
+          + '<div class="mf-duty-info"><strong>' + escapeHtml(c.area) + '</strong><span>Optional</span></div>'
+          + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + c.id + '" title="Release this spot">✕</button></div>');
+      });
+      if ((d.cleaning_open || []).length) {
         // Areas grouped under their floor (Main Floor / Upstairs / Outside)
         // so the list reads like the cleaning rota (Erin, 2026-07-15).
         var CLEAN_FLOOR_LABELS = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
-        var cleanOptsHtml = '<option value="">— optional: pick an open area… —</option>';
+        var cleanOptsHtml = '<option value="">— optional: ' + (myClean.length ? 'add another area…' : 'pick an open area…') + ' —</option>';
         var floorOrder = [];
         var byFloor = {};
         d.cleaning_open.forEach(function (a) {
@@ -5241,8 +5245,8 @@
         });
         injectRow('Cleaning',
           '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;">' + cleanOptsHtml + '</select>',
-          { prepend: true, bare: true });
-      } else {
+          { prepend: !myClean.length, bare: true });
+      } else if (!myClean.length) {
         injectRow('Cleaning', '<span class="mf-vol-optional">Optional — all areas are covered for this session. Thank you!</span>', { prepend: true, bare: true });
       }
     }
