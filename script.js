@@ -8217,12 +8217,19 @@
     catch (e) { console.error('workspace notes save failed:', e); }
   }
 
+  // Workspace role filter (Erin, 2026-07-15: "each role as a tab?" →
+  // pill bar hybrid): '' = All (every section), else show only that
+  // role's sections (+ Shared). In-memory only — each visit starts on
+  // All so nothing pending hides by default.
+  var _wsRoleFilter = '';
+
   function renderWorkspaceTab(opts) {
     var container = document.getElementById('workspaceTabContent');
     if (!container) return;
 
     var roles = getWorkspaceRoles();
     var prefs = getWorkspacePrefs();
+    if (_wsRoleFilter && roles.indexOf(_wsRoleFilter) === -1) _wsRoleFilter = '';
 
     // Skip a redundant full rebuild that would visibly flicker the cards.
     // loadLiveData renders once from cached /api/sheets, then again ~1s later
@@ -8291,6 +8298,20 @@
     }
     html += '</div>';
 
+    // Role pill bar — only worth showing for multi-role holders. Each
+    // role pill carries a To Do count badge (painted by
+    // updateWsRolePillBadges as the loaders settle) so filtering to one
+    // role never hides that something else needs attention.
+    if (roles.length >= 2) {
+      html += '<div class="board-cal-views ws-role-pillbar" role="group" aria-label="Filter workspace by role">';
+      html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (!_wsRoleFilter ? ' is-active' : '') + '" data-ws-pill="">All</button>';
+      roles.forEach(function (r) {
+        html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === r ? ' is-active' : '') + '" data-ws-pill="' + escapeAttr(r) + '">' + escapeHtml(r)
+          + '<span class="ws-pill-badge" data-ws-badge="' + escapeAttr(r) + '" hidden>0</span></button>';
+      });
+      html += '</div>';
+    }
+
     // Track OPEN widget types across all sections so afterRender hooks and
     // form wiring can iterate a flat list. Minimized cards leave the grid
     // entirely (they render as compact chips below the section — the whole
@@ -8311,7 +8332,7 @@
       // Only skip the whole section if it has no content *and* no notes slot.
       if (visible.length === 0 && minimized.length === 0 && !opts.showNotes) return '';
 
-      var s = '<section class="workspace-role-section">';
+      var s = '<section class="workspace-role-section" data-ws-role="' + escapeAttr(heading) + '">';
       var role = (opts.showNotes && roleKey) ? getRoleByKey(roleKey) : null;
       // Minimized cards ride the section-header row as chips (Erin:
       // "same row as the Header... so they are more visible") — tap to
@@ -8417,6 +8438,16 @@
 
     container.innerHTML = html;
     container.setAttribute('data-ws-sig', wsSig);
+
+    // Role pill bar: filter + badge wiring, and re-apply the current
+    // filter so async re-renders don't reset the view.
+    container.querySelectorAll('.ws-role-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _wsRoleFilter = this.getAttribute('data-ws-pill') || '';
+        applyWsRoleFilter();
+      });
+    });
+    applyWsRoleFilter();
 
     // Per-widget post-render hooks (e.g. kick off async data fetches).
     allVisibleTypes.forEach(function (type) {
@@ -11524,6 +11555,8 @@
     // immediately instead of flashing "All caught up" while the per-item
     // fetches run (~1s on prod cold starts). See restoreTodoSnapshot.
     snapshotTodoState();
+    // Keep the workspace role-pill badges in step with the item counts.
+    if (typeof updateWsRolePillBadges === 'function') updateWsRolePillBadges();
   }
 
   // ── To Do flicker fix: snapshot / restore ─────────────────────────
@@ -18561,6 +18594,39 @@
       if (clPillNow) clPillNow.hidden = false;
       loadRolesMgrCleaning();
     }
+  }
+
+  // ── Workspace role pill bar: filter + To Do badges ─────────────────
+  // Show only the picked role's sections (Shared stays — Resources and
+  // the Members snapshot are universally useful); badge every role pill
+  // with its card's visible To Do count so a filtered view never hides
+  // pending work elsewhere.
+  function applyWsRoleFilter() {
+    var container = document.getElementById('workspaceTabContent');
+    if (!container) return;
+    container.querySelectorAll('.workspace-role-section').forEach(function (sec) {
+      var r = sec.getAttribute('data-ws-role') || '';
+      sec.hidden = !!(_wsRoleFilter && r !== _wsRoleFilter && r !== 'Shared');
+    });
+    container.querySelectorAll('.ws-role-pill').forEach(function (btn) {
+      btn.classList.toggle('is-active', (btn.getAttribute('data-ws-pill') || '') === _wsRoleFilter);
+    });
+    updateWsRolePillBadges();
+  }
+
+  function updateWsRolePillBadges() {
+    var container = document.getElementById('workspaceTabContent');
+    if (!container) return;
+    container.querySelectorAll('.workspace-role-section').forEach(function (sec) {
+      var r = sec.getAttribute('data-ws-role') || '';
+      if (!r || r === 'Shared') return;
+      var badge = container.querySelector('.ws-pill-badge[data-ws-badge="' + (window.CSS && CSS.escape ? CSS.escape(r) : r.replace(/"/g, '\\"')) + '"]');
+      if (!badge) return;
+      var count = 0;
+      sec.querySelectorAll('ul[id="ws-todo-list"] li[id$="-item"]').forEach(function (li) { if (!li.hidden) count++; });
+      badge.textContent = String(count);
+      badge.hidden = count <= 0;
+    });
   }
 
   // Lens key → body container id. Also the allowlist for opts.view.

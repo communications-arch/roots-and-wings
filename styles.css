@@ -11382,6 +11382,24 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 button.ws-tour-status { cursor: pointer; border: 0; font-family: inherit; }
 button.ws-tour-status:hover { filter: brightness(0.95); }
 button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
+
+/* Workspace role pill bar (2026-07-15): multi-role holders filter My
+   Workspace to one role; each role pill carries its To Do count so a
+   filtered view never hides pending work elsewhere. */
+.ws-role-pillbar { margin: 0 0 14px; }
+.ws-pill-badge {
+  display: inline-block;
+  margin-left: 7px;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-accent, #E0B52C);
+  color: #3d2a5c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
 /* "Inquiry" tag on Tour Pipeline rows that came from the Contact Us form
    rather than the Schedule a Tour form. */
 /* Truncated message preview in the lean Inquiries table. */
