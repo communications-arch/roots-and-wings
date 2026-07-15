@@ -11523,6 +11523,68 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   font-weight: 600;
   color: var(--color-text-light);
 }
+/* Board at a Glance (workspace card, board-only) — one tile per board
+   role/program with live counts; same tile anatomy as .ws-msum-stat. */
+.ws-bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+.ws-bg-tile {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ws-bg-tile-program {
+  background: rgba(var(--color-primary-rgb), 0.04);
+}
+.ws-bg-role {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+}
+.ws-bg-icon { margin-right: 5px; }
+.ws-bg-holder {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
+.ws-bg-unfilled { font-style: italic; font-weight: 400; }
+.ws-bg-metrics {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-bg-metrics li {
+  font-size: 0.8rem;
+  color: var(--color-text);
+}
+.ws-bg-num {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-primary-dark);
+  margin-right: 2px;
+}
+.ws-bg-none {
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--color-text-light);
+  margin: 4px 0 0;
+}
+.ws-bg-view {
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
 /* Clickable stat tiles (26/27 Members card → drill into the Membership Report) */
 .ws-msum-stat.ws-msum-click {
   cursor: pointer;

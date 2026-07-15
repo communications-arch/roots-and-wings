@@ -7836,6 +7836,28 @@
         if (typeof loadMembersSummary === 'function') loadMembersSummary();
       }
     },
+    'board-glance': {
+      // Board transparency (Erin, 2026-07-15): every board member sees what
+      // the other board roles are working on — one tile per role with live
+      // headline counts from /api/tour?board_glance=1 (board-gated), plus
+      // the two liaison-run programs the board tracks (cleaning rota,
+      // special events). "View" opens the underlying report read-only
+      // (actions stay hidden for non-holders via viewerCanAct). Personal
+      // To Do lists stay scoped to the individual.
+      title: 'Board at a Glance',
+      roleGate: ['President', 'Vice President', 'Treasurer', 'Secretary',
+                 'Membership Director', 'Communications Director', 'Sustaining Director'],
+      render: function () {
+        var h = '<p class="ws-body-hint">What each board role is working on right now — visible to the whole board.</p>';
+        h += '<div class="ws-bglance" id="ws-bglance-body" aria-live="polite">';
+        h += '<p class="ws-part-meter-caption">Loading board overview…</p>';
+        h += '</div>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadBoardGlance === 'function') loadBoardGlance();
+      }
+    },
     'special-events': {
       // Special Events Liaison (+ VP): the standalone manager was retired
       // (2026-07-05) — dates live on the Admin Calendar, lead + assistants
@@ -8082,13 +8104,13 @@
     // rows — VP dropped from 7 role cards to 4, Comms from 7 to 5.
     // (2026-07-07, Erin) 'my-links' dropped from every default for now —
     // the widget code stays; re-add the key here to bring the card back.
-    'President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
-    'Membership Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Treasurer': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Vice President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Secretary': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
-    'Sustaining Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
+    'President': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    'Communications Director': ['todos', 'reports', 'board-glance', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
+    'Membership Director': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    'Treasurer': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    'Vice President': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    'Secretary': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
+    'Sustaining Director': ['todos', 'reports', 'board-glance', 'roles', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
     'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'roles', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
@@ -8472,7 +8494,7 @@
           var w = WORKSPACE_WIDGETS[type];
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
-          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40' };
+          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-glance': 'accent-8' };
           var wsAccent = WS_ACCENTS[type] ? '<img class="brand-accent" src="brand/secondary/' + WS_ACCENTS[type] + '.png" alt=""> ' : '';
           // Tap the header to minimize — the card shrinks to a chip in
           // the strip below the grid, freeing its slot.
@@ -8642,6 +8664,7 @@
   // close/reopen cycle that follows a successful Resend so the user
   // returns to the same view they were just on.
   var _waiversCache = null;
+  var _waiversCanAct = true; // false = board member reading read-only
   var _waiversFilter = 'all';
 
   // Column spec for the Waivers Report. Standard order: row identifier
@@ -8708,7 +8731,9 @@
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (w) {
         var resendable = !w.signed && (w.source === 'Backup Coach' || w.source === 'One-off');
-        if (!resendable) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Board members read this report read-only (Board at a Glance,
+        // 2026-07-15) — the server's viewerCanAct=false hides Resend.
+        if (!resendable || !_waiversCanAct) return '<span class="ws-srt-actions-empty">&mdash;</span>';
         var src = (w.source === 'Backup Coach') ? 'backup' : 'one_off';
         return '<div class="ws-srt-actions">'
           + '<button type="button" class="sc-btn ws-wv-resend-btn"'
@@ -8755,6 +8780,7 @@
         merged.push({ source: 'Registration', rowId: r.id, name: r.name, email: r.email, signed: true, sent_at: r.sent_at, signed_at: r.signed_at, context: r.context || '', waiver_version: r.waiver_version || '', photo_consent: r.photo_consent });
       });
       _waiversCache = merged;
+      _waiversCanAct = res.data.viewerCanAct !== false;
 
       var total   = merged.length;
       var signed  = merged.filter(function (w) { return  w.signed; }).length;
@@ -9216,6 +9242,7 @@
         .then(function (d) {
           if (!d) return;
           _regInvitesCache = Array.isArray(d.invites) ? d.invites : [];
+          _regInvitesCanAct = d.viewerCanAct !== false;
           loadTourPipeline();
         })
         .catch(function () { /* stamps/stages just stay base-status */ });
@@ -20872,6 +20899,9 @@
   // and the Registration Links modal (resend / dismiss).
   var _regInvitesCache = null;   // null = not loaded; [] = loaded, empty
   var _regInvitesFilter = null;  // null = all, else 'waiting'|'registered'|'dismissed'
+  // Board members read this funnel read-only (Board at a Glance, 2026-07-15);
+  // the list response's viewerCanAct=false hides resend/dismiss/restore.
+  var _regInvitesCanAct = true;
 
   function regInviteForEmail(email) {
     if (!email || !Array.isArray(_regInvitesCache)) return null;
@@ -21100,6 +21130,7 @@
           return;
         }
         _regInvitesCache = Array.isArray(r.data.invites) ? r.data.invites : [];
+        _regInvitesCanAct = r.data.viewerCanAct !== false;
         renderRegInvitesBody();
         updateRegInviteTodoItems();
       })
@@ -21180,7 +21211,7 @@
       if (inv.registered_at) h += '<div class="ws-welcome-stamp">✓ Registered ' + escapeHtml(welcomeFmtDate(inv.registered_at)) + '</div>';
       if (st === 'dismissed') h += '<div class="ws-welcome-sub">✕ Dismissed ' + escapeHtml(welcomeFmtDate(inv.dismissed_at)) + (inv.dismissed_by ? ' by ' + escapeHtml(inv.dismissed_by) : '') + '</div>';
       var acts = '';
-      if (st !== 'registered') {
+      if (st !== 'registered' && _regInvitesCanAct) {
         acts += '<button type="button" class="btn btn-sm btn-outline-dark ws-reginv-act" data-email="' + escapeHtml(inv.email) + '" data-act="resend">Resend link</button>';
         if (inv.id) {
           acts += (st === 'dismissed')
@@ -23180,6 +23211,69 @@
   // returns, so when next year's registration opens (DEFAULT_SEASON bumps)
   // the card heading + counts roll over on the next workspace render. Each
   // workspace render re-runs this, so new sign-ups appear without a reload.
+  // Board at a Glance — fills every rendered copy of the card (a member
+  // holding two board roles gets the card in each role section; both get
+  // the same content, mirroring the ws-todo-list duplicate-id pattern).
+  function loadBoardGlance() {
+    var bodies = document.querySelectorAll('[id="ws-bglance-body"]');
+    if (!bodies.length) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/tour?board_glance=1', { headers: rwAuthHeaders(true) })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
+          .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .then(function (res) {
+        var els = document.querySelectorAll('[id="ws-bglance-body"]');
+        if (!els.length) return;
+        var html;
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
+          html = '<p class="ws-empty ws-wv-err">Could not load the board overview: ' + escapeHtmlWs(msg) + '</p>';
+        } else {
+          var tiles = Array.isArray(res.data && res.data.tiles) ? res.data.tiles : [];
+          if (!tiles.length) {
+            html = '<p class="ws-empty">No board roles found for this year.</p>';
+          } else {
+            html = '<div class="ws-bg-grid">';
+            tiles.forEach(function (t) {
+              html += '<div class="ws-bg-tile' + (t.isBoard ? '' : ' ws-bg-tile-program') + '">';
+              html += '<div class="ws-bg-role">' + (t.icon ? '<span class="ws-bg-icon">' + escapeHtmlWs(t.icon) + '</span>' : '') + escapeHtmlWs(t.role) + '</div>';
+              html += '<div class="ws-bg-holder">' + (t.holder ? escapeHtmlWs(t.holder) : '<span class="ws-bg-unfilled">Unfilled</span>') + '</div>';
+              if (t.metrics && t.metrics.length) {
+                html += '<ul class="ws-bg-metrics">';
+                t.metrics.forEach(function (m) {
+                  html += '<li><span class="ws-bg-num">' + escapeHtmlWs(String(m.value)) + '</span> ' + escapeHtmlWs(m.label) + '</li>';
+                });
+                html += '</ul>';
+              } else {
+                html += '<p class="ws-bg-none">No live counts yet</p>';
+              }
+              if (t.view) {
+                html += '<button type="button" class="sc-btn ws-bg-view" data-bg-view="' + escapeHtmlWs(t.view) + '">View</button>';
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+        }
+        els.forEach(function (el) {
+          el.innerHTML = html;
+          el.querySelectorAll('.ws-bg-view').forEach(function (b) {
+            b.addEventListener('click', function () {
+              var v = b.getAttribute('data-bg-view');
+              if (v === 'member-pipeline' && typeof showTourPipelineModal === 'function') showTourPipelineModal();
+              else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
+              else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
+              else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
+            });
+          });
+        });
+      })
+      .catch(function (err) { console.warn('[loadBoardGlance] network error:', err); });
+  }
+
   function loadMembersSummary() {
     var body = document.getElementById('ws-msum-body');
     if (!body) return;

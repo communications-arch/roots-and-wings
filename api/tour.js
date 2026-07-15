@@ -2141,10 +2141,10 @@ async function handleWaiversCounts(req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   const isComms = isSuperUser(auth.email) ||
     await hasCapability(auth.email, 'waivers_manage');
-  if (!isComms) {
+  if (!isComms && !(await isBoardMember(auth.email))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
-      error: 'Only the Communications Director can view this report.',
+      error: 'Only the Communications Director or a board member can view this report.',
       youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
@@ -2180,10 +2180,13 @@ async function handleWaiversReport(req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   const isComms = isSuperUser(auth.email) ||
     await hasCapability(auth.email, 'waivers_manage');
-  if (!isComms) {
+  // Board transparency (2026-07-15): board members read the report;
+  // viewerCanAct=false hides the send/resend controls client-side (the
+  // send endpoints stay gated on waivers_manage).
+  if (!isComms && !(await isBoardMember(auth.email))) {
     const expected = await getRoleHolderEmail('Communications Director');
     return res.status(403).json({
-      error: 'Only the Communications Director can view this report.',
+      error: 'Only the Communications Director or a board member can view this report.',
       youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
@@ -2299,7 +2302,7 @@ async function handleWaiversReport(req, res) {
       });
     });
 
-    return res.status(200).json({ backup, oneOff, registration });
+    return res.status(200).json({ backup, oneOff, registration, viewerCanAct: isComms });
   } catch (err) {
     console.error('waivers report error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -2604,11 +2607,14 @@ async function handleInviteOpenPing(req, res) {
 async function handleRegistrationInvitesList(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-  const canView = await hasCapability(auth.email, 'registration_invite');
+  const canAct = await hasCapability(auth.email, 'registration_invite');
+  // Board transparency (2026-07-15): board members read the funnel;
+  // resend/dismiss/log actions stay gated on the capability.
+  const canView = canAct || await isBoardMember(auth.email);
   if (!canView) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
-      error: 'Only the Membership or Communications Director can view sent registration links.',
+      error: 'Only the Membership or Communications Director or a board member can view sent registration links.',
       youAre: auth.realEmail,
       expected: expected || '(unknown)'
     });
@@ -2628,7 +2634,7 @@ async function handleRegistrationInvitesList(req, res) {
       WHERE i.season = ${DEFAULT_SEASON}
       ORDER BY i.last_sent_at DESC
     `;
-    return res.status(200).json({ invites: rows });
+    return res.status(200).json({ invites: rows, viewerCanAct: canAct });
   } catch (err) {
     console.error('Registration invites list error:', err);
     return res.status(500).json({ error: 'Could not load sent registration links.' });
@@ -3640,10 +3646,14 @@ async function handleTourList(req, res) {
   // only canImpersonate() super users may do this. auth.realEmail is
   // preserved for the youAre field.
   const isMembership = await hasCapability(auth.email, 'tours_view');
-  if (!isMembership) {
+  // Board transparency (2026-07-15): every board member may READ the
+  // pipeline; viewerCanAct=false tells the client to hide the action
+  // controls (status changes stay gated in handleTourUpdate).
+  const canRead = isMembership || await isBoardMember(auth.email);
+  if (!canRead) {
     const expected = await getRoleHolderEmail('Membership Director');
     return res.status(403).json({
-      error: 'Only the Membership Director can view the tour pipeline.',
+      error: 'Only the Membership Director or a board member can view the pipeline.',
       youAre: auth.realEmail,
       expected: expected || '(unknown — sheet lookup failed)'
     });
@@ -3678,7 +3688,7 @@ async function handleTourList(req, res) {
         END,
         created_at DESC
     `;
-    return res.status(200).json({ tours: rows });
+    return res.status(200).json({ tours: rows, viewerCanAct: isMembership });
   } catch (err) {
     console.error('tour-list error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -5946,6 +5956,207 @@ async function handleCommunitySnapshot(req, res) {
   }
 }
 
+// ── Board at a Glance ─────────────────────────────────────────────────
+// One tile per board role (plus the Cleaning Crew + Special Events
+// liaisons) with live headline counts, so every board member can see
+// what the others are working on without cloning their workspaces.
+// Board-gated; each metric is computed in its own try/catch so a single
+// broken table degrades that tile to "—" instead of failing the card.
+async function handleBoardGlance(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canView = isSuperUser(auth.email) || await isBoardMember(auth.email);
+  if (!canView) {
+    return res.status(403).json({
+      error: 'Board at a Glance is only visible to board members.',
+      youAre: auth.realEmail
+    });
+  }
+  const sql = getSql();
+  const year = activeSchoolYear();
+  const season = DEFAULT_SEASON;
+
+  // Holders: every active board role, plus the two liaison-run programs
+  // the board tracks (cleaning rota + special events). Names resolve
+  // through people (never role_holders' snapshot columns).
+  let holders = [];
+  try {
+    holders = await sql`
+      SELECT r.title, r.icon_emoji, r.display_order, r.category,
+             rhv.person_email,
+             NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') AS people_name
+      FROM roles r
+      LEFT JOIN role_holders_v2 rhv
+        ON rhv.role_id = r.id AND rhv.school_year = ${year} AND rhv.ended_at IS NULL
+      LEFT JOIN people p
+        ON (LOWER(p.email) = LOWER(rhv.person_email) OR LOWER(p.family_email) = LOWER(rhv.person_email))
+        AND p.role = 'mlc'
+      WHERE r.status = 'active'
+        AND (r.category = 'board'
+             OR LOWER(REPLACE(r.title, '-', ' ')) IN ('cleaning crew liaison', 'special events liaison'))
+      ORDER BY (r.category = 'board') DESC, r.display_order ASC, r.id ASC
+    `;
+  } catch (err) {
+    console.error('board-glance holders lookup failed:', err);
+  }
+
+  // Metric queries — independent, each optional.
+  const metric = async (fn) => { try { return await fn(); } catch (e) { console.error('board-glance metric failed:', e); return null; } };
+  const [pipeline, awaitingReg, pendingPay, waivers, afternoon, morning, cleaning, events, boardTasks] = await Promise.all([
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*) FILTER (WHERE status IN ('inquiry','requested','scheduled'))::int AS pre_tour,
+               COUNT(*) FILTER (WHERE status IN ('toured','followed_up'))::int AS post_tour
+        FROM tours`;
+      return r[0];
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*)::int AS n
+        FROM registration_invites i
+        LEFT JOIN registrations reg
+          ON LOWER(reg.email) = LOWER(i.email) AND reg.season = i.season AND reg.declined_at IS NULL
+        WHERE i.season = ${season} AND i.dismissed_at IS NULL AND reg.id IS NULL`;
+      return r[0].n;
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*)::int AS n FROM registrations
+        WHERE season = ${season} AND declined_at IS NULL AND LOWER(COALESCE(payment_status, '')) <> 'paid'`;
+      return r[0].n;
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*) FILTER (WHERE ws.signed_at IS NULL)::int AS unsigned
+        FROM waiver_signatures ws
+        LEFT JOIN registrations reg ON reg.id = ws.registration_id
+        WHERE ws.role IN ('backup_coach', 'one_off')
+          AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)`;
+      return r[0].unsigned;
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*) FILTER (WHERE status = 'scheduled')::int AS scheduled,
+               COUNT(*) FILTER (WHERE status = 'submitted')::int AS inbox
+        FROM class_submissions WHERE school_year = ${year}`;
+      return r[0];
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*) FILTER (WHERE class_group <> '')::int AS placed,
+               COUNT(*)::int AS total,
+               (SELECT status FROM morning_class_plans WHERE school_year = ${year}) AS plan_status
+        FROM morning_class_assignments WHERE school_year = ${year}`;
+      return r[0];
+    }),
+    metric(async () => {
+      // Nearest current-or-upcoming session's unassigned (non-floater) areas —
+      // same semantics as the liaison's own To Do count.
+      const sess = await sql`
+        SELECT session_number FROM co_op_sessions
+        WHERE school_year = ${year} AND end_date >= CURRENT_DATE
+        ORDER BY session_number ASC LIMIT 1`;
+      const sessionNumber = sess.length ? sess[0].session_number : 1;
+      const r = await sql`
+        SELECT COUNT(*)::int AS open FROM cleaning_areas a
+        WHERE a.floor_key <> 'floater'
+          AND NOT EXISTS (
+            SELECT 1 FROM cleaning_assignments ca
+            WHERE ca.cleaning_area_id = a.id
+              AND ca.session_number = ${sessionNumber}
+              AND ca.school_year = ${year})`;
+      return { session: sessionNumber, open: r[0].open };
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE EXISTS (
+                 SELECT 1 FROM special_event_people sep
+                 WHERE sep.event_id = e.id AND sep.role = 'lead'
+                   AND (sep.person_name <> '' OR sep.person_email <> '')))::int AS staffed
+        FROM special_events e WHERE e.school_year = ${year}`;
+      const t = await sql`
+        SELECT COUNT(*)::int AS open FROM event_tasks t
+        JOIN special_events e ON e.id = t.special_event_id
+        WHERE e.school_year = ${year} AND t.done_at IS NULL`;
+      return { total: r[0].total, staffed: r[0].staffed, openTasks: t[0].open };
+    }),
+    metric(async () => {
+      const r = await sql`
+        SELECT COUNT(*)::int AS n FROM board_calendar_events
+        WHERE event_type = 'task' AND school_year = ${year}
+          AND event_date >= CURRENT_DATE AND event_date < CURRENT_DATE + INTERVAL '30 days'`;
+      return r[0].n;
+    })
+  ]);
+
+  // Metrics + View target per role. `view` keys map to board-readable
+  // reports on the client; roles without one get counts only.
+  const metricsFor = (title) => {
+    const key = String(title || '').toLowerCase().replace(/-/g, ' ');
+    if (key === 'membership director') {
+      const m = [];
+      if (pipeline) m.push({ label: 'in pipeline', value: pipeline.pre_tour + pipeline.post_tour });
+      if (awaitingReg != null) m.push({ label: 'awaiting registration', value: awaitingReg });
+      return { metrics: m, view: 'member-pipeline' };
+    }
+    if (key === 'treasurer') {
+      return { metrics: pendingPay == null ? [] : [{ label: 'payments pending', value: pendingPay }], view: 'membership-report' };
+    }
+    if (key === 'communications director') {
+      return { metrics: waivers == null ? [] : [{ label: 'waivers unsigned', value: waivers }], view: 'waivers-report' };
+    }
+    if (key === 'vice president') {
+      const m = [];
+      if (morning && morning.total > 0) m.push({ label: 'morning kids placed (' + (morning.plan_status || 'draft') + ')', value: morning.placed + '/' + morning.total });
+      if (afternoon) {
+        m.push({ label: 'afternoon classes scheduled', value: afternoon.scheduled });
+        if (afternoon.inbox > 0) m.push({ label: 'class ideas awaiting review', value: afternoon.inbox });
+      }
+      return { metrics: m, view: '' };
+    }
+    if (key === 'president') {
+      return { metrics: boardTasks == null ? [] : [{ label: 'board tasks next 30 days', value: boardTasks }], view: 'admin-calendar' };
+    }
+    if (key === 'cleaning crew liaison') {
+      return { metrics: !cleaning ? [] : [{ label: 'areas open — Session ' + cleaning.session, value: cleaning.open }], view: '' };
+    }
+    if (key === 'special events liaison') {
+      const m = [];
+      if (events) {
+        m.push({ label: 'events staffed', value: events.staffed + '/' + events.total });
+        if (events.openTasks > 0) m.push({ label: 'planning tasks open', value: events.openTasks });
+      }
+      return { metrics: m, view: '' };
+    }
+    return { metrics: [], view: '' };
+  };
+
+  // One tile per role; co-holders' names join with " & ".
+  const byRole = new Map();
+  holders.forEach(h => {
+    const t = String(h.title || '');
+    let tile = byRole.get(t);
+    if (!tile) {
+      const extra = metricsFor(t);
+      tile = {
+        role: t,
+        icon: h.icon_emoji || '',
+        holder: '',
+        isBoard: h.category === 'board',
+        metrics: extra.metrics,
+        view: extra.view
+      };
+      byRole.set(t, tile);
+    }
+    if (h.people_name && tile.holder.indexOf(h.people_name) === -1) {
+      tile.holder = tile.holder ? tile.holder + ' & ' + h.people_name : h.people_name;
+    }
+  });
+  const tiles = Array.from(byRole.values());
+  return res.status(200).json({ school_year: year, season: season, tiles: tiles });
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -5970,6 +6181,7 @@ module.exports = async function handler(req, res) {
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
     if (req.query.community === '1' || req.query.community === 'true') return handleCommunitySnapshot(req, res);
+    if (req.query.board_glance === '1') return handleBoardGlance(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
