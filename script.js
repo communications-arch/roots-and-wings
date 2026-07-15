@@ -17042,7 +17042,7 @@
           summaryBadge0.textContent = 'All clear';
           summaryBadge0.className = 'coverage-summary-badge coverage-summary-ok';
         }
-        el.innerHTML = '<div class="coverage-empty">No absences reported for this session. You\u2019ll see coverage here as soon as someone reports one.</div>';
+        el.innerHTML = '<div class="coverage-empty">No absences reported for this or any upcoming session. You\u2019ll see coverage here as soon as someone reports one.</div>';
       } else {
         if (card) card.style.display = 'none';
       }
@@ -17610,7 +17610,11 @@
             method: 'PATCH',
             headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
             body: JSON.stringify({ slots: missing })
-          }).then(function (r) { return r.ok; }).catch(function () { return false; })
+          }).then(function (r) {
+            // Only count it when the server actually added something —
+            // a concurrent device may have synced the same diff already.
+            return r.json().then(function (d) { return r.ok && d.added > 0; });
+          }).catch(function () { return false; })
         );
       });
       if (pending.length === 0) return;
