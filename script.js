@@ -22985,11 +22985,19 @@
   // Client-side board check for calendar affordances (+ Add board task,
   // Edit/Delete manual rows). The server re-checks everything.
   function boardCalViewerIsBoard() {
-    if (isCommsUser()) return true;
+    // Board-ness tracks the ACTING identity's actual roles (Erin,
+    // 2026-07-15: the Board pill was showing for every dev member because
+    // the old isCommsUser() shortcut treats ALL dev logins as super
+    // users). Real super users keep board visibility on their own
+    // dashboard, but impersonating a non-board member shows that
+    // member's view — same philosophy as the server's View-As handling.
     var BOARD = ['President', 'Vice President', 'Treasurer', 'Secretary',
       'Membership Director', 'Sustaining Director', 'Communications Director'];
     var roles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
-    return roles.some(function (r) { return BOARD.indexOf(r) !== -1; });
+    if (roles.some(function (r) { return BOARD.indexOf(r) !== -1; })) return true;
+    // With no View As active, getActiveEmail() IS the real login.
+    var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
+    return !viewAs && isSuperUserEmail(getActiveEmail());
   }
 
   function renderBoardCalendarBody() {
