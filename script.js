@@ -6354,7 +6354,13 @@
       // kids are with the littles morning AND afternoon, so their PM row
       // mirrors the group instead of teasing electives they can't take
       // (they're also excluded from the sign-up picker server-side).
-      var kidAgeNum = kid.age != null ? kid.age : computeAge(kid.birthDate);
+      // Age counts only when we actually KNOW it: computeAge() returns 0
+      // for a missing birth date too (and kid.age is built as
+      // `kid.age || computeAge(...)`), which rendered every kid without
+      // a birth date on file as Greenhouse (prod report, 2026-07-16).
+      // Unknown age ⇒ null here, and only a real group/age says "under 3".
+      var kidAgeNum = kid.birthDate ? computeAge(kid.birthDate)
+        : (kid.age > 0 ? kid.age : null);
       var isGreenhouseKid = String(kidGroup || '').toLowerCase() === 'greenhouse'
         || (kidAgeNum != null && kidAgeNum < 3);
       if (isGreenhouseKid) {
