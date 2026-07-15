@@ -1118,8 +1118,12 @@ module.exports = async function handler(req, res) {
         stCls.forEach(r => {
           const hs = stHelpersBySub[r.id] || [];
           const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
-          if (r.class_period === 'AM' && r.scheduled_hour !== 'AM1' && r.scheduled_hour !== 'AM2') {
-            ['AM1', 'AM2'].forEach(b => {
+          const spansTwo = r.class_period === 'AM'
+            ? (r.scheduled_hour !== 'AM1' && r.scheduled_hour !== 'AM2')
+            : r.scheduled_hour === 'both';
+          if (spansTwo) {
+            // Two-hour classes take per-hour assists — gaps count per hour.
+            stBlocksOf(r).forEach(b => {
               const n = hs.filter(h => !h.block || h.block === b).length;
               if (wants - n > 0) assistantGaps.push({ class_name: r.class_name, block: b, needs: wants - n });
             });
@@ -1742,13 +1746,16 @@ module.exports = async function handler(req, res) {
         const vaPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${vaEmail} OR LOWER(personal_email) = ${vaEmail} LIMIT 1`;
         const vaName = vaPeople.length ? ((vaPeople[0].first_name || '') + ' ' + (vaPeople[0].last_name || '')).trim() : (user.name || vaEmail);
-        // Assisting a WHOLE-MORNING class from the AM1/AM2 dropdown is a
-        // one-hour commitment (Erin, 2026-07-15): honor body.block for
-        // those classes so the other hour stays free for a different pick.
-        const isWholeMorning = vc.class_period === 'AM'
-          && vc.scheduled_hour !== 'AM1' && vc.scheduled_hour !== 'AM2';
+        // Assisting a class that spans two hours (whole-morning AM, or a
+        // 2-hour 'both' afternoon class) from an hour dropdown is a ONE-hour
+        // commitment (Erin, 2026-07-15): honor body.block so the other hour
+        // stays free for a different pick.
+        const spansTwoHours = vc.class_period === 'AM'
+          ? (vc.scheduled_hour !== 'AM1' && vc.scheduled_hour !== 'AM2')
+          : vc.scheduled_hour === 'both';
+        const validHourBlocks = vc.class_period === 'AM' ? ['AM1', 'AM2'] : ['PM1', 'PM2'];
         const reqBlock = String((req.body || {}).block || '').trim();
-        const effBlock = (isWholeMorning && (reqBlock === 'AM1' || reqBlock === 'AM2')) ? reqBlock : '';
+        const effBlock = (spansTwoHours && validHourBlocks.indexOf(reqBlock) !== -1) ? reqBlock : '';
         // One commitment per block the ASSIST occupies.
         const vaBlocks = effBlock ? [effBlock]
           : vc.class_period === 'AM'
@@ -2309,13 +2316,13 @@ module.exports = async function handler(req, res) {
         const daSubId = parseInt(req.query.id, 10);
         if (!Number.isFinite(daSubId)) return res.status(400).json({ error: 'id required' });
         const daEmail = actingEmailFor(user, req).toLowerCase();
-        // Optional hour scope: removing an AM1-only assist leaves the AM2
-        // row (and vice versa); no block removes every row for the class.
+        // Optional hour scope: removing an hour-only assist leaves the
+        // other hour's row; no block removes every row for the class.
         const daBlock = String(req.query.block || '').trim();
         const daPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${daEmail} OR LOWER(personal_email) = ${daEmail} LIMIT 1`;
         const daName = daPeople.length ? ((daPeople[0].first_name || '') + ' ' + (daPeople[0].last_name || '')).trim() : (user.name || '');
-        const goneH = (daBlock === 'AM1' || daBlock === 'AM2')
+        const goneH = (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(daBlock) !== -1)
           ? await sql`DELETE FROM class_assignment_helpers
               WHERE class_submission_id = ${daSubId} AND block = ${daBlock}
                 AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))

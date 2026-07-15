@@ -1514,9 +1514,84 @@
     return null;
   }
 
+  // Last-rendered calendar events — feeds the printable school-year
+  // calendar (Erin, 2026-07-15).
+  var _calendarEventsData = null;
+
+  // Printable school-year calendar: sessions, the Wednesday routine, and
+  // every loaded Co-op Calendar event, grouped by month.
+  function printCoopCalendar() {
+    var year = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '';
+    var events = _calendarEventsData;
+    if (!events) {
+      try { events = JSON.parse(localStorage.getItem(CACHE_CALENDAR_KEY) || 'null'); } catch (e) { events = null; }
+    }
+    function fmtDay(iso) {
+      var d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+      if (isNaN(d.getTime())) return String(iso || '');
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    var h = '<!DOCTYPE html><html><head><title>Co-op Calendar' + (year ? ' — ' + escapeHtml(year) : '') + '</title><style>'
+      + 'body{font-family:Georgia,serif;color:#222;margin:32px;}'
+      + 'h1{font-size:1.4rem;margin:0 0 2px;} .sub{color:#666;font-size:0.85rem;margin:0 0 18px;}'
+      + 'h2{font-size:1.05rem;margin:18px 0 6px;border-bottom:1px solid #ccc;padding-bottom:2px;}'
+      + 'table{border-collapse:collapse;width:100%;font-size:0.85rem;}'
+      + 'td,th{padding:4px 8px 4px 0;text-align:left;vertical-align:top;}'
+      + '.mo{font-weight:700;padding-top:10px;font-size:0.9rem;}'
+      + '.muted{color:#666;} @media print { body{margin:12mm;} }'
+      + '</style></head><body>';
+    h += '<h1>Roots &amp; Wings — Co-op Calendar' + (year ? ' ' + escapeHtml(year) : '') + '</h1>';
+    h += '<p class="sub">Printed from the member portal · rootsandwingsindy.com</p>';
+    // Sessions
+    var sessKeys = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; });
+    if (sessKeys.length) {
+      h += '<h2>Sessions</h2><table>';
+      sessKeys.forEach(function (n) {
+        var s = SESSION_DATES[n];
+        if (!s) return;
+        h += '<tr><td><strong>' + escapeHtml(s.name || ('Session ' + n)) + '</strong></td><td>'
+          + escapeHtml(fmtDay(s.start)) + ' &ndash; ' + escapeHtml(fmtDay(s.end)) + '</td></tr>';
+      });
+      h += '</table>';
+    }
+    // Wednesday routine (mirrors the modal's table)
+    h += '<h2>Wednesday Routine</h2><table>'
+      + '<tr><td><strong>9:40&ndash;9:45 AM</strong></td><td>Arrive</td></tr>'
+      + '<tr><td><strong>9:50 AM</strong></td><td>Announcements in Fellowship Hall</td></tr>'
+      + '<tr><td><strong>10 AM&ndash;12 PM</strong></td><td>Morning Classes</td></tr>'
+      + '<tr><td><strong>12&ndash;1 PM</strong></td><td>Lunch &amp; parent-supervised outdoor play</td></tr>'
+      + '<tr><td><strong>1:00&ndash;1:55 PM</strong></td><td>1st set of Afternoon Classes</td></tr>'
+      + '<tr><td><strong>2:00&ndash;2:55 PM</strong></td><td>2nd set of Afternoon Classes</td></tr>'
+      + '<tr><td><strong>2:55&ndash;3:15 PM</strong></td><td>Clean Up</td></tr>'
+      + '</table>';
+    // Events, grouped by month
+    if (events && events.length) {
+      h += '<h2>Events</h2><table>';
+      var mo = '';
+      events.forEach(function (ev) {
+        var start = new Date(ev.start);
+        if (isNaN(start.getTime())) return;
+        var label = MONTHS[start.getMonth()] + ' ' + start.getFullYear();
+        if (label !== mo) {
+          mo = label;
+          h += '<tr><td class="mo" colspan="3">' + escapeHtml(label) + '</td></tr>';
+        }
+        var time = ev.allDay ? '' : start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        h += '<tr><td>' + escapeHtml(start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</td>'
+          + '<td><strong>' + escapeHtml(ev.summary || 'Event') + '</strong>'
+          + (ev.location ? '<br><span class="muted">📍 ' + escapeHtml(ev.location) + '</span>' : '') + '</td>'
+          + '<td class="muted">' + escapeHtml(time) + '</td></tr>';
+      });
+      h += '</table>';
+    }
+    h += '</body></html>';
+    openPrintIframe(h);
+  }
+
   function renderCalendar(events) {
     var el = document.getElementById('calendarEvents');
     if (!el || !events) return;
+    _calendarEventsData = events;
 
     if (events.length === 0) {
       el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">No upcoming events.</div>';
@@ -3774,6 +3849,17 @@
       calendarOverlay.style.display = 'none';
       document.body.style.overflow = '';
     });
+    // Print icon in the modal chrome (Erin, 2026-07-15) — prints the
+    // school-year calendar: sessions, the Wednesday routine, and every
+    // loaded event. Standard .detail-actions + openPrintIframe pattern.
+    var calModalCard = calendarOverlay.querySelector('.directory-modal-card');
+    if (calModalCard && !calModalCard.querySelector('.cal-print-btn')) {
+      var calPrintWrap = document.createElement('div');
+      calPrintWrap.className = 'detail-actions no-print';
+      calPrintWrap.innerHTML = '<button type="button" class="rd-icon cal-print-btn" aria-label="Print the school-year calendar" title="Print">' + ICON_SVG.print + '</button>';
+      calModalCard.insertBefore(calPrintWrap, calModalCard.firstChild);
+      calPrintWrap.querySelector('.cal-print-btn').addEventListener('click', printCoopCalendar);
+    }
     calendarOverlay.addEventListener('click', function (e) {
       if (e.target === calendarOverlay) {
         calendarOverlay.style.display = 'none';
@@ -4958,12 +5044,10 @@
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
     sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
-      // Morning assists are per-hour even for whole-morning classes (Erin,
-      // 2026-07-15) — only a 2-hour AFTERNOON class is a both-hours
-      // commitment worth flagging.
-      var spansBoth = blockKey.indexOf('AM') !== 0 && c.hour === 'both';
+      // ALL assists are per-hour commitments now — even for whole-morning
+      // and 2-hour afternoon classes (Erin, 2026-07-15) — so no
+      // "fills both hours" flag on any assist option.
       h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' +
-           (spansBoth ? ' — fills both hours' : '') +
            (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
     });
     // Support roles only get the adults left over after every key
