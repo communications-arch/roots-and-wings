@@ -3843,23 +3843,25 @@
     calendarNavBtn.addEventListener('click', function () {
       calendarOverlay.style.display = 'flex';
       document.body.style.overflow = 'hidden';
+      // Print icon injected on first open (Erin, 2026-07-15) — prints the
+      // school-year calendar via the standard .detail-actions +
+      // openPrintIframe pattern. Injection happens HERE, not at wiring
+      // time: ICON_SVG is declared much later in this file, so touching it
+      // during startup crashed the whole script (the 07-15 "dev hung").
+      var calModalCard = calendarOverlay.querySelector('.directory-modal-card');
+      if (calModalCard && !calModalCard.querySelector('.cal-print-btn')) {
+        var calPrintWrap = document.createElement('div');
+        calPrintWrap.className = 'detail-actions no-print';
+        calPrintWrap.innerHTML = '<button type="button" class="rd-icon cal-print-btn" aria-label="Print the school-year calendar" title="Print">' + ICON_SVG.print + '</button>';
+        calModalCard.insertBefore(calPrintWrap, calModalCard.firstChild);
+        calPrintWrap.querySelector('.cal-print-btn').addEventListener('click', printCoopCalendar);
+      }
     });
     var calClose = calendarOverlay.querySelector('.calendar-close');
     if (calClose) calClose.addEventListener('click', function () {
       calendarOverlay.style.display = 'none';
       document.body.style.overflow = '';
     });
-    // Print icon in the modal chrome (Erin, 2026-07-15) — prints the
-    // school-year calendar: sessions, the Wednesday routine, and every
-    // loaded event. Standard .detail-actions + openPrintIframe pattern.
-    var calModalCard = calendarOverlay.querySelector('.directory-modal-card');
-    if (calModalCard && !calModalCard.querySelector('.cal-print-btn')) {
-      var calPrintWrap = document.createElement('div');
-      calPrintWrap.className = 'detail-actions no-print';
-      calPrintWrap.innerHTML = '<button type="button" class="rd-icon cal-print-btn" aria-label="Print the school-year calendar" title="Print">' + ICON_SVG.print + '</button>';
-      calModalCard.insertBefore(calPrintWrap, calModalCard.firstChild);
-      calPrintWrap.querySelector('.cal-print-btn').addEventListener('click', printCoopCalendar);
-    }
     calendarOverlay.addEventListener('click', function (e) {
       if (e.target === calendarOverlay) {
         calendarOverlay.style.display = 'none';
