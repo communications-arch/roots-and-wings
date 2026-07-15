@@ -7237,11 +7237,17 @@
     // Wire up pager
     wirePager(container);
 
-    // Wire up elective card clicks (sheet-era cards only — DB cards carry
-    // their full info inline and have no roster to expand yet).
+    // Wire up elective card clicks. Sheet-era cards open the legacy
+    // roster detail; DB cards open the full class popup (description,
+    // staff, and who has signed up so far — Erin, 2026-07-16).
     container.querySelectorAll('.elective-card[data-elective]').forEach(function (card) {
       card.addEventListener('click', function () {
         showElectiveDetail(this.getAttribute('data-elective'));
+      });
+    });
+    container.querySelectorAll('.elective-card[data-db-class]').forEach(function (card) {
+      card.addEventListener('click', function () {
+        showDbClassPopup(parseInt(this.getAttribute('data-db-class'), 10));
       });
     });
 
@@ -7285,7 +7291,9 @@
         || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
     });
     var ages = e.scheduled_age_range || prettyAgesClient(e.age_groups, e.age_groups_other) || '';
-    var html = '<div class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" style="cursor:default;">';
+    // Clickable (Erin, 2026-07-16): opens the full class popup —
+    // description, staff, room, and who has signed up so far.
+    var html = '<button type="button" class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
     html += '<div class="elective-card-header">';
     html += '<span class="elective-card-name">' + escapeHtml(e.class_name || 'TBD') + '</span>';
     if (ages) html += '<span class="elective-age-pill">' + escapeHtml(ages) + '</span>';
@@ -7299,7 +7307,7 @@
     metaBits.push(leaderHtml + assistHtml);
     if (e.max_students) metaBits.push('Up to ' + e.max_students + ' kids');
     html += '<div class="elective-card-meta">' + metaBits.join(' &middot; ') + '</div>';
-    html += '</div>';
+    html += '</button>';
     return html;
   }
 
