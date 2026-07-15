@@ -12575,6 +12575,8 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-body { display: flex; flex-direction: column; min-width: 0; }
 .signup-class-name { font-weight: 600; font-size: 0.88rem; color: var(--color-text); }
 .signup-class-meta { font-size: 0.74rem; color: var(--color-text-light); }
+.signup-class-desc { font-size: 0.76rem; color: var(--color-text); margin-top: 2px; }
+.signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
 .signup-save { margin-top: 6px; }
 
 /* ── Photo cropper modal (Edit My Info) ── */

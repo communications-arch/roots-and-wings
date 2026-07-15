@@ -4233,6 +4233,13 @@
     // "Afternoon Class Sign-Ups" panel under the Approved badge.
     if (status !== 'open' || !withinDates) { card.style.display = 'none'; return; }
     card.style.display = '';
+    // While sign-ups are live, the card jumps to the TOP of My Family so
+    // parents land on it (Erin, 2026-07-15). It's appended at the bottom
+    // on creation; non-open states never show it, so only this path moves it.
+    var gridEl = document.getElementById('myFamilyGrid');
+    if (gridEl && card.parentNode === gridEl && gridEl.firstChild !== card) {
+      gridEl.insertBefore(card, gridEl.firstChild);
+    }
 
     var h = '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Afternoon Class Sign-ups</h3>';
 
@@ -4268,22 +4275,48 @@
     else if (status === 'open') h += '<p class="signup-note">Tap classes in order of preference (1 = first choice), up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span>.</p>';
 
     var kids = s.kids || [];
+    // Preferred names for display — the signup data itself stays keyed by
+    // the kid's given first name (family_email + first_name is the pick key).
+    var kidNickByFirst = {};
+    try {
+      var famEm = getActiveEmail();
+      for (var fi = 0; fi < FAMILIES.length; fi++) {
+        if (familyMatchesEmail(FAMILIES[fi], famEm)) {
+          (FAMILIES[fi].kids || []).forEach(function (k) {
+            if (k && k.nickname) kidNickByFirst[String(k.name || '').trim().toLowerCase()] = k.nickname;
+          });
+          break;
+        }
+      }
+    } catch (e) { /* display-only nicety */ }
     if (kids.length === 0) {
       h += '<p class="mf-empty">No children on this family to sign up.</p>';
     } else {
       kids.forEach(function (kid) {
         var age = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
+        var kidDisplay = nickOr(kidNickByFirst[String(kid).trim().toLowerCase()], kid);
         h += '<div class="signup-kid">';
-        h += '<div class="signup-kid-name">' + escapeHtml(kid) +
+        h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (age != null ? ' <span class="signup-kid-age">age ' + age + '</span>' : '') + '</div>';
         h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, age);
         h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, age);
-        if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kid) + '’s picks</button>';
+        if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
     }
     card.innerHTML = h;
     wireSignupCard();
+  }
+
+  // Human-readable age range for a class: the reviewer's free-text override
+  // when present, else the teacher-picked age-group buckets ("Saplings (3–5),
+  // Sassafras (5–6)"). The same string feeds ageFitsRange, so the fit
+  // highlight works for the common case where scheduled_age_range was left
+  // blank at scheduling time (this is why highlights weren't showing).
+  function signupAgeText(c) {
+    if (c.ageRange) return c.ageRange;
+    var groups = Array.isArray(c.ageGroups) ? c.ageGroups : [];
+    return groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean).join(', ');
   }
 
   function signupHourHtml(kid, hour, classes, canEdit, age) {
@@ -4296,10 +4329,11 @@
       classes.forEach(function (c) {
         var idx = ranked.indexOf(c.id);
         var sel = idx !== -1;
+        var ageText = signupAgeText(c);
         // null = age/range unknown (no judgement); true = age fits; false = clearly outside.
-        var fit = ageFitsRange(age, c.ageRange);
+        var fit = ageFitsRange(age, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
-        var bits = [c.ageRange, c.room, c.leader ? ('led by ' + c.leader) : ''];
+        var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
         if (c.hour === 'both') bits.push('fills both hours');
         var meta = bits.filter(Boolean).join(' · ');
         h += '<button type="button" class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '"' +
@@ -4309,6 +4343,13 @@
              (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
              escapeHtml(c.name) + '</span>';
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
+        if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
+        // Live demand vs capacity. "Signed up" = kids with this class in
+        // their current picks (any rank) — placement happens at the lottery.
+        var capBits = [];
+        capBits.push(c.signedUp > 0 ? c.signedUp + ' signed up so far' : 'no sign-ups yet');
+        if (c.max > 0) capBits.push('max ' + c.max + ' kids');
+        h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) + '</span>';
         h += '</span></button>';
       });
       h += '</div>';

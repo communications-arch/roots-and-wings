@@ -1161,16 +1161,35 @@ module.exports = async function handler(req, res) {
         `;
         const classRows = await sql`
           SELECT id, class_name, scheduled_hour, scheduled_age_range, scheduled_room,
-                 submitted_by_name, max_students
+                 submitted_by_name, max_students, age_groups, description
           FROM class_submissions
           WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
             AND class_period = 'PM'
           ORDER BY class_name
         `;
+        // How many kids have this class in their picks right now (any rank,
+        // across all families) — surfaces demand next to max_students on the
+        // parent card. Distinct per kid so re-ranking doesn't double count.
+        const countRows = await sql`
+          SELECT class_submission_id,
+                 COUNT(DISTINCT (LOWER(family_email) || '|' || kid_first_name))::int AS kids
+          FROM class_signup_picks
+          WHERE school_year = ${sy} AND session_number = ${session}
+          GROUP BY class_submission_id
+        `;
+        const pickCounts = {};
+        countRows.forEach(r => { pickCounts[r.class_submission_id] = r.kids; });
         const ser = (r) => ({
           id: r.id, name: r.class_name, hour: r.scheduled_hour,
-          ageRange: r.scheduled_age_range || '', room: r.scheduled_room || '',
-          leader: r.submitted_by_name || '', max: r.max_students || 0
+          // scheduled_age_range is the reviewer's free-text override; most
+          // schedules leave it blank, so the teacher-picked age_groups slugs
+          // ride along and the client renders/fits from whichever exists.
+          ageRange: r.scheduled_age_range || '',
+          ageGroups: Array.isArray(r.age_groups) ? r.age_groups : [],
+          description: r.description || '',
+          room: r.scheduled_room || '',
+          leader: r.submitted_by_name || '', max: r.max_students || 0,
+          signedUp: pickCounts[r.id] || 0
         });
         // A 2-hour ('both') class is ranked under PM1 only and fills both slots.
         const classes = {
