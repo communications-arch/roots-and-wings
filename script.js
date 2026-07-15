@@ -4190,6 +4190,10 @@
     }
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) { card.style.display = 'none'; return; }
+    // Paint immediately from the last-loaded data (renderMyFamily just
+    // rebuilt the grid, wiping the card + pending blocks) — the fetch
+    // below refreshes counts/picks and re-renders when it lands.
+    if (_signup) renderClassSignupCard();
     var qs = '?action=class-signup';
     if (sessionOverride) qs += '&session=' + encodeURIComponent(sessionOverride);
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
@@ -4210,16 +4214,14 @@
       .catch(function () { card.style.display = 'none'; });
   }
 
-  function renderClassSignupCard() {
-    var card = document.getElementById('classSignupCard');
-    if (!card || !_signup) return;
-    var s = _signup;
+  // status='open' AND today (Indianapolis-pinned so the window doesn't flip
+  // a day early/late for parents in adjacent timezones) inside the
+  // VP-chosen date window.
+  function signupWindowLive(s) {
     var status = (s.window && s.window.status) || null;
     var startDate = (s.window && s.window.signup_start_date) || null;
     var endDate = (s.window && s.window.signup_end_date) || null;
-    var reviewer = !!s.is_reviewer;
-    // "Today" pinned to Indianapolis local so the date window doesn't flip
-    // a day early/late for parents in adjacent timezones.
+    if (status !== 'open' || !startDate || !endDate) return false;
     var todayStr = '';
     try {
       var parts = new Intl.DateTimeFormat('en-CA', {
@@ -4231,12 +4233,36 @@
     } catch (e) {
       todayStr = new Date().toISOString().slice(0, 10);
     }
-    var withinDates = startDate && endDate && todayStr >= startDate && todayStr <= endDate;
+    return todayStr >= startDate && todayStr <= endDate;
+  }
+
+  function signupSavedPicksExist(s) {
+    return (s.kids || []).some(function (k) {
+      var p = (s.picks && s.picks[k]) || {};
+      return ((p.PM1 || []).length + (p.PM2 || []).length) > 0;
+    });
+  }
+
+  // Once a family has submitted picks, the big picker collapses and their
+  // pending choices live under Kids' Schedule; "Edit picks" reopens it.
+  var _signupPickerOpen = false;
+
+  function renderClassSignupCard() {
+    var card = document.getElementById('classSignupCard');
+    if (!card || !_signup) return;
+    var s = _signup;
+    var status = (s.window && s.window.status) || null;
+    var reviewer = !!s.is_reviewer;
+    var live = signupWindowLive(s);
+    // The pending-picks blocks under Kids' Schedule track every render —
+    // they show whenever picks exist for an open/closed window.
+    renderPendingPicks();
     // Card only appears on My Family when a session is currently open for
-    // sign-ups (status='open' AND today is inside the VP-chosen date window).
+    // sign-ups AND the family hasn't submitted yet (or asked to edit).
     // Reviewers manage non-open sessions from the Schedule Builder's
     // "Afternoon Class Sign-Ups" panel under the Approved badge.
-    if (status !== 'open' || !withinDates) { card.style.display = 'none'; return; }
+    var collapsed = signupSavedPicksExist(s) && !_signupPickerOpen;
+    if (!live || collapsed) { card.style.display = 'none'; return; }
     card.style.display = '';
     // While sign-ups are live, the card jumps to the TOP of My Family so
     // parents land on it (Erin, 2026-07-15) — but always BELOW the
@@ -4447,6 +4473,96 @@
     });
   }
 
+  // Fill each kid's "pending afternoon picks" block under Kids' Schedule.
+  // Shows the family's SAVED rankings while a window is open or closed
+  // (pending the lottery); each pick opens a detail popup, and "Edit picks"
+  // reopens the collapsed picker while the window is live.
+  function renderPendingPicks() {
+    var s = _signup;
+    var blocks = document.querySelectorAll('.mf-pending-picks');
+    if (!blocks.length) return;
+    var status = s && s.window && s.window.status;
+    var showable = s && s.session && (status === 'open' || status === 'closed');
+    var live = showable && signupWindowLive(s);
+    var classById = {};
+    if (showable) {
+      (s.classes.PM1 || []).concat(s.classes.PM2 || []).forEach(function (c) { classById[c.id] = c; });
+    }
+    blocks.forEach(function (el) {
+      if (!showable) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      var kid = el.getAttribute('data-kid');
+      if ((s.kids || []).indexOf(kid) === -1) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      var saved = (s.picks && s.picks[kid]) || {};
+      var hasAny = ((saved.PM1 || []).length + (saved.PM2 || []).length) > 0;
+      if (!hasAny && !live) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      var h = '<div class="mf-pending-title">Afternoon picks — Session ' + s.session +
+              (hasAny ? ' <span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
+      if (hasAny) {
+        ['PM1', 'PM2'].forEach(function (hour) {
+          var ids = saved[hour] || [];
+          if (!ids.length) return;
+          h += '<div class="mf-pending-row"><span class="mf-pending-hour">' + (hour === 'PM1' ? 'PM 1' : 'PM 2') + '</span>';
+          h += ids.map(function (cid, i) {
+            var c = classById[cid];
+            var nm = c ? c.name : ('Class #' + cid);
+            return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' + (i + 1) + '. ' + escapeHtml(nm) + '</button>';
+          }).join('<span class="mf-pending-sep"> · </span>');
+          h += '</div>';
+        });
+      } else {
+        h += '<div class="mf-pending-row mf-empty-text">No afternoon picks yet.</div>';
+      }
+      if (live) {
+        h += '<button type="button" class="sc-btn mf-pending-edit">' + (hasAny ? 'Edit picks' : 'Pick classes') + '</button>';
+      }
+      el.innerHTML = h;
+      el.style.display = '';
+      el.querySelectorAll('.signup-pick-link').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          showSignupClassDetail(parseInt(this.getAttribute('data-pick-class'), 10));
+        });
+      });
+      var editBtn = el.querySelector('.mf-pending-edit');
+      if (editBtn) {
+        editBtn.addEventListener('click', function () {
+          _signupPickerOpen = true;
+          renderClassSignupCard();
+          var cardEl = document.getElementById('classSignupCard');
+          if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    });
+  }
+
+  // Detail popup for a pending pick — the same info the picker tile shows
+  // (age range, room, leader, description) plus who has signed up so far.
+  function showSignupClassDetail(cid) {
+    if (!_signup || document.getElementById('signupClassDetailOverlay')) return;
+    var c = null;
+    (['PM1', 'PM2']).forEach(function (hour) {
+      (_signup.classes[hour] || []).forEach(function (x) { if (x.id === cid) c = x; });
+    });
+    if (!c) return;
+    var hourLabel = c.hour === 'both' ? 'Both hours · 1:00–2:55' : c.hour === 'PM2' ? '2:00–2:55' : '1:00–1:55';
+    var meta = [hourLabel, signupAgeText(c), c.room, c.leader ? 'led by ' + c.leader : ''].filter(Boolean).join(' · ');
+    var names = Array.isArray(c.signedUpNames) ? c.signedUpNames : [];
+    var h = '<div class="absence-overlay" id="signupClassDetailOverlay"><div class="absence-modal">';
+    h += '<button class="detail-close absence-close" id="signupClassDetailClose" aria-label="Close">&times;</button>';
+    h += '<h3 style="margin-top:0;">' + escapeHtml(c.name) + '</h3>';
+    h += '<p class="signup-class-meta" style="font-size:0.85rem;">' + escapeHtml(meta) + '</p>';
+    if (c.description) h += '<p>' + escapeHtml(c.description) + '</p>';
+    h += '<div class="mf-pending-title" style="margin-top:10px;">Signed up so far' +
+         (c.max > 0 ? ' <span class="mf-pending-badge">' + c.signedUp + ' of max ' + c.max + '</span>' : '') + '</div>';
+    h += names.length
+      ? '<ul class="absence-slot-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>'
+      : '<p class="mf-empty-text" style="font-size:0.85rem;">No sign-ups yet.</p>';
+    h += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', h);
+    var overlay = document.getElementById('signupClassDetailOverlay');
+    document.getElementById('signupClassDetailClose').addEventListener('click', function () { overlay.remove(); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+  }
+
   function saveSignupKid(kid, btn) {
     if (!_signup || !_signup.working[kid]) return;
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
@@ -4460,7 +4576,19 @@
       }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
     }
     postHour('PM1').then(function () { return postHour('PM2'); })
-      .then(function () { btn.textContent = 'Saved ✓'; setTimeout(function () { btn.disabled = false; btn.textContent = orig; }, 1500); })
+      .then(function () {
+        btn.textContent = 'Saved ✓';
+        // Mirror the save locally, collapse the picker (the pending picks
+        // under Kids' Schedule take over; Edit reopens it), and re-render.
+        // No refetch — another kid's in-progress rankings must survive.
+        if (!_signup.picks) _signup.picks = {};
+        _signup.picks[kid] = { PM1: w.PM1.slice(), PM2: w.PM2.slice() };
+        setTimeout(function () {
+          btn.disabled = false; btn.textContent = orig;
+          _signupPickerOpen = false;
+          renderClassSignupCard();
+        }, 900);
+      })
       .catch(function (e) { alert(e.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = orig; });
   }
 
@@ -5651,7 +5779,12 @@
         html += '</div>';
       }
 
-      html += '</div></div>';
+      html += '</div>'; // end .mf-schedule
+      // Pending afternoon sign-up picks — filled in by renderPendingPicks()
+      // once the class-signup data loads (submitted rankings await the
+      // lottery, so they live here as "pending", with Edit + detail links).
+      html += '<div class="mf-pending-picks" data-kid="' + escapeHtml(kid.name) + '" style="display:none;"></div>';
+      html += '</div>'; // end .mf-kid
     });
     html += '</div>';
     } // end else (non-summer Kids' Schedule)

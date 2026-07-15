@@ -1717,7 +1717,17 @@ module.exports = async function handler(req, res) {
         if (!fam || !fam.family_email) return res.status(403).json({ error: 'No family found for your account.' });
         const familyEmail = fam.family_email;
         if (!isReviewer && !isSuperUser(user.email)) {
-          if (!(await canActAs(sql, user.email, familyEmail))) {
+          // The real login qualifies directly, OR — when View-As was honored
+          // (resolveSubmitterEmail only swaps identities for callers that
+          // pass canImpersonate: super users on prod, any signed-in member
+          // on dev/preview) — the IMPERSONATED identity must belong to the
+          // family. Checking only the real login 403'd every non-reviewer
+          // View-As save (2026-07-15: "picks only save for reviewers").
+          const actingSelf = await canActAs(sql, user.email, familyEmail);
+          const actingViewAs = !actingSelf
+            && effEmail !== user.email
+            && (await canActAs(sql, effEmail, familyEmail));
+          if (!actingSelf && !actingViewAs) {
             return res.status(403).json({ error: 'Not allowed to edit this family.' });
           }
         }

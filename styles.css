@@ -12596,6 +12596,45 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-desc { font-size: 0.76rem; color: var(--color-text); margin-top: 2px; }
 .signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
 .signup-save { margin-top: 6px; }
+/* Pending afternoon picks under each kid on the Kids' Schedule card. */
+.mf-pending-picks {
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+}
+.mf-pending-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mf-pending-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--color-border);
+  color: var(--color-text-light);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.mf-pending-row { font-size: 0.82rem; margin-top: 4px; }
+.mf-pending-hour { font-weight: 700; color: var(--color-text-light); margin-right: 4px; font-size: 0.72rem; }
+.mf-pending-sep { color: var(--color-text-light); }
+.signup-pick-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 0.82rem;
+}
+.mf-pending-edit { margin-top: 6px; }
 
 /* ── Photo cropper modal (Edit My Info) ── */
 .crop-overlay {
