@@ -798,6 +798,9 @@ CREATE INDEX IF NOT EXISTS kids_class_group_idx ON kids (class_group)
 -- participation name resolution and never displays.
 ALTER TABLE people ADD COLUMN IF NOT EXISTS nickname TEXT NOT NULL DEFAULT '';
 ALTER TABLE kids   ADD COLUMN IF NOT EXISTS nickname TEXT NOT NULL DEFAULT '';
+-- Per-pick parent note (Erin, 2026-07-15): required when the ranked class is
+-- outside the kid's age range — context for the Afternoon Class Liaison.
+ALTER TABLE class_signup_picks ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders

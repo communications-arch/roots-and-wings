@@ -1222,6 +1222,7 @@ module.exports = async function handler(req, res) {
         const kidAges = {};
         const kidGroups = {};
         const picks = {};
+        const pickNotes = {};
         if (fam && fam.family_email) {
           const kidRows = await sql`
             SELECT first_name, birth_date, class_group FROM kids
@@ -1247,7 +1248,7 @@ module.exports = async function handler(req, res) {
             if (k.first_name && k.class_group) kidGroups[k.first_name] = k.class_group;
           });
           const pickRows = await sql`
-            SELECT kid_first_name, hour, class_submission_id
+            SELECT kid_first_name, hour, class_submission_id, note
             FROM class_signup_picks
             WHERE school_year = ${sy} AND session_number = ${session}
               AND LOWER(family_email) = LOWER(${fam.family_email})
@@ -1256,12 +1257,17 @@ module.exports = async function handler(req, res) {
           pickRows.forEach(p => {
             if (!picks[p.kid_first_name]) picks[p.kid_first_name] = { PM1: [], PM2: [] };
             (picks[p.kid_first_name][p.hour] || (picks[p.kid_first_name][p.hour] = [])).push(p.class_submission_id);
+            if (p.note) {
+              if (!pickNotes[p.kid_first_name]) pickNotes[p.kid_first_name] = {};
+              pickNotes[p.kid_first_name][p.class_submission_id] = p.note;
+            }
           });
         }
         return res.status(200).json({
           school_year: sy, session,
           window: winRows[0] || { status: null },
           classes, kids, kidAges, kidGroups, picks,
+          pick_notes: pickNotes,
           is_reviewer: reviewer
         });
       }
@@ -1709,6 +1715,9 @@ module.exports = async function handler(req, res) {
         const kidFirst = String(body.kid_first_name || '').trim();
         const ranked = (Array.isArray(body.ranked_class_ids) ? body.ranked_class_ids : [])
           .map(x => parseInt(x, 10)).filter(Boolean);
+        // Optional per-class parent note ({classId: text}) — required by the
+        // client when the class is outside the kid's age range.
+        const rawNotes = (body.notes && typeof body.notes === 'object') ? body.notes : {};
         if (!session || (hour !== 'PM1' && hour !== 'PM2') || !kidFirst) {
           return res.status(400).json({ error: 'session, hour (PM1/PM2), and kid_first_name required' });
         }
@@ -1780,10 +1789,11 @@ module.exports = async function handler(req, res) {
             AND LOWER(kid_first_name)=LOWER(${kidFirst}) AND hour=${hour}
         `;
         for (let i = 0; i < cleanIds.length; i++) {
+          const note = String(rawNotes[cleanIds[i]] || '').trim().slice(0, 300);
           await sql`
             INSERT INTO class_signup_picks
-              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, created_by_email)
-            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${user.email})
+              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, note, created_by_email)
+            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${user.email})
           `;
         }
         return res.status(200).json({ ok: true, saved: cleanIds.length });

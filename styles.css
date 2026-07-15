@@ -12596,6 +12596,13 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
 /* Save button right-aligned under the kid's class grid (Erin, 2026-07-15). */
 .signup-save { display: block; margin: 6px 0 0 auto; }
+/* Parent note for an out-of-age-range pick — required before saving. */
+.signup-misfit-note {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  width: 100%;
+  resize: vertical;
+}
 /* A kid whose picks are saved folds to a one-line summary; the picker
    stays up for whoever still needs to choose. */
 .signup-kid-done { padding-bottom: 8px; }

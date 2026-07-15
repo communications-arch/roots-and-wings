@@ -4209,7 +4209,21 @@
         _signup.working = {};
         (data.kids || []).forEach(function (k) {
           var src = (data.picks && data.picks[k]) || {};
-          _signup.working[k] = { PM1: rankMapFromArray(src.PM1), PM2: rankMapFromArray(src.PM2) };
+          // Two choices per hour (Erin, 2026-07-15) — legacy 3rd/4th picks
+          // from before the cap self-heal away on the next save.
+          _signup.working[k] = {
+            PM1: rankMapFromArray((src.PM1 || []).slice(0, 2)),
+            PM2: rankMapFromArray((src.PM2 || []).slice(0, 2))
+          };
+        });
+        // Per-pick parent notes (kid -> {classId: text}); required when a
+        // ranked class is outside the kid's age range.
+        _signup.workingNotes = {};
+        (data.kids || []).forEach(function (k) {
+          var srcNotes = (data.pick_notes && data.pick_notes[k]) || {};
+          var copy = {};
+          Object.keys(srcNotes).forEach(function (cid) { copy[cid] = srcNotes[cid]; });
+          _signup.workingNotes[k] = copy;
         });
         renderClassSignupCard();
       })
@@ -4301,7 +4315,7 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Pick a rank for each class you’d like — <strong>1 = first choice</strong>, up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span>.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour (both required). PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range just needs a quick note for the Afternoon Class Liaison.</p>';
 
     var kids = s.kids || [];
     // Preferred names for display — the signup data itself stays keyed by
@@ -4406,7 +4420,7 @@
 
   function signupHourHtml(kid, hour, classes, canEdit, kidBands) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
-    var maxRank = Math.min(4, classes.length);
+    var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     if (classes.length === 0) {
       h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
@@ -4445,6 +4459,15 @@
         if (c.max > 0) capBits.push('max ' + c.max + ' kids');
         h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
              (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
+        // An out-of-range pick is allowed but needs a parent note for the
+        // Afternoon Class Liaison (Erin, 2026-07-15).
+        if (sel && fit === false) {
+          var noteVal = (_signup.workingNotes && _signup.workingNotes[kid] && _signup.workingNotes[kid][c.id]) || '';
+          h += '<textarea class="rd-input signup-misfit-note" rows="2" maxlength="300"' +
+               ' data-kid="' + escapeHtml(kid) + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') +
+               ' placeholder="Outside the listed age range — tell the Afternoon Class Liaison why this class fits your child (required)">' +
+               escapeHtml(noteVal) + '</textarea>';
+        }
         h += '</span></div>';
       });
       h += '</div>';
@@ -4525,6 +4548,16 @@
       btn.addEventListener('click', function () {
         _signupKidOpen[this.getAttribute('data-kid')] = true;
         renderClassSignupCard();
+      });
+    });
+    // Out-of-range pick notes — stored as they're typed (typing never
+    // re-renders; the value survives rank-change re-renders via workingNotes).
+    card.querySelectorAll('.signup-misfit-note').forEach(function (ta) {
+      ta.addEventListener('input', function () {
+        var kid = this.getAttribute('data-kid');
+        if (!_signup.workingNotes) _signup.workingNotes = {};
+        if (!_signup.workingNotes[kid]) _signup.workingNotes[kid] = {};
+        _signup.workingNotes[kid][this.getAttribute('data-class')] = this.value;
       });
     });
   }
@@ -4651,16 +4684,51 @@
 
   function saveSignupKid(kid, btn) {
     if (!_signup || !_signup.working[kid]) return;
+    var s = _signup;
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
-    var session = _signup.session;
-    var w = _signup.working[kid];
+    var session = s.session;
+    var w = s.working[kid];
     // Rank maps → ordered arrays (the picks API stores rank = position).
-    var orderedIds = { PM1: rankedIdsFrom(w.PM1), PM2: rankedIdsFrom(w.PM2) };
+    // Two choices per hour, hard cap (Erin, 2026-07-15).
+    var orderedIds = { PM1: rankedIdsFrom(w.PM1).slice(0, 2), PM2: rankedIdsFrom(w.PM2).slice(0, 2) };
+    // Validate: 2 picks required per hour (or as many as the hour offers),
+    // and every out-of-range pick needs its parent note.
+    var kidAge = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
+    var kidBands = kidBandsFor(kidAge, (s.kidGroups && s.kidGroups[kid]) || '');
+    var kidNotes = (s.workingNotes && s.workingNotes[kid]) || {};
+    var problems = [];
+    ['PM1', 'PM2'].forEach(function (hour) {
+      var classes = (s.classes && s.classes[hour]) || [];
+      var hourLabel = hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2';
+      var required = Math.min(2, classes.length);
+      if (orderedIds[hour].length < required) {
+        problems.push(hourLabel + ' needs ' + required + (required === 1 ? ' choice' : ' choices'));
+      }
+      orderedIds[hour].forEach(function (cid) {
+        var c = null;
+        classes.forEach(function (x) { if (x.id === cid) c = x; });
+        if (c && fitsKid(kidBands, signupAgeText(c)) === false && !String(kidNotes[cid] || '').trim()) {
+          problems.push('“' + c.name + '” is outside the listed age range — add a note for the liaison');
+        }
+      });
+    });
+    if (problems.length) {
+      alert('Before saving:\n• ' + problems.join('\n• '));
+      return;
+    }
+    function notesFor(hour) {
+      var out = {};
+      orderedIds[hour].forEach(function (cid) {
+        var n = String(kidNotes[cid] || '').trim();
+        if (n) out[cid] = n;
+      });
+      return out;
+    }
     btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Saving…';
     function postHour(hour) {
       return fetch('/api/curriculum?action=class-signup-picks', {
         method: 'POST', headers: rwAuthHeaders(true),
-        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: orderedIds[hour], view_as: active })
+        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: orderedIds[hour], notes: notesFor(hour), view_as: active })
       }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
     }
     postHour('PM1').then(function () { return postHour('PM2'); })
