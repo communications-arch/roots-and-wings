@@ -5136,7 +5136,11 @@
     var openBlocks = [];
     VOL_BLOCKS.forEach(function (blk) {
       var mine = (d.mine || {})[blk.key];
-      if (!mine && !_mfDutyBlocks[blk.key] && blockAvailable(blk.key)) openBlocks.push(blk);
+      // _mfDutyBlocks reflects the CURRENT session's duty rows — consulting
+      // it while previewing another session made Session 1's commitments
+      // pre-fill Sessions 2-5 (Erin, 2026-07-15). Later sessions rely on
+      // the matrix's own `mine` (leads/assists/pledges for THAT session).
+      if (!mine && !(isCurrent && _mfDutyBlocks[blk.key]) && blockAvailable(blk.key)) openBlocks.push(blk);
       if (!isCurrent || !mine) return;
       if (_mfDutyBlocks[blk.key] && (mine.kind === 'lead' || mine.kind === 'assist')) return; // already listed as a duty
       var sec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
