@@ -4321,7 +4321,7 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour (both required). PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range just needs a quick note for the Afternoon Class Liaison.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour (both required; a 2-hour class covers Hour 2 too). PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
 
     var kids = s.kids || [];
     // Preferred names for display — the signup data itself stays keyed by
@@ -4371,8 +4371,16 @@
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
+        // A ranked 2-hour ('both') class fills PM Hour 2 as well — pin it
+        // there so the second hour reflects it (Erin, 2026-07-15: both-hour
+        // classes "weren't functioning" — they were invisible in Hour 2).
+        var pm1Map = (s.working[kid] && s.working[kid].PM1) || {};
+        var pinnedBoth = [];
+        (s.classes.PM1 || []).forEach(function (c) {
+          if (c.hour === 'both' && pm1Map[c.id]) pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+        });
         h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -4428,13 +4436,19 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
+    // 2-hour classes ranked in PM Hour 1 occupy this hour too.
+    if (pinnedBoth && pinnedBoth.length) {
+      pinnedBoth.slice().sort(function (a, b) { return a.rank - b.rank; }).forEach(function (p) {
+        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class, fills this hour too (choice ' + p.rank + ' in PM Hour 1)</div>';
+      });
+    }
     if (classes.length === 0) {
-      h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
+      if (!pinnedBoth || !pinnedBoth.length) h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
     } else {
       h += '<div class="signup-classes">';
       classes.forEach(function (c) {
@@ -4487,7 +4501,7 @@
           var noteVal = (_signup.workingNotes && _signup.workingNotes[kid] && _signup.workingNotes[kid][c.id]) || '';
           var notePh = assistChecked
             ? 'Anything the Afternoon Class Liaison should know (optional)'
-            : 'Outside the listed age range — tell the Afternoon Class Liaison why this class fits your child (required)';
+            : 'Outside the listed age range — tell the Afternoon Class Liaison why this class fits your child (optional)';
           h += '<textarea class="rd-input signup-misfit-note" rows="2" maxlength="300"' +
                ' data-kid="' + escapeHtml(kid) + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') +
                ' placeholder="' + notePh + '">' +
@@ -4728,9 +4742,29 @@
       var pct = Math.max(0, Math.min(100, Math.round((c.signedUp / c.max) * 100)));
       h += '<div class="signup-detail-cap"><span style="width:' + pct + '%"></span></div>';
     }
-    h += names.length
-      ? '<ul class="absence-slot-list signup-detail-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>'
-      : '<p class="mf-empty-text signup-detail-none">No sign-ups yet.</p>';
+    // Grouped by choice: 1st picks lead, 2nd picks below with their own
+    // indicator (Erin, 2026-07-15). Everything stays pending the lottery.
+    var det = Array.isArray(c.signedUpDetailed) ? c.signedUpDetailed : [];
+    if (det.length) {
+      h += '<p class="signup-detail-pendingnote">All sign-ups are pending until the class lottery runs.</p>';
+      var firsts = det.filter(function (d) { return d.rank === 1; });
+      var others = det.filter(function (d) { return d.rank !== 1; });
+      var liFor = function (d) {
+        return '<li>' + escapeHtml(d.name) + (d.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
+      };
+      if (firsts.length) {
+        h += '<div class="signup-detail-rankhead">1st choice</div>';
+        h += '<ul class="absence-slot-list signup-detail-list">' + firsts.map(liFor).join('') + '</ul>';
+      }
+      if (others.length) {
+        h += '<div class="signup-detail-rankhead">2nd choice</div>';
+        h += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + others.map(liFor).join('') + '</ul>';
+      }
+    } else if (names.length) {
+      h += '<ul class="absence-slot-list signup-detail-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>';
+    } else {
+      h += '<p class="mf-empty-text signup-detail-none">No sign-ups yet.</p>';
+    }
     h += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
     var overlay = document.getElementById('signupClassDetailOverlay');
@@ -4747,28 +4781,25 @@
     // Rank maps → ordered arrays (the picks API stores rank = position).
     // Two choices per hour, hard cap (Erin, 2026-07-15).
     var orderedIds = { PM1: rankedIdsFrom(w.PM1).slice(0, 2), PM2: rankedIdsFrom(w.PM2).slice(0, 2) };
-    // Validate: 2 picks required per hour (or as many as the hour offers),
-    // and every out-of-range pick needs its parent note.
-    var kidAge = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
-    var kidBands = kidBandsFor(kidAge, (s.kidGroups && s.kidGroups[kid]) || '');
+    // Validate: 2 picks required per hour (or as many as the hour offers).
     var kidNotes = (s.workingNotes && s.workingNotes[kid]) || {};
     var kidAssist = (s.workingAssist && s.workingAssist[kid]) || {};
+    // A ranked 2-hour ('both') class occupies PM Hour 2 as well, so it
+    // counts toward Hour 2's required choices. Notes are optional
+    // everywhere (Erin, 2026-07-15).
+    var bothCount = 0;
+    orderedIds.PM1.forEach(function (cid) {
+      (s.classes && s.classes.PM1 || []).forEach(function (x) { if (x.id === cid && x.hour === 'both') bothCount++; });
+    });
     var problems = [];
     ['PM1', 'PM2'].forEach(function (hour) {
       var classes = (s.classes && s.classes[hour]) || [];
       var hourLabel = hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2';
       var required = Math.min(2, classes.length);
+      if (hour === 'PM2') required = Math.max(0, required - bothCount);
       if (orderedIds[hour].length < required) {
         problems.push(hourLabel + ' needs ' + required + (required === 1 ? ' choice' : ' choices'));
       }
-      orderedIds[hour].forEach(function (cid) {
-        var c = null;
-        classes.forEach(function (x) { if (x.id === cid) c = x; });
-        // Assistant picks carry their own context; the note is optional.
-        if (c && fitsKid(kidBands, signupAgeText(c)) === false && !kidAssist[cid] && !String(kidNotes[cid] || '').trim()) {
-          problems.push('“' + c.name + '” is outside the listed age range — add a note for the liaison');
-        }
-      });
     });
     if (problems.length) {
       alert('Before saving:\n• ' + problems.join('\n• '));
@@ -4875,7 +4906,15 @@
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
     sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
-      h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' + (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
+      // A whole-morning class (hour 'AM'/'') or a 2-hour afternoon class
+      // ('both') is one commitment that fills BOTH hours — say so, since
+      // picking it from the Hour 1 list also books Hour 2 (Erin, 2026-07-15).
+      var spansBoth = blockKey.indexOf('AM') === 0
+        ? (c.hour !== 'AM1' && c.hour !== 'AM2')
+        : c.hour === 'both';
+      h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' +
+           (spansBoth ? ' — fills both hours' : '') +
+           (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
     });
     var fl = b.floaters.length;
     if (blockKey.indexOf('AM') === 0) {
@@ -5026,10 +5065,27 @@
           + '<div class="mf-duty-info"><strong>' + escapeHtml(myClean.map(function (c) { return c.area; }).join(', ')) + '</strong><span>Optional</span></div>'
           + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + myClean[0].id + '" title="Release this spot">✕</button></div>');
       } else if ((d.cleaning_open || []).length) {
+        // Areas grouped under their floor (Main Floor / Upstairs / Outside)
+        // so the list reads like the cleaning rota (Erin, 2026-07-15).
+        var CLEAN_FLOOR_LABELS = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
+        var cleanOptsHtml = '<option value="">— optional: pick an open area… —</option>';
+        var floorOrder = [];
+        var byFloor = {};
+        d.cleaning_open.forEach(function (a) {
+          var fk = a.floor || (a.floater ? 'floater' : '');
+          if (!byFloor[fk]) { byFloor[fk] = []; floorOrder.push(fk); }
+          byFloor[fk].push(a);
+        });
+        floorOrder.forEach(function (fk) {
+          var label = CLEAN_FLOOR_LABELS[fk] || fk || 'Other';
+          cleanOptsHtml += '<optgroup label="' + escapeHtml(label) + '">';
+          byFloor[fk].forEach(function (a) {
+            cleanOptsHtml += '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>';
+          });
+          cleanOptsHtml += '</optgroup>';
+        });
         injectRow('Cleaning',
-          '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;"><option value="">— optional: pick an open area… —</option>'
-          + d.cleaning_open.map(function (a) { return '<option value="' + a.id + '">' + escapeHtml(a.area) + (a.floater ? ' (floaters welcome)' : '') + '</option>'; }).join('')
-          + '</select>',
+          '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;">' + cleanOptsHtml + '</select>',
           { prepend: true, bare: true });
       } else {
         injectRow('Cleaning', '<span class="mf-vol-optional">Optional — all areas are covered for this session. Thank you!</span>', { prepend: true, bare: true });

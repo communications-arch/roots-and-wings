@@ -12603,6 +12603,39 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   width: 100%;
   resize: vertical;
 }
+/* A ranked 2-hour class pinned into the PM Hour 2 section — read-only
+   reminder that it fills this hour too. */
+.signup-class-pinned {
+  display: block;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  font-size: 0.78rem;
+  color: var(--color-text);
+}
+/* Detail popup: rank group headings + pending note + assistant tag. */
+.signup-detail-pendingnote { font-size: 0.76rem; color: var(--color-text-light); margin: 4px 0 6px; font-style: italic; }
+.signup-detail-rankhead {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text-light);
+  margin-top: 8px;
+}
+.signup-detail-list-2nd { opacity: 0.85; }
+.signup-detail-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--color-teal);
+  background: rgba(var(--color-teal-rgb), 0.08);
+  border: 1px solid rgba(var(--color-teal-rgb), 0.35);
+  border-radius: 999px;
+  padding: 0 7px;
+  margin-left: 4px;
+}
 /* Pigeon "sign up as the class assistant" option on opted-in classes. */
 .signup-assist-opt {
   display: flex;

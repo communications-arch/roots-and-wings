@@ -1080,7 +1080,7 @@ module.exports = async function handler(req, res) {
             SELECT 1 FROM cleaning_assignments ca
             WHERE ca.cleaning_area_id = a.id AND ca.session_number = ${vmSess} AND ca.school_year = ${vmYear})
           ORDER BY a.sort_order, a.id`;
-        const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floater: a.floor_key === 'floater' }));
+        const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floor: a.floor_key || '', floater: a.floor_key === 'floater' }));
         return res.status(200).json({ school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open, me: { email: actingEmail, name: meName } });
       }
 
@@ -1179,6 +1179,7 @@ module.exports = async function handler(req, res) {
         // handleProfileUpdate migrates/cleans picks on rename going forward.
         const pickKidRows = await sql`
           SELECT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
+                 MIN(p.rank) AS pick_rank,
                  BOOL_OR(p.as_assistant) AS as_assistant,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
@@ -1194,15 +1195,25 @@ module.exports = async function handler(req, res) {
         `;
         const pickCounts = {};
         const pickNames = {};
+        const pickDetailed = {};
         pickKidRows.forEach(r => {
           const id = r.class_submission_id;
           pickCounts[id] = (pickCounts[id] || 0) + 1;
-          const nm = (r.display_first + ' ' + (r.display_last || '')).trim()
-            + (r.as_assistant ? ' (assistant)' : '');
-          if (!pickNames[id]) pickNames[id] = [];
-          if (nm) pickNames[id].push(nm);
+          const base = (r.display_first + ' ' + (r.display_last || '')).trim();
+          if (!base) return;
+          if (!pickDetailed[id]) pickDetailed[id] = [];
+          pickDetailed[id].push({
+            name: base,
+            rank: parseInt(r.pick_rank, 10) || 1,
+            assistant: r.as_assistant === true
+          });
         });
-        Object.keys(pickNames).forEach(id => pickNames[id].sort());
+        // 1st choices first, then 2nd (etc.), alphabetical within a rank —
+        // the detail popup groups them; the flat list feeds the tiles.
+        Object.keys(pickDetailed).forEach(id => {
+          pickDetailed[id].sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name));
+          pickNames[id] = pickDetailed[id].map(d => d.name + (d.assistant ? ' (assistant)' : ''));
+        });
         const ser = (r) => ({
           id: r.id, name: r.class_name, hour: r.scheduled_hour,
           // scheduled_age_range is the reviewer's free-text override; most
@@ -1217,7 +1228,8 @@ module.exports = async function handler(req, res) {
           // rank this class as its assistant regardless of age range.
           openToTeen: r.open_to_teen_assistant === true,
           signedUp: pickCounts[r.id] || 0,
-          signedUpNames: pickNames[r.id] || []
+          signedUpNames: pickNames[r.id] || [],
+          signedUpDetailed: pickDetailed[r.id] || []
         });
         // A 2-hour ('both') class is ranked under PM1 only and fills both slots.
         const classes = {
