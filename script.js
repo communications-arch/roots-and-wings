@@ -1484,6 +1484,9 @@
   };
   var GCAL_DEFAULT_COLOR = '#33B679'; // Sage — regular co-op days
 
+  // The R&W Special Events shared calendar (Field Day, Talent Show, …).
+  var SPECIAL_EVENTS_CAL_ID = 'c_f7e599c566fa32ba8da0c20bf51c82967e9d8aedffa8f775673db5146646b1b2@group.calendar.google.com';
+
   // Per-calendar fallback colors. Used when an event has no colorId set
   // (which is the common case — event-level colors in Google Calendar are
   // rarely used, but shared calendars each have a default background color
@@ -1518,11 +1521,87 @@
   // calendar (Erin, 2026-07-15).
   var _calendarEventsData = null;
 
+  // Calendar-modal view state (Erin, 2026-07-16): scope pills switch
+  // between the rolling upcoming feed and the entire school year;
+  // category pills filter what's shown. The full-year feed is fetched
+  // lazily on first use and kept in memory only (it can be large, and
+  // localStorage already holds the upcoming feed).
+  var _calScope = 'upcoming';
+  var _calType = 'all';
+  var _calYearEventsData = null;
+  var _calYearLoading = false;
+
+  // Parse an event start/end for display. All-day events arrive as
+  // date-only strings ("2026-08-05"), which new Date() reads as UTC
+  // midnight — the previous EVENING in Indianapolis, so an Aug 5 meeting
+  // rendered as Aug 4. Pin date-only values to local noon instead.
+  function calEventDate(iso) {
+    var s = String(iso || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T12:00:00');
+    return new Date(s);
+  }
+
+  // Filter-pill category for an event — mirrors the color precedence
+  // (title keywords first, then the source calendar). Board admin items
+  // never reach these Google feeds (only 'general' and 'field_trip'
+  // board rows sync), so there is no board category to hide.
+  function calEventCategory(ev) {
+    // Admin-Calendar-sourced events carry their DB type — the only
+    // reliable signal for imported field trips, whose titles are just
+    // the destination ("First Thursday at Newfields").
+    if (ev && ev.boardType === 'field_trip') return 'fieldtrip';
+    var s = String((ev && ev.summary) || '');
+    if (/deadline/i.test(s)) return 'deadline';
+    if (/field trip/i.test(s)) return 'fieldtrip';
+    if (/meeting/i.test(s)) return 'meeting';
+    if (/special event/i.test(s) || (ev && ev.sourceCalendarId) === SPECIAL_EVENTS_CAL_ID) return 'special';
+    return 'coop';
+  }
+
+  // Fetch the entire school year (Aug 1 → Jul 31) once per page load.
+  // onReady (optional) fires once the fetch settles either way — used by
+  // the print button to wait for the full feed before printing.
+  var _calYearTried = false;
+  function loadCalendarYear(onReady) {
+    if (_calYearEventsData) { if (onReady) onReady(); return; }
+    if (_calYearLoading) return;
+    var googleCred = localStorage.getItem('rw_google_credential');
+    if (!googleCred) { if (onReady) onReady(); return; }
+    _calYearLoading = true;
+    _calYearTried = true;
+    fetch('/api/calendar?range=year', { headers: { 'Authorization': 'Bearer ' + googleCred } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        _calYearLoading = false;
+        if (data.events) {
+          _calYearEventsData = data.events;
+          if (_calScope === 'year') paintCalendarEvents();
+        }
+        if (onReady) onReady();
+      })
+      .catch(function (err) {
+        _calYearLoading = false;
+        console.warn('Failed to load school-year calendar:', err);
+        if (_calScope === 'year') {
+          var el = document.getElementById('calendarEvents');
+          if (el) el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">Couldn’t load the school-year calendar. Please try again.</div>';
+        }
+        if (onReady) onReady();
+      });
+  }
+
   // Printable school-year calendar: sessions, the Wednesday routine, and
   // every loaded Co-op Calendar event, grouped by month.
   function printCoopCalendar() {
     var year = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '';
-    var events = _calendarEventsData;
+    // The printout is the SCHOOL-YEAR calendar — fetch the full feed
+    // first if it isn't in yet (one attempt; on failure fall back to the
+    // rolling upcoming window rather than printing nothing).
+    if (!_calYearEventsData && !_calYearTried) {
+      loadCalendarYear(function () { printCoopCalendar(); });
+      return;
+    }
+    var events = _calYearEventsData || _calendarEventsData;
     if (!events) {
       try { events = JSON.parse(localStorage.getItem(CACHE_CALENDAR_KEY) || 'null'); } catch (e) { events = null; }
     }
@@ -1569,7 +1648,7 @@
       h += '<h2>Events</h2><table>';
       var mo = '';
       events.forEach(function (ev) {
-        var start = new Date(ev.start);
+        var start = calEventDate(ev.start);
         if (isNaN(start.getTime())) return;
         var label = MONTHS[start.getMonth()] + ' ' + start.getFullYear();
         if (label !== mo) {
@@ -1589,14 +1668,8 @@
   }
 
   function renderCalendar(events) {
-    var el = document.getElementById('calendarEvents');
-    if (!el || !events) return;
+    if (!events) return;
     _calendarEventsData = events;
-
-    if (events.length === 0) {
-      el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">No upcoming events.</div>';
-      return;
-    }
 
     try {
       console.log('[R&W calendar] diag:', events.map(function (e) {
@@ -1604,11 +1677,36 @@
       }));
     } catch (e) { /* ignore */ }
 
+    paintCalendarEvents();
+  }
+
+  // Paint whichever feed the scope pill selects, filtered by the active
+  // category pill. Re-entrant — called on every pill click and whenever
+  // either feed refreshes.
+  function paintCalendarEvents() {
+    var el = document.getElementById('calendarEvents');
+    if (!el) return;
+    var events = (_calScope === 'year') ? _calYearEventsData : _calendarEventsData;
+    if (_calScope === 'year' && !events) {
+      el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">Loading the full school year…</div>';
+      loadCalendarYear();
+      return;
+    }
+    if (!events) return;
+
+    var list = (_calType === 'all') ? events
+      : events.filter(function (ev) { return calEventCategory(ev) === _calType; });
+    if (list.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--color-text-light);padding:40px 0;">'
+        + (_calType === 'all' ? 'No upcoming events.' : 'No matching events.') + '</div>';
+      return;
+    }
+
     var html = '';
     var currentMonth = '';
-    events.forEach(function(ev) {
-      var start = new Date(ev.start);
-      var end = new Date(ev.end);
+    list.forEach(function(ev) {
+      var start = calEventDate(ev.start);
+      var end = calEventDate(ev.end);
       var monthLabel = MONTHS[start.getMonth()] + ' ' + start.getFullYear();
 
       if (monthLabel !== currentMonth) {
@@ -1625,6 +1723,7 @@
       }
 
       var color = GCAL_EVENT_COLORS[ev.colorId]
+        || (ev.boardType === 'field_trip' ? '#3F51B5' : null) // Blueberry — typed field trips
         || matchTitleColor(ev.summary)
         || GCAL_SOURCE_COLORS[ev.sourceCalendarId]
         || GCAL_DEFAULT_COLOR;
@@ -3856,6 +3955,26 @@
         calModalCard.insertBefore(calPrintWrap, calModalCard.firstChild);
         calPrintWrap.querySelector('.cal-print-btn').addEventListener('click', printCoopCalendar);
       }
+    });
+    // Scope + category filter pills (Erin, 2026-07-16). Scope switches
+    // between the rolling upcoming feed and the entire school year;
+    // category narrows to one event type. Safe to wire at startup —
+    // handlers only touch hoisted functions and early-declared state.
+    calendarOverlay.querySelectorAll('[data-cal-scope]').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        calendarOverlay.querySelectorAll('[data-cal-scope]').forEach(function (p) { p.classList.remove('active'); });
+        this.classList.add('active');
+        _calScope = this.getAttribute('data-cal-scope') || 'upcoming';
+        paintCalendarEvents();
+      });
+    });
+    calendarOverlay.querySelectorAll('[data-cal-type]').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        calendarOverlay.querySelectorAll('[data-cal-type]').forEach(function (p) { p.classList.remove('active'); });
+        this.classList.add('active');
+        _calType = this.getAttribute('data-cal-type') || 'all';
+        paintCalendarEvents();
+      });
     });
     var calClose = calendarOverlay.querySelector('.calendar-close');
     if (calClose) calClose.addEventListener('click', function () {

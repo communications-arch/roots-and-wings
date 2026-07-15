@@ -1,4 +1,5 @@
 const { google } = require('googleapis');
+const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { OAuth2Client } = require('google-auth-library');
 
@@ -53,8 +54,24 @@ module.exports = async function handler(req, res) {
     var calendar = google.calendar({ version: 'v3', auth: auth });
 
     var now = new Date();
-    var threeMonths = new Date(now);
-    threeMonths.setMonth(threeMonths.getMonth() + 3);
+    var timeMin = now;
+    var timeMax = new Date(now);
+    timeMax.setMonth(timeMax.getMonth() + 3);
+    var maxResults = 50;
+
+    // ?range=year — the entire school calendar (Aug 1 → Jul 31),
+    // including past events. July counts toward the UPCOMING school year
+    // (the co-op year flips right after Field Day in June). Board admin
+    // items never reach these Google calendars — only 'general' and
+    // 'field_trip' board-calendar rows sync (GCAL_SYNCED_TYPES in
+    // tour.js) — so no extra filtering is needed here.
+    var range = String((req.query && req.query.range) || '');
+    if (range === 'year') {
+      var startYear = now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+      timeMin = new Date(Date.UTC(startYear, 7, 1, 4));      // ≈ midnight Aug 1, Indianapolis
+      timeMax = new Date(Date.UTC(startYear + 1, 7, 1, 4));  // ≈ midnight Aug 1 next year
+      maxResults = 250;
+    }
 
     var allEvents = [];
 
@@ -62,11 +79,11 @@ module.exports = async function handler(req, res) {
       try {
         var result = await calendar.events.list({
           calendarId: CALENDAR_IDS[i],
-          timeMin: now.toISOString(),
-          timeMax: threeMonths.toISOString(),
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
           singleEvents: true,
           orderBy: 'startTime',
-          maxResults: 50
+          maxResults: maxResults
         });
         if (result.data.items) {
           var srcId = CALENDAR_IDS[i];
@@ -85,6 +102,21 @@ module.exports = async function handler(req, res) {
       return new Date(aStart) - new Date(bStart);
     });
 
+    // Board-calendar rows remember which Google event they created
+    // (gcal_event_id) and what kind it is. Google events carry no colorId
+    // or type of their own, so this lookup is what lets the client's
+    // filter pills tell an imported Field Trip apart from a co-op day.
+    var boardTypeByGid = {};
+    try {
+      var sql = neon(process.env.DATABASE_URL);
+      var typed = await sql`
+        SELECT gcal_event_id, event_type FROM board_calendar_events
+        WHERE gcal_event_id <> ''`;
+      typed.forEach(function (r) { boardTypeByGid[r.gcal_event_id] = r.event_type || ''; });
+    } catch (e) {
+      // Feed still works untyped if the DB hiccups.
+    }
+
     // Format events
     var events = allEvents.map(function(ev) {
       var startStr = ev.start.dateTime || ev.start.date;
@@ -98,7 +130,8 @@ module.exports = async function handler(req, res) {
         location: ev.location || '',
         description: ev.description || '',
         colorId: ev.colorId || '',
-        sourceCalendarId: ev.__source || ''
+        sourceCalendarId: ev.__source || '',
+        boardType: boardTypeByGid[ev.id] || ''
       };
     });
 

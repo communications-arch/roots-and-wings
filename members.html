@@ -302,6 +302,18 @@
           <p style="font-size:0.85rem;color:var(--color-text-muted);margin:0;"><em>Delays and cancellations due to weather or calendar changes will be posted to the chat announcements and added to the calendars shown on this page.</em></p>
         </details>
 
+        <div class="directory-filters" style="margin-bottom:10px;">
+          <button class="filter-pill active" data-cal-scope="upcoming">Upcoming</button>
+          <button class="filter-pill" data-cal-scope="year">Full School Year</button>
+        </div>
+        <div class="directory-filters directory-filters-secondary" style="margin-top:0;">
+          <button class="filter-pill filter-pill-secondary active" data-cal-type="all">All</button>
+          <button class="filter-pill filter-pill-secondary" data-cal-type="coop"><span class="cal-type-dot" style="background:#33B679;"></span>Co-op Days</button>
+          <button class="filter-pill filter-pill-secondary" data-cal-type="fieldtrip"><span class="cal-type-dot" style="background:#3F51B5;"></span>Field Trips</button>
+          <button class="filter-pill filter-pill-secondary" data-cal-type="special"><span class="cal-type-dot" style="background:#D81B60;"></span>Special Events</button>
+          <button class="filter-pill filter-pill-secondary" data-cal-type="meeting"><span class="cal-type-dot" style="background:#F4511E;"></span>Meetings</button>
+          <button class="filter-pill filter-pill-secondary" data-cal-type="deadline"><span class="cal-type-dot" style="background:#D50000;"></span>Deadlines</button>
+        </div>
         <div id="calendarEvents" class="calendar-events" style="background:var(--color-white); border-radius:var(--radius-md); border:1px solid var(--color-border); padding:24px; min-height:200px;">
           <div style="text-align:center;color:var(--color-text-light);padding:40px 0;">Loading events...</div>
         </div>
@@ -471,7 +483,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260716b"></script>
+  <script src="script.js?v=20260716c"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
