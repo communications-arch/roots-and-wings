@@ -1228,12 +1228,20 @@ module.exports = async function handler(req, res) {
             WHERE LOWER(family_email) = LOWER(${fam.family_email})
             ORDER BY sort_order, first_name
           `;
-          kids = kidRows.map(k => k.first_name).filter(Boolean);
+          // No programming under 3 (Erin, 2026-07-15): Greenhouse kids stay
+          // with the littles all day, so they never enter afternoon
+          // sign-ups — leave them out of the picker entirely.
+          const eligible = kidRows.filter(k => {
+            if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
+            const age = ageFromBirthDate(k.birth_date);
+            return !(age != null && age < 3);
+          });
+          kids = eligible.map(k => k.first_name).filter(Boolean);
           // Current age per kid so the parent card can flag age-appropriate
           // classes. Keyed by first name (same key as picks/working). The
           // class group rides along as the fallback when there's no birth
           // date on file (the card derives an age band from the group).
-          kidRows.forEach(k => {
+          eligible.forEach(k => {
             const age = ageFromBirthDate(k.birth_date);
             if (k.first_name && age != null) kidAges[k.first_name] = age;
             if (k.first_name && k.class_group) kidGroups[k.first_name] = k.class_group;

@@ -4962,9 +4962,8 @@ button.staff-role:hover {
 
 /* ---------- Billing Card ---------- */
 /* ---------- Billing Card — Refined Ledger ---------- */
-.mf-billing-card {
-  grid-column: 1 / -1;
-}
+/* Half-width (Erin, 2026-07-15) so Class Ideas sits beside it — the
+   grid's default single column; no span rule needed. */
 
 /* Deposit blocks: compact, quiet — these are settled or simple */
 .mf-billing-semester {
@@ -12595,7 +12594,14 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-meta { font-size: 0.74rem; color: var(--color-text-light); }
 .signup-class-desc { font-size: 0.76rem; color: var(--color-text); margin-top: 2px; }
 .signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
-.signup-save { margin-top: 6px; }
+/* Save button right-aligned under the kid's class grid (Erin, 2026-07-15). */
+.signup-save { display: block; margin: 6px 0 0 auto; }
+/* A kid whose picks are saved folds to a one-line summary; the picker
+   stays up for whoever still needs to choose. */
+.signup-kid-done { padding-bottom: 8px; }
+.signup-kid-done .signup-kid-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 0; }
+.signup-kid-savednote { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); }
+.signup-kid-expand { margin-left: auto; }
 /* Pending afternoon picks under each kid on the Kids' Schedule card.
    Renders as the kid card's footer band (flush, border-top) so it reads
    as part of the schedule above it: hour labels sit in the same 52px

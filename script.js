@@ -4238,16 +4238,24 @@
     return todayStr >= startDate && todayStr <= endDate;
   }
 
-  function signupSavedPicksExist(s) {
-    return (s.kids || []).some(function (k) {
-      var p = (s.picks && s.picks[k]) || {};
-      return ((p.PM1 || []).length + (p.PM2 || []).length) > 0;
-    });
+  function signupKidHasSaved(s, kid) {
+    var p = (s.picks && s.picks[kid]) || {};
+    return ((p.PM1 || []).length + (p.PM2 || []).length) > 0;
   }
 
-  // Once a family has submitted picks, the big picker collapses and their
-  // pending choices live under Kids' Schedule; "Edit picks" reopens it.
+  // The picker stays up until EVERY kid has saved picks (Erin, 2026-07-15);
+  // only then does it collapse into the Kids' Schedule pending blocks.
+  function signupAllKidsSaved(s) {
+    var kids = s.kids || [];
+    return kids.length > 0 && kids.every(function (k) { return signupKidHasSaved(s, k); });
+  }
+
+  // Once every kid is saved, the big picker collapses and the pending
+  // choices live under Kids' Schedule; "Edit picks" reopens it.
   var _signupPickerOpen = false;
+  // Within the open picker, kids whose picks are already saved fold to a
+  // one-line summary (kid → true = expanded for editing).
+  var _signupKidOpen = {};
 
   function renderClassSignupCard() {
     var card = document.getElementById('classSignupCard');
@@ -4260,10 +4268,10 @@
     // they show whenever picks exist for an open/closed window.
     renderPendingPicks();
     // Card only appears on My Family when a session is currently open for
-    // sign-ups AND the family hasn't submitted yet (or asked to edit).
-    // Reviewers manage non-open sessions from the Schedule Builder's
-    // "Afternoon Class Sign-Ups" panel under the Approved badge.
-    var collapsed = signupSavedPicksExist(s) && !_signupPickerOpen;
+    // sign-ups AND there's still a kid who needs picks (or someone asked
+    // to edit). Reviewers manage non-open sessions from the Schedule
+    // Builder's "Afternoon Class Sign-Ups" panel under the Approved badge.
+    var collapsed = signupAllKidsSaved(s) && !_signupPickerOpen;
     if (!live || collapsed) { card.style.display = 'none'; return; }
     card.style.display = '';
     // While sign-ups are live, the card jumps to the TOP of My Family so
@@ -4311,7 +4319,10 @@
       }
     } catch (e) { /* display-only nicety */ }
     if (kids.length === 0) {
-      h += '<p class="mf-empty">No children on this family to sign up.</p>';
+      // Nothing to pick — e.g. a Greenhouse-only family (under-3s are
+      // excluded from sign-ups). No card at all beats an empty shell.
+      card.style.display = 'none';
+      return;
     } else {
       kids.forEach(function (kid) {
         var age = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
@@ -4322,6 +4333,17 @@
         // kid's assigned age group (dev/test kids and birthday-less
         // profiles still get a pill + highlighting via the group band).
         var pill = age != null ? 'age ' + age : (group ? escapeHtml(group) : '');
+        // Already-saved kids fold to a one-line summary so the picker
+        // focuses on whoever still needs picks (Erin, 2026-07-15).
+        if (signupKidHasSaved(s, kid) && !_signupKidOpen[kid]) {
+          h += '<div class="signup-kid signup-kid-done">';
+          h += '<div class="signup-kid-name"><span class="signup-fit-check" aria-hidden="true">✓</span> ' + escapeHtml(kidDisplay) +
+               (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') +
+               ' <span class="signup-kid-savednote">picks saved</span>';
+          if (canEdit) h += '<button type="button" class="sc-btn signup-kid-expand" data-kid="' + escapeHtml(kid) + '">Edit</button>';
+          h += '</div></div>';
+          return;
+        }
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
@@ -4498,6 +4520,13 @@
     card.querySelectorAll('.signup-save').forEach(function (btn) {
       btn.addEventListener('click', function () { saveSignupKid(this.getAttribute('data-kid'), this); });
     });
+    // Re-expand a folded (already-saved) kid for editing.
+    card.querySelectorAll('.signup-kid-expand').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _signupKidOpen[this.getAttribute('data-kid')] = true;
+        renderClassSignupCard();
+      });
+    });
   }
 
   // Fill each kid's "pending afternoon picks" block under Kids' Schedule.
@@ -4516,13 +4545,24 @@
       (s.classes.PM1 || []).concat(s.classes.PM2 || []).forEach(function (c) { classById[c.id] = c; });
     }
     blocks.forEach(function (el) {
-      if (!showable) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      // These picks ARE the kid's (pending) electives, so while the block
+      // is visible the schedule's "No electives yet" placeholder row above
+      // it hides (Erin, 2026-07-15) — and comes back if the block goes away.
+      function setEmptyRowHidden(hidden) {
+        var row = el.parentNode ? el.parentNode.querySelector('.mf-sched-empty') : null;
+        if (row) row.style.display = hidden ? 'none' : '';
+      }
+      if (!showable) { el.style.display = 'none'; el.innerHTML = ''; setEmptyRowHidden(false); return; }
       var kid = el.getAttribute('data-kid');
-      if ((s.kids || []).indexOf(kid) === -1) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      if ((s.kids || []).indexOf(kid) === -1) { el.style.display = 'none'; el.innerHTML = ''; setEmptyRowHidden(false); return; }
       var saved = (s.picks && s.picks[kid]) || {};
       var hasAny = ((saved.PM1 || []).length + (saved.PM2 || []).length) > 0;
-      if (!hasAny && !live) { el.style.display = 'none'; el.innerHTML = ''; return; }
-      var h = '<div class="mf-pending-title"><span>Afternoon picks — Session ' + s.session + '</span>' +
+      if (!hasAny && !live) { el.style.display = 'none'; el.innerHTML = ''; setEmptyRowHidden(false); return; }
+      setEmptyRowHidden(true);
+      // Session number only when it differs from the session the card is
+      // already labeled with (e.g. next session's window opens mid-session).
+      var sessSuffix = (s.session !== currentSession) ? ' — Session ' + s.session : '';
+      var h = '<div class="mf-pending-title"><span>Afternoon picks' + sessSuffix + '</span>' +
               (hasAny ? '<span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
       if (hasAny) {
         ['PM1', 'PM2'].forEach(function (hour) {
@@ -4556,6 +4596,8 @@
       if (editBtn) {
         editBtn.addEventListener('click', function () {
           _signupPickerOpen = true;
+          // Expand THIS kid in the picker (saved kids fold by default).
+          _signupKidOpen[kid] = true;
           renderClassSignupCard();
           var cardEl = document.getElementById('classSignupCard');
           if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -4624,14 +4666,16 @@
     postHour('PM1').then(function () { return postHour('PM2'); })
       .then(function () {
         btn.textContent = 'Saved ✓';
-        // Mirror the save locally, collapse the picker (the pending picks
-        // under Kids' Schedule take over; Edit reopens it), and re-render.
+        // Mirror the save locally and fold this kid to their summary row.
+        // The picker itself stays up until EVERY kid has saved picks; only
+        // then does it collapse into the Kids' Schedule pending blocks.
         // No refetch — another kid's in-progress rankings must survive.
         if (!_signup.picks) _signup.picks = {};
         _signup.picks[kid] = { PM1: orderedIds.PM1.slice(), PM2: orderedIds.PM2.slice() };
+        delete _signupKidOpen[kid];
         setTimeout(function () {
           btn.disabled = false; btn.textContent = orig;
-          _signupPickerOpen = false;
+          if (signupAllKidsSaved(_signup)) _signupPickerOpen = false;
           renderClassSignupCard();
         }, 900);
       })
@@ -5807,8 +5851,21 @@
         html += '</div>';
       }
 
-      // Afternoon electives
-      if (electives.length > 0) {
+      // Afternoon. No programming under 3 (Erin, 2026-07-15): Greenhouse
+      // kids are with the littles morning AND afternoon, so their PM row
+      // mirrors the group instead of teasing electives they can't take
+      // (they're also excluded from the sign-up picker server-side).
+      var kidAgeNum = kid.age != null ? kid.age : computeAge(kid.birthDate);
+      var isGreenhouseKid = String(kidGroup || '').toLowerCase() === 'greenhouse'
+        || (kidAgeNum != null && kidAgeNum < 3);
+      if (isGreenhouseKid) {
+        html += '<div class="mf-sched-row">';
+        html += '<span class="mf-sched-time">PM</span>';
+        html += '<span class="mf-sched-class">' + ageGroupIconHtml('Greenhouse') + ' <span class="ag-name ' + ageGroupClass('Greenhouse') + '">' + groupWithAge('Greenhouse') + '</span></span>';
+        html += '<span class="mf-sched-room">' + (room || '') + '</span>';
+        html += '<span class="mf-sched-teacher"></span>';
+        html += '</div>';
+      } else if (electives.length > 0) {
         electives.forEach(function (e) {
           var label = e.hour === 'both' ? 'PM' : e.hour === 1 ? 'PM 1' : 'PM 2';
           html += '<div class="mf-sched-row">';

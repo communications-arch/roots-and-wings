@@ -3503,6 +3503,16 @@ async function handleProfileUpdate(body, req, res) {
           WHERE school_year = ${yr} AND LOWER(family_email) = LOWER(${familyEmail})
             AND LOWER(kid_first_name) = ${removed[0]}
         `;
+        // The VP-assigned class group is carried by name too (snapshot
+        // above) — a rename otherwise drops the kid's placement.
+        const priorGroup = priorKidGroups[removed[0]];
+        if (priorGroup) {
+          await sql`
+            UPDATE kids SET class_group = ${priorGroup}
+            WHERE family_email = ${familyEmail}
+              AND LOWER(first_name) = ${addedLc[0]} AND class_group = ''
+          `;
+        }
       } else if (removed.length > 0) {
         await sql`
           DELETE FROM class_signup_picks
