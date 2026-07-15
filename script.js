@@ -17664,9 +17664,49 @@
     return a.trim().toLowerCase() === b.trim().toLowerCase();
   }
 
-  function getResponsibilitiesForBlocks(parentFullNames, session, blocks, familyName) {
+  // Committee titles held by ONE named person — the same two sources
+  // getWorkspaceRoles consults: the role_holders_v2 overlay (by the
+  // person's email) and the legacy volunteer sheet (by full name).
+  function committeeTitlesForPerson(fam, fullName) {
+    var titles = [];
+    var target = String(fullName || '').trim().toLowerCase();
+    if (!target) return titles;
+    ((fam && fam.people) || []).forEach(function (pp) {
+      if (!pp || !pp.email) return;
+      var full = String((typeof personFullName === 'function' ? personFullName(pp, fam) : pp.name) || '').trim().toLowerCase();
+      if (full !== target) return;
+      ((COMMITTEE_ROLE_HOLDERS || {})[String(pp.email).toLowerCase()] || []).forEach(function (t) { titles.push(String(t)); });
+    });
+    (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
+      if (c.chair && c.chair.person && String(c.chair.person).trim().toLowerCase() === target) titles.push(String(c.chair.title || ''));
+      (c.roles || []).forEach(function (r) {
+        if (r.person && String(r.person).trim().toLowerCase() === target) titles.push(String(r.title || ''));
+      });
+    });
+    return titles;
+  }
+
+  function getResponsibilitiesForBlocks(parentFullNames, session, blocks, familyName, fam) {
     var slots = [];
     function has(b) { return blocks.indexOf(b) !== -1; }
+
+    // Building Opener / Closer (Erin, 2026-07-16): board-appointed
+    // building duties. role_type 'opener'/'closer' is what the server's
+    // claim gate and board-scoped notifications key on — only a board
+    // member can cover these.
+    if (fam) {
+      parentFullNames.forEach(function (full) {
+        var titles = committeeTitlesForPerson(fam, full);
+        var isOpener = titles.some(function (t) { return /\bopener\b/i.test(t); });
+        var isCloser = titles.some(function (t) { return /\bcloser\b/i.test(t); });
+        if (isOpener && has('AM')) {
+          slots.push({ block: 'AM', role_type: 'opener', role_description: 'Building Opener — unlock & morning set-up', group_or_class: '' });
+        }
+        if (isCloser && (has('PM2') || has('Cleaning'))) {
+          slots.push({ block: 'Cleaning', role_type: 'closer', role_description: 'Building Closer / Lost & Found — end of day', group_or_class: '' });
+        }
+      });
+    }
 
     if (has('AM')) {
       Object.keys(AM_CLASSES).forEach(function (groupName) {
@@ -17823,7 +17863,7 @@
     function updatePreview() {
       var previewEl = document.getElementById('absencePreview');
       if (!previewEl) return;
-      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], selectedSession, getSelectedBlocks(), me.name);
+      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], selectedSession, getSelectedBlocks(), me.name, me);
       if (slotsPreview.length === 0) { previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>'; }
       else {
         var ph = '<ul class="absence-slot-list">';
@@ -17842,7 +17882,7 @@
       if (prefillDate && isPrefillSession && coopDates.indexOf(prefillDate) === -1) coopDates.unshift(prefillDate);
 
       // Which blocks does this family have duties in, for THIS session?
-      var allSlots = getResponsibilitiesForBlocks(parentNames, selectedSession, allBlocks, me.name);
+      var allSlots = getResponsibilitiesForBlocks(parentNames, selectedSession, allBlocks, me.name, me);
       var activeBlocks = {};
       allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
       var hasAnyDuties = Object.keys(activeBlocks).length > 0;
@@ -17932,7 +17972,7 @@
       if (!selectedDate) { alert('Please pick a day.'); return; }
       var blocks = getSelectedBlocks();
       if (blocks.length === 0) { alert('Please select at least one block.'); return; }
-      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name);
+      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me);
       submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
       var cred = localStorage.getItem('rw_google_credential');
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
@@ -18173,11 +18213,17 @@
         html += '<div class="coverage-section-label">Needs Coverage</div>';
         openSlots.forEach(function (slot) {
           var isMyOwnAbsence = slot._familyEmail && slot._familyEmail === email;
+          // Building Opener/Closer may only be covered by a board member
+          // (Erin, 2026-07-16) \u2014 tag the slot and hide the claim button
+          // from non-board viewers; the server enforces the same rule.
+          var boardOnly = slot.role_type === 'opener' || slot.role_type === 'closer';
+          var viewerIsBoard = typeof boardCalViewerIsBoard === 'function' && boardCalViewerIsBoard();
           html += '<div class="coverage-slot coverage-slot-open">';
           html += '<span class="coverage-slot-block">' + slot.block + '</span>';
-          html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span></span>';
+          html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span>'
+            + (boardOnly ? ' <span class="coverage-board-tag">Board only</span>' : '') + '</span>';
           html += '<span class="coverage-slot-actions">';
-          if (!isMyOwnAbsence) {
+          if (!isMyOwnAbsence && (!boardOnly || viewerIsBoard)) {
             html += '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '">I\'ll Cover This</button>';
           }
           if (isVpUser) html += '<button class="btn btn-sm btn-outline btn-assign" data-slot-id="' + slot.id + '" data-slot-desc="' + (slot.role_description || '').replace(/"/g, '&quot;') + '" data-slot-date="' + date + '">Assign\u2026</button>';
@@ -18585,7 +18631,7 @@
         // so reconcile them against every block; absences that already have
         // slots stick to the blocks the member actually picked.
         var blocks = (a.slots && a.slots.length > 0) ? (a.blocks || []) : allBlocks;
-        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name);
+        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name, me);
         if (expected.length === 0) return;
         var have = {};
         (a.slots || []).forEach(function (s) { have[slotKey(s)] = true; });

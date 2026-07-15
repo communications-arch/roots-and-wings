@@ -3371,6 +3371,21 @@ p + p { margin-top: 1rem; }
   margin-bottom: 16px;
 }
 
+/* Coverage slot restricted to board members (Building Opener/Closer) —
+   small plum tag beside the description. */
+.coverage-board-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 50px;
+  background: var(--color-primary);
+  color: var(--color-white);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
 /* Category swatch inside a calendar filter pill — matches the event's
    left-border color in the list below. */
 .cal-type-dot {

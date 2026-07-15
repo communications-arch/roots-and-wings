@@ -8,8 +8,12 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { sendToUser } = require('./_push');
-const { canEditAsRole } = require('./_permissions');
+const { canEditAsRole, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
+
+// Building Opener / Closer slots may only be covered by a board member
+// (Erin, 2026-07-16). Mirrors BOARD_ONLY_ROLE_TYPES in absences.js.
+const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -65,6 +69,9 @@ module.exports = async function handler(req, res) {
       `;
       if (slot.length === 0) return res.status(404).json({ error: 'Slot not found' });
       if (slot[0].claimed_by_email) return res.status(409).json({ error: 'Slot already claimed' });
+      if (BOARD_ONLY_ROLE_TYPES.indexOf(slot[0].role_type) !== -1 && !(await isBoardMember(user.email))) {
+        return res.status(403).json({ error: 'Only a board member can cover the Building Opener/Closer.' });
+      }
 
       const claimerName = String((req.body || {}).claimer_name || user.name || '').trim();
 
@@ -110,6 +117,11 @@ module.exports = async function handler(req, res) {
         WHERE cs.id = ${id}
       `;
       if (slot.length === 0) return res.status(404).json({ error: 'Slot not found' });
+
+      if (newEmail && BOARD_ONLY_ROLE_TYPES.indexOf(slot[0].role_type) !== -1
+          && !(await isBoardMember(newEmail))) {
+        return res.status(400).json({ error: 'The Building Opener/Closer can only be covered by a board member.' });
+      }
 
       if (newEmail) {
         await sql`

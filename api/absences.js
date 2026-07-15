@@ -11,7 +11,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
-const { canEditAsRole } = require('./_permissions');
+const { canEditAsRole, BOARD_ROLE_EMAILS } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 
@@ -43,38 +43,97 @@ function getSql() {
 
 const VALID_BLOCKS = ['AM', 'PM1', 'PM2', 'Cleaning'];
 
-// Broadcast "Coverage Needed" to every member (in-app rows + push). Fired
-// when an absence is reported WITH slots, and again when a previously
-// slot-less absence gains its first slots via PATCH (the member picked up
-// responsibilities after entering their dates). Never fired for zero-slot
-// (informational) absences — no coverage needed means no notification.
-async function notifyCoverageNeeded(sql, absence, slotCount) {
+// Building Opener / Closer slots may only be covered by a board member
+// (Erin, 2026-07-16) — their "Coverage Needed" ping goes to the board,
+// not the whole membership. Mirrors BOARD_ONLY_ROLE_TYPES in coverage.js.
+const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
+
+// Current board members' emails: every canonical board mailbox plus the
+// holders' personal logins from role_holders_v2 (category 'board', the
+// year that actually has data — same MAX() convention as _permissions).
+async function boardRecipientEmails(sql) {
+  const out = new Set();
+  Object.keys(BOARD_ROLE_EMAILS).forEach(t => {
+    BOARD_ROLE_EMAILS[t].forEach(e => out.add(String(e).toLowerCase()));
+  });
+  try {
+    const rows = await sql`
+      SELECT LOWER(rhv.person_email) AS email
+      FROM role_holders_v2 rhv
+      JOIN roles r ON r.id = rhv.role_id
+      WHERE r.category = 'board' AND rhv.ended_at IS NULL
+        AND rhv.school_year = (SELECT MAX(school_year) FROM role_holders_v2)
+    `;
+    rows.forEach(r => { if (r.email) out.add(r.email); });
+  } catch (e) {
+    // Mailboxes alone still reach every board role.
+    console.error('boardRecipientEmails lookup failed:', e);
+  }
+  return [...out];
+}
+
+// Announce new coverage slots (in-app rows + push). Fired when an
+// absence is reported WITH slots, and again when a previously slot-less
+// absence gains its first slots via PATCH (the member picked up
+// responsibilities after entering their dates). Never fired for
+// zero-slot (informational) absences — no coverage needed means no
+// notification. Regular slots broadcast to everyone; board-only slots
+// (Building Opener/Closer) ping just the board.
+async function notifyCoverageNeeded(sql, absence, slots) {
   const iso = String(absence.absence_date || '').slice(0, 10);
   const dateLabel = new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const notifTitle = 'Coverage Needed — ' + dateLabel;
-  const notifBody = absence.absent_person + ' is out. ' + slotCount + ' slot' + (slotCount === 1 ? '' : 's') + ' need' + (slotCount === 1 ? 's' : '') + ' coverage.';
+  const boardSlots = slots.filter(s => BOARD_ONLY_ROLE_TYPES.indexOf(s.role_type) !== -1);
+  const regularSlots = slots.filter(s => BOARD_ONLY_ROLE_TYPES.indexOf(s.role_type) === -1);
 
-  const allEmails = await sql`
-    SELECT DISTINCT user_email FROM push_subscriptions
-  `;
-  const recipientEmails = new Set(allEmails.map(r => r.user_email));
-  recipientEmails.add(absence.family_email);
-  for (const email of recipientEmails) {
-    await sql`
-      INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
-      VALUES (${email}, 'coverage_needed', ${notifTitle}, ${notifBody}, '#coverage', ${absence.id})
+  if (regularSlots.length > 0) {
+    const n = regularSlots.length;
+    const notifTitle = 'Coverage Needed — ' + dateLabel;
+    const notifBody = absence.absent_person + ' is out. ' + n + ' slot' + (n === 1 ? '' : 's') + ' need' + (n === 1 ? 's' : '') + ' coverage.';
+    const allEmails = await sql`
+      SELECT DISTINCT user_email FROM push_subscriptions
     `;
+    const recipientEmails = new Set(allEmails.map(r => r.user_email));
+    recipientEmails.add(absence.family_email);
+    for (const email of recipientEmails) {
+      await sql`
+        INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+        VALUES (${email}, 'coverage_needed', ${notifTitle}, ${notifBody}, '#coverage', ${absence.id})
+      `;
+    }
+    try {
+      await broadcastAll(sql, {
+        title: notifTitle,
+        body: notifBody,
+        tag: 'coverage-' + absence.id,
+        url: '/members.html#coverage'
+      });
+    } catch (pushErr) {
+      console.error('Push broadcast error:', pushErr);
+    }
   }
 
-  try {
-    await broadcastAll(sql, {
-      title: notifTitle,
-      body: notifBody,
-      tag: 'coverage-' + absence.id,
-      url: '/members.html#coverage'
-    });
-  } catch (pushErr) {
-    console.error('Push broadcast error:', pushErr);
+  if (boardSlots.length > 0) {
+    const boardTitle = 'Board Coverage Needed — ' + dateLabel;
+    const boardBody = absence.absent_person + ' is out. '
+      + boardSlots.map(s => s.role_description).join('; ')
+      + ' — a board member needs to cover.';
+    const boardEmails = await boardRecipientEmails(sql);
+    for (const email of boardEmails) {
+      await sql`
+        INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+        VALUES (${email}, 'coverage_needed', ${boardTitle}, ${boardBody}, '#coverage', ${absence.id})
+      `;
+      try {
+        await sendToUser(sql, email, {
+          title: boardTitle,
+          body: boardBody,
+          tag: 'coverage-board-' + absence.id,
+          url: '/members.html#coverage'
+        });
+      } catch (pushErr) {
+        console.error('Board coverage push error:', pushErr);
+      }
+    }
   }
 }
 
@@ -171,7 +230,7 @@ module.exports = async function handler(req, res) {
       const absenceId = inserted[0].id;
 
       // Insert coverage slots
-      let insertedCount = 0;
+      const createdSlots = [];
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -182,14 +241,14 @@ module.exports = async function handler(req, res) {
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
           VALUES (${absenceId}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
         `;
-        insertedCount++;
+        createdSlots.push({ block, role_type, role_description });
       }
 
       // Notify members — but only when there's actually something to cover.
       // A zero-slot absence (no session duties on file) is informational;
       // if duties appear later, PATCH below fires the notification then.
-      if (insertedCount > 0) {
-        await notifyCoverageNeeded(sql, { id: absenceId, absence_date, absent_person, family_email }, insertedCount);
+      if (createdSlots.length > 0) {
+        await notifyCoverageNeeded(sql, { id: absenceId, absence_date, absent_person, family_email }, createdSlots);
       }
 
       // Return the full absence with slots
@@ -231,7 +290,7 @@ module.exports = async function handler(req, res) {
         SELECT block, role_type, role_description FROM coverage_slots WHERE absence_id = ${id}
       `;
       const seen = new Set(existing.map(s => s.block + '|' + s.role_type + '|' + s.role_description));
-      let added = 0;
+      const addedSlots = [];
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -246,19 +305,19 @@ module.exports = async function handler(req, res) {
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
           VALUES (${id}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
         `;
-        added++;
+        addedSlots.push({ block, role_type, role_description });
       }
 
       // The absence was reported silently (zero slots → no notification at
       // POST time). Now that it needs coverage for the first time, tell
       // everyone. Absences that already had slots were announced already —
       // extra slots just appear on the board without re-pinging members.
-      if (added > 0 && existing.length === 0) {
-        await notifyCoverageNeeded(sql, absence, added);
+      if (addedSlots.length > 0 && existing.length === 0) {
+        await notifyCoverageNeeded(sql, absence, addedSlots);
       }
 
       const fullSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
-      return res.status(200).json({ ok: true, id, added, slots: fullSlots });
+      return res.status(200).json({ ok: true, id, added: addedSlots.length, slots: fullSlots });
     }
 
     // ── DELETE: cancel an absence ──
