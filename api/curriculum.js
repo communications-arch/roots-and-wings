@@ -1017,7 +1017,7 @@ module.exports = async function handler(req, res) {
         const stSess = parseInt(req.query.session, 10) || 1;
         const stYear = activeSchoolYear(new Date());
 
-        const [stKids, stPicked, stCls, stHelpers, stSignups, stApproval] = await Promise.all([
+        const [stKids, stPicked, stCls, stHelpers, stSignups, stApproval, stWin, stFirsts] = await Promise.all([
           sql`SELECT k.first_name, k.class_group, k.birth_date, LOWER(k.family_email) AS fam,
                      COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
                      COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
@@ -1026,6 +1026,7 @@ module.exports = async function handler(req, res) {
           sql`SELECT DISTINCT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
               FROM class_signup_picks WHERE school_year = ${stYear} AND session_number = ${stSess}`,
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
+                     c.max_students, c.lead_email_sent_at, c.lottery_run_at,
                      LOWER(c.submitted_by_email) AS teacher_email,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
                        WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
@@ -1040,9 +1041,20 @@ module.exports = async function handler(req, res) {
           sql`SELECT block, LOWER(person_email) AS email, person_name FROM volunteer_signups
               WHERE school_year = ${stYear} AND session_number = ${stSess}`,
           sql`SELECT approved_at FROM co_op_sessions
-              WHERE school_year = ${stYear} AND session_number = ${stSess}`
+              WHERE school_year = ${stYear} AND session_number = ${stSess}`,
+          sql`SELECT status FROM class_signup_windows
+              WHERE school_year = ${stYear} AND session_number = ${stSess} LIMIT 1`,
+          // Enrollment = 1st-choice picks (distinct kids) per class.
+          sql`SELECT class_submission_id,
+                     COUNT(DISTINCT (LOWER(family_email) || '|' || LOWER(kid_first_name)))::int AS firsts
+              FROM class_signup_picks
+              WHERE school_year = ${stYear} AND session_number = ${stSess} AND rank = 1
+              GROUP BY class_submission_id`
         ]);
         const stPmApproved = !!(stApproval.length && stApproval[0].approved_at);
+        const stWinStatus = stWin.length ? stWin[0].status : null;
+        const stFirstBy = {};
+        stFirsts.forEach(r => { stFirstBy[r.class_submission_id] = r.firsts; });
 
         // 1. Kids without afternoon picks (Greenhouse / under-3 never pick).
         const stPickedSet = new Set(stPicked.map(r => r.fam + '|' + r.kid));
@@ -1134,15 +1146,124 @@ module.exports = async function handler(req, res) {
         });
         assistantGaps.sort((a, b) => a.class_name.localeCompare(b.class_name) || String(a.block).localeCompare(String(b.block)));
 
+        // Post-close resolution (Erin, 2026-07-15). Over-max = 1st-choice
+        // kids beyond max_students on a PM class. Once the window is
+        // closed AND nothing is over-max, un-sent lead confirmations
+        // become the next To Do.
+        const overmax = [];
+        const confirmPending = [];
+        stCls.forEach(r => {
+          if (r.class_period !== 'PM') return;
+          const firsts = stFirstBy[r.id] || 0;
+          const max = r.max_students || 0;
+          if (max > 0 && firsts > max) {
+            overmax.push({
+              id: r.id, class_name: r.class_name, hour: r.scheduled_hour || 'PM1',
+              max: max, firsts: firsts, over: firsts - max,
+              lottery_run: !!r.lottery_run_at
+            });
+          }
+          if (firsts > 0) {
+            confirmPending.push({
+              id: r.id, class_name: r.class_name, firsts: firsts,
+              sent: !!r.lead_email_sent_at, teacher: r.teacher_name || ''
+            });
+          }
+        });
+        overmax.sort((a, b) => b.over - a.over);
+        confirmPending.sort((a, b) => a.class_name.localeCompare(b.class_name));
+
         return res.status(200).json({
           session: stSess, school_year: stYear, pm_approved: stPmApproved,
+          window_status: stWinStatus,
           // Placing FROM the To Do modal works via view_as, which the
           // write endpoints only honor for canImpersonate callers (VP
           // mailbox on prod; anyone on dev/preview).
           can_place: canImpersonate(user.email),
           kids_unpicked: kidsUnpicked,
           adults_unplaced: adultsUnplaced,
-          assistant_gaps: assistantGaps
+          assistant_gaps: assistantGaps,
+          overmax: overmax,
+          confirm_pending: confirmPending
+        });
+      }
+
+      // ── "Went to lottery" report (Erin, 2026-07-15) — popular classes
+      // whose lesson plans are worth starring for future sessions.
+      if (action === 'lottery-report') {
+        if (!(await isReviewerReq(user, req))) return res.status(403).json({ error: 'Reviewers only.' });
+        const lrYear = activeSchoolYear(new Date());
+        const rows = await sql`
+          SELECT c.id, c.class_name, c.scheduled_session, c.scheduled_hour, c.max_students,
+                 c.lottery_run_at, c.submitted_by_name,
+                 (SELECT COUNT(*)::int FROM class_lottery_bumps b
+                   WHERE b.class_submission_id = c.id) AS bumped
+          FROM class_submissions c
+          WHERE c.school_year = ${lrYear} AND c.lottery_run_at IS NOT NULL
+          ORDER BY c.scheduled_session, c.class_name`;
+        return res.status(200).json({
+          school_year: lrYear,
+          classes: rows.map(r => ({
+            id: r.id, class_name: r.class_name, session: r.scheduled_session,
+            hour: r.scheduled_hour || '', max: r.max_students || 0,
+            bumped: r.bumped, leader: r.submitted_by_name || '',
+            run_at: r.lottery_run_at
+          }))
+        });
+      }
+
+      // ── Lead confirmation draft (Erin, 2026-07-15) ──
+      // #students × $5 per hour; kids (1st choice), co-leads, assistants.
+      if (action === 'class-confirm-draft') {
+        const cdId = parseInt(String(req.query.id || ''), 10);
+        if (!Number.isFinite(cdId)) return res.status(400).json({ error: 'id required' });
+        const cdScope = await reviewerScopeReq(user, req);
+        const cdRows = await sql`SELECT * FROM class_submissions WHERE id = ${cdId}`;
+        if (!cdRows.length) return res.status(404).json({ error: 'Class not found.' });
+        const cd = cdRows[0];
+        if (!cdScope || !scopeAllowsSub(cdScope, cd)) return res.status(403).json({ error: 'Reviewers only.' });
+        const cdHour = (cd.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+        const cdKids = await sql`
+          SELECT COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first,
+                 COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS last
+          FROM class_signup_picks p
+          JOIN kids k ON LOWER(k.family_email) = LOWER(p.family_email)
+                     AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+          LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+          WHERE p.class_submission_id = ${cdId} AND p.rank = 1 AND p.hour = ${cdHour}
+            AND p.school_year = ${cd.school_year} AND p.session_number = ${cd.scheduled_session}
+          ORDER BY 1, 2`;
+        const cdHelpers = await sql`SELECT person_name, person_email, block FROM class_assignment_helpers
+          WHERE class_submission_id = ${cdId} ORDER BY sort_order`;
+        const leadRows = await sql`SELECT first_name, last_name FROM people
+          WHERE LOWER(email) = LOWER(${cd.submitted_by_email})
+             OR LOWER(personal_email) = LOWER(${cd.submitted_by_email}) LIMIT 1`;
+        const leadName = leadRows.length
+          ? ((leadRows[0].first_name || '') + ' ' + (leadRows[0].last_name || '')).trim()
+          : (cd.submitted_by_name || String(cd.submitted_by_email || '').split('@')[0]);
+        const nKids = cdKids.length;
+        const hours = cd.scheduled_hour === 'both' ? 2 : 1;
+        const budget = nKids * 5 * hours;
+        const kidLines = cdKids.map(k => '  • ' + (k.first + ' ' + (k.last || '')).trim()).join('\n');
+        const coLeads = String(cd.co_teachers || '').split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+        const helperLines = cdHelpers.map(h => '  • ' + (h.person_name || h.person_email)
+          + (h.block === 'PM1' ? ' (Hour 1)' : h.block === 'PM2' ? ' (Hour 2)' : '')).join('\n');
+        const body =
+          'Hi ' + (leadName.split(' ')[0] || leadName) + ',\n\n' +
+          'Class sign-ups are wrapped up — here are the details for “' + cd.class_name + '” (Session ' + cd.scheduled_session + '):\n\n' +
+          'Students: ' + nKids + '\n' +
+          'Budget: $' + budget + ' (' + nKids + ' student' + (nKids === 1 ? '' : 's') + ' × $5' + (hours === 2 ? ' × 2 hours' : ' per hour') + ')\n\n' +
+          'Your class list:\n' + (kidLines || '  (no students yet)') + '\n\n' +
+          (coLeads.length ? 'Co-lead' + (coLeads.length === 1 ? '' : 's') + ':\n' + coLeads.map(n => '  • ' + n).join('\n') + '\n\n' : '') +
+          (helperLines ? 'Assistant' + (cdHelpers.length === 1 ? '' : 's') + ':\n' + helperLines + '\n\n' : '') +
+          'Please double-check the list and let me know if anything looks off. Thank you for leading!\n\n' +
+          '— Afternoon Class Liaison';
+        return res.status(200).json({
+          id: cd.id,
+          to: cd.submitted_by_email,
+          subject: '“' + cd.class_name + '” — Session ' + cd.scheduled_session + ' class list & budget',
+          body: body,
+          sent_at: cd.lead_email_sent_at || null
         });
       }
 
@@ -1919,6 +2040,157 @@ module.exports = async function handler(req, res) {
       // Opening requires the session's Schedule Builder to be Approved first
       // and a (start, end) date range so the parent My Family widget knows
       // when to show itself.
+      // ── Over-max resolution (Erin, 2026-07-15): raise the cap, spin up a
+      // second section, or run the lottery. All reviewer-scoped writes.
+      if (action === 'class-set-max') {
+        const smId = parseInt((req.body || {}).id, 10);
+        const smMax = parseInt((req.body || {}).max_students, 10);
+        if (!Number.isFinite(smId) || !Number.isFinite(smMax) || smMax < 1 || smMax > 60) {
+          return res.status(400).json({ error: 'id and max_students (1-60) required' });
+        }
+        const smScope = await reviewerScopeReq(user, req);
+        const smRows = await sql`SELECT id, class_period, age_groups FROM class_submissions WHERE id = ${smId}`;
+        if (!smRows.length) return res.status(404).json({ error: 'Class not found.' });
+        if (!smScope || !scopeAllowsSub(smScope, smRows[0])) return res.status(403).json({ error: 'Reviewers only.' });
+        await sql`UPDATE class_submissions SET max_students = ${smMax}, updated_at = NOW() WHERE id = ${smId}`;
+        return res.status(200).json({ ok: true, id: smId, max_students: smMax });
+      }
+
+      if (action === 'class-duplicate') {
+        const dupId = parseInt((req.body || {}).id, 10);
+        if (!Number.isFinite(dupId)) return res.status(400).json({ error: 'id required' });
+        const dupScope = await reviewerScopeReq(user, req);
+        const dupRows = await sql`SELECT * FROM class_submissions WHERE id = ${dupId}`;
+        if (!dupRows.length) return res.status(404).json({ error: 'Class not found.' });
+        const dc = dupRows[0];
+        if (!dupScope || !scopeAllowsSub(dupScope, dc)) return res.status(403).json({ error: 'Reviewers only.' });
+        // Same schedule slot + settings; the liaison lines up a second
+        // leader afterwards (room stays blank so it can be assigned).
+        const ins = await sql`
+          INSERT INTO class_submissions
+            (submitted_by_email, submitted_by_name, school_year, class_name,
+             session_preferences, hour_preference, assistant_count, co_teachers,
+             space_request, space_request_other, max_students, max_students_other,
+             age_groups, age_groups_other, pre_enroll_kids, open_to_teen_assistant,
+             prerequisites, description, other_info, status,
+             scheduled_session, scheduled_hour, scheduled_age_range, scheduled_room,
+             reviewer_notes, reviewed_by_email, reviewed_at)
+          VALUES
+            (${dc.submitted_by_email}, ${dc.submitted_by_name}, ${dc.school_year}, ${dc.class_name + ' — 2nd section'},
+             ${dc.session_preferences}, ${dc.hour_preference}, ${dc.assistant_count}, ${dc.co_teachers},
+             ${dc.space_request}, ${dc.space_request_other}, ${dc.max_students}, ${dc.max_students_other},
+             ${dc.age_groups}, ${dc.age_groups_other}, ${dc.pre_enroll_kids}, ${dc.open_to_teen_assistant},
+             ${dc.prerequisites}, ${dc.description}, ${dc.other_info}, ${dc.status},
+             ${dc.scheduled_session}, ${dc.scheduled_hour}, ${dc.scheduled_age_range}, ${''},
+             ${'Second section spun up from over-full sign-ups (' + user.email + ')'}, ${user.email}, NOW())
+          RETURNING id, class_name`;
+        return res.status(201).json({ ok: true, id: ins[0].id, class_name: ins[0].class_name });
+      }
+
+      if (action === 'class-lottery') {
+        const ltId = parseInt((req.body || {}).id, 10);
+        if (!Number.isFinite(ltId)) return res.status(400).json({ error: 'id required' });
+        const ltScope = await reviewerScopeReq(user, req);
+        const ltRows = await sql`SELECT * FROM class_submissions WHERE id = ${ltId}`;
+        if (!ltRows.length) return res.status(404).json({ error: 'Class not found.' });
+        const lt = ltRows[0];
+        if (!ltScope || !scopeAllowsSub(ltScope, lt)) return res.status(403).json({ error: 'Reviewers only.' });
+        const max = lt.max_students || 0;
+        if (max < 1) return res.status(400).json({ error: 'Set a max before running a lottery.' });
+        const ltHour = (lt.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+        // 1st-choice kids, with display names for the result summary.
+        const signed = await sql`
+          SELECT p.id AS pick_id, LOWER(p.family_email) AS fam, p.kid_first_name,
+                 COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
+                 COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+          FROM class_signup_picks p
+          JOIN kids k ON LOWER(k.family_email) = LOWER(p.family_email)
+                     AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+          LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+          WHERE p.class_submission_id = ${ltId} AND p.rank = 1 AND p.hour = ${ltHour}
+            AND p.school_year = ${lt.school_year} AND p.session_number = ${lt.scheduled_session}`;
+        if (signed.length <= max) return res.status(409).json({ error: 'This class is not over its max — no lottery needed.' });
+        // Exempt (never bumped): the lead's own kids, and any kid who
+        // already lost a lottery this school year.
+        const leadFam = await sql`SELECT family_email FROM people
+          WHERE LOWER(email) = LOWER(${lt.submitted_by_email})
+             OR LOWER(personal_email) = LOWER(${lt.submitted_by_email}) LIMIT 1`;
+        const leadFamEmail = leadFam.length ? String(leadFam[0].family_email || '').toLowerCase() : '';
+        const priorBumps = await sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
+          FROM class_lottery_bumps WHERE school_year = ${lt.school_year}`;
+        const priorSet = new Set(priorBumps.map(r => r.fam + '|' + r.kid));
+        const safe = [];
+        const pool = [];
+        signed.forEach(s2 => {
+          const key = s2.fam + '|' + String(s2.kid_first_name).toLowerCase();
+          if ((leadFamEmail && s2.fam === leadFamEmail) || priorSet.has(key)) safe.push(s2);
+          else pool.push(s2);
+        });
+        // Fisher-Yates, then keep enough from the pool to reach max.
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+        }
+        const keepFromPool = Math.max(0, max - safe.length);
+        const winners = pool.slice(0, keepFromPool);
+        const losers = pool.slice(keepFromPool);
+        const nameOf = s2 => (s2.display_first + ' ' + (s2.display_last || '')).trim();
+        for (const l of losers) {
+          await sql`INSERT INTO class_lottery_bumps
+            (school_year, session_number, class_submission_id, family_email, kid_first_name, created_by)
+            VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${user.email})`;
+          // Drop the lost 1st choice; their 2nd choice (same hour) becomes
+          // their 1st so the family keeps a placement without re-picking.
+          await sql`DELETE FROM class_signup_picks WHERE id = ${l.pick_id}`;
+          await sql`UPDATE class_signup_picks SET rank = 1
+            WHERE school_year = ${lt.school_year} AND session_number = ${lt.scheduled_session}
+              AND LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})
+              AND hour = ${ltHour} AND rank = 2`;
+        }
+        await sql`UPDATE class_submissions SET lottery_run_at = NOW(), updated_at = NOW() WHERE id = ${ltId}`;
+        return res.status(200).json({
+          ok: true, id: ltId,
+          kept: safe.concat(winners).map(nameOf).sort(),
+          bumped: losers.map(nameOf).sort(),
+          exempt: safe.map(nameOf).sort()
+        });
+      }
+
+      // ── Send the lead-confirmation email (edited draft) ──
+      if (action === 'class-confirm-send') {
+        const csId = parseInt((req.body || {}).id, 10);
+        const csSubject = String((req.body || {}).subject || '').trim().slice(0, 200);
+        const csBody = String((req.body || {}).body || '').trim().slice(0, 8000);
+        if (!Number.isFinite(csId) || !csSubject || !csBody) {
+          return res.status(400).json({ error: 'id, subject, and body required' });
+        }
+        const csScope = await reviewerScopeReq(user, req);
+        const csRows = await sql`SELECT id, class_name, class_period, age_groups, submitted_by_email FROM class_submissions WHERE id = ${csId}`;
+        if (!csRows.length) return res.status(404).json({ error: 'Class not found.' });
+        if (!csScope || !scopeAllowsSub(csScope, csRows[0])) return res.status(403).json({ error: 'Reviewers only.' });
+        if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'Email service is not configured in this environment.' });
+        const escBody = csBody
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>');
+        try {
+          const resend = new Resend(process.env.RESEND_API_KEY);
+          await resend.emails.send({
+            from: 'Roots & Wings <noreply@rootsandwingsindy.com>',
+            to: csRows[0].submitted_by_email,
+            replyTo: user.email,
+            subject: emailSubject(csSubject),
+            html: '<div style="font-family:Georgia,serif;line-height:1.5;">' + escBody + '</div>'
+          });
+        } catch (mailErr) {
+          console.error('class-confirm-send email error:', mailErr);
+          return res.status(502).json({ error: 'Email failed to send — try again.' });
+        }
+        await sql`UPDATE class_submissions
+          SET lead_email_sent_at = NOW(), lead_email_sent_by = ${user.email}, updated_at = NOW()
+          WHERE id = ${csId}`;
+        return res.status(200).json({ ok: true, id: csId });
+      }
+
       if (action === 'class-signup-window') {
         // Sign-ups are an afternoon concern — full-scope reviewers only.
         const swScope = await reviewerScopeReq(user, req);

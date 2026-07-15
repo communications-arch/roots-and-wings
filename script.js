@@ -8429,6 +8429,13 @@
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
         }
+        if (role === 'Afternoon Class Liaison') {
+          // Post-close resolution (Erin, 2026-07-15): first clear over-full
+          // classes (raise max / 2nd section / lottery), then send each
+          // lead their class list + budget.
+          h += '<li id="ws-todo-acl-overmax-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-overmax"><span class="ws-link-count" id="ws-acl-overmax-count">0</span><span class="ws-link-icon">🎟️</span><span id="ws-acl-overmax-label">Resolve over-full classes</span></button></li>';
+          h += '<li id="ws-todo-acl-confirm-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-confirm"><span class="ws-link-count" id="ws-acl-confirm-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-acl-confirm-label">Send class confirmations</span></button></li>';
+        }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
           // Cleaning Crew Management (Erin, 2026-07-15). Painted by
@@ -17011,6 +17018,8 @@
     else if (action === 'signup-todo-adults' && typeof showSignupTodoModal === 'function') showSignupTodoModal('adults');
     else if (action === 'signup-todo-kids' && typeof showSignupTodoModal === 'function') showSignupTodoModal('kids');
     else if (action === 'signup-todo-assist' && typeof showSignupTodoModal === 'function') showSignupTodoModal('assist');
+    else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
+    else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
   });
 
   // Render all coordination tabs
@@ -22082,6 +22091,16 @@
       (d.kids_unpicked || []).length, 'Place kids in afternoon classes — Session ' + d.session);
     paint('ws-todo-vp-assist-item', 'ws-vp-assist-count', 'ws-vp-assist-label',
       (d.assistant_gaps || []).length, 'Fill assistant spots — Session ' + d.session);
+    // Post-close resolution (Erin, 2026-07-15): over-max first; only when
+    // the window is closed AND nothing is over do confirmations surface.
+    var closed = d.window_status === 'closed';
+    var overN = closed ? (d.overmax || []).length : 0;
+    var unsent = (d.confirm_pending || []).filter(function (c) { return !c.sent; }).length;
+    var confirmN = (closed && !overN) ? unsent : 0;
+    paint('ws-todo-acl-overmax-item', 'ws-acl-overmax-count', 'ws-acl-overmax-label',
+      overN, 'Resolve over-full classes — Session ' + d.session);
+    paint('ws-todo-acl-confirm-item', 'ws-acl-confirm-count', 'ws-acl-confirm-label',
+      confirmN, 'Send class confirmations — Session ' + d.session);
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
@@ -22241,6 +22260,190 @@
           .catch(function (e2) { alert(e2.message || 'Could not save picks.'); self.disabled = false; self.textContent = 'Save'; });
       });
     });
+  }
+
+  // ── Over-full classes (Afternoon Class Liaison, Erin 2026-07-15) ──
+  // Three resolutions per class: raise the max, spin up a 2nd section,
+  // or run the lottery (lead's kids + any prior lottery loser are exempt).
+  function showOvermaxModal() {
+    var d = _signupTodoState;
+    if (!d) return;
+    renderReportModal({
+      title: 'Resolve over-full classes — Session ' + d.session,
+      subtitle: 'Sign-ups are closed and these classes have more 1st-choice sign-ups than seats. Raise the max, add a 2nd section, or run the lottery — the lead’s own kids and anyone who already lost a lottery this school year keep their spots automatically.',
+      icons: [{ label: 'Lottery report', icon: '🎟️', aria: 'Classes that went to lottery this year', action: function () { showLotteryReportModal(); } }],
+      bodyId: 'ws-acl-overmax-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    renderOvermaxBody();
+  }
+
+  function renderOvermaxBody() {
+    var body = document.getElementById('ws-acl-overmax-body');
+    var d = _signupTodoState;
+    if (!body || !d) return;
+    var list = d.overmax || [];
+    if (!list.length) {
+      body.innerHTML = '<p class="ws-empty">All classes fit their max — nothing to resolve. 🎉</p>';
+      return;
+    }
+    body.innerHTML = list.map(function (c) {
+      var h = '<div class="st-place-row" data-class-id="' + c.id + '">';
+      h += '<strong>' + escapeHtml(c.class_name) + '</strong>';
+      h += '<span class="ws-wv-context">' + escapeHtml(c.hour === 'both' ? 'Both PM hours' : (c.hour === 'PM2' ? 'PM Hour 2' : 'PM Hour 1')) + '</span>';
+      h += '<span class="signup-class-count">' + c.firsts + ' signed up · max ' + c.max + ' (+' + c.over + ')</span>';
+      h += '<label class="st-place-slot">Max <input type="number" class="cl-input om-max-input" min="1" max="60" value="' + c.max + '" style="width:70px;"></label>';
+      h += '<button type="button" class="btn btn-primary btn-sm om-set-max">Set max</button>';
+      h += '<button type="button" class="sc-btn om-duplicate">Add 2nd section</button>';
+      h += '<button type="button" class="sc-btn om-lottery">Run lottery</button>';
+      h += '</div>';
+      return h;
+    }).join('');
+
+    function refreshOvermax() {
+      fetchSignupTodos().then(function () {
+        if (document.getElementById('ws-acl-overmax-body')) renderOvermaxBody();
+      });
+    }
+    function post(actionName, payload, btn, done) {
+      btn.disabled = true;
+      fetch('/api/curriculum?action=' + actionName + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert((res.data && res.data.error) || 'Action failed.'); btn.disabled = false; return; }
+          if (done) done(res.data);
+          refreshOvermax();
+        })
+        .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+    }
+    body.querySelectorAll('.st-place-row').forEach(function (row) {
+      var cid = parseInt(row.getAttribute('data-class-id'), 10);
+      row.querySelector('.om-set-max').addEventListener('click', function () {
+        var v = parseInt(row.querySelector('.om-max-input').value, 10);
+        if (!v || v < 1) { alert('Enter a max of at least 1.'); return; }
+        post('class-set-max', { id: cid, max_students: v }, this);
+      });
+      row.querySelector('.om-duplicate').addEventListener('click', function () {
+        if (!confirm('Add a 2nd section of this class in the same hour? You’ll line up its leader afterwards, and families can re-pick into it.')) return;
+        post('class-duplicate', { id: cid }, this);
+      });
+      row.querySelector('.om-lottery').addEventListener('click', function () {
+        if (!confirm('Run the lottery for this class?\nThe lead’s own kids and anyone who already lost a lottery this school year keep their spots. Bumped kids move to their 2nd choice automatically.')) return;
+        post('class-lottery', { id: cid }, this, function (data) {
+          alert('Lottery done.\n\nKept (' + (data.kept || []).length + '): ' + (data.kept || []).join(', ') +
+            '\n\nBumped (' + (data.bumped || []).length + '): ' + ((data.bumped || []).join(', ') || '—'));
+        });
+      });
+    });
+  }
+
+  // "Went to lottery" — popular classes worth starring for next time.
+  function showLotteryReportModal() {
+    renderReportModal({
+      title: 'Classes that went to lottery',
+      subtitle: 'High-demand classes this school year — worth starring these lesson plans as favorites for future sessions.',
+      bodyId: 'ws-lottery-report-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    fetch('/api/curriculum?action=lottery-report' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var body = document.getElementById('ws-lottery-report-body');
+        if (!body) return;
+        var list = (d && d.classes) || [];
+        if (!list.length) { body.innerHTML = '<p class="ws-empty">No lotteries have run this school year.</p>'; return; }
+        body.innerHTML = '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + list.map(function (c) {
+          return '<li><strong>' + escapeHtml(c.class_name) + '</strong>'
+            + ' <span class="ws-wv-context">Session ' + c.session + (c.leader ? ' · ' + escapeHtml(c.leader) : '') + '</span>'
+            + ' — max ' + c.max + ', ' + c.bumped + ' bumped</li>';
+        }).join('') + '</ul>';
+      });
+  }
+
+  // ── Lead confirmation emails (Afternoon Class Liaison, Erin 2026-07-15) ──
+  // Draft per class (kids, co-leads, assistants, budget = kids × $5/hour),
+  // editable before sending; sent state is stamped; Copy feeds the chat.
+  function showClassConfirmModal() {
+    var d = _signupTodoState;
+    if (!d) return;
+    renderReportModal({
+      title: 'Send class confirmations — Session ' + d.session,
+      subtitle: 'Each lead gets their class list and budget (students × $5 per hour). Edit the draft, send it, then copy the text into the chat too.',
+      bodyId: 'ws-acl-confirm-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    renderClassConfirmList();
+  }
+
+  function renderClassConfirmList() {
+    var body = document.getElementById('ws-acl-confirm-body');
+    var d = _signupTodoState;
+    if (!body || !d) return;
+    var list = d.confirm_pending || [];
+    if (!list.length) {
+      body.innerHTML = '<p class="ws-empty">No classes with sign-ups yet.</p>';
+      return;
+    }
+    body.innerHTML = list.map(function (c) {
+      return '<div class="st-place-row"><strong>' + escapeHtml(c.class_name) + '</strong>'
+        + (c.teacher ? ' <span class="ws-wv-context">' + escapeHtml(c.teacher) + '</span>' : '')
+        + '<span class="signup-class-count">' + c.firsts + ' kid' + (c.firsts === 1 ? '' : 's') + '</span>'
+        + (c.sent
+          ? '<span class="mf-pending-badge">✓ sent</span><button type="button" class="sc-btn cc-draft" data-id="' + c.id + '">View / resend</button>'
+          : '<button type="button" class="btn btn-primary btn-sm cc-draft" data-id="' + c.id + '">Draft email</button>')
+        + '</div>';
+    }).join('');
+    body.querySelectorAll('.cc-draft').forEach(function (btn) {
+      btn.addEventListener('click', function () { renderClassConfirmDraft(parseInt(this.getAttribute('data-id'), 10)); });
+    });
+  }
+
+  function renderClassConfirmDraft(classId) {
+    var body = document.getElementById('ws-acl-confirm-body');
+    if (!body) return;
+    body.innerHTML = '<p class="ws-empty">Building draft…</p>';
+    fetch('/api/curriculum?action=class-confirm-draft&id=' + classId + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+      .then(function (res) {
+        if (!res.ok) { body.innerHTML = '<p class="ws-empty">' + escapeHtml((res.data && res.data.error) || 'Could not build the draft.') + '</p>'; return; }
+        var dft = res.data;
+        var h = '<div class="cc-editor">';
+        h += '<p class="ws-wv-context" style="margin:6px 0 2px;">To: <strong>' + escapeHtml(dft.to) + '</strong>' + (dft.sent_at ? ' · <span class="mf-pending-badge">✓ already sent</span>' : '') + '</p>';
+        h += '<input type="text" class="rd-input" id="cc-subject" maxlength="200" value="' + escapeHtml(dft.subject) + '">';
+        h += '<textarea class="rd-input" id="cc-body" rows="14" style="margin-top:6px;font-family:inherit;">' + escapeHtml(dft.body) + '</textarea>';
+        h += '<div class="rd-btn-row rd-btn-row-end" style="margin-top:8px;">';
+        h += '<button type="button" class="sc-btn" id="cc-back">← Back</button>';
+        h += '<button type="button" class="sc-btn" id="cc-copy">Copy text</button>';
+        h += '<button type="button" class="btn btn-primary btn-sm" id="cc-send">' + (dft.sent_at ? 'Resend email' : 'Send email') + '</button>';
+        h += '</div></div>';
+        body.innerHTML = h;
+        document.getElementById('cc-back').addEventListener('click', renderClassConfirmList);
+        document.getElementById('cc-copy').addEventListener('click', function () {
+          var txt = document.getElementById('cc-body').value;
+          var self = this;
+          (navigator.clipboard && navigator.clipboard.writeText
+            ? navigator.clipboard.writeText(txt)
+            : Promise.reject())
+            .then(function () { self.textContent = 'Copied ✓'; setTimeout(function () { self.textContent = 'Copy text'; }, 1500); })
+            .catch(function () { alert('Could not copy — select the text and copy manually.'); });
+        });
+        document.getElementById('cc-send').addEventListener('click', function () {
+          var self = this;
+          self.disabled = true; self.textContent = 'Sending…';
+          fetch('/api/curriculum?action=class-confirm-send' + notifViewAsSuffix(), {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ id: classId, subject: document.getElementById('cc-subject').value, body: document.getElementById('cc-body').value })
+          }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res2) {
+              if (!res2.ok) { alert((res2.data && res2.data.error) || 'Send failed.'); self.disabled = false; self.textContent = 'Send email'; return; }
+              fetchSignupTodos().then(function () {
+                if (document.getElementById('ws-acl-confirm-body')) renderClassConfirmList();
+              });
+            })
+            .catch(function () { alert('Network error — try again.'); self.disabled = false; self.textContent = 'Send email'; });
+        });
+      });
   }
 
   function loadCleaningTodoCount() {

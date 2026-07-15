@@ -816,6 +816,28 @@ ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS dates_status TEXT NOT NULL D
 -- 'AM1'/'AM2' = helping ONE hour of a whole-morning class.
 ALTER TABLE class_assignment_helpers ADD COLUMN IF NOT EXISTS block TEXT NOT NULL DEFAULT '';
 
+-- Post-close sign-up resolution (Erin, 2026-07-15). A class that ran a
+-- lottery is stamped (feeds the "went to lottery" report — popular classes
+-- whose lesson plans are worth starring); the lead-confirmation email gets
+-- a sent stamp once the Afternoon Class Liaison sends it.
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lottery_run_at TIMESTAMPTZ;
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lead_email_sent_at TIMESTAMPTZ;
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lead_email_sent_by TEXT NOT NULL DEFAULT '';
+-- Kids bumped in a class lottery. Year-wide: a kid appearing here is
+-- EXEMPT from every later lottery that school year (they keep their spot).
+CREATE TABLE IF NOT EXISTS class_lottery_bumps (
+  id                  SERIAL PRIMARY KEY,
+  school_year         TEXT NOT NULL,
+  session_number      INTEGER NOT NULL,
+  class_submission_id INTEGER,
+  family_email        TEXT NOT NULL,
+  kid_first_name      TEXT NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS class_lottery_bumps_year_idx
+  ON class_lottery_bumps (school_year, LOWER(family_email), LOWER(kid_first_name));
+
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders
 -- ──────────────────────────────────────────────
