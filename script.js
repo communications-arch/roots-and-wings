@@ -23219,7 +23219,7 @@
     if (!bodies.length) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    fetch('/api/tour?board_glance=1', { headers: rwAuthHeaders(true) })
+    fetch('/api/tour?board_glance=1', { headers: rwAuthHeaders() })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
           .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
