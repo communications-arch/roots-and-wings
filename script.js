@@ -8229,7 +8229,7 @@
 
     var roles = getWorkspaceRoles();
     var prefs = getWorkspacePrefs();
-    if (_wsRoleFilter && roles.indexOf(_wsRoleFilter) === -1) _wsRoleFilter = '';
+    if (_wsRoleFilter && _wsRoleFilter !== 'Shared' && roles.indexOf(_wsRoleFilter) === -1) _wsRoleFilter = '';
 
     // Skip a redundant full rebuild that would visibly flicker the cards.
     // loadLiveData renders once from cached /api/sheets, then again ~1s later
@@ -8309,6 +8309,7 @@
         html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === r ? ' is-active' : '') + '" data-ws-pill="' + escapeAttr(r) + '">' + escapeHtml(r)
           + '<span class="ws-pill-badge" data-ws-badge="' + escapeAttr(r) + '" hidden>0</span></button>';
       });
+      html += '<button type="button" class="board-cal-view-pill ws-role-pill' + (_wsRoleFilter === 'Shared' ? ' is-active' : '') + '" data-ws-pill="Shared">Shared</button>';
       html += '</div>';
     }
 
