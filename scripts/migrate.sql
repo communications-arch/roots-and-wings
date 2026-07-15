@@ -1731,3 +1731,17 @@ CREATE INDEX IF NOT EXISTS event_tasks_event_idx
   ON event_tasks (special_event_id, sort_order);
 CREATE INDEX IF NOT EXISTS event_tasks_assignee_idx
   ON event_tasks (LOWER(assigned_email)) WHERE done_at IS NULL;
+
+-- ──────────────────────────────────────────────
+-- Board Notes (Erin, 2026-07-16): shared scratchpad in the Board
+-- section of My Workspace — any board member can add a note; the
+-- author (or a super user) can remove one. created_by is the REAL
+-- login, never the View-As identity.
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS board_notes (
+  id         SERIAL PRIMARY KEY,
+  note       TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS board_notes_created_idx ON board_notes (created_at DESC);

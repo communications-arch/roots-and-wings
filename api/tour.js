@@ -6324,6 +6324,79 @@ async function handleBoardGlance(req, res) {
   return res.status(200).json({ school_year: year, season: season, tiles: tiles });
 }
 
+// ── Board Notes ───────────────────────────────────────────────────────
+// Shared scratchpad for the whole board (Erin, 2026-07-16): any board
+// member can add a note; author or super user can remove one. Same
+// visibility gate as Board at a Glance.
+async function boardNotesGate(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const canView = isSuperUser(auth.email) || await isBoardMember(auth.email);
+  if (!canView) {
+    res.status(403).json({ error: 'Board Notes are only visible to board members.' });
+    return null;
+  }
+  return auth;
+}
+
+async function handleBoardNotesGet(req, res) {
+  const auth = await boardNotesGate(req, res);
+  if (!auth) return;
+  const sql = getSql();
+  const rows = await sql`
+    SELECT n.id, n.note, LOWER(n.created_by) AS created_by, n.created_at,
+           (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+             WHERE LOWER(p.email) = LOWER(n.created_by)
+                OR LOWER(p.personal_email) = LOWER(n.created_by) LIMIT 1) AS author_name
+    FROM board_notes n
+    ORDER BY n.created_at DESC
+    LIMIT 100
+  `;
+  return res.status(200).json({
+    notes: rows.map(r => ({
+      id: r.id,
+      note: r.note,
+      created_by: r.created_by,
+      author: r.author_name || String(r.created_by || '').split('@')[0],
+      created_at: r.created_at
+    })),
+    you: String(auth.realEmail || auth.email || '').toLowerCase(),
+    is_super: isSuperUser(auth.realEmail || auth.email)
+  });
+}
+
+async function handleBoardNoteAdd(body, req, res) {
+  const auth = await boardNotesGate(req, res);
+  if (!auth) return;
+  const note = String((body || {}).note || '').trim().slice(0, 1000);
+  if (!note) return res.status(400).json({ error: 'Write a note first.' });
+  const sql = getSql();
+  // Author = the REAL login (a super user or dev tester posting through
+  // View As signs their own name, not the impersonated member's).
+  const author = String(auth.realEmail || auth.email || '').toLowerCase();
+  const ins = await sql`
+    INSERT INTO board_notes (note, created_by) VALUES (${note}, ${author})
+    RETURNING id, created_at
+  `;
+  return res.status(201).json({ ok: true, id: ins[0].id, created_at: ins[0].created_at });
+}
+
+async function handleBoardNoteDelete(body, req, res) {
+  const auth = await boardNotesGate(req, res);
+  if (!auth) return;
+  const id = parseInt((body || {}).id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+  const sql = getSql();
+  const rows = await sql`SELECT created_by FROM board_notes WHERE id = ${id}`;
+  if (!rows.length) return res.status(404).json({ error: 'Note not found.' });
+  const real = String(auth.realEmail || auth.email || '').toLowerCase();
+  if (String(rows[0].created_by || '').toLowerCase() !== real && !isSuperUser(real)) {
+    return res.status(403).json({ error: 'Only the note’s author can remove it.' });
+  }
+  await sql`DELETE FROM board_notes WHERE id = ${id}`;
+  return res.status(200).json({ ok: true, id });
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -6349,6 +6422,7 @@ module.exports = async function handler(req, res) {
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
     if (req.query.community === '1' || req.query.community === 'true') return handleCommunitySnapshot(req, res);
     if (req.query.board_glance === '1') return handleBoardGlance(req, res);
+    if (req.query.board_notes === '1') return handleBoardNotesGet(req, res);
     return res.status(400).json({ error: 'Unknown GET action.' });
   }
 
@@ -6364,6 +6438,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
+    if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);
+    if (kind === 'board-note-delete') return handleBoardNoteDelete(body, req, res);
     if (kind === 'registration-decline') return handleRegistrationDecline(body, req, res);
     if (kind === 'registration-undecline') return handleRegistrationUndecline(body, req, res);
     if (kind === 'registration-mark-paid') return handleRegistrationMarkPaid(body, req, res);

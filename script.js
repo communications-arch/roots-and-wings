@@ -8725,26 +8725,43 @@
         if (typeof loadMembersSummary === 'function') loadMembersSummary();
       }
     },
-    'board-glance': {
-      // Board transparency (Erin, 2026-07-15): every board member sees what
-      // the other board roles are working on — one tile per role with live
-      // headline counts from /api/tour?board_glance=1 (board-gated), plus
-      // the two liaison-run programs the board tracks (cleaning rota,
-      // special events). "View" opens the underlying report read-only
-      // (actions stay hidden for non-holders via viewerCanAct). Personal
-      // To Do lists stay scoped to the individual.
-      title: 'Board at a Glance',
+    'board-notes': {
+      // Shared board scratchpad (Erin, 2026-07-16): any board member can
+      // add a note; the author (or a super user) can remove one. Server
+      // gate matches Board at a Glance.
+      title: 'Board Notes',
       roleGate: ['President', 'Vice President', 'Treasurer', 'Secretary',
                  'Membership Director', 'Communications Director', 'Sustaining Director'],
       render: function () {
-        var h = '<p class="ws-body-hint">What each board role is working on right now — visible to the whole board.</p>';
-        h += '<div class="ws-bglance" id="ws-bglance-body" aria-live="polite">';
-        h += '<p class="ws-part-meter-caption">Loading board overview…</p>';
-        h += '</div>';
+        var h = '<p class="ws-body-hint">Shared with the whole board — questions, reminders, things to raise at the next meeting.</p>';
+        h += '<div id="ws-bnotes-list" aria-live="polite"><p class="ws-part-meter-caption">Loading notes…</p></div>';
+        h += '<textarea class="cl-input ws-bnotes-input" id="ws-bnotes-input" rows="2" maxlength="1000" placeholder="Add a note for the board…"></textarea>';
+        h += '<div class="rd-btn-row-end"><button type="button" class="btn btn-primary btn-sm" id="ws-bnotes-add">Add note</button></div>';
         return h;
       },
       afterRender: function () {
-        if (typeof loadBoardGlance === 'function') loadBoardGlance();
+        if (typeof loadBoardNotes === 'function') loadBoardNotes();
+        var btn = document.getElementById('ws-bnotes-add');
+        if (btn && !btn.__rwWired) {
+          btn.__rwWired = true;
+          btn.addEventListener('click', function () {
+            var input = document.getElementById('ws-bnotes-input');
+            var text = input ? input.value.trim() : '';
+            if (!text) { alert('Write a note first.'); return; }
+            btn.disabled = true;
+            fetch('/api/tour', {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({ kind: 'board-note', note: text })
+            }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res) {
+                btn.disabled = false;
+                if (!res.ok) { alert((res.data && res.data.error) || 'Could not save the note.'); return; }
+                if (input) input.value = '';
+                loadBoardNotes();
+              })
+              .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+          });
+        }
       }
     },
     'special-events': {
@@ -8851,6 +8868,50 @@
     // 'admin-consoles' above (2026-07-05 workspace review); its lazy
     // loader lives on as loadSourceSheetIndex below.
   };
+
+  // Board section cards (Erin, 2026-07-16): one card PER board role —
+  // replacing the single "Board at a Glance" card — plus the two
+  // liaison-run programs the board tracks. Each card body fills from a
+  // single shared /api/tour?board_glance=1 fetch (holder, live counts,
+  // and the read-only reports scoped to that role).
+  var BOARD_ROLE_CARDS = [
+    { key: 'bg-president',      role: 'President' },
+    { key: 'bg-vp',             role: 'Vice President' },
+    { key: 'bg-treasurer',      role: 'Treasurer' },
+    { key: 'bg-secretary',      role: 'Secretary' },
+    { key: 'bg-membership',     role: 'Membership Director' },
+    { key: 'bg-sustaining',     role: 'Sustaining Director' },
+    { key: 'bg-communications', role: 'Communications Director' },
+    { key: 'bg-cleaning',       role: 'Cleaning Crew Liaison' },
+    { key: 'bg-events-liaison', role: 'Special Events Liaison' }
+  ];
+  var BOARD_GATE_ROLES = ['President', 'Vice President', 'Treasurer', 'Secretary',
+    'Membership Director', 'Communications Director', 'Sustaining Director'];
+  BOARD_ROLE_CARDS.forEach(function (def) {
+    WORKSPACE_WIDGETS[def.key] = {
+      title: escapeHtml(def.role),
+      roleGate: BOARD_GATE_ROLES,
+      render: function () {
+        return '<div class="ws-bg-cardbody" data-bg-role="' + escapeHtml(def.role) + '" aria-live="polite">'
+          + '<p class="ws-part-meter-caption">Loading…</p></div>';
+      },
+      afterRender: function () {
+        if (typeof loadBoardGlanceOnce === 'function') loadBoardGlanceOnce();
+      }
+    };
+  });
+
+  // All nine role cards render in the same pass and each afterRender
+  // asks for the glance data — collapse those into ONE fetch per render.
+  var _bgLoadQueued = false;
+  function loadBoardGlanceOnce() {
+    if (_bgLoadQueued) return;
+    _bgLoadQueued = true;
+    setTimeout(function () {
+      _bgLoadQueued = false;
+      if (typeof loadBoardGlance === 'function') loadBoardGlance();
+    }, 0);
+  }
 
   // Sheet-index lazy loader for the Admin Consoles & Sources card.
   // (Extracted from the old source-sheets widget's afterRender.)
@@ -8993,8 +9054,9 @@
     // rows — VP dropped from 7 role cards to 4, Comms from 7 to 5.
     // (2026-07-07, Erin) 'my-links' dropped from every default for now —
     // the widget code stays; re-add the key here to bring the card back.
-    // 'board-glance' is NOT in any role list — it renders in the shared
-    // "Board" section (its own pill) for every board member.
+    // The per-role board cards (bg-*) + 'board-notes' are NOT in any role
+    // list — they render in the shared "Board" section (its own pill)
+    // for every board member.
     'President': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Communications Director': ['todos', 'reports', 'admin-consoles', 'roles', 'ways-to-help', 'resources'],
     'Membership Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
@@ -9412,8 +9474,10 @@
           var w = WORKSPACE_WIDGETS[type];
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
-          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-glance': 'accent-8' };
-          var wsAccent = WS_ACCENTS[type] ? '<img class="brand-accent" src="brand/secondary/' + WS_ACCENTS[type] + '.png" alt=""> ' : '';
+          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-notes': 'accent-8' };
+          // Per-role board cards share one accent.
+          var wsAccentKey = WS_ACCENTS[type] || (type.indexOf('bg-') === 0 ? 'accent-8' : '');
+          var wsAccent = wsAccentKey ? '<img class="brand-accent" src="brand/secondary/' + wsAccentKey + '.png" alt=""> ' : '';
           // Tap the header to minimize — the card shrinks to a chip in
           // the strip below the grid, freeing its slot.
           s += '<div class="mf-card workspace-card" data-widget-type="' + type + '">';
@@ -9438,10 +9502,13 @@
     });
 
     // "Board" section — shared board-wide surfaces, not tied to any one
-    // role (Erin, 2026-07-15: "set it up as a Board pill"). Board at a
-    // Glance today; meeting minutes + action items planned.
+    // role (Erin, 2026-07-15: "set it up as a Board pill"). One card per
+    // board role + the tracked liaison programs + shared Board Notes
+    // (Erin, 2026-07-16 — replaced the single Board-at-a-Glance card).
     if (showBoardSection) {
-      html += renderSection('Board', null, ['board-glance'], { showNotes: false });
+      var boardCardKeys = BOARD_ROLE_CARDS.map(function (d) { return d.key; });
+      boardCardKeys.push('board-notes');
+      html += renderSection('Board', null, boardCardKeys, { showNotes: false });
     }
 
     // "Shared" bucket for universal widgets. Always render (even if empty)
@@ -25033,81 +25100,144 @@
   // returns, so when next year's registration opens (DEFAULT_SEASON bumps)
   // the card heading + counts roll over on the next workspace render. Each
   // workspace render re-runs this, so new sign-ups appear without a reload.
-  // Board at a Glance — fills every rendered copy of the card (a member
-  // holding two board roles gets the card in each role section; both get
-  // the same content, mirroring the ws-todo-list duplicate-id pattern).
+  // Board section — one card per board role (Erin, 2026-07-16). A single
+  // /api/tour?board_glance=1 fetch fills every [data-bg-role] card body
+  // with the role's holder, live counts, and its scoped read-only reports.
   function loadBoardGlance() {
-    var bodies = document.querySelectorAll('[id="ws-bglance-body"]');
+    var bodies = document.querySelectorAll('[data-bg-role]');
     if (!bodies.length) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
+
+    // Role titles from the DB may be hyphenated ("Vice-President").
+    function bgRoleKey(s) { return String(s || '').toLowerCase().replace(/-/g, ' ').trim(); }
+
+    function wireViewButtons(el) {
+      el.querySelectorAll('.ws-bg-view').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var v = b.getAttribute('data-bg-view');
+          if (v === 'member-pipeline' && typeof showTourPipelineModal === 'function') showTourPipelineModal();
+          else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
+          else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
+          else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
+          else if (v === 'reg-links' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
+          // Roles Assignments lenses — board members reach them
+          // read-only (the manage doorways stay holder-gated).
+          else if (v === 'roles-am' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'am' });
+          else if (v === 'roles-pm' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'pm' });
+          else if (v === 'roles-cleaning' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'cleaning' });
+          else if (v === 'roles-se' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'special-events' });
+        });
+      });
+    }
+
     fetch('/api/tour?board_glance=1', { headers: rwAuthHeaders() })
       .then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
           .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
       })
       .then(function (res) {
-        var els = document.querySelectorAll('[id="ws-bglance-body"]');
+        var els = document.querySelectorAll('[data-bg-role]');
         if (!els.length) return;
-        var html;
         if (!res.ok) {
           var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
-          html = '<p class="ws-empty ws-wv-err">Could not load the board overview: ' + escapeHtmlWs(msg) + '</p>';
-        } else {
-          var tiles = Array.isArray(res.data && res.data.tiles) ? res.data.tiles : [];
-          if (!tiles.length) {
-            html = '<p class="ws-empty">No board roles found for this year.</p>';
+          els.forEach(function (el) {
+            el.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtmlWs(msg) + '</p>';
+          });
+          return;
+        }
+        var tiles = Array.isArray(res.data && res.data.tiles) ? res.data.tiles : [];
+        var byRole = {};
+        tiles.forEach(function (t) { byRole[bgRoleKey(t.role)] = t; });
+
+        els.forEach(function (el) {
+          var t = byRole[bgRoleKey(el.getAttribute('data-bg-role'))];
+          if (!t) {
+            el.innerHTML = '<p class="ws-empty">No data for this role yet this year.</p>';
+            return;
+          }
+          var html = '<div class="ws-bg-holder">' + (t.icon ? '<span class="ws-bg-icon">' + escapeHtmlWs(t.icon) + '</span> ' : '')
+            + (t.holder ? escapeHtmlWs(t.holder) : '<span class="ws-bg-unfilled">Unfilled</span>') + '</div>';
+          if (t.metrics && t.metrics.length) {
+            html += '<ul class="ws-bg-metrics">';
+            t.metrics.forEach(function (m) {
+              html += '<li><span class="ws-bg-num">' + escapeHtmlWs(String(m.value)) + '</span> ' + escapeHtmlWs(m.label) + '</li>';
+            });
+            html += '</ul>';
           } else {
-            html = '<div class="ws-bg-grid">';
-            tiles.forEach(function (t) {
-              html += '<div class="ws-bg-tile' + (t.isBoard ? '' : ' ws-bg-tile-program') + '">';
-              html += '<div class="ws-bg-role">' + (t.icon ? '<span class="ws-bg-icon">' + escapeHtmlWs(t.icon) + '</span>' : '') + escapeHtmlWs(t.role) + '</div>';
-              html += '<div class="ws-bg-holder">' + (t.holder ? escapeHtmlWs(t.holder) : '<span class="ws-bg-unfilled">Unfilled</span>') + '</div>';
-              if (t.metrics && t.metrics.length) {
-                html += '<ul class="ws-bg-metrics">';
-                t.metrics.forEach(function (m) {
-                  html += '<li><span class="ws-bg-num">' + escapeHtmlWs(String(m.value)) + '</span> ' + escapeHtmlWs(m.label) + '</li>';
-                });
-                html += '</ul>';
-              } else {
-                html += '<p class="ws-bg-none">No live counts yet</p>';
-              }
-              // Every view the role's work spans — one button each (Erin,
-              // 2026-07-15: VP alone covers Morning/Afternoon/Cleaning/Events).
-              var views = Array.isArray(t.views) ? t.views : (t.view ? [{ key: t.view, label: 'View' }] : []);
-              if (views.length) {
-                html += '<div class="ws-bg-views">';
-                views.forEach(function (v) {
-                  html += '<button type="button" class="sc-btn ws-bg-view" data-bg-view="' + escapeHtmlWs(v.key) + '">' + escapeHtmlWs(v.label) + '</button>';
-                });
-                html += '</div>';
-              }
-              html += '</div>';
+            html += '<p class="ws-bg-none">No live counts yet</p>';
+          }
+          // The role's scoped reports — read-only lenses for the board.
+          var views = Array.isArray(t.views) ? t.views : [];
+          if (views.length) {
+            html += '<div class="ws-bg-views">';
+            views.forEach(function (v) {
+              html += '<button type="button" class="sc-btn ws-bg-view" data-bg-view="' + escapeHtmlWs(v.key) + '">' + escapeHtmlWs(v.label) + '</button>';
             });
             html += '</div>';
           }
-        }
-        els.forEach(function (el) {
           el.innerHTML = html;
-          el.querySelectorAll('.ws-bg-view').forEach(function (b) {
-            b.addEventListener('click', function () {
-              var v = b.getAttribute('data-bg-view');
-              if (v === 'member-pipeline' && typeof showTourPipelineModal === 'function') showTourPipelineModal();
-              else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
-              else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
-              else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
-              else if (v === 'reg-links' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
-              // Roles Assignments lenses — board members reach them
-              // read-only (the manage doorways stay holder-gated).
-              else if (v === 'roles-am' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'am' });
-              else if (v === 'roles-pm' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'pm' });
-              else if (v === 'roles-cleaning' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'cleaning' });
-              else if (v === 'roles-se' && typeof showRolesManagerModal === 'function') showRolesManagerModal({ view: 'special-events' });
-            });
-          });
+          wireViewButtons(el);
         });
       })
       .catch(function (err) { console.warn('[loadBoardGlance] network error:', err); });
+  }
+
+  // Board Notes — shared board scratchpad (Erin, 2026-07-16).
+  function loadBoardNotes() {
+    var body = document.getElementById('ws-bnotes-list');
+    if (!body) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/tour?board_notes=1', { headers: rwAuthHeaders() })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; })
+          .catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+      })
+      .then(function (res) {
+        var el = document.getElementById('ws-bnotes-list');
+        if (!el) return;
+        if (!res.ok) {
+          var msg = (res.data && res.data.error) || ('HTTP ' + res.status);
+          el.innerHTML = '<p class="ws-empty ws-wv-err">Could not load notes: ' + escapeHtmlWs(msg) + '</p>';
+          return;
+        }
+        var notes = Array.isArray(res.data && res.data.notes) ? res.data.notes : [];
+        var you = String(res.data.you || '').toLowerCase();
+        var isSuper = res.data.is_super === true;
+        if (!notes.length) {
+          el.innerHTML = '<p class="ws-empty">No notes yet — leave the first one below.</p>';
+          return;
+        }
+        var h = '';
+        notes.forEach(function (n) {
+          var mine = String(n.created_by || '').toLowerCase() === you;
+          h += '<div class="ws-bnote">';
+          h += '<div class="ws-bnote-meta"><strong>' + escapeHtmlWs(n.author) + '</strong>'
+            + ' <span class="ws-bnote-when">' + escapeHtmlWs(timeAgo(n.created_at)) + '</span>'
+            + ((mine || isSuper) ? '<button type="button" class="ws-bnote-del" data-note-id="' + n.id + '" aria-label="Remove note" title="Remove">✕</button>' : '')
+            + '</div>';
+          h += '<p class="ws-bnote-text">' + escapeHtmlWs(n.note).replace(/\n/g, '<br>') + '</p>';
+          h += '</div>';
+        });
+        el.innerHTML = h;
+        el.querySelectorAll('.ws-bnote-del').forEach(function (b) {
+          b.addEventListener('click', function () {
+            if (!confirm('Remove this note?')) return;
+            b.disabled = true;
+            fetch('/api/tour', {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({ kind: 'board-note-delete', id: parseInt(b.getAttribute('data-note-id'), 10) })
+            }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (r2) {
+                if (!r2.ok) { alert((r2.data && r2.data.error) || 'Could not remove it.'); b.disabled = false; return; }
+                loadBoardNotes();
+              })
+              .catch(function () { alert('Network error — try again.'); b.disabled = false; });
+          });
+        });
+      })
+      .catch(function (err) { console.warn('[loadBoardNotes] network error:', err); });
   }
 
   function loadMembersSummary() {

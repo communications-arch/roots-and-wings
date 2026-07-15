@@ -11641,6 +11641,43 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   gap: 6px;
 }
 
+/* Board Notes card — shared board scratchpad (2026-07-16). */
+.ws-bnote {
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 0;
+}
+.ws-bnote:last-child { border-bottom: none; }
+.ws-bnote-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+}
+.ws-bnote-meta strong { color: var(--color-primary-dark); font-size: 0.82rem; }
+.ws-bnote-when { flex: 1; }
+.ws-bnote-del {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  padding: 0 2px;
+}
+.ws-bnote-del:hover { color: var(--color-error); }
+.ws-bnote-text {
+  margin: 3px 0 0;
+  font-size: 0.88rem;
+  color: var(--color-text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ws-bnotes-input {
+  width: 100%;
+  margin-top: 10px;
+  resize: vertical;
+}
+
 /* Clickable stat tiles (26/27 Members card → drill into the Membership Report) */
 .ws-msum-stat.ws-msum-click {
   cursor: pointer;
