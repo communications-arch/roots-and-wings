@@ -18625,6 +18625,11 @@
       var count = 0;
       sec.querySelectorAll('ul[id="ws-todo-list"] li[id$="-item"]').forEach(function (li) { if (!li.hidden) count++; });
       badge.textContent = String(count);
+      // Self-explain the number (Erin, 2026-07-15: "what's the count for?").
+      var hint = count + ' To Do item' + (count === 1 ? '' : 's') + ' waiting for this role';
+      badge.setAttribute('title', hint);
+      badge.setAttribute('aria-label', hint);
+      if (badge.parentElement) badge.parentElement.setAttribute('title', hint);
       badge.hidden = count <= 0;
     });
   }
