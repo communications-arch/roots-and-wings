@@ -1712,7 +1712,8 @@ module.exports = async function handler(req, res) {
               AND c.class_period = 'PM' AND c.status IN ('scheduled', 'drafted')
               AND COALESCE(c.scheduled_hour, '') = ANY(${vsHour})`;
           const needy = uncovered.find(u => Number(u.gap) > 0);
-          if (needy) return res.status(409).json({ error: '“' + needy.class_name + '” still needs an assistant that hour — classes fill before floaters.' });
+          // Generic on purpose (Erin, 2026-07-15) — no class name, just the rule.
+          if (needy) return res.status(409).json({ error: 'Classes that hour still need assistants — classes fill before floaters.' });
         }
         const insertedVs = await sql`
           INSERT INTO volunteer_signups (school_year, session_number, block, role, person_email, person_name)
