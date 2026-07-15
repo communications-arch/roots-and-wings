@@ -8132,7 +8132,6 @@
         // Renamed from "Class Ideas" (2026-07-05) \u2014 that name now belongs
         // to the My Family card listing YOUR submitted classes; this is
         // the browse-for-inspiration list.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="class-ideas"><span class="ws-link-icon">\uD83D\uDCA1</span>Class Inspiration</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
         h += '</ul>';
@@ -8261,7 +8260,7 @@
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? <button type="button" class="ws-inline-link" data-resource-action="class-ideas">Browse class inspiration</button>.</span></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>.</span></p>';
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
@@ -14103,26 +14102,69 @@
   }
 
   // Class Ideas popup (from Resources card)
+  // DB-backed inspiration list ({group: [{id, idea}]}); falls back to the
+  // sheet-era CLASS_IDEAS while the table is empty (prod pre-seed).
+  var _classInspirations = null;
   function showClassIdeasPopup() {
     if (!personDetail || !personDetailCard) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?action=class-inspiration', { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        _classInspirations = (d && d.groups) || null;
+        renderClassIdeasPopup();
+      })
+      .catch(function () { _classInspirations = null; renderClassIdeasPopup(); });
+  }
+
+  function renderClassIdeasPopup() {
+    if (!personDetail || !personDetailCard) return;
+    // VP / Afternoon Class Liaison curate the list (Erin, 2026-07-15).
+    var canEditIdeas = typeof clientHasCapability === 'function'
+      && clientHasCapability('class_inspiration_edit', ['Vice President', 'Afternoon Class Liaison']);
+    var dbGroups = _classInspirations && Object.keys(_classInspirations).length ? _classInspirations : null;
 
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
-    html += '<h3>Class Ideas Board</h3>';
+    html += '<h3>Class Inspiration</h3>';
     html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
 
-    var groups = Object.keys(CLASS_IDEAS);
-    groups.forEach(function (group) {
-      var ideas = CLASS_IDEAS[group];
-      html += '<div style="margin-bottom:1.25rem;">';
-      html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + group + '</h4>';
-      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-      ideas.forEach(function (idea) {
-        html += '<span class="idea-chip">' + idea + '</span>';
+    if (dbGroups) {
+      Object.keys(dbGroups).forEach(function (group) {
+        html += '<div style="margin-bottom:1.25rem;">';
+        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(group) + '</h4>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+        dbGroups[group].forEach(function (row) {
+          html += '<span class="idea-chip">' + escapeHtml(row.idea)
+            + (canEditIdeas ? ' <button type="button" class="ci-del" data-ci-id="' + row.id + '" aria-label="Remove idea" title="Remove" style="border:none;background:none;cursor:pointer;padding:0 0 0 2px;color:var(--color-text-light);">✕</button>' : '')
+            + '</span>';
+        });
+        html += '</div>';
+        if (canEditIdeas) {
+          html += '<div style="display:flex;gap:6px;margin-top:6px;">'
+            + '<input type="text" class="cl-input ci-add-input" maxlength="200" placeholder="Add an idea…" data-ci-group="' + escapeHtml(group) + '" style="max-width:260px;">'
+            + '<button type="button" class="sc-btn ci-add-btn" data-ci-group="' + escapeHtml(group) + '">Add</button></div>';
+        }
+        html += '</div>';
       });
-      html += '</div></div>';
-    });
-
+    } else {
+      // Sheet-era fallback (read-only).
+      Object.keys(CLASS_IDEAS).forEach(function (group) {
+        html += '<div style="margin-bottom:1.25rem;">';
+        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(group) + '</h4>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+        CLASS_IDEAS[group].forEach(function (idea) {
+          html += '<span class="idea-chip">' + escapeHtml(idea) + '</span>';
+        });
+        html += '</div></div>';
+      });
+    }
+    if (canEditIdeas) {
+      html += '<div style="border-top:1px solid var(--color-border);padding-top:10px;margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">'
+        + '<input type="text" class="cl-input" id="ci-new-group" maxlength="80" placeholder="New group (e.g. Teens)" style="max-width:180px;">'
+        + '<input type="text" class="cl-input" id="ci-new-idea" maxlength="200" placeholder="First idea for it…" style="max-width:240px;">'
+        + '<button type="button" class="sc-btn" id="ci-new-add">Add group</button></div>';
+    }
     html += '</div>';
     personDetailCard.innerHTML = html;
     personDetail.style.display = 'flex';
@@ -14130,6 +14172,46 @@
     personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
     personDetail.addEventListener('click', function (e) {
       if (e.target === personDetail) closeDetail();
+    });
+    if (!canEditIdeas) return;
+
+    var cred = localStorage.getItem('rw_google_credential');
+    function ciPost(group, idea, btn) {
+      if (!group || !idea) return;
+      if (btn) btn.disabled = true;
+      fetch('/api/curriculum?action=class-inspiration', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_name: group, idea: idea })
+      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert((res.data && res.data.error) || 'Could not add.'); if (btn) btn.disabled = false; return; }
+          showClassIdeasPopup();
+        })
+        .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
+    }
+    personDetailCard.querySelectorAll('.ci-add-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var inp = personDetailCard.querySelector('.ci-add-input[data-ci-group="' + this.getAttribute('data-ci-group').replace(/"/g, '\\"') + '"]');
+        ciPost(this.getAttribute('data-ci-group'), inp ? inp.value.trim() : '', this);
+      });
+    });
+    var newAdd = document.getElementById('ci-new-add');
+    if (newAdd) newAdd.addEventListener('click', function () {
+      ciPost((document.getElementById('ci-new-group') || {}).value || '', ((document.getElementById('ci-new-idea') || {}).value || '').trim(), this);
+    });
+    personDetailCard.querySelectorAll('.ci-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        self.disabled = true;
+        fetch('/api/curriculum?action=class-inspiration&id=' + this.getAttribute('data-ci-id'), {
+          method: 'DELETE', headers: { 'Authorization': 'Bearer ' + cred }
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not remove.'); self.disabled = false; return; }
+            showClassIdeasPopup();
+          })
+          .catch(function () { alert('Network error — try again.'); self.disabled = false; });
+      });
     });
   }
 
@@ -16049,7 +16131,7 @@
   function renderCurriculumLibraryBody() {
     var state = curriculumState;
     var html = '<h3>Curriculum Library</h3>';
-    html += '<p class="cl-intro">Browse shared lesson plans, or create your own. Each plan has up to 5 lessons and a supply list.</p>';
+    html += '<p class="cl-intro">Browse shared lesson plans, or create your own. Each plan has up to 5 lessons and a supply list. Looking for a spark? Check the <button type="button" class="ws-inline-link" id="cl-inspiration-link">Class Inspiration</button> board.</p>';
 
     // Controls
     html += '<div class="cl-controls">';
@@ -16576,6 +16658,10 @@
   }
 
   function wireCurriculumEvents() {
+    // Library intro → Class Inspiration board (same modal container, so
+    // the popup simply takes over the card; Erin, 2026-07-15).
+    var inspoLink = document.getElementById('cl-inspiration-link');
+    if (inspoLink) inspoLink.addEventListener('click', function () { showClassIdeasPopup(); });
     var closeBtn = personDetailCard.querySelector('.detail-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', function () {

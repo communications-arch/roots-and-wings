@@ -1423,6 +1423,19 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ submission: serializeSubmission(r) });
       }
 
+      // ── Class Inspiration board (Erin, 2026-07-15) ──
+      // DB-backed idea list; any member reads. Edits live in the POST /
+      // DELETE sections below ('class_inspiration_edit' capability).
+      if (action === 'class-inspiration') {
+        const rows = await sql`SELECT id, group_name, idea FROM class_inspirations
+          ORDER BY group_name, sort_order, id`;
+        const groups = {};
+        rows.forEach(r => {
+          (groups[r.group_name] || (groups[r.group_name] = [])).push({ id: r.id, idea: r.idea });
+        });
+        return res.status(200).json({ groups });
+      }
+
       // Favorited PM/both curricula — feeds the "Need inspiration?" strip
       // inside the PM class submission modal. Any logged-in member can read.
       if (action === 'inspiration') {
@@ -2040,6 +2053,19 @@ module.exports = async function handler(req, res) {
       // Opening requires the session's Schedule Builder to be Approved first
       // and a (start, end) date range so the parent My Family widget knows
       // when to show itself.
+      // ── Class Inspiration: add an idea (Erin, 2026-07-15) ──
+      if (action === 'class-inspiration') {
+        const ciEditor = isSuperUser(user.email) || await hasCapability(user.email, 'class_inspiration_edit');
+        if (!ciEditor) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can edit the inspiration list.' });
+        const ciGroup = String((req.body || {}).group_name || '').trim().slice(0, 80);
+        const ciIdea = String((req.body || {}).idea || '').trim().slice(0, 200);
+        if (!ciGroup || !ciIdea) return res.status(400).json({ error: 'group_name and idea required' });
+        const ciNext = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM class_inspirations WHERE group_name = ${ciGroup}`;
+        const ciIns = await sql`INSERT INTO class_inspirations (group_name, idea, sort_order, created_by)
+          VALUES (${ciGroup}, ${ciIdea}, ${ciNext[0].n}, ${user.email}) RETURNING id`;
+        return res.status(201).json({ ok: true, id: ciIns[0].id });
+      }
+
       // ── Over-max resolution (Erin, 2026-07-15): raise the cap, spin up a
       // second section, or run the lottery. All reviewer-scoped writes.
       if (action === 'class-set-max') {
@@ -2573,6 +2599,15 @@ module.exports = async function handler(req, res) {
 
     // ── DELETE ──
     if (req.method === 'DELETE') {
+      // Class Inspiration: remove an idea (Erin, 2026-07-15).
+      if (action === 'class-inspiration') {
+        const ciDelOk = isSuperUser(user.email) || await hasCapability(user.email, 'class_inspiration_edit');
+        if (!ciDelOk) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can edit the inspiration list.' });
+        const ciDelId = parseInt(req.query.id, 10);
+        if (!Number.isFinite(ciDelId)) return res.status(400).json({ error: 'id required' });
+        await sql`DELETE FROM class_inspirations WHERE id = ${ciDelId}`;
+        return res.status(200).json({ ok: true });
+      }
       // Volunteer sign-ups (2026-07-11): drop your own floater/board/prep
       // pledge, or step out of a class you're assisting.
       if (action === 'volunteer-signup') {

@@ -823,6 +823,20 @@ ALTER TABLE class_assignment_helpers ADD COLUMN IF NOT EXISTS block TEXT NOT NUL
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lottery_run_at TIMESTAMPTZ;
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lead_email_sent_at TIMESTAMPTZ;
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS lead_email_sent_by TEXT NOT NULL DEFAULT '';
+-- Class Inspiration board (Erin, 2026-07-15): the idea list members browse
+-- when proposing classes — DB-backed so the VP / Afternoon Class Liaison
+-- can edit it (was parsed from a master-sheet tab, read-only + prod-only).
+CREATE TABLE IF NOT EXISTS class_inspirations (
+  id         SERIAL PRIMARY KEY,
+  group_name TEXT NOT NULL,
+  idea       TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS class_inspirations_group_idx
+  ON class_inspirations (group_name, sort_order, id);
+
 -- Kids bumped in a class lottery. Year-wide: a kid appearing here is
 -- EXEMPT from every later lottery that school year (they keep their spot).
 CREATE TABLE IF NOT EXISTS class_lottery_bumps (

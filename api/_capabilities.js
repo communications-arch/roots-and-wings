@@ -37,6 +37,13 @@ const CAPABILITIES = [
     defaultRoles: ['Vice President', 'Afternoon Class Liaison']
   },
   {
+    key: 'class_inspiration_edit',
+    area: 'Classes & Scheduling',
+    label: 'Class Inspiration — edit the idea list',
+    desc: 'Add and remove ideas on the Class Inspiration board members browse when proposing classes.',
+    defaultRoles: ['Vice President', 'Afternoon Class Liaison']
+  },
+  {
     key: 'morning_builder',
     area: 'Classes & Scheduling',
     label: 'Morning Class Builder — view',
