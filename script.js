@@ -4203,11 +4203,13 @@
       .then(function (data) {
         if (!data || data.error) { card.style.display = 'none'; return; }
         _signup = data;
-        // Working copy of picks (kid -> {PM1:[],PM2:[]}) seeded from saved.
+        // Working copy of picks (kid -> {PM1:{classId:rank}, PM2:{...}})
+        // seeded from the saved ordered arrays. A rank MAP (not an array)
+        // so the number the user picks is exactly the number that sticks.
         _signup.working = {};
         (data.kids || []).forEach(function (k) {
           var src = (data.picks && data.picks[k]) || {};
-          _signup.working[k] = { PM1: (src.PM1 || []).slice(), PM2: (src.PM2 || []).slice() };
+          _signup.working[k] = { PM1: rankMapFromArray(src.PM1), PM2: rankMapFromArray(src.PM2) };
         });
         renderClassSignupCard();
       })
@@ -4344,8 +4346,44 @@
     return groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean).join(', ');
   }
 
+  // {classId: rank} from a saved ordered array ([id1, id2] → {id1:1, id2:2}).
+  function rankMapFromArray(arr) {
+    var m = {};
+    (arr || []).forEach(function (id, i) { m[id] = i + 1; });
+    return m;
+  }
+
+  // Ordered class-id array from a rank map, lowest rank first — the shape
+  // the picks API stores (rank = position). Gaps collapse on save (ranks
+  // 1 and 3 become 1 and 2), which keeps them ordinal.
+  function rankedIdsFrom(map) {
+    return Object.keys(map || {})
+      .map(function (id) { return { id: parseInt(id, 10), r: map[id] }; })
+      .sort(function (a, b) { return a.r - b.r; })
+      .map(function (x) { return x.id; });
+  }
+
+  // Give class `cid` exactly rank `newRank` (null = unrank). If another
+  // class already holds that number, the two SWAP (the other class takes
+  // cid's previous rank, or becomes unranked) — the user's chosen number
+  // always sticks (Erin, 2026-07-15: "the user should be able to select
+  // the order"). Pure — exercised directly by tests.
+  function applyRankChange(map, cid, newRank) {
+    var prev = map[cid] || null;
+    delete map[cid];
+    if (!newRank) return map;
+    for (var k in map) {
+      if (map[k] === newRank) {
+        if (prev) map[k] = prev; else delete map[k];
+        break;
+      }
+    }
+    map[cid] = newRank;
+    return map;
+  }
+
   function signupHourHtml(kid, hour, classes, canEdit, kidBands) {
-    var ranked = (_signup.working[kid] && _signup.working[kid][hour]) || [];
+    var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var maxRank = Math.min(4, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     if (classes.length === 0) {
@@ -4353,8 +4391,8 @@
     } else {
       h += '<div class="signup-classes">';
       classes.forEach(function (c) {
-        var idx = ranked.indexOf(c.id);
-        var sel = idx !== -1;
+        var myRank = rankMap[c.id] || null;
+        var sel = !!myRank;
         var ageText = signupAgeText(c);
         // null = age/range unknown (no judgement); true = fits; false = clearly outside.
         var fit = fitsKid(kidBands, ageText);
@@ -4368,7 +4406,7 @@
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
         h += '<option value="">–</option>';
         for (var r = 1; r <= maxRank; r++) {
-          h += '<option value="' + r + '"' + (sel && idx + 1 === r ? ' selected' : '') + '>' + r + '</option>';
+          h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
@@ -4444,27 +4482,16 @@
   function wireSignupCard() {
     var card = document.getElementById('classSignupCard');
     if (!card) return;
-    // Explicit rank pickers (Erin, 2026-07-15: user picks the ranking, not
-    // tap-order auto-assign). Choosing rank N inserts the class at that
-    // position; classes already at/below shift down.
+    // Explicit rank pickers (Erin, 2026-07-15: the user selects the order —
+    // the chosen number always sticks; a class already holding that number
+    // swaps to this one's previous rank).
     card.querySelectorAll('.signup-rank-sel').forEach(function (sel) {
       sel.addEventListener('change', function () {
         if (this.disabled) return;
         var kid = this.getAttribute('data-kid');
         var hour = this.getAttribute('data-hour');
         var cid = parseInt(this.getAttribute('data-class'), 10);
-        var arr = _signup.working[kid][hour];
-        var i = arr.indexOf(cid);
-        if (i !== -1) arr.splice(i, 1);
-        var v = this.value;
-        if (v) {
-          if (arr.length >= 4) {
-            alert('You can rank up to 4 choices per hour — remove one first.');
-            renderClassSignupCard();
-            return;
-          }
-          arr.splice(Math.min(parseInt(v, 10) - 1, arr.length), 0, cid);
-        }
+        applyRankChange(_signup.working[kid][hour], cid, this.value ? parseInt(this.value, 10) : null);
         renderClassSignupCard();
       });
     });
@@ -4568,11 +4595,13 @@
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
     var session = _signup.session;
     var w = _signup.working[kid];
+    // Rank maps → ordered arrays (the picks API stores rank = position).
+    var orderedIds = { PM1: rankedIdsFrom(w.PM1), PM2: rankedIdsFrom(w.PM2) };
     btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Saving…';
     function postHour(hour) {
       return fetch('/api/curriculum?action=class-signup-picks', {
         method: 'POST', headers: rwAuthHeaders(true),
-        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: w[hour], view_as: active })
+        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: orderedIds[hour], view_as: active })
       }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
     }
     postHour('PM1').then(function () { return postHour('PM2'); })
@@ -4582,7 +4611,7 @@
         // under Kids' Schedule take over; Edit reopens it), and re-render.
         // No refetch — another kid's in-progress rankings must survive.
         if (!_signup.picks) _signup.picks = {};
-        _signup.picks[kid] = { PM1: w.PM1.slice(), PM2: w.PM2.slice() };
+        _signup.picks[kid] = { PM1: orderedIds.PM1.slice(), PM2: orderedIds.PM2.slice() };
         setTimeout(function () {
           btn.disabled = false; btn.textContent = orig;
           _signupPickerOpen = false;
@@ -27004,7 +27033,9 @@
           // Useful for kids who use a different surname than the family unit.
           last_name: k.lastName && k.lastName !== fam.name ? k.lastName : '',
           nickname: k.nickname || '',
-          birth_date: k.birthDate || '',
+          // Defensive slice: a full ISO timestamp would render an EMPTY
+          // date input and the next save would wipe the birthday.
+          birth_date: k.birthDate ? String(k.birthDate).slice(0, 10) : '',
           pronouns: k.pronouns || '',
           allergies: k.allergies || '',
           schedule: k.schedule || 'all-day',

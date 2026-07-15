@@ -1159,6 +1159,19 @@ async function handleBillingPost(req, res) {
 // shape the client expects. Keeps photo_consent / photo_url / personal_email
 // in snake_case because the frontend save payload uses snake_case (matches
 // the EMI form field names) — readability over consistency here.
+// Normalize a birth_date to 'YYYY-MM-DD'. The driver may hand back a Date
+// object (DATE columns) or an ISO string; a raw Date leaks into the client
+// as a full ISO timestamp, which a <input type="date"> rejects — it renders
+// EMPTY and the next EMI save silently wipes the birthday. Local date parts
+// (not toISOString) so a UTC server doesn't shift the day.
+function isoDay(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2);
+  }
+  return String(v).slice(0, 10);
+}
+
 function shapePersonRow(r) {
   return {
     email:          String(r.email || '').toLowerCase(),
@@ -1332,7 +1345,7 @@ async function applyMemberProfileOverlay(families) {
       if (!ov) return;
       if (ov.pronouns) kid.pronouns = ov.pronouns;
       if (ov.allergies) kid.allergies = ov.allergies;
-      if (ov.birth_date) kid.birthDate = ov.birth_date;
+      if (ov.birth_date) kid.birthDate = isoDay(ov.birth_date);
       if (ov.schedule) kid.schedule = ov.schedule;
       if (ov.photo_url) kid.photoUrl = ov.photo_url;
       if (ov.last_name) kid.lastName = ov.last_name;
@@ -1356,7 +1369,7 @@ async function applyMemberProfileOverlay(families) {
           schedule: k.schedule || 'all-day',
           pronouns: k.pronouns || '',
           allergies: k.allergies || '',
-          birthDate: k.birth_date || '',
+          birthDate: isoDay(k.birth_date),
           photoUrl: k.photo_url || '',
           photo_consent: k.photo_consent !== false
         });
@@ -1901,8 +1914,8 @@ async function loadFamiliesFromProfiles(sql) {
     ORDER BY family_email, sort_order, email
   `;
   var kidRows = await sql`
-    SELECT family_email, first_name, last_name, nickname, pronouns, allergies,
-           schedule, class_group, photo_url, photo_consent, sort_order
+    SELECT family_email, first_name, last_name, nickname, birth_date, pronouns,
+           allergies, schedule, class_group, photo_url, photo_consent, sort_order
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
   `;
@@ -1924,6 +1937,10 @@ async function loadFamiliesFromProfiles(sql) {
       name: String(kr.first_name || '').trim(),
       lastName: String(kr.last_name || '').trim(),
       nickname: String(kr.nickname || ''),
+      // Missing birthDate here is what wiped sibling birthdays on dev:
+      // the EMI form seeded every kid's date input empty, so saving one
+      // kid's edit re-inserted the others with NULL (2026-07-15).
+      birthDate: isoDay(kr.birth_date),
       group: String(kr.class_group || ''),
       schedule: String(kr.schedule || 'all-day'),
       pronouns: String(kr.pronouns || ''),
