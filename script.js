@@ -8284,6 +8284,18 @@
         if (role === 'Treasurer') {
           h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
         }
+        if (role === 'Vice President') {
+          // Session placement gaps (Erin, 2026-07-15): adults with an
+          // uncovered hour + classes short on assistants. Painted by
+          // loadSignupTodos; clicks open list modals for placing people.
+          h += '<li id="ws-todo-vp-adults-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-adults"><span class="ws-link-count" id="ws-vp-adults-count">0</span><span class="ws-link-icon">🧑‍🏫</span><span id="ws-vp-adults-label">Place adults</span></button></li>';
+          h += '<li id="ws-todo-vp-assist-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-assist"><span class="ws-link-count" id="ws-vp-assist-count">0</span><span class="ws-link-icon">🤝</span><span id="ws-vp-assist-label">Fill assistant spots</span></button></li>';
+        }
+        if (role === 'Vice President' || role === 'Afternoon Class Liaison') {
+          // Kids without afternoon picks — the Afternoon Class Liaison
+          // shares this one with the VP.
+          h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
+        }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
           // Cleaning Crew Management (Erin, 2026-07-15). Painted by
@@ -8379,6 +8391,7 @@
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadRegInviteTodoCounts === 'function') loadRegInviteTodoCounts();
         if (typeof loadCleaningTodoCount === 'function') loadCleaningTodoCount();
+        if (typeof loadSignupTodos === 'function') loadSignupTodos();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
@@ -16862,6 +16875,9 @@
     }
     else if (action === 'membership-reginv-wait' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
     else if (action === 'cleaning-crew-manage' && typeof showCleaningManagementModal === 'function') showCleaningManagementModal();
+    else if (action === 'signup-todo-adults' && typeof showSignupTodoModal === 'function') showSignupTodoModal('adults');
+    else if (action === 'signup-todo-kids' && typeof showSignupTodoModal === 'function') showSignupTodoModal('kids');
+    else if (action === 'signup-todo-assist' && typeof showSignupTodoModal === 'function') showSignupTodoModal('assist');
   });
 
   // Render all coordination tabs
@@ -21905,6 +21921,76 @@
   // ── Cleaning Crew Liaison To Do: unassigned areas this session ─────
   // Counts cleaning areas (floater excluded) with no family assigned for
   // the current session; opens Cleaning Crew Management (Erin, 2026-07-15).
+  // Sign-up placement To Dos (Erin, 2026-07-15): adults with an uncovered
+  // hour + classes short on assistants (VP), kids without afternoon picks
+  // (VP + Afternoon Class Liaison). One fetch paints all three rows.
+  var _signupTodoState = null;
+  function loadSignupTodos() {
+    var anyItem = document.getElementById('ws-todo-vp-adults-item') || document.getElementById('ws-todo-kids-unpicked-item');
+    if (!anyItem) return; // not a VP / Afternoon Class Liaison tab
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    var sess = (_signup && _signup.session) || currentSession;
+    fetch('/api/curriculum?action=signup-todos&session=' + sess + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || d.error) return;
+        _signupTodoState = d;
+        function paint(itemId, countId, labelId, n, label) {
+          var item = document.getElementById(itemId);
+          if (!item) return;
+          var pill = document.getElementById(countId);
+          if (pill) pill.textContent = String(n);
+          var lbl = document.getElementById(labelId);
+          if (lbl) lbl.textContent = label;
+          item.hidden = n <= 0;
+        }
+        paint('ws-todo-vp-adults-item', 'ws-vp-adults-count', 'ws-vp-adults-label',
+          (d.adults_unplaced || []).length, 'Place adults — Session ' + d.session);
+        paint('ws-todo-kids-unpicked-item', 'ws-kids-unpicked-count', 'ws-kids-unpicked-label',
+          (d.kids_unpicked || []).length, 'Place kids in afternoon classes — Session ' + d.session);
+        paint('ws-todo-vp-assist-item', 'ws-vp-assist-count', 'ws-vp-assist-label',
+          (d.assistant_gaps || []).length, 'Fill assistant spots — Session ' + d.session);
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function (err) { console.warn('[loadSignupTodos] network error:', err); });
+  }
+
+  // List modal for one of the three sign-up To Dos.
+  function showSignupTodoModal(kind) {
+    var d = _signupTodoState;
+    if (!d) return;
+    var BLOCK_LABELS_ST = { AM1: 'AM Hour 1', AM2: 'AM Hour 2', PM1: 'PM Hour 1', PM2: 'PM Hour 2', AM: 'Morning', PM: 'Afternoon', both: 'Both PM hours' };
+    var title, subtitle, rowsHtml;
+    if (kind === 'adults') {
+      title = 'Place adults — Session ' + d.session;
+      subtitle = 'Main Learning Coaches with an uncovered hour' + (d.pm_approved ? '' : ' (morning only — the afternoon schedule isn’t approved yet)') + '. Use “Everyone’s sign-ups” on My Family, or assign them from the Roles Assignments views.';
+      rowsHtml = (d.adults_unplaced || []).map(function (a) {
+        return '<li><strong>' + escapeHtml(a.name) + '</strong> — needs: ' + escapeHtml((a.missing || []).map(function (b) { return BLOCK_LABELS_ST[b] || b; }).join(', ')) + '</li>';
+      }).join('');
+    } else if (kind === 'kids') {
+      title = 'Place kids in afternoon classes — Session ' + d.session;
+      subtitle = 'Kids with no afternoon picks yet. Nudge their families while sign-ups are open, or enter picks for them via View As.';
+      rowsHtml = (d.kids_unpicked || []).map(function (k) {
+        return '<li><strong>' + escapeHtml(k.name) + '</strong>' + (k.group ? ' <span class="ws-wv-context">' + escapeHtml(k.group) + '</span>' : '') + '</li>';
+      }).join('');
+    } else {
+      title = 'Fill assistant spots — Session ' + d.session;
+      subtitle = 'Classes still short of the assistants their teacher asked for.';
+      rowsHtml = (d.assistant_gaps || []).map(function (g) {
+        return '<li><strong>' + escapeHtml(g.class_name) + '</strong> <span class="ws-wv-context">' + escapeHtml(BLOCK_LABELS_ST[g.block] || g.block) + '</span> — needs ' + g.needs + ' more</li>';
+      }).join('');
+    }
+    renderReportModal({
+      title: title,
+      subtitle: subtitle,
+      bodyId: 'ws-signup-todo-body',
+      bodyPlaceholder: rowsHtml
+        ? '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + rowsHtml + '</ul>'
+        : '<p class="ws-empty">All caught up — nothing pending.</p>'
+    });
+  }
+
   function loadCleaningTodoCount() {
     var item = document.getElementById('ws-todo-cleaning-item');
     if (!item) return; // not the liaison's tab

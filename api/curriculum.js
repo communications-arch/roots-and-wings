@@ -1008,6 +1008,133 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // ── Sign-up To Dos (Erin, 2026-07-15) — VP + Afternoon Class Liaison ──
+      // Three placement gaps for one session: adults with an uncovered hour,
+      // kids without afternoon picks, and classes short on assistants.
+      if (action === 'signup-todos') {
+        const stReviewer = await isReviewerReq(user, req);
+        if (!stReviewer) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can view sign-up to-dos.' });
+        const stSess = parseInt(req.query.session, 10) || 1;
+        const stYear = activeSchoolYear(new Date());
+
+        const [stKids, stPicked, stCls, stHelpers, stSignups, stApproval] = await Promise.all([
+          sql`SELECT k.first_name, k.class_group, k.birth_date, LOWER(k.family_email) AS fam,
+                     COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
+                     COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+              FROM kids k
+              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)`,
+          sql`SELECT DISTINCT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
+              FROM class_signup_picks WHERE school_year = ${stYear} AND session_number = ${stSess}`,
+          sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
+                     LOWER(c.submitted_by_email) AS teacher_email,
+                     (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                       WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                          OR LOWER(p.personal_email) = LOWER(c.submitted_by_email) LIMIT 1) AS teacher_name
+              FROM class_submissions c
+              WHERE c.school_year = ${stYear} AND c.scheduled_session = ${stSess}
+                AND c.status IN ('scheduled', 'drafted')`,
+          sql`SELECT h.class_submission_id, LOWER(h.person_email) AS email, h.person_name, h.block
+              FROM class_assignment_helpers h
+              JOIN class_submissions c ON c.id = h.class_submission_id
+              WHERE c.school_year = ${stYear} AND c.scheduled_session = ${stSess}`,
+          sql`SELECT block, LOWER(person_email) AS email, person_name FROM volunteer_signups
+              WHERE school_year = ${stYear} AND session_number = ${stSess}`,
+          sql`SELECT approved_at FROM co_op_sessions
+              WHERE school_year = ${stYear} AND session_number = ${stSess}`
+        ]);
+        const stPmApproved = !!(stApproval.length && stApproval[0].approved_at);
+
+        // 1. Kids without afternoon picks (Greenhouse / under-3 never pick).
+        const stPickedSet = new Set(stPicked.map(r => r.fam + '|' + r.kid));
+        const kidsUnpicked = stKids.filter(k => {
+          if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
+          const age = ageFromBirthDate(k.birth_date);
+          if (age != null && age < 3) return false;
+          return !stPickedSet.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
+        }).map(k => ({
+          name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
+          group: k.class_group || ''
+        })).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Shared occupancy maps (mirrors volunteer-matrix semantics).
+        const stBlocksOf = r => r.class_period === 'AM'
+          ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+          : r.scheduled_hour === 'both' ? ['PM1', 'PM2']
+          : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        const stHelpersBySub = {};
+        stHelpers.forEach(h => {
+          (stHelpersBySub[h.class_submission_id] || (stHelpersBySub[h.class_submission_id] = [])).push(h);
+        });
+        // occupied['AM1'] = Set of emails + lowercased names committed that hour
+        const occupied = { AM1: new Set(), AM2: new Set(), PM1: new Set(), PM2: new Set() };
+        const mark = (b, email, name) => {
+          if (email) occupied[b].add(email);
+          const nl = String(name || '').trim().toLowerCase();
+          if (nl) occupied[b].add(nl);
+        };
+        stCls.forEach(r => {
+          const hs = stHelpersBySub[r.id] || [];
+          stBlocksOf(r).forEach(b => {
+            mark(b, r.teacher_email, r.teacher_name);
+            hs.forEach(h => { if (!h.block || h.block === b) mark(b, h.email, h.person_name); });
+          });
+        });
+        stSignups.forEach(s2 => {
+          (s2.block === 'AM' ? ['AM1', 'AM2'] : [s2.block]).forEach(b => {
+            if (occupied[b]) mark(b, s2.email, s2.person_name);
+          });
+        });
+
+        // 2. Adults (Main Learning Coaches) with an uncovered hour. PM hours
+        // only count once the session's afternoon schedule is approved.
+        const stMlcs = await sql`
+          SELECT LOWER(p.email) AS email, LOWER(p.personal_email) AS personal_email,
+                 NULLIF(TRIM(CONCAT_WS(' ', p.first_name, NULLIF(p.last_name, ''))), '') AS pname,
+                 p.first_name, mp.family_name
+          FROM people p
+          LEFT JOIN member_profiles mp ON mp.family_email = p.family_email
+          WHERE p.role = 'mlc'`;
+        const stExpected = stPmApproved ? ['AM1', 'AM2', 'PM1', 'PM2'] : ['AM1', 'AM2'];
+        const adultsUnplaced = [];
+        stMlcs.forEach(m => {
+          const fullName = (m.pname || ((m.first_name || '') + ' ' + (m.family_name || '')).trim()).toLowerCase();
+          const ids = [m.email, m.personal_email, fullName].filter(Boolean);
+          const missing = stExpected.filter(b => !ids.some(idv => occupied[b].has(idv)));
+          if (missing.length) {
+            adultsUnplaced.push({
+              name: m.pname || ((m.first_name || '') + ' ' + (m.family_name || '')).trim(),
+              missing
+            });
+          }
+        });
+        adultsUnplaced.sort((a, b) => a.name.localeCompare(b.name));
+
+        // 3. Classes short on assistants (per hour for whole-morning classes,
+        // once per class otherwise).
+        const assistantGaps = [];
+        stCls.forEach(r => {
+          const hs = stHelpersBySub[r.id] || [];
+          const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+          if (r.class_period === 'AM' && r.scheduled_hour !== 'AM1' && r.scheduled_hour !== 'AM2') {
+            ['AM1', 'AM2'].forEach(b => {
+              const n = hs.filter(h => !h.block || h.block === b).length;
+              if (wants - n > 0) assistantGaps.push({ class_name: r.class_name, block: b, needs: wants - n });
+            });
+          } else {
+            const gap = wants - hs.length;
+            if (gap > 0) assistantGaps.push({ class_name: r.class_name, block: r.scheduled_hour || (r.class_period === 'AM' ? 'AM' : 'PM'), needs: gap });
+          }
+        });
+        assistantGaps.sort((a, b) => a.class_name.localeCompare(b.class_name) || String(a.block).localeCompare(String(b.block)));
+
+        return res.status(200).json({
+          session: stSess, school_year: stYear, pm_approved: stPmApproved,
+          kids_unpicked: kidsUnpicked,
+          adults_unplaced: adultsUnplaced,
+          assistant_gaps: assistantGaps
+        });
+      }
+
       // ── Volunteer matrix (2026-07-11, Erin's session sign-up build) ──
       // One member-visible picture of a session: every placed class per
       // block (AM1 / AM2 / PM1 / PM2 — morning split per hour, Erin
