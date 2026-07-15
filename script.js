@@ -5133,13 +5133,16 @@
           var text = 'Covering: ' + (s.role_description || 'role');
           var detail = 'For ' + absentPerson + ' \u00b7 ' + dateLbl;
           // If the slot maps to a known class/elective, build a popup link.
+          // Use the absence's own session — loaded absences span the current
+          // session and every later one.
+          var covSess = parseInt(a.session_number, 10) || currentSession;
           var popup = null;
           if (s.block === 'AM' && s.group_or_class && AM_CLASSES[s.group_or_class]) {
-            popup = { type: 'amClass', group: s.group_or_class, session: currentSession };
+            popup = { type: 'amClass', group: s.group_or_class, session: covSess };
           } else if ((s.block === 'PM1' || s.block === 'PM2') && s.group_or_class) {
             popup = { type: 'elective', name: s.group_or_class };
           } else if (s.block === 'Cleaning' && s.group_or_class) {
-            popup = { type: 'cleaning', area: s.group_or_class, floor: s.group_or_class === 'Floater' ? 'floater' : '', session: currentSession };
+            popup = { type: 'cleaning', area: s.group_or_class, floor: s.group_or_class === 'Floater' ? 'floater' : '', session: covSess };
           }
           duties.push({ block: blk, icon: icon, text: text, detail: detail, popup: popup, isCoverage: true, slotId: s.id });
           if (blk === 'Cleaning') hasCleaning = true;
@@ -16768,17 +16771,6 @@
     var me = null;
     for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     if (!me) { alert('Could not find your family record.'); return; }
-    var coopDates = getCoopDatesInSession(currentSession);
-    if (coopDates.length === 0) { alert('No session dates available.'); return; }
-
-    var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
-
-    // Determine which blocks this person actually has duties in
-    var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
-    var allSlots = getResponsibilitiesForBlocks(parentNames, currentSession, allBlocks, me.name);
-    var activeBlocks = {};
-    allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
-    var hasAnyDuties = Object.keys(activeBlocks).length > 0;
 
     // Prefill (for Edit flow)
     var editingAbsenceId = prefill && prefill.id ? prefill.id : null;
@@ -16786,16 +16778,20 @@
     var prefillDate = prefill && prefill.absence_date ? String(prefill.absence_date).slice(0, 10) : null;
     var prefillBlocks = prefill && prefill.blocks && prefill.blocks.length ? prefill.blocks.slice() : null;
     var prefillNotes = prefill && prefill.notes ? String(prefill.notes) : '';
+    var prefillSession = prefill && prefill.session_number ? parseInt(prefill.session_number, 10) : null;
 
-    // If the prefilled date isn't in the current session window, surface it at the top
-    if (prefillDate && coopDates.indexOf(prefillDate) === -1) coopDates.unshift(prefillDate);
+    // Sessions you can report for: the current one plus every later one \u2014
+    // same Session-pills idea as the My Responsibilities sign-up strip.
+    // Editing an older absence keeps its original session selectable.
+    var sessionChoices = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; })
+      .filter(function (s) { return s >= currentSession; });
+    if (prefillSession && sessionChoices.indexOf(prefillSession) === -1) sessionChoices.unshift(prefillSession);
+    if (sessionChoices.length === 0) { alert('No session dates available.'); return; }
+    var selectedSession = (prefillSession && sessionChoices.indexOf(prefillSession) !== -1) ? prefillSession : sessionChoices[0];
 
+    var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
+    var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
     var blockLabelsModal = { AM: 'AM (10:00\u201312:00)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
-
-    // Which blocks should start checked?
-    var activeBlockList = allBlocks.filter(function (b) { return activeBlocks[b]; });
-    var initialChecked = prefillBlocks ? prefillBlocks.filter(function (b) { return activeBlocks[b]; }) : activeBlockList.slice();
-    var wholeDayChecked = activeBlockList.length > 0 && activeBlockList.every(function (b) { return initialChecked.indexOf(b) !== -1; });
 
     function escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -16808,37 +16804,23 @@
       html += '<option value="' + escAttr(name) + '"' + sel + '>' + name + '</option>';
     });
     html += '</select></div>';
-    html += '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
-    coopDates.forEach(function (d, idx) {
-      var isActive = prefillDate ? (d === prefillDate) : (idx === 0);
-      html += '<button class="absence-date-btn' + (isActive ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
-    });
-    html += '</div></div>';
-    html += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
-    if (hasAnyDuties) {
-      html += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
-      allBlocks.forEach(function (blk) {
-        if (activeBlocks[blk]) {
-          var checked = initialChecked.indexOf(blk) !== -1;
-          html += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
-        }
+    if (sessionChoices.length > 1) {
+      html += '<div class="absence-field"><label>Which session?</label><div style="display:inline-flex;gap:4px;flex-wrap:wrap;">';
+      sessionChoices.forEach(function (s) {
+        html += '<button type="button" class="sb-sess-chip absence-sess-chip' + (s === selectedSession ? ' sb-sess-match' : '') + '" data-sess="' + s + '" style="cursor:pointer;border:none;">S' + s + '</button>';
       });
-    } else {
-      html += '<em class="absence-no-slots">No session-specific duties on file for either parent \u2014 reporting this absence is informational, no coverage slots will be created.</em>';
-      // Still create a hidden checked block so the submit logic has something to send
-      html += '<input type="checkbox" class="absence-block-cb" value="AM" checked style="display:none;">';
+      html += '</div></div>';
     }
-    html += '</div></div>';
-    if (hasAnyDuties) {
-      html += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
-    }
+    // Dates + blocks + preview depend on the selected session (duties differ
+    // session to session), so they live in a re-renderable container.
+    html += '<div id="absenceDynamic"></div>';
     html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..." value="' + escAttr(prefillNotes) + '"></div>';
     html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">' + (editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out') + '</button>';
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
 
     var overlay = document.getElementById('absenceOverlay');
-    var selectedDate = (prefillDate && coopDates.indexOf(prefillDate) !== -1) ? prefillDate : coopDates[0];
+    var selectedDate = null;
     var selectedPerson = (prefillPerson && parentNames.indexOf(prefillPerson) !== -1) ? prefillPerson : parentNames[0];
 
     function getSelectedBlocks() {
@@ -16849,7 +16831,7 @@
     function updatePreview() {
       var previewEl = document.getElementById('absencePreview');
       if (!previewEl) return;
-      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], currentSession, getSelectedBlocks(), me.name);
+      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], selectedSession, getSelectedBlocks(), me.name);
       if (slotsPreview.length === 0) { previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>'; }
       else {
         var ph = '<ul class="absence-slot-list">';
@@ -16858,39 +16840,107 @@
       }
     }
 
+    function renderDynamic() {
+      var dyn = document.getElementById('absenceDynamic');
+      if (!dyn) return;
+      var isPrefillSession = selectedSession === (prefillSession || currentSession);
+      var coopDates = getCoopDatesInSession(selectedSession);
+      // Editing an absence whose date isn't on this session's calendar
+      // (legacy non-Wednesday dates) \u2014 surface it at the top.
+      if (prefillDate && isPrefillSession && coopDates.indexOf(prefillDate) === -1) coopDates.unshift(prefillDate);
+
+      // Which blocks does this family have duties in, for THIS session?
+      var allSlots = getResponsibilitiesForBlocks(parentNames, selectedSession, allBlocks, me.name);
+      var activeBlocks = {};
+      allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
+      var hasAnyDuties = Object.keys(activeBlocks).length > 0;
+      var activeBlockList = allBlocks.filter(function (b) { return activeBlocks[b]; });
+      var initialChecked = (prefillBlocks && isPrefillSession)
+        ? prefillBlocks.filter(function (b) { return activeBlocks[b]; })
+        : activeBlockList.slice();
+      var wholeDayChecked = activeBlockList.length > 0 && activeBlockList.every(function (b) { return initialChecked.indexOf(b) !== -1; });
+
+      var h = '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
+      if (coopDates.length === 0) {
+        h += '<em class="absence-no-slots">No co-op dates on the calendar for this session yet.</em>';
+      }
+      coopDates.forEach(function (d, idx) {
+        var isActive = (prefillDate && isPrefillSession) ? (d === prefillDate) : (idx === 0);
+        h += '<button class="absence-date-btn' + (isActive ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
+      });
+      h += '</div></div>';
+      h += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
+      if (hasAnyDuties) {
+        h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
+        allBlocks.forEach(function (blk) {
+          if (activeBlocks[blk]) {
+            var checked = initialChecked.indexOf(blk) !== -1;
+            h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
+          }
+        });
+      } else {
+        h += '<em class="absence-no-slots">No session-specific duties on file for either parent yet \u2014 this absence is recorded as a whole-day out. If you pick up responsibilities for this session later, coverage requests will be created automatically.</em>';
+        // Recorded as whole-day so the later slot backfill can reconcile
+        // against every block once responsibilities exist.
+        allBlocks.forEach(function (blk) {
+          h += '<input type="checkbox" class="absence-block-cb" value="' + blk + '" checked style="display:none;">';
+        });
+      }
+      h += '</div></div>';
+      if (hasAnyDuties) {
+        h += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
+      }
+      dyn.innerHTML = h;
+
+      selectedDate = null;
+      if (coopDates.length > 0) {
+        selectedDate = (prefillDate && isPrefillSession && coopDates.indexOf(prefillDate) !== -1) ? prefillDate : coopDates[0];
+      }
+
+      dyn.querySelectorAll('.absence-date-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          dyn.querySelectorAll('.absence-date-btn').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          selectedDate = btn.getAttribute('data-date');
+        });
+      });
+      var wholeDayCb = document.getElementById('absenceWholeDay');
+      if (wholeDayCb) {
+        wholeDayCb.addEventListener('change', function () {
+          dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
+          updatePreview();
+        });
+      }
+      dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          if (wholeDayCb) {
+            var allChecked = true;
+            dyn.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
+            wholeDayCb.checked = allChecked;
+          }
+          updatePreview();
+        });
+      });
+      updatePreview();
+    }
+
     document.getElementById('absenceCloseBtn').addEventListener('click', function () { overlay.remove(); });
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelectorAll('.absence-date-btn').forEach(function (btn) {
+    overlay.querySelectorAll('.absence-sess-chip').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        overlay.querySelectorAll('.absence-date-btn').forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        selectedDate = btn.getAttribute('data-date');
+        selectedSession = parseInt(btn.getAttribute('data-sess'), 10);
+        overlay.querySelectorAll('.absence-sess-chip').forEach(function (b) { b.classList.toggle('sb-sess-match', b === btn); });
+        renderDynamic();
       });
     });
     document.getElementById('absenceWho').addEventListener('change', function () { selectedPerson = this.value; updatePreview(); });
-    var wholeDayCb = document.getElementById('absenceWholeDay');
-    if (wholeDayCb) {
-      wholeDayCb.addEventListener('change', function () {
-        overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
-        updatePreview();
-      });
-    }
-    overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) {
-      cb.addEventListener('change', function () {
-        if (wholeDayCb) {
-          var allChecked = true;
-          overlay.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
-          wholeDayCb.checked = allChecked;
-        }
-        updatePreview();
-      });
-    });
     document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
       var submitBtn = document.getElementById('absenceSubmitBtn');
       if (submitBtn.disabled) return;
+      if (!selectedDate) { alert('Please pick a day.'); return; }
       var blocks = getSelectedBlocks();
       if (blocks.length === 0) { alert('Please select at least one block.'); return; }
-      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], currentSession, blocks, me.name);
+      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name);
       submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
       var cred = localStorage.getItem('rw_google_credential');
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
@@ -16900,7 +16950,7 @@
         return fetch('/api/absences', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: currentSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal })
+          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal })
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
       }
 
@@ -16927,7 +16977,7 @@
           return;
         }
         overlay.remove();
-        showSupplyToast(editingAbsenceId ? 'Absence updated' : 'Absence reported \u2014 coverage posted');
+        showSupplyToast(editingAbsenceId ? 'Absence updated' : (slotsToSend.length > 0 ? 'Absence reported \u2014 coverage posted' : 'Absence reported'));
         loadCoverageBoard();
         loadNotifications();
       }).catch(function (err) {
@@ -16936,13 +16986,16 @@
         submitBtn.textContent = originalLabel;
       });
     });
-    updatePreview();
+    renderDynamic();
   }
 
   function loadCoverageBoard() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    fetch('/api/absences?session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
+    // Current session AND every later one, so members can review/claim
+    // coverage for upcoming sessions (Session pills on the board) and
+    // absences entered ahead of time stay visible.
+    fetch('/api/absences?from_session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       var raw = data.absences || [];
@@ -16958,8 +17011,11 @@
     .catch(function (err) { console.error('Coverage fetch failed:', err); var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
   }
 
-  // Store loaded absences so responsibilities card can reference them
+  // Store loaded absences so responsibilities card can reference them.
+  // Holds the current session and everything after it (see loadCoverageBoard).
   var loadedAbsences = [];
+  // Which session the Coverage Board is showing; null = follow currentSession.
+  var coverageViewSession = null;
 
   function renderCoverageBoard(absences) {
     loadedAbsences = absences;
@@ -16996,7 +17052,8 @@
     }
     if (card) card.style.display = '';
 
-    // Count total open slots for the summary badge
+    // Count total open slots for the summary badge — across every loaded
+    // session, so the collapsed card still flags upcoming-session needs.
     var totalOpenAll = 0;
     absences.forEach(function (a) { (a.slots || []).forEach(function (s) { if (!s.claimed_by_email) totalOpenAll++; }); });
     var summaryBadge = document.getElementById('coverageSummaryBadge');
@@ -17010,9 +17067,46 @@
     for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
     var myName = me ? me.parents.split(' & ')[0].trim() + ' ' + me.name : '';
 
-    // Group absences by date
+    // Session pills — current + later sessions, same chip pattern as the
+    // My Responsibilities sign-up strip. Any session id that only exists in
+    // the data (defensive) still gets a pill so its absences stay reachable.
+    var pillSessions = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; })
+      .filter(function (s) { return s >= currentSession; });
+    absences.forEach(function (a) {
+      var s = parseInt(a.session_number, 10);
+      if (s && pillSessions.indexOf(s) === -1) pillSessions.push(s);
+    });
+    pillSessions.sort(function (a, b) { return a - b; });
+    var viewSess = (coverageViewSession && pillSessions.indexOf(coverageViewSession) !== -1) ? coverageViewSession : currentSession;
+    if (pillSessions.indexOf(viewSess) === -1) viewSess = pillSessions[0];
+
+    var html = '';
+    if (pillSessions.length > 1) {
+      html += '<div class="coverage-sess-row" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">';
+      pillSessions.forEach(function (s) {
+        var openCount = 0;
+        absences.forEach(function (a) {
+          if (parseInt(a.session_number, 10) !== s) return;
+          (a.slots || []).forEach(function (sl) { if (!sl.claimed_by_email) openCount++; });
+        });
+        html += '<button type="button" class="sb-sess-chip coverage-sess-chip' + (s === viewSess ? ' sb-sess-match' : '') + '" data-sess="' + s + '" style="cursor:pointer;border:none;">S' + s + (openCount > 0 ? ' · ' + openCount : '') + '</button>';
+      });
+      html += '</div>';
+    }
+
+    function wireSessionPills() {
+      el.querySelectorAll('.coverage-sess-chip').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          coverageViewSession = parseInt(btn.getAttribute('data-sess'), 10);
+          renderCoverageBoard(loadedAbsences);
+        });
+      });
+    }
+
+    // Group the viewed session's absences by date
     var byDate = {};
     absences.forEach(function (a) {
+      if (parseInt(a.session_number, 10) !== viewSess) return;
       var dateKey = String(a.absence_date || '').slice(0, 10);
       if (!byDate[dateKey]) byDate[dateKey] = [];
       byDate[dateKey].push(a);
@@ -17024,11 +17118,14 @@
     // render instead of silently being filtered into oblivion.
     var activeDates = Object.keys(byDate).sort();
     if (activeDates.length === 0) {
-      if (isVpUser) {
-        el.innerHTML = '<div class="coverage-empty">No absences reported for any upcoming co-op day this session.</div>';
-      } else if (card) {
-        card.style.display = 'none';
-      }
+      // Other sessions have absences (we returned above otherwise), so the
+      // card stays visible for everyone — just an empty selected session.
+      html += '<div class="coverage-empty">No absences reported for Session ' + viewSess + ' yet.</div>';
+      el.innerHTML = html;
+      wireSessionPills();
+      updateCoverageNotes();
+      renderMyAbsences();
+      syncMyAbsenceSlots();
       return;
     }
 
@@ -17041,7 +17138,7 @@
     }
 
     // Build tabs
-    var html = '<div class="portal-tab-nav coverage-tab-nav">';
+    html += '<div class="portal-tab-nav coverage-tab-nav">';
     activeDates.forEach(function (date) {
       var openCount = 0;
       (byDate[date] || []).forEach(function (a) { (a.slots || []).forEach(function (s) { if (!s.claimed_by_email) openCount++; }); });
@@ -17145,6 +17242,8 @@
 
     el.innerHTML = html;
 
+    wireSessionPills();
+
     // Wire tabs
     el.querySelectorAll('.coverage-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
@@ -17223,6 +17322,7 @@
     // Update responsibility coverage notes and my absences
     updateCoverageNotes();
     renderMyAbsences();
+    syncMyAbsenceSlots();
   }
 
   // ── VP: assign/reassign a coverage slot to any family ────────────────────
@@ -17300,27 +17400,31 @@
     if (!me) return;
     var parentFullNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
 
-    // Find which classes/electives I teach or assist
-    var myClasses = []; // { groupName, role }
-    Object.keys(AM_CLASSES).forEach(function (groupName) {
-      var sess = (AM_CLASSES[groupName].sessions || {})[currentSession];
-      if (!sess) return;
-      parentFullNames.forEach(function (full) {
-        if (nameMatchAbsence(sess.teacher, full) || (sess.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
-          myClasses.push(groupName);
-        }
+    // Find which classes/electives I teach or assist — per session, since
+    // loaded absences now span the current session and every later one.
+    var groupsBySession = {};
+    function myGroupsFor(sess) {
+      if (groupsBySession[sess]) return groupsBySession[sess];
+      var g = { classes: [], electives: [] };
+      Object.keys(AM_CLASSES).forEach(function (groupName) {
+        var s = (AM_CLASSES[groupName].sessions || {})[sess];
+        if (!s) return;
+        parentFullNames.forEach(function (full) {
+          if (nameMatchAbsence(s.teacher, full) || (s.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
+            g.classes.push(groupName);
+          }
+        });
       });
-    });
-    var myElectives = [];
-    (PM_ELECTIVES[currentSession] || []).forEach(function (elec) {
-      parentFullNames.forEach(function (full) {
-        if (nameMatchAbsence(elec.leader, full) || (elec.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
-          myElectives.push(elec.name);
-        }
+      (PM_ELECTIVES[sess] || []).forEach(function (elec) {
+        parentFullNames.forEach(function (full) {
+          if (nameMatchAbsence(elec.leader, full) || (elec.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
+            g.electives.push(elec.name);
+          }
+        });
       });
-    });
-
-    if (myClasses.length === 0 && myElectives.length === 0) { notesContainer.innerHTML = ''; return; }
+      groupsBySession[sess] = g;
+      return g;
+    }
 
     // Check if any absent person has a slot matching my classes/electives.
     // Skip absences where I'm the one out — those are already surfaced in
@@ -17328,10 +17432,11 @@
     var notes = [];
     loadedAbsences.forEach(function (a) {
       if (a.family_email === email) return;
+      var mg = myGroupsFor(parseInt(a.session_number, 10) || currentSession);
       (a.slots || []).forEach(function (slot) {
         var match = false;
-        if (myClasses.indexOf(slot.group_or_class) !== -1) match = true;
-        if (myElectives.indexOf(slot.group_or_class) !== -1) match = true;
+        if (mg.classes.indexOf(slot.group_or_class) !== -1) match = true;
+        if (mg.electives.indexOf(slot.group_or_class) !== -1) match = true;
         if (!match) return;
         var dateLabel = formatDateLabel(a.absence_date);
         if (slot.claimed_by_email) {
@@ -17370,7 +17475,8 @@
       html += '<div class="my-absence-row">';
       html += '<div class="my-absence-info">';
       html += '<strong>' + dateLabel + '</strong> \u00b7 ' + a.absent_person;
-      html += '<div class="my-absence-detail">' + blocks + statusText + '</div>';
+      var sessLbl = a.session_number ? 'Session ' + a.session_number + ' \u00b7 ' : '';
+      html += '<div class="my-absence-detail">' + sessLbl + blocks + statusText + '</div>';
       html += '</div>';
       html += '<div class="my-absence-actions">';
       html += '<button class="sc-btn my-absence-edit" data-absence-id="' + a.id + '">Edit</button>';
@@ -17446,10 +17552,76 @@
           absent_person: absence.absent_person,
           absence_date: absence.absence_date,
           blocks: absence.blocks,
-          notes: absence.notes
+          notes: absence.notes,
+          session_number: absence.session_number
         });
       });
     });
+  }
+
+  // ── Backfill coverage slots onto absences reported before responsibilities
+  // existed ─────────────────────────────────────────────────────────────────
+  // A member can enter dates to be out before they've picked (or been given)
+  // any responsibilities for that session — the absence saves with zero
+  // slots and no notification goes out. Whenever the board renders, diff
+  // each of MY family's upcoming absences against the responsibilities the
+  // schedule shows NOW; any missing slots are added via PATCH, and the
+  // server fires the deferred "Coverage Needed" notification the first time
+  // a slot-less absence gains slots. Only ever adds — existing slots
+  // (claimed or not) are never touched, so this is safe to re-run.
+  var _absenceSyncTried = {};
+  function syncMyAbsenceSlots() {
+    try {
+      if (isSummerBreak || !loadedAbsences || loadedAbsences.length === 0) return;
+      var email = getActiveEmail();
+      if (!email || !FAMILIES) return;
+      var me = null;
+      for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
+      if (!me) return;
+      var cred = localStorage.getItem('rw_google_credential');
+      if (!cred) return;
+      var todayIso = new Date().toISOString().slice(0, 10);
+      var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
+      function slotKey(s) { return s.block + '|' + s.role_type + '|' + s.role_description; }
+
+      var pending = [];
+      loadedAbsences.forEach(function (a) {
+        if (a.cancelled_at || a.family_email !== me.email) return;
+        var absDate = String(a.absence_date || '').slice(0, 10);
+        if (!absDate || absDate < todayIso) return;
+        // Zero-slot absences were recorded as informational whole-day outs,
+        // so reconcile them against every block; absences that already have
+        // slots stick to the blocks the member actually picked.
+        var blocks = (a.slots && a.slots.length > 0) ? (a.blocks || []) : allBlocks;
+        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name);
+        if (expected.length === 0) return;
+        var have = {};
+        (a.slots || []).forEach(function (s) { have[slotKey(s)] = true; });
+        var missing = expected.filter(function (s) { return !have[slotKey(s)]; });
+        if (missing.length === 0) return;
+        // One attempt per absence+diff; stops retry loops if the server
+        // rejects, while still allowing a NEW diff (another responsibility
+        // picked later) to sync.
+        var sig = a.id + ':' + missing.map(slotKey).sort().join(';');
+        if (_absenceSyncTried[sig]) return;
+        _absenceSyncTried[sig] = true;
+        pending.push(
+          fetch('/api/absences?id=' + encodeURIComponent(a.id), {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slots: missing })
+          }).then(function (r) { return r.ok; }).catch(function () { return false; })
+        );
+      });
+      if (pending.length === 0) return;
+      Promise.all(pending).then(function (results) {
+        if (results.some(Boolean)) {
+          showSupplyToast('Coverage requests created for your reported absences');
+          loadCoverageBoard();
+          loadNotifications();
+        }
+      });
+    } catch (e) { console.error('absence slot sync failed:', e); }
   }
 
   var notifState = { notifications: [], unreadCount: 0, dropdownOpen: false };

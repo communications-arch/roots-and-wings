@@ -1,8 +1,11 @@
 // Absences API
 //
-// GET    /api/absences?session=N  → all non-cancelled absences for a session with coverage slots
-// POST   /api/absences            → report an absence (creates coverage slots + notifications)
-// DELETE /api/absences?id=N       → cancel an absence (soft-delete)
+// GET    /api/absences?session=N       → all non-cancelled absences for a session with coverage slots
+// GET    /api/absences?from_session=N  → same, for session N and every later one (Coverage Board session pills)
+// POST   /api/absences                 → report an absence (creates coverage slots + notifications)
+// PATCH  /api/absences?id=N            → add missing coverage slots to an existing absence
+//                                        (responsibilities picked after the dates were reported)
+// DELETE /api/absences?id=N            → cancel an absence (soft-delete)
 
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
@@ -40,10 +43,45 @@ function getSql() {
 
 const VALID_BLOCKS = ['AM', 'PM1', 'PM2', 'Cleaning'];
 
+// Broadcast "Coverage Needed" to every member (in-app rows + push). Fired
+// when an absence is reported WITH slots, and again when a previously
+// slot-less absence gains its first slots via PATCH (the member picked up
+// responsibilities after entering their dates). Never fired for zero-slot
+// (informational) absences — no coverage needed means no notification.
+async function notifyCoverageNeeded(sql, absence, slotCount) {
+  const iso = String(absence.absence_date || '').slice(0, 10);
+  const dateLabel = new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const notifTitle = 'Coverage Needed — ' + dateLabel;
+  const notifBody = absence.absent_person + ' is out. ' + slotCount + ' slot' + (slotCount === 1 ? '' : 's') + ' need' + (slotCount === 1 ? 's' : '') + ' coverage.';
+
+  const allEmails = await sql`
+    SELECT DISTINCT user_email FROM push_subscriptions
+  `;
+  const recipientEmails = new Set(allEmails.map(r => r.user_email));
+  recipientEmails.add(absence.family_email);
+  for (const email of recipientEmails) {
+    await sql`
+      INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+      VALUES (${email}, 'coverage_needed', ${notifTitle}, ${notifBody}, '#coverage', ${absence.id})
+    `;
+  }
+
+  try {
+    await broadcastAll(sql, {
+      title: notifTitle,
+      body: notifBody,
+      tag: 'coverage-' + absence.id,
+      url: '/members.html#coverage'
+    });
+  } catch (pushErr) {
+    console.error('Push broadcast error:', pushErr);
+  }
+}
+
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -53,18 +91,27 @@ module.exports = async function handler(req, res) {
   try {
     const sql = getSql();
 
-    // ── GET: list absences for a session ──
+    // ── GET: list absences for a session (or a session + all later ones) ──
     if (req.method === 'GET') {
+      const fromSession = parseInt(req.query.from_session, 10);
       const session = parseInt(req.query.session, 10);
-      if (!session) return res.status(400).json({ error: 'session query param required' });
+      if (!fromSession && !session) return res.status(400).json({ error: 'session or from_session query param required' });
 
-      const absences = await sql`
-        SELECT id, family_email, family_name, absent_person, session_number, absence_date,
-               blocks, notes, created_by, created_at
-        FROM absences
-        WHERE session_number = ${session} AND cancelled_at IS NULL
-        ORDER BY absence_date, absent_person
-      `;
+      const absences = fromSession
+        ? await sql`
+            SELECT id, family_email, family_name, absent_person, session_number, absence_date,
+                   blocks, notes, created_by, created_at
+            FROM absences
+            WHERE session_number >= ${fromSession} AND cancelled_at IS NULL
+            ORDER BY session_number, absence_date, absent_person
+          `
+        : await sql`
+            SELECT id, family_email, family_name, absent_person, session_number, absence_date,
+                   blocks, notes, created_by, created_at
+            FROM absences
+            WHERE session_number = ${session} AND cancelled_at IS NULL
+            ORDER BY absence_date, absent_person
+          `;
       const absenceIds = absences.map(a => a.id);
       let slots = [];
       if (absenceIds.length > 0) {
@@ -124,6 +171,7 @@ module.exports = async function handler(req, res) {
       const absenceId = inserted[0].id;
 
       // Insert coverage slots
+      let insertedCount = 0;
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -134,39 +182,14 @@ module.exports = async function handler(req, res) {
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
           VALUES (${absenceId}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
         `;
+        insertedCount++;
       }
 
-      // Create notifications for all members
-      const dateLabel = new Date(absence_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const slotCount = slotsData.length;
-      const notifTitle = 'Coverage Needed — ' + dateLabel;
-      const notifBody = absent_person + ' is out. ' + slotCount + ' slot' + (slotCount === 1 ? '' : 's') + ' need' + (slotCount === 1 ? 's' : '') + ' coverage.';
-
-      // Get all unique member emails for broadcast notifications
-      const allEmails = await sql`
-        SELECT DISTINCT user_email FROM push_subscriptions
-      `;
-      // Also insert in-app notifications for all members who have push subs
-      // (plus the absent person's family)
-      const recipientEmails = new Set(allEmails.map(r => r.user_email));
-      recipientEmails.add(family_email);
-      for (const email of recipientEmails) {
-        await sql`
-          INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
-          VALUES (${email}, 'coverage_needed', ${notifTitle}, ${notifBody}, '#coverage', ${absenceId})
-        `;
-      }
-
-      // Send push notifications
-      try {
-        await broadcastAll(sql, {
-          title: notifTitle,
-          body: notifBody,
-          tag: 'coverage-' + absenceId,
-          url: '/members.html#coverage'
-        });
-      } catch (pushErr) {
-        console.error('Push broadcast error:', pushErr);
+      // Notify members — but only when there's actually something to cover.
+      // A zero-slot absence (no session duties on file) is informational;
+      // if duties appear later, PATCH below fires the notification then.
+      if (insertedCount > 0) {
+        await notifyCoverageNeeded(sql, { id: absenceId, absence_date, absent_person, family_email }, insertedCount);
       }
 
       // Return the full absence with slots
@@ -175,6 +198,67 @@ module.exports = async function handler(req, res) {
       const result = full[0];
       result.slots = fullSlots;
       return res.status(201).json({ absence: result });
+    }
+
+    // ── PATCH: add missing coverage slots to an existing absence ──
+    // Used when a member reported dates BEFORE picking responsibilities:
+    // once responsibilities exist for that session, the client diffs them
+    // against the absence's slots and sends the missing ones here. Only
+    // ever adds — existing slots (claimed or not) are never touched.
+    if (req.method === 'PATCH') {
+      const id = parseInt(req.query.id, 10);
+      if (!id) return res.status(400).json({ error: 'id query param required' });
+      const slotsData = Array.isArray((req.body || {}).slots) ? req.body.slots : [];
+      if (slotsData.length === 0) return res.status(400).json({ error: 'slots required' });
+
+      const rows = await sql`
+        SELECT id, family_email, absent_person, absence_date, created_by
+        FROM absences WHERE id = ${id} AND cancelled_at IS NULL
+      `;
+      if (rows.length === 0) return res.status(404).json({ error: 'Absence not found' });
+      const absence = rows[0];
+
+      // Same ownership rule as DELETE: creator, the absence's family
+      // (primary or co-parent), or the coverage admin.
+      const isOwner = absence.created_by === user.email
+        || absence.family_email === user.email
+        || (await canActAs(sql, user.email, absence.family_email));
+      if (!isOwner && !(await isVP(user.email))) {
+        return res.status(403).json({ error: 'Not authorized to update this absence' });
+      }
+
+      const existing = await sql`
+        SELECT block, role_type, role_description FROM coverage_slots WHERE absence_id = ${id}
+      `;
+      const seen = new Set(existing.map(s => s.block + '|' + s.role_type + '|' + s.role_description));
+      let added = 0;
+      for (const slot of slotsData) {
+        const block = String(slot.block || '').trim();
+        const role_type = String(slot.role_type || '').trim();
+        const role_description = String(slot.role_description || '').trim();
+        const group_or_class = String(slot.group_or_class || '').trim();
+        if (!block || !role_type || !role_description) continue;
+        if (!VALID_BLOCKS.includes(block)) continue;
+        const key = block + '|' + role_type + '|' + role_description;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await sql`
+          INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
+          VALUES (${id}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
+        `;
+        added++;
+      }
+
+      // The absence was reported silently (zero slots → no notification at
+      // POST time). Now that it needs coverage for the first time, tell
+      // everyone. Absences that already had slots were announced already —
+      // extra slots just appear on the board without re-pinging members.
+      if (added > 0 && existing.length === 0) {
+        await notifyCoverageNeeded(sql, absence, added);
+      }
+
+      const fullSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
+      return res.status(200).json({ ok: true, id, added, slots: fullSlots });
     }
 
     // ── DELETE: cancel an absence ──
