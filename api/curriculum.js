@@ -942,6 +942,7 @@ module.exports = async function handler(req, res) {
         const ciHelpers = await sql`SELECT person_name, person_email FROM class_assignment_helpers
           WHERE class_submission_id = ${ciId} ORDER BY sort_order`;
         let ciKids = [];
+        let ciKidsPending = false;
         if (ci.class_period === 'AM') {
           const ciGroup = String((ci.age_groups || [])[0] || '');
           if (ciGroup) {
@@ -950,7 +951,42 @@ module.exports = async function handler(req, res) {
                 AND LOWER(class_group) = LOWER(${ciGroup})
               ORDER BY kid_first_name`;
             ciKids = kidRows.map(r => r.kid_first_name);
+            // Placements not finalized yet — show the kids currently in the
+            // class's age group as the pending roster (Erin, 2026-07-15:
+            // "I'm not seeing the kids").
+            if (!ciKids.length) {
+              const pend = await sql`
+                SELECT COALESCE(NULLIF(nickname, ''), first_name) AS n FROM kids
+                WHERE LOWER(class_group) = LOWER(${ciGroup}) ORDER BY 1`;
+              ciKids = pend.map(r => r.n);
+              ciKidsPending = ciKids.length > 0;
+            }
           }
+        }
+        // Afternoon classes: who has ranked this class so far (1st/2nd
+        // choice + assistant flag) — pending the lottery.
+        let ciSignups = [];
+        if (ci.class_period === 'PM' && ci.scheduled_session) {
+          const suRows = await sql`
+            SELECT MIN(p.rank) AS pick_rank, BOOL_OR(p.as_assistant) AS as_assistant,
+                   COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
+                   COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+            FROM class_signup_picks p
+            JOIN kids k
+              ON LOWER(k.family_email) = LOWER(p.family_email)
+             AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+            LEFT JOIN member_profiles mp
+              ON LOWER(mp.family_email) = LOWER(p.family_email)
+            WHERE p.class_submission_id = ${ciId}
+              AND p.school_year = ${ci.school_year} AND p.session_number = ${ci.scheduled_session}
+            GROUP BY p.kid_first_name, LOWER(p.family_email), k.nickname, k.last_name, mp.family_name
+          `;
+          ciSignups = suRows.map(r => ({
+            name: ((r.display_first || '') + ' ' + (r.display_last || '')).trim(),
+            rank: parseInt(r.pick_rank, 10) || 1,
+            assistant: r.as_assistant === true
+          })).filter(s => s.name)
+            .sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name));
         }
         const ciWants = Math.min.apply(null, (ci.assistant_count && ci.assistant_count.length) ? ci.assistant_count : [1]);
         return res.status(200).json({
@@ -966,7 +1002,9 @@ module.exports = async function handler(req, res) {
             helpers_needed: Math.max(0, ciWants - ciHelpers.length),
             pre_enroll_kids: ci.pre_enroll_kids || ''
           },
-          kids: ciKids
+          kids: ciKids,
+          kids_pending: ciKidsPending,
+          signups: ciSignups
         });
       }
 

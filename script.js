@@ -3561,11 +3561,40 @@
         if (c.helpers_needed > 0) html += '<p class="ra-open-note" style="display:inline-block;">needs ' + c.helpers_needed + ' more assistant' + (c.helpers_needed === 1 ? '' : 's') + ' ⚠</p>';
         if (c.class_period === 'AM') {
           html += '<h4 style="margin:14px 0 4px;">Kids' + (d.kids.length ? ' (' + d.kids.length + ')' : '') + '</h4>';
+          // Pre-finalize, the group's current kids ARE the expected roster —
+          // show them with the pending caveat instead of an empty shrug.
+          if (d.kids.length && d.kids_pending) {
+            html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">Placements aren’t finalized yet — these are the kids currently in this group.</p>';
+          }
           html += d.kids.length
             ? '<p style="margin:0;color:var(--color-text-light);">' + d.kids.map(escapeHtml).join(', ') + '</p>'
             : '<p style="margin:0;color:var(--color-text-light);">Placements aren’t finalized yet.</p>';
-        } else if (c.pre_enroll_kids) {
-          html += '<h4 style="margin:14px 0 4px;">Pre-enrolled</h4><p style="margin:0;color:var(--color-text-light);">' + escapeHtml(c.pre_enroll_kids) + '</p>';
+        } else {
+          // Afternoon: who has ranked this class so far — 1st choices lead,
+          // 2nd choices below, assistants tagged; all pending the lottery.
+          var su = Array.isArray(d.signups) ? d.signups : [];
+          html += '<h4 style="margin:14px 0 4px;">Kids signed up so far' + (su.length ? ' (' + su.length + ')' : '') + '</h4>';
+          if (su.length) {
+            html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">All sign-ups are pending until the class lottery runs.</p>';
+            var suFirst = su.filter(function (s2) { return s2.rank === 1; });
+            var suRest = su.filter(function (s2) { return s2.rank !== 1; });
+            var suLi = function (s2) {
+              return '<li>' + escapeHtml(s2.name) + (s2.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
+            };
+            if (suFirst.length) {
+              html += '<div class="signup-detail-rankhead">1st choice</div>';
+              html += '<ul class="absence-slot-list signup-detail-list">' + suFirst.map(suLi).join('') + '</ul>';
+            }
+            if (suRest.length) {
+              html += '<div class="signup-detail-rankhead">2nd choice</div>';
+              html += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + suRest.map(suLi).join('') + '</ul>';
+            }
+          } else {
+            html += '<p style="margin:0;color:var(--color-text-light);">No sign-ups yet.</p>';
+          }
+          if (c.pre_enroll_kids) {
+            html += '<h4 style="margin:14px 0 4px;">Pre-enrolled</h4><p style="margin:0;color:var(--color-text-light);">' + escapeHtml(c.pre_enroll_kids) + '</p>';
+          }
         }
         if (roleWord && VOL_ROLE_BLURBS[roleWord]) {
           html += '<h4 style="margin:14px 0 4px;">Your role — ' + roleWord + '</h4><p style="margin:0;color:var(--color-text-light);">' + VOL_ROLE_BLURBS[roleWord] + '</p>';
