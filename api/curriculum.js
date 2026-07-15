@@ -1053,6 +1053,8 @@ module.exports = async function handler(req, res) {
           return !stPickedSet.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
         }).map(k => ({
           name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
+          first_name: k.first_name,
+          family_email: k.fam,
           group: k.class_group || ''
         })).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1103,6 +1105,7 @@ module.exports = async function handler(req, res) {
           if (missing.length) {
             adultsUnplaced.push({
               name: m.pname || ((m.first_name || '') + ' ' + (m.family_name || '')).trim(),
+              email: m.email || '',
               missing
             });
           }
@@ -1129,6 +1132,10 @@ module.exports = async function handler(req, res) {
 
         return res.status(200).json({
           session: stSess, school_year: stYear, pm_approved: stPmApproved,
+          // Placing FROM the To Do modal works via view_as, which the
+          // write endpoints only honor for canImpersonate callers (VP
+          // mailbox on prod; anyone on dev/preview).
+          can_place: canImpersonate(user.email),
           kids_unpicked: kidsUnpicked,
           adults_unplaced: adultsUnplaced,
           assistant_gaps: assistantGaps
@@ -1195,6 +1202,10 @@ module.exports = async function handler(req, res) {
           : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
         const blocks = { AM1: { classes: [], floaters: [], board: [], prep: [] }, AM2: { classes: [], floaters: [], board: [], prep: [] }, PM1: { classes: [], floaters: [], board: [], prep: [] }, PM2: { classes: [], floaters: [], board: [], prep: [] } };
         const mine = { AM1: null, AM2: null, PM1: null, PM2: null };
+        // Key classroom positions per hour (lead + co-leads + assistant
+        // spots). Support roles (floater/board/prep) only get whatever
+        // adults remain beyond these (Erin, 2026-07-15).
+        const keyNeeded = { AM1: 0, AM2: 0, PM1: 0, PM2: 0 };
         clsRows.forEach(r => {
           if (r.class_period !== 'AM' && !pmApproved) return;
           const hs = helpersBySub[r.id] || [];
@@ -1217,6 +1228,9 @@ module.exports = async function handler(req, res) {
               hour: r.scheduled_hour || ''
             };
             blocks[b].classes.push(entry);
+            keyNeeded[b] += 1
+              + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
+              + Math.max(wants, hsB.length);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
               mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
             }
@@ -1241,6 +1255,18 @@ module.exports = async function handler(req, res) {
             }
           });
         });
+        // Support-slot capacity per hour: adults (MLCs) minus the key
+        // classroom positions. Sent per block so the sign-up dropdowns can
+        // close floater/board/prep once every remaining adult is needed in
+        // a classroom.
+        const mlcCountRows = await sql`SELECT COUNT(*)::int AS n FROM people WHERE role = 'mlc'`;
+        const adultCount = mlcCountRows[0].n;
+        Object.keys(blocks).forEach(b => {
+          const bk = blocks[b];
+          bk.support_capacity = Math.max(0, adultCount - keyNeeded[b]);
+          bk.support_taken = bk.floaters.length + bk.board.length + bk.prep.length;
+        });
+
         const cleaning = cleanRows.map(c => ({ id: c.id, area: c.area_name, family: c.family_name }));
         // Open cleaning spots for self-serve sign-up (2026-07-11): every
         // non-floater area takes ONE family per session; the Floater area
@@ -1252,7 +1278,10 @@ module.exports = async function handler(req, res) {
             WHERE ca.cleaning_area_id = a.id AND ca.session_number = ${vmSess} AND ca.school_year = ${vmYear})
           ORDER BY a.sort_order, a.id`;
         const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floor: a.floor_key || '', floater: a.floor_key === 'floater' }));
-        return res.status(200).json({ school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open, me: { email: actingEmail, name: meName } });
+        return res.status(200).json({
+          school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open,
+          me: { email: actingEmail, name: meName, is_board: await isBoardMember(actingEmail) }
+        });
       }
 
       // Single submission fetch — owner or reviewer can view.
@@ -1606,6 +1635,12 @@ module.exports = async function handler(req, res) {
         if (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM1, AM2, PM1, or PM2' });
         if (['floater', 'board', 'prep'].indexOf(vsRole) === -1) return res.status(400).json({ error: 'role must be floater, board, or prep' });
         const vsEmail = actingEmailFor(user, req).toLowerCase();
+        // Board Duties is a board-member commitment (Erin, 2026-07-15) —
+        // the dropdown hides it for everyone else, and the server backs
+        // that up here.
+        if (vsRole === 'board' && !(await isBoardMember(vsEmail))) {
+          return res.status(403).json({ error: 'Board Duties is for board members.' });
+        }
         const vsPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${vsEmail} OR LOWER(personal_email) = ${vsEmail} LIMIT 1`;
         const vsName = vsPeople.length ? ((vsPeople[0].first_name || '') + ' ' + (vsPeople[0].last_name || '')).trim() : (user.name || vsEmail);
@@ -1633,6 +1668,31 @@ module.exports = async function handler(req, res) {
                            AND (LOWER(h.person_email) = ${vsEmail} OR LOWER(h.person_name) = LOWER(${vsName}))))
           LIMIT 1`;
         if (busy.length) return res.status(409).json({ error: 'You are already with “' + busy[0].class_name + '” that hour.' });
+        // Support capacity: floater/board/prep slots only exist for adults
+        // beyond the hour's key classroom positions — leads + co-leads +
+        // assistant spots (Erin, 2026-07-15).
+        const capCls = await sql`
+          SELECT scheduled_hour, class_period, co_teachers, assistant_count
+          FROM class_submissions
+          WHERE school_year = ${vsYear} AND scheduled_session = ${vsSess}
+            AND class_period = ${vsPeriod} AND status IN ('scheduled', 'drafted')`;
+        let keyNeededHour = 0;
+        capCls.forEach(r => {
+          const occ = r.class_period === 'AM'
+            ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+            : r.scheduled_hour === 'both' ? ['PM1', 'PM2'] : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+          if (occ.indexOf(vsBlock) === -1) return;
+          keyNeededHour += 1
+            + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
+            + Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+        });
+        const mlcRows = await sql`SELECT COUNT(*)::int AS n FROM people WHERE role = 'mlc'`;
+        const supportCapacity = Math.max(0, mlcRows[0].n - keyNeededHour);
+        const supportTaken = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
+          WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks})`;
+        if (supportTaken[0].n >= supportCapacity) {
+          return res.status(409).json({ error: 'Support slots for that hour are full — every remaining adult is needed to lead or assist a class.' });
+        }
         // Caps.
         const capCount = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
           WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks}) AND role = ${vsRole}`;

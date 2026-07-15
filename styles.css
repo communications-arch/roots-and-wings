@@ -6655,6 +6655,11 @@ button.staff-role:hover {
 .sc-save:hover {
   background: var(--color-primary-dark);
 }
+/* The row's Save proper follows the portal-wide primary-Save pattern —
+   filled Golden Yellow ("Gold owns action", matches .btn-primary).
+   Other .sc-save uses (Move & Delete confirm) keep the purple fill. */
+.sc-save.sc-save-btn { background: var(--color-accent); }
+.sc-save.sc-save-btn:hover { background: var(--color-accent-dark); }
 .sc-coord {
   font-size: 0.72rem;
   color: var(--color-text-light);
@@ -7969,14 +7974,16 @@ button.staff-role:hover {
   padding: 3px 10px;
   border-radius: 999px;
 }
+/* MCB filled primary (cell Save / Finalize) — Golden Yellow per the
+   portal-wide primary-action pattern (matches .btn-primary). */
 .sc-btn.mcb-primary {
-  background: var(--color-primary);
+  background: var(--color-accent);
   color: #fff;
-  border-color: var(--color-primary);
+  border-color: var(--color-accent);
 }
 .sc-btn.mcb-primary:hover {
-  background: var(--color-primary-dark);
-  border-color: var(--color-primary-dark);
+  background: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
 }
 .mcb-layout {
   display: grid;
@@ -8122,7 +8129,8 @@ button.staff-role:hover {
 .mcb-cell-panel { max-width: 420px; padding: 22px; }
 .mcb-cell-lbl { display: block; font-weight: 600; font-size: 0.82rem; margin: 12px 0 4px; color: var(--color-primary-dark); }
 .mcb-assist-input { margin-bottom: 6px; }
-.mcb-cell-actions { display: flex; gap: 8px; margin-top: 16px; }
+/* Editor footer — Save right-aligned per the portal-wide pattern. */
+.mcb-cell-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
 
 /* PM Schedule Builder helper inputs (Phase B2) — stacked member pickers. */
 .sbEditHelper { margin-bottom: 6px; }
@@ -8205,7 +8213,7 @@ button.staff-role:hover {
 .se-assists { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
 @media (max-width: 540px) { .se-assists { grid-template-columns: 1fr; } }
 .se-note { font-size: 0.76rem; color: var(--color-text-light); margin: 0 0 8px; }
-.se-people-save { margin-top: 4px; }
+/* .se-people-save spacing now comes from its .rd-btn-row wrapper. */
 
 /* ── Volunteer Assignments lenses (Roles Assignments, 2026-07-09) ──
    Read-only AM / PM-helper / Cleaning coverage views. Tables reuse the
@@ -9583,14 +9591,16 @@ button.staff-role:hover {
   border-color: var(--color-primary);
   color: var(--color-primary-dark);
 }
+/* Filled primary variant — Golden Yellow per the portal-wide
+   primary-action pattern (matches .btn-primary). */
 .cle-btn-save {
-  background: var(--color-primary);
+  background: var(--color-accent);
   color: var(--color-text-inverse);
-  border-color: var(--color-primary);
+  border-color: var(--color-accent);
 }
 .cle-btn-save:hover {
-  background: var(--color-primary-dark);
-  border-color: var(--color-primary-dark);
+  background: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
   color: var(--color-text-inverse);
 }
 
@@ -10112,8 +10122,18 @@ button.staff-role:hover {
   gap: 8px;
   margin-top: 14px;
 }
+/* Footer variant — the primary Save hugs the row's right edge, with
+   Cancel (when present) sitting to its LEFT as the secondary action.
+   Generic: add next to any flex action row (.rd-btn-row, .perm-chips,
+   …) that hosts a form's primary Save. */
+.rd-btn-row-end {
+  justify-content: flex-end;
+  align-items: center;
+}
+/* Primary Save — filled Golden Yellow per the portal-wide pattern
+   ("Purple leads identity, Gold owns action" — matches .btn-primary). */
 .rd-save-btn {
-  background: var(--color-primary);
+  background: var(--color-accent);
   color: var(--color-white);
   border: none;
   padding: 8px 20px;
@@ -10122,7 +10142,7 @@ button.staff-role:hover {
   font-weight: 600;
   font-size: 0.88rem;
 }
-.rd-save-btn:hover { opacity: 0.9; }
+.rd-save-btn:hover { background: var(--color-accent-dark); }
 .rd-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .rd-cancel-btn {
   background: var(--color-bg);
@@ -11299,6 +11319,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .merch-inv-edit-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end; /* Cancel left, Save right per the portal-wide pattern */
   gap: 10px;
 }
 .merch-inv-status {
@@ -12636,6 +12657,43 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 0 7px;
   margin-left: 4px;
 }
+/* Card title row with an action on the right (My Responsibilities'
+   "I'll Be Out", Erin 2026-07-15). The compact variant undoes
+   .btn-absence's full-width block treatment for header use. */
+.mf-card-title-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mf-card-title-flex > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.btn-absence-header {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.78rem;
+}
+/* Placement rows in the VP's sign-up To Do modals. */
+.st-place-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.st-place-row:last-child { border-bottom: none; }
+.st-place-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
+.st-place-slot .cl-input { max-width: 260px; font-weight: 400; }
 /* Pigeon "sign up as the class assistant" option on opted-in classes. */
 .signup-assist-opt {
   display: flex;
@@ -13328,6 +13386,7 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   bottom: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end; /* Save right-aligned per the portal-wide pattern */
   gap: 10px;
   margin-top: 12px;
   padding: 10px 2px;

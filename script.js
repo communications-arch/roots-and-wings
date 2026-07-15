@@ -1008,9 +1008,9 @@
     html += '<label class="rd-label">Responsibilities (one per line)</label>';
     html += '<textarea class="rd-textarea" id="rdEditDuties" rows="10">' + (role.duties || []).map(escapeHtml).join('\n') + '</textarea>';
     html += '<p class="rd-hint" style="font-size:0.85rem;color:#666;margin:8px 0 0;">"Last reviewed by" and date are stamped automatically when you save.</p>';
-    html += '<div class="rd-btn-row">';
-    html += '<button class="btn rd-save-btn" id="rdSaveBtn">Save</button>';
+    html += '<div class="rd-btn-row rd-btn-row-end">';
     html += '<button class="btn rd-cancel-btn" id="rdCancelBtn">Cancel</button>';
+    html += '<button class="btn rd-save-btn" id="rdSaveBtn">Save</button>';
     html += '</div>';
     html += '</div>';
 
@@ -1127,9 +1127,9 @@
       html += '<h3 class="rd-title">Edit Playbook</h3>';
       html += '<p class="rd-hint">Long-form guide for whoever holds this role. Timelines, instructions, troubleshooting, links\u2014anything the next person will need.</p>';
       html += '<div class="rd-playbook-editor-wrap"><div id="rpbQuill"></div></div>';
-      html += '<div class="rd-btn-row">';
-      html += '<button class="btn rd-save-btn" id="rpbSaveBtn">Save</button>';
+      html += '<div class="rd-btn-row rd-btn-row-end">';
       html += '<button class="btn rd-cancel-btn" id="rpbCancelBtn">Cancel</button>';
+      html += '<button class="btn rd-save-btn" id="rpbSaveBtn">Save</button>';
       html += '</div>';
       html += '</div>';
     }
@@ -4966,14 +4966,35 @@
            (spansBoth ? ' — fills both hours' : '') +
            (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
     });
+    // Support roles only get the adults left over after every key
+    // classroom position (lead + co-leads + assistant spots) could be
+    // covered (Erin, 2026-07-15). support_capacity comes from the matrix;
+    // older payloads without it just skip the gate.
+    var supportLeft = (typeof b.support_capacity === 'number')
+      ? Math.max(0, b.support_capacity - (b.floaters.length + b.board.length + b.prep.length))
+      : null;
+    var supportFull = supportLeft !== null && supportLeft <= 0;
+    // Unavailable support roles are HIDDEN, not greyed (Erin, 2026-07-15:
+    // the "(1/2)" caps and disabled rows read as noise). Each role keeps a
+    // 2-per-hour cap server-side; the overall capacity rule (adults minus
+    // key classroom positions) can close them all at once.
     var fl = b.floaters.length;
+    var flTag = fl > 0 ? ' · ' + fl + ' signed up' : '';
     if (blockKey.indexOf('AM') === 0) {
-      h += '<option value="floater"' + (fl >= 2 ? ' disabled' : '') + '>Floater — covers absences (' + fl + '/2)</option>';
-    } else {
-      h += '<option value="floater">Floater — covers absences (' + fl + ' so far)</option>';
+      if (fl < 2 && !supportFull) h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
+    } else if (!supportFull) {
+      h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
     }
-    h += '<option value="board"' + (b.board.length >= 2 ? ' disabled' : '') + '>Board Duties (' + b.board.length + '/2)</option>';
-    h += '<option value="prep"' + (b.prep.length >= 2 ? ' disabled' : '') + '>Prep Period (' + b.prep.length + '/2)</option>';
+    // Board Duties only offers itself to board members (Erin, 2026-07-15).
+    // d.me.is_board comes from the matrix; older payloads / test fixtures
+    // without it keep the option (server enforces regardless).
+    var showBoard = !(d.me && d.me.is_board === false);
+    if (showBoard && b.board.length < 2 && !supportFull) {
+      h += '<option value="board">Board Duties' + (b.board.length > 0 ? ' · ' + b.board.length + ' signed up' : '') + '</option>';
+    }
+    if (b.prep.length < 2 && !supportFull) {
+      h += '<option value="prep">Prep Period' + (b.prep.length > 0 ? ' · ' + b.prep.length + ' signed up' : '') + '</option>';
+    }
     return h;
   }
 
@@ -5186,16 +5207,31 @@
         var cred = localStorage.getItem('rw_google_credential');
         var isAssist = v.indexOf('assist:') === 0;
         var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + notifViewAsSuffix();
+        var pickedBlock = this.getAttribute('data-block');
         var body = isAssist
           // block rides along so assisting a whole-morning class from the
           // AM1/AM2 dropdown books just that hour (Erin, 2026-07-15).
-          ? { class_submission_id: parseInt(v.slice(7), 10), block: this.getAttribute('data-block') }
-          : { school_year: (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '', session: d.session, block: this.getAttribute('data-block'), role: v };
+          ? { class_submission_id: parseInt(v.slice(7), 10), block: pickedBlock }
+          : { school_year: (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '', session: d.session, block: pickedBlock, role: v };
         fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
           .then(function (res) {
             if (!res.ok) { showErr((res.data && res.data.error) || 'Could not sign up.'); sel.value = ''; return; }
             publishedSchedule.loaded = false; // helpers show on the schedule
+            // Picking AM Hour 1 defaults Hour 2 to the SAME thing (Erin,
+            // 2026-07-15) — best-effort, only when Hour 2 is still open;
+            // the ✕ on the Hour 2 row lets them swap it afterwards. A
+            // mirror that can't apply (hour-specific class, caps, support
+            // slots full) just leaves Hour 2 open — no error shown.
+            if (pickedBlock === 'AM1' && !(d.mine && d.mine.AM2)) {
+              var mirrorBody = isAssist
+                ? { class_submission_id: body.class_submission_id, block: 'AM2' }
+                : { school_year: body.school_year, session: d.session, block: 'AM2', role: v };
+              fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(mirrorBody) })
+                .catch(function () { /* best-effort */ })
+                .then(function () { reload(); });
+              return;
+            }
             reload();
           })
           .catch(function () { showErr('Network error — try again.'); sel.value = ''; });
@@ -5489,7 +5525,11 @@
 
     // ──── Responsibilities card (first on mobile) ────
     html += '<div class="mf-card">';
-    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-8.png" alt=""> My Responsibilities</h3>';
+    // "I'll Be Out" lives in the card header (Erin, 2026-07-15) — hidden
+    // during summer break like the rest of the absence machinery.
+    html += '<h3 class="mf-card-title mf-card-title-flex"><span><img class="brand-accent" src="brand/secondary/accent-8.png" alt=""> My Responsibilities</span>'
+      + (!isSummerBreak ? '<button class="btn btn-absence btn-absence-header" id="reportAbsenceBtn">I\'ll Be Out</button>' : '')
+      + '</h3>';
     var duties = [];
 
     // Match against the LOGGED-IN PERSON, not "any parent in this family".
@@ -6007,13 +6047,12 @@
     });
     html += '</div>';
 
-    // Coverage notes + "I'll Be Out" + My Absences — all hidden during
-    // summer break (no co-op days to be absent from or cover for).
+    // Coverage notes + My Absences — hidden during summer break (no co-op
+    // days to be absent from or cover for). The "I'll Be Out" button
+    // moved to the card header above (Erin, 2026-07-15).
     if (!isSummerBreak) {
       // Coverage notes area (populated after absences load)
       html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
-      // "I'll Be Out" button
-      html += '<button class="btn btn-absence" id="reportAbsenceBtn" data-has-cleaning="' + (hasCleaning ? '1' : '0') + '">I\'ll Be Out</button>';
       // My absences area (populated after absences load)
       html += '<div id="myAbsencesArea"></div>';
     }
@@ -15633,7 +15672,7 @@
 
     // Footer
     html += '<div class="cl-detail-actions">';
-    html += '<button class="cl-action-btn" id="cl-editor-save-btn">' + (isNew ? 'Create Plan' : 'Save Changes') + '</button>';
+    html += '<button class="btn btn-primary btn-sm" id="cl-editor-save-btn">' + (isNew ? 'Create Plan' : 'Save Changes') + '</button>';
     html += '</div>';
 
     return html;
@@ -19674,8 +19713,10 @@
         h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
       }
       h += '</div></div>';
-      h += '<button type="button" class="sc-btn se-people-save">Save lead &amp; assistants</button>';
+      h += '<div class="rd-btn-row rd-btn-row-end">';
+      h += '<button type="button" class="btn btn-primary btn-sm se-people-save">Save lead &amp; assistants</button>';
       h += '<span class="se-save-status" aria-live="polite"></span>';
+      h += '</div>';
       h += '</div>';
     });
     h += '</div>';
@@ -19895,7 +19936,7 @@
     h += '<div class="cls-field"><label class="cls-label">Task</label><input class="cl-input evs-f-title" type="text" maxlength="300" value="' + escapeAttr(task ? task.title : '') + '" placeholder="e.g. Order ice cream"></div>';
     h += '<div class="cls-field"><label class="cls-label">Assigned to (optional)</label><input class="cl-input evs-f-who" type="text" list="evsMemberList" value="' + escapeAttr(task ? (task.assigned_name || task.assigned_email) : '') + '" placeholder="Start typing a member’s name…"></div>';
     h += '<div class="cls-field"><label class="cls-label">Due date (optional)</label><input class="cl-input evs-f-due" type="date" value="' + escapeAttr(task && task.due_date ? task.due_date : '') + '"></div>';
-    h += '<div class="perm-chips" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-f-save">' + (isEdit ? 'Save changes' : 'Add task') + '</button><span class="perm-status evs-f-status" aria-live="polite"></span></div>';
+    h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-f-save">' + (isEdit ? 'Save changes' : 'Add task') + '</button><span class="perm-status evs-f-status" aria-live="polite"></span></div>';
     el.innerHTML = h;
     var titleInp = el.querySelector('.evs-f-title');
     if (titleInp) titleInp.focus();
@@ -19940,7 +19981,7 @@
     if (!el) return;
     var h = '<p class="ws-body-hint">One task per line. The template seeds this event’s planning list when a year starts from it — the current checklist isn’t changed by edits here.</p>';
     h += '<textarea class="cl-input cls-textarea evs-tpl-text" rows="12" placeholder="Order ice cream\nGet napkins & bowls\nLine up serving volunteers\nRequest topping donations">' + escapeHtmlWs((d.template_titles || []).join('\n')) + '</textarea>';
-    h += '<div class="perm-chips" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-tpl-save">Save template</button><span class="perm-status evs-tpl-status" aria-live="polite"></span></div>';
+    h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-tpl-save">Save template</button><span class="perm-status evs-tpl-status" aria-live="polite"></span></div>';
     el.innerHTML = h;
     el.querySelector('.evs-tpl-save').addEventListener('click', function () {
       var st = el.querySelector('.evs-tpl-status');
@@ -20732,7 +20773,7 @@
     h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(v.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
     h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="3" maxlength="2000">' + escapeHtmlWs(v.details || '') + '</textarea></div>';
     h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> 🌳 Outdoor space — needs an indoor rain backup when assigned</label>';
-    h += '<div class="perm-chips" style="margin-top:12px;">';
+    h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;">';
     h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (isEdit ? 'Save changes' : 'Add room') + '</button>';
     h += '<span class="perm-status fac-status" aria-live="polite"></span>';
     h += '</div>';
@@ -21925,69 +21966,186 @@
   // hour + classes short on assistants (VP), kids without afternoon picks
   // (VP + Afternoon Class Liaison). One fetch paints all three rows.
   var _signupTodoState = null;
+  // Aux data for placing FROM the modal: the volunteer matrix (adult slot
+  // options) and the class pools (kid picks), per session.
+  var _signupTodoAux = { session: null, matrix: null, classes: null };
+
+  function paintSignupTodoCounts() {
+    var d = _signupTodoState;
+    if (!d) return;
+    function paint(itemId, countId, labelId, n, label) {
+      var item = document.getElementById(itemId);
+      if (!item) return;
+      var pill = document.getElementById(countId);
+      if (pill) pill.textContent = String(n);
+      var lbl = document.getElementById(labelId);
+      if (lbl) lbl.textContent = label;
+      item.hidden = n <= 0;
+    }
+    paint('ws-todo-vp-adults-item', 'ws-vp-adults-count', 'ws-vp-adults-label',
+      (d.adults_unplaced || []).length, 'Place adults — Session ' + d.session);
+    paint('ws-todo-kids-unpicked-item', 'ws-kids-unpicked-count', 'ws-kids-unpicked-label',
+      (d.kids_unpicked || []).length, 'Place kids in afternoon classes — Session ' + d.session);
+    paint('ws-todo-vp-assist-item', 'ws-vp-assist-count', 'ws-vp-assist-label',
+      (d.assistant_gaps || []).length, 'Fill assistant spots — Session ' + d.session);
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  function fetchSignupTodos() {
+    var sess = (_signup && _signup.session) || currentSession;
+    return fetch('/api/curriculum?action=signup-todos&session=' + sess + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && !d.error) { _signupTodoState = d; paintSignupTodoCounts(); }
+        return d;
+      });
+  }
+
   function loadSignupTodos() {
     var anyItem = document.getElementById('ws-todo-vp-adults-item') || document.getElementById('ws-todo-kids-unpicked-item');
     if (!anyItem) return; // not a VP / Afternoon Class Liaison tab
-    var cred = localStorage.getItem('rw_google_credential');
-    if (!cred) return;
-    var sess = (_signup && _signup.session) || currentSession;
-    fetch('/api/curriculum?action=signup-todos&session=' + sess + notifViewAsSuffix(), { headers: rwAuthHeaders() })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) {
-        if (!d || d.error) return;
-        _signupTodoState = d;
-        function paint(itemId, countId, labelId, n, label) {
-          var item = document.getElementById(itemId);
-          if (!item) return;
-          var pill = document.getElementById(countId);
-          if (pill) pill.textContent = String(n);
-          var lbl = document.getElementById(labelId);
-          if (lbl) lbl.textContent = label;
-          item.hidden = n <= 0;
-        }
-        paint('ws-todo-vp-adults-item', 'ws-vp-adults-count', 'ws-vp-adults-label',
-          (d.adults_unplaced || []).length, 'Place adults — Session ' + d.session);
-        paint('ws-todo-kids-unpicked-item', 'ws-kids-unpicked-count', 'ws-kids-unpicked-label',
-          (d.kids_unpicked || []).length, 'Place kids in afternoon classes — Session ' + d.session);
-        paint('ws-todo-vp-assist-item', 'ws-vp-assist-count', 'ws-vp-assist-label',
-          (d.assistant_gaps || []).length, 'Fill assistant spots — Session ' + d.session);
-        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
-      })
-      .catch(function (err) { console.warn('[loadSignupTodos] network error:', err); });
+    if (!localStorage.getItem('rw_google_credential')) return;
+    fetchSignupTodos().catch(function (err) { console.warn('[loadSignupTodos] network error:', err); });
   }
 
-  // List modal for one of the three sign-up To Dos.
+  function fetchSignupTodoAux(kind) {
+    var d = _signupTodoState;
+    if (!d || !d.can_place) return Promise.resolve();
+    if (_signupTodoAux.session !== d.session) _signupTodoAux = { session: d.session, matrix: null, classes: null };
+    if (kind === 'adults') {
+      return fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent(d.school_year) + '&session=' + d.session, { headers: rwAuthHeaders() })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) { if (m && !m.error) _signupTodoAux.matrix = m; });
+    }
+    if (kind === 'kids') {
+      return fetch('/api/curriculum?action=class-signup&session=' + d.session, { headers: rwAuthHeaders() })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (c) { if (c && !c.error) _signupTodoAux.classes = c.classes || null; });
+    }
+    return Promise.resolve();
+  }
+
+  // List modal for one of the three sign-up To Dos. Adults + kids allow
+  // placing right from the list (Erin, 2026-07-15) — writes ride view_as,
+  // which the server only honors for canImpersonate callers (can_place).
   function showSignupTodoModal(kind) {
     var d = _signupTodoState;
     if (!d) return;
+    var titles = {
+      adults: 'Place adults — Session ' + d.session,
+      kids: 'Place kids in afternoon classes — Session ' + d.session,
+      assist: 'Fill assistant spots — Session ' + d.session
+    };
+    var subtitles = {
+      adults: 'Main Learning Coaches with an uncovered hour' + (d.pm_approved ? '' : ' (morning only — the afternoon schedule isn’t approved yet)') + (d.can_place ? '. Pick a spot to place them on the spot.' : '.'),
+      kids: 'Kids with no afternoon picks yet.' + (d.can_place ? ' Pick classes for them right here — their family can refine the ranking later.' : ' Nudge their families while sign-ups are open.'),
+      assist: 'Classes still short of the assistants their teacher asked for. Place adults from the “Place adults” list.'
+    };
+    renderReportModal({
+      title: titles[kind],
+      subtitle: subtitles[kind],
+      bodyId: 'ws-signup-todo-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    renderSignupTodoBody(kind);
+    fetchSignupTodoAux(kind).then(function () { renderSignupTodoBody(kind); });
+  }
+
+  function renderSignupTodoBody(kind) {
+    var body = document.getElementById('ws-signup-todo-body');
+    var d = _signupTodoState;
+    if (!body || !d) return;
     var BLOCK_LABELS_ST = { AM1: 'AM Hour 1', AM2: 'AM Hour 2', PM1: 'PM Hour 1', PM2: 'PM Hour 2', AM: 'Morning', PM: 'Afternoon', both: 'Both PM hours' };
-    var title, subtitle, rowsHtml;
+    var h = '';
     if (kind === 'adults') {
-      title = 'Place adults — Session ' + d.session;
-      subtitle = 'Main Learning Coaches with an uncovered hour' + (d.pm_approved ? '' : ' (morning only — the afternoon schedule isn’t approved yet)') + '. Use “Everyone’s sign-ups” on My Family, or assign them from the Roles Assignments views.';
-      rowsHtml = (d.adults_unplaced || []).map(function (a) {
-        return '<li><strong>' + escapeHtml(a.name) + '</strong> — needs: ' + escapeHtml((a.missing || []).map(function (b) { return BLOCK_LABELS_ST[b] || b; }).join(', ')) + '</li>';
+      var canPickAdult = d.can_place && _signupTodoAux.matrix;
+      h = (d.adults_unplaced || []).map(function (a) {
+        var row = '<div class="st-place-row"><strong>' + escapeHtml(a.name) + '</strong>';
+        if (canPickAdult && a.email) {
+          (a.missing || []).forEach(function (b) {
+            row += '<label class="st-place-slot">' + (BLOCK_LABELS_ST[b] || b) +
+              '<select class="cl-input st-place-adult" data-email="' + escapeHtml(a.email) + '" data-block="' + b + '">' +
+              volSlotOptionsHtml(b, _signupTodoAux.matrix) + '</select></label>';
+          });
+        } else {
+          row += ' <span class="ws-wv-context">needs: ' + escapeHtml((a.missing || []).map(function (b) { return BLOCK_LABELS_ST[b] || b; }).join(', ')) + '</span>';
+        }
+        return row + '</div>';
       }).join('');
     } else if (kind === 'kids') {
-      title = 'Place kids in afternoon classes — Session ' + d.session;
-      subtitle = 'Kids with no afternoon picks yet. Nudge their families while sign-ups are open, or enter picks for them via View As.';
-      rowsHtml = (d.kids_unpicked || []).map(function (k) {
-        return '<li><strong>' + escapeHtml(k.name) + '</strong>' + (k.group ? ' <span class="ws-wv-context">' + escapeHtml(k.group) + '</span>' : '') + '</li>';
+      var pools = _signupTodoAux.classes;
+      var canPickKid = d.can_place && pools;
+      function classOpts(hour) {
+        var list = (pools && pools[hour]) || [];
+        return '<option value="">— pick… —</option>' + list.map(function (c) {
+          return '<option value="' + c.id + '">' + escapeHtml(c.name) + (c.hour === 'both' ? ' (2-hour)' : '') + '</option>';
+        }).join('');
+      }
+      h = (d.kids_unpicked || []).map(function (k) {
+        var row = '<div class="st-place-row"><strong>' + escapeHtml(k.name) + '</strong>' +
+          (k.group ? ' <span class="ws-wv-context">' + escapeHtml(k.group) + '</span>' : '');
+        if (canPickKid) {
+          row += '<label class="st-place-slot">PM 1<select class="cl-input st-kid-pm1">' + classOpts('PM1') + '</select></label>';
+          row += '<label class="st-place-slot">PM 2<select class="cl-input st-kid-pm2">' + classOpts('PM2') + '</select></label>';
+          row += '<button type="button" class="btn btn-primary btn-sm st-kid-save" data-fam="' + escapeHtml(k.family_email) + '" data-kid="' + escapeHtml(k.first_name) + '">Save</button>';
+        }
+        return row + '</div>';
       }).join('');
     } else {
-      title = 'Fill assistant spots — Session ' + d.session;
-      subtitle = 'Classes still short of the assistants their teacher asked for.';
-      rowsHtml = (d.assistant_gaps || []).map(function (g) {
+      h = '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + (d.assistant_gaps || []).map(function (g) {
         return '<li><strong>' + escapeHtml(g.class_name) + '</strong> <span class="ws-wv-context">' + escapeHtml(BLOCK_LABELS_ST[g.block] || g.block) + '</span> — needs ' + g.needs + ' more</li>';
-      }).join('');
+      }).join('') + '</ul>';
     }
-    renderReportModal({
-      title: title,
-      subtitle: subtitle,
-      bodyId: 'ws-signup-todo-body',
-      bodyPlaceholder: rowsHtml
-        ? '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + rowsHtml + '</ul>'
-        : '<p class="ws-empty">All caught up — nothing pending.</p>'
+    body.innerHTML = h || '<p class="ws-empty">All caught up — nothing pending.</p>';
+
+    function refreshAfterPlace() {
+      Promise.all([fetchSignupTodos(), fetchSignupTodoAux(kind)]).then(function () {
+        if (document.getElementById('ws-signup-todo-body')) renderSignupTodoBody(kind);
+      });
+    }
+    body.querySelectorAll('.st-place-adult').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var v = this.value;
+        if (!v) return;
+        var email = this.getAttribute('data-email');
+        var block = this.getAttribute('data-block');
+        var isAssist = v.indexOf('assist:') === 0;
+        var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + '&view_as=' + encodeURIComponent(email);
+        var payload = isAssist
+          ? { class_submission_id: parseInt(v.slice(7), 10), block: block }
+          : { school_year: _signupTodoState.school_year, session: _signupTodoState.session, block: block, role: v };
+        var selEl = this;
+        selEl.disabled = true;
+        fetch(url, { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not place them.'); selEl.disabled = false; selEl.value = ''; return; }
+            refreshAfterPlace();
+          })
+          .catch(function () { alert('Network error — try again.'); selEl.disabled = false; });
+      });
+    });
+    body.querySelectorAll('.st-kid-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = this.closest('.st-place-row');
+        var pm1 = row.querySelector('.st-kid-pm1').value;
+        var pm2 = row.querySelector('.st-kid-pm2').value;
+        if (!pm1 && !pm2) { alert('Pick at least one class first.'); return; }
+        var fam = this.getAttribute('data-fam');
+        var kid = this.getAttribute('data-kid');
+        var self = this;
+        self.disabled = true; self.textContent = 'Saving…';
+        function postHour(hour, cid) {
+          if (!cid) return Promise.resolve();
+          return fetch('/api/curriculum?action=class-signup-picks', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ session: _signupTodoState.session, hour: hour, kid_first_name: kid, ranked_class_ids: [parseInt(cid, 10)], view_as: fam })
+          }).then(function (r) { return r.json().then(function (x) { if (!r.ok) throw new Error((x && x.error) || 'Save failed'); }); });
+        }
+        postHour('PM1', pm1).then(function () { return postHour('PM2', pm2); })
+          .then(function () { refreshAfterPlace(); })
+          .catch(function (e2) { alert(e2.message || 'Could not save picks.'); self.disabled = false; self.textContent = 'Save'; });
+      });
     });
   }
 
@@ -22622,7 +22780,7 @@
         if (r.kind === 'session') {
           if (sessEditing) {
             h += '<td class="coop-cal-actions" style="white-space:nowrap;">'
-              + '<button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button>'
+              + '<button type="button" class="btn btn-primary btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button>'
               + (e.event_date ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-canceledit" data-sess-num="' + r.sessNum + '">Cancel</button>' : '')
               + '</td>';
           } else if (sessEditable) {
@@ -22635,7 +22793,7 @@
         } else if (r.kind === 'special') {
           if (canSE && r.seRow) {
             h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
-            if (!r.autoDate) h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
+            if (!r.autoDate) h += '<button type="button" class="btn btn-primary btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
             else h += '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span> ';
             h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '">' + (r.seRow.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
             // Custom (non-seeded) special events can be removed; the
@@ -24878,7 +25036,7 @@
     h += amAssistInputHtml('');
     h += '</div>';
     h += '<button type="button" class="ws-inline-link" id="mcbAddAssist">+ add another assistant</button>';
-    h += '<div class="mcb-cell-actions"><button type="button" class="sc-btn mcb-primary" id="mcbCellSave">Save</button><button type="button" class="sc-btn" id="mcbCellCancel">Cancel</button></div>';
+    h += '<div class="mcb-cell-actions"><button type="button" class="sc-btn" id="mcbCellCancel">Cancel</button><button type="button" class="sc-btn mcb-primary" id="mcbCellSave">Save</button></div>';
     h += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
     var ov = document.getElementById('mcbCellOverlay');
@@ -26543,7 +26701,7 @@
     (scheduleBuilderState.members || []).forEach(function (mm) { hHtml += '<option value="' + escClsAttr(mm.name) + '"></option>'; });
     hHtml += '</datalist>';
     hHtml += '<div class="cls-actions" style="justify-content:flex-start;flex-wrap:wrap;margin-top:8px;">';
-    hHtml += '<button type="button" class="sc-btn" id="sbFormSaveHelpers">Save helpers</button>';
+    hHtml += '<button type="button" class="btn btn-primary btn-sm" id="sbFormSaveHelpers">Save helpers</button>';
     hHtml += '<button type="button" class="sc-btn sc-btn-del" id="sbFormUnsched">Send back to Inbox</button>';
     hHtml += '<button type="button" class="sc-btn sc-btn-del" id="sbFormDelete">Delete Class</button>';
     hHtml += '<span class="perm-status" id="sbFormStatus" aria-live="polite"></span>';
@@ -27681,8 +27839,8 @@
       html += '</div>';
 
       html += '<div class="rd-btn-row emi-btn-row">';
-      html += '<button type="button" class="rd-save-btn" id="emiSaveBtn">Save changes</button>';
       html += '<button type="button" class="rd-cancel-btn" id="emiCancelBtn">Cancel</button>';
+      html += '<button type="button" class="rd-save-btn" id="emiSaveBtn">Save changes</button>';
       html += '</div>';
       html += '</div>';
 
