@@ -12537,9 +12537,27 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-white);
+}
+/* Explicit rank picker (– / 1–4) — replaces the tap-order rank badge. */
+.signup-rank-sel {
+  flex-shrink: 0;
+  width: 48px;
+  padding: 4px 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: center;
+  background: var(--color-white);
+  color: var(--color-text);
   cursor: pointer;
 }
-.signup-class:disabled { cursor: default; opacity: 0.75; }
+.signup-rank-sel:disabled { cursor: default; opacity: 0.75; }
+.signup-class-sel .signup-rank-sel {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
 /* Age-fit highlighting — fit gets a green accent, clear mismatches recede.
    Defined before .signup-class-sel so the selected (purple) state wins. */
 .signup-class-fit { border-color: #5a9e63; background: rgba(90, 158, 99, 0.09); }

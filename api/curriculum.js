@@ -1167,18 +1167,33 @@ module.exports = async function handler(req, res) {
             AND class_period = 'PM'
           ORDER BY class_name
         `;
-        // How many kids have this class in their picks right now (any rank,
-        // across all families) — surfaces demand next to max_students on the
+        // Who has this class in their picks right now (any rank, across all
+        // families) — surfaces demand + names next to max_students on the
         // parent card. Distinct per kid so re-ranking doesn't double count.
-        const countRows = await sql`
-          SELECT class_submission_id,
-                 COUNT(DISTINCT (LOWER(family_email) || '|' || kid_first_name))::int AS kids
-          FROM class_signup_picks
-          WHERE school_year = ${sy} AND session_number = ${session}
-          GROUP BY class_submission_id
+        // Display name = the kid's "goes by" nickname (or first name) + the
+        // family surname; placement itself happens at the lottery.
+        const pickKidRows = await sql`
+          SELECT DISTINCT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
+                 COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
+                 COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+          FROM class_signup_picks p
+          LEFT JOIN kids k
+            ON LOWER(k.family_email) = LOWER(p.family_email)
+           AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+          LEFT JOIN member_profiles mp
+            ON LOWER(mp.family_email) = LOWER(p.family_email)
+          WHERE p.school_year = ${sy} AND p.session_number = ${session}
         `;
         const pickCounts = {};
-        countRows.forEach(r => { pickCounts[r.class_submission_id] = r.kids; });
+        const pickNames = {};
+        pickKidRows.forEach(r => {
+          const id = r.class_submission_id;
+          pickCounts[id] = (pickCounts[id] || 0) + 1;
+          const nm = (r.display_first + ' ' + (r.display_last || '')).trim();
+          if (!pickNames[id]) pickNames[id] = [];
+          if (nm) pickNames[id].push(nm);
+        });
+        Object.keys(pickNames).forEach(id => pickNames[id].sort());
         const ser = (r) => ({
           id: r.id, name: r.class_name, hour: r.scheduled_hour,
           // scheduled_age_range is the reviewer's free-text override; most
@@ -1189,7 +1204,8 @@ module.exports = async function handler(req, res) {
           description: r.description || '',
           room: r.scheduled_room || '',
           leader: r.submitted_by_name || '', max: r.max_students || 0,
-          signedUp: pickCounts[r.id] || 0
+          signedUp: pickCounts[r.id] || 0,
+          signedUpNames: pickNames[r.id] || []
         });
         // A 2-hour ('both') class is ranked under PM1 only and fills both slots.
         const classes = {
@@ -1200,19 +1216,23 @@ module.exports = async function handler(req, res) {
         const fam = await resolveFamily(sql, effEmail);
         let kids = [];
         const kidAges = {};
+        const kidGroups = {};
         const picks = {};
         if (fam && fam.family_email) {
           const kidRows = await sql`
-            SELECT first_name, birth_date FROM kids
+            SELECT first_name, birth_date, class_group FROM kids
             WHERE LOWER(family_email) = LOWER(${fam.family_email})
             ORDER BY sort_order, first_name
           `;
           kids = kidRows.map(k => k.first_name).filter(Boolean);
           // Current age per kid so the parent card can flag age-appropriate
-          // classes. Keyed by first name (same key as picks/working).
+          // classes. Keyed by first name (same key as picks/working). The
+          // class group rides along as the fallback when there's no birth
+          // date on file (the card derives an age band from the group).
           kidRows.forEach(k => {
             const age = ageFromBirthDate(k.birth_date);
             if (k.first_name && age != null) kidAges[k.first_name] = age;
+            if (k.first_name && k.class_group) kidGroups[k.first_name] = k.class_group;
           });
           const pickRows = await sql`
             SELECT kid_first_name, hour, class_submission_id
@@ -1229,7 +1249,7 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           school_year: sy, session,
           window: winRows[0] || { status: null },
-          classes, kids, kidAges, picks,
+          classes, kids, kidAges, kidGroups, picks,
           is_reviewer: reviewer
         });
       }

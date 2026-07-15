@@ -4154,6 +4154,11 @@
     if (groupName === 'Teens') lookupName = 'Pigeons';
     var cls = AM_CLASSES[lookupName];
     if (cls && cls.ages) return displayName + ' (' + cls.ages + ')';
+    // Sheet-era AM_CLASSES carries per-group ages; DB-first seasons often
+    // don't. Fall back to the canonical age-group labels so rosters and
+    // the View Classmates modal still show the range (Erin, 2026-07-15).
+    var lbl = AGE_GROUP_LABELS[String(lookupName || '').toLowerCase()];
+    if (lbl && lbl.indexOf('(') !== -1) return displayName + ' ' + lbl.slice(lbl.indexOf('('));
     return displayName;
   }
 
@@ -4234,32 +4239,20 @@
     if (status !== 'open' || !withinDates) { card.style.display = 'none'; return; }
     card.style.display = '';
     // While sign-ups are live, the card jumps to the TOP of My Family so
-    // parents land on it (Erin, 2026-07-15). It's appended at the bottom
-    // on creation; non-open states never show it, so only this path moves it.
+    // parents land on it (Erin, 2026-07-15) — but always BELOW the
+    // "Viewing as" banner when a super user is impersonating, so the
+    // impersonation context stays the first thing on the page.
     var gridEl = document.getElementById('myFamilyGrid');
-    if (gridEl && card.parentNode === gridEl && gridEl.firstChild !== card) {
-      gridEl.insertBefore(card, gridEl.firstChild);
+    if (gridEl && card.parentNode === gridEl) {
+      var viewAsBar = gridEl.querySelector('.view-as-bar');
+      var anchorEl = viewAsBar ? viewAsBar.nextSibling : gridEl.firstChild;
+      if (anchorEl !== card) gridEl.insertBefore(card, anchorEl);
     }
 
+    // This card is purely the parent-facing class selection (Erin,
+    // 2026-07-15: no session picker / Close / Lock here — window lifecycle
+    // lives in the Afternoon Class Builder's sign-ups panel).
     var h = '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Afternoon Class Sign-ups</h3>';
-
-    if (reviewer) {
-      h += '<div class="signup-admin">';
-      h += '<label class="signup-admin-sess">Session <select id="signupSessionSel">';
-      for (var n = 1; n <= 5; n++) {
-        h += '<option value="' + n + '"' + (String(s.session) === String(n) ? ' selected' : '') + '>' + n + '</option>';
-      }
-      h += '</select></label>';
-      h += '<span class="signup-status signup-status-' + (status || 'none') + '">' + (status ? status.toUpperCase() : 'NOT OPEN') + '</span>';
-      if (startDate && endDate) {
-        h += '<span class="signup-dates">' + escapeHtml(formatDateLabel(startDate)) + ' → ' + escapeHtml(formatDateLabel(endDate)) + '</span>';
-      }
-      h += '<div class="signup-admin-btns">';
-      h += '<button type="button" class="sc-btn" data-signup-win="closed"' + (status !== 'open' ? ' disabled' : '') + '>Close</button>';
-      h += '<button type="button" class="sc-btn sc-btn-del" data-signup-win="locked"' + ((status === 'locked' || !status) ? ' disabled' : '') + '>Lock</button>';
-      h += '</div></div>';
-      h += '<p class="signup-note">Set sign-up dates from the Afternoon Class Builder under the Approved badge.</p>';
-    }
 
     if (!s.session) {
       h += '<p class="mf-empty">No session is open for sign-ups yet.</p>';
@@ -4272,7 +4265,7 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Tap classes in order of preference (1 = first choice), up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span>.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Pick a rank for each class you’d like — <strong>1 = first choice</strong>, up to 4 per hour. PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span>.</p>';
 
     var kids = s.kids || [];
     // Preferred names for display — the signup data itself stays keyed by
@@ -4294,12 +4287,18 @@
     } else {
       kids.forEach(function (kid) {
         var age = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
+        var group = (s.kidGroups && s.kidGroups[kid]) || '';
+        var kidBands = kidBandsFor(age, group);
         var kidDisplay = nickOr(kidNickByFirst[String(kid).trim().toLowerCase()], kid);
+        // Pill shows the exact age when we have a birth date, else the
+        // kid's assigned age group (dev/test kids and birthday-less
+        // profiles still get a pill + highlighting via the group band).
+        var pill = age != null ? 'age ' + age : (group ? escapeHtml(group) : '');
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
-             (age != null ? ' <span class="signup-kid-age">age ' + age + '</span>' : '') + '</div>';
-        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, age);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, age);
+             (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
+        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -4310,7 +4309,7 @@
 
   // Human-readable age range for a class: the reviewer's free-text override
   // when present, else the teacher-picked age-group buckets ("Saplings (3–5),
-  // Sassafras (5–6)"). The same string feeds ageFitsRange, so the fit
+  // Sassafras (5–6)"). The same string feeds fitsKid, so the fit
   // highlight works for the common case where scheduled_age_range was left
   // blank at scheduling time (this is why highlights weren't showing).
   function signupAgeText(c) {
@@ -4319,8 +4318,9 @@
     return groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean).join(', ');
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, age) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands) {
     var ranked = (_signup.working[kid] && _signup.working[kid][hour]) || [];
+    var maxRank = Math.min(4, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     if (classes.length === 0) {
       h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
@@ -4330,27 +4330,36 @@
         var idx = ranked.indexOf(c.id);
         var sel = idx !== -1;
         var ageText = signupAgeText(c);
-        // null = age/range unknown (no judgement); true = age fits; false = clearly outside.
-        var fit = ageFitsRange(age, ageText);
+        // null = age/range unknown (no judgement); true = fits; false = clearly outside.
+        var fit = fitsKid(kidBands, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
         var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
         if (c.hour === 'both') bits.push('fills both hours');
         var meta = bits.filter(Boolean).join(' · ');
-        h += '<button type="button" class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '"' +
+        h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '">';
+        // Explicit rank picker — the user chooses 1–4 instead of tap-order.
+        h += '<select class="signup-rank-sel" aria-label="Rank for ' + escapeHtml(c.name) + '"' +
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
-        h += '<span class="signup-rank">' + (sel ? (idx + 1) : '+') + '</span>';
+        h += '<option value="">–</option>';
+        for (var r = 1; r <= maxRank; r++) {
+          h += '<option value="' + r + '"' + (sel && idx + 1 === r ? ' selected' : '') + '>' + r + '</option>';
+        }
+        h += '</select>';
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
              (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
              escapeHtml(c.name) + '</span>';
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
-        // Live demand vs capacity. "Signed up" = kids with this class in
-        // their current picks (any rank) — placement happens at the lottery.
+        // Live demand vs capacity, with the kids' names. "Signed up" = kids
+        // with this class in their current picks (any rank) — placement
+        // happens at the lottery.
+        var names = Array.isArray(c.signedUpNames) ? c.signedUpNames : [];
         var capBits = [];
         capBits.push(c.signedUp > 0 ? c.signedUp + ' signed up so far' : 'no sign-ups yet');
         if (c.max > 0) capBits.push('max ' + c.max + ' kids');
-        h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) + '</span>';
-        h += '</span></button>';
+        h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
+             (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
+        h += '</span></div>';
       });
       h += '</div>';
     }
@@ -4378,14 +4387,30 @@
     return bands.length ? { bands: bands } : null;
   }
 
-  // null = can't tell (don't flag); true = age fits; false = clearly outside.
-  function ageFitsRange(age, text) {
-    if (age == null) return null;
+  // The kid's age band(s) for fit-checking: exact age when the birth date is
+  // on file, otherwise the age band of their assigned class group (many dev/
+  // test kids — and any family that skipped the birthday — only have a
+  // group; Violet-in-Pigeons should still highlight Pigeons classes).
+  function kidBandsFor(age, group) {
+    if (age != null) return [[age, age]];
+    var slug = String(group || '').trim().toLowerCase();
+    if (slug === 'teens') slug = 'pigeons';
+    var label = slug ? AGE_GROUP_LABELS[slug] : '';
+    var p = label ? parseAgeBands(label) : null;
+    return p && p.bands ? p.bands : null;
+  }
+
+  // null = can't tell (don't flag); true = the kid's band overlaps the
+  // class's range; false = clearly outside.
+  function fitsKid(kidBands, text) {
+    if (!kidBands || !kidBands.length) return null;
     var p = parseAgeBands(text);
     if (!p) return null;
     if (p.allAges) return true;
     for (var i = 0; i < p.bands.length; i++) {
-      if (age >= p.bands[i][0] && age <= p.bands[i][1]) return true;
+      for (var j = 0; j < kidBands.length; j++) {
+        if (kidBands[j][0] <= p.bands[i][1] && p.bands[i][0] <= kidBands[j][1]) return true;
+      }
     }
     return false;
   }
@@ -4393,19 +4418,11 @@
   function wireSignupCard() {
     var card = document.getElementById('classSignupCard');
     if (!card) return;
-    card.querySelectorAll('[data-signup-win]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var status = this.getAttribute('data-signup-win');
-        var sel = document.getElementById('signupSessionSel');
-        var session = sel ? parseInt(sel.value, 10) : _signup.session;
-        if (status === 'locked' && !confirm('Lock sign-ups for Session ' + session + '? No one can change picks after this.')) return;
-        setSignupWindow(session, status);
-      });
-    });
-    var sessSel = document.getElementById('signupSessionSel');
-    if (sessSel) sessSel.addEventListener('change', function () { loadClassSignupCard(null, parseInt(this.value, 10)); });
-    card.querySelectorAll('.signup-class').forEach(function (btn) {
-      btn.addEventListener('click', function () {
+    // Explicit rank pickers (Erin, 2026-07-15: user picks the ranking, not
+    // tap-order auto-assign). Choosing rank N inserts the class at that
+    // position; classes already at/below shift down.
+    card.querySelectorAll('.signup-rank-sel').forEach(function (sel) {
+      sel.addEventListener('change', function () {
         if (this.disabled) return;
         var kid = this.getAttribute('data-kid');
         var hour = this.getAttribute('data-hour');
@@ -4413,26 +4430,21 @@
         var arr = _signup.working[kid][hour];
         var i = arr.indexOf(cid);
         if (i !== -1) arr.splice(i, 1);
-        else if (arr.length >= 4) { alert('You can rank up to 4 choices per hour.'); return; }
-        else arr.push(cid);
+        var v = this.value;
+        if (v) {
+          if (arr.length >= 4) {
+            alert('You can rank up to 4 choices per hour — remove one first.');
+            renderClassSignupCard();
+            return;
+          }
+          arr.splice(Math.min(parseInt(v, 10) - 1, arr.length), 0, cid);
+        }
         renderClassSignupCard();
       });
     });
     card.querySelectorAll('.signup-save').forEach(function (btn) {
       btn.addEventListener('click', function () { saveSignupKid(this.getAttribute('data-kid'), this); });
     });
-  }
-
-  function setSignupWindow(session, status) {
-    var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
-    fetch('/api/curriculum?action=class-signup-window', {
-      method: 'POST', headers: rwAuthHeaders(true),
-      body: JSON.stringify({ session: session, status: status, view_as: active })
-    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        if (!res.ok) { alert((res.d && res.d.error) || 'Could not update sign-ups.'); return; }
-        loadClassSignupCard(null, session);
-      }).catch(function (e) { alert('Network error: ' + (e.message || 'unknown')); });
   }
 
   function saveSignupKid(kid, btn) {
