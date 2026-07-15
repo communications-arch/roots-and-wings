@@ -4401,15 +4401,29 @@
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
         // A ranked 2-hour ('both') class fills PM Hour 2 as well — pin it
-        // there so the second hour reflects it (Erin, 2026-07-15: both-hour
-        // classes "weren't functioning" — they were invisible in Hour 2).
+        // there AND reserve the SAME choice number in Hour 2 (Erin,
+        // 2026-07-15: both-class as 1st choice → Hour 2 offers only the
+        // 2nd-choice slot, and vice versa).
         var pm1Map = (s.working[kid] && s.working[kid].PM1) || {};
+        var pm2Map = (s.working[kid] && s.working[kid].PM2) || {};
         var pinnedBoth = [];
+        var bothRankTaken = {};
         (s.classes.PM1 || []).forEach(function (c) {
-          if (c.hour === 'both' && pm1Map[c.id]) pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+          if (c.hour === 'both' && pm1Map[c.id]) {
+            pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+            bothRankTaken[pm1Map[c.id]] = true;
+          }
+        });
+        // Shift any PM2 pick off a number the 2-hour class now occupies.
+        Object.keys(pm2Map).forEach(function (cid2) {
+          if (bothRankTaken[pm2Map[cid2]]) {
+            var alt = pm2Map[cid2] === 1 ? 2 : 1;
+            var altBusy = bothRankTaken[alt] || Object.keys(pm2Map).some(function (k2) { return k2 !== cid2 && pm2Map[k2] === alt; });
+            if (altBusy) delete pm2Map[cid2]; else pm2Map[cid2] = alt;
+          }
         });
         h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth, bothRankTaken);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -4465,15 +4479,16 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth, excludeRanks) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
-    // 2-hour classes ranked in PM Hour 1 occupy this hour too.
+    // 2-hour classes ranked in PM Hour 1 occupy this hour too — at the
+    // same choice number, so the dropdowns below only offer the other slot.
     if (pinnedBoth && pinnedBoth.length) {
       pinnedBoth.slice().sort(function (a, b) { return a.rank - b.rank; }).forEach(function (p) {
-        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class, fills this hour too (choice ' + p.rank + ' in PM Hour 1)</div>';
+        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class: also your choice ' + p.rank + ' for this hour</div>';
       });
     }
     if (classes.length === 0) {
@@ -4496,6 +4511,7 @@
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
         h += '<option value="">–</option>';
         for (var r = 1; r <= maxRank; r++) {
+          if (excludeRanks && excludeRanks[r]) continue; // slot held by a 2-hour class
           h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
@@ -4643,6 +4659,13 @@
           if (!m[cid]) {
             var used = {};
             Object.keys(m).forEach(function (k) { used[m[k]] = true; });
+            // A ranked 2-hour class reserves its choice number in Hour 2.
+            if (hour === 'PM2') {
+              var pm1m = (_signup.working[kid] && _signup.working[kid].PM1) || {};
+              (_signup.classes.PM1 || []).forEach(function (c2) {
+                if (c2.hour === 'both' && pm1m[c2.id]) used[pm1m[c2.id]] = true;
+              });
+            }
             var free = !used[1] ? 1 : (!used[2] ? 2 : null);
             if (free == null) {
               alert('Both choices for this hour are already used — free one up first.');
@@ -4935,12 +4958,10 @@
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
     sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
-      // A whole-morning class (hour 'AM'/'') or a 2-hour afternoon class
-      // ('both') is one commitment that fills BOTH hours — say so, since
-      // picking it from the Hour 1 list also books Hour 2 (Erin, 2026-07-15).
-      var spansBoth = blockKey.indexOf('AM') === 0
-        ? (c.hour !== 'AM1' && c.hour !== 'AM2')
-        : c.hour === 'both';
+      // Morning assists are per-hour even for whole-morning classes (Erin,
+      // 2026-07-15) — only a 2-hour AFTERNOON class is a both-hours
+      // commitment worth flagging.
+      var spansBoth = blockKey.indexOf('AM') !== 0 && c.hour === 'both';
       h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' +
            (spansBoth ? ' — fills both hours' : '') +
            (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
@@ -5018,7 +5039,7 @@
       var row = document.createElement('div');
       row.className = 'mf-duty mf-vol-inline';
       var removeBtn = mine.kind === 'assist'
-        ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" title="Step out">✕</button>'
+        ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" data-block="' + (mine.block || '') + '" title="Step out">✕</button>'
         : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
       // Class rows render as title + role tag with the room underneath
       // (Erin, 2026-07-11); pledge rows keep their plain label.
@@ -5166,7 +5187,9 @@
         var isAssist = v.indexOf('assist:') === 0;
         var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + notifViewAsSuffix();
         var body = isAssist
-          ? { class_submission_id: parseInt(v.slice(7), 10) }
+          // block rides along so assisting a whole-morning class from the
+          // AM1/AM2 dropdown books just that hour (Erin, 2026-07-15).
+          ? { class_submission_id: parseInt(v.slice(7), 10), block: this.getAttribute('data-block') }
           : { school_year: (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '', session: d.session, block: this.getAttribute('data-block'), role: v };
         fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
@@ -5187,10 +5210,13 @@
         if (!confirm('Remove this sign-up?')) return;
         var kind = this.getAttribute('data-kind');
         var idAttr = this.getAttribute('data-id');
+        // Hour-scoped assist rows remove just their own hour.
+        var blockAttr = this.getAttribute('data-block') || '';
         var cred = localStorage.getItem('rw_google_credential');
         var req = kind === 'clean'
           ? fetch('/api/cleaning?action=cleaning-signup&id=' + idAttr, { method: 'DELETE', headers: rwAuthHeaders() })
-          : fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr + notifViewAsSuffix(), {
+          : fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr
+              + (kind === 'assist' && blockAttr ? '&block=' + encodeURIComponent(blockAttr) : '') + notifViewAsSuffix(), {
               method: 'DELETE',
               headers: { 'Authorization': 'Bearer ' + cred }
             });

@@ -810,6 +810,11 @@ ALTER TABLE class_signup_picks ADD COLUMN IF NOT EXISTS as_assistant BOOLEAN NOT
 -- already published to Google); NEW rows are inserted 'proposed' explicitly.
 -- Only approved sessions publish/refresh their Google Calendar event.
 ALTER TABLE co_op_sessions ADD COLUMN IF NOT EXISTS dates_status TEXT NOT NULL DEFAULT 'approved';
+-- Per-HOUR class assists (Erin, 2026-07-15: assisting a whole-morning
+-- class booked both AM hours, so you could never pick different AM1/AM2
+-- classes). '' = helping the whole class (legacy + hour-specific classes);
+-- 'AM1'/'AM2' = helping ONE hour of a whole-morning class.
+ALTER TABLE class_assignment_helpers ADD COLUMN IF NOT EXISTS block TEXT NOT NULL DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders

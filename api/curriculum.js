@@ -1029,7 +1029,7 @@ module.exports = async function handler(req, res) {
               FROM class_submissions c
               WHERE c.school_year = ${vmYear} AND c.scheduled_session = ${vmSess}
                 AND c.status IN ('scheduled', 'drafted')`,
-          sql`SELECT h.class_submission_id, h.person_email, h.person_name
+          sql`SELECT h.class_submission_id, h.person_email, h.person_name, h.block
               FROM class_assignment_helpers h
               JOIN class_submissions c ON c.id = h.class_submission_id
               WHERE c.school_year = ${vmYear} AND c.scheduled_session = ${vmSess}
@@ -1055,8 +1055,11 @@ module.exports = async function handler(req, res) {
         const helpersBySub = {};
         helperRows.forEach(h => {
           (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
-            .push({ email: (h.person_email || '').toLowerCase(), name: h.person_name || '' });
+            .push({ email: (h.person_email || '').toLowerCase(), name: h.person_name || '', block: h.block || '' });
         });
+        // Which helper rows count for a given hour block: whole-class rows
+        // ('') always, hour rows only for their own hour.
+        const helpersForBlock = (hs, b) => hs.filter(h => !h.block || h.block === b);
         const meName = meRows.length ? ((meRows[0].first_name || '') + ' ' + (meRows[0].last_name || '')).trim() : (user.name || '');
         const meNameLc = meName.toLowerCase();
         const blocksOf = r => r.class_period === 'AM'
@@ -1069,27 +1072,30 @@ module.exports = async function handler(req, res) {
           if (r.class_period !== 'AM' && !pmApproved) return;
           const hs = helpersBySub[r.id] || [];
           const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
-          const entry = {
-            id: r.id, class_name: r.class_name,
-            group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
-            groups: r.age_groups || [],
-            ages: r.scheduled_age_range || '',
-            teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
-            teacher_email: (r.submitted_by_email || '').toLowerCase(),
-            co_teachers: r.co_teachers || '',
-            helpers: hs.map(h => h.name || h.email),
-            helpers_needed: Math.max(0, wants - hs.length),
-            room: r.scheduled_room || '',
-            hour: r.scheduled_hour || ''
-          };
           blocksOf(r).forEach(b => {
+            // Per-block view of the class: hour-scoped assists (whole-morning
+            // classes, Erin 2026-07-15) only show/count in their own hour.
+            const hsB = helpersForBlock(hs, b);
+            const entry = {
+              id: r.id, class_name: r.class_name,
+              group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
+              groups: r.age_groups || [],
+              ages: r.scheduled_age_range || '',
+              teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
+              teacher_email: (r.submitted_by_email || '').toLowerCase(),
+              co_teachers: r.co_teachers || '',
+              helpers: hsB.map(h => h.name || h.email),
+              helpers_needed: Math.max(0, wants - hsB.length),
+              room: r.scheduled_room || '',
+              hour: r.scheduled_hour || ''
+            };
             blocks[b].classes.push(entry);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
               mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
             }
             if (!mine[b]) {
-              const hit = hs.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
-              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”', class_id: r.id };
+              const hit = hsB.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
+              if (hit) mine[b] = { kind: 'assist', label: 'Assisting “' + r.class_name + '”', class_id: r.id, block: hit.block || '' };
             }
           });
         });
@@ -1496,6 +1502,7 @@ module.exports = async function handler(req, res) {
             AND (LOWER(c.submitted_by_email) = ${vsEmail}
               OR EXISTS (SELECT 1 FROM class_assignment_helpers h
                          WHERE h.class_submission_id = c.id
+                           AND (h.block = '' OR h.block = ${vsBlock})
                            AND (LOWER(h.person_email) = ${vsEmail} OR LOWER(h.person_name) = LOWER(${vsName}))))
           LIMIT 1`;
         if (busy.length) return res.status(409).json({ error: 'You are already with “' + busy[0].class_name + '” that hour.' });
@@ -1547,10 +1554,18 @@ module.exports = async function handler(req, res) {
         const vaPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${vaEmail} OR LOWER(personal_email) = ${vaEmail} LIMIT 1`;
         const vaName = vaPeople.length ? ((vaPeople[0].first_name || '') + ' ' + (vaPeople[0].last_name || '')).trim() : (user.name || vaEmail);
-        // One commitment per block the class occupies.
-        const vaBlocks = vc.class_period === 'AM'
-          ? (vc.scheduled_hour === 'AM1' ? ['AM1'] : vc.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
-          : vc.scheduled_hour === 'both' ? ['PM1', 'PM2'] : vc.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        // Assisting a WHOLE-MORNING class from the AM1/AM2 dropdown is a
+        // one-hour commitment (Erin, 2026-07-15): honor body.block for
+        // those classes so the other hour stays free for a different pick.
+        const isWholeMorning = vc.class_period === 'AM'
+          && vc.scheduled_hour !== 'AM1' && vc.scheduled_hour !== 'AM2';
+        const reqBlock = String((req.body || {}).block || '').trim();
+        const effBlock = (isWholeMorning && (reqBlock === 'AM1' || reqBlock === 'AM2')) ? reqBlock : '';
+        // One commitment per block the ASSIST occupies.
+        const vaBlocks = effBlock ? [effBlock]
+          : vc.class_period === 'AM'
+            ? (vc.scheduled_hour === 'AM1' ? ['AM1'] : vc.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+            : vc.scheduled_hour === 'both' ? ['PM1', 'PM2'] : vc.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
         for (const b of vaBlocks) {
           const bHours = b === 'AM1' ? ['AM', 'AM1', '']
             : b === 'AM2' ? ['AM', 'AM2', '']
@@ -1564,6 +1579,7 @@ module.exports = async function handler(req, res) {
               AND (LOWER(c.submitted_by_email) = ${vaEmail}
                 OR EXISTS (SELECT 1 FROM class_assignment_helpers h
                            WHERE h.class_submission_id = c.id
+                             AND (h.block = '' OR h.block = ${b})
                              AND (LOWER(h.person_email) = ${vaEmail} OR LOWER(h.person_name) = LOWER(${vaName}))))
             LIMIT 1`;
           if (clash.length) return res.status(409).json({ error: 'You are already with “' + clash[0].class_name + '” that hour.' });
@@ -1573,13 +1589,16 @@ module.exports = async function handler(req, res) {
               AND block = ANY(${vaPledgeBlocks}) AND LOWER(person_email) = ${vaEmail}`;
           if (pledged.length) return res.status(409).json({ error: 'You already have a ' + pledged[0].role + ' pledge that hour — remove it first.' });
         }
-        const already = await sql`SELECT id FROM class_assignment_helpers
+        // Overlap check: an existing whole-class row blocks everything;
+        // an hour row only blocks that hour (or a new whole-class join).
+        const already = await sql`SELECT id, block FROM class_assignment_helpers
           WHERE class_submission_id = ${vaSubId}
             AND (LOWER(person_email) = ${vaEmail} OR LOWER(person_name) = LOWER(${vaName}))`;
-        if (already.length) return res.status(409).json({ error: 'You are already helping this class.' });
+        const overlaps = already.some(r => r.block === '' || effBlock === '' || r.block === effBlock);
+        if (overlaps) return res.status(409).json({ error: 'You are already helping this class that hour.' });
         const sortRows = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM class_assignment_helpers WHERE class_submission_id = ${vaSubId}`;
-        await sql`INSERT INTO class_assignment_helpers (class_submission_id, person_email, person_name, sort_order, updated_by)
-          VALUES (${vaSubId}, ${vaEmail}, ${vaName}, ${sortRows[0].next}, ${user.email})`;
+        await sql`INSERT INTO class_assignment_helpers (class_submission_id, person_email, person_name, block, sort_order, updated_by)
+          VALUES (${vaSubId}, ${vaEmail}, ${vaName}, ${effBlock}, ${sortRows[0].next}, ${user.email})`;
         return res.status(201).json({ ok: true, class_id: vaSubId, class_name: vc.class_name });
       }
 
@@ -2102,13 +2121,21 @@ module.exports = async function handler(req, res) {
         const daSubId = parseInt(req.query.id, 10);
         if (!Number.isFinite(daSubId)) return res.status(400).json({ error: 'id required' });
         const daEmail = actingEmailFor(user, req).toLowerCase();
+        // Optional hour scope: removing an AM1-only assist leaves the AM2
+        // row (and vice versa); no block removes every row for the class.
+        const daBlock = String(req.query.block || '').trim();
         const daPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${daEmail} OR LOWER(personal_email) = ${daEmail} LIMIT 1`;
         const daName = daPeople.length ? ((daPeople[0].first_name || '') + ' ' + (daPeople[0].last_name || '')).trim() : (user.name || '');
-        const goneH = await sql`DELETE FROM class_assignment_helpers
-          WHERE class_submission_id = ${daSubId}
-            AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
-          RETURNING id`;
+        const goneH = (daBlock === 'AM1' || daBlock === 'AM2')
+          ? await sql`DELETE FROM class_assignment_helpers
+              WHERE class_submission_id = ${daSubId} AND block = ${daBlock}
+                AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
+              RETURNING id`
+          : await sql`DELETE FROM class_assignment_helpers
+              WHERE class_submission_id = ${daSubId}
+                AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
+              RETURNING id`;
         if (!goneH.length) return res.status(404).json({ error: 'You are not on that class’s helper list.' });
         return res.status(200).json({ ok: true });
       }
