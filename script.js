@@ -18622,11 +18622,19 @@
       if (!r || r === 'Shared') return;
       var badge = container.querySelector('.ws-pill-badge[data-ws-badge="' + (window.CSS && CSS.escape ? CSS.escape(r) : r.replace(/"/g, '\\"')) + '"]');
       if (!badge) return;
+      // Sum the ITEMS, not the categories (Erin, 2026-07-15: Comms showed
+      // "2" while its two To Do rows totalled 13 things). Each visible row
+      // contributes its count pill's number; rows without a live count
+      // (date-gated nudges) count as one task.
       var count = 0;
-      sec.querySelectorAll('ul[id="ws-todo-list"] li[id$="-item"]').forEach(function (li) { if (!li.hidden) count++; });
+      sec.querySelectorAll('ul[id="ws-todo-list"] li[id$="-item"]').forEach(function (li) {
+        if (li.hidden) return;
+        var pill = li.querySelector('.ws-link-count');
+        var n = pill ? parseInt(pill.textContent, 10) : NaN;
+        count += (Number.isFinite(n) && n > 0) ? n : 1;
+      });
       badge.textContent = String(count);
-      // Self-explain the number (Erin, 2026-07-15: "what's the count for?").
-      var hint = count + ' To Do item' + (count === 1 ? '' : 's') + ' waiting for this role';
+      var hint = count + ' thing' + (count === 1 ? '' : 's') + ' to do for this role';
       badge.setAttribute('title', hint);
       badge.setAttribute('aria-label', hint);
       if (badge.parentElement) badge.parentElement.setAttribute('title', hint);
