@@ -14128,3 +14128,21 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   100% { box-shadow: 0 0 0 0 rgba(var(--color-accent-light-rgb), 0.0); }
 }
 .ws-card-flash { animation: wsCardFlash 1.4s ease-out; }
+
+/* Event planning space (Collaboration Phase 1, 2026-07-15): the per-
+   event checklist inside the standard report modal. */
+.evs-task-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.evs-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+.evs-task:last-child { border-bottom: none; }
+.evs-check input { width: 18px; height: 18px; margin-top: 2px; cursor: pointer; }
+.evs-body { flex: 1; min-width: 0; }
+.evs-title { display: block; font-weight: 600; }
+.evs-done .evs-title { text-decoration: line-through; color: var(--color-text-light); font-weight: 400; }
+.evs-meta { display: block; font-size: 0.82rem; color: var(--color-text-light); margin-top: 2px; }
+.evs-task .ws-srt-actions { flex: 0 0 auto; }

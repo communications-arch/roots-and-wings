@@ -4756,6 +4756,294 @@ async function handleSpecialEventsGet(req, res) {
   }
 }
 
+// ── Event planning spaces (Collaboration Phase 1, Erin 2026-07-15) ──
+// A per-event checklist copied from a per-event-NAME template. Any
+// signed-in member may VIEW a space (open planning doubles as helper
+// recruiting — Erin's call); edits belong to SEL/VP/super (the
+// special_events_manage capability) plus the event's own lead and
+// assistants. Assignees may check off their OWN task even without
+// broader edit rights.
+async function canEditEventSpace(sql, auth, eventId) {
+  if (await hasCapability(auth.email, 'special_events_manage')) return true;
+  const ppl = await sql`
+    SELECT 1 FROM special_event_people
+    WHERE event_id = ${eventId} AND LOWER(person_email) = ${String(auth.email || '').toLowerCase()}
+    LIMIT 1
+  `;
+  return ppl.length > 0;
+}
+
+function eventTaskShape(t) {
+  return {
+    id: t.id,
+    title: t.title,
+    assigned_email: t.assigned_email || '',
+    assigned_name: t.assigned_name || '',
+    due_date: specialEventDateStr(t.due_date),
+    done_at: t.done_at || null,
+    done_by: t.done_by || '',
+    sort_order: t.sort_order
+  };
+}
+
+// GET ?event_space=<special_event_id> — the space payload: event info,
+// checklist, people, template size, and (for editors) the member picker.
+async function handleEventSpaceGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(req.query.event_space, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_space id required' });
+  try {
+    const sql = getSql();
+    const evRows = await sql`
+      SELECT id, school_year, name, event_date, date_status, notes
+      FROM special_events WHERE id = ${eventId}
+    `;
+    if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const ev = evRows[0];
+    const tasks = await sql`
+      SELECT id, title, assigned_email, assigned_name, due_date, done_at, done_by, sort_order
+      FROM event_tasks WHERE special_event_id = ${eventId}
+      ORDER BY sort_order, id
+    `;
+    const people = await sql`
+      SELECT role, person_email, person_name, sort_order
+      FROM special_event_people WHERE event_id = ${eventId}
+      ORDER BY role DESC, sort_order
+    `;
+    const tplCount = await sql`
+      SELECT COUNT(*)::int AS n FROM event_task_templates WHERE event_name = ${ev.name}
+    `;
+    const canEdit = await canEditEventSpace(sql, auth, eventId);
+    const payload = {
+      event: {
+        id: ev.id,
+        school_year: ev.school_year,
+        name: ev.name,
+        event_date: specialEventDateStr(ev.event_date),
+        date_status: ev.date_status,
+        notes: ev.notes || ''
+      },
+      tasks: tasks.map(eventTaskShape),
+      people: people.map(p => ({ role: p.role, email: p.person_email || '', name: p.person_name || '' })),
+      template_count: tplCount[0].n,
+      can_edit: canEdit,
+      viewer_email: String(auth.email || '').toLowerCase()
+    };
+    if (canEdit) {
+      const memRows = await sql`
+        SELECT email, personal_email, first_name, last_name
+        FROM people WHERE COALESCE(role, '') <> 'blc'
+        ORDER BY first_name, last_name
+      `;
+      const seen = new Set();
+      payload.members = [];
+      memRows.forEach(p => {
+        const nm = ((p.first_name || '') + ' ' + (p.last_name || '')).trim();
+        const em = String(p.email || p.personal_email || '').toLowerCase();
+        const k = em || nm.toLowerCase();
+        if (!nm || seen.has(k)) return;
+        seen.add(k);
+        payload.members.push({ name: nm, email: em });
+      });
+      // Editors can also see (and edit, via kind=event-template-save) the
+      // template titles for this event name.
+      const tpl = await sql`
+        SELECT title FROM event_task_templates WHERE event_name = ${ev.name} ORDER BY sort_order, id
+      `;
+      payload.template_titles = tpl.map(t => t.title);
+    }
+    return res.status(200).json(payload);
+  } catch (err) {
+    console.error('event-space get error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// GET ?my_event_tasks=1 — the signed-in member's OPEN tasks across all
+// events (feeds the To Do card).
+async function handleMyEventTasksGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT t.id, t.title, t.due_date, t.special_event_id,
+             se.name AS event_name, se.school_year, se.event_date
+      FROM event_tasks t
+      JOIN special_events se ON se.id = t.special_event_id
+      WHERE LOWER(t.assigned_email) = ${String(auth.email || '').toLowerCase()}
+        AND t.done_at IS NULL
+      ORDER BY t.due_date NULLS LAST, se.event_date NULLS LAST, t.id
+    `;
+    return res.status(200).json({
+      tasks: rows.map(r => ({
+        id: r.id,
+        title: r.title,
+        due_date: specialEventDateStr(r.due_date),
+        event_id: r.special_event_id,
+        event_name: r.event_name,
+        school_year: r.school_year,
+        event_date: specialEventDateStr(r.event_date)
+      }))
+    });
+  } catch (err) {
+    console.error('my-event-tasks error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-task-save — add or edit a task (editors only).
+async function handleEventTaskSave(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  const title = String(body.title || '').trim().slice(0, 300);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  if (!title) return res.status(400).json({ error: 'A task title is required.' });
+  const dueDate = String(body.due_date || '').trim();
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: 'Due date must be YYYY-MM-DD.' });
+  const assignedEmail = String(body.assigned_email || '').trim().toLowerCase().slice(0, 200);
+  const assignedName = String(body.assigned_name || '').trim().slice(0, 200);
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this planning list.', youAre: auth.realEmail });
+    }
+    const id = body.id != null ? parseInt(body.id, 10) : null;
+    let row;
+    if (Number.isInteger(id) && id > 0) {
+      const upd = await sql`
+        UPDATE event_tasks
+        SET title = ${title}, assigned_email = ${assignedEmail}, assigned_name = ${assignedName},
+            due_date = ${dueDate || null}, updated_at = NOW(), updated_by = ${auth.realEmail}
+        WHERE id = ${id} AND special_event_id = ${eventId}
+        RETURNING id, title, assigned_email, assigned_name, due_date, done_at, done_by, sort_order
+      `;
+      if (upd.length === 0) return res.status(404).json({ error: 'Task not found.' });
+      row = upd[0];
+    } else {
+      const ins = await sql`
+        INSERT INTO event_tasks (special_event_id, title, assigned_email, assigned_name, due_date, sort_order, updated_by)
+        VALUES (${eventId}, ${title}, ${assignedEmail}, ${assignedName}, ${dueDate || null},
+                (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM event_tasks WHERE special_event_id = ${eventId}),
+                ${auth.realEmail})
+        RETURNING id, title, assigned_email, assigned_name, due_date, done_at, done_by, sort_order
+      `;
+      row = ins[0];
+    }
+    return res.status(200).json({ task: eventTaskShape(row) });
+  } catch (err) {
+    console.error('event-task-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-task-toggle — check/uncheck. Editors can toggle anything;
+// an assignee can toggle their OWN task.
+async function handleEventTaskToggle(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  const done = !!body.done;
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT id, special_event_id, assigned_email FROM event_tasks WHERE id = ${id}`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Task not found.' });
+    const t = rows[0];
+    const isAssignee = String(t.assigned_email || '').toLowerCase() === String(auth.email || '').toLowerCase();
+    if (!isAssignee && !(await canEditEventSpace(sql, auth, t.special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or the task’s assignee) can update this task.', youAre: auth.realEmail });
+    }
+    const upd = done
+      ? await sql`UPDATE event_tasks SET done_at = NOW(), done_by = ${auth.realEmail}, updated_at = NOW(), updated_by = ${auth.realEmail} WHERE id = ${id} RETURNING id, title, assigned_email, assigned_name, due_date, done_at, done_by, sort_order`
+      : await sql`UPDATE event_tasks SET done_at = NULL, done_by = '', updated_at = NOW(), updated_by = ${auth.realEmail} WHERE id = ${id} RETURNING id, title, assigned_email, assigned_name, due_date, done_at, done_by, sort_order`;
+    return res.status(200).json({ task: eventTaskShape(upd[0]) });
+  } catch (err) {
+    console.error('event-task-toggle error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-task-delete — editors only.
+async function handleEventTaskDelete(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT special_event_id FROM event_tasks WHERE id = ${id}`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Task not found.' });
+    if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this planning list.', youAre: auth.realEmail });
+    }
+    await sql`DELETE FROM event_tasks WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-task-delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-space-template-start — copy the event's template into an
+// EMPTY checklist (409 if tasks already exist, so nothing duplicates).
+async function handleEventSpaceTemplateStart(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can start the planning list.', youAre: auth.realEmail });
+    }
+    const evRows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const existing = await sql`SELECT COUNT(*)::int AS n FROM event_tasks WHERE special_event_id = ${eventId}`;
+    if (existing[0].n > 0) return res.status(409).json({ error: 'This event already has tasks — add from the template by hand instead.' });
+    const inserted = await sql`
+      INSERT INTO event_tasks (special_event_id, title, sort_order, updated_by)
+      SELECT ${eventId}, title, sort_order, ${auth.realEmail}
+      FROM event_task_templates WHERE event_name = ${evRows[0].name}
+      ORDER BY sort_order, id
+      RETURNING id
+    `;
+    return res.status(200).json({ ok: true, added: inserted.length });
+  } catch (err) {
+    console.error('event-space-template-start error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-template-save — replace an event name's template task list
+// (SEL/VP/super only; per-year checklists are untouched).
+async function handleEventTemplateSave(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventName = String(body.event_name || '').trim().slice(0, 200);
+  if (!eventName) return res.status(400).json({ error: 'event_name required' });
+  const titles = (Array.isArray(body.titles) ? body.titles : [])
+    .map(t => String(t || '').trim().slice(0, 300))
+    .filter(Boolean)
+    .slice(0, 100);
+  try {
+    const sql = getSql();
+    await sql`DELETE FROM event_task_templates WHERE event_name = ${eventName}`;
+    for (let i = 0; i < titles.length; i++) {
+      await sql`
+        INSERT INTO event_task_templates (event_name, title, sort_order, updated_by)
+        VALUES (${eventName}, ${titles[i]}, ${i}, ${auth.realEmail})
+      `;
+    }
+    return res.status(200).json({ ok: true, count: titles.length });
+  } catch (err) {
+    console.error('event-template-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // POST kind='special-event-people' — replace one event's lead + assistants.
 async function handleSpecialEventSave(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
@@ -5677,6 +5965,8 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
+    if (req.query.event_space) return handleEventSpaceGet(req, res);
+    if (req.query.my_event_tasks === '1') return handleMyEventTasksGet(req, res);
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
     if (req.query.community === '1' || req.query.community === 'true') return handleCommunitySnapshot(req, res);
@@ -5717,6 +6007,11 @@ module.exports = async function handler(req, res) {
     if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
     if (kind === 'special-event-create') return handleSpecialEventCreate(body, req, res);
     if (kind === 'special-event-delete') return handleSpecialEventDelete(body, req, res);
+    if (kind === 'event-task-save') return handleEventTaskSave(body, req, res);
+    if (kind === 'event-task-toggle') return handleEventTaskToggle(body, req, res);
+    if (kind === 'event-task-delete') return handleEventTaskDelete(body, req, res);
+    if (kind === 'event-space-template-start') return handleEventSpaceTemplateStart(body, req, res);
+    if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||

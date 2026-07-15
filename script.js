@@ -5172,6 +5172,27 @@
         duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
       }
     }
+
+    // ── My event planning tasks (Collaboration spaces, 2026-07-15) ──
+    // Open tasks assigned to me across special events — one duty per
+    // event; Manage opens its planning space.
+    if (Array.isArray(_myEventTasks) && _myEventTasks.length) {
+      var evTasksByEvent = {};
+      _myEventTasks.forEach(function (t) {
+        (evTasksByEvent[t.event_id] || (evTasksByEvent[t.event_id] = { name: t.event_name, tasks: [] })).tasks.push(t);
+      });
+      Object.keys(evTasksByEvent).forEach(function (eid) {
+        var g = evTasksByEvent[eid];
+        var soonest = g.tasks.map(function (t) { return t.due_date; }).filter(Boolean).sort()[0];
+        duties.push({
+          block: 'annual', icon: 'volunteer',
+          text: '🎉 ' + g.name + ' — ' + g.tasks.length + ' task' + (g.tasks.length === 1 ? '' : 's') + ' for you',
+          detail: soonest ? ('next due ' + boardCalFmtDate(soonest)) : 'Event planning',
+          popup: null,
+          manage: 'eventSpace-' + eid
+        });
+      });
+    }
     SPECIAL_EVENTS.forEach(function (ev) {
       // Coordinator strings come from the master sheet and may include
       // "Erin" or "Erin Bogan" or even free-form ("Erin & Joey"). Match
@@ -5712,6 +5733,9 @@
     // switches / View-As changes / post-submit navigation previously left
     // it stale (2026-07-05, Erin: card didn't refresh after submitting).
     if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
+    // My assigned event-planning tasks (Collaboration spaces) — the
+    // loader re-renders once when the set changes.
+    if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
 
     // Keep the header picker in sync with the active family.
     renderHeaderViewAs();
@@ -5784,6 +5808,9 @@
         var type = this.getAttribute('data-manage');
         if (type === 'cleaningCrew') showCleaningManagementModal();
         if (type === 'supplyCloset') showSupplyClosetPopup();
+        if (type && type.indexOf('eventSpace-') === 0 && typeof showEventSpaceModal === 'function') {
+          showEventSpaceModal(parseInt(type.slice('eventSpace-'.length), 10));
+        }
       });
     });
 
@@ -18727,7 +18754,7 @@
     ];
     var h = raLensHead(pills, { label: 'Manage Special Events', action: 'special-events' });
     h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar; tap Manage to assign people right here.</p>';
-    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th></tr></thead><tbody>';
+    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th><th>Planning</th></tr></thead><tbody>';
     events.forEach(function (ev) {
       var assists = (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
       h += '<tr>';
@@ -18739,11 +18766,17 @@
         ? '<span class="mcb-teach-lead">' + escapeHtmlWs(ev.lead.name || ev.lead.email) + '</span>'
         : '<span class="ra-open-note">OPEN ⚠</span>') + '</td>';
       h += '<td class="mcb-teach-cell">' + (assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>') + '</td>';
+      h += '<td class="mcb-teach-cell"><button type="button" class="sc-btn se-space-btn" data-eid="' + ev.id + '">Open space</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table></div>';
     wrap.innerHTML = h;
     raWireManage(wrap);
+    wrap.querySelectorAll('.se-space-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
+      });
+    });
   }
 
   // The editor — the standard settings drawer over the lens, mirroring
@@ -18819,6 +18852,274 @@
           });
       });
     });
+  }
+
+  // ── Event planning space (Collaboration Phase 1, 2026-07-15) ───────
+  // Per-event checklist copied from a per-event template. Any member can
+  // view; the event's people + SEL/VP edit (server-enforced); assignees
+  // can check off their own tasks. Assigned tasks also surface on the
+  // member's My Responsibilities.
+  var _eventSpaceState = { id: null, data: null };
+
+  function showEventSpaceModal(eventId) {
+    _eventSpaceState.id = eventId;
+    _eventSpaceState.data = null;
+    var body = renderReportModal({
+      title: 'Event Planning',
+      subtitle: 'The event’s working checklist — assign tasks, check them off, and keep the plan in one place. Dates live on the Admin Calendar; lead & assistants in Roles Assignments.',
+      meta: '',
+      icons: [],
+      bodyId: 'event-space-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading planning space…</p>'
+    });
+    if (!body) return;
+    loadEventSpace();
+  }
+
+  function loadEventSpace() {
+    var body = document.getElementById('event-space-body');
+    if (!body || !_eventSpaceState.id) return;
+    fetch('/api/tour?event_space=' + _eventSpaceState.id, { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty">' + escapeHtmlWs((res.data && res.data.error) || 'Could not load the planning space.') + '</p>';
+          return;
+        }
+        _eventSpaceState.data = res.data;
+        renderEventSpaceBody();
+      })
+      .catch(function () {
+        body.innerHTML = '<p class="ws-empty">Network error — check your connection and reopen.</p>';
+      });
+  }
+
+  function renderEventSpaceBody() {
+    var body = document.getElementById('event-space-body');
+    var d = _eventSpaceState.data;
+    if (!body || !d) return;
+    var titleEl = personDetailCard && personDetailCard.querySelector('.rd-title');
+    if (titleEl) titleEl.textContent = '🎉 ' + d.event.name + ' — Planning';
+    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+    if (metaEl) metaEl.textContent = d.event.school_year + (d.event.event_date ? ' · ' + boardCalFmtDate(d.event.event_date) : '');
+
+    var tasks = d.tasks || [];
+    var doneCount = tasks.filter(function (t) { return t.done_at; }).length;
+    var openCount = tasks.length - doneCount;
+    var unassigned = tasks.filter(function (t) { return !t.done_at && !t.assigned_email && !t.assigned_name; }).length;
+
+    var h = '<div class="rd-counts">';
+    h += raCountPill('ws-wv-ok', doneCount + ' done');
+    h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
+    if (unassigned > 0) h += raCountPill('ws-wv-pending', unassigned + ' unassigned');
+    h += '</div>';
+
+    var lead = (d.people || []).filter(function (p) { return p.role === 'lead'; })[0];
+    var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
+      .map(function (p) { return p.name || p.email; }).filter(Boolean);
+    h += '<p class="ws-body-hint">👑 Lead: <strong>' + escapeHtmlWs(lead ? (lead.name || lead.email) : 'not set') + '</strong>'
+      + (assists.length ? ' · Assistants: ' + assists.map(escapeHtmlWs).join(', ') : '')
+      + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
+
+    if (d.can_edit) {
+      h += '<div class="coop-cal-toolbar"><span></span><span style="display:flex;gap:8px;flex-wrap:wrap;">';
+      if (tasks.length === 0 && d.template_count > 0) {
+        h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + d.template_count + ' task' + (d.template_count === 1 ? '' : 's') + ')</button>';
+      }
+      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button>';
+      if (d.template_titles !== undefined) {
+        h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-edit-template">Edit template</button>';
+      }
+      h += '</span></div>';
+    }
+
+    if (tasks.length === 0) {
+      h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
+    } else {
+      h += '<ul class="evs-task-list">';
+      tasks.forEach(function (t) {
+        var isMine = !!(t.assigned_email && t.assigned_email === d.viewer_email);
+        var canToggle = d.can_edit || isMine;
+        h += '<li class="evs-task' + (t.done_at ? ' evs-done' : '') + '" data-task-id="' + t.id + '">';
+        h += '<label class="evs-check"><input type="checkbox" class="evs-toggle"' + (t.done_at ? ' checked' : '') + (canToggle ? '' : ' disabled') + ' aria-label="Mark done"></label>';
+        h += '<span class="evs-body"><span class="evs-title">' + escapeHtmlWs(t.title) + '</span>';
+        var meta = [];
+        if (t.assigned_name || t.assigned_email) meta.push('👤 ' + escapeHtmlWs(t.assigned_name || t.assigned_email) + (isMine ? ' (you)' : ''));
+        else if (!t.done_at) meta.push('<span class="ra-open-note" style="display:inline;">unassigned</span>');
+        if (t.due_date) meta.push('📅 due ' + escapeHtmlWs(boardCalFmtDate(t.due_date)));
+        if (t.done_at) meta.push('✓ done' + (t.done_by ? ' by ' + escapeHtmlWs(t.done_by) : ''));
+        if (meta.length) h += '<span class="evs-meta">' + meta.join(' · ') + '</span>';
+        h += '</span>';
+        if (d.can_edit) {
+          h += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-edit" data-task-id="' + t.id + '">Edit</button>'
+            + '<button type="button" class="sc-btn sc-btn-del evs-del" data-task-id="' + t.id + '">Delete</button></span>';
+        }
+        h += '</li>';
+      });
+      h += '</ul>';
+    }
+    body.innerHTML = h;
+    wireEventSpace(body);
+  }
+
+  function wireEventSpace(body) {
+    var d = _eventSpaceState.data;
+    body.querySelectorAll('.evs-toggle').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var li = cb.closest('.evs-task');
+        var id = parseInt(li.getAttribute('data-task-id'), 10);
+        cb.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-task-toggle', id: id, done: cb.checked }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not update.'); loadEventSpace(); return; }
+            var t = (_eventSpaceState.data.tasks || []).filter(function (x) { return x.id === id; })[0];
+            if (t && res.data.task) Object.assign(t, res.data.task);
+            renderEventSpaceBody();
+            // My Responsibilities mirrors open assigned tasks.
+            _myEventTasks = null;
+            if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
+          })
+          .catch(function () { alert('Network error.'); loadEventSpace(); });
+      });
+    });
+    body.querySelectorAll('.evs-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-task-id'), 10);
+        var t = (d.tasks || []).filter(function (x) { return x.id === id; })[0];
+        if (t) openEventTaskDrawer(t);
+      });
+    });
+    body.querySelectorAll('.evs-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-task-id'), 10);
+        if (!confirm('Delete this task?')) return;
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-task-delete', id: id }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Delete failed.'); return; }
+            _eventSpaceState.data.tasks = (_eventSpaceState.data.tasks || []).filter(function (x) { return x.id !== id; });
+            renderEventSpaceBody();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error.'); });
+      });
+    });
+    var addBtn = body.querySelector('#evs-add-task');
+    if (addBtn) addBtn.addEventListener('click', function () { openEventTaskDrawer(null); });
+    var startBtn = body.querySelector('#evs-start-template');
+    if (startBtn) startBtn.addEventListener('click', function () {
+      startBtn.disabled = true; startBtn.textContent = 'Copying…';
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-space-template-start', event_id: _eventSpaceState.id }) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) alert((res.data && res.data.error) || 'Could not start from the template.');
+          loadEventSpace();
+        })
+        .catch(function () { alert('Network error.'); loadEventSpace(); });
+    });
+    var tplBtn = body.querySelector('#evs-edit-template');
+    if (tplBtn) tplBtn.addEventListener('click', openEventTemplateDrawer);
+  }
+
+  // Add/Edit task — standard settings drawer over the space.
+  function openEventTaskDrawer(task) {
+    var d = _eventSpaceState.data;
+    if (!d) return;
+    var isEdit = !!task;
+    openReportDrawer({ title: isEdit ? 'Edit task' : 'Add a task', bodyId: 'evs-task-drawer', bodyPlaceholder: '' });
+    var el = document.getElementById('evs-task-drawer');
+    if (!el) return;
+    var h = '<datalist id="evsMemberList">';
+    (d.members || []).forEach(function (m) { h += '<option value="' + escapeAttr(m.name) + '"></option>'; });
+    h += '</datalist>';
+    h += '<div class="cls-field"><label class="cls-label">Task</label><input class="cl-input evs-f-title" type="text" maxlength="300" value="' + escapeAttr(task ? task.title : '') + '" placeholder="e.g. Order ice cream"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Assigned to (optional)</label><input class="cl-input evs-f-who" type="text" list="evsMemberList" value="' + escapeAttr(task ? (task.assigned_name || task.assigned_email) : '') + '" placeholder="Start typing a member’s name…"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Due date (optional)</label><input class="cl-input evs-f-due" type="date" value="' + escapeAttr(task && task.due_date ? task.due_date : '') + '"></div>';
+    h += '<div class="perm-chips" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-f-save">' + (isEdit ? 'Save changes' : 'Add task') + '</button><span class="perm-status evs-f-status" aria-live="polite"></span></div>';
+    el.innerHTML = h;
+    var titleInp = el.querySelector('.evs-f-title');
+    if (titleInp) titleInp.focus();
+    el.querySelector('.evs-f-save').addEventListener('click', function () {
+      var st = el.querySelector('.evs-f-status');
+      var title = el.querySelector('.evs-f-title').value.trim();
+      if (!title) { st.className = 'perm-status evs-f-status ws-wv-err'; st.textContent = 'A task title is required'; return; }
+      var whoVal = el.querySelector('.evs-f-who').value.trim();
+      // Matching a member name gets the email link (their To Do sees the
+      // task); a free-text name still displays.
+      var member = (d.members || []).filter(function (m) { return m.name.toLowerCase() === whoVal.toLowerCase(); })[0];
+      var payload = {
+        kind: 'event-task-save',
+        event_id: _eventSpaceState.id,
+        title: title,
+        assigned_name: whoVal,
+        assigned_email: member ? member.email : '',
+        due_date: el.querySelector('.evs-f-due').value || ''
+      };
+      if (isEdit) payload.id = task.id;
+      var btn = this;
+      btn.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) { st.className = 'perm-status evs-f-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          closeReportDrawer(true);
+          loadEventSpace();
+        })
+        .catch(function () { btn.disabled = false; st.className = 'perm-status evs-f-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // Edit the event's TEMPLATE (SEL/VP): one task per line; this year's
+  // checklist is untouched — templates seed future years.
+  function openEventTemplateDrawer() {
+    var d = _eventSpaceState.data;
+    if (!d) return;
+    openReportDrawer({ title: 'Template — ' + d.event.name, bodyId: 'evs-template-drawer', bodyPlaceholder: '' });
+    var el = document.getElementById('evs-template-drawer');
+    if (!el) return;
+    var h = '<p class="ws-body-hint">One task per line. The template seeds this event’s planning list when a year starts from it — the current checklist isn’t changed by edits here.</p>';
+    h += '<textarea class="cl-input cls-textarea evs-tpl-text" rows="12" placeholder="Order ice cream\nGet napkins & bowls\nLine up serving volunteers\nRequest topping donations">' + escapeHtmlWs((d.template_titles || []).join('\n')) + '</textarea>';
+    h += '<div class="perm-chips" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-tpl-save">Save template</button><span class="perm-status evs-tpl-status" aria-live="polite"></span></div>';
+    el.innerHTML = h;
+    el.querySelector('.evs-tpl-save').addEventListener('click', function () {
+      var st = el.querySelector('.evs-tpl-status');
+      var titles = el.querySelector('.evs-tpl-text').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var btn = this;
+      btn.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-template-save', event_name: d.event.name, titles: titles }) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) { st.className = 'perm-status evs-tpl-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          closeReportDrawer(true);
+          loadEventSpace();
+        })
+        .catch(function () { btn.disabled = false; st.className = 'perm-status evs-tpl-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // My open event tasks — feeds My Responsibilities (one duty per event).
+  var _myEventTasks = null;
+  var _myEventTasksSig = '';
+  function loadMyEventTasks() {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/tour?my_event_tasks=1', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        var sig = JSON.stringify(tasks);
+        var changed = sig !== _myEventTasksSig;
+        _myEventTasksSig = sig;
+        _myEventTasks = tasks;
+        // Re-render once when the set changes so the duty rows appear
+        // without looping (renderMyFamily calls this loader).
+        if (changed && typeof renderMyFamily === 'function') renderMyFamily();
+      })
+      .catch(function () { /* silent */ });
   }
 
   // ── Volunteer Assignments lenses (inside Roles Assignments) ──

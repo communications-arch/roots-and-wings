@@ -1625,3 +1625,39 @@ WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '4go
 INSERT INTO board_calendar_events (school_year, title, event_date, note, event_type, start_time, end_time, gcal_event_id, updated_by)
 SELECT '2026-2027', 'Westermeier Playground and Splash Pad', '2026-08-12', 'Westermeier Commons Playground, Carmel', 'field_trip', '13:00', '15:00', '547k4ddksdj8l7nn0jfo2h537g', 'gcal-import'
 WHERE NOT EXISTS (SELECT 1 FROM board_calendar_events WHERE gcal_event_id = '547k4ddksdj8l7nn0jfo2h537g');
+
+-- Collaboration spaces Phase 1 (Erin, 2026-07-15): per-event planning
+-- checklists. event_task_templates holds each event's default task list
+-- (keyed by event NAME so it carries year to year; SEL/VP editable).
+-- event_tasks is the live checklist for one special_events row (that
+-- year's event) — copied in via "Start from template", then edited
+-- freely without touching the template.
+CREATE TABLE IF NOT EXISTS event_task_templates (
+  id          SERIAL PRIMARY KEY,
+  event_name  TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS event_task_templates_name_idx
+  ON event_task_templates (event_name, sort_order);
+
+CREATE TABLE IF NOT EXISTS event_tasks (
+  id               SERIAL PRIMARY KEY,
+  special_event_id INTEGER NOT NULL,
+  title            TEXT NOT NULL,
+  assigned_email   TEXT NOT NULL DEFAULT '',
+  assigned_name    TEXT NOT NULL DEFAULT '',
+  due_date         DATE,
+  done_at          TIMESTAMPTZ,
+  done_by          TEXT NOT NULL DEFAULT '',
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS event_tasks_event_idx
+  ON event_tasks (special_event_id, sort_order);
+CREATE INDEX IF NOT EXISTS event_tasks_assignee_idx
+  ON event_tasks (LOWER(assigned_email)) WHERE done_at IS NULL;
