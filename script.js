@@ -22211,8 +22211,9 @@
         } else {
           h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
         }
-        // Notes cell (+ status chip for special events).
+        // Notes cell (location first, then note + status chip for special events).
         var notes = escapeHtml(e.note || '');
+        if (e.location) notes = '📍 ' + escapeHtml(e.location) + (notes ? '<br>' + notes : '');
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
         if (r.kind === 'special' && r.seRow) {
           notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
@@ -22452,7 +22453,9 @@
     var canSEForm = !!_boardCalState.canEditSpecialEvents;
     var boardForm = boardCalViewerIsBoard();
     var evRawType = ev ? String(ev.event_type || '') : '';
-    var evType = (evRawType === 'general' || evRawType === 'field_trip') ? evRawType : 'task';
+    // No preselected type on NEW events (Erin, 2026-07-15) — the author
+    // must consciously pick where it lands; edits keep the saved type.
+    var evType = isEdit ? ((evRawType === 'general' || evRawType === 'field_trip') ? evRawType : 'task') : '';
     var h = '<div class="board-cal-form">';
     h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
     if (boardForm) {
@@ -22479,6 +22482,9 @@
     h += '<label>Start time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-stime" value="' + escapeHtml(String(v.start_time || '').slice(0, 5)) + '" /></label>';
     h += '<label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="board-cal-f-etime" value="' + escapeHtml(String(v.end_time || '').slice(0, 5)) + '" /></label>';
     h += '</div>';
+    // Location (Erin, 2026-07-15) — rides to the Google event's location
+    // for member-facing types, and shows on the Admin Calendar row.
+    h += '<div class="board-cal-field" id="board-cal-loc-wrap"><label>Location <span class="board-cal-opt">(optional)</span><br><input type="text" id="board-cal-f-loc" maxlength="200" value="' + escapeHtml(v.location || '') + '" placeholder="e.g. Southeastway Park, Fellowship Hall" /></label></div>';
     h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
@@ -22504,7 +22510,10 @@
   function boardCalFormType() {
     if (document.getElementById('board-cal-f-type-fixed')) return 'special';
     var checked = document.querySelector('input[name="board-cal-f-type"]:checked');
-    return checked ? checked.value : 'task';
+    // '' = the type row is showing but nothing picked yet (new events start
+    // unselected); boardCalSave blocks the save until one is chosen.
+    if (checked) return checked.value;
+    return document.getElementById('board-cal-type-row') ? '' : 'task';
   }
 
   // Special events have no end-date/notes in this form, and may start
@@ -22513,10 +22522,12 @@
     var isSpecial = boardCalFormType() === 'special';
     var endWrap = document.getElementById('board-cal-end-wrap');
     var noteWrap = document.getElementById('board-cal-note-wrap');
+    var locWrap = document.getElementById('board-cal-loc-wrap');
     var timesWrap = document.getElementById('board-cal-times-wrap');
     var dateOpt = document.getElementById('board-cal-date-opt');
     if (endWrap) endWrap.hidden = isSpecial;
     if (noteWrap) noteWrap.hidden = isSpecial;
+    if (locWrap) locWrap.hidden = isSpecial;
     if (timesWrap) timesWrap.hidden = isSpecial;
     if (dateOpt) dateOpt.hidden = !isSpecial;
   }
@@ -22552,6 +22563,10 @@
         });
       return;
     }
+    // A visible Type row with nothing picked blocks the save — new events
+    // start unselected so the author consciously chooses (Erin, 2026-07-15).
+    var formType = boardCalFormType();
+    if (formType === '') { boardCalShowMsg('Pick a type for this event.'); return; }
     var payload = {
       kind: 'calendar-save',
       school_year: _boardCalState.schoolYear,
@@ -22559,11 +22574,12 @@
       event_date: document.getElementById('board-cal-f-date').value || '',
       end_date: document.getElementById('board-cal-f-end').value || '',
       note: (document.getElementById('board-cal-f-note').value || '').trim(),
+      location: ((document.getElementById('board-cal-f-loc') || {}).value || '').trim(),
       start_time: (document.getElementById('board-cal-f-stime') || {}).value || '',
       end_time: (document.getElementById('board-cal-f-etime') || {}).value || '',
       // Which pill the row lands under (general + field_trip also sync
       // to the co-op Google Calendar; tasks stay internal).
-      event_type: (function (bt) { return (bt === 'general' || bt === 'field_trip') ? bt : 'task'; })(boardCalFormType())
+      event_type: (formType === 'general' || formType === 'field_trip') ? formType : 'task'
     };
     var idAttr = saveBtn.getAttribute('data-id');
     if (idAttr) payload.id = parseInt(idAttr, 10);

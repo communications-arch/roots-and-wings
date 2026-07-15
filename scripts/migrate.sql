@@ -1608,6 +1608,10 @@ ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS end_time TIME;
 -- publish to the co-op Google Calendar (board tasks explicitly do NOT).
 -- gcal_event_id links the row to its Google event for update/delete.
 ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';
+-- Where the event happens (Erin, 2026-07-15). Free text; synced to the
+-- Google event's location for member-facing types, shown on the Admin
+-- Calendar row for all types.
+ALTER TABLE board_calendar_events ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
 
 -- Session days on the Google Calendar (Erin, 2026-07-14): each co-op
 -- session publishes as a weekly recurring event 9:40 AM-3:15 PM from its

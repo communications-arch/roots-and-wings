@@ -5414,7 +5414,7 @@ async function handleBoardCalendarGet(req, res) {
     const sql = getSql();
     const rows = await sql`
       SELECT id, school_year, title, event_date, end_date, note, event_type,
-             start_time, end_time, updated_at, updated_by
+             location, start_time, end_time, updated_at, updated_by
       FROM board_calendar_events
       ORDER BY event_date, start_time NULLS FIRST, id
     `;
@@ -5425,6 +5425,7 @@ async function handleBoardCalendarGet(req, res) {
       event_date: calDateStr(r.event_date),
       end_date: calDateStr(r.end_date),
       note: r.note || '',
+      location: r.location || '',
       event_type: r.event_type || 'task',
       start_time: r.start_time ? String(r.start_time).slice(0, 5) : '',
       end_time: r.end_time ? String(r.end_time).slice(0, 5) : '',
@@ -5568,7 +5569,10 @@ function gcalBodyFromEvent(row) {
   const et = String(row.end_time || '').slice(0, 5);
   const body = {
     summary: row.title || 'Co-op event',
-    description: row.note || ''
+    description: row.note || '',
+    // Always set (even when blank) so clearing a location in the app
+    // clears it on the Google event too.
+    location: row.location || ''
   };
   if (st && !endDate) {
     let end = et;
@@ -5679,6 +5683,7 @@ async function handleBoardCalendarSave(body, req, res) {
   const eventDate = String(body.event_date).trim();
   const endDate = String(body.end_date || '').trim() || null;
   const note = String(body.note || '').trim();
+  const location = String(body.location || '').trim().slice(0, 200);
   // 'task' (board tasks pill), 'general', or 'field_trip' — the latter
   // two are member-facing and sync to the co-op Google Calendar.
   const rawType = String(body.event_type || 'task').trim();
@@ -5694,19 +5699,19 @@ async function handleBoardCalendarSave(body, req, res) {
         UPDATE board_calendar_events
         SET school_year = ${schoolYear}, title = ${title}, event_date = ${eventDate},
             end_date = ${endDate}, note = ${note}, event_type = ${eventType},
-            start_time = ${startTime}, end_time = ${endTime},
+            location = ${location}, start_time = ${startTime}, end_time = ${endTime},
             updated_at = NOW(), updated_by = ${auth.realEmail}
         WHERE id = ${id}
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, gcal_event_id, updated_at, updated_by
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, location, start_time, end_time, gcal_event_id, updated_at, updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Event not found.' });
       row = updated[0];
     } else {
       const inserted = await sql`
         INSERT INTO board_calendar_events
-          (school_year, title, event_date, end_date, note, event_type, start_time, end_time, updated_at, updated_by)
-        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, ${startTime}, ${endTime}, NOW(), ${auth.realEmail})
-        RETURNING id, school_year, title, event_date, end_date, note, event_type, start_time, end_time, gcal_event_id, updated_at, updated_by
+          (school_year, title, event_date, end_date, note, event_type, location, start_time, end_time, updated_at, updated_by)
+        VALUES (${schoolYear}, ${title}, ${eventDate}, ${endDate}, ${note}, ${eventType}, ${location}, ${startTime}, ${endTime}, NOW(), ${auth.realEmail})
+        RETURNING id, school_year, title, event_date, end_date, note, event_type, location, start_time, end_time, gcal_event_id, updated_at, updated_by
       `;
       row = inserted[0];
     }
@@ -5727,6 +5732,7 @@ async function handleBoardCalendarSave(body, req, res) {
         event_date: calDateStr(row.event_date),
         end_date: calDateStr(row.end_date),
         note: row.note || '',
+        location: row.location || '',
         event_type: row.event_type || 'task',
         start_time: row.start_time ? String(row.start_time).slice(0, 5) : '',
         end_time: row.end_time ? String(row.end_time).slice(0, 5) : '',
