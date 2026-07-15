@@ -4522,25 +4522,28 @@
       var saved = (s.picks && s.picks[kid]) || {};
       var hasAny = ((saved.PM1 || []).length + (saved.PM2 || []).length) > 0;
       if (!hasAny && !live) { el.style.display = 'none'; el.innerHTML = ''; return; }
-      var h = '<div class="mf-pending-title">Afternoon picks — Session ' + s.session +
-              (hasAny ? ' <span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
+      var h = '<div class="mf-pending-title"><span>Afternoon picks — Session ' + s.session + '</span>' +
+              (hasAny ? '<span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
       if (hasAny) {
         ['PM1', 'PM2'].forEach(function (hour) {
           var ids = saved[hour] || [];
           if (!ids.length) return;
           h += '<div class="mf-pending-row"><span class="mf-pending-hour">' + (hour === 'PM1' ? 'PM 1' : 'PM 2') + '</span>';
+          h += '<span class="mf-pending-chips">';
           h += ids.map(function (cid, i) {
             var c = classById[cid];
             var nm = c ? c.name : ('Class #' + cid);
-            return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' + (i + 1) + '. ' + escapeHtml(nm) + '</button>';
-          }).join('<span class="mf-pending-sep"> · </span>');
-          h += '</div>';
+            return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' +
+                   '<span class="mf-pick-rank">' + (i + 1) + '</span>' +
+                   '<span class="mf-pick-name">' + escapeHtml(nm) + '</span></button>';
+          }).join('');
+          h += '</span></div>';
         });
       } else {
-        h += '<div class="mf-pending-row mf-empty-text">No afternoon picks yet.</div>';
+        h += '<div class="mf-pending-empty mf-empty-text">No afternoon picks yet.</div>';
       }
       if (live) {
-        h += '<button type="button" class="sc-btn mf-pending-edit">' + (hasAny ? 'Edit picks' : 'Pick classes') + '</button>';
+        h += '<div class="mf-pending-foot"><button type="button" class="sc-btn mf-pending-edit">' + (hasAny ? 'Edit picks' : 'Pick classes') + '</button></div>';
       }
       el.innerHTML = h;
       el.style.display = '';
@@ -4571,18 +4574,32 @@
     });
     if (!c) return;
     var hourLabel = c.hour === 'both' ? 'Both hours · 1:00–2:55' : c.hour === 'PM2' ? '2:00–2:55' : '1:00–1:55';
-    var meta = [hourLabel, signupAgeText(c), c.room, c.leader ? 'led by ' + c.leader : ''].filter(Boolean).join(' · ');
     var names = Array.isArray(c.signedUpNames) ? c.signedUpNames : [];
-    var h = '<div class="absence-overlay" id="signupClassDetailOverlay"><div class="absence-modal">';
+    // Group marks (brand icons + colored names); the plain age text only
+    // repeats when it adds something the tags don't (a custom range, or
+    // no tag rendered at all) — same info as the picker tile, structured.
+    var tagHtml = groupTagHtml(c.ageGroups);
+    var ageText = c.ageRange ? c.ageRange : (tagHtml ? '' : signupAgeText(c));
+    var h = '<div class="absence-overlay" id="signupClassDetailOverlay"><div class="absence-modal signup-detail-modal">';
     h += '<button class="detail-close absence-close" id="signupClassDetailClose" aria-label="Close">&times;</button>';
-    h += '<h3 style="margin-top:0;">' + escapeHtml(c.name) + '</h3>';
-    h += '<p class="signup-class-meta" style="font-size:0.85rem;">' + escapeHtml(meta) + '</p>';
-    if (c.description) h += '<p>' + escapeHtml(c.description) + '</p>';
-    h += '<div class="mf-pending-title" style="margin-top:10px;">Signed up so far' +
-         (c.max > 0 ? ' <span class="mf-pending-badge">' + c.signedUp + ' of max ' + c.max + '</span>' : '') + '</div>';
+    h += '<h3 class="signup-detail-title">' + escapeHtml(c.name) + '</h3>';
+    h += '<div class="signup-detail-pills"><span class="mf-sched-room">' + escapeHtml(hourLabel) + '</span>' +
+         (c.room ? '<span class="mf-sched-room">' + escapeHtml(c.room) + '</span>' : '') + '</div>';
+    var metaBits = [];
+    if (tagHtml) metaBits.push('<span class="signup-detail-groups">' + tagHtml + '</span>');
+    if (ageText) metaBits.push('<span>' + escapeHtml(ageText) + '</span>');
+    if (c.leader) metaBits.push('<span>led by ' + escapeHtml(c.leader) + '</span>');
+    if (metaBits.length) h += '<div class="signup-detail-meta">' + metaBits.join('') + '</div>';
+    if (c.description) h += '<p class="signup-detail-desc">' + escapeHtml(c.description) + '</p>';
+    h += '<div class="signup-detail-sub">Signed up so far' +
+         (c.max > 0 ? '<span class="mf-pending-badge">' + c.signedUp + ' of max ' + c.max + '</span>' : '') + '</div>';
+    if (c.max > 0) {
+      var pct = Math.max(0, Math.min(100, Math.round((c.signedUp / c.max) * 100)));
+      h += '<div class="signup-detail-cap"><span style="width:' + pct + '%"></span></div>';
+    }
     h += names.length
-      ? '<ul class="absence-slot-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>'
-      : '<p class="mf-empty-text" style="font-size:0.85rem;">No sign-ups yet.</p>';
+      ? '<ul class="absence-slot-list signup-detail-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>'
+      : '<p class="mf-empty-text signup-detail-none">No sign-ups yet.</p>';
     h += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
     var overlay = document.getElementById('signupClassDetailOverlay');

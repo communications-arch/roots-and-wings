@@ -1172,12 +1172,16 @@ module.exports = async function handler(req, res) {
         // parent card. Distinct per kid so re-ranking doesn't double count.
         // Display name = the kid's "goes by" nickname (or first name) + the
         // family surname; placement itself happens at the lottery.
+        // INNER join on kids: picks are keyed by kid_first_name, so a kid
+        // renamed via Edit My Info orphans their old pick rows — those must
+        // not surface as phantom students ("Test Family", 2026-07-15).
+        // handleProfileUpdate migrates/cleans picks on rename going forward.
         const pickKidRows = await sql`
           SELECT DISTINCT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
           FROM class_signup_picks p
-          LEFT JOIN kids k
+          JOIN kids k
             ON LOWER(k.family_email) = LOWER(p.family_email)
            AND LOWER(k.first_name) = LOWER(p.kid_first_name)
           LEFT JOIN member_profiles mp

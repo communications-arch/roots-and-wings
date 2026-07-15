@@ -12596,13 +12596,16 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-desc { font-size: 0.76rem; color: var(--color-text); margin-top: 2px; }
 .signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
 .signup-save { margin-top: 6px; }
-/* Pending afternoon picks under each kid on the Kids' Schedule card. */
+/* Pending afternoon picks under each kid on the Kids' Schedule card.
+   Renders as the kid card's footer band (flush, border-top) so it reads
+   as part of the schedule above it: hour labels sit in the same 52px
+   column as .mf-sched-time, picks are ranked pill chips echoing the
+   .signup-rank circle, and the lottery state is a quiet teal badge. */
 .mf-pending-picks {
-  margin: 6px 0 2px;
-  padding: 8px 10px;
+  margin: 2px 0 0;
+  padding: 8px 14px 10px;
   background: rgba(var(--color-primary-rgb), 0.05);
-  border: 1px dashed var(--color-border);
-  border-radius: 8px;
+  border-top: 1px solid var(--color-border);
 }
 .mf-pending-title {
   font-size: 0.8rem;
@@ -12610,31 +12613,159 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   color: var(--color-primary-dark);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px 8px;
   flex-wrap: wrap;
+  margin-bottom: 2px;
 }
+.mf-pending-title > span:first-child { min-width: 0; }
 .mf-pending-badge {
+  margin-left: auto;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--color-teal);
+  background: rgba(var(--color-teal-rgb), 0.08);
+  border: 1px solid rgba(var(--color-teal-rgb), 0.35);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+.mf-pending-row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 4px 0;
+}
+.mf-pending-hour {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding-top: 3px; /* optically centers on the first chip row */
+}
+.mf-pending-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.signup-pick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 2px 11px 2px 2px;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.signup-pick-link:hover {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.06);
+  color: var(--color-primary-dark);
+}
+.signup-pick-link:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 2px;
+}
+.mf-pick-rank {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.68rem;
   font-weight: 700;
-  background: var(--color-border);
-  color: var(--color-text-light);
-  border-radius: 999px;
-  padding: 1px 8px;
+  background: var(--color-primary);
+  color: var(--color-white);
 }
-.mf-pending-row { font-size: 0.82rem; margin-top: 4px; }
-.mf-pending-hour { font-weight: 700; color: var(--color-text-light); margin-right: 4px; font-size: 0.72rem; }
-.mf-pending-sep { color: var(--color-text-light); }
-.signup-pick-link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--color-primary);
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: underline;
+.mf-pick-name { min-width: 0; overflow-wrap: anywhere; }
+.mf-pending-empty {
+  font-size: 0.8rem;
+  padding: 3px 0 1px;
+}
+.mf-pending-foot { margin-top: 7px; }
+
+/* Pick detail popup (showSignupClassDetail) — rides the .absence-modal
+   shell; header pills reuse the .mf-sched-room idiom, group tags reuse
+   the brand ag-icon/.ag-name pattern, roster gets a quiet teal meter. */
+.signup-detail-modal h3.signup-detail-title { margin: 0 28px 6px 0; }
+.signup-detail-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.signup-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
   font-size: 0.82rem;
+  color: var(--color-text-light);
+  margin-bottom: 10px;
 }
-.mf-pending-edit { margin-top: 6px; }
+.signup-detail-groups {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.signup-detail-desc {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin: 0 0 4px;
+}
+.signup-detail-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-light);
+  margin: 16px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.signup-detail-sub .mf-pending-badge { text-transform: none; letter-spacing: 0.3px; }
+.signup-detail-cap {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(var(--color-teal-rgb), 0.12);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.signup-detail-cap span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-teal);
+}
+.signup-detail-list {
+  column-width: 170px;
+  column-gap: 18px;
+}
+.signup-detail-list li {
+  font-size: 0.84rem;
+  padding: 3px 0;
+  break-inside: avoid;
+}
+.signup-detail-none { font-size: 0.85rem; }
 
 /* ── Photo cropper modal (Edit My Info) ── */
 .crop-overlay {

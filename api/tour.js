@@ -3437,11 +3437,13 @@ async function handleProfileUpdate(body, req, res) {
     // profile save silently wiped class_group, dropping the kid out of the
     // directory's class/group sections (their card vanished entirely).
     const priorKidGroups = {};
+    const priorKidNames = new Set();
     try {
       const priorKids = await sql`SELECT first_name, class_group FROM kids WHERE family_email = ${familyEmail}`;
       priorKids.forEach(r => {
         const key = String(r.first_name || '').trim().toLowerCase();
         if (key && r.class_group) priorKidGroups[key] = r.class_group;
+        if (key) priorKidNames.add(key);
       });
     } catch (e) { /* non-fatal — worst case the group is blank, same as before */ }
     await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
@@ -3479,6 +3481,37 @@ async function handleProfileUpdate(body, req, res) {
           ${i}, ${kidGroup}
         )
       `;
+    }
+
+    // Afternoon class-signup picks are keyed by (family_email,
+    // kid_first_name) — kids.id isn't stable across this delete+reinsert.
+    // A rename would orphan the kid's saved picks (they'd surface as a
+    // phantom student under the old name, e.g. "Test Family" 2026-07-15).
+    // Exactly one name out + one name in = a rename: carry the picks to
+    // the new name. Anything else that vanished (kid removed, ambiguous
+    // multi-rename) gets its current-year picks cleaned up instead.
+    try {
+      const newNames = new Set(kids.map(k => String(k.name || '').trim().toLowerCase()).filter(Boolean));
+      const removed = [...priorKidNames].filter(n => !newNames.has(n));
+      const addedLc = [...newNames].filter(n => !priorKidNames.has(n));
+      const yr = activeSchoolYear(new Date());
+      if (removed.length === 1 && addedLc.length === 1) {
+        const newName = kids.map(k => String(k.name || '').trim())
+          .find(n => n.toLowerCase() === addedLc[0]);
+        await sql`
+          UPDATE class_signup_picks SET kid_first_name = ${newName}
+          WHERE school_year = ${yr} AND LOWER(family_email) = LOWER(${familyEmail})
+            AND LOWER(kid_first_name) = ${removed[0]}
+        `;
+      } else if (removed.length > 0) {
+        await sql`
+          DELETE FROM class_signup_picks
+          WHERE school_year = ${yr} AND LOWER(family_email) = LOWER(${familyEmail})
+            AND LOWER(kid_first_name) = ANY(${removed}::text[])
+        `;
+      }
+    } catch (e) {
+      console.error('class_signup_picks rename sync failed (non-fatal):', e);
     }
 
     // Auto-trigger a backup-coach waiver for any newly-added BLC. Mirrors
