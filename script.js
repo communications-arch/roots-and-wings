@@ -339,12 +339,17 @@
   // (e.g., communications@ viewing as Treasurer correctly hits the
   // Treasurer scope, not their super-user bypass).
   // Pass json=true for POST/PATCH bodies; the helper adds Content-Type.
+  // The REAL signed-in login, ignoring any View As selection.
+  function getRealEmail() {
+    return localStorage.getItem('rw_user_email');
+  }
+
   function rwAuthHeaders(json) {
     var headers = {};
     var cred = localStorage.getItem('rw_google_credential');
     if (cred) headers['Authorization'] = 'Bearer ' + cred;
     var viewAs = sessionStorage.getItem(VIEW_AS_KEY) || '';
-    var real = String(localStorage.getItem('rw_user_email') || '').toLowerCase();
+    var real = String(getRealEmail() || '').toLowerCase();
     if (viewAs && viewAs.toLowerCase() !== real) {
       headers['X-View-As'] = viewAs;
     }
@@ -6330,7 +6335,14 @@
       // group). The sheet-era AM_CLASSES teacher/topic below only speaks
       // for 2025-2026 (server gates it off in newer seasons).
       var pubAm = (typeof publishedAmForGroup === 'function') ? publishedAmForGroup(currentSession, kidGroup) : [];
-      if (pubAm.length > 0) {
+      var kidSched = kid.schedule || 'all-day';
+      if (kidSched === 'afternoon') {
+        // Half-day, afternoons only — no morning class rows.
+        html += '<div class="mf-sched-row mf-sched-empty">';
+        html += '<span class="mf-sched-time">AM</span>';
+        html += '<span class="mf-sched-class mf-empty-text">Half day — afternoons only</span>';
+        html += '</div>';
+      } else if (pubAm.length > 0) {
         var amHourLabel = { AM: 'AM', AM1: 'AM 1', AM2: 'AM 2' };
         pubAm.forEach(function (c) {
           html += '<div class="mf-sched-row">';
@@ -6369,6 +6381,13 @@
         html += '<span class="mf-sched-class">' + ageGroupIconHtml('Greenhouse') + ' <span class="ag-name ' + ageGroupClass('Greenhouse') + '">' + groupWithAge('Greenhouse') + '</span></span>';
         html += '<span class="mf-sched-room">' + (room || '') + '</span>';
         html += '<span class="mf-sched-teacher"></span>';
+        html += '</div>';
+      } else if (kidSched === 'morning') {
+        // Half-day, mornings only — no afternoon electives (they're also
+        // excluded from the sign-up picker server-side).
+        html += '<div class="mf-sched-row mf-sched-empty">';
+        html += '<span class="mf-sched-time">PM</span>';
+        html += '<span class="mf-sched-class mf-empty-text">Half day — mornings only</span>';
         html += '</div>';
       } else if (electives.length > 0) {
         electives.forEach(function (e) {
@@ -8141,8 +8160,8 @@
   //   1. Family's boardRole (assigned in applySheetsData from chair rows)
   //   2. Non-board volunteer-committee roles matched by parent name
   //   3. Super-user shortcut: communications@ always gets Comms Director
-  function getWorkspaceRoles() {
-    var active = getActiveEmail();
+  function getWorkspaceRoles(emailOverride) {
+    var active = emailOverride || getActiveEmail();
     if (!active) return [];
     var lower = active.toLowerCase();
     var out = [];
@@ -8558,6 +8577,9 @@
           // classes (raise max / 2nd section / lottery), then send each
           // lead their class list + budget.
           h += '<li id="ws-todo-acl-overmax-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-overmax"><span class="ws-link-count" id="ws-acl-overmax-count">0</span><span class="ws-link-icon">🎟️</span><span id="ws-acl-overmax-label">Resolve over-full classes</span></button></li>';
+          // Kids bumped by a lottery whose family hasn't been told yet —
+          // shows which lottery and where they landed (Erin, 2026-07-16).
+          h += '<li id="ws-todo-acl-lotmoves-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-lottery-moves"><span class="ws-link-count" id="ws-acl-lotmoves-count">0</span><span class="ws-link-icon">📣</span><span id="ws-acl-lotmoves-label">Tell families about lottery moves</span></button></li>';
           h += '<li id="ws-todo-acl-confirm-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-confirm"><span class="ws-link-count" id="ws-acl-confirm-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-acl-confirm-label">Send class confirmations</span></button></li>';
         }
         if (role === 'Cleaning Crew Liaison') {
@@ -9003,6 +9025,23 @@
   function clientHasCapability(key, fallbackTitles) {
     var titles = grantTitlesFor(key) || fallbackTitles || [];
     var mine = getWorkspaceRoles();
+    for (var i = 0; i < titles.length; i++) {
+      if (mine.indexOf(normalizeWorkspaceTitle(titles[i])) !== -1) return true;
+    }
+    return false;
+  }
+
+  // Like clientHasCapability, but checks the REAL login even while View
+  // As is active — for controls that act on the VIEWED family but are
+  // granted by the VIEWER's own role (e.g. the Membership Director
+  // switching a kid's half-day/full-day schedule inside Edit My Info).
+  // Server-side gates check the same real identity.
+  function realUserHasCapability(key, fallbackTitles) {
+    var real = getRealEmail();
+    if (!real) return false;
+    if (isSuperUserEmail(real)) return true;
+    var titles = grantTitlesFor(key) || fallbackTitles || [];
+    var mine = getWorkspaceRoles(real);
     for (var i = 0; i < titles.length; i++) {
       if (mine.indexOf(normalizeWorkspaceTitle(titles[i])) !== -1) return true;
     }
@@ -17230,6 +17269,7 @@
     else if (action === 'signup-todo-kids' && typeof showSignupTodoModal === 'function') showSignupTodoModal('kids');
     else if (action === 'signup-todo-assist' && typeof showSignupTodoModal === 'function') showSignupTodoModal('assist');
     else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
+    else if (action === 'acl-lottery-moves' && typeof showLotteryMovesModal === 'function') showLotteryMovesModal();
     else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
   });
 
@@ -22310,6 +22350,8 @@
     var confirmN = (closed && !overN) ? unsent : 0;
     paint('ws-todo-acl-overmax-item', 'ws-acl-overmax-count', 'ws-acl-overmax-label',
       overN, 'Resolve over-full classes — Session ' + d.session);
+    paint('ws-todo-acl-lotmoves-item', 'ws-acl-lotmoves-count', 'ws-acl-lotmoves-label',
+      (d.lottery_moves || []).length, 'Tell families about lottery moves — Session ' + d.session);
     paint('ws-todo-acl-confirm-item', 'ws-acl-confirm-count', 'ws-acl-confirm-label',
       confirmN, 'Send class confirmations — Session ' + d.session);
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
@@ -22402,12 +22444,20 @@
       function classOpts(hour) {
         var list = (pools && pools[hour]) || [];
         return '<option value="">— pick… —</option>' + list.map(function (c) {
-          return '<option value="' + c.id + '">' + escapeHtml(c.name) + (c.hour === 'both' ? ' (2-hour)' : '') + '</option>';
+          // Age range beside each class so the liaison can match kids to
+          // classes without leaving the To Do (Erin, 2026-07-16).
+          var ages = (typeof signupAgeText === 'function') ? signupAgeText(c) : '';
+          return '<option value="' + c.id + '">' + escapeHtml(c.name)
+            + (c.hour === 'both' ? ' (2-hour)' : '')
+            + (ages ? ' — ' + escapeHtml(ages) : '') + '</option>';
         }).join('');
       }
       h = (d.kids_unpicked || []).map(function (k) {
+        var kidMeta = [];
+        if (k.age != null) kidMeta.push('age ' + k.age);
+        if (k.group) kidMeta.push(k.group);
         var row = '<div class="st-place-row"><strong>' + escapeHtml(k.name) + '</strong>' +
-          (k.group ? ' <span class="ws-wv-context">' + escapeHtml(k.group) + '</span>' : '');
+          (kidMeta.length ? ' <span class="ws-wv-context">' + escapeHtml(kidMeta.join(' · ')) + '</span>' : '');
         if (canPickKid) {
           row += '<label class="st-place-slot">PM 1<select class="cl-input st-kid-pm1">' + classOpts('PM1') + '</select></label>';
           row += '<label class="st-place-slot">PM 2<select class="cl-input st-kid-pm2">' + classOpts('PM2') + '</select></label>';
@@ -22501,7 +22551,8 @@
     body.innerHTML = list.map(function (c) {
       var h = '<div class="st-place-row" data-class-id="' + c.id + '">';
       h += '<strong>' + escapeHtml(c.class_name) + '</strong>';
-      h += '<span class="ws-wv-context">' + escapeHtml(c.hour === 'both' ? 'Both PM hours' : (c.hour === 'PM2' ? 'PM Hour 2' : 'PM Hour 1')) + '</span>';
+      h += '<span class="ws-wv-context">' + escapeHtml(c.hour === 'both' ? 'Both PM hours' : (c.hour === 'PM2' ? 'PM Hour 2' : 'PM Hour 1'))
+        + (c.teacher ? ' · led by ' + escapeHtml(c.teacher) : '') + '</span>';
       h += '<span class="signup-class-count">' + c.firsts + ' signed up · max ' + c.max + ' (+' + c.over + ')</span>';
       h += '<label class="st-place-slot">Max <input type="number" class="cl-input om-max-input" min="1" max="60" value="' + c.max + '" style="width:70px;"></label>';
       h += '<button type="button" class="btn btn-primary btn-sm om-set-max">Set max</button>';
@@ -22545,6 +22596,69 @@
           alert('Lottery done.\n\nKept (' + (data.kept || []).length + '): ' + (data.kept || []).join(', ') +
             '\n\nBumped (' + (data.bumped || []).length + '): ' + ((data.bumped || []).join(', ') || '—'));
         });
+      });
+    });
+  }
+
+  // ── Lottery moves (Erin, 2026-07-16) — kids bumped by a lottery whose
+  // family hasn't been told yet. Each row shows which class's lottery it
+  // was and where the kid landed (their promoted 2nd choice, live — a
+  // re-pick shows the current placement). "Mark told" clears the row.
+  function showLotteryMovesModal() {
+    var d = _signupTodoState;
+    if (!d) return;
+    renderReportModal({
+      title: 'Tell families about lottery moves — Session ' + d.session,
+      subtitle: 'These kids were bumped in a class lottery. Let each family know which lottery it was and where their kid landed, then mark the row told.',
+      icons: [{ label: 'Copy list', icon: '📋', aria: 'Copy the list for chat', action: function () {
+        var txt = ((_signupTodoState && _signupTodoState.lottery_moves) || []).map(function (m) {
+          return m.kid + ' — "' + m.from_class + '" lottery → ' + (m.moved_to ? 'moved to "' + m.moved_to + '"' : 'no 2nd choice yet — needs a class');
+        }).join('\n');
+        navigator.clipboard.writeText(txt).then(function () { alert('Copied.'); }, function () { alert('Could not copy — select and copy manually.'); });
+      } }],
+      bodyId: 'ws-acl-lotmoves-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    renderLotteryMovesBody();
+  }
+
+  function renderLotteryMovesBody() {
+    var body = document.getElementById('ws-acl-lotmoves-body');
+    var d = _signupTodoState;
+    if (!body || !d) return;
+    var list = d.lottery_moves || [];
+    if (!list.length) {
+      body.innerHTML = '<p class="ws-empty">Every family has been told — nothing pending. 🎉</p>';
+      return;
+    }
+    body.innerHTML = list.map(function (m) {
+      var h = '<div class="st-place-row" data-move-id="' + m.id + '">';
+      h += '<strong>' + escapeHtml(m.kid) + '</strong>';
+      h += '<span class="ws-wv-context">"' + escapeHtml(m.from_class) + '" lottery</span>';
+      h += m.moved_to
+        ? '<span class="signup-class-count">→ moved to “' + escapeHtml(m.moved_to) + '”</span>'
+        : '<span class="signup-class-count" style="color:var(--color-coral,#d35a48);">→ no 2nd choice — place them from “Place kids”</span>';
+      h += '<button type="button" class="btn btn-primary btn-sm lm-told">Mark told</button>';
+      h += '</div>';
+      return h;
+    }).join('');
+
+    body.querySelectorAll('.lm-told').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = this.closest('.st-place-row');
+        var id = parseInt(row.getAttribute('data-move-id'), 10);
+        var self = this;
+        self.disabled = true;
+        fetch('/api/curriculum?action=lottery-move-notified' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ id: id })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not mark it.'); self.disabled = false; return; }
+            fetchSignupTodos().then(function () {
+              if (document.getElementById('ws-acl-lotmoves-body')) renderLotteryMovesBody();
+            });
+          })
+          .catch(function () { alert('Network error — try again.'); self.disabled = false; });
       });
     });
   }
@@ -28298,16 +28412,31 @@
       // first name.
       h += '<input class="rd-input emi-full" type="text" placeholder="Goes by (shown in directory — optional)" data-field="nickname" value="' + escapeHtml(k.nickname || '') + '">';
       h += '<label class="emi-inline-label"><span>Birthday <span style="color:#d35a48;font-weight:700;">*</span></span><input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
-      // Schedule is read-only here because changing it has billing implications
-      // (half-day vs. full-day dues). Members contact the Membership Director to
-      // change schedules; we may enable self-service once billing is integrated.
+      // Schedule is read-only for members because changing it has billing
+      // implications (half-day vs. full-day dues) — they contact the
+      // Membership Director. The Membership Director (capability
+      // member_schedule_edit, checked on the REAL login so it works
+      // through View As) gets a live select; the server enforces the
+      // same gate (Erin, 2026-07-16).
       var schedLabel = k.schedule === 'morning' ? 'Morning only'
                     : k.schedule === 'afternoon' ? 'Afternoon only'
                     : 'All day';
-      h += '<label class="emi-inline-label">Schedule' +
-           '<input class="rd-input emi-readonly" value="' + escapeHtml(schedLabel) + '" readonly tabindex="-1" title="Contact the Membership Director to change schedule — affects dues.">' +
-           '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
-           '</label>';
+      if (typeof realUserHasCapability === 'function'
+          && realUserHasCapability('member_schedule_edit', ['Membership Director'])) {
+        var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
+        h += '<label class="emi-inline-label">Schedule' +
+             '<select class="rd-input" data-field="schedule" title="Half-day ↔ full-day — affects dues.">' +
+             '<option value="all-day"' + (schedVal === 'all-day' ? ' selected' : '') + '>All day</option>' +
+             '<option value="morning"' + (schedVal === 'morning' ? ' selected' : '') + '>Morning only</option>' +
+             '<option value="afternoon"' + (schedVal === 'afternoon' ? ' selected' : '') + '>Afternoon only</option>' +
+             '</select>' +
+             '</label>';
+      } else {
+        h += '<label class="emi-inline-label">Schedule' +
+             '<input class="rd-input emi-readonly" value="' + escapeHtml(schedLabel) + '" readonly tabindex="-1" title="Contact the Membership Director to change schedule — affects dues.">' +
+             '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
+             '</label>';
+      }
       h += '<label class="emi-inline-label emi-full">' +
              'Allergies, medical &amp; notes ' +
              '<span style="font-weight:400;font-size:0.8em;color:var(--color-text-light);">— visible to all co-op members; share what teachers + leaders should know to keep your child safe.</span>' +

@@ -44,6 +44,13 @@ const CAPABILITIES = [
     defaultRoles: ['Vice President', 'Afternoon Class Liaison']
   },
   {
+    key: 'member_schedule_edit',
+    area: 'Membership',
+    label: 'Kid schedules — switch half-day ↔ full-day',
+    desc: 'Change a kid’s schedule (all day / morning only / afternoon only) in Edit My Info. Schedule drives dues, so members can’t change it themselves.',
+    defaultRoles: ['Membership Director']
+  },
+  {
     key: 'morning_builder',
     area: 'Classes & Scheduling',
     label: 'Morning Class Builder — view',

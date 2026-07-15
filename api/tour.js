@@ -3438,14 +3438,46 @@ async function handleProfileUpdate(body, req, res) {
     // directory's class/group sections (their card vanished entirely).
     const priorKidGroups = {};
     const priorKidNames = new Set();
+    const priorKidSchedules = {};
     try {
-      const priorKids = await sql`SELECT first_name, class_group FROM kids WHERE family_email = ${familyEmail}`;
+      const priorKids = await sql`SELECT first_name, class_group, schedule FROM kids WHERE family_email = ${familyEmail}`;
       priorKids.forEach(r => {
         const key = String(r.first_name || '').trim().toLowerCase();
         if (key && r.class_group) priorKidGroups[key] = r.class_group;
         if (key) priorKidNames.add(key);
+        if (key) priorKidSchedules[key] = String(r.schedule || '').trim().toLowerCase() || 'all-day';
       });
     } catch (e) { /* non-fatal — worst case the group is blank, same as before */ }
+
+    // Schedule is dues-bearing (half-day vs full-day), so switching an
+    // EXISTING kid's schedule needs the member_schedule_edit capability
+    // (Membership Director by default) or super user — checked on the
+    // REAL login, not the impersonated family. New kids pass through
+    // (registration sets their schedule). A blank incoming value means
+    // "keep what they had" so stale clients can never flip anyone.
+    const scheduleSwitchedToMorning = [];
+    {
+      const realEmail = user.realEmail || user.email;
+      let mayEditSchedule = null; // resolved lazily — most saves change nothing
+      for (const k of kids) {
+        // Same name key as priorKidGroups: kids.first_name stores the
+        // EMI "name" field verbatim.
+        const key = String(k.name || '').trim().toLowerCase();
+        const prior = priorKidSchedules[key];
+        if (!prior) continue;               // new kid — no prior to protect
+        if (!k.schedule) { k.schedule = prior; continue; }
+        if (k.schedule === prior) continue;
+        if (mayEditSchedule === null) {
+          mayEditSchedule = isSuperUser(realEmail) || (await hasCapability(realEmail, 'member_schedule_edit'));
+        }
+        if (!mayEditSchedule) {
+          return res.status(403).json({
+            error: 'Schedule changes (half-day ↔ full-day) affect dues — contact the Membership Director to switch ' + (k.first_name || k.name) + '’s schedule.'
+          });
+        }
+        if (k.schedule === 'morning') scheduleSwitchedToMorning.push(key);
+      }
+    }
     await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
     await sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`;
 
@@ -3522,6 +3554,22 @@ async function handleProfileUpdate(body, req, res) {
       }
     } catch (e) {
       console.error('class_signup_picks rename sync failed (non-fatal):', e);
+    }
+
+    // A kid switched to morning-only leaves afternoon programming — drop
+    // their current-year afternoon picks so rosters, pending-pick chips,
+    // and lead confirmations stop counting them (Erin, 2026-07-16).
+    if (scheduleSwitchedToMorning.length > 0) {
+      try {
+        const yr2 = activeSchoolYear(new Date());
+        await sql`
+          DELETE FROM class_signup_picks
+          WHERE school_year = ${yr2} AND LOWER(family_email) = LOWER(${familyEmail})
+            AND LOWER(kid_first_name) = ANY(${scheduleSwitchedToMorning}::text[])
+        `;
+      } catch (e) {
+        console.error('morning-switch pick cleanup failed (non-fatal):', e);
+      }
     }
 
     // Auto-trigger a backup-coach waiver for any newly-added BLC. Mirrors

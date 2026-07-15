@@ -1018,7 +1018,7 @@ module.exports = async function handler(req, res) {
         const stYear = activeSchoolYear(new Date());
 
         const [stKids, stPicked, stCls, stHelpers, stSignups, stApproval, stWin, stFirsts] = await Promise.all([
-          sql`SELECT k.first_name, k.class_group, k.birth_date, LOWER(k.family_email) AS fam,
+          sql`SELECT k.first_name, k.class_group, k.birth_date, k.schedule, LOWER(k.family_email) AS fam,
                      COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
                      COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
               FROM kids k
@@ -1056,10 +1056,12 @@ module.exports = async function handler(req, res) {
         const stFirstBy = {};
         stFirsts.forEach(r => { stFirstBy[r.class_submission_id] = r.firsts; });
 
-        // 1. Kids without afternoon picks (Greenhouse / under-3 never pick).
+        // 1. Kids without afternoon picks (Greenhouse / under-3 /
+        // morning-only half-day kids never pick).
         const stPickedSet = new Set(stPicked.map(r => r.fam + '|' + r.kid));
         const kidsUnpicked = stKids.filter(k => {
           if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
+          if (String(k.schedule || '').trim().toLowerCase() === 'morning') return false;
           const age = ageFromBirthDate(k.birth_date);
           if (age != null && age < 3) return false;
           return !stPickedSet.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
@@ -1067,7 +1069,10 @@ module.exports = async function handler(req, res) {
           name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
           first_name: k.first_name,
           family_email: k.fam,
-          group: k.class_group || ''
+          group: k.class_group || '',
+          // Age so the liaison can eyeball class fit from the To Do
+          // (Erin, 2026-07-16); null when no birth date is on file.
+          age: ageFromBirthDate(k.birth_date)
         })).sort((a, b) => a.name.localeCompare(b.name));
 
         // Shared occupancy maps (mirrors volunteer-matrix semantics).
@@ -1160,7 +1165,10 @@ module.exports = async function handler(req, res) {
             overmax.push({
               id: r.id, class_name: r.class_name, hour: r.scheduled_hour || 'PM1',
               max: max, firsts: firsts, over: firsts - max,
-              lottery_run: !!r.lottery_run_at
+              lottery_run: !!r.lottery_run_at,
+              // Lead's name so the liaison knows who to talk to before
+              // raising the max or running a lottery (Erin, 2026-07-16).
+              teacher: r.teacher_name || ''
             });
           }
           if (firsts > 0) {
@@ -1173,6 +1181,42 @@ module.exports = async function handler(req, res) {
         overmax.sort((a, b) => b.over - a.over);
         confirmPending.sort((a, b) => a.class_name.localeCompare(b.class_name));
 
+        // Lottery moves the families haven't been told about yet (Erin,
+        // 2026-07-16): each bump shows which class's lottery it was and
+        // where the kid landed — their promoted 2nd choice (now rank 1 in
+        // the same hour), or nothing if they had no 2nd choice. Derived
+        // live so a later re-pick shows the family's current placement.
+        const lotteryMoveRows = await sql`
+          SELECT b.id, b.class_submission_id, LOWER(b.family_email) AS fam,
+                 b.kid_first_name,
+                 c.class_name AS from_class, c.scheduled_hour AS from_hour,
+                 COALESCE(NULLIF(k.nickname, ''), b.kid_first_name) AS display_first,
+                 COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last,
+                 (SELECT c2.class_name FROM class_signup_picks p2
+                    JOIN class_submissions c2 ON c2.id = p2.class_submission_id
+                   WHERE p2.school_year = b.school_year AND p2.session_number = b.session_number
+                     AND LOWER(p2.family_email) = LOWER(b.family_email)
+                     AND LOWER(p2.kid_first_name) = LOWER(b.kid_first_name)
+                     AND p2.hour = (CASE WHEN c.scheduled_hour = 'PM2' THEN 'PM2' ELSE 'PM1' END)
+                     AND p2.rank = 1
+                   LIMIT 1) AS moved_to
+          FROM class_lottery_bumps b
+          JOIN class_submissions c ON c.id = b.class_submission_id
+          LEFT JOIN kids k ON LOWER(k.family_email) = LOWER(b.family_email)
+                          AND LOWER(k.first_name) = LOWER(b.kid_first_name)
+          LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(b.family_email)
+          WHERE b.school_year = ${stYear} AND b.session_number = ${stSess}
+            AND b.notified_at IS NULL
+          ORDER BY c.class_name, b.kid_first_name`;
+        const lotteryMoves = lotteryMoveRows.map(r => ({
+          id: r.id,
+          kid: ((r.display_first || '') + ' ' + (r.display_last || '')).trim(),
+          family_email: r.fam,
+          from_class: r.from_class,
+          hour: r.from_hour || 'PM1',
+          moved_to: r.moved_to || ''
+        }));
+
         return res.status(200).json({
           session: stSess, school_year: stYear, pm_approved: stPmApproved,
           window_status: stWinStatus,
@@ -1184,7 +1228,8 @@ module.exports = async function handler(req, res) {
           adults_unplaced: adultsUnplaced,
           assistant_gaps: assistantGaps,
           overmax: overmax,
-          confirm_pending: confirmPending
+          confirm_pending: confirmPending,
+          lottery_moves: lotteryMoves
         });
       }
 
@@ -1584,15 +1629,17 @@ module.exports = async function handler(req, res) {
         const pickAssists = {};
         if (fam && fam.family_email) {
           const kidRows = await sql`
-            SELECT first_name, birth_date, class_group FROM kids
+            SELECT first_name, birth_date, class_group, schedule FROM kids
             WHERE LOWER(family_email) = LOWER(${fam.family_email})
             ORDER BY sort_order, first_name
           `;
           // No programming under 3 (Erin, 2026-07-15): Greenhouse kids stay
           // with the littles all day, so they never enter afternoon
-          // sign-ups — leave them out of the picker entirely.
+          // sign-ups — leave them out of the picker entirely. Morning-only
+          // (half-day) kids skip afternoons too (Erin, 2026-07-16).
           const eligible = kidRows.filter(k => {
             if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
+            if (String(k.schedule || '').trim().toLowerCase() === 'morning') return false;
             const age = ageFromBirthDate(k.birth_date);
             return !(age != null && age < 3);
           });
@@ -2182,6 +2229,20 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // ── Mark a lottery move as "family told" (Erin, 2026-07-16) ──
+      // Clears the row from the liaison's lottery-moves To Do.
+      if (action === 'lottery-move-notified') {
+        const lmId = parseInt((req.body || {}).id, 10);
+        if (!Number.isFinite(lmId)) return res.status(400).json({ error: 'id required' });
+        if (!(await isReviewerReq(user, req))) return res.status(403).json({ error: 'Reviewers only.' });
+        const upd = await sql`
+          UPDATE class_lottery_bumps
+          SET notified_at = NOW(), notified_by = ${user.email}
+          WHERE id = ${lmId} AND notified_at IS NULL
+          RETURNING id`;
+        return res.status(200).json({ ok: true, id: lmId, updated: upd.length });
+      }
+
       // ── Send the lead-confirmation email (edited draft) ──
       if (action === 'class-confirm-send') {
         const csId = parseInt((req.body || {}).id, 10);
@@ -2333,10 +2394,24 @@ module.exports = async function handler(req, res) {
           }
         }
         const kidOk = await sql`
-          SELECT 1 FROM kids WHERE LOWER(family_email) = LOWER(${familyEmail})
+          SELECT class_group, birth_date, schedule FROM kids
+          WHERE LOWER(family_email) = LOWER(${familyEmail})
             AND LOWER(first_name) = LOWER(${kidFirst}) LIMIT 1
         `;
         if (kidOk.length === 0) return res.status(400).json({ error: 'That child is not in your family.' });
+        // Mirror the picker's eligibility server-side: Greenhouse /
+        // under-3 / morning-only kids aren't in afternoon programming.
+        {
+          const kr = kidOk[0];
+          const krAge = ageFromBirthDate(kr.birth_date);
+          const ineligible =
+            String(kr.class_group || '').trim().toLowerCase() === 'greenhouse'
+            || String(kr.schedule || '').trim().toLowerCase() === 'morning'
+            || (krAge != null && krAge < 3);
+          if (ineligible && ranked.length > 0) {
+            return res.status(400).json({ error: 'That child isn’t in afternoon programming (Greenhouse, under 3, or morning-only schedule).' });
+          }
+        }
 
         // Keep only ids that are scheduled classes valid for this hour, in the
         // submitted rank order, de-duplicated.

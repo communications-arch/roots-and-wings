@@ -851,6 +851,11 @@ CREATE TABLE IF NOT EXISTS class_lottery_bumps (
 );
 CREATE INDEX IF NOT EXISTS class_lottery_bumps_year_idx
   ON class_lottery_bumps (school_year, LOWER(family_email), LOWER(kid_first_name));
+-- Lottery-move To Do (Erin, 2026-07-16): the liaison tells each bumped
+-- family which lottery moved their kid and where they landed; marking
+-- the row notified clears it from the To Do.
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ;
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS notified_by TEXT NOT NULL DEFAULT '';
 
 -- ──────────────────────────────────────────────
 -- Roles v2: clean redesign of role_descriptions + role_holders
