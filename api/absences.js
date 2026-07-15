@@ -279,6 +279,13 @@ module.exports = async function handler(req, res) {
       }
 
       await sql`UPDATE absences SET cancelled_at = NOW() WHERE id = ${id}`;
+      // A cancelled absence needs no coverage — retract its "Coverage
+      // Needed" rows so members' bells don't keep a stale ask (Erin,
+      // 2026-07-16: two lingered on prod after cancellations).
+      await sql`
+        DELETE FROM notifications
+        WHERE type = 'coverage_needed' AND related_absence_id = ${id}
+      `;
       return res.status(200).json({ ok: true, id });
     }
 
