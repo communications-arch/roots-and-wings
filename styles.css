@@ -12603,6 +12603,17 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   width: 100%;
   resize: vertical;
 }
+/* Pigeon "sign up as the class assistant" option on opted-in classes. */
+.signup-assist-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  cursor: pointer;
+}
 /* A kid whose picks are saved folds to a one-line summary; the picker
    stays up for whoever still needs to choose. */
 .signup-kid-done { padding-bottom: 8px; }

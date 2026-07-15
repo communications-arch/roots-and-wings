@@ -1161,7 +1161,8 @@ module.exports = async function handler(req, res) {
         `;
         const classRows = await sql`
           SELECT id, class_name, scheduled_hour, scheduled_age_range, scheduled_room,
-                 submitted_by_name, max_students, age_groups, description
+                 submitted_by_name, max_students, age_groups, description,
+                 open_to_teen_assistant
           FROM class_submissions
           WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
             AND class_period = 'PM'
@@ -1177,7 +1178,8 @@ module.exports = async function handler(req, res) {
         // not surface as phantom students ("Test Family", 2026-07-15).
         // handleProfileUpdate migrates/cleans picks on rename going forward.
         const pickKidRows = await sql`
-          SELECT DISTINCT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
+          SELECT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
+                 BOOL_OR(p.as_assistant) AS as_assistant,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
           FROM class_signup_picks p
@@ -1187,13 +1189,16 @@ module.exports = async function handler(req, res) {
           LEFT JOIN member_profiles mp
             ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.school_year = ${sy} AND p.session_number = ${session}
+          GROUP BY p.class_submission_id, p.kid_first_name, LOWER(p.family_email),
+                   k.nickname, k.last_name, mp.family_name
         `;
         const pickCounts = {};
         const pickNames = {};
         pickKidRows.forEach(r => {
           const id = r.class_submission_id;
           pickCounts[id] = (pickCounts[id] || 0) + 1;
-          const nm = (r.display_first + ' ' + (r.display_last || '')).trim();
+          const nm = (r.display_first + ' ' + (r.display_last || '')).trim()
+            + (r.as_assistant ? ' (assistant)' : '');
           if (!pickNames[id]) pickNames[id] = [];
           if (nm) pickNames[id].push(nm);
         });
@@ -1208,6 +1213,9 @@ module.exports = async function handler(req, res) {
           description: r.description || '',
           room: r.scheduled_room || '',
           leader: r.submitted_by_name || '', max: r.max_students || 0,
+          // Teacher opted in to a Pigeons-age assistant — Pigeon kids may
+          // rank this class as its assistant regardless of age range.
+          openToTeen: r.open_to_teen_assistant === true,
           signedUp: pickCounts[r.id] || 0,
           signedUpNames: pickNames[r.id] || []
         });
@@ -1223,6 +1231,7 @@ module.exports = async function handler(req, res) {
         const kidGroups = {};
         const picks = {};
         const pickNotes = {};
+        const pickAssists = {};
         if (fam && fam.family_email) {
           const kidRows = await sql`
             SELECT first_name, birth_date, class_group FROM kids
@@ -1248,7 +1257,7 @@ module.exports = async function handler(req, res) {
             if (k.first_name && k.class_group) kidGroups[k.first_name] = k.class_group;
           });
           const pickRows = await sql`
-            SELECT kid_first_name, hour, class_submission_id, note
+            SELECT kid_first_name, hour, class_submission_id, note, as_assistant
             FROM class_signup_picks
             WHERE school_year = ${sy} AND session_number = ${session}
               AND LOWER(family_email) = LOWER(${fam.family_email})
@@ -1261,6 +1270,10 @@ module.exports = async function handler(req, res) {
               if (!pickNotes[p.kid_first_name]) pickNotes[p.kid_first_name] = {};
               pickNotes[p.kid_first_name][p.class_submission_id] = p.note;
             }
+            if (p.as_assistant) {
+              if (!pickAssists[p.kid_first_name]) pickAssists[p.kid_first_name] = {};
+              pickAssists[p.kid_first_name][p.class_submission_id] = true;
+            }
           });
         }
         return res.status(200).json({
@@ -1268,6 +1281,7 @@ module.exports = async function handler(req, res) {
           window: winRows[0] || { status: null },
           classes, kids, kidAges, kidGroups, picks,
           pick_notes: pickNotes,
+          pick_assists: pickAssists,
           is_reviewer: reviewer
         });
       }
@@ -1718,6 +1732,10 @@ module.exports = async function handler(req, res) {
         // Optional per-class parent note ({classId: text}) — required by the
         // client when the class is outside the kid's age range.
         const rawNotes = (body.notes && typeof body.notes === 'object') ? body.notes : {};
+        // Optional per-class assistant flag ({classId: true}) — Pigeons
+        // ranking a class as its assistant. Only honored below for classes
+        // whose teacher opted in (open_to_teen_assistant).
+        const rawAssist = (body.assist && typeof body.assist === 'object') ? body.assist : {};
         if (!session || (hour !== 'PM1' && hour !== 'PM2') || !kidFirst) {
           return res.status(400).json({ error: 'session, hour (PM1/PM2), and kid_first_name required' });
         }
@@ -1763,14 +1781,18 @@ module.exports = async function handler(req, res) {
         let validRows = [];
         if (ranked.length) {
           validRows = await sql`
-            SELECT id, scheduled_hour FROM class_submissions
+            SELECT id, scheduled_hour, open_to_teen_assistant FROM class_submissions
             WHERE status='scheduled' AND school_year=${sy} AND scheduled_session=${session}
               AND class_period = 'PM'
               AND id = ANY(${ranked}::int[])
           `;
         }
         const hourById = {};
-        validRows.forEach(r => { hourById[r.id] = r.scheduled_hour; });
+        const teenOkById = {};
+        validRows.forEach(r => {
+          hourById[r.id] = r.scheduled_hour;
+          teenOkById[r.id] = r.open_to_teen_assistant === true;
+        });
         const cleanIds = [];
         const seen = {};
         for (const cid of ranked) {
@@ -1790,10 +1812,11 @@ module.exports = async function handler(req, res) {
         `;
         for (let i = 0; i < cleanIds.length; i++) {
           const note = String(rawNotes[cleanIds[i]] || '').trim().slice(0, 300);
+          const asAssistant = !!rawAssist[cleanIds[i]] && teenOkById[cleanIds[i]] === true;
           await sql`
             INSERT INTO class_signup_picks
-              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, note, created_by_email)
-            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${user.email})
+              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, note, as_assistant, created_by_email)
+            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${asAssistant}, ${user.email})
           `;
         }
         return res.status(200).json({ ok: true, saved: cleanIds.length });

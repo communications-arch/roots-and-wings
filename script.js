@@ -4217,13 +4217,19 @@
           };
         });
         // Per-pick parent notes (kid -> {classId: text}); required when a
-        // ranked class is outside the kid's age range.
+        // ranked class is outside the kid's age range. workingAssist mirrors
+        // the Pigeon "sign up as the class assistant" checkboxes.
         _signup.workingNotes = {};
+        _signup.workingAssist = {};
         (data.kids || []).forEach(function (k) {
           var srcNotes = (data.pick_notes && data.pick_notes[k]) || {};
           var copy = {};
           Object.keys(srcNotes).forEach(function (cid) { copy[cid] = srcNotes[cid]; });
           _signup.workingNotes[k] = copy;
+          var srcAssist = (data.pick_assists && data.pick_assists[k]) || {};
+          var acopy = {};
+          Object.keys(srcAssist).forEach(function (cid) { acopy[cid] = true; });
+          _signup.workingAssist[k] = acopy;
         });
         renderClassSignupCard();
       })
@@ -4358,11 +4364,15 @@
           h += '</div></div>';
           return;
         }
+        // Pigeons may additionally offer to ASSIST any class whose teacher
+        // opted in — normal age highlighting still applies (assisting is a
+        // last-resort pick, Erin 2026-07-15).
+        var isPigeonKid = String(group).toLowerCase() === 'pigeons' || (age != null && age >= 14);
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
-        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands);
+        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -4418,8 +4428,9 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
+    var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     if (classes.length === 0) {
@@ -4435,6 +4446,7 @@
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
         var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
         if (c.hour === 'both') bits.push('fills both hours');
+        if (isPigeon && c.openToTeen) bits.push('🕊 open to a Pigeon assistant');
         var meta = bits.filter(Boolean).join(' · ');
         h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '">';
         // Explicit rank picker — the user chooses 1–4 instead of tap-order.
@@ -4459,13 +4471,25 @@
         if (c.max > 0) capBits.push('max ' + c.max + ' kids');
         h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
              (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
+        // Pigeons on a teacher-opted-in class: a ranked pick can be "as the
+        // class assistant" (last-resort option — highlighting unchanged).
+        var assistChecked = !!kidAssist[c.id];
+        if (sel && isPigeon && c.openToTeen) {
+          h += '<label class="signup-assist-opt"><input type="checkbox" class="signup-assist-cb"' +
+               ' data-kid="' + escapeHtml(kid) + '" data-class="' + c.id + '"' +
+               (assistChecked ? ' checked' : '') + (canEdit ? '' : ' disabled') + '> 🕊 Sign up as the class assistant</label>';
+        }
         // An out-of-range pick is allowed but needs a parent note for the
-        // Afternoon Class Liaison (Erin, 2026-07-15).
-        if (sel && fit === false) {
+        // Afternoon Class Liaison (Erin, 2026-07-15) — unless it's an
+        // assistant pick, where the note is welcome but optional.
+        if (sel && (fit === false || assistChecked)) {
           var noteVal = (_signup.workingNotes && _signup.workingNotes[kid] && _signup.workingNotes[kid][c.id]) || '';
+          var notePh = assistChecked
+            ? 'Anything the Afternoon Class Liaison should know (optional)'
+            : 'Outside the listed age range — tell the Afternoon Class Liaison why this class fits your child (required)';
           h += '<textarea class="rd-input signup-misfit-note" rows="2" maxlength="300"' +
                ' data-kid="' + escapeHtml(kid) + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') +
-               ' placeholder="Outside the listed age range — tell the Afternoon Class Liaison why this class fits your child (required)">' +
+               ' placeholder="' + notePh + '">' +
                escapeHtml(noteVal) + '</textarea>';
         }
         h += '</span></div>';
@@ -4560,6 +4584,19 @@
         _signup.workingNotes[kid][this.getAttribute('data-class')] = this.value;
       });
     });
+    // Pigeon assistant checkboxes — toggling re-renders (the note field's
+    // presence/placeholder depends on it).
+    card.querySelectorAll('.signup-assist-cb').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var kid = this.getAttribute('data-kid');
+        var cid = this.getAttribute('data-class');
+        if (!_signup.workingAssist) _signup.workingAssist = {};
+        if (!_signup.workingAssist[kid]) _signup.workingAssist[kid] = {};
+        if (this.checked) _signup.workingAssist[kid][cid] = true;
+        else delete _signup.workingAssist[kid][cid];
+        renderClassSignupCard();
+      });
+    });
   }
 
   // Fill each kid's "pending afternoon picks" block under Kids' Schedule.
@@ -4606,9 +4643,10 @@
           h += ids.map(function (cid, i) {
             var c = classById[cid];
             var nm = c ? c.name : ('Class #' + cid);
+            var isAssist = !!(s.pick_assists && s.pick_assists[kid] && s.pick_assists[kid][cid]);
             return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' +
                    '<span class="mf-pick-rank">' + (i + 1) + '</span>' +
-                   '<span class="mf-pick-name">' + escapeHtml(nm) + '</span></button>';
+                   '<span class="mf-pick-name">' + escapeHtml(nm) + (isAssist ? ' · assistant' : '') + '</span></button>';
           }).join('');
           h += '</span></div>';
         });
@@ -4696,6 +4734,7 @@
     var kidAge = (s.kidAges && s.kidAges[kid] != null) ? s.kidAges[kid] : null;
     var kidBands = kidBandsFor(kidAge, (s.kidGroups && s.kidGroups[kid]) || '');
     var kidNotes = (s.workingNotes && s.workingNotes[kid]) || {};
+    var kidAssist = (s.workingAssist && s.workingAssist[kid]) || {};
     var problems = [];
     ['PM1', 'PM2'].forEach(function (hour) {
       var classes = (s.classes && s.classes[hour]) || [];
@@ -4707,7 +4746,8 @@
       orderedIds[hour].forEach(function (cid) {
         var c = null;
         classes.forEach(function (x) { if (x.id === cid) c = x; });
-        if (c && fitsKid(kidBands, signupAgeText(c)) === false && !String(kidNotes[cid] || '').trim()) {
+        // Assistant picks carry their own context; the note is optional.
+        if (c && fitsKid(kidBands, signupAgeText(c)) === false && !kidAssist[cid] && !String(kidNotes[cid] || '').trim()) {
           problems.push('“' + c.name + '” is outside the listed age range — add a note for the liaison');
         }
       });
@@ -4724,11 +4764,16 @@
       });
       return out;
     }
+    function assistFor(hour) {
+      var out = {};
+      orderedIds[hour].forEach(function (cid) { if (kidAssist[cid]) out[cid] = true; });
+      return out;
+    }
     btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Saving…';
     function postHour(hour) {
       return fetch('/api/curriculum?action=class-signup-picks', {
         method: 'POST', headers: rwAuthHeaders(true),
-        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: orderedIds[hour], notes: notesFor(hour), view_as: active })
+        body: JSON.stringify({ session: session, hour: hour, kid_first_name: kid, ranked_class_ids: orderedIds[hour], notes: notesFor(hour), assist: assistFor(hour), view_as: active })
       }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
     }
     postHour('PM1').then(function () { return postHour('PM2'); })
@@ -4740,6 +4785,11 @@
         // No refetch — another kid's in-progress rankings must survive.
         if (!_signup.picks) _signup.picks = {};
         _signup.picks[kid] = { PM1: orderedIds.PM1.slice(), PM2: orderedIds.PM2.slice() };
+        // Mirror the saved assistant flags for the pending-picks chips.
+        if (!_signup.pick_assists) _signup.pick_assists = {};
+        var savedAssist = {};
+        orderedIds.PM1.concat(orderedIds.PM2).forEach(function (cid) { if (kidAssist[cid]) savedAssist[cid] = true; });
+        _signup.pick_assists[kid] = savedAssist;
         delete _signupKidOpen[kid];
         setTimeout(function () {
           btn.disabled = false; btn.textContent = orig;
