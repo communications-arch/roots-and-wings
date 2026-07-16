@@ -2945,10 +2945,15 @@ async function upsertParentPhotoConsent(sql, familyEmail, familyName, parentFull
     if (byPersonalEmail.length > 0) targetId = byPersonalEmail[0].id;
   }
   if (!targetId) {
+    // Match the goes-by nickname too (2026-07-16, Goodnight duplicate):
+    // a waiver signed as "Cammie" must resolve to the stored legal
+    // "Camm" row when "Cammie" is her nickname — otherwise the INSERT
+    // fallback below fabricates an orphan person.
     const byName = await sql`
       SELECT id FROM people
       WHERE family_email = ${familyEmail}
-        AND LOWER(first_name) = ${firstName.toLowerCase()}
+        AND (LOWER(first_name) = ${firstName.toLowerCase()}
+             OR LOWER(COALESCE(nickname, '')) = ${firstName.toLowerCase()})
       LIMIT 1
     `;
     if (byName.length > 0) targetId = byName[0].id;
@@ -3114,20 +3119,36 @@ async function upsertProfileFromRegistration(sql, params) {
     const nm = String((p && p.name) || '').trim();
     return (nm.split(/\s+/)[0] || '').toLowerCase();
   }
+  // Every first name an existing row answers to: the legal first name
+  // plus the goes-by nickname (2026-07-16, Goodnight duplicate — a
+  // family re-registering as "Cammie" must match the stored "Camm" row
+  // instead of appending a second person).
+  function answersTo(p) {
+    const keys = [];
+    const fk = firstKey(p);
+    if (fk) keys.push(fk);
+    const nick = String((p && p.nickname) || '').trim().toLowerCase();
+    const nickFirst = nick.split(/\s+/)[0] || '';
+    if (nickFirst && keys.indexOf(nickFirst) === -1) keys.push(nickFirst);
+    return keys;
+  }
 
   // Merge parents. Registration is authoritative for the fields it
   // supplies (role, photo_consent, last_name); existing values win for
   // pronouns / photo_url / personal_email / phone (preserves later EMI
   // edits when a family re-registers without updating those).
   const mergedParents = [];
-  const seenFirsts = new Set();
+  const matchedExParents = new Set();
   newParents.forEach(np => {
     const key = firstKey(np);
     if (!key) return;
-    seenFirsts.add(key);
-    const ex = exPeople.find(p => firstKey(p) === key) || {};
+    const ex = exPeople.find(p => !matchedExParents.has(p) && answersTo(p).indexOf(key) !== -1) || {};
+    if (exPeople.indexOf(ex) !== -1) matchedExParents.add(ex);
+    // When the match came through the goes-by nickname, the typed name is
+    // a nickname — keep the stored legal first name rather than renaming.
+    const matchedByNickname = ex.first_name && firstKey(ex) !== key;
     mergedParents.push({
-      first_name: np.first_name || ex.first_name || '',
+      first_name: (matchedByNickname ? ex.first_name : np.first_name || ex.first_name) || '',
       last_name: np.last_name || ex.last_name || '',
       pronouns: ex.pronouns || np.pronouns || '',
       photo_url: ex.photo_url || np.photo_url || '',
@@ -3143,7 +3164,7 @@ async function upsertProfileFromRegistration(sql, params) {
       nicknames: Array.isArray(ex.nicknames) ? ex.nicknames : []
     });
   });
-  exPeople.forEach(p => { if (!seenFirsts.has(firstKey(p))) mergedParents.push(p); });
+  exPeople.forEach(p => { if (!matchedExParents.has(p)) mergedParents.push(p); });
 
   // Merge kids by lowercased FIRST name. Same convention as before.
   function kidFirst(k) {
@@ -3165,19 +3186,34 @@ async function upsertProfileFromRegistration(sql, params) {
     });
     return out;
   }
+  // Same goes-by awareness as the parent merge: a kid registered under
+  // their nickname must fold into the stored legal-name row.
+  function kidAnswersTo(k) {
+    const keys = [];
+    const fk = kidFirst(k);
+    if (fk) keys.push(fk);
+    const nick = String((k && k.nickname) || '').trim().split(/\s+/)[0].toLowerCase();
+    if (nick && keys.indexOf(nick) === -1) keys.push(nick);
+    return keys;
+  }
   const mergedKids = [];
-  const seenKids = new Set();
+  const matchedExKids = new Set();
   newKids.forEach(nk => {
     const key = kidFirst(nk);
     if (!key) return;
-    seenKids.add(key);
-    const ex = aggregateKidMatches(exKids.filter(k => kidFirst(k) === key));
+    const exMatches = exKids.filter(k => kidAnswersTo(k).indexOf(key) !== -1);
+    exMatches.forEach(k => matchedExKids.add(k));
+    const ex = aggregateKidMatches(exMatches);
+    const kidMatchedByNickname = ex.first_name && String(ex.first_name).trim().split(/\s+/)[0].toLowerCase() !== key;
     mergedKids.push({
       // Prefer the explicitly-entered first name; fall back to the first
-      // token of the combined name for older clients.
-      first_name: (nk.first_name && nk.first_name.trim())
-        ? nk.first_name.trim()
-        : String(nk.name || '').trim().split(/\s+/)[0],
+      // token of the combined name for older clients. When the match came
+      // through the goes-by nickname, keep the stored legal name.
+      first_name: kidMatchedByNickname
+        ? ex.first_name
+        : (nk.first_name && nk.first_name.trim())
+          ? nk.first_name.trim()
+          : String(nk.name || '').trim().split(/\s+/)[0],
       last_name: nk.last_name || ex.last_name || '',
       // Registration doesn't collect the display nickname — preserve it.
       nickname: ex.nickname || '',
@@ -3189,7 +3225,7 @@ async function upsertProfileFromRegistration(sql, params) {
       photo_consent: typeof nk.photo_consent === 'boolean' ? nk.photo_consent : (ex.photo_consent !== false)
     });
   });
-  exKids.forEach(k => { if (!seenKids.has(kidFirst(k))) mergedKids.push(k); });
+  exKids.forEach(k => { if (!matchedExKids.has(k)) mergedKids.push(k); });
 
   const phone = String(params.phone || '').trim();
   const address = String(params.address || '').trim();
