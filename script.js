@@ -5947,12 +5947,20 @@
             parentFullNames.some(function(pf) { return nl === pf.toLowerCase(); });
         });
       }
+      // Include the floor grouping in the duty label (Erin, 2026-07-16):
+      // "Cleaning: Upstairs Bathrooms", "Cleaning: Main Floor Kitchen" —
+      // area names alone are ambiguous across floors. Skip the prefix if
+      // the area name already starts with it.
+      var cleanFloorLabels = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside' };
       cleanAreas.forEach(function (floor) {
         if (!sessClean[floor]) return;
         Object.keys(sessClean[floor]).forEach(function (area) {
           if (matchesCleaning(sessClean[floor][area])) {
             hasCleaning = true;
-            duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning: ' + area, detail: 'Session ' + dutySession, popup: {type: 'cleaning', area: area, floor: floor, session: dutySession}});
+            var floorLbl = cleanFloorLabels[floor] || '';
+            var areaLbl = (floorLbl && area.toLowerCase().indexOf(floorLbl.toLowerCase()) !== 0)
+              ? floorLbl + ' ' + area : area;
+            duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning: ' + areaLbl, detail: 'Session ' + dutySession, popup: {type: 'cleaning', area: area, floor: floor, session: dutySession}});
           }
         });
       });
@@ -9052,7 +9060,7 @@
   };
   var ROLE_FORMS = {
     'Communications Director': [
-      { key: 'send-waiver', title: 'Send One-Off Waiver' }
+      { key: 'send-waiver', title: 'Send Waiver' }
     ],
     'Membership Director': [
       { key: 'send-registration', title: 'Send Registration Form' }
@@ -9167,7 +9175,7 @@
     'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Member Pipeline' }] },
     'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Morning Classes' }] },
     'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
-                               forms:   [{ key: 'send-waiver', title: 'Send One-Off Waiver' }] },
+                               forms:   [{ key: 'send-waiver', title: 'Send Waiver' }] },
     'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise Orders' }] },
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
     'special_events_manage': { widgets: ['special-events'] },
@@ -9762,7 +9770,7 @@
     },
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (w) {
-        var resendable = !w.signed && (w.source === 'Backup Coach' || w.source === 'One-off');
+        var resendable = !w.signed && ['Backup Coach', 'One-off', 'Guest', 'Community Liaison'].indexOf(w.source) !== -1;
         // Board members read this report read-only (Board at a Glance,
         // 2026-07-15) — the server's viewerCanAct=false hides Resend.
         if (!resendable || !_waiversCanAct) return '<span class="ws-srt-actions-empty">&mdash;</span>';
@@ -9806,7 +9814,12 @@
         merged.push({ source: 'Backup Coach', rowId: b.id, name: b.name, email: b.email, signed: !!b.signed_at, sent_at: b.sent_at, last_sent_at: b.last_sent_at, signed_at: b.signed_at, context: b.sent_by ? 'for ' + b.sent_by : '', waiver_version: b.waiver_version || '', photo_consent: b.photo_consent });
       });
       oneOff.forEach(function (o) {
-        merged.push({ source: 'One-off', rowId: o.id, name: o.name, email: o.email, signed: !!o.signed_at, sent_at: o.sent_at, last_sent_at: o.last_sent_at, signed_at: o.signed_at, note: o.note || '', context: o.sent_by ? 'by ' + o.sent_by : '', waiver_version: o.waiver_version || '', photo_consent: o.photo_consent });
+        // Guest + Community Liaison sends ride the one-off bucket but get
+        // their own Source label (waiver_role from the DB row).
+        var srcLabel = o.waiver_role === 'guest' ? 'Guest'
+          : o.waiver_role === 'community_liaison' ? 'Community Liaison'
+          : 'One-off';
+        merged.push({ source: srcLabel, rowId: o.id, name: o.name, email: o.email, signed: !!o.signed_at, sent_at: o.sent_at, last_sent_at: o.last_sent_at, signed_at: o.signed_at, note: o.note || '', context: o.sent_by ? 'by ' + o.sent_by : '', waiver_version: o.waiver_version || '', photo_consent: o.photo_consent });
       });
       registration.forEach(function (r) {
         merged.push({ source: 'Registration', rowId: r.id, name: r.name, email: r.email, signed: true, sent_at: r.sent_at, signed_at: r.signed_at, context: r.context || '', waiver_version: r.waiver_version || '', photo_consent: r.photo_consent });
@@ -11477,7 +11490,7 @@
     ];
     var body = renderReportModal({
       title: 'Waivers Report',
-      subtitle: 'Everyone who has been sent a waiver — registration backups + one-off sends.',
+      subtitle: 'Everyone who has been sent a waiver — registration backups, guests, community liaisons + one-off sends.',
       meta: '',
       icons: icons,
       bodyId: 'ws-waivers-report-body',
@@ -12177,9 +12190,14 @@
     if (!personDetail || !personDetailCard) return;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
-    html += '<h3 class="rd-title">Send One-Off Waiver</h3>';
-    html += '<p class="rd-subtitle">Email a signing link to a last-minute adult. They sign via <code>/waiver.html</code> and it shows up in the Waivers report.</p>';
+    html += '<h3 class="rd-title">Send Waiver</h3>';
+    html += '<p class="rd-subtitle">Email a signing link to an adult who isn’t a member — a Guest helping with a class or event, a Community Liaison, or any last-minute adult. They sign via <code>/waiver.html</code> and it shows up in the Waivers report.</p>';
     html += '<div class="ws-waiver-form">';
+    html += '<label>Who is this for?<select id="ws-wv-role">';
+    html += '<option value="guest">Guest — teaching a class or helping at an event</option>';
+    html += '<option value="community_liaison">Community Liaison</option>';
+    html += '<option value="one_off">Other one-off adult</option>';
+    html += '</select></label>';
     html += '<label>Recipient name<input type="text" id="ws-wv-name" maxlength="200" placeholder="Jane Doe"></label>';
     html += '<label>Recipient email<input type="email" id="ws-wv-email" maxlength="200" placeholder="jane@example.com"></label>';
     html += '<label>Note (optional)<textarea id="ws-wv-note" maxlength="500" rows="2" placeholder="Added context that appears in the email..."></textarea></label>';
@@ -12198,17 +12216,19 @@
       var nameEl = personDetailCard.querySelector('#ws-wv-name');
       var emailEl = personDetailCard.querySelector('#ws-wv-email');
       var noteEl = personDetailCard.querySelector('#ws-wv-note');
+      var roleEl = personDetailCard.querySelector('#ws-wv-role');
       var statusEl = personDetailCard.querySelector('#ws-wv-status');
       var name = (nameEl.value || '').trim();
       var emailVal = (emailEl.value || '').trim();
       var note = (noteEl.value || '').trim();
+      var waiverRole = (roleEl && roleEl.value) || 'one_off';
       if (!name || !emailVal) { statusEl.className = 'ws-wv-status ws-wv-err'; statusEl.textContent = 'Name and email are required.'; return; }
       sendBtn.disabled = true; var orig = sendBtn.textContent; sendBtn.textContent = 'Sending\u2026';
       statusEl.className = 'ws-wv-status'; statusEl.textContent = '';
       fetch('/api/tour', {
         method: 'POST',
         headers: rwAuthHeaders(true),
-        body: JSON.stringify({ kind: 'waiver-send', name: name, email: emailVal, note: note })
+        body: JSON.stringify({ kind: 'waiver-send', name: name, email: emailVal, note: note, waiver_role: waiverRole })
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         sendBtn.disabled = false; sendBtn.textContent = orig;
