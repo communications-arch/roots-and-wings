@@ -1795,6 +1795,36 @@ async function firstSeasonByEmail(sql) {
   }
 }
 
+// Which families hold a live (non-declined) registration for the season
+// currently open for registration (tour.js DEFAULT_SEASON) — drives the
+// Directory's "hasn't re-enrolled" state (Erin, 2026-07-16). Any payment
+// status counts (pending cash/check families ARE re-enrolled). Same
+// dual-key emission as firstSeasonFromRows: the flag is reachable by BOTH
+// the raw registration (personal) email and the derived Workspace family
+// email. {} on failure so the directory degrades to no indicator.
+async function registeredSeasonByEmail(sql) {
+  var tour = require('./tour.js'); // lazy: top-level require would cycle
+  try {
+    var rows = await sql`
+      SELECT email, main_learning_coach, existing_family_name
+      FROM registrations
+      WHERE declined_at IS NULL AND season = ${tour.DEFAULT_SEASON}
+    `;
+    var out = {};
+    rows.forEach(function (r) {
+      var rawEmail = String(r.email || '').toLowerCase().trim();
+      var famName = tour.deriveFamilyName(r.main_learning_coach, r.existing_family_name);
+      var famEmail = String(tour.deriveFamilyEmail(r.main_learning_coach, famName) || '').toLowerCase();
+      if (rawEmail) out[rawEmail] = true;
+      if (famEmail) out[famEmail] = true;
+    });
+    return out;
+  } catch (e) {
+    console.error('Registrations current-season query failed:', e.message);
+    return {};
+  }
+}
+
 function participationBuildNameIndex(families) {
   var idx = {};
   // Build a per-parent nickname lookup keyed by canonical first name +
@@ -1923,6 +1953,9 @@ async function loadFamiliesFromProfiles(sql) {
   // indicator (family hasn't completed a full co-op year yet). The client
   // derives newness from firstSeason against the Field-Day year boundary.
   var regByEmail = await firstSeasonByEmail(sql);
+  // Live registration for the season currently open — families without
+  // one render dimmed in the Directory ("hasn't re-enrolled").
+  var regCurrentByEmail = await registeredSeasonByEmail(sql);
   var byFamily = {};
   peopleRows.forEach(function (pr) {
     var k = String(pr.family_email || '').toLowerCase();
@@ -1982,6 +2015,11 @@ async function loadFamiliesFromProfiles(sql) {
       // '' when they predate the portal or their earliest registration
       // was an existing-family one — never new.
       firstSeason: regByEmail[key] || '',
+      // TRUE when the family holds a live registration for the season
+      // currently open (DEFAULT_SEASON). Strictly boolean so the client
+      // can distinguish "not re-enrolled" (false) from older cached
+      // payloads that predate the field (undefined).
+      registeredCurrentSeason: regCurrentByEmail[key] === true,
       // Full normalized roster for downstream consumers that want every
       // person (e.g. dev-mode renderMyFamily / View As).
       people: people

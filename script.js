@@ -675,7 +675,8 @@
                 boardRole: (isPrimaryParent && fam.boardRole) ? fam.boardRole : null,
                 boardEmail: (isPrimaryParent && fam.boardRole) ? (fam.boardEmail || null) : null,
                 role: piHit.role || null,
-                firstSeason: fam.firstSeason || ''
+                firstSeason: fam.firstSeason || '',
+                registeredCurrentSeason: fam.registeredCurrentSeason
               });
             });
             (fam.kids || []).forEach(function (kid) {
@@ -696,7 +697,8 @@
                 schedule: kid.schedule || 'all-day',
                 photoConsent: kid.photo_consent !== false,
                 parentNames: fam.parents,
-                firstSeason: fam.firstSeason || ''
+                firstSeason: fam.firstSeason || '',
+                registeredCurrentSeason: fam.registeredCurrentSeason
               });
             });
           });
@@ -2619,6 +2621,13 @@
     var completed = lastCompletedYearLabel();
     return !!completed && firstSeason > completed;
   }
+  // Family has NOT re-enrolled for the season currently open for
+  // registration (Erin, 2026-07-16) — no live registration row. Strict
+  // === false so older cached payloads that predate the field (undefined)
+  // never gray anyone out.
+  function isNotReEnrolledPerson(person) {
+    return !!person && person.registeredCurrentSeason === false;
+  }
 
   // Nearest upcoming co-op day — returns today's date if today is co-op day,
   // else the next one. Formatted YYYY-MM-DD.
@@ -2723,13 +2732,15 @@
         // First-year families: green card outline (.yb-card-new) instead of a
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
         var isNewM = isNewMemberPerson(person);
+        var notReEnrolled = isNotReEnrolledPerson(person);
         var extras = '';
         if (person.pronouns) extras += '<div class="yb-pronouns">' + person.pronouns + '</div>';
         if (person.allergies) extras += '<div class="yb-allergy">' + person.allergies + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
         if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="This child is opted out of photos.">⛔ No Photos</div>';
+        if (notReEnrolled) extras += '<div class="yb-inactive-badge" title="This family hasn’t registered for the upcoming year yet.">Not re-enrolled</div>';
 
-        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
+        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + classCardFirst.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + (person.age ? 'Age ' + person.age : '') + '</div>' +
@@ -2829,8 +2840,16 @@
         // First-year families: green card outline (.yb-card-new) instead of a
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
         var isNewM = isNewMemberPerson(person);
+        // Hasn't re-enrolled for the upcoming year: dimmed card + pill.
+        var notReEnrolled = isNotReEnrolledPerson(person);
+        var inactiveTag = notReEnrolled
+          ? '<div class="yb-inactive-badge">Not re-enrolled</div>'
+          : '';
+        var cardTitle = notReEnrolled
+          ? 'This family hasn’t registered for the upcoming year yet.'
+          : (isNewM ? 'This family is in their first co-op year.' : '');
 
-        html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + (isNewM ? 'This family is in their first co-op year.' : '') + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + '">' +
+        html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + cardTitle + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + displayFirstName.charAt(0) + '</span></div>' +
           '<div class="yb-name">' + displayName + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
@@ -2841,6 +2860,7 @@
           absenceTag +
           allergyTag +
           noPhotoTag +
+          inactiveTag +
           '</button>';
         shown++;
       });
@@ -3127,6 +3147,9 @@
     }
     if (isNewMemberPerson(person)) {
       html += '<p class="detail-new-member">\u{1F331} First-year family</p>';
+    }
+    if (isNotReEnrolledPerson(person)) {
+      html += '<p class="detail-not-reenrolled">⏳ Not re-enrolled — this family hasn’t registered for the upcoming year yet.</p>';
     }
     html += '</div></div>';
 

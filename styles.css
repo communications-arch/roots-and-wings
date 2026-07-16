@@ -3662,6 +3662,35 @@ p + p { margin-top: 1rem; }
   opacity: 0.82;
 }
 
+/* Not re-enrolled — family has no live registration for the season
+   currently open. Whole card dims + desaturates; slate pill mirrors
+   .yb-no-photo (restriction tone, not alert). */
+.yb-inactive-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #4b5563;
+  background: rgba(75, 85, 99, 0.12);
+  padding: 2px 8px;
+  border-radius: 50px;
+  margin-top: 5px;
+  display: inline-block;
+}
+.yb-card.yb-card-inactive {
+  outline: 1.5px dashed rgba(75, 85, 99, 0.45);
+  outline-offset: -3px;
+  opacity: 0.72;
+}
+.yb-card.yb-card-inactive .yb-photo {
+  filter: grayscale(0.85);
+  opacity: 0.75;
+}
+.detail-not-reenrolled {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4b5563;
+  margin-top: 4px;
+}
+
 /* Detail overlay */
 .person-detail-overlay {
   position: fixed;

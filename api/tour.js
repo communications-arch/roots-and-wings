@@ -6517,6 +6517,7 @@ module.exports = async function handler(req, res) {
 module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
 module.exports.deriveFamilyName = deriveFamilyName;
 module.exports.deriveFamilyEmail = deriveFamilyEmail;
+module.exports.DEFAULT_SEASON = DEFAULT_SEASON;
 module.exports.morningKidDisplayName = morningKidDisplayName;
 module.exports.validateBoardCalendarEvent = validateBoardCalendarEvent;
 module.exports.computeDerivedCalendarEvents = computeDerivedCalendarEvents;
