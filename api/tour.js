@@ -6144,7 +6144,7 @@ async function handleBoardGlance(req, res) {
 
   // Metric queries — independent, each optional.
   const metric = async (fn) => { try { return await fn(); } catch (e) { console.error('board-glance metric failed:', e); return null; } };
-  const [pipeline, awaitingReg, pendingPay, waivers, afternoon, morning, cleaning, events, boardTasks] = await Promise.all([
+  const [pipeline, awaitingReg, pendingPay, waivers, afternoon, morning, cleaning, events, boardTasks, onboard] = await Promise.all([
     metric(async () => {
       const r = await sql`
         SELECT COUNT(*) FILTER (WHERE status IN ('inquiry','requested','scheduled'))::int AS pre_tour,
@@ -6168,13 +6168,15 @@ async function handleBoardGlance(req, res) {
       return r[0].n;
     }),
     metric(async () => {
+      // "Pending" matches the Comms To Do exactly (waivers awaiting a
+      // first send — handleWaiversCounts), not every unsigned row.
       const r = await sql`
-        SELECT COUNT(*) FILTER (WHERE ws.signed_at IS NULL)::int AS unsigned
+        SELECT COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NULL)::int AS pending
         FROM waiver_signatures ws
         LEFT JOIN registrations reg ON reg.id = ws.registration_id
         WHERE ws.role IN ('backup_coach', 'one_off')
           AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)`;
-      return r[0].unsigned;
+      return r[0].pending;
     }),
     metric(async () => {
       const r = await sql`
@@ -6229,6 +6231,20 @@ async function handleBoardGlance(req, res) {
         WHERE event_type = 'task' AND school_year = ${year}
           AND event_date >= CURRENT_DATE AND event_date < CURRENT_DATE + INTERVAL '30 days'`;
       return r[0].n;
+    }),
+    metric(async () => {
+      // New members ready to onboard — mirrors the client's
+      // isReadyToOnboard filter on the Comms To Do: paid, agreement
+      // signed, genuinely new family, welcome email not yet sent.
+      const r = await sql`
+        SELECT COUNT(*)::int AS n FROM registrations
+        WHERE season = ${season} AND declined_at IS NULL
+          AND LOWER(COALESCE(payment_status, '')) = 'paid'
+          AND waiver_member_agreement = TRUE
+          AND COALESCE(signature_name, '') <> ''
+          AND COALESCE(existing_family_name, '') = ''
+          AND welcome_email_sent_at IS NULL`;
+      return r[0].n;
     })
   ]);
 
@@ -6253,7 +6269,12 @@ async function handleBoardGlance(req, res) {
       ] };
     }
     if (key === 'communications director') {
-      return { metrics: waivers == null ? [] : [{ label: 'waivers unsigned', value: waivers }], views: [
+      // Members to onboard + pending waivers — the same two counts as
+      // the Comms To Do items (Erin, 2026-07-16).
+      const m = [];
+      if (onboard != null) m.push({ label: 'members to onboard', value: onboard });
+      if (waivers != null) m.push({ label: 'waivers pending', value: waivers });
+      return { metrics: m, views: [
         { key: 'waivers-report', label: 'Waivers' },
         { key: 'membership-report', label: 'Members' }
       ] };

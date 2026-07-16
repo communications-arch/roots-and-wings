@@ -2143,6 +2143,16 @@
       var targetId = this.getAttribute('href');
       if (targetId === '#' || targetId.length < 2) return;
 
+      // "My Family" IS the top of the page — anchoring to the #myFamily
+      // section landed below the header/greeting, and the lingering hash
+      // made every reload start scrolled way down (Erin, 2026-07-16).
+      if (targetId === '#myFamily') {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+        return;
+      }
+
       var target = document.querySelector(targetId);
       if (target) {
         e.preventDefault();
@@ -2152,6 +2162,13 @@
       }
     });
   });
+
+  // A #myFamily hash left in the URL by an older visit would re-anchor
+  // every page load below the header — clean it and start at the top.
+  if (location.hash === '#myFamily') {
+    if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+    window.addEventListener('load', function () { window.scrollTo(0, 0); });
+  }
 
   // ──────────────────────────────────────────────
   // Tour Modal — close on Escape key
