@@ -1774,10 +1774,10 @@ SELECT
   v.ord, v.term, v.overview, v.icon, 'migration'
 FROM (VALUES
   ('guest', 'Guest', 400, '',
-   'A helper from outside the co-op — someone who isn''t a member but would like to teach a class or help out with a special event. Every Guest must sign the liability waiver before joining us at co-op (send it from the Workspace via Send Waiver; signatures land in the Waivers Report). Guests don''t have member portal logins.',
+   'A helper from outside the co-op — someone who isn''t a member but would like to teach a class or help out with a special event. Every Guest must sign the liability waiver before joining us at co-op (send it from the Workspace via Send Waiver — signatures land in the Waivers Report). Guests don''t have member portal logins.',
    E'🤝'),
   ('community_liaison', 'Community Liaison', 401, '1 year',
-   'Connects Roots & Wings with the broader community — outside organizations, venues, guest teachers, and event helpers. Signs the liability waiver like a Guest if not already a member. Currently has the same access as a Guest; additional permissions can be granted later through the Permissions admin.',
+   'Connects Roots & Wings with the broader community — outside organizations, venues, guest teachers, and event helpers. Signs the liability waiver like a Guest if not already a member. Currently has the same access as a Guest — additional permissions can be granted later through the Permissions admin.',
    E'🌉')
 ) AS v(key, title, ord, term, overview, icon)
 WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
