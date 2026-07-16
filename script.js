@@ -1393,8 +1393,10 @@
     } catch (e) { /* ignore */ }
 
     var googleCred = localStorage.getItem('rw_google_credential');
-    if (!googleCred) return;
-    fetch('/api/cleaning', { headers: rwAuthHeaders() })
+    if (!googleCred) return Promise.resolve();
+    // RETURNS the fetch chain (2026-07-16) so drawer mutations can redraw
+    // after the data actually lands instead of racing a fixed timer.
+    return fetch('/api/cleaning', { headers: rwAuthHeaders() })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         // A management modal waiting on this fetch must never strand on
@@ -5421,9 +5423,12 @@
           });
           cleanOptsHtml += '</optgroup>';
         });
+        // Constant position (testers, 2026-07-16): the picker used to
+        // prepend when the family held no spot and append otherwise, so
+        // releasing your last area made it hop bottom → top mid-click.
         injectRow('Cleaning',
           '<select class="cl-input mf-vol-pick-clean" style="max-width:280px;">' + cleanOptsHtml + '</select>',
-          { prepend: !myClean.length, bare: true });
+          { prepend: false, bare: true });
       } else if (!myClean.length) {
         injectRow('Cleaning', '<span class="mf-vol-optional">Optional — all areas are covered for this session. Thank you!</span>', { prepend: true, bare: true });
       }
@@ -7799,7 +7804,10 @@
         html += '<div class="cle-family-chips">';
         families.forEach(function (f) {
           var aId = findAssignmentId(viewSess, floor.key, area.area_name, f);
-          html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
+          // data-family carries the RAW stored name — the visible text is
+          // cleaningDisplayName(f), which won't match findAssignmentId
+          // after a seed (2026-07-16: intermittent "can't delete").
+          html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '" data-family="' + escapeAttr(f) + '">&times;</button></span>';
         });
         html += '</div>';
         // Add volunteer input
@@ -7824,7 +7832,7 @@
       html += '<div class="cle-family-chips">';
       floaterFamilies.forEach(function (f) {
         var aId = findAssignmentId(viewSess, 'floater', 'Floater', f);
-        html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '">&times;</button></span>';
+        html += '<span class="cle-chip">' + escapeAttr(cleaningDisplayName(f)) + '<button class="cle-chip-x" data-assign-id="' + aId + '" data-family="' + escapeAttr(f) + '">&times;</button></span>';
       });
       html += '</div>';
       html += '<div class="cle-add-row">';
@@ -7876,7 +7884,11 @@
       btn.onclick = function (e) {
         e.stopPropagation();
         var rawId = btn.getAttribute('data-assign-id');
-        var familyName = btn.parentElement ? btn.parentElement.firstChild.textContent : '';
+        // Prefer the raw stored family name (data-family) — the visible
+        // chip text is the DISPLAY name, which misses findAssignmentId's
+        // exact match against seeded rows (2026-07-16 fix).
+        var familyName = btn.getAttribute('data-family')
+          || (btn.parentElement ? btn.parentElement.firstChild.textContent : '');
         var needsSeed = !rawId || rawId === 'null';
 
         var promise = needsSeed
@@ -7885,13 +7897,18 @@
               var floorKey = findFloorForFamilyChip(btn);
               var areaName = findAreaForFamilyChip(btn, floorKey);
               var newId = findAssignmentId(cleaningModalSession, floorKey, areaName, familyName);
-              return newId ? cleaningApiCall('DELETE', 'action=assignment&id=' + newId) : null;
+              if (!newId) throw new Error('Could not match "' + familyName + '" to a saved assignment — reopen the drawer and try again.');
+              return cleaningApiCall('DELETE', 'action=assignment&id=' + newId);
             })
           : cleaningApiCall('DELETE', 'action=assignment&id=' + rawId);
 
+        // Redraw AFTER the refetch lands — the old fixed 300ms timer lost
+        // the race on slow networks and the deleted chip reappeared
+        // (2026-07-16: intermittent "can't delete").
         promise.then(function () {
-          loadCleaningData();
-          setTimeout(renderCleaningManager, 300);
+          return loadCleaningData();
+        }).then(function () {
+          renderCleaningManager();
         }).catch(function (err) { alert('Error removing: ' + (err && err.message || err)); });
       };
     });
@@ -7921,8 +7938,7 @@
           })
           .then(function (r) {
             if (r && r.error) { alert(r.error); btn.disabled = false; btn.textContent = originalText; return; }
-            loadCleaningData();
-            setTimeout(renderCleaningManager, 300);
+            return loadCleaningData().then(function () { renderCleaningManager(); });
           })
           .catch(function (err) {
             alert('Error saving: ' + (err && err.message || err));
@@ -7967,12 +7983,16 @@
         document.getElementById('clmSaveTasks-' + areaId).onclick = function () {
           var newTasks = [];
           editor.querySelectorAll('.cle-task-input').forEach(function (inp) { var v = inp.value.trim(); if (v) newTasks.push(v); });
-          cleaningApiCall('PATCH', 'action=area&id=' + areaId, { tasks: newTasks }).then(function () {
+          cleaningApiCall('PATCH', 'action=area&id=' + areaId, { tasks: newTasks }).then(function (r) {
+            if (r && r.error) { alert('Could not save tasks: ' + r.error); return; }
             for (var i = 0; i < cleaningDB.areas.length; i++) {
               if (cleaningDB.areas[i].id === parseInt(areaId, 10)) { cleaningDB.areas[i].tasks = newTasks; break; }
             }
             renderCleaningManager();
-          });
+            // Refresh the localStorage cache too — otherwise a deleted
+            // task flashed back from cache on the next open (2026-07-16).
+            loadCleaningData();
+          }).catch(function (err) { alert('Could not save tasks: ' + ((err && err.message) || err)); });
         };
       };
     });
@@ -7988,7 +8008,7 @@
         if (!confirm('Copy ' + fromAssignments.length + ' assignments from session ' + fromSess + ' to session ' + toSess + '?')) return;
         Promise.all(fromAssignments.map(function (a) {
           return cleaningApiCall('POST', 'action=assignment', { session_number: toSess, cleaning_area_id: a.cleaning_area_id, family_name: a.family_name });
-        })).then(function () { loadCleaningData(); setTimeout(renderCleaningManager, 300); });
+        })).then(function () { return loadCleaningData(); }).then(function () { renderCleaningManager(); });
       };
     }
   }

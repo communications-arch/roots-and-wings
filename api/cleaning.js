@@ -1319,6 +1319,20 @@ module.exports = async function handler(req, res) {
 
     // ── Area CRUD ──
     if (action === 'area') {
+      // Same write gate as 'assignment' (2026-07-16 audit: area/task
+      // CRUD had NO gate — any signed-in member could rewrite or delete
+      // areas). Reads come through the main GET, so this only guards writes.
+      const canManageAreas =
+        (await canEditAsRole(user.email, 'Cleaning Crew Liaison')) ||
+        (await canEditAsRole(user.email, 'Vice President')) ||
+        (await canEditAsRole(user.email, 'Vice-President')) ||
+        isSuperUser(user.email);
+      if (!canManageAreas) {
+        return res.status(403).json({
+          error: 'Only the Cleaning Crew Liaison (or the VP) can manage cleaning areas and tasks.',
+          youAre: (user.viewedBy || user.email)
+        });
+      }
       if (req.method === 'POST') {
         const { floor_key, area_name, tasks } = req.body || {};
         if (!floor_key || !area_name) {
