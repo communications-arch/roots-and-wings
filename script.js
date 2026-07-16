@@ -5226,6 +5226,11 @@
   }
 
   var _volPanelSession = null; // defaults to currentSession on first load
+  // Session the My Responsibilities DUTY ROWS display. null = current.
+  // Set by the panel's S1–S5 chips (Erin, 2026-07-16: the rows kept
+  // showing Session 1 while the chips only previewed the sign-up strip).
+  var _mfDutySession = null;
+  var _mfDutySessionFam = '';
   var _mfDutyBlocks = { AM1: false, AM2: false, PM1: false, PM2: false }; // set by renderMyFamily
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
@@ -5430,7 +5435,12 @@
     wrap.querySelectorAll('.mf-vol-sess').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _volPanelSession = parseInt(this.getAttribute('data-sess'), 10);
-        reload();
+        // The duty ROWS follow the chip too (Erin, 2026-07-16: they kept
+        // showing Session 1) — re-render the whole My Family view so the
+        // responsibilities list, subtitle, and panel all show this session.
+        _mfDutySession = _volPanelSession === currentSession ? null : _volPanelSession;
+        if (typeof renderMyFamily === 'function') renderMyFamily();
+        else reload();
       });
     });
     var gridBtn = document.getElementById('mfVolGridBtn');
@@ -5767,6 +5777,15 @@
       + '</h3>';
     var duties = [];
 
+    // Which session the duty rows show. Defaults to the current session;
+    // the panel's S1–S5 chips set _mfDutySession to preview another.
+    // A family switch (View As) drops any lingering preview.
+    if (_mfDutySessionFam !== String(fam.email || '')) {
+      _mfDutySession = null;
+      _mfDutySessionFam = String(fam.email || '');
+    }
+    var dutySession = _mfDutySession || currentSession;
+
     // Match against the LOGGED-IN PERSON, not "any parent in this family".
     // The per-person model means a co-parent (BLC) doesn't inherit their
     // spouse's AM/PM/cleaning duties or vice versa. When we can't identify
@@ -5797,25 +5816,25 @@
     // ── AM duties ──
     Object.keys(AM_CLASSES).forEach(function (groupName) {
       var staff = AM_CLASSES[groupName];
-      var sess = staff.sessions[currentSession];
+      var sess = staff.sessions[dutySession];
       if (!sess) return;
       parentFullNames.forEach(function (full) {
         if (nameMatch(staff.liaison, full)) {
-          duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: '', popup: {type: 'amClass', group: groupName, session: currentSession}});
+          duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: '', popup: {type: 'amClass', group: groupName, session: dutySession}});
         }
         if (nameMatch(sess.teacher, full)) {
-          duties.push({block: 'AM', icon: 'teach', text: groupName + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+          duties.push({block: 'AM', icon: 'teach', text: groupName + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: dutySession}});
         }
         sess.assistants.forEach(function (a) {
           if (nameMatch(a, full)) {
-            duties.push({block: 'AM', icon: 'assist', text: groupName + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: currentSession}});
+            duties.push({block: 'AM', icon: 'assist', text: groupName + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: dutySession}});
           }
         });
       });
     });
 
     // AM support roles (floater, prep, board duties)
-    var amSupport = AM_SUPPORT_ROLES[currentSession];
+    var amSupport = AM_SUPPORT_ROLES[dutySession];
     if (amSupport) {
       ['10-11', '11-12'].forEach(function (slot) {
         if (amSupport.floaters && amSupport.floaters[slot]) {
@@ -5843,7 +5862,7 @@
     }
 
     // ── PM duties ──
-    var sessElectives = PM_ELECTIVES[currentSession] || [];
+    var sessElectives = PM_ELECTIVES[dutySession] || [];
     sessElectives.forEach(function (elec) {
       var isPM1 = elec.hour === 1 || elec.hour === 'both';
       var isPM2 = elec.hour === 2 || elec.hour === 'both';
@@ -5868,7 +5887,7 @@
     // electives; the legacy PM_ELECTIVES loop above keeps sheet-era rows,
     // so skip anything it already added by class name.
     (myClassSubmissions || []).forEach(function (s) {
-      if (s.status !== 'scheduled' || s.scheduled_session !== currentSession) return;
+      if (s.status !== 'scheduled' || s.scheduled_session !== dutySession) return;
       if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && s.school_year && ACTIVE_SESSION_YEAR && s.school_year !== ACTIVE_SESSION_YEAR) return;
       var dup = duties.some(function (d) {
         return d.icon === 'teach' && String(d.text).indexOf(s.class_name) === 0;
@@ -5892,7 +5911,7 @@
     });
 
     // PM support roles
-    var pmSupport = PM_SUPPORT_ROLES[currentSession];
+    var pmSupport = PM_SUPPORT_ROLES[dutySession];
     if (pmSupport) {
       if (pmSupport.floaters) pmSupport.floaters.forEach(function (name) {
         parentFullNames.forEach(function (full) {
@@ -5917,7 +5936,7 @@
     }
 
     // ── Cleaning ──
-    var sessClean = CLEANING_CREW.sessions[currentSession];
+    var sessClean = CLEANING_CREW.sessions[dutySession];
     if (sessClean) {
       var cleanAreas = ['mainFloor', 'upstairs', 'outside'];
       function matchesCleaning(names) {
@@ -5933,13 +5952,13 @@
         Object.keys(sessClean[floor]).forEach(function (area) {
           if (matchesCleaning(sessClean[floor][area])) {
             hasCleaning = true;
-            duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning: ' + area, detail: 'Session ' + currentSession, popup: {type: 'cleaning', area: area, floor: floor, session: currentSession}});
+            duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning: ' + area, detail: 'Session ' + dutySession, popup: {type: 'cleaning', area: area, floor: floor, session: dutySession}});
           }
         });
       });
       if (sessClean.floater && matchesCleaning(sessClean.floater)) {
         hasCleaning = true;
-        duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning Floater', detail: 'Session ' + currentSession, popup: {type: 'cleaning', area: 'Floater', floor: 'floater', session: currentSession}});
+        duties.push({block: 'Cleaning', icon: 'clean', text: 'Cleaning Floater', detail: 'Session ' + dutySession, popup: {type: 'cleaning', area: 'Floater', floor: 'floater', session: dutySession}});
       }
     }
 
@@ -5954,6 +5973,9 @@
       (loadedAbsences || []).forEach(function (a) {
         var absDate = String(a.absence_date || '').slice(0, 10);
         if (!absDate || absDate < todayIsoCov) return;
+        // Previewing another session narrows coverage rows to it; the
+        // default (current) view keeps showing every upcoming claim.
+        if (_mfDutySession && (parseInt(a.session_number, 10) || currentSession) !== dutySession) return;
         (a.slots || []).forEach(function (s) {
           if (!s.claimed_by_email && !s.claimed_by_name) return;
           var mine = parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
@@ -6148,9 +6170,9 @@
       if (sessionDuties.length === 0) {
         var annual = duties.filter(function (d) { return d.block === 'annual'; });
         if (annual.length > 0) {
-          subtitleEl.textContent = 'Session ' + currentSession + ' \u2014 nothing scheduled this session. Thanks for serving as ' + annual[0].text + '.';
+          subtitleEl.textContent = 'Session ' + dutySession + ' \u2014 nothing scheduled this session. Thanks for serving as ' + annual[0].text + '.';
         } else {
-          subtitleEl.textContent = 'Session ' + currentSession + ' \u2014 no responsibilities scheduled. Your schedule is below.';
+          subtitleEl.textContent = 'Session ' + dutySession + ' \u2014 no responsibilities scheduled. Your schedule is below.';
         }
         return;
       }
@@ -6624,11 +6646,12 @@
     // Kids' finalized morning placements (re-renders once when they land).
     if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
 
-    // Volunteer sign-up slots — always opens on the CURRENT session
-    // (chips inside the panel can look ahead without re-rendering the
-    // whole card). Blocks already covered by a duty row above are
-    // skipped so the panel only shows pledges + still-open hours.
-    _volPanelSession = null;
+    // Volunteer sign-up slots. Default = the CURRENT session; when the
+    // S1–S5 chips are previewing another session (_mfDutySession), the
+    // panel follows it so the duty rows and sign-up strip agree. Blocks
+    // already covered by a duty row above are skipped so the panel only
+    // shows pledges + still-open hours.
+    _volPanelSession = _mfDutySession;
     _mfDutyBlocks = {
       AM1: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM1'; }),
       AM2: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM2'; }),
