@@ -3691,6 +3691,22 @@ p + p { margin-top: 1rem; }
   margin-top: 4px;
 }
 
+/* Set Up a Guest — numbered setup steps above the Send Waiver form. */
+.ws-guest-steps {
+  margin: 0 0 12px;
+  padding-left: 22px;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--color-text, #333);
+}
+.ws-guest-steps li { margin-bottom: 8px; }
+.ws-guest-steps-note {
+  font-size: 0.8rem;
+  color: var(--color-text-light, #666);
+  font-style: italic;
+  margin: 0 0 14px;
+}
+
 /* Detail overlay */
 .person-detail-overlay {
   position: fixed;

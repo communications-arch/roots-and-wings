@@ -9083,7 +9083,8 @@
   };
   var ROLE_FORMS = {
     'Communications Director': [
-      { key: 'send-waiver', title: 'Send Waiver' }
+      { key: 'send-waiver', title: 'Send Waiver' },
+      { key: 'guest-setup', title: 'Set Up a Guest' }
     ],
     'Membership Director': [
       { key: 'send-registration', title: 'Send Registration Form' }
@@ -9198,7 +9199,8 @@
     'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Member Pipeline' }] },
     'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Morning Classes' }] },
     'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
-                               forms:   [{ key: 'send-waiver', title: 'Send Waiver' }] },
+                               forms:   [{ key: 'send-waiver', title: 'Send Waiver' },
+                                         { key: 'guest-setup', title: 'Set Up a Guest' }] },
     'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise Orders' }] },
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
     'special_events_manage': { widgets: ['special-events'] },
@@ -9698,6 +9700,7 @@
       btn.addEventListener('click', function () {
         var key = this.getAttribute('data-form-key');
         if (key === 'send-waiver') showSendWaiverModal();
+        else if (key === 'guest-setup') showSendWaiverModal({ mode: 'guest' });
         else if (key === 'send-registration') showSendRegistrationFormModal();
       });
     });
@@ -12209,12 +12212,28 @@
     });
   }
 
-  function showSendWaiverModal() {
+  function showSendWaiverModal(opts) {
+    opts = opts || {};
+    var guestMode = opts.mode === 'guest';
     if (!personDetail || !personDetailCard) return;
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail rd-modal">';
-    html += '<h3 class="rd-title">Send Waiver</h3>';
-    html += '<p class="rd-subtitle">Email a signing link to an adult who isn’t a member — a Guest helping with a class or event, a Community Liaison, or any last-minute adult. They sign via <code>/waiver.html</code> and it shows up in the Waivers report.</p>';
+    if (guestMode) {
+      // Guided flow for bringing in an outside helper (Erin, 2026-07-16):
+      // same send form, framed with the setup steps.
+      html += '<h3 class="rd-title">Set Up a Guest</h3>';
+      html += '<p class="rd-subtitle">A Guest is someone from outside the co-op who’s helping teach a class or with a special event. Here’s the whole setup:</p>';
+      html += '<ol class="ws-guest-steps">';
+      html += '<li><strong>Send the waiver</strong> with the form below — to their <strong>personal email</strong>, not a co-op account. Each season’s waiver is tied to the email it’s sent to, so a loaner account that later gets recycled would collide with the next guest’s waiver.</li>';
+      html += '<li><strong>They sign online</strong> via the emailed link — the signature lands in the Waivers Report labeled “Guest.”</li>';
+      html += '<li><strong>Portal access (optional):</strong> create a temporary @rootsandwingsindy.com account for them in Google Admin and share the login with them. Recycle the account when they’re done.</li>';
+      html += '<li><strong>Give them the role (optional):</strong> in Roles Assignments, add that temporary account as a holder of the <em>Guest</em> role (under Membership Director) so they show up with the role.</li>';
+      html += '</ol>';
+      html += '<p class="ws-guest-steps-note">Setting up a Community Liaison? Same steps — just pick Community Liaison below.</p>';
+    } else {
+      html += '<h3 class="rd-title">Send Waiver</h3>';
+      html += '<p class="rd-subtitle">Email a signing link to an adult who isn’t a member — a Guest helping with a class or event, a Community Liaison, or any last-minute adult. They sign via <code>/waiver.html</code> and it shows up in the Waivers report.</p>';
+    }
     html += '<div class="ws-waiver-form">';
     html += '<label>Who is this for?<select id="ws-wv-role">';
     html += '<option value="guest">Guest — teaching a class or helping at an event</option>';

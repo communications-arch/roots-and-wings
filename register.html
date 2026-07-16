@@ -78,6 +78,14 @@
     .reg-waiver { background: rgba(var(--color-primary-rgb), 0.04); border-left: 4px solid var(--color-primary); padding: 14px 18px; margin: 14px 0; border-radius: 0 8px 8px 0; font-size: 0.95rem; line-height: 1.6; color: #333; }
     .reg-waiver h3 { font-family: 'Playfair Display', serif; color: var(--color-primary-dark); margin: 0 0 8px; font-size: 1.15rem; }
     .reg-waiver ul { margin: 0 0 0 20px; padding: 0; }
+    /* Handbook callout — registrants kept missing the inline text link
+       (Erin, 2026-07-16), so it's a full-width card-style link now. */
+    .reg-handbook-link { display: flex; align-items: center; gap: 12px; background: #fff; border: 1.5px solid rgba(var(--color-primary-rgb), 0.35); border-radius: 10px; padding: 12px 16px; margin: 10px 0 6px; text-decoration: none; color: var(--color-primary-dark); box-shadow: 0 2px 10px rgba(82, 58, 121, 0.08); transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s; }
+    .reg-handbook-link:hover { border-color: var(--color-primary); box-shadow: 0 6px 18px rgba(82, 58, 121, 0.18); transform: translateY(-1px); }
+    .reg-handbook-icon { font-size: 1.5rem; line-height: 1; }
+    .reg-handbook-text { font-weight: 700; font-size: 1rem; }
+    .reg-handbook-sub { display: block; font-size: 0.78rem; font-weight: 500; color: #777; }
+    .reg-handbook-arrow { margin-left: auto; color: var(--color-primary); font-weight: 700; font-size: 1.1rem; }
     .reg-check-label { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-start; font-weight: 500; color: #222; margin-top: 10px; cursor: pointer; padding: 12px 14px; background: #fff; border: 1.5px solid rgba(var(--color-primary-rgb), 0.25); border-radius: 8px; line-height: 1.55; }
     .reg-check-label input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--color-primary); flex: 0 0 18px; margin: 3px 16px 0 0; }
     .reg-check-label > span { flex: 1 1 auto; min-width: 0; }
@@ -267,7 +275,12 @@
           <h3>Membership Requirements &amp; Expectations</h3>
           <p><strong>Requirements:</strong> Sign this agreement, pay the Fall Membership Fee, and ensure an assigned adult is present with your student(s) each co-op day.</p>
           <p><strong>Expectations:</strong> Attend co-op and parent meetings reasonably; participate in special events, field trips, and leadership/volunteering per the handbook; pay class fees and sign up for classes on time.</p>
-          <p><strong>Handbook:</strong> I acknowledge that I have received and read the <a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener">Roots and Wings Homeschool Co-op Inc. Member Handbook</a> and agree to work with co-op members to meet its requirements and expectations.</p>
+          <p><strong>Handbook:</strong> I acknowledge that I have received and read the Roots and Wings Homeschool Co-op Inc. Member Handbook and agree to work with co-op members to meet its requirements and expectations.</p>
+          <a class="reg-handbook-link" href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener">
+            <span class="reg-handbook-icon" aria-hidden="true">📖</span>
+            <span class="reg-handbook-text">Read the Member Handbook<span class="reg-handbook-sub">Opens in a new tab</span></span>
+            <span class="reg-handbook-arrow" aria-hidden="true">&#8599;</span>
+          </a>
           <p>If these requirements or expectations don't work for your family, please contact <a href="mailto:board@rootsandwingsindy.com">board@rootsandwingsindy.com</a> before registering.</p>
         </div>
 
