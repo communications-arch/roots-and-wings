@@ -1447,7 +1447,10 @@ async function handleBackupWaiverInfo(req, res) {
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Waiver link not found. Please contact membership@rootsandwingsindy.com.' });
     const row = rows[0];
-    const isOneOff = row.role === 'one_off';
+    // Guest + Community Liaison waivers (2026-07-16) behave exactly like
+    // one-offs on the signing page — only backup coaches get the
+    // family-context branch.
+    const isOneOff = row.role !== 'backup_coach';
     // Prefer the live people / member_profiles values (what the family
     // currently shows in the directory) over the registrations snapshot,
     // which is frozen at registration time and won't reflect EMI edits.
@@ -1515,7 +1518,8 @@ async function handleBackupWaiverSign(body, req, res) {
     if (updated.length === 0) return res.status(409).json({ error: 'This waiver has already been signed.' });
 
     const u = updated[0];
-    const isOneOff = u.role === 'one_off';
+    // Guest / Community Liaison rows take the one-off confirmation path.
+    const isOneOff = u.role !== 'backup_coach';
 
     if (!isOneOff) {
       // Backup-coach branch: confirm to coach + Main LC, propagate photo
@@ -2157,7 +2161,7 @@ async function handleWaiversCounts(req, res) {
         COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NOT NULL) AS resent
       FROM waiver_signatures ws
       LEFT JOIN registrations r ON r.id = ws.registration_id
-      WHERE ws.role IN ('backup_coach', 'one_off')
+      WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison')
         AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
     `;
     const r = rows[0] || {};
@@ -2235,9 +2239,13 @@ async function handleWaiversReport(req, res) {
           season: ws.season, waiver_version: ws.waiver_version,
           photo_consent: ws.photo_consent
         });
-      } else if (ws.role === 'one_off') {
+      } else if (ws.role === 'one_off' || ws.role === 'guest' || ws.role === 'community_liaison') {
+        // Guest + Community Liaison (2026-07-16) ride the one-off bucket —
+        // same send/resend mechanics — and carry waiver_role so the client
+        // can label the Source column distinctly.
         oneOff.push({
-          source: 'one_off', id: ws.id, name: ws.name, email: ws.email,
+          source: 'one_off', waiver_role: ws.role,
+          id: ws.id, name: ws.name, email: ws.email,
           signed_at: ws.signed_at, sent_at: ws.sent_at,
           last_sent_at: ws.last_sent_at,
           sent_by: ws.sent_by_email || '', note: ws.note,
@@ -2326,10 +2334,16 @@ async function handleWaiverSend(body, req, res) {
   const name = String(body.name || '').trim();
   const email = String(body.email || '').trim().toLowerCase();
   const note = String(body.note || '').trim().slice(0, 500);
+  // Who the waiver is for (2026-07-16): Guest (outside helper for a class
+  // or event), Community Liaison, or a plain one-off adult. Stored on the
+  // waiver_signatures row so the Waivers Report can label it.
+  const waiverRole = String(body.waiver_role || 'one_off').trim();
+  const WAIVER_SEND_ROLES = ['one_off', 'guest', 'community_liaison'];
 
   if (!name) return res.status(400).json({ error: 'Recipient name is required.' });
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Valid recipient email is required.' });
   if (name.length > 200) return res.status(400).json({ error: 'Name too long.' });
+  if (WAIVER_SEND_ROLES.indexOf(waiverRole) === -1) return res.status(400).json({ error: 'Unknown waiver type.' });
 
   try {
     const sql = getSql();
@@ -2347,7 +2361,7 @@ async function handleWaiverSend(body, req, res) {
         season, role, person_name, person_email,
         pending_token, sent_at, sent_by_email, note
       ) VALUES (
-        ${season}, 'one_off', ${name}, ${email},
+        ${season}, ${waiverRole}, ${name}, ${email},
         ${token}, NOW(), ${user.realEmail || user.email}, ${note}
       )
       ON CONFLICT DO NOTHING
@@ -2428,8 +2442,8 @@ async function handleWaiverResend(body, req, res) {
     if (!row) return res.status(404).json({ error: 'Waiver not found.' });
     if (row.signed_at) return res.status(409).json({ error: 'Already signed — nothing to resend.' });
     if (!row.token) return res.status(409).json({ error: 'No pending token on this row — cannot resend.' });
-    if (row.role !== 'backup_coach' && row.role !== 'one_off') {
-      return res.status(400).json({ error: 'Only backup-coach or one-off waivers can be resent.' });
+    if (['backup_coach', 'one_off', 'guest', 'community_liaison'].indexOf(row.role) === -1) {
+      return res.status(400).json({ error: 'Only backup-coach, guest, or one-off waivers can be resent.' });
     }
 
     const isBackup = row.role === 'backup_coach';
@@ -6174,7 +6188,7 @@ async function handleBoardGlance(req, res) {
         SELECT COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NULL)::int AS pending
         FROM waiver_signatures ws
         LEFT JOIN registrations reg ON reg.id = ws.registration_id
-        WHERE ws.role IN ('backup_coach', 'one_off')
+        WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison')
           AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)`;
       return r[0].pending;
     }),

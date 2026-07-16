@@ -457,7 +457,7 @@ CREATE TABLE IF NOT EXISTS waiver_signatures (
   id SERIAL PRIMARY KEY,
   season TEXT NOT NULL,
   waiver_version TEXT,
-  role TEXT NOT NULL CHECK (role IN ('main_lc', 'backup_coach', 'one_off')),
+  role TEXT NOT NULL CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison')),
   person_name TEXT NOT NULL,
   person_email TEXT NOT NULL,
   family_email TEXT DEFAULT '',
@@ -1745,3 +1745,39 @@ CREATE TABLE IF NOT EXISTS board_notes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS board_notes_created_idx ON board_notes (created_at DESC);
+
+
+-- ──────────────────────────────────────────────
+-- Guest + Community Liaison (Erin, 2026-07-16). Two additions:
+--
+-- 1) New waiver categories. A Guest is a non-member helper (teaching a
+--    class or helping at a special event) who must sign the liability
+--    waiver first; a Community Liaison signs the same way when they're
+--    not already a member. Both ride the existing one-off token flow
+--    (Send Waiver form → /waiver.html?token=…) and are labeled
+--    distinctly in the Waivers Report. (DROP CONSTRAINT IF EXISTS + ADD
+--    is the idempotent pair the guard whitelists for widening a CHECK.)
+--
+-- 2) Seed both as committee roles so they appear in Roles Assignments
+--    (holders assignable per year) and "Community Liaison" can be
+--    granted capabilities later via the Permissions admin. Parented
+--    under the Membership Director; movable in the role editor.
+-- ──────────────────────────────────────────────
+ALTER TABLE waiver_signatures DROP CONSTRAINT IF EXISTS waiver_signatures_role_check;
+ALTER TABLE waiver_signatures ADD CONSTRAINT waiver_signatures_role_check
+  CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison'));
+
+INSERT INTO roles (role_key, title, category, parent_role_id, display_order, term_length, overview, icon_emoji, updated_by)
+SELECT
+  v.key, v.title, 'committee_role',
+  (SELECT id FROM roles WHERE LOWER(REPLACE(title, '-', ' ')) = 'membership director' AND category = 'board' LIMIT 1),
+  v.ord, v.term, v.overview, v.icon, 'migration'
+FROM (VALUES
+  ('guest', 'Guest', 400, '',
+   'A helper from outside the co-op — someone who isn''t a member but would like to teach a class or help out with a special event. Every Guest must sign the liability waiver before joining us at co-op (send it from the Workspace via Send Waiver; signatures land in the Waivers Report). Guests don''t have member portal logins.',
+   E'🤝'),
+  ('community_liaison', 'Community Liaison', 401, '1 year',
+   'Connects Roots & Wings with the broader community — outside organizations, venues, guest teachers, and event helpers. Signs the liability waiver like a Guest if not already a member. Currently has the same access as a Guest; additional permissions can be granted later through the Permissions admin.',
+   E'🌉')
+) AS v(key, title, ord, term, overview, icon)
+WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
