@@ -2,11 +2,14 @@
 // "Cam/Cammie Goodnight" duplicate created by the legal-first-name-only
 // matcher, fixed in api/tour.js the same day).
 //
-// Inspect (lists the family's people rows + loose-reference counts,
+// Inspect (lists the family's people + kids rows + loose-reference counts,
 // emails partially masked so PII stays out of terminals/transcripts):
 //   node --env-file=.env.local scripts/delete-orphan-person.js <family-fragment>
-// Delete one row by id (also removes its loose references):
+// Delete one adult row by id (also removes its loose references):
 //   node --env-file=.env.local scripts/delete-orphan-person.js <family-fragment> --delete <people.id>
+// Delete one kid row by id (also removes its name-keyed references in
+// class_signup_picks / morning_class_assignments / class_lottery_bumps):
+//   node --env-file=.env.local scripts/delete-orphan-person.js <family-fragment> --delete-kid <kids.id>
 //
 // Loose references cleaned on delete (nothing cascades from people):
 // waiver_signatures / role_holders_v2 / class_assignment_helpers /
@@ -26,6 +29,8 @@ async function main() {
   const frag = process.argv[2];
   const delFlag = process.argv.indexOf('--delete');
   const deleteId = delFlag !== -1 ? parseInt(process.argv[delFlag + 1], 10) : null;
+  const delKidFlag = process.argv.indexOf('--delete-kid');
+  const deleteKidId = delKidFlag !== -1 ? parseInt(process.argv[delKidFlag + 1], 10) : null;
   if (!frag) {
     console.error('Usage: node --env-file=.env.local scripts/delete-orphan-person.js <family-fragment> [--delete <people.id>]');
     process.exit(1);
@@ -85,14 +90,35 @@ async function main() {
       ORDER BY sort_order, id
     `;
     for (const k of kids) {
+      const kidRefs = await sql`
+        SELECT
+          (SELECT COUNT(*) FROM class_signup_picks WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${k.first_name}))::int AS picks,
+          (SELECT COUNT(*) FROM morning_class_assignments WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${k.first_name}))::int AS am_assignments,
+          (SELECT COUNT(*) FROM class_lottery_bumps WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${k.first_name}))::int AS lottery_bumps
+      `;
       console.log(
         ' kids.id=' + k.id,
         '| ' + k.first_name + ' ' + (k.last_name || ''),
         '| goes-by:', k.nickname || '—',
         '| birth date on file:', k.has_bday ? 'yes' : 'NO',
         '| sort:', k.sort_order,
-        '  (kids: delete manually if this is the orphan — pass nothing here)'
+        '| refs:', JSON.stringify(kidRefs[0])
       );
+    }
+
+    if (deleteKidId) {
+      const kidRows = await sql`
+        SELECT id, first_name FROM kids
+        WHERE id = ${deleteKidId} AND LOWER(family_email) = LOWER(${fam.family_email})
+      `;
+      const kt = kidRows[0];
+      if (!kt) { console.log('\n--delete-kid id', deleteKidId, 'is not a kids row in this family — nothing deleted.'); continue; }
+      const k1 = await sql`DELETE FROM class_signup_picks WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${kt.first_name}) RETURNING id`;
+      const k2 = await sql`DELETE FROM morning_class_assignments WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${kt.first_name}) RETURNING id`;
+      const k3 = await sql`DELETE FROM class_lottery_bumps WHERE LOWER(family_email) = LOWER(${fam.family_email}) AND LOWER(kid_first_name) = LOWER(${kt.first_name}) RETURNING id`;
+      console.log('\n Deleted kid refs — picks:', k1.length, 'am_assignments:', k2.length, 'lottery_bumps:', k3.length);
+      const kGone = await sql`DELETE FROM kids WHERE id = ${deleteKidId} RETURNING id, first_name`;
+      console.log(' Deleted kids row:', JSON.stringify({ id: kGone[0].id, first_name: kGone[0].first_name }));
     }
 
     if (deleteId) {
@@ -112,7 +138,7 @@ async function main() {
       console.log(' Deleted people row:', JSON.stringify({ id: gone[0].id, first_name: gone[0].first_name }));
     }
   }
-  if (!deleteId) console.log('\n(inspect only — re-run with --delete <people.id> to remove the orphan)');
+  if (!deleteId && !deleteKidId) console.log('\n(inspect only — re-run with --delete <people.id> or --delete-kid <kids.id> to remove the orphan)');
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

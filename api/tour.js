@@ -2356,7 +2356,7 @@ async function handleWaiverSend(body, req, res) {
     // 2025-2026 and never surfaced in the new year's Waivers Report.
     const season = DEFAULT_SEASON;
 
-    await sql`
+    const inserted = await sql`
       INSERT INTO waiver_signatures (
         season, role, person_name, person_email,
         pending_token, sent_at, sent_by_email, note
@@ -2365,7 +2365,25 @@ async function handleWaiverSend(body, req, res) {
         ${token}, NOW(), ${user.realEmail || user.email}, ${note}
       )
       ON CONFLICT DO NOTHING
+      RETURNING id
     `;
+    // Waivers are unique per (email, season). Silently emailing a link
+    // whose token was never stored (the old behavior) sends a dead link —
+    // bites recycled guest Workspace accounts especially (2026-07-16).
+    if (inserted.length === 0) {
+      const existing = await sql`
+        SELECT person_name, signed_at FROM waiver_signatures
+        WHERE LOWER(person_email) = ${email} AND season = ${season}
+        LIMIT 1
+      `;
+      const ex = existing[0];
+      const who = ex && ex.person_name ? ex.person_name : 'someone';
+      return res.status(409).json({
+        error: ex && ex.signed_at
+          ? `This email already has a signed ${season} waiver on file (${who}). If this is a different person — e.g. a recycled guest account — send the waiver to their personal email instead.`
+          : `This email already has a pending ${season} waiver (${who}) — use Resend in the Waivers Report, or send to a different email.`
+      });
+    }
 
     const baseUrl = (req.headers['x-forwarded-proto'] && req.headers.host)
       ? `${req.headers['x-forwarded-proto']}://${req.headers.host}`
