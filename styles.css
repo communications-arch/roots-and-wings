@@ -11134,6 +11134,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   letter-spacing: 0.5px;
 }
 .ws-waiver-form input,
+.ws-waiver-form select,
 .ws-waiver-form textarea {
   padding: 10px 12px;
   border: 1px solid var(--color-border);
@@ -11148,6 +11149,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 .ws-waiver-form input:focus,
+.ws-waiver-form select:focus,
 .ws-waiver-form textarea:focus {
   outline: none;
   border-color: var(--color-primary);
@@ -11156,6 +11158,11 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-waiver-form textarea {
   resize: vertical;
   min-height: 56px;
+}
+/* The form column is align-items:stretch — keep the CTA content-sized
+   like every other modal button, not full width. */
+.ws-waiver-form .btn {
+  align-self: flex-start;
 }
 .ws-wv-status {
   font-size: 0.85rem;
