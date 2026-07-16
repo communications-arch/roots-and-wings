@@ -8814,6 +8814,28 @@ button.staff-role:hover {
   background: #fde2e2;
   color: #a32222;
 }
+/* ✓ Mark reviewed — same anatomy as the ✗, sits to its left; green on
+   hover (acknowledge, not destroy). */
+.sb-palette-ack {
+  position: absolute;
+  top: 4px;
+  right: 28px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sb-palette-ack:hover,
+.sb-palette-ack:focus-visible {
+  background: #e3efd8;
+  color: var(--color-leaf);
+}
 .sb-palette-card:active { cursor: grabbing; }
 .sb-palette-card strong { font-size: 0.86rem; color: var(--color-text); }
 .sb-palette-card-meta { font-size: 0.74rem; color: var(--color-text-light); margin-top: 2px; }

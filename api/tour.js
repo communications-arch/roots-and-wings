@@ -6352,7 +6352,10 @@ async function handleBoardGlance(req, res) {
       if (morning && morning.total > 0) m.push({ label: 'morning kids placed (' + (morning.plan_status || 'draft') + ')', value: morning.placed + '/' + morning.total });
       if (afternoon) {
         m.push({ label: 'afternoon classes scheduled', value: afternoon.scheduled });
-        if (afternoon.inbox > 0) m.push({ label: 'class ideas awaiting review', value: afternoon.inbox });
+        // "Review" = schedule, mark reviewed, or decline in the Class
+        // Builder (testers, 2026-07-16: the old "awaiting review" label
+        // implied an approval action that doesn't exist).
+        if (afternoon.inbox > 0) m.push({ label: 'class submissions to review in the Class Builder', value: afternoon.inbox });
       }
       return { metrics: m, views: [
         { key: 'roles-am', label: 'Morning' },

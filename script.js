@@ -5210,11 +5210,14 @@
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
     sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
+      // Covered classes are HIDDEN, same rule as full support roles below
+      // (testers, 2026-07-16: the selectable "(covered)" option let the VP
+      // stack extra helpers onto a full class — the server 409s now too).
+      if (need <= 0) return;
       // ALL assists are per-hour commitments now — even for whole-morning
       // and 2-hour afternoon classes (Erin, 2026-07-15) — so no
       // "fills both hours" flag on any assist option.
-      h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '”' +
-           (need > 0 ? ' — needs ' + need + ' more' : ' (covered)') + '</option>';
+      h += '<option value="assist:' + c.id + '">Assist “' + escapeHtml(c.class_name) + '” — needs ' + need + ' more</option>';
     });
     // Support roles only get the adults left over after every key
     // classroom position (lead + co-leads + assistant spots) could be
@@ -8565,7 +8568,7 @@
           // it; the pending pill rides this row). Special-events dates +
           // helpers live in the Admin Calendar / Roles Assignments rows the
           // VP already has on this card — no separate special-events row.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
         }
         // Facilities — rooms admin lives HERE, not inside the Class
         // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).
@@ -8600,7 +8603,7 @@
         // pending-submitted count pill rides on this single row.
         var h = '<p class="ws-body-hint">Review inbound class submissions — morning and afternoon — and draft the upcoming session.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count" id="pmrep-pending-count" hidden></span></button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
         h += '</ul>';
         return h;
       },
@@ -8647,6 +8650,11 @@
           h += '<li id="ws-todo-vp-assist-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-assist"><span class="ws-link-count" id="ws-vp-assist-count">0</span><span class="ws-link-icon">🤝</span><span id="ws-vp-assist-label">Fill assistant spots</span></button></li>';
         }
         if (role === 'Vice President' || role === 'Afternoon Class Liaison') {
+          // Class submissions sitting in the inbox (Erin's testers,
+          // 2026-07-16: counts showed everywhere with no doorway and no
+          // explanation — scheduling or declining IS the review). Opens
+          // the Class Builder, whose inbox palette holds the pending ones.
+          h += '<li id="ws-todo-classreview-item" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">📋</span><span>Review class submissions — schedule, mark reviewed, or decline</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
@@ -8761,6 +8769,7 @@
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
         if (typeof loadMorningClassTodos === 'function') loadMorningClassTodos();
         if (typeof loadLiaisonClassTodo === 'function') loadLiaisonClassTodo();
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
         // Welcome Coordinator: per-stage counts on the To Do card + the
         // date-gated pre-co-op outreach nudge.
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
@@ -22680,9 +22689,15 @@
           // Age range beside each class so the liaison can match kids to
           // classes without leaving the To Do (Erin, 2026-07-16).
           var ages = (typeof signupAgeText === 'function') ? signupAgeText(c) : '';
+          // Fullness so placement decisions don't need the (closed)
+          // sign-up card: "3/8 in" (testers, 2026-07-16).
+          var fullness = (typeof c.signedUp === 'number')
+            ? ' — ' + c.signedUp + (c.max ? '/' + c.max : '') + ' in'
+            : '';
           return '<option value="' + c.id + '">' + escapeHtml(c.name)
             + (c.hour === 'both' ? ' (2-hour)' : '')
-            + (ages ? ' — ' + escapeHtml(ages) : '') + '</option>';
+            + (ages ? ' — ' + escapeHtml(ages) : '')
+            + fullness + '</option>';
         }).join('');
       }
       h = (d.kids_unpicked || []).map(function (k) {
@@ -25527,8 +25542,13 @@
   }
 
   function loadPmSubmissionsPendingCount() {
-    var pill = document.getElementById('pmrep-pending-count');
-    if (!pill) return;
+    // Class-based: the pill rides the Class Builder row on BOTH the VP's
+    // Co-op Management card and the Class Scheduling card (a duplicate
+    // id previously meant only the first-rendered pill ever painted),
+    // plus the VP/ACL "Review class submissions" To Do item.
+    var pills = document.querySelectorAll('.pmrep-pending-count');
+    var todoItem = document.getElementById('ws-todo-classreview-item');
+    if (!pills.length && !todoItem) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
     fetch('/api/curriculum?action=class-submissions&scope=all' + notifViewAsSuffix(), {
@@ -25542,11 +25562,19 @@
         var pending = subs.filter(function (s) {
           return s.status === 'submitted' && s.school_year === year;
         }).length;
-        if (pending > 0) {
-          pill.textContent = pending + ' new';
-          pill.hidden = false;
-        } else {
-          pill.hidden = true;
+        pills.forEach(function (pill) {
+          if (pending > 0) {
+            pill.textContent = pending + ' to review';
+            pill.hidden = false;
+          } else {
+            pill.hidden = true;
+          }
+        });
+        if (todoItem) {
+          var cnt = document.getElementById('ws-todo-classreview-count');
+          if (cnt) cnt.textContent = pending;
+          todoItem.hidden = pending === 0;
+          if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
         }
       })
       .catch(function () { /* silent — pill stays hidden */ });
@@ -25988,6 +26016,25 @@
         var p = toPerson(inp.value);
         if (p) assists.push(p);
       });
+      // Double-booking guard (testers, 2026-07-16): a morning assignment
+      // spans both AM hours, so the same person in another group the same
+      // session is a clash. Soft warning — co-teaching setups exist.
+      var amConflicts = [];
+      function amConflictFor(p, myRole) {
+        if (!p) return;
+        (morningBuilderState.teaching || []).forEach(function (r) {
+          if (String(r.session_number) !== String(session)) return;
+          if (r.group_name === group) return;
+          var sameEmail = p.email && r.person_email && p.email.toLowerCase() === String(r.person_email).toLowerCase();
+          var sameName = !sameEmail && p.name && r.person_name && String(p.name).toLowerCase() === String(r.person_name).toLowerCase();
+          if (sameEmail || sameName) {
+            amConflicts.push((p.name || p.email) + ' (' + myRole + ' here) is already ' + (r.role === 'lead' ? 'leading' : 'assisting') + ' ' + r.group_name + ' in Session ' + session);
+          }
+        });
+      }
+      amConflictFor(lead, 'lead');
+      assists.forEach(function (a) { amConflictFor(a, 'assistant'); });
+      if (amConflicts.length && !confirm('Heads up — double booking:\n\n' + amConflicts.join('\n') + '\n\nMorning assignments cover the whole morning. Save anyway?')) return;
       saveAmCell(group, session, lead, assists, close);
     });
   }
@@ -26522,6 +26569,13 @@
         // down. Same PATCH the report's Decline button sends; re-queue
         // stays in the Submissions Report.
         paletteHtml += '<button type="button" class="sb-palette-decline" draggable="false" data-sub-id="' + s.id + '" title="Decline this class" aria-label="Decline ' + escClsHtml(s.class_name) + '">✗</button>';
+        // Acknowledge without committing (Erin's testers, 2026-07-16):
+        // "Mark reviewed" moves submitted → drafted, which drops it from
+        // every awaiting-review count but keeps the card in the palette
+        // to place later. Only submitted cards need it.
+        if (s.status === 'submitted') {
+          paletteHtml += '<button type="button" class="sb-palette-ack" draggable="false" data-sub-id="' + s.id + '" title="Mark reviewed — clears it from the review counts but keeps it here to place later" aria-label="Mark ' + escClsHtml(s.class_name) + ' reviewed">✓</button>';
+        }
         // Lead with ages as colored words. Status chip omitted — palette =
         // inbox by definition, so "Submitted" is implicit.
         var palAges = ageGroupsColoredHtml(s.age_groups, s.age_groups_other);
@@ -26625,8 +26679,15 @@
         var tLocked = !tsub || !sbCanTouchSub(tsub)
           || (tsub.scheduled_session && sbIsSessionApproved(tsub.scheduled_session, tsub.class_period === 'AM' ? 'AM' : 'PM'));
         if (!tLocked) { sbOpenPlacedClassForm(tsub); return; }
-        // Locked / out-of-scope: a clean read-only view of the submission
-        // (Erin, 2026-07-11: the old placement editor read as 'weird').
+        // Locked / out-of-scope: scheduled classes open the class-info
+        // popup, which carries the kid roster + counts in every window
+        // state (testers, 2026-07-16: the read-only submission view hid
+        // who's in the class once sign-ups closed). Non-scheduled rows
+        // keep the clean submission view (Erin, 2026-07-11).
+        if (tsub && tsub.status === 'scheduled' && typeof showDbClassPopup === 'function') {
+          showDbClassPopup(subId);
+          return;
+        }
         showSbSubmissionDetail(subId);
       });
     });
@@ -26724,12 +26785,18 @@
         sbDeclineSubmission(parseInt(this.getAttribute('data-sub-id'), 10));
       });
     });
+    body.querySelectorAll('.sb-palette-ack').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        sbMarkReviewedSubmission(parseInt(this.getAttribute('data-sub-id'), 10));
+      });
+    });
 
     // Tap a palette card → full submission details (description, prefs,
     // max students, …) with the review actions inline.
     body.querySelectorAll('.sb-palette-card').forEach(function (el) {
       el.addEventListener('click', function (e) {
-        if (e.target.closest('.sb-palette-decline')) return;
+        if (e.target.closest('.sb-palette-decline') || e.target.closest('.sb-palette-ack')) return;
         var cardSubId = parseInt(el.getAttribute('data-sub-id'), 10);
         // Tapping an inbox card opens the PREFILLED, EDITABLE class form
         // for every reviewer (Erin, 2026-07-10) — one surface, not a
@@ -26782,6 +26849,22 @@
         if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       })
       .catch(function (err) { alert('Could not decline: ' + (err.message || 'error')); });
+  }
+
+  // Acknowledge-without-committing (testers, 2026-07-16): submitted →
+  // drafted. The card stays in the palette (palette filter includes
+  // drafted) but leaves every awaiting-review count, which only tallies
+  // status='submitted'.
+  function sbMarkReviewedSubmission(id) {
+    var sub = scheduleBuilderState.submissions.filter(function (x) { return x.id === id; })[0];
+    if (sub && !sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
+    patchReviewAction(id, { status: 'drafted', reviewer_notes: (sub && sub.reviewer_notes) || '' })
+      .then(function () {
+        closeSbSubmissionDetail();
+        loadScheduleBuilder();
+        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
+      })
+      .catch(function (err) { alert('Could not mark reviewed: ' + (err.message || 'error')); });
   }
 
   function sbRequeueSubmission(id) {
@@ -27106,6 +27189,28 @@
           alert('“' + roomSpec + '” is already taken that hour by “' + occ.class_name + '”. Drag that one out first, or pick another room.');
           return;
         }
+      }
+    }
+    // Double-booking guard (testers, 2026-07-16): warn when this class's
+    // leader already leads another class that session in an overlapping
+    // hour. Soft confirm, not a block — intentional back-to-back setups
+    // and co-led classes exist, so the reviewer decides.
+    var dbLeadEmail = String(sub.submitted_by_email || '').toLowerCase();
+    if (dbLeadEmail) {
+      var sbSpansAll = function (period, h) { return period === 'AM' ? (h === 'AM' || h === '') : h === 'both'; };
+      var dbDupe = scheduleBuilderState.submissions.filter(function (s) {
+        if (s.id === subId) return false;
+        if (s.status !== 'scheduled' && s.status !== 'drafted') return false;
+        if (String(s.scheduled_session) !== String(scheduleBuilderState.session)) return false;
+        if ((s.class_period === 'AM' ? 'AM' : 'PM') !== subPeriod) return false;
+        if (String(s.submitted_by_email || '').toLowerCase() !== dbLeadEmail) return false;
+        var oh = String(s.scheduled_hour || '');
+        var nh = String(scheduledHour || '');
+        return sbSpansAll(subPeriod, oh) || sbSpansAll(subPeriod, nh) || oh === nh;
+      })[0];
+      if (dbDupe) {
+        var dbWho = sub.submitted_by_name || sub.submitted_by_email;
+        if (!confirm('Heads up — double booking:\n\n' + dbWho + ' already leads “' + dbDupe.class_name + '” in Session ' + scheduleBuilderState.session + ' (' + (dbDupe.scheduled_hour || subPeriod) + '), which overlaps ' + (scheduledHour || subPeriod) + '.\n\nPlace “' + sub.class_name + '” anyway?')) return;
       }
     }
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';

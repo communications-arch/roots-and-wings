@@ -1220,10 +1220,12 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           session: stSess, school_year: stYear, pm_approved: stPmApproved,
           window_status: stWinStatus,
-          // Placing FROM the To Do modal works via view_as, which the
-          // write endpoints only honor for canImpersonate callers (VP
-          // mailbox on prod; anyone on dev/preview).
-          can_place: canImpersonate(user.email),
+          // Placing FROM the To Do modal works via view_as. Reviewers
+          // (VP + Afternoon Class Liaison) place kids as part of the job —
+          // the picks write honors reviewer view_as too (testers,
+          // 2026-07-16: the ACL was locked out on prod because this flag
+          // keyed on canImpersonate = super users only).
+          can_place: stReviewer || canImpersonate(user.email),
           kids_unpicked: kidsUnpicked,
           adults_unplaced: adultsUnplaced,
           assistant_gaps: assistantGaps,
@@ -1915,7 +1917,7 @@ module.exports = async function handler(req, res) {
         const vaSubId = parseInt((req.body || {}).class_submission_id, 10);
         if (!Number.isFinite(vaSubId)) return res.status(400).json({ error: 'class_submission_id required' });
         const vaEmail = actingEmailFor(user, req).toLowerCase();
-        const vaCls = await sql`SELECT id, class_name, class_period, scheduled_hour, school_year, scheduled_session, status, submitted_by_email
+        const vaCls = await sql`SELECT id, class_name, class_period, scheduled_hour, school_year, scheduled_session, status, submitted_by_email, assistant_count
           FROM class_submissions WHERE id = ${vaSubId}`;
         if (!vaCls.length || !vaCls[0].scheduled_session || ['scheduled', 'drafted'].indexOf(vaCls[0].status) === -1) {
           return res.status(409).json({ error: 'That class is not on the schedule.' });
@@ -1972,6 +1974,20 @@ module.exports = async function handler(req, res) {
             AND (LOWER(person_email) = ${vaEmail} OR LOWER(person_name) = LOWER(${vaName}))`;
         const overlaps = already.some(r => r.block === '' || effBlock === '' || r.block === effBlock);
         if (overlaps) return res.status(409).json({ error: 'You are already helping this class that hour.' });
+        // Capacity gate (testers, 2026-07-16: Place Adults let you stack
+        // unlimited helpers onto a full class). A class wants
+        // MIN(assistant_count) helpers per hour; whole-class helper rows
+        // (block='') occupy every hour the class runs — same math as the
+        // volunteer-matrix helpers_needed derivation.
+        const vaWants = (vc.assistant_count && vc.assistant_count.length)
+          ? Math.min.apply(null, vc.assistant_count) : 1;
+        for (const b of vaBlocks) {
+          const helperCount = await sql`SELECT COUNT(*)::int AS n FROM class_assignment_helpers
+            WHERE class_submission_id = ${vaSubId} AND (block = '' OR block = ${b})`;
+          if (helperCount[0].n >= vaWants) {
+            return res.status(409).json({ error: '“' + vc.class_name + '” already has its ' + vaWants + ' assistant' + (vaWants === 1 ? '' : 's') + ' for ' + b + '. Pick a class that still shows an open spot.' });
+          }
+        }
         const sortRows = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM class_assignment_helpers WHERE class_submission_id = ${vaSubId}`;
         await sql`INSERT INTO class_assignment_helpers (class_submission_id, person_email, person_name, block, sort_order, updated_by)
           VALUES (${vaSubId}, ${vaEmail}, ${vaName}, ${effBlock}, ${sortRows[0].next}, ${user.email})`;
@@ -2374,7 +2390,15 @@ module.exports = async function handler(req, res) {
         if (wstatus === 'locked') return res.status(409).json({ error: 'Sign-ups are locked for this session.' });
         if (wstatus !== 'open' && !isReviewer) return res.status(409).json({ error: 'Sign-ups are not open right now.' });
 
-        const effEmail = resolveSubmitterEmail(user, body.view_as);
+        // Reviewers (VP + ACL) place other families' kids from the To Do
+        // card — honor their view_as even without canImpersonate (testers,
+        // 2026-07-16). resolveSubmitterEmail alone only swaps identities
+        // for super users on prod.
+        let effEmail = resolveSubmitterEmail(user, body.view_as);
+        if (isReviewer && effEmail === user.email) {
+          const rvVa = String(body.view_as || '').trim().toLowerCase();
+          if (rvVa && (rvVa.split('@')[1] || '') === ALLOWED_DOMAIN) effEmail = rvVa;
+        }
         const fam = await resolveFamily(sql, effEmail);
         if (!fam || !fam.family_email) return res.status(403).json({ error: 'No family found for your account.' });
         const familyEmail = fam.family_email;
