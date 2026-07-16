@@ -8346,7 +8346,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><a href="https://drive.google.com/file/d/1okPkRloZtr4D3_lsavayx-TKZn2fuzHp/view?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
+        h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">\uD83C\uDF33</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">\u270D</span>Member Agreement &amp; Waivers</button></li>';
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
@@ -12220,16 +12220,17 @@
     html += '<div class="elective-detail rd-modal">';
     if (guestMode) {
       // Guided flow for bringing in an outside helper (Erin, 2026-07-16):
-      // same send form, framed with the setup steps.
+      // same send form, framed with setup steps in the Member Onboarding
+      // checklist idiom (mo-checklist + mo-step-link doorways).
       html += '<h3 class="rd-title">Set Up a Guest</h3>';
       html += '<p class="rd-subtitle">A Guest is someone from outside the co-op who’s helping teach a class or with a special event. Here’s the whole setup:</p>';
-      html += '<ol class="ws-guest-steps">';
-      html += '<li><strong>Send the waiver</strong> with the form below — to their <strong>personal email</strong>, not a co-op account. Each season’s waiver is tied to the email it’s sent to, so a loaner account that later gets recycled would collide with the next guest’s waiver.</li>';
-      html += '<li><strong>They sign online</strong> via the emailed link — the signature lands in the Waivers Report labeled “Guest.”</li>';
-      html += '<li><strong>Portal access (optional):</strong> create a temporary @rootsandwingsindy.com account for them in Google Admin and share the login with them. Recycle the account when they’re done.</li>';
-      html += '<li><strong>Give them the role (optional):</strong> in Roles Assignments, add that temporary account as a holder of the <em>Guest</em> role (under Membership Director) so they show up with the role.</li>';
-      html += '</ol>';
-      html += '<p class="ws-guest-steps-note">Setting up a Community Liaison? Same steps — just pick Community Liaison below.</p>';
+      html += '<ul class="mo-checklist ws-guest-steps">';
+      html += '<li><strong>1. Send the waiver</strong> with the form below — to their <strong>personal email</strong>, not a co-op account.<br><span class="mo-row-hint">Each season’s waiver is tied to the email it’s sent to, so a loaner account that later gets recycled would collide with the next guest’s waiver.</span></li>';
+      html += '<li><strong>2. They sign online</strong> via the emailed link — the signature lands in the report labeled “Guest.” <button type="button" class="mo-step-link ws-guest-doorway" data-guest-doorway="waivers">Waivers Report&nbsp;↗</button></li>';
+      html += '<li><strong>3. Portal access</strong> <span class="mo-row-sub">(optional)</span> — create a temporary @rootsandwingsindy.com account and share the login with them. Recycle it when they’re done. <a class="mo-step-link" href="https://admin.google.com/ac/users" target="_blank" rel="noopener" title="Open Google Workspace Admin Console in a new tab">admin.google.com&nbsp;↗</a></li>';
+      html += '<li><strong>4. Give them the role</strong> <span class="mo-row-sub">(optional)</span> — add that temporary account as a holder of the <em>Guest</em> role, under Membership Director. <button type="button" class="mo-step-link ws-guest-doorway" data-guest-doorway="roles">Roles Assignments&nbsp;↗</button></li>';
+      html += '</ul>';
+      html += '<p class="mo-row-hint ws-guest-steps-note">Setting up a Community Liaison? Same steps — just pick Community Liaison below.</p>';
     } else {
       html += '<h3 class="rd-title">Send Waiver</h3>';
       html += '<p class="rd-subtitle">Email a signing link to an adult who isn’t a member — a Guest helping with a class or event, a Community Liaison, or any last-minute adult. They sign via <code>/waiver.html</code> and it shows up in the Waivers report.</p>';
@@ -12252,6 +12253,15 @@
     document.body.style.overflow = 'hidden';
     personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
     personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+
+    // Guest-mode doorway links into the surfaces the steps reference.
+    personDetailCard.querySelectorAll('.ws-guest-doorway').forEach(function (dw) {
+      dw.addEventListener('click', function () {
+        var dest = this.getAttribute('data-guest-doorway');
+        if (dest === 'roles' && typeof showRolesManagerModal === 'function') showRolesManagerModal();
+        else if (dest === 'waivers' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
+      });
+    });
 
     var sendBtn = personDetailCard.querySelector('#ws-wv-send');
     sendBtn.addEventListener('click', function () {

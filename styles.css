@@ -3691,20 +3691,21 @@ p + p { margin-top: 1rem; }
   margin-top: 4px;
 }
 
-/* Set Up a Guest — numbered setup steps above the Send Waiver form. */
-.ws-guest-steps {
-  margin: 0 0 12px;
-  padding-left: 22px;
-  font-size: 0.86rem;
-  line-height: 1.55;
-  color: var(--color-text, #333);
-}
-.ws-guest-steps li { margin-bottom: 8px; }
-.ws-guest-steps-note {
-  font-size: 0.8rem;
-  color: var(--color-text-light, #666);
-  font-style: italic;
-  margin: 0 0 14px;
+/* Set Up a Guest — setup steps above the Send Waiver form, in the
+   Member Onboarding checklist idiom (.mo-checklist / .mo-step-link /
+   .mo-row-hint carry the look; these are layout-only overrides). */
+.ws-guest-steps { margin-bottom: 14px; }
+.ws-guest-steps li { line-height: 1.5; }
+.ws-guest-steps-note { margin: 0 0 14px; }
+/* Doorway buttons share the .mo-step-link anatomy but need the native
+   button chrome stripped. */
+button.ws-guest-doorway {
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted rgba(var(--color-primary-rgb), 0.35);
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 /* Detail overlay */
