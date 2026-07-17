@@ -989,7 +989,8 @@ module.exports = async function handler(req, res) {
           const suRows = await sql`
             SELECT MIN(p.rank) AS pick_rank, BOOL_OR(p.as_assistant) AS as_assistant,
                    COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
-                   COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+                   COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last,
+                   MAX(k.class_group) AS class_group
             FROM class_signup_picks p
             JOIN kids k
               ON LOWER(k.family_email) = LOWER(p.family_email)
@@ -1003,7 +1004,8 @@ module.exports = async function handler(req, res) {
           ciSignups = suRows.map(r => ({
             name: ((r.display_first || '') + ' ' + (r.display_last || '')).trim(),
             rank: parseInt(r.pick_rank, 10) || 1,
-            assistant: r.as_assistant === true
+            assistant: r.as_assistant === true,
+            group: r.class_group || ''
           })).filter(s => s.name)
             .sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name));
         }

@@ -2581,6 +2581,16 @@
     }
     return AGE_GROUP_EMOJI[g] || '';
   }
+  // Compact icon + brand-colored group label for a single kid (Erin,
+  // 2026-07-17: show which group a kid is in wherever kids are listed).
+  // Capitalizes defensively (kids.class_group is stored capitalized).
+  function kidGroupBadge(group) {
+    var g = String(group || '').trim();
+    if (!g) return '';
+    g = g.charAt(0).toUpperCase() + g.slice(1);
+    return '<span class="kid-group-badge">' + ageGroupIconHtml(g)
+      + '<span class="ag-name ' + ageGroupClass(g) + '">' + escapeHtml(g) + '</span></span>';
+  }
   // ── New-member detection ──
   // A family is "new" until it has completed a full co-op year. A year
   // completes at the end of Field Day (the isSummerBreak boundary), so:
@@ -3213,7 +3223,7 @@
       var kDisplay = nickOr(kid.nickname, kid.name);
       html += '<div class="detail-member' + (kid.name === person.name ? ' detail-member-current' : '') + '">';
       html += '<div class="detail-member-dot" style="background:' + faceColor(kid.name) + '"><span>' + kDisplay.charAt(0) + '</span></div>';
-      html += '<span>' + kDisplay + '</span><small>' + groupWithAge(kid.group) + '</small></div>';
+      html += '<span>' + escapeHtml(kDisplay) + '</span><small>' + (kid.group ? kidGroupBadge(kid.group) : '') + '</small></div>';
     });
     html += '</div></div>';
 
@@ -3791,7 +3801,7 @@
             var suFirst = su.filter(function (s2) { return s2.rank === 1; });
             var suRest = su.filter(function (s2) { return s2.rank !== 1; });
             var suLi = function (s2) {
-              return '<li>' + escapeHtml(s2.name) + (s2.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
+              return '<li>' + escapeHtml(s2.name) + (s2.group ? ' ' + kidGroupBadge(s2.group) : '') + (s2.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
             };
             if (suFirst.length) {
               html += '<div class="signup-detail-rankhead">1st choice</div>';
@@ -22980,11 +22990,13 @@
       h = (d.kids_unpicked || []).map(function (k) {
         var kidMeta = [];
         if (k.age != null) kidMeta.push('age ' + k.age);
-        // The kid's MORNING class, labeled so the liaison can match it to an
-        // afternoon class's "open to" list (Erin, 2026-07-17).
-        if (k.group) kidMeta.push('morning: ' + k.group);
-        else kidMeta.push('morning: not placed yet');
-        var row = '<div class="st-place-row"><strong>' + escapeHtml(k.name) + '</strong>' +
+        // The kid's MORNING class — shown with its group icon + color so the
+        // liaison can match it to an afternoon class's "open to" list (Erin,
+        // 2026-07-17). "not placed yet" when the VP hasn't grouped them.
+        var groupBit = k.group
+          ? ' ' + kidGroupBadge(k.group)
+          : ' <span class="ws-wv-context">morning: not placed yet</span>';
+        var row = '<div class="st-place-row"><strong>' + escapeHtml(k.name) + '</strong>' + groupBit +
           (kidMeta.length ? ' <span class="ws-wv-context">' + escapeHtml(kidMeta.join(' · ')) + '</span>' : '');
         if (canPickKid) {
           row += '<label class="st-place-slot">PM 1<select class="cl-input st-kid-pm1">' + classOpts('PM1') + '</select></label>';

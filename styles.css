@@ -8424,6 +8424,16 @@ button.staff-role:hover {
   vertical-align: -0.18em;
   display: inline-block;
 }
+/* Compact "icon + colored group name" badge next to a kid's name. */
+.kid-group-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.kid-group-badge .ag-name { font-weight: 700; }
 .age-group-emoji img {
   height: 1em;
   width: auto;
