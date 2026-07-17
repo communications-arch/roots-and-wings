@@ -3633,6 +3633,28 @@ async function handleProfileUpdate(body, req, res) {
     }
     await sql.transaction(profileStmts);
 
+    // Keep the family's registration TRACK in step with the kids' live
+    // schedules (Erin, 2026-07-17: the Membership Report + PM-only labels
+    // read registrations.track, which an EMI schedule switch never updated —
+    // so an AM/PM-only → full-day change didn't show). Track is family-level:
+    // Both if the family does mornings AND afternoons, else the one side.
+    // Best-effort; matched on the stored family key (populated for
+    // registrations from 2026-07-17 onward).
+    try {
+      const sched = k => String(k && k.schedule || '').toLowerCase();
+      const hasAM = kids.some(k => sched(k) === 'all-day' || sched(k) === 'morning');
+      const hasPM = kids.some(k => sched(k) === 'all-day' || sched(k) === 'afternoon');
+      const newTrack = (hasAM && hasPM) ? 'Both' : hasAM ? 'Morning Only' : hasPM ? 'Afternoon Only' : '';
+      if (newTrack) {
+        await sql`
+          UPDATE registrations SET track = ${newTrack}, updated_at = NOW()
+          WHERE LOWER(family_email) = LOWER(${familyEmail}) AND declined_at IS NULL
+        `;
+      }
+    } catch (trkErr) {
+      console.error('EMI → registration track sync (non-fatal):', trkErr);
+    }
+
     // Afternoon class-signup picks are keyed by (family_email,
     // kid_first_name) — kids.id isn't stable across this delete+reinsert.
     // A rename would orphan the kid's saved picks (they'd surface as a

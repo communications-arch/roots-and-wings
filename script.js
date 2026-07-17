@@ -4391,6 +4391,10 @@
   // kids against them claimed stale enrollments. Returns none until
   // DB class sign-ups land; the card shows "No electives yet".
   function getKidElectives(kidFullName) {
+    // Afternoon electives now come from DB sign-ups, surfaced by
+    // renderPendingPicks (which runs when _signup loads): "pending" chips
+    // while open/closed, and the finalized schedule once locked. So this
+    // legacy sheet-era matcher stays retired.
     return [];
     var sessElectives = PM_ELECTIVES[currentSession] || [];
     var result = [];
@@ -4937,8 +4941,11 @@
     var blocks = document.querySelectorAll('.mf-pending-picks');
     if (!blocks.length) return;
     var status = s && s.window && s.window.status;
-    var showable = s && s.session && (status === 'open' || status === 'closed');
-    var live = showable && signupWindowLive(s);
+    var isLocked = status === 'locked';
+    // 'locked' = sign-ups finalized → the picks ARE the afternoon schedule
+    // (Erin, 2026-07-17). open/closed → still "pending" the lottery.
+    var showable = s && s.session && (status === 'open' || status === 'closed' || isLocked);
+    var live = showable && !isLocked && signupWindowLive(s);
     var classById = {};
     if (showable) {
       (s.classes.PM1 || []).concat(s.classes.PM2 || []).forEach(function (c) { classById[c.id] = c; });
@@ -4961,12 +4968,16 @@
       // Session number only when it differs from the session the card is
       // already labeled with (e.g. next session's window opens mid-session).
       var sessSuffix = (s.session !== currentSession) ? ' — Session ' + s.session : '';
-      var h = '<div class="mf-pending-title"><span>Afternoon picks' + sessSuffix + '</span>' +
-              (hasAny ? '<span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
+      // Locked → these are the kid's final afternoon classes (rank 1 = the
+      // placement). Open/closed → ranked picks awaiting the lottery.
+      var h = '<div class="mf-pending-title"><span>' + (isLocked ? 'Afternoon electives' : 'Afternoon picks') + sessSuffix + '</span>' +
+              ((hasAny && !isLocked) ? '<span class="mf-pending-badge">pending lottery</span>' : '') + '</div>';
       if (hasAny) {
         ['PM1', 'PM2'].forEach(function (hour) {
           var ids = saved[hour] || [];
           if (!ids.length) return;
+          // Once locked, only the top pick (their placement) shows.
+          if (isLocked) ids = ids.slice(0, 1);
           h += '<div class="mf-pending-row"><span class="mf-pending-hour">' + (hour === 'PM1' ? 'PM 1' : 'PM 2') + '</span>';
           h += '<span class="mf-pending-chips">';
           h += ids.map(function (cid, i) {
@@ -4974,7 +4985,7 @@
             var nm = c ? c.name : ('Class #' + cid);
             var isAssist = !!(s.pick_assists && s.pick_assists[kid] && s.pick_assists[kid][cid]);
             return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' +
-                   '<span class="mf-pick-rank">' + (i + 1) + '</span>' +
+                   (isLocked ? '' : '<span class="mf-pick-rank">' + (i + 1) + '</span>') +
                    '<span class="mf-pick-name">' + escapeHtml(nm) + (isAssist ? ' · assistant' : '') + '</span></button>';
           }).join('');
           h += '</span></div>';
