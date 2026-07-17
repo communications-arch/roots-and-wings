@@ -867,6 +867,17 @@ async function handleRegistration(body, req, res) {
         famEmail = deriveFamilyEmail(main_learning_coach, famName);
       }
       if (famEmail) {
+        // Record the EXACT key + whether we're creating a brand-new profile
+        // vs merging into an existing family — the decline path keys off
+        // these instead of re-deriving (2026-07-17 data-loss fix). Checked
+        // before the upsert, which would otherwise make it look pre-existing.
+        const preExisting = await sql`SELECT 1 FROM member_profiles WHERE family_email = ${famEmail} LIMIT 1`;
+        const createdProfile = preExisting.length === 0;
+        await sql`
+          UPDATE registrations
+          SET family_email = ${famEmail}, created_profile = ${createdProfile}
+          WHERE id = ${id}
+        `;
         await upsertProfileFromRegistration(sql, {
           familyEmail: famEmail,
           familyName: famName,
@@ -890,9 +901,13 @@ async function handleRegistration(body, req, res) {
     // Stamp the MLC's signature into waiver_signatures (consolidated, versioned
     // waiver record). The registrations row keeps the inline signature columns
     // for now; this row is the source of truth for the unified Waivers Report.
-    // Conflict on (LOWER(person_email), season) shouldn't happen — the
-    // registration insert above would have failed first via its own unique
-    // index — but if it does (e.g. prior backfill), DO NOTHING keeps us safe.
+    // A DECLINED family can re-register (the registrations unique index is
+    // partial: WHERE declined_at IS NULL), but waiver_signatures' unique index
+    // on (LOWER(person_email), season) is absolute — so a conflict IS reachable
+    // on re-registration. DO NOTHING used to silently drop the fresh signature
+    // and leave the row pointing at the DECLINED registration, which the report
+    // then hides → the active registration showed no signed MLC waiver
+    // (2026-07-17 review). Re-point + refresh the existing row instead.
     try {
       await sql`
         INSERT INTO waiver_signatures (
@@ -904,7 +919,15 @@ async function handleRegistration(body, req, res) {
           ${main_learning_coach}, ${email}, ${email}, ${id},
           NOW(), ${signature_name}, ${signature_date}, ${waiver_photo_consent === 'yes'}
         )
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (LOWER(person_email), season) DO UPDATE SET
+          registration_id = EXCLUDED.registration_id,
+          waiver_version  = EXCLUDED.waiver_version,
+          person_name     = EXCLUDED.person_name,
+          family_email    = EXCLUDED.family_email,
+          signed_at       = EXCLUDED.signed_at,
+          signature_name  = EXCLUDED.signature_name,
+          signature_date  = EXCLUDED.signature_date,
+          photo_consent   = EXCLUDED.photo_consent
       `;
     } catch (wsErr) {
       console.error('waiver_signatures (MLC) insert error (non-fatal):', wsErr);
@@ -1661,21 +1684,32 @@ async function handleRegistrationDecline(body, req, res) {
   try {
     const rows = await sql`
       SELECT id, email, main_learning_coach, existing_family_name, season,
-             paypal_transaction_id, payment_amount, kids, declined_at
+             paypal_transaction_id, payment_amount, kids, declined_at,
+             family_email, created_profile
       FROM registrations WHERE id = ${id} LIMIT 1
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
     const reg = rows[0];
     if (reg.declined_at) return res.status(200).json({ success: true, already: true });
 
-    // Best-effort: delete any member_profiles row created by this registration.
-    // We keyed it by derived family_email (Main LC first name + family initial).
-    // Undo re-creates it from the registration row via upsertProfileFromRegistration.
+    // Remove the member_profiles row ONLY when THIS registration created a
+    // brand-new one, keyed by the email resolved AT REGISTRATION TIME — never
+    // a re-derived guess (2026-07-17 HIGH data-loss fix: the old code could
+    // cascade-delete the wrong family, or a returning family's long-lived
+    // profile it merely merged into). Extra guard: don't delete if the family
+    // still has another active registration. Legacy rows (family_email='' /
+    // created_profile=false) fall through and delete nothing — fail-safe.
     try {
-      const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
-      const famEmail = deriveFamilyEmail(reg.main_learning_coach, famName);
-      if (famEmail) {
-        await sql`DELETE FROM member_profiles WHERE family_email = ${famEmail}`;
+      const storedFamEmail = String(reg.family_email || '').trim().toLowerCase();
+      if (storedFamEmail && reg.created_profile) {
+        const stillActive = await sql`
+          SELECT 1 FROM registrations
+          WHERE LOWER(family_email) = ${storedFamEmail}
+            AND declined_at IS NULL AND id <> ${id} LIMIT 1
+        `;
+        if (stillActive.length === 0) {
+          await sql`DELETE FROM member_profiles WHERE family_email = ${storedFamEmail}`;
+        }
       }
     } catch (mpErr) {
       console.error('member_profiles delete (non-fatal):', mpErr);
@@ -1765,7 +1799,8 @@ async function handleRegistrationUndecline(body, req, res) {
     const rows = await sql`
       SELECT id, email, main_learning_coach, existing_family_name, season,
              phone, address, track, kids, placement_notes,
-             waiver_photo_consent, declined_at
+             waiver_photo_consent, declined_at,
+             family_email, created_profile
       FROM registrations WHERE id = ${id} LIMIT 1
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
@@ -1795,12 +1830,15 @@ async function handleRegistrationUndecline(body, req, res) {
       WHERE id = ${id}
     `;
 
-    // Re-create the member_profiles row the decline deleted, from the same
-    // fields registration used. Merge-not-clobber, and non-fatal — the family
-    // can re-enter extras (photos, pronouns) via Edit My Info if needed.
+    // Re-create the member_profiles row the decline may have deleted. This
+    // is a merge (never clobbers existing people/kids), so running it is safe
+    // whether or not a profile currently exists — which also covers families
+    // declined under the old code. Prefer the stored registration-time key so
+    // the restore lands on the same row, never a re-derived guess (2026-07-17).
     try {
       const famName = deriveFamilyName(reg.main_learning_coach, reg.existing_family_name);
-      const famEmail = deriveFamilyEmail(reg.main_learning_coach, famName);
+      const famEmail = String(reg.family_email || '').trim().toLowerCase()
+        || deriveFamilyEmail(reg.main_learning_coach, famName);
       if (famEmail) {
         const backupRows = await sql`
           SELECT person_name AS name, person_email AS email

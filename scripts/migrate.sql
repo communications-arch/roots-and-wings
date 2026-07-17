@@ -1789,3 +1789,16 @@ WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
 -- time so releases can gate on identity; the tightened name-match stays
 -- only as a fallback for legacy rows created before this column existed.
 ALTER TABLE cleaning_assignments ADD COLUMN IF NOT EXISTS created_by_email TEXT NOT NULL DEFAULT '';
+
+
+-- 2026-07-17 review (HIGH data-loss fix): the registration DECLINE path
+-- re-derived the family's key with deriveFamilyEmail() and cascade-DELETEd
+-- member_profiles by that guess — which could hit the WRONG family, or a
+-- RETURNING family's long-lived profile that registration only MERGED into
+-- (destroying pre-existing people/kids the undo can't restore). Store the
+-- key actually resolved at registration time + whether THIS registration
+-- created a brand-new profile, so decline can act precisely instead of
+-- guessing. Legacy rows keep family_email='' / created_profile=false, which
+-- the decline path treats as "don't delete anything" (fail-safe).
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS family_email    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS created_profile BOOLEAN NOT NULL DEFAULT FALSE;
