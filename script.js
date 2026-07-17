@@ -2047,6 +2047,7 @@
     loadRoleDescriptions();
     loadCoopSessions();
     loadCapabilityGrants();
+    if (typeof loadHelpOverrides === 'function') loadHelpOverrides();
     // Render with whatever data is available (live if preloaded, static otherwise)
     setTimeout(function () {
       if (typeof renderMyFamily === 'function') renderMyFamily();
@@ -4581,7 +4582,7 @@
     // This card is purely the parent-facing class selection (Erin,
     // 2026-07-15: no session picker / Close / Lock here — window lifecycle
     // lives in the Afternoon Class Builder's sign-ups panel).
-    var h = '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Afternoon Class Sign-ups</h3>';
+    var h = '<h3 class="mf-card-title" data-help-key="mf-signup"><img class="brand-accent" src="brand/secondary/accent-5.png" alt=""> Afternoon Class Sign-ups</h3>';
 
     if (!s.session) {
       h += '<p class="mf-empty">No session is open for sign-ups yet.</p>';
@@ -5783,7 +5784,7 @@
     // Hidden during summer break — no co-op days = no coverage to claim.
     if (!isSummerBreak) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
-      html += '<summary class="mf-card-title mf-coverage-summary"><img class="brand-accent" src="brand/secondary/accent-33.png" alt=""> Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
+      html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage"><img class="brand-accent" src="brand/secondary/accent-33.png" alt=""> Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
       html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
       html += '<div id="coverageBoardContent"></div>';
       html += '</details>';
@@ -5793,7 +5794,7 @@
     html += '<div class="mf-card">';
     // "I'll Be Out" lives in the card header (Erin, 2026-07-15) — hidden
     // during summer break like the rest of the absence machinery.
-    html += '<h3 class="mf-card-title mf-card-title-flex"><span><img class="brand-accent" src="brand/secondary/accent-8.png" alt=""> My Responsibilities</span>'
+    html += '<h3 class="mf-card-title mf-card-title-flex"><span><img class="brand-accent" src="brand/secondary/accent-8.png" alt=""> My Responsibilities ' + (hasHelp('mf-responsibilities') ? renderHelpIcon('mf-responsibilities') : '') + '</span>'
       + (!isSummerBreak ? '<button class="btn btn-absence btn-absence-header" id="reportAbsenceBtn">I\'ll Be Out</button>' : '')
       + '</h3>';
     var duties = [];
@@ -6351,7 +6352,7 @@
       // Each kid's CURRENT group is shown as reference; placements for
       // the next school year happen later in summer and will appear
       // automatically once SESSION_DATES rolls forward.
-      html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule</h3>';
+      html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule</h3>';
       html += '<p class="mf-empty" style="margin-bottom:12px;">Co-op resumes in the fall — class assignments for the next school year will be posted closer to the start.</p>';
       fam.kids.forEach(function (kid) {
         html += '<div class="mf-kid">';
@@ -6372,7 +6373,7 @@
       });
       html += '</div>';
     } else {
-    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
+    html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
     fam.kids.forEach(function (kid) {
       // Finalized morning placement wins over the directory's stale group.
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
@@ -6486,7 +6487,7 @@
 
     // ──── Billing card ────
     html += '<div class="mf-card mf-billing-card">';
-    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-46.png" alt=""> Billing &amp; Fees</h3>';
+    html += '<h3 class="mf-card-title" data-help-key="mf-billing"><img class="brand-accent" src="brand/secondary/accent-46.png" alt=""> Billing &amp; Fees</h3>';
 
     var semKeys = ['fall', 'spring'];
 
@@ -6658,7 +6659,7 @@
     // Card is always visible; body is populated by renderClassSubsCardBody()
     // after loadMyClassSubmissions() fills `myClassSubmissions`.
     html += '<div class="mf-card mf-classsubs-card" id="mfClassSubsCard">';
-    html += '<h3 class="mf-card-title"><img class="brand-accent" src="brand/secondary/accent-2.png" alt=""> Class Ideas</h3>';
+    html += '<h3 class="mf-card-title" data-help-key="mf-class-ideas"><img class="brand-accent" src="brand/secondary/accent-2.png" alt=""> Class Ideas</h3>';
     html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
     html += '</p>';
@@ -6667,6 +6668,7 @@
 
     grid.innerHTML = html;
     section.style.display = '';
+    if (typeof injectMyFamilyHelp === 'function') injectMyFamilyHelp(grid);
 
     // Afternoon class sign-ups card — loads async; hides itself when nothing
     // is open for sign-ups and the viewer isn't a reviewer (VP/Liaison).
@@ -8481,6 +8483,8 @@
         // in one place") — who can use which feature, seeded to match the
         // long-standing hardcoded gates.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
+        // Help content editor (2026-07-17) — edit the "?" card help text.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="help-editor"><span class="ws-link-icon">❓</span>Card Help Text</button></li>';
         // Facilities (2026-07-10): rooms + the notes the Class Builder's
         // room picker shows. Also reachable from the builder's class
         // editor via "Manage rooms…" for Facilities managers.
@@ -9127,6 +9131,250 @@
   };
 
   // ══════════════════════════════════════════════
+  // Card help (2026-07-17) — a "?" icon on every card opens a popover
+  // ══════════════════════════════════════════════
+  // Help is keyed by a stable card key (workspace widget `type`, or a
+  // `data-help-key` on My Family cards). Code ships starter DEFAULT_HELP so
+  // cards are never empty; Comms can override any card's text in-app (Help
+  // editor → help_content table), layered on top by HELP_OVERRIDES. A value
+  // may be a string, or {default, byRole:{Role:text}} for role-specific help.
+  var DEFAULT_HELP = {
+    // Workspace widget cards
+    'todos': 'Your personal to-do list. Items appear here automatically when something needs your attention — pending payments, waivers, cleaning gaps, class reviews, restocks, and more. The number is a live count; click an item to jump straight to it. “All caught up” means nothing’s pending for your roles.',
+    'reports': 'Reports and forms for the roles you hold. Each opens a table you can filter, print, and export. What shows here depends on your role and the permissions the Communications Director has granted.',
+    'pm-scheduling': 'Review inbound class submissions and build the upcoming session. Scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.” Use “Mark reviewed” to clear a class from the count while keeping it to place later.',
+    'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles Assignments, Facilities, and more.',
+    'admin-consoles': 'Admin tools and data sources for the roles you hold — permissions, calendars, and other back-office consoles.',
+    'roles': 'Who holds each board and committee role this year. Depending on your role you can assign or update holders here.',
+    'members-summary': 'A friendly snapshot of this season’s registered families — returning vs. new, and kids by track. Click a count to see the roster (names, members, track). No sensitive info.',
+    'board-notes': 'A shared scratchpad for the board. Any board member can add a note; the author (or a super user) can remove one.',
+    'special-events': 'Special events for the year — assign a lead and helpers, and track dates from proposed to approved.',
+    'supply-closet-mgmt': 'Manage the supply closet inventory and storage locations. Flag items low, set quantities, and record who holds member-held supplies.',
+    'upcoming-events': 'Upcoming co-op dates pulled from the calendar — sessions, special events, and field trips.',
+    'ways-to-help': 'Open volunteer roles and ways to pitch in this year, plus your own participation so far.',
+    'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
+    'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
+    // Board section per-role cards (bg-*)
+    'bg-president': 'President tools and the board’s at-a-glance view for the year.',
+    'bg-vp': 'Vice President tools — morning & afternoon class building, volunteer assignments, and session planning.',
+    'bg-treasurer': 'Treasurer tools — payments, billing, and the membership financial picture.',
+    'bg-secretary': 'Secretary tools — board records and the shared calendar.',
+    'bg-membership': 'Membership Director tools — the member pipeline, registrations, waivers, and onboarding.',
+    'bg-sustaining': 'Sustaining Director tools for the year.',
+    'bg-communications': 'Communications Director tools — waivers, onboarding, permissions, and site content.',
+    'bg-cleaning': 'Cleaning Crew Liaison tools — assign families to cleaning areas each session.',
+    'bg-events-liaison': 'Special Events Liaison tools — plan events, assign helpers, and set dates.',
+    // My Family cards
+    'mf-responsibilities': 'Everything you’re signed up to do — teaching, assisting, cleaning, board and committee roles, and any coverage you’ve claimed. Grouped by block (morning, afternoon, cleaning, annual). Tap a duty for details.',
+    'mf-kids-schedule': 'Your kids’ morning class and afternoon electives for the session. Elective names open a class detail popup; pending afternoon sign-ups show here with an Edit link.',
+    'mf-billing': 'Your family’s fees and payments for the year — what’s due, what’s paid, and how to pay. Contact the Treasurer with questions.',
+    'mf-class-ideas': 'Class ideas and afternoon class submissions for your family — propose a class or track one you’ve submitted.',
+    'mf-signup': 'Afternoon class sign-ups. Rank the classes each kid wants during the sign-up window; the Afternoon Class Liaison runs the lottery when it closes.',
+    'mf-coverage': 'The coverage board — days a member is out and the duties that need someone to cover. Claim an open slot to help out.'
+  };
+  var HELP_OVERRIDES = {}; // { cardKey: { role: content } } from the DB
+  var HELP_OVERRIDES_KEY = 'rw_help_overrides';
+
+  // Resolve the help text for a card given the viewer's roles + the card's
+  // section heading (itself treated as a role). Order: DB override for a
+  // matching role → DB override default('*') → code default byRole → code
+  // default string. Returns '' when there's nothing to show.
+  function helpFor(cardKey, roles, heading) {
+    var order = [heading].concat(roles || []);
+    var ov = HELP_OVERRIDES[cardKey];
+    if (ov) {
+      for (var i = 0; i < order.length; i++) {
+        if (order[i] && typeof ov[order[i]] === 'string' && ov[order[i]] !== '') return ov[order[i]];
+      }
+      if (typeof ov['*'] === 'string' && ov['*'] !== '') return ov['*'];
+    }
+    var d = DEFAULT_HELP[cardKey];
+    if (!d) return '';
+    if (typeof d === 'string') return d;
+    if (d.byRole) {
+      for (var j = 0; j < order.length; j++) {
+        if (order[j] && d.byRole[order[j]]) return d.byRole[order[j]];
+      }
+    }
+    return d.default || '';
+  }
+  // Does a card have ANY help to show (default or override)?
+  function hasHelp(cardKey) {
+    return !!(DEFAULT_HELP[cardKey] || (HELP_OVERRIDES[cardKey] && Object.keys(HELP_OVERRIDES[cardKey]).length));
+  }
+  function renderHelpIcon(cardKey) {
+    return '<button type="button" class="card-help-btn" data-help-key="' + escapeAttr(cardKey) + '" aria-label="Help" title="What is this card?">?</button>';
+  }
+  // One shared help popover, anchored to the clicked "?".
+  var _helpPopover = null;
+  function closeHelpPopover() {
+    if (_helpPopover && _helpPopover.parentNode) _helpPopover.parentNode.removeChild(_helpPopover);
+    _helpPopover = null;
+    document.removeEventListener('click', _helpPopoverOutside, true);
+    document.removeEventListener('keydown', _helpPopoverEsc, true);
+  }
+  function _helpPopoverOutside(e) { if (_helpPopover && !_helpPopover.contains(e.target) && !(e.target.classList && e.target.classList.contains('card-help-btn'))) closeHelpPopover(); }
+  function _helpPopoverEsc(e) { if (e.key === 'Escape') closeHelpPopover(); }
+  function openHelpPopover(anchorEl, text) {
+    closeHelpPopover();
+    if (!text) return;
+    var pop = document.createElement('div');
+    pop.className = 'card-help-popover';
+    pop.innerHTML = '<button type="button" class="card-help-close" aria-label="Close">&times;</button><div class="card-help-body">' + escapeHtml(text) + '</div>';
+    document.body.appendChild(pop);
+    _helpPopover = pop;
+    var r = anchorEl.getBoundingClientRect();
+    var top = r.bottom + window.scrollY + 6;
+    var left = r.left + window.scrollX;
+    // Clamp within the viewport.
+    var pw = Math.min(320, window.innerWidth - 24);
+    pop.style.width = pw + 'px';
+    if (left + pw > window.scrollX + window.innerWidth - 12) left = window.scrollX + window.innerWidth - pw - 12;
+    if (left < window.scrollX + 12) left = window.scrollX + 12;
+    pop.style.top = top + 'px';
+    pop.style.left = left + 'px';
+    pop.querySelector('.card-help-close').addEventListener('click', closeHelpPopover);
+    setTimeout(function () {
+      document.addEventListener('click', _helpPopoverOutside, true);
+      document.addEventListener('keydown', _helpPopoverEsc, true);
+    }, 10);
+  }
+  // My Family cards carry a data-help-key on their title; append the icon
+  // (once) and wire clicks. Runs after each renderMyFamily paint.
+  function injectMyFamilyHelp(grid) {
+    if (!grid) return;
+    grid.querySelectorAll('.mf-card-title[data-help-key]').forEach(function (titleEl) {
+      var key = titleEl.getAttribute('data-help-key');
+      if (!hasHelp(key) || titleEl.querySelector('.card-help-btn')) return;
+      titleEl.insertAdjacentHTML('beforeend', ' ' + renderHelpIcon(key));
+    });
+    wireHelpIcons(grid);
+  }
+  // Delegated click handler for any "?" button in a container.
+  function wireHelpIcons(container, rolesFn) {
+    if (!container) return;
+    container.querySelectorAll('.card-help-btn').forEach(function (btn) {
+      if (btn._helpWired) return;
+      btn._helpWired = true;
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        var key = btn.getAttribute('data-help-key');
+        var section = btn.closest('[data-ws-role]');
+        var heading = section ? section.getAttribute('data-ws-role') : null;
+        var roles = (typeof rolesFn === 'function') ? rolesFn() : ((typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : []);
+        openHelpPopover(btn, helpFor(key, roles, heading));
+      });
+    });
+  }
+  // Friendly labels for the Help editor (falls back to the key).
+  var HELP_CARD_LABELS = {
+    'todos': 'To Do', 'reports': 'Reports & Forms', 'pm-scheduling': 'Class Scheduling',
+    'coop-management': 'Co-op Management', 'admin-consoles': 'Admin Consoles & Sources',
+    'roles': 'Roles Assignments', 'members-summary': 'Members Snapshot', 'board-notes': 'Board Notes',
+    'special-events': 'Special Events', 'supply-closet-mgmt': 'Supply Closet', 'upcoming-events': 'Upcoming Events',
+    'ways-to-help': 'Ways to Help', 'resources': 'Resources', 'my-links': 'My Links',
+    'bg-president': 'Board — President', 'bg-vp': 'Board — Vice President', 'bg-treasurer': 'Board — Treasurer',
+    'bg-secretary': 'Board — Secretary', 'bg-membership': 'Board — Membership Director',
+    'bg-sustaining': 'Board — Sustaining Director', 'bg-communications': 'Board — Communications Director',
+    'bg-cleaning': 'Board — Cleaning Crew Liaison', 'bg-events-liaison': 'Board — Special Events Liaison',
+    'mf-responsibilities': 'My Family — My Responsibilities', 'mf-kids-schedule': 'My Family — Kids’ Schedule',
+    'mf-billing': 'My Family — Billing & Fees', 'mf-class-ideas': 'My Family — Class Ideas',
+    'mf-signup': 'My Family — Afternoon Sign-ups', 'mf-coverage': 'My Family — Coverage Board'
+  };
+  // Comms' Help-text editor. One row per card: edit the default ('*') text,
+  // Save (override) or Reset (back to the code default).
+  function showHelpEditorModal() {
+    if (!personDetail || !personDetailCard) return;
+    var keys = Object.keys(DEFAULT_HELP);
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<h3 class="rd-title">Card Help Text</h3>';
+    html += '<p class="rd-subtitle">Edit the help shown by each card’s “?” icon. Changes apply for everyone. “Reset” restores the built-in text.</p>';
+    keys.forEach(function (k) {
+      var d = DEFAULT_HELP[k];
+      var codeDefault = (typeof d === 'string') ? d : (d && d.default) || '';
+      var ov = HELP_OVERRIDES[k] && HELP_OVERRIDES[k]['*'];
+      var current = (typeof ov === 'string') ? ov : codeDefault;
+      var label = HELP_CARD_LABELS[k] || k;
+      html += '<div class="help-editor-row" data-hk="' + escapeAttr(k) + '">';
+      html += '<h5>' + escapeHtml(label) + ' <span class="help-editor-key">' + escapeHtml(k) + '</span></h5>';
+      html += '<textarea class="help-editor-text" maxlength="4000">' + escapeHtml(current) + '</textarea>';
+      html += '<div class="help-editor-actions">';
+      html += '<button type="button" class="btn btn-primary btn-sm help-editor-save">Save</button>';
+      html += '<button type="button" class="btn btn-outline-dark btn-sm help-editor-reset">Reset to default</button>';
+      html += '<span class="help-editor-status"></span>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+
+    function setOverride(k, content) {
+      (HELP_OVERRIDES[k] || (HELP_OVERRIDES[k] = {}))['*'] = content;
+      try { localStorage.setItem(HELP_OVERRIDES_KEY, JSON.stringify(HELP_OVERRIDES)); } catch (e) { /* quota */ }
+    }
+    personDetailCard.querySelectorAll('.help-editor-row').forEach(function (row) {
+      var k = row.getAttribute('data-hk');
+      var ta = row.querySelector('.help-editor-text');
+      var status = row.querySelector('.help-editor-status');
+      row.querySelector('.help-editor-save').addEventListener('click', function () {
+        var content = ta.value;
+        status.textContent = 'Saving…';
+        fetch('/api/cleaning?action=help', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ card_key: k, role: '*', content: content })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { status.textContent = (res.data && res.data.error) || 'Save failed.'; return; }
+            setOverride(k, content);
+            status.textContent = 'Saved ✓';
+          }).catch(function () { status.textContent = 'Network error.'; });
+      });
+      row.querySelector('.help-editor-reset').addEventListener('click', function () {
+        status.textContent = 'Resetting…';
+        fetch('/api/cleaning?action=help&card_key=' + encodeURIComponent(k) + '&role=*', {
+          method: 'DELETE', headers: rwAuthHeaders(true)
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { status.textContent = (res.data && res.data.error) || 'Reset failed.'; return; }
+            if (HELP_OVERRIDES[k]) delete HELP_OVERRIDES[k]['*'];
+            try { localStorage.setItem(HELP_OVERRIDES_KEY, JSON.stringify(HELP_OVERRIDES)); } catch (e) { /* quota */ }
+            var d = DEFAULT_HELP[k];
+            ta.value = (typeof d === 'string') ? d : (d && d.default) || '';
+            status.textContent = 'Reset ✓';
+          }).catch(function () { status.textContent = 'Network error.'; });
+      });
+    });
+  }
+
+  // Load Comms' in-app overrides (cached in localStorage for instant paint).
+  function loadHelpOverrides() {
+    try {
+      var cached = localStorage.getItem(HELP_OVERRIDES_KEY);
+      if (cached) HELP_OVERRIDES = JSON.parse(cached) || {};
+    } catch (e) { /* ignore */ }
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/cleaning?action=help', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.help)) return;
+        var map = {};
+        data.help.forEach(function (row) {
+          var k = row.card_key, role = row.role || '*';
+          (map[k] || (map[k] = {}))[role] = row.content || '';
+        });
+        HELP_OVERRIDES = map;
+        try { localStorage.setItem(HELP_OVERRIDES_KEY, JSON.stringify(map)); } catch (e) { /* quota */ }
+      })
+      .catch(function () { /* keep cached/defaults */ });
+  }
+
+  // ══════════════════════════════════════════════
   // Capability grants (Permissions admin, 2026-07-09)
   // ══════════════════════════════════════════════
   // The server enforces feature access through capability grants
@@ -9527,6 +9775,7 @@
           s += '<div class="mf-card workspace-card" data-widget-type="' + type + '">';
           s += '<div class="workspace-card-header ws-card-toggle" data-widget="' + type + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">';
           s += '<h4>' + wsAccent + w.title + '</h4>';
+          s += (hasHelp(type) ? renderHelpIcon(type) : '');
           s += '<span class="ws-min-caret" aria-hidden="true">▾</span>';
           s += '</div>';
           s += '<div class="workspace-card-body">' + w.render(prefs, roles, heading) + '</div>';
@@ -9571,6 +9820,10 @@
       });
     });
     applyWsRoleFilter();
+
+    // Card help "?" icons — one delegated wiring pass covers every workspace
+    // + board card (they all flow through the shared header).
+    if (typeof wireHelpIcons === 'function') wireHelpIcons(container);
 
     // Per-widget post-render hooks (e.g. kick off async data fetches).
     allVisibleTypes.forEach(function (type) {
@@ -17422,6 +17675,7 @@
       showRolesManagerModal({ view: btn.getAttribute('data-roles-view') || undefined });
     }
     else if (action === 'permissions-admin' && typeof showPermissionsAdminModal === 'function') showPermissionsAdminModal();
+    else if (action === 'help-editor' && typeof showHelpEditorModal === 'function') showHelpEditorModal();
     else if (action === 'facilities-admin' && typeof showFacilitiesAdminModal === 'function') showFacilitiesAdminModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {

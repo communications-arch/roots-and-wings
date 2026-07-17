@@ -313,6 +313,44 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ grants });
     }
 
+    // ── Help content for the card "?" icons (2026-07-17) ──
+    // GET: any member — returns every override row so the client can layer
+    // them over its code defaults. POST/DELETE: Comms/super only (edit a
+    // (card_key, role) override, or reset it to the code default).
+    if (action === 'help') {
+      if (req.method === 'GET') {
+        const rows = await sql`SELECT card_key, role, content FROM help_content`;
+        return res.status(200).json({ help: rows });
+      }
+      const isHelpAdmin = isSuperUser(user.email)
+        || await canEditAsRole(user.email, 'Communications Director');
+      if (!isHelpAdmin) {
+        return res.status(403).json({ error: 'Only the Communications Director can edit help content.' });
+      }
+      if (req.method === 'POST') {
+        const body = req.body || {};
+        const cardKey = String(body.card_key || '').trim().slice(0, 120);
+        const role = String(body.role || '*').trim().slice(0, 120) || '*';
+        const content = String(body.content || '').slice(0, 4000);
+        if (!cardKey) return res.status(400).json({ error: 'card_key is required.' });
+        await sql`
+          INSERT INTO help_content (card_key, role, content, updated_by, updated_at)
+          VALUES (${cardKey}, ${role}, ${content}, ${user.email}, NOW())
+          ON CONFLICT (card_key, role) DO UPDATE SET
+            content = EXCLUDED.content, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+        `;
+        return res.status(200).json({ ok: true });
+      }
+      if (req.method === 'DELETE') {
+        const cardKey = String(req.query.card_key || '').trim();
+        const role = String(req.query.role || '*').trim() || '*';
+        if (!cardKey) return res.status(400).json({ error: 'card_key is required.' });
+        await sql`DELETE FROM help_content WHERE card_key = ${cardKey} AND role = ${role}`;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     // ── Cleaning self-signup (2026-07-11, Erin's volunteer build) ──
     // Any member claims an OPEN area for a session (one family per area;
     // the Floater area always accepts more). Their display name comes

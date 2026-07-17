@@ -10743,6 +10743,69 @@ button.staff-role:hover {
   padding-bottom: 10px;
   border-bottom: 2px solid var(--color-primary-light);
 }
+/* In the workspace header the help "?" sits next to the title; margin-right
+   auto pushes the minimize caret to the far right. */
+.workspace-card-header .card-help-btn { margin-right: auto; }
+
+/* Card help "?" icon + popover (site-wide). */
+.card-help-btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-primary-light);
+  background: transparent;
+  color: var(--color-primary);
+  font-weight: 700;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  transition: background 0.15s, color 0.15s;
+}
+.card-help-btn:hover, .card-help-btn:focus-visible {
+  background: var(--color-primary);
+  color: #fff;
+  outline: none;
+}
+.mf-card-title .card-help-btn { margin-left: 4px; }
+.card-help-popover {
+  position: absolute;
+  z-index: 100050;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--shadow-lg, 0 8px 30px rgba(0,0,0,0.12));
+  padding: 14px 16px 16px;
+}
+.card-help-popover .card-help-close {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  border: none;
+  background: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--color-text-light);
+  cursor: pointer;
+}
+.card-help-body {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+/* Help editor modal (Comms). */
+.help-editor-row { border-bottom: 1px solid var(--color-border); padding: 12px 0; }
+.help-editor-row h5 { margin: 0 0 4px; font-size: 0.95rem; color: var(--color-primary-dark); }
+.help-editor-row .help-editor-key { font-size: 0.72rem; color: var(--color-text-light); font-family: ui-monospace, Consolas, monospace; }
+.help-editor-row textarea { width: 100%; margin-top: 6px; min-height: 60px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm, 8px); font-family: var(--font-body); font-size: 0.85rem; resize: vertical; }
+.help-editor-row .help-editor-actions { margin-top: 6px; display: flex; gap: 8px; align-items: center; }
+.help-editor-row .help-editor-status { font-size: 0.78rem; color: var(--color-leaf); }
 .workspace-card-header h4 {
   margin: 0;
   font-family: var(--font-body);

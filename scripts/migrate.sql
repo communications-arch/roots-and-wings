@@ -1809,3 +1809,18 @@ ALTER TABLE registrations ADD COLUMN IF NOT EXISTS created_profile BOOLEAN NOT N
 -- held_by = person display name; held_by_email = their email (dropdown-backed).
 ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS held_by       TEXT NOT NULL DEFAULT '';
 ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS held_by_email TEXT NOT NULL DEFAULT '';
+
+
+-- 2026-07-17: in-app-editable help content for the site-wide card "?" icons.
+-- One row per (card_key, role); role='*' is the default shown to everyone,
+-- a specific role title overrides it for that role. Content is plain text
+-- (rendered escaped). Comms/super edit it via the Help editor; code ships
+-- starter defaults so cards are never empty before/without a DB row.
+CREATE TABLE IF NOT EXISTS help_content (
+  card_key   TEXT NOT NULL,
+  role       TEXT NOT NULL DEFAULT '*',
+  content    TEXT NOT NULL DEFAULT '',
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (card_key, role)
+);
