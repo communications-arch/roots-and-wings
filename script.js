@@ -2725,7 +2725,7 @@
         html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + escapeHtml(displayName + ' ' + person.family) + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
           '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + escapeHtml(classCardFirst.charAt(0)) + '</span></div>' +
           '<div class="yb-name">' + escapeHtml(displayName) + '</div>' +
-          '<div class="yb-subtitle">' + (person.age ? 'Age ' + escapeHtml(String(person.age)) : '') + '</div>' +
+          '<div class="yb-subtitle">' + escapeHtml(person.group || '') + '</div>' +
           '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
           extras +
           '</button>';
@@ -2777,8 +2777,11 @@
         // covers third+ adults like grandparents or legal guardians who
         // aren't tagged MLC/BLC.
         var ROLE_LABELS_DIR = { mlc: 'Main Learning Coach', blc: 'Back Up Learning Coach', parent: 'Parent' };
+        // Directory shows a kid's class group only — no age (Erin,
+        // 2026-07-17). Bare group name (not groupWithAge, which appends the
+        // age range).
         var subtitle = person.type === 'kid'
-          ? (person.age ? 'Age ' + person.age + ' &middot; ' : '') + groupWithAge(person.group)
+          ? escapeHtml(person.group || '')
           : (ROLE_LABELS_DIR[person.role] || 'Parent');
         var bgStyle = faceColor(person.name);
 
@@ -3104,7 +3107,8 @@
       html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
     }
     if (person.type === 'kid') {
-      html += '<p class="detail-group">' + (person.age ? 'Age ' + escapeHtml(String(person.age)) + ' &middot; ' : '') + groupWithAge(person.group) + '</p>';
+      // Class group only, no age (Erin, 2026-07-17).
+      if (person.group) html += '<p class="detail-group">' + escapeHtml(person.group) + '</p>';
       if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
       if (person.schedule && person.schedule !== 'all-day') {
         html += '<p class="detail-schedule">' + (person.schedule === 'morning' ? 'Morning only' : 'Afternoon only') + '</p>';
@@ -25738,6 +25742,16 @@
   // a ⏳ marker so Membership knows payment hasn't landed.
   function mcbKidChip(k) {
     var age = (k.age == null) ? '?' : k.age;
+    // Birthdate for the Membership Director's placement decisions (Erin,
+    // 2026-07-17). Parse the date-only string as a LOCAL day (no UTC
+    // back-shift) and show it next to the age.
+    var bday = '';
+    if (k.birth_date) {
+      var bd = new Date(String(k.birth_date).slice(0, 10) + 'T00:00:00');
+      if (!isNaN(bd.getTime())) {
+        bday = ' · ' + bd.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+      }
+    }
     // First-year families get a green chip outline (.mcb-kid-new) instead of a
     // 🌱 badge — same cue as the Directory's green card outline, less clutter.
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
@@ -25750,7 +25764,7 @@
     return '<div class="' + cls + '"' + (k.locked ? '' : ' draggable="true"') + ' data-key="' + escapeHtmlWs(k.key) + '"'
       + (titleAttr ? ' title="' + escapeHtmlWs(titleAttr) + '"' : '') + '>'
       + '<span class="mcb-kid-name">' + escapeHtmlWs(k.display_name) + '</span>'
-      + '<span class="mcb-kid-age">age ' + age + '</span>'
+      + '<span class="mcb-kid-age">age ' + age + bday + '</span>'
       + allergy + note + pend + lock
       + '</div>';
   }
