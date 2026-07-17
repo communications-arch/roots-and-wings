@@ -26020,7 +26020,14 @@
   }
 
   function showScheduleBuilder() {
-    if (document.getElementById('sbOverlay')) return;
+    // Dismiss any open modal first so the builder (a body-level overlay at
+    // the same z-index) always opens on top instead of behind it (Erin,
+    // 2026-07-17: opened behind for the ACL from the To Do). Also clear a
+    // stale overlay so a leftover node can't block a fresh open.
+    if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* ignore */ } }
+    if (typeof closeNotifDropdown === 'function') { try { closeNotifDropdown(); } catch (e) { /* ignore */ } }
+    var _sbStale = document.getElementById('sbOverlay');
+    if (_sbStale) { _sbStale.remove(); }
     var html = '<div class="sb-overlay" id="sbOverlay">';
     html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Class Builder">';
     html += '<button class="detail-close" id="sbCloseBtn" aria-label="Close">&times;</button>';
