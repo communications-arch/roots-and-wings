@@ -12,17 +12,19 @@ function getSql() {
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-  // Cron-only endpoint: without this gate ANYONE could curl it and fire a
-  // push broadcast + notification insert for every member at will
-  // (2026-07-17 review). Vercel Cron sends `Authorization: Bearer
-  // $CRON_SECRET` automatically when CRON_SECRET is set. Mirror the check
-  // in api/tour.js handleReconcileCron.
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers['authorization'] || '';
-    if (auth !== 'Bearer ' + cronSecret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  // Cron-only endpoint: without a gate ANYONE could curl it and fire a push
+  // broadcast + notification insert for every member (2026-07-17 review).
+  // Mirror api/tour.js handleReconcileCron exactly: accept Vercel cron's
+  // `User-Agent: vercel-cron/...` (works even when CRON_SECRET isn't set)
+  // OR an explicit bearer secret for manual runs. A plain anonymous curl
+  // has neither → 401.
+  const ua = String(req.headers['user-agent'] || '');
+  const isVercelCron = ua.indexOf('vercel-cron') !== -1;
+  const cronSecret = process.env.CRON_SECRET || '';
+  const authHeader = String(req.headers['authorization'] || '');
+  const hasSecret = cronSecret && authHeader === `Bearer ${cronSecret}`;
+  if (!isVercelCron && !hasSecret) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   try {
