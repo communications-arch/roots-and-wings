@@ -4932,12 +4932,15 @@ const SPECIAL_EVENT_SEED = [
 async function requireSpecialEventsEditor(req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
-  // 'special_events_manage' — defaults to SEL + VP; Permissions-table
-  // editable.
-  const ok = await hasCapability(auth.email, 'special_events_manage');
+  // 'special_events_manage' (defaults SEL + VP, Permissions-editable) OR any
+  // board member (Erin, 2026-07-17: "let anyone on the board edit/approve
+  // any admin calendar events") OR a super user.
+  const ok = await hasCapability(auth.email, 'special_events_manage')
+    || isSuperUser(auth.email)
+    || await isBoardMember(auth.email);
   if (!ok) {
     res.status(403).json({
-      error: 'Only the Special Events Liaison or Vice President can manage special events.',
+      error: 'Only a board member (or the Special Events Liaison) can manage special events.',
       youAre: auth.realEmail
     });
     return null;
@@ -5381,6 +5384,41 @@ async function handleSpecialEventDate(body, req, res) {
   }
 }
 
+// POST kind='special-event-details' — set a special event's time/location/
+// notes/end-date without touching its date or approval status (Erin,
+// 2026-07-17). Separate from special-event-date so an inline date save
+// never clobbers these and vice versa.
+async function handleSpecialEventDetails(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventId = parseInt(body.event_id, 10);
+  if (!eventId) return res.status(400).json({ error: 'event_id required' });
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const startTime = String(body.start_time || '').trim();
+  const endTime = String(body.end_time || '').trim();
+  const endDate = String(body.end_date || '').trim();
+  if (startTime && !timeRe.test(startTime)) return res.status(400).json({ error: 'Start time must be HH:MM.' });
+  if (endTime && !timeRe.test(endTime)) return res.status(400).json({ error: 'End time must be HH:MM.' });
+  if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return res.status(400).json({ error: 'End date must be YYYY-MM-DD.' });
+  const location = String(body.location || '').trim().slice(0, 200);
+  const notes = String(body.notes || '').trim().slice(0, 1000);
+  try {
+    const sql = getSql();
+    const upd = await sql`
+      UPDATE special_events
+      SET start_time = ${startTime || null}, end_time = ${endTime || null},
+          end_date = ${endDate || null}, location = ${location}, notes = ${notes},
+          updated_by = ${auth.realEmail}, updated_at = NOW()
+      WHERE id = ${eventId} RETURNING id
+    `;
+    if (!upd.length) return res.status(404).json({ error: 'Event not found' });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('special-event-details error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // POST kind='special-event-create' — add a NEW special event for a year,
 // beyond the seeded standard nine (Admin Calendar "+ Add event" with the
 // 🎉 Special event type). Created as 'proposed'; date optional.
@@ -5759,7 +5797,8 @@ async function handleBoardCalendarGet(req, res) {
       }
     }
     const seRows = await sql`
-      SELECT id, school_year, name, event_date, date_status, sort_order
+      SELECT id, school_year, name, event_date, date_status, sort_order,
+             start_time, end_time, end_date, location, notes
       FROM special_events
       ORDER BY sort_order, name
     `;
@@ -5776,6 +5815,11 @@ async function handleBoardCalendarGet(req, res) {
         event_date: saved || suggested,
         date_is_default: !saved && !!suggested,
         date_status: e.date_status,
+        start_time: e.start_time ? String(e.start_time).slice(0, 5) : '',
+        end_time: e.end_time ? String(e.end_time).slice(0, 5) : '',
+        end_date: specialEventDateStr(e.end_date),
+        location: e.location || '',
+        notes: e.notes || '',
         // Ice Cream Social + Field Day dates are driven by the session
         // calendar (derived events above) — read-only here.
         date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
@@ -5784,11 +5828,11 @@ async function handleBoardCalendarGet(req, res) {
         seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
       };
     });
-    // isSEL is the 'special_events_manage' capability (defaults SEL + VP).
-    // Super users also create/edit special events server-side
-    // (requireSpecialEventsEditor allows them), so the client flag must
-    // include them or the UI hides the option from Comms (2026-07-17).
-    const viewerCanEditSpecialEvents = isSEL || isSuperUser(auth.email);
+    // Mirror requireSpecialEventsEditor exactly: special-events management is
+    // the capability (SEL/VP) OR any board member OR super user (Erin,
+    // 2026-07-17). The client flag must match or the UI hides the controls.
+    const viewerCanEditSpecialEvents = isSEL || isSuperUser(auth.email)
+      || await isBoardMember(auth.email);
 
     return res.status(200).json({
       events,
@@ -6676,6 +6720,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'am-teacher-assign') return handleAmTeacherAssign(body, req, res);
     if (kind === 'special-event-people') return handleSpecialEventSave(body, req, res);
     if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
+    if (kind === 'special-event-details') return handleSpecialEventDetails(body, req, res);
     if (kind === 'special-event-create') return handleSpecialEventCreate(body, req, res);
     if (kind === 'special-event-delete') return handleSpecialEventDelete(body, req, res);
     if (kind === 'event-task-save') return handleEventTaskSave(body, req, res);

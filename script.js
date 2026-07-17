@@ -22938,12 +22938,20 @@
     } else if (kind === 'kids') {
       var pools = _signupTodoAux.classes;
       var canPickKid = d.can_place && pools;
+      // Which morning classes (age groups) an afternoon class is open to —
+      // the group NAMES, so the liaison can match a kid's morning class
+      // (Erin, 2026-07-17). Falls back to the numeric age range.
+      function classOpenToText(c) {
+        var groups = Array.isArray(c.ageGroups) ? c.ageGroups : [];
+        var names = groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean);
+        if (names.length) return 'open to ' + names.join(', ');
+        var ages = (typeof signupAgeText === 'function') ? signupAgeText(c) : '';
+        return ages ? 'ages ' + ages : '';
+      }
       function classOpts(hour) {
         var list = (pools && pools[hour]) || [];
         return '<option value="">— pick… —</option>' + list.map(function (c) {
-          // Age range beside each class so the liaison can match kids to
-          // classes without leaving the To Do (Erin, 2026-07-16).
-          var ages = (typeof signupAgeText === 'function') ? signupAgeText(c) : '';
+          var openTo = classOpenToText(c);
           // Fullness so placement decisions don't need the (closed)
           // sign-up card: "3/8 in" (testers, 2026-07-16).
           var fullness = (typeof c.signedUp === 'number')
@@ -22951,14 +22959,17 @@
             : '';
           return '<option value="' + c.id + '">' + escapeHtml(c.name)
             + (c.hour === 'both' ? ' (2-hour)' : '')
-            + (ages ? ' — ' + escapeHtml(ages) : '')
+            + (openTo ? ' — ' + escapeHtml(openTo) : '')
             + fullness + '</option>';
         }).join('');
       }
       h = (d.kids_unpicked || []).map(function (k) {
         var kidMeta = [];
         if (k.age != null) kidMeta.push('age ' + k.age);
-        if (k.group) kidMeta.push(k.group);
+        // The kid's MORNING class, labeled so the liaison can match it to an
+        // afternoon class's "open to" list (Erin, 2026-07-17).
+        if (k.group) kidMeta.push('morning: ' + k.group);
+        else kidMeta.push('morning: not placed yet');
         var row = '<div class="st-place-row"><strong>' + escapeHtml(k.name) + '</strong>' +
           (kidMeta.length ? ' <span class="ws-wv-context">' + escapeHtml(kidMeta.join(' · ')) + '</span>' : '');
         if (canPickKid) {
@@ -23933,6 +23944,13 @@
         if (e.location) notes = '📍 ' + escapeHtml(e.location) + (notes ? '<br>' + notes : '');
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
         if (r.kind === 'special' && r.seRow) {
+          // Surface the saved details (time / location / notes) on the row.
+          var seDet = '';
+          var seR = r.seRow;
+          if (seR.start_time) seDet += '🕑 ' + escapeHtml(boardCalFmtTimeRange(seR.start_time, seR.end_time));
+          if (seR.location) seDet += (seDet ? '<br>' : '') + '📍 ' + escapeHtml(seR.location);
+          if (seR.notes) seDet += (seDet ? '<br>' : '') + escapeHtml(seR.notes);
+          if (seDet) notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + seDet + '</span>';
           notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
           // Session-anchored default date, not yet saved (Erin, 2026-07-16:
           // PJ Party + Maker's Market ride the mini session two weeks after
@@ -23968,6 +23986,9 @@
             if (!r.autoDate) h += '<button type="button" class="btn btn-primary btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
             else h += '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span> ';
             h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '">' + (r.seRow.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
+            // Times / location / notes / end date (Erin, 2026-07-17). Auto
+            // events (Ice Cream / Field Day) keep only their calendar date.
+            if (!r.autoDate) h += ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-se-details" data-se-id="' + r.seRow.id + '">Details…</button>';
             // Custom (non-seeded) special events can be removed; the
             // standard nine would just re-seed, so no Delete for them.
             if (!r.autoDate && !r.seRow.seeded) {
@@ -24066,6 +24087,51 @@
         loadBoardCalendar();
       })
       .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
+  }
+
+  // Edit a special event's times / location / notes / end date (Erin,
+  // 2026-07-17). Date + approval stay on the row; this covers everything else.
+  function showSpecialEventDetailsModal(ev) {
+    if (!personDetail || !personDetailCard || !ev) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail rd-modal">';
+    html += '<h3 class="rd-title">' + escapeHtml(ev.name || 'Special event') + ' — details</h3>';
+    html += '<p class="rd-subtitle">Set the time, place, and notes. The date and approval stay on the calendar row.</p>';
+    html += '<div class="ws-waiver-form">';
+    html += '<label>Start time<input type="time" id="se-det-stime" value="' + escapeAttr(ev.start_time || '') + '"></label>';
+    html += '<label>End time<input type="time" id="se-det-etime" value="' + escapeAttr(ev.end_time || '') + '"></label>';
+    html += '<label>End date <span class="reg-optional">(for a multi-day event)</span><input type="date" id="se-det-edate" value="' + escapeAttr(ev.end_date || '') + '"></label>';
+    html += '<label>Location<input type="text" id="se-det-loc" maxlength="200" placeholder="e.g. Fellowship Hall" value="' + escapeAttr(ev.location || '') + '"></label>';
+    html += '<label>Notes<textarea id="se-det-notes" maxlength="1000" rows="3" placeholder="Anything families should know">' + escapeHtml(ev.notes || '') + '</textarea></label>';
+    html += '<button class="btn btn-primary btn-sm" id="se-det-save">Save details</button>';
+    html += '<div class="ws-wv-status" id="se-det-status"></div>';
+    html += '</div></div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+    personDetailCard.querySelector('#se-det-save').addEventListener('click', function () {
+      var btn = this;
+      var status = personDetailCard.querySelector('#se-det-status');
+      btn.disabled = true; status.className = 'ws-wv-status'; status.textContent = 'Saving…';
+      fetch('/api/tour', {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          kind: 'special-event-details', event_id: ev.id,
+          start_time: personDetailCard.querySelector('#se-det-stime').value,
+          end_time: personDetailCard.querySelector('#se-det-etime').value,
+          end_date: personDetailCard.querySelector('#se-det-edate').value,
+          location: personDetailCard.querySelector('#se-det-loc').value,
+          notes: personDetailCard.querySelector('#se-det-notes').value
+        })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { btn.disabled = false; status.className = 'ws-wv-status ws-wv-err'; status.textContent = (res.data && res.data.error) || 'Save failed.'; return; }
+          closeDetail();
+          if (typeof loadBoardCalendar === 'function') loadBoardCalendar();
+        }).catch(function (err) { btn.disabled = false; status.className = 'ws-wv-status ws-wv-err'; status.textContent = 'Network error: ' + ((err && err.message) || 'unknown'); });
+    });
   }
 
   function wireBoardCalendarBody() {
@@ -24183,6 +24249,12 @@
       btn.addEventListener('click', function () {
         var b = seRowBits(this);
         boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status === 'approved' ? 'proposed' : 'approved');
+      });
+    });
+    body.querySelectorAll('.board-cal-se-details').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var b = seRowBits(this);
+        if (typeof showSpecialEventDetailsModal === 'function') showSpecialEventDetailsModal(b.ev);
       });
     });
     body.querySelectorAll('.board-cal-se-delete').forEach(function (btn) {

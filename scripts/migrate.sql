@@ -1824,3 +1824,12 @@ CREATE TABLE IF NOT EXISTS help_content (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (card_key, role)
 );
+
+
+-- 2026-07-17: special events can carry times + location + an end date (Erin:
+-- "Special Events need to be modified to add times and other details"). notes
+-- already exists; these round out the detail set the SEL/board can edit.
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS start_time TIME;
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS end_time   TIME;
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS location   TEXT NOT NULL DEFAULT '';
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS end_date   DATE;
