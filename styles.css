@@ -2754,6 +2754,9 @@ p + p { margin-top: 1rem; }
      Log Out replace the hamburger on that page. */
   .nav-toggle { display: flex; }
   body.members-portal .nav-toggle { display: none; }
+  /* Defensive: never let the dashboard scroll sideways on mobile — a stray
+     wide child clips instead of shifting the whole page (Erin, 2026-07-17). */
+  body.members-portal { overflow-x: hidden; }
 
   .nav-quick-icons {
     display: none;
@@ -4609,6 +4612,13 @@ button.staff-role:hover {
   padding: 24px;
   box-shadow: var(--shadow-md);
   border: 1px solid var(--color-border);
+  /* Grid items default to min-width:auto, so a wide no-wrap child (a duty
+     row, a long class name) forces the card past the viewport on mobile —
+     the whole dashboard then scrolls sideways / cuts off (Erin, 2026-07-17).
+     min-width:0 lets the card shrink to its column and the inner
+     ellipsis/overflow rules take over. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .mf-card-title {
@@ -13668,6 +13678,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.10);
   cursor: pointer;
+  /* Base color so the currentColor plant is ALWAYS visible even before/
+     without a tier class — otherwise it inherited the greeting bar's white
+     text and vanished into the circle (Erin, 2026-07-17: "just a circle"). */
+  color: var(--color-accent-light, #F0D66B);
   transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
   flex-shrink: 0;
   line-height: 0;
