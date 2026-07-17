@@ -148,6 +148,7 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') {
       const rows = await sql`
         SELECT id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+               held_by, held_by_email,
                needs_restock, restock_flagged_at, restock_flagged_by,
                quantity_level, quantity_updated_at, quantity_updated_by
         FROM supply_closet
@@ -261,6 +262,8 @@ module.exports = async function handler(req, res) {
       const location = String(body.location || '').trim();
       const category = String(body.category || '').trim();
       const notes = String(body.notes || '').trim();
+      const held_by = String(body.held_by || '').trim().slice(0, 200);
+      const held_by_email = String(body.held_by_email || '').trim().toLowerCase().slice(0, 200);
 
       if (!item_name) return res.status(400).json({ error: 'item_name is required' });
       if (VALID_CATEGORIES.indexOf(category) === -1) {
@@ -271,9 +274,10 @@ module.exports = async function handler(req, res) {
       }
 
       const inserted = await sql`
-        INSERT INTO supply_closet (item_name, location, category, notes, updated_by)
-        VALUES (${item_name}, ${location}, ${category}, ${notes}, ${user.email})
+        INSERT INTO supply_closet (item_name, location, category, notes, held_by, held_by_email, updated_by)
+        VALUES (${item_name}, ${location}, ${category}, ${notes}, ${held_by}, ${held_by_email}, ${user.email})
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  held_by, held_by_email,
                   needs_restock, restock_flagged_at, restock_flagged_by,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
@@ -288,6 +292,8 @@ module.exports = async function handler(req, res) {
       const location = String(body.location || '').trim();
       const category = String(body.category || '').trim();
       const notes = String(body.notes || '').trim();
+      const held_by = String(body.held_by || '').trim().slice(0, 200);
+      const held_by_email = String(body.held_by_email || '').trim().toLowerCase().slice(0, 200);
 
       if (!item_name) return res.status(400).json({ error: 'item_name is required' });
       if (VALID_CATEGORIES.indexOf(category) === -1) {
@@ -303,10 +309,13 @@ module.exports = async function handler(req, res) {
             location = ${location},
             category = ${category},
             notes = ${notes},
+            held_by = ${held_by},
+            held_by_email = ${held_by_email},
             updated_at = NOW(),
             updated_by = ${user.email}
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
+                  held_by, held_by_email,
                   needs_restock, restock_flagged_at, restock_flagged_by,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;

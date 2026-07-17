@@ -8641,6 +8641,12 @@
           // loadCleaningTodoCount.
           h += '<li id="ws-todo-cleaning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="cleaning-crew-manage"><span class="ws-link-count" id="ws-cleaning-open-count">0</span><span class="ws-link-icon">🧹</span><span id="ws-cleaning-open-label">Assign cleaning areas</span></button></li>';
         }
+        if (role === 'Supply Coordinator') {
+          // Items flagged as needing restock (Erin, 2026-07-17) — opens the
+          // Supply Closet, which floats flagged items to the top. Painted by
+          // loadSupplyRestockCount.
+          h += '<li id="ws-todo-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-count" id="ws-restock-count">0</span><span class="ws-link-icon">🛒</span><span id="ws-restock-label">Buy / restock supplies</span></button></li>';
+        }
         if (role === 'Communications Director') {
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
@@ -8730,6 +8736,7 @@
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadRegInviteTodoCounts === 'function') loadRegInviteTodoCounts();
         if (typeof loadCleaningTodoCount === 'function') loadCleaningTodoCount();
+        if (typeof loadSupplyRestockCount === 'function') loadSupplyRestockCount();
         if (typeof loadSignupTodos === 'function') loadSignupTodos();
         if (typeof loadCoopCalendarTodoCount === 'function') loadCoopCalendarTodoCount();
         if (typeof loadRoleHolderNagCount === 'function') loadRoleHolderNagCount();
@@ -14917,6 +14924,9 @@
     }
     html += '</div>';
     if (item.location) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
+    // Who holds it (members-location items) — its own line so it reads
+    // cleanly instead of being buried in notes (Erin, 2026-07-17).
+    if (item.held_by) html += '<div class="sc-held-by">🤝 Held by ' + escapeAttr(item.held_by) + '</div>';
     if (item.notes) html += '<div class="sc-notes">' + linkify(item.notes) + '</div>';
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
@@ -14956,11 +14966,15 @@
     return html;
   }
 
+  // The location name that turns on the "Held by ___" member dropdown.
+  var SUPPLY_HELD_BY_LOCATION = 'Supplies held by members';
+
   function renderEditRow(item) {
     var isNew = !item;
     var name = isNew ? '' : escapeAttr(item.item_name);
     var loc = isNew ? '' : escapeAttr(item.location);
     var notes = isNew ? '' : escapeAttr(item.notes);
+    var heldEmail = isNew ? '' : String((item && item.held_by_email) || '').toLowerCase();
     var currentCat = isNew ? supplyClosetState.newItemCategory : item.category;
     var idAttr = isNew ? 'new' : item.id;
 
@@ -14979,6 +14993,19 @@
       html += '<option value="' + c.key + '"' + sel + '>' + c.label + '</option>';
     });
     html += '</select>';
+    html += '</div>';
+    // "Held by ___" — a member dropdown, shown only when the item is in the
+    // "Supplies held by members" location (Erin, 2026-07-17). Replaces
+    // typing a name into Notes, which read poorly.
+    var showHeld = (item ? item.location : '') === SUPPLY_HELD_BY_LOCATION;
+    html += '<div class="sc-held-by-wrap" data-id="' + idAttr + '"' + (showHeld ? '' : ' style="display:none;"') + '>';
+    html += '<label class="sc-held-by-label">Supply held by <select class="sc-in-heldby" data-id="' + idAttr + '">';
+    html += '<option value="">— choose a member —</option>';
+    buildParentPickerOptions().forEach(function (o) {
+      var sel = String(o.email || '').toLowerCase() === heldEmail ? ' selected' : '';
+      html += '<option value="' + escapeAttr(o.email) + '" data-name="' + escapeAttr(o.person_name || o.displayName) + '"' + sel + '>' + escapeHtml(o.displayName) + '</option>';
+    });
+    html += '</select></label>';
     html += '</div>';
     html += '<input class="sc-in-notes sc-edit-notes" data-id="' + idAttr + '" placeholder="Notes (optional)" value="' + notes + '">';
     html += '<div class="sc-edit-actions">';
@@ -15218,15 +15245,33 @@
       });
     });
 
-    // Add button
+    // Add button. The new edit row is prepended at the TOP of the list while
+    // this button lives at the bottom, so after re-rendering, scroll the new
+    // name field into view and focus it — otherwise the coordinator clicks
+    // "Add Item" and sees nothing change (Erin, 2026-07-17).
     var addBtn = personDetailCard.querySelector('#sc-add-btn');
     if (addBtn) {
       addBtn.addEventListener('click', function () {
         supplyClosetState.addingNew = true;
         supplyClosetState.editingId = null;
         renderSupplyClosetModal();
+        var newName = personDetailCard.querySelector('.sc-in-name[data-id="new"]');
+        if (newName) {
+          try { newName.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { newName.scrollIntoView(); }
+          newName.focus();
+        }
       });
     }
+
+    // Held-by dropdown visibility follows the location select (only the
+    // "Supplies held by members" location shows it).
+    personDetailCard.querySelectorAll('.sc-in-loc').forEach(function (locSel) {
+      locSel.addEventListener('change', function () {
+        var idAttr = locSel.getAttribute('data-id');
+        var wrap = personDetailCard.querySelector('.sc-held-by-wrap[data-id="' + idAttr + '"]');
+        if (wrap) wrap.style.display = (locSel.value === SUPPLY_HELD_BY_LOCATION) ? '' : 'none';
+      });
+    });
 
     // Edit
     personDetailCard.querySelectorAll('.sc-edit-btn').forEach(function (btn) {
@@ -15254,11 +15299,24 @@
         var locEl = personDetailCard.querySelector('.sc-in-loc[data-id="' + idAttr + '"]');
         var notesEl = personDetailCard.querySelector('.sc-in-notes[data-id="' + idAttr + '"]');
         var catEl = personDetailCard.querySelector('.sc-in-cat[data-id="' + idAttr + '"]');
+        var heldEl = personDetailCard.querySelector('.sc-in-heldby[data-id="' + idAttr + '"]');
+        // Only record a holder when the item is in the members location AND
+        // one is chosen — otherwise clear it so a moved item doesn't keep a
+        // stale holder.
+        var locVal = locEl ? locEl.value : '';
+        var heldEmail = '', heldName = '';
+        if (locVal === SUPPLY_HELD_BY_LOCATION && heldEl && heldEl.value) {
+          heldEmail = heldEl.value;
+          var heldOpt = heldEl.options[heldEl.selectedIndex];
+          heldName = heldOpt ? (heldOpt.getAttribute('data-name') || heldOpt.textContent) : '';
+        }
         var payload = {
           item_name: nameEl ? nameEl.value : '',
-          location: locEl ? locEl.value : '',
+          location: locVal,
           notes: notesEl ? notesEl.value : '',
-          category: catEl ? catEl.value : 'permanent'
+          category: catEl ? catEl.value : 'permanent',
+          held_by: heldName,
+          held_by_email: heldEmail
         };
         if (!payload.item_name.trim()) { alert('Item name is required.'); return; }
         btn.disabled = true;
@@ -22988,6 +23046,38 @@
       .catch(function (err) { console.warn('[loadCleaningTodoCount] network error:', err); });
   }
 
+  // Supply Coordinator To Do: count items flagged as needing restock so a
+  // "Buy / restock supplies" item surfaces automatically (Erin, 2026-07-17).
+  // Self-gates on the DOM element, so it's safe to fire for every role.
+  function loadSupplyRestockCount() {
+    var item = document.getElementById('ws-todo-restock-item');
+    if (!item) return; // not the Supply Coordinator's tab
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/supply-closet', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || data.error) return;
+        var items = Array.isArray(data.items) ? data.items : [];
+        var flagged = items.filter(function (it) { return it.needs_restock; });
+        var n = flagged.length;
+        var pill = document.getElementById('ws-restock-count');
+        if (pill) pill.textContent = String(n);
+        var label = document.getElementById('ws-restock-label');
+        if (label) {
+          // Name up to two items so the To Do reads "Buy / restock Glue, Tape";
+          // more than that collapses to a count.
+          var names = flagged.map(function (it) { return it.item_name; }).filter(Boolean);
+          if (n === 0) label.textContent = 'Buy / restock supplies';
+          else if (n <= 2) label.textContent = 'Buy / restock ' + names.join(', ');
+          else label.textContent = 'Buy / restock ' + names.slice(0, 2).join(', ') + ' + ' + (n - 2) + ' more';
+        }
+        item.hidden = n <= 0;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function (err) { console.warn('[loadSupplyRestockCount] network error:', err); });
+  }
+
   function showRegInvitesModal() {
     var body = renderReportModal({
       title: 'Registration Links',
@@ -23882,14 +23972,21 @@
     var h = '<div class="board-cal-form">';
     h += '<h4 style="margin:0 0 10px;">' + (isEdit ? 'Edit event' : 'Add event') + '</h4>';
     if (boardForm) {
-      h += '<div class="board-cal-field" id="board-cal-type-row"><span class="board-cal-type-lbl">Type:</span>';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="task"' + (evType === 'task' ? ' checked' : '') + '> 📌 Board task</label>';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="general"' + (evType === 'general' ? ' checked' : '') + '> 🗓 General event</label>';
-      h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="field_trip"' + (evType === 'field_trip' ? ' checked' : '') + '> 🚌 Field trip</label>';
+      // Type is a dropdown (Erin, 2026-07-17) — Special event is offered to
+      // board members who can manage special events (SEL/VP capability or a
+      // super user). New events start unselected so the author consciously
+      // picks where it lands; edits keep the saved type (never 'special',
+      // which is edited through its own row).
+      h += '<div class="board-cal-field" id="board-cal-type-row"><label class="board-cal-type-lbl">Type:<br>';
+      h += '<select id="board-cal-f-type-select" class="cl-input">';
+      if (!isEdit) h += '<option value=""' + (evType === '' ? ' selected' : '') + '>Choose a type…</option>';
+      h += '<option value="task"' + (evType === 'task' ? ' selected' : '') + '>📌 Board task</option>';
+      h += '<option value="general"' + (evType === 'general' ? ' selected' : '') + '>🗓 General event</option>';
+      h += '<option value="field_trip"' + (evType === 'field_trip' ? ' selected' : '') + '>🚌 Field trip</option>';
       if (!isEdit && canSEForm) {
-        h += '<label style="font-weight:400;"><input type="radio" name="board-cal-f-type" value="special"> 🎉 Special event</label>';
+        h += '<option value="special">🎉 Special event</option>';
       }
-      h += '</div>';
+      h += '</select></label></div>';
       h += '<p class="board-cal-legend" style="margin:0 0 10px;">General events and field trips also publish to the co-op Google Calendar; board tasks stay internal.</p>';
     } else if (!isEdit && canSEForm && !boardForm) {
       // SEL-only viewer: special events are the only kind she can add.
@@ -23908,7 +24005,12 @@
     // Location (Erin, 2026-07-15) — rides to the Google event's location
     // for member-facing types, and shows on the Admin Calendar row.
     h += '<div class="board-cal-field" id="board-cal-loc-wrap"><label>Location <span class="board-cal-opt">(optional)</span><br><input type="text" id="board-cal-f-loc" maxlength="200" value="' + escapeHtml(v.location || '') + '" placeholder="e.g. Southeastway Park, Fellowship Hall" /></label></div>';
-    h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Anything the board should know">' + escapeHtml(v.note || '') + '</textarea></label></div>';
+    h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Details for this event">' + escapeHtml(v.note || '') + '</textarea></label>';
+    // Visibility warning (Erin, 2026-07-17): notes ride to the shared Google
+    // Calendar description for member-facing types, so they are NOT board-only
+    // there. Board tasks never sync, so their notes stay board-only. Updated
+    // live by the type radios below.
+    h += '<div class="board-cal-note-vis" id="board-cal-note-vis"></div></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
     h += '<button id="board-cal-form-save" class="btn btn-primary btn-sm" type="button"' + (isEdit ? ' data-id="' + ev.id + '"' : '') + '>Save event</button>';
@@ -23922,9 +24024,8 @@
       boardCalShowMsg('');
     });
     document.getElementById('board-cal-form-save').addEventListener('click', boardCalSave);
-    document.querySelectorAll('input[name="board-cal-f-type"]').forEach(function (r) {
-      r.addEventListener('change', boardCalApplyTypeUi);
-    });
+    var typeSelEl = document.getElementById('board-cal-f-type-select');
+    if (typeSelEl) typeSelEl.addEventListener('change', boardCalApplyTypeUi);
     boardCalApplyTypeUi();
   }
 
@@ -23932,17 +24033,18 @@
   // row (Special Events pill); 'task' → board_calendar_events (Board tasks).
   function boardCalFormType() {
     if (document.getElementById('board-cal-f-type-fixed')) return 'special';
-    var checked = document.querySelector('input[name="board-cal-f-type"]:checked');
-    // '' = the type row is showing but nothing picked yet (new events start
+    var sel = document.getElementById('board-cal-f-type-select');
+    // '' = the dropdown is showing but nothing picked yet (new events start
     // unselected); boardCalSave blocks the save until one is chosen.
-    if (checked) return checked.value;
+    if (sel) return sel.value;
     return document.getElementById('board-cal-type-row') ? '' : 'task';
   }
 
   // Special events have no end-date/notes in this form, and may start
   // undated (proposed); board tasks require a date.
   function boardCalApplyTypeUi() {
-    var isSpecial = boardCalFormType() === 'special';
+    var ftype = boardCalFormType();
+    var isSpecial = ftype === 'special';
     var endWrap = document.getElementById('board-cal-end-wrap');
     var noteWrap = document.getElementById('board-cal-note-wrap');
     var locWrap = document.getElementById('board-cal-loc-wrap');
@@ -23953,6 +24055,22 @@
     if (locWrap) locWrap.hidden = isSpecial;
     if (timesWrap) timesWrap.hidden = isSpecial;
     if (dateOpt) dateOpt.hidden = !isSpecial;
+    // Notes-visibility hint (Erin, 2026-07-17): member-facing types publish
+    // the notes to the shared co-op Google Calendar; board tasks stay board-only.
+    var vis = document.getElementById('board-cal-note-vis');
+    if (vis) {
+      var memberFacing = ftype === 'general' || ftype === 'field_trip';
+      if (memberFacing) {
+        vis.textContent = '⚠ Visible to everyone — these notes publish to the shared co-op Google Calendar all members see.';
+        vis.className = 'board-cal-note-vis is-public';
+      } else if (ftype === 'task') {
+        vis.textContent = '🔒 Board-only — board tasks stay on this Admin Calendar and don’t publish anywhere members can see.';
+        vis.className = 'board-cal-note-vis is-private';
+      } else {
+        vis.textContent = '';
+        vis.className = 'board-cal-note-vis';
+      }
+    }
   }
 
   function boardCalSave() {

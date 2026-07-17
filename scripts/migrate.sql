@@ -1802,3 +1802,10 @@ ALTER TABLE cleaning_assignments ADD COLUMN IF NOT EXISTS created_by_email TEXT 
 -- the decline path treats as "don't delete anything" (fail-safe).
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS family_email    TEXT    NOT NULL DEFAULT '';
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS created_profile BOOLEAN NOT NULL DEFAULT FALSE;
+
+
+-- 2026-07-17: "Supplies held by members" items need to record WHO holds the
+-- item as a first-class field instead of stuffing a name into notes (Erin).
+-- held_by = person display name; held_by_email = their email (dropdown-backed).
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS held_by       TEXT NOT NULL DEFAULT '';
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS held_by_email TEXT NOT NULL DEFAULT '';

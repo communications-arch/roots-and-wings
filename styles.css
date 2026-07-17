@@ -6544,6 +6544,29 @@ button.staff-role:hover {
   font-style: italic;
   margin-top: 2px;
 }
+/* "Held by X" line on a members-held supply item + the edit-form field. */
+.sc-held-by {
+  font-size: 0.75rem;
+  color: var(--color-primary-dark);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.sc-held-by-wrap {
+  margin-top: 8px;
+}
+.sc-held-by-label {
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sc-held-by-label select {
+  flex: 1 1 200px;
+  min-width: 0;
+}
 .sc-badge {
   display: inline-block;
   padding: 3px 10px;
@@ -14533,6 +14556,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .board-cal-fields-row label { flex: 0 0 auto; }
 .board-cal-opt { font-weight: 400; color: var(--color-text-muted, #777); font-size: 0.82rem; }
 .board-cal-legend { font-size: 0.82rem; color: var(--color-text-muted, #777); margin: 4px 0 10px; line-height: 1.4; }
+.board-cal-note-vis { font-size: 0.78rem; margin-top: 4px; line-height: 1.35; }
+.board-cal-note-vis.is-public { color: var(--color-coral, #d95f3b); font-weight: 600; }
+.board-cal-note-vis.is-private { color: var(--color-text-light, #5e6572); }
 .board-cal-derived-row td { background: #f7f5fb; }
 .board-cal-auto-cell {
   text-align: right;

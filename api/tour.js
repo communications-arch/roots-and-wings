@@ -5784,9 +5784,11 @@ async function handleBoardCalendarGet(req, res) {
         seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
       };
     });
-    // isSEL already IS the 'special_events_manage' capability check
-    // (defaults include the VP), so no separate VP branch needed.
-    const viewerCanEditSpecialEvents = isSEL;
+    // isSEL is the 'special_events_manage' capability (defaults SEL + VP).
+    // Super users also create/edit special events server-side
+    // (requireSpecialEventsEditor allows them), so the client flag must
+    // include them or the UI hides the option from Comms (2026-07-17).
+    const viewerCanEditSpecialEvents = isSEL || isSuperUser(auth.email);
 
     return res.status(200).json({
       events,
