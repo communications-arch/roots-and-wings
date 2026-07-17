@@ -543,18 +543,6 @@
   // True when the active user (respecting View As) is the Treasurer. Same
   // pattern as isVP — drives client-side affordances; backend re-checks
   // via canEditAsRole against the volunteer sheet.
-  function isTreasurer() {
-    var email = getActiveEmail();
-    if (!email) return false;
-    for (var i = 0; i < FAMILIES.length; i++) {
-      // Board roles are person-scoped, not family-scoped. Use strict primary
-      // family_email match so a co-parent doesn't inherit their spouse's role.
-      if (String(FAMILIES[i].email || '').toLowerCase() === email.toLowerCase()
-        && FAMILIES[i].boardRole === 'Treasurer') return true;
-    }
-    return false;
-  }
-
   function isMembershipDirector() {
     var email = getActiveEmail();
     if (!email) return false;
@@ -2118,10 +2106,13 @@
           localStorage.removeItem(CACHE_PHOTOS_KEY);
           localStorage.removeItem(CACHE_CLEANING_KEY);
           localStorage.removeItem(CACHE_SESSIONS_KEY);
+          // 2026-07-17 review: these two members-only caches used to
+          // survive logout, leaving role + calendar data in localStorage.
+          localStorage.removeItem(CACHE_ROLES_KEY);
+          localStorage.removeItem(CACHE_CALENDAR_KEY);
           sessionStorage.removeItem(VIEW_AS_KEY);
           localStorage.removeItem('rw_google_credential');
           localStorage.removeItem('rw_user_email');
-          localStorage.removeItem('rw_user_name');
         } catch (e) { /* ignore */ }
         if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
           try { google.accounts.id.disableAutoSelect(); } catch (e) { /* ignore */ }
@@ -2589,11 +2580,6 @@
     }
     return AGE_GROUP_EMOJI[g] || '';
   }
-  function ageGroupEmoji(name) {
-    var g = (name === 'Teens') ? 'Pigeons' : String(name || '');
-    return AGE_GROUP_EMOJI[g] || '';
-  }
-
   // ── New-member detection ──
   // A family is "new" until it has completed a full co-op year. A year
   // completes at the end of Field Day (the isSummerBreak boundary), so:
@@ -7333,26 +7319,6 @@
     });
   }
 
-  function buildElectiveCard(e, myNames) {
-    var pct = Math.round((e.students.length / e.maxCapacity) * 100);
-    var barColor = pct >= 90 ? 'var(--color-error)' : pct >= 70 ? 'var(--color-accent)' : 'var(--color-primary-light)';
-    var isMyCard = myNames && myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === (e.leader || '').trim().toLowerCase() || (e.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
-    var html = '<button class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" data-elective="' + e.name + '">';
-    html += '<div class="elective-card-header">';
-    html += '<span class="elective-card-name">' + e.name + '</span>';
-    html += '<span class="elective-age-pill">' + e.ageRange + '</span>';
-    html += '</div>';
-    if (e.hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
-    html += '<p class="elective-card-desc">' + e.description + '</p>';
-    var leaderHtml = myNames ? highlightIfMe(e.leader, myNames) : e.leader;
-    var assistHtml = (e.assistants && e.assistants.length > 0) ? ' + ' + e.assistants.map(function (a) { return myNames ? highlightIfMe(a, myNames) : a; }).join(', ') : '';
-    html += '<div class="elective-card-meta">' + e.room + ' &middot; ' + leaderHtml + assistHtml + '</div>';
-    html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
-    html += '<div class="elective-card-spots">' + e.students.length + '/' + e.maxCapacity + '</div>';
-    html += '</button>';
-    return html;
-  }
-
   // Published-DB elective card: same look as the sheet-era card, but no
   // roster/capacity bar yet (sign-ups feature will bring enrollment counts).
   function buildDbElectiveCard(e, myNames) {
@@ -8139,30 +8105,6 @@
       // Summary line
       html += '<div class="event-fill-summary">' + filled + ' of ' + ev.maxSupport + ' support spots filled</div>';
 
-      html += '</div></div>';
-    });
-    html += '</div>';
-
-    container.innerHTML = html;
-  }
-
-  function renderIdeasTab() {
-    var container = document.getElementById('ideasTabContent');
-    if (!container) return;
-
-    var html = '<h3>Class Ideas Board</h3>';
-    html += '<p style="color:var(--color-text-light);margin-bottom:20px;">Have an idea for a class? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
-    html += '<div class="ideas-grid">';
-
-    var groups = Object.keys(CLASS_IDEAS);
-    groups.forEach(function (group) {
-      var ideas = CLASS_IDEAS[group];
-      html += '<div class="ideas-card">';
-      html += '<h4>' + group + '</h4>';
-      html += '<div class="ideas-list">';
-      ideas.forEach(function (idea) {
-        html += '<span class="idea-chip">' + idea + '</span>';
-      });
       html += '</div></div>';
     });
     html += '</div>';
@@ -9343,17 +9285,6 @@
   // Resolve the ordered widget list for a user: union of defaults for each
   // role they hold, plus the universal '*' defaults, preserving first-seen
   // order and deduplicating.
-  function resolveWidgetOrder(roles) {
-    var order = [];
-    function add(type) { if (WORKSPACE_WIDGETS[type] && order.indexOf(type) === -1) order.push(type); }
-    roles.forEach(function (r) {
-      var list = WORKSPACE_DEFAULTS[r];
-      if (list) list.forEach(add);
-    });
-    (WORKSPACE_DEFAULTS['*'] || []).forEach(add);
-    return order;
-  }
-
   // Notes persistence: one textarea per role, scoped to the viewing email.
   var WORKSPACE_NOTES_KEY_PREFIX = 'rw_workspace_notes_';
   function workspaceNotesKey(roleKey) {
@@ -16333,21 +16264,6 @@
     return html;
   }
 
-  function renderDynamicList(field, label, items) {
-    var html = '<div class="cl-dyn-section"><div class="cl-dyn-label">' + label + '</div>';
-    if (items.length === 0) items = [''];
-    items.forEach(function (val, i) {
-      html += '<div class="cl-dyn-row" data-dyn-idx="' + i + '">';
-      html += '<span class="cl-dyn-bullet">' + (i + 1) + '.</span>';
-      html += '<textarea class="cl-input cl-textarea cl-dyn-textarea" data-dyn-field="' + field + '" data-dyn-idx="' + i + '" rows="2" placeholder="Step ' + (i + 1) + '">' + escapeAttr(val) + '</textarea>';
-      html += '<button class="cl-dyn-remove" data-dyn-remove="' + field + '" data-dyn-idx="' + i + '" type="button" title="Remove">&times;</button>';
-      html += '</div>';
-    });
-    html += '<button class="cl-dyn-add" data-dyn-add="' + field + '" type="button">+ Add step</button>';
-    html += '</div>';
-    return html;
-  }
-
   function gatherEditorDraftFromForm() {
     // Pull all form values back into state.draft so surgical re-renders and saves
     // use the latest user input without losing anything.
@@ -17587,7 +17503,6 @@
 
       // Success — store session and credential for API auth
       localStorage.setItem(SESSION_KEY, 'true');
-      localStorage.setItem('rw_user_name', payload.name || '');
       localStorage.setItem('rw_user_email', email);
       localStorage.setItem('rw_google_credential', response.credential);
       showDashboard();
@@ -25711,15 +25626,6 @@
   var MORNING_PROGRAM_GROUPS = MORNING_GROUP_ORDER.filter(function (g) { return g.name !== 'Greenhouse'; });
 
   // Used to hint which class a pending kid would likely land in.
-  function mcbGroupForAge(age) {
-    if (age == null) return '';
-    for (var i = 0; i < MORNING_GROUP_ORDER.length; i++) {
-      var g = MORNING_GROUP_ORDER[i];
-      if (age >= g.min && age <= g.max) return g.name;
-    }
-    return '';
-  }
-
   var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false, view: 'kids', teaching: [], members: [], viewerCanTeach: false, viewerCanAct: true };
 
   // NOTE (2026-07-05): the standalone Special Events manager was retired —
