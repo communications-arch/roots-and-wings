@@ -207,8 +207,11 @@ const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'fol
 // that haven't loaded yet.
 function getUpcomingTourDates(sessions) {
   sessions = sessions || SESSION_DATES_FALLBACK;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Compare in the Indianapolis day, not the server's UTC day (2026-07-17
+  // review): with plain `new Date()` on Vercel (UTC), the "future" cutoff
+  // dropped the very next Wednesday a full evening early (~7-8 PM local
+  // Tuesday) and validateTourSlot then rejected a family who picked it.
+  const todayStr = indyTodayStr();
   const dates = [];
   Object.keys(sessions).sort().forEach(k => {
     const s = sessions[k];
@@ -217,12 +220,13 @@ function getUpcomingTourDates(sessions) {
     // Walk from start to end, picking out Wednesdays (getDay() === 3).
     const cursor = new Date(start.getTime());
     while (cursor.getTime() <= end.getTime()) {
-      if (cursor.getDay() === 3 && cursor.getTime() > today.getTime()) {
-        const yyyy = cursor.getFullYear();
-        const mm = String(cursor.getMonth() + 1).padStart(2, '0');
-        const dd = String(cursor.getDate()).padStart(2, '0');
+      const yyyy = cursor.getFullYear();
+      const mm = String(cursor.getMonth() + 1).padStart(2, '0');
+      const dd = String(cursor.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      if (cursor.getDay() === 3 && dateStr > todayStr) {
         dates.push({
-          date: `${yyyy}-${mm}-${dd}`,
+          date: dateStr,
           sessionLabel: s.name,
           label: cursor.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + ' — ' + s.name
         });
@@ -3546,12 +3550,19 @@ async function handleProfileUpdate(body, req, res) {
         if (k.schedule === 'morning') scheduleSwitchedToMorning.push(key);
       }
     }
-    await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
-    await sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`;
-
+    // Atomic replace (2026-07-17 review): the DELETE of people+kids and the
+    // per-row re-inserts used to autocommit separately, so a failing insert
+    // (e.g. the global unique email index, or a duplicate first name in the
+    // submitted form) committed the DELETEs and left the family with zero
+    // people/kids. One transaction — either the whole family rewrites or
+    // nothing changes.
+    const profileStmts = [
+      sql`DELETE FROM people WHERE family_email = ${familyEmail}`,
+      sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`
+    ];
     for (let i = 0; i < people.length; i++) {
       const pp = people[i];
-      await sql`
+      profileStmts.push(sql`
         INSERT INTO people (
           email, family_email, first_name, last_name, nickname, role,
           personal_email, phone, pronouns, photo_url, photo_consent,
@@ -3562,14 +3573,14 @@ async function handleProfileUpdate(body, req, res) {
           ${pp.photo_url || ''}, ${pp.photo_consent !== false},
           ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i}, ${user.realEmail || user.email}
         )
-      `;
+      `);
     }
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
       // Carry forward the VP-assigned class group (preserved above). A
       // brand-new kid with no prior row gets '' — the VP assigns it later.
       const kidGroup = priorKidGroups[String(k.name || '').trim().toLowerCase()] || '';
-      await sql`
+      profileStmts.push(sql`
         INSERT INTO kids (
           family_email, first_name, last_name, nickname, birth_date,
           pronouns, allergies, schedule, photo_url, photo_consent,
@@ -3580,8 +3591,9 @@ async function handleProfileUpdate(body, req, res) {
           ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
           ${i}, ${kidGroup}
         )
-      `;
+      `);
     }
+    await sql.transaction(profileStmts);
 
     // Afternoon class-signup picks are keyed by (family_email,
     // kid_first_name) — kids.id isn't stable across this delete+reinsert.

@@ -15,6 +15,15 @@ const { hasCapability } = require('./_capabilities');
 // (Erin, 2026-07-16). Mirrors BOARD_ONLY_ROLE_TYPES in absences.js.
 const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
 
+// The neon driver returns DATE columns as JS Date objects. Concatenating a
+// Date with 'T12:00:00' yields "Wed Jul 16 2026...T12:00:00" → Invalid Date
+// (2026-07-17 review: coverage notifications showed "Invalid Date"). Coerce
+// both Date objects and strings to a plain YYYY-MM-DD first.
+function isoDay(v) {
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v || '').slice(0, 10);
+}
+
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -82,7 +91,7 @@ module.exports = async function handler(req, res) {
       `;
 
       // Notify the absent person
-      const dateLabel = new Date(slot[0].absence_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dateLabel = new Date(isoDay(slot[0].absence_date) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       const notifTitle = 'Slot Covered — ' + dateLabel;
       const notifBody = claimerName + ' is covering: ' + slot[0].role_description;
 
@@ -130,7 +139,7 @@ module.exports = async function handler(req, res) {
           WHERE id = ${id}
         `;
         // Notify the new assignee
-        const dateLabel = new Date(slot[0].absence_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const dateLabel = new Date(isoDay(slot[0].absence_date) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         await sql`
           INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
           VALUES (${newEmail}, 'slot_reassigned', ${'Assigned to Cover — ' + dateLabel}, ${'VP assigned you to: ' + slot[0].role_description}, '#coverage', ${slot[0].absence_id})

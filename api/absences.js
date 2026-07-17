@@ -80,7 +80,13 @@ async function boardRecipientEmails(sql) {
 // notification. Regular slots broadcast to everyone; board-only slots
 // (Building Opener/Closer) ping just the board.
 async function notifyCoverageNeeded(sql, absence, slots) {
-  const iso = String(absence.absence_date || '').slice(0, 10);
+  // absence_date is a plain string on the POST path but a Date object when
+  // the row was read from the DB (PATCH path) — String(Date).slice(0,10)
+  // gave "Wed Jul 16" → Invalid Date in the notification title (2026-07-17
+  // review). Normalize both shapes.
+  const iso = absence.absence_date instanceof Date
+    ? absence.absence_date.toISOString().slice(0, 10)
+    : String(absence.absence_date || '').slice(0, 10);
   const dateLabel = new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const boardSlots = slots.filter(s => BOARD_ONLY_ROLE_TYPES.indexOf(s.role_type) !== -1);
   const regularSlots = slots.filter(s => BOARD_ONLY_ROLE_TYPES.indexOf(s.role_type) === -1);

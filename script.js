@@ -13529,8 +13529,12 @@
       return;
     }
     _participationMineEmail = email;
+    // Use rwAuthHeaders so the X-View-As header rides along (2026-07-17
+    // review): the server resolves participation-mine's identity from
+    // X-View-As, so raw Bearer-only headers 403'd under View-As — the same
+    // class of bug as the class-signup-picks 403.
     fetch('/api/sheets?action=participation-mine&email=' + encodeURIComponent(email), {
-      headers: { 'Authorization': 'Bearer ' + cred }
+      headers: rwAuthHeaders()
     })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {

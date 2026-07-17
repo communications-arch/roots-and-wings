@@ -214,23 +214,38 @@ async function createCurriculum(sql, user, body) {
 }
 
 async function replaceLessons(sql, curriculumId, lessonCount, lessonRows) {
-  // Delete existing lessons (cascades to supplies), then re-insert.
-  await sql`DELETE FROM lessons WHERE curriculum_id = ${curriculumId}`;
-  for (let i = 0; i < lessonCount; i++) {
-    const ls = normalizeLesson(lessonRows[i], i + 1);
-    const lessonResult = await sql`
+  // Atomic replace (2026-07-17 review): the old code DELETEd all lessons
+  // (cascading to supplies) then re-inserted one autocommit statement at a
+  // time — a crash mid-save destroyed the author's lessons for good. The
+  // lesson replacement now runs as a single transaction; supplies (which
+  // need each lesson's returned id) go in a second transaction, so the
+  // worst case is lessons-present-without-supplies (re-savable), never the
+  // lessons themselves vanishing.
+  const normalized = [];
+  for (let i = 0; i < lessonCount; i++) normalized.push(normalizeLesson(lessonRows[i], i + 1));
+
+  const lessonStmts = [sql`DELETE FROM lessons WHERE curriculum_id = ${curriculumId}`];
+  normalized.forEach(ls => {
+    lessonStmts.push(sql`
       INSERT INTO lessons (curriculum_id, lesson_number, title, overview, room_setup, activity, instruction, links)
       VALUES (${curriculumId}, ${ls.lesson_number}, ${ls.title}, ${ls.overview}, ${ls.room_setup}, ${ls.activity}, ${ls.instruction}, ${JSON.stringify(ls.links)})
       RETURNING id
-    `;
-    const lessonId = lessonResult[0].id;
-    for (const sp of ls.supplies) {
-      await sql`
+    `);
+  });
+  const results = await sql.transaction(lessonStmts);
+
+  // results[0] is the DELETE; results[k+1] is lesson k's RETURNING row.
+  const supplyStmts = [];
+  normalized.forEach((ls, k) => {
+    const lessonId = results[k + 1][0].id;
+    ls.supplies.forEach(sp => {
+      supplyStmts.push(sql`
         INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
         VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
-      `;
-    }
-  }
+      `);
+    });
+  });
+  if (supplyStmts.length) await sql.transaction(supplyStmts);
 }
 
 function canEdit(user, row) {
@@ -903,8 +918,12 @@ module.exports = async function handler(req, res) {
       // only — no other family's data is reachable.
       if (action === 'my-kid-placements') {
         const famEmail = resolveSubmitterEmail(user, req.query.view_as);
-        const famRec = await resolveFamily(famEmail);
-        const keyEmail = (famRec && famRec.email) || famEmail;
+        // resolveFamily(sql, email) — the arity was wrong (email landed in
+        // the sql slot, returning null) and .email isn't a returned field
+        // (.family_email is), so co-parents fell back to their raw login
+        // and saw the wrong/stale group (2026-07-17 review).
+        const famRec = await resolveFamily(sql, famEmail);
+        const keyEmail = (famRec && famRec.family_email) || famEmail;
         const pYear = String(req.query.school_year || '').trim().slice(0, 20) || activeSchoolYear();
         const pRows = await sql`
           SELECT kid_first_name, class_group, finalized
@@ -1899,10 +1918,15 @@ module.exports = async function handler(req, res) {
         if (vsRole === 'floater' && vsPeriod === 'PM') {
           // PM gate: floaters open only once every placed class that hour
           // has its helper spots covered.
+          // Count helpers PER HOUR (2026-07-17 review): assists on a 2-hour
+          // 'both' class are hour-scoped (block='PM1'/'PM2'), so a class
+          // wanting 2 assistants with one in each hour must NOT read as
+          // covered. Match the block predicate every other consumer uses.
           const uncovered = await sql`
             SELECT c.class_name,
                    GREATEST(0, (SELECT MIN(x) FROM UNNEST(c.assistant_count) AS x)
-                     - (SELECT COUNT(*)::int FROM class_assignment_helpers h WHERE h.class_submission_id = c.id)) AS gap
+                     - (SELECT COUNT(*)::int FROM class_assignment_helpers h
+                        WHERE h.class_submission_id = c.id AND (h.block = '' OR h.block = ${vsBlock}))) AS gap
             FROM class_submissions c
             WHERE c.school_year = ${vsYear} AND c.scheduled_session = ${vsSess}
               AND c.class_period = 'PM' AND c.status IN ('scheduled', 'drafted')
@@ -2474,21 +2498,25 @@ module.exports = async function handler(req, res) {
           }
         }
 
-        await sql`
+        // Atomic replace (2026-07-17 review): DELETE + INSERTs run as one
+        // transaction so a crash between them can't wipe the kid's existing
+        // picks and write nothing back (the "dev kid lost 3 picks" incident).
+        const pickStmts = [sql`
           DELETE FROM class_signup_picks
           WHERE school_year=${sy} AND session_number=${session}
             AND LOWER(family_email)=LOWER(${familyEmail})
             AND LOWER(kid_first_name)=LOWER(${kidFirst}) AND hour=${hour}
-        `;
+        `];
         for (let i = 0; i < cleanIds.length; i++) {
           const note = String(rawNotes[cleanIds[i]] || '').trim().slice(0, 300);
           const asAssistant = !!rawAssist[cleanIds[i]] && teenOkById[cleanIds[i]] === true;
-          await sql`
+          pickStmts.push(sql`
             INSERT INTO class_signup_picks
               (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, note, as_assistant, created_by_email)
             VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${asAssistant}, ${user.email})
-          `;
+          `);
         }
+        await sql.transaction(pickStmts);
         return res.status(200).json({ ok: true, saved: cleanIds.length });
       }
 
