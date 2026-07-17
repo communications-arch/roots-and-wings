@@ -23667,6 +23667,13 @@
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
         if (r.kind === 'special' && r.seRow) {
           notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
+          // Session-anchored default date, not yet saved (Erin, 2026-07-16:
+          // PJ Party + Maker's Market ride the mini session two weeks after
+          // Session 2, Passion Fair follows Session 3, Camp the week after
+          // Session 4). Save or Approve makes it official.
+          if (r.seRow.date_is_default) {
+            notes = '<span class="board-cal-auto-pill" title="Suggested from the session calendar — Save or Approve to make it official">Suggested</span> ' + notes;
+          }
         }
         // Session dates carry the same Proposed/Approved chip — entered
         // dates stay pending until the board approves them (Erin, 2026-07-15).

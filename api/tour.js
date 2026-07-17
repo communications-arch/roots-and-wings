@@ -5428,6 +5428,34 @@ function iceCreamSocialForYear(sessions, schoolYear) {
   return rows.length ? calSnapWed(rows[0].start_date, -1) : '';
 }
 
+// Session-anchored DEFAULT dates for special events (Erin, 2026-07-16).
+// Surfaced only while the event has no saved date — the SEL's saved value
+// always wins, and until then the suggestion tracks session-date edits.
+// Anchors (sessions end on Wednesdays):
+//   PJ Party + Maker's Market — the "mini session", two weeks after
+//     Session 2 ends.
+//   Passion Fair — the Wednesday after Session 3 ends.
+//   Camp — TBD; the week right after Session 4 (Monday following its
+//     end — historically "week of Mar 29" vs "week of Apr 5").
+function specialEventDefaultDate(name, sessions, schoolYear) {
+  const rows = calSessionsForYear(sessions, schoolYear);
+  const endOf = n => {
+    const r = rows.filter(s => String(s.session_number) === String(n))[0];
+    return r ? r.end_date : '';
+  };
+  switch (name) {
+    case 'PJ Party':
+    case "Maker's Market":
+      return calAddDays(endOf(2), 14);
+    case 'Passion Fair':
+      return calAddDays(endOf(3), 7);
+    case 'Camp':
+      return calAddDays(endOf(4), 5); // Wed end + 5 days = following Monday
+    default:
+      return '';
+  }
+}
+
 // Build the read-only derived events for one school year. Each carries a
 // synthetic string id (so the client can key/skip it), derived:true, and the
 // action item / role it relates to. Returns [] when the year has no sessions
@@ -5649,19 +5677,27 @@ async function handleBoardCalendarGet(req, res) {
       FROM special_events
       ORDER BY sort_order, name
     `;
-    const specialEvents = seRows.map(e => ({
-      id: e.id,
-      school_year: e.school_year,
-      name: e.name,
-      event_date: specialEventDateStr(e.event_date),
-      date_status: e.date_status,
-      // Ice Cream Social + Field Day dates are driven by the session
-      // calendar (derived events above) — read-only here.
-      date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
-      // Standard events can't be deleted (they'd just re-seed); custom
-      // ones added via "+ Add event" can.
-      seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
-    }));
+    const specialEvents = seRows.map(e => {
+      const saved = specialEventDateStr(e.event_date);
+      // No saved date yet → suggest the session-anchored default (Erin,
+      // 2026-07-16). date_is_default lets the client flag it; Save or
+      // Approve stamps it into the row like any hand-picked date.
+      const suggested = saved ? '' : specialEventDefaultDate(e.name, sessions, e.school_year);
+      return {
+        id: e.id,
+        school_year: e.school_year,
+        name: e.name,
+        event_date: saved || suggested,
+        date_is_default: !saved && !!suggested,
+        date_status: e.date_status,
+        // Ice Cream Social + Field Day dates are driven by the session
+        // calendar (derived events above) — read-only here.
+        date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
+        // Standard events can't be deleted (they'd just re-seed); custom
+        // ones added via "+ Add event" can.
+        seeded: SPECIAL_EVENT_SEED.indexOf(e.name) !== -1
+      };
+    });
     // isSEL already IS the 'special_events_manage' capability check
     // (defaults include the VP), so no separate VP branch needed.
     const viewerCanEditSpecialEvents = isSEL;
