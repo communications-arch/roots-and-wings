@@ -1781,3 +1781,11 @@ FROM (VALUES
    E'🌉')
 ) AS v(key, title, ord, term, overview, icon)
 WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.role_key = v.key);
+
+
+-- 2026-07-17 review: cleaning self-signup DELETE gated ownership on a
+-- SURNAME SUBSTRING match ("lee" matched "kleeman"; same-surname families
+-- could release each other's spots). Record the signer's email at POST
+-- time so releases can gate on identity; the tightened name-match stays
+-- only as a fallback for legacy rows created before this column existed.
+ALTER TABLE cleaning_assignments ADD COLUMN IF NOT EXISTS created_by_email TEXT NOT NULL DEFAULT '';

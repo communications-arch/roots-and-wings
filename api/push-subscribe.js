@@ -60,7 +60,11 @@ module.exports = async function handler(req, res) {
     if (req.method === 'DELETE') {
       const endpoint = String(body.endpoint || '').trim();
       if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
-      await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
+      // Scope to the caller (2026-07-17 review): an unscoped delete-by-
+      // endpoint let anyone who learned another member's endpoint silently
+      // unsubscribe them. Server-side dead-endpoint cleanup (api/_push.js)
+      // still prunes by bare endpoint by design.
+      await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint} AND user_email = ${user.email}`;
       return res.status(200).json({ ok: true });
     }
 

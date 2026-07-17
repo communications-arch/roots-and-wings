@@ -1788,6 +1788,15 @@ module.exports = async function handler(req, res) {
         if (!session_number || !class_key || !curriculum_id) {
           return res.status(400).json({ error: 'session_number, class_key, and curriculum_id required' });
         }
+        // Gate (2026-07-17 review): link/unlink were ungated — any member
+        // could strip or swap any class's lesson-plan attachment. Allow a
+        // reviewer (VP/ACL) or someone attaching their OWN curriculum.
+        const linkActor = actingEmailFor(user, req).toLowerCase();
+        const linkAuthor = await sql`SELECT author_email FROM curricula WHERE id = ${curriculum_id}`;
+        const isLinkReviewer = await isReviewerReq(user, req);
+        if (!isLinkReviewer && !(linkAuthor.length && String(linkAuthor[0].author_email || '').toLowerCase() === linkActor)) {
+          return res.status(403).json({ error: 'Only the plan’s author or a class reviewer can attach it.' });
+        }
         // Upsert — replace existing link for this class+session
         await sql`DELETE FROM class_curriculum_links WHERE session_number = ${session_number} AND class_key = ${class_key}`;
         const inserted = await sql`
@@ -2779,6 +2788,14 @@ module.exports = async function handler(req, res) {
       // Unlink a class-curriculum link
       if (action === 'unlink') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
+        // Gate (2026-07-17 review): reviewer, or the member who attached it.
+        const unlinkActor = actingEmailFor(user, req).toLowerCase();
+        const linkRow = await sql`SELECT attached_by FROM class_curriculum_links WHERE id = ${id}`;
+        if (!linkRow.length) return res.status(404).json({ error: 'Link not found.' });
+        const isUnlinkReviewer = await isReviewerReq(user, req);
+        if (!isUnlinkReviewer && String(linkRow[0].attached_by || '').toLowerCase() !== unlinkActor) {
+          return res.status(403).json({ error: 'Only the member who attached this plan or a class reviewer can remove it.' });
+        }
         await sql`DELETE FROM class_curriculum_links WHERE id = ${id}`;
         return res.status(200).json({ ok: true });
       }

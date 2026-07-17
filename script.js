@@ -315,17 +315,6 @@
     return html;
   }
 
-  // Small HTML escape used by the helpers above. The bigger codebase uses
-  // ad-hoc escapes; keeping this local and small avoids name collisions.
-  function escapeHtml(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function getActiveEmail() {
     var viewAs = sessionStorage.getItem(VIEW_AS_KEY);
     if (viewAs) return viewAs;
@@ -1240,9 +1229,14 @@
     });
   }
 
+  // Canonical HTML escaper (2026-07-17: consolidated — a second, weaker
+  // copy that skipped single-quotes used to shadow this one via hoisting).
+  // Escapes & < > " ' and is null-safe, so it's safe in text and both
+  // single- and double-quoted attribute contexts.
   function escapeHtml(str) {
-    if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   // Render the playbook for display. New content saved by Quill is HTML; legacy
@@ -1988,7 +1982,7 @@
       }
       if (url && !photoDiv.querySelector('img')) {
         var hiRes = url.replace(/=s\d+-c/, '=s256-c');
-        photoDiv.innerHTML = '<img src="' + hiRes + '" alt="' + person.name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + person.name.charAt(0) + '</span>';
+        photoDiv.innerHTML = '<img src="' + escapeHtml(hiRes) + '" alt="' + escapeHtml(person.name) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'\'"><span style="display:none">' + escapeHtml(person.name.charAt(0)) + '</span>';
       }
     });
     if (dbg.length) console.log('[rw-debug] applyPhotos kids:', dbg);
@@ -2716,7 +2710,7 @@
       if (classAllergies.length > 0) {
         html += '<div class="class-allergy-alerts"><div class="class-allergy-title">\u26A0 Allergy & Medical Alerts</div><ul>';
         classAllergies.forEach(function (c) {
-          html += '<li><strong>' + c.name + ':</strong> ' + c.allergies + '</li>';
+          html += '<li><strong>' + escapeHtml(c.name) + ':</strong> ' + escapeHtml(c.allergies) + '</li>';
         });
         html += '</ul></div>';
       }
@@ -2736,17 +2730,17 @@
         var isNewM = isNewMemberPerson(person);
         var notReEnrolled = isNotReEnrolledPerson(person);
         var extras = '';
-        if (person.pronouns) extras += '<div class="yb-pronouns">' + person.pronouns + '</div>';
-        if (person.allergies) extras += '<div class="yb-allergy">' + person.allergies + '</div>';
+        if (person.pronouns) extras += '<div class="yb-pronouns">' + escapeHtml(person.pronouns) + '</div>';
+        if (person.allergies) extras += '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
         if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="This child is opted out of photos.">⛔ No Photos</div>';
         if (notReEnrolled) extras += '<div class="yb-inactive-badge" title="This family hasn’t registered for the upcoming year yet.">Not re-enrolled</div>';
 
-        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
-          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + classCardFirst.charAt(0) + '</span></div>' +
-          '<div class="yb-name">' + displayName + '</div>' +
-          '<div class="yb-subtitle">' + (person.age ? 'Age ' + person.age : '') + '</div>' +
-          '<div class="yb-family">' + (person.familyDisplay || person.family) + ' Family</div>' +
+        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + escapeHtml(displayName + ' ' + person.family) + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
+          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + escapeHtml(classCardFirst.charAt(0)) + '</span></div>' +
+          '<div class="yb-name">' + escapeHtml(displayName) + '</div>' +
+          '<div class="yb-subtitle">' + (person.age ? 'Age ' + escapeHtml(String(person.age)) : '') + '</div>' +
+          '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
           extras +
           '</button>';
         shown++;
@@ -2802,7 +2796,7 @@
           : (ROLE_LABELS_DIR[person.role] || 'Parent');
         var bgStyle = faceColor(person.name);
 
-        var pronounTag = person.pronouns ? '<div class="yb-pronouns">' + person.pronouns + '</div>' : '';
+        var pronounTag = person.pronouns ? '<div class="yb-pronouns">' + escapeHtml(person.pronouns) + '</div>' : '';
 
         // Show "Parent of X" when kids have different last names
         var parentOfTag = '';
@@ -2811,7 +2805,7 @@
           var label = dnk[0].name + ' ' + dnk[0].lastName;
           if (dnk.length === 2) label += ' & ' + dnk[1].name + ' ' + dnk[1].lastName;
           else if (dnk.length > 2) label += ' + ' + (dnk.length - 1) + ' more';
-          parentOfTag = '<div class="yb-parent-of">Parent of ' + label + '</div>';
+          parentOfTag = '<div class="yb-parent-of">Parent of ' + escapeHtml(label) + '</div>';
         }
 
         var boardEmojis = {
@@ -2836,7 +2830,7 @@
           : '';
 
         var allergyTag = (person.type === 'kid' && person.allergies)
-          ? '<div class="yb-allergy">' + person.allergies + '</div>'
+          ? '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>'
           : '';
 
         // First-year families: green card outline (.yb-card-new) instead of a
@@ -2851,13 +2845,13 @@
           ? 'This family hasn’t registered for the upcoming year yet.'
           : (isNewM ? 'This family is in their first co-op year.' : '');
 
-        html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + cardTitle + '" aria-label="' + displayName + ' ' + person.family + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
-          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + displayFirstName.charAt(0) + '</span></div>' +
-          '<div class="yb-name">' + displayName + '</div>' +
+        html += '<button class="yb-card' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.boardRole ? ' yb-card-board' : '') + (absenceTag ? ' yb-card-absent' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" title="' + escapeHtml(cardTitle) + '" aria-label="' + escapeHtml(displayName + ' ' + person.family) + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
+          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + escapeHtml(displayFirstName.charAt(0)) + '</span></div>' +
+          '<div class="yb-name">' + escapeHtml(displayName) + '</div>' +
           '<div class="yb-subtitle">' + subtitle + '</div>' +
           boardTag +
           pronounTag +
-          '<div class="yb-family">' + (person.familyDisplay || person.family) + ' Family</div>' +
+          '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
           parentOfTag +
           absenceTag +
           allergyTag +
@@ -3112,30 +3106,30 @@
     var headingFull = (lastLc && personLc.endsWith(' ' + lastLc)) ? personFullName
       : (displayLc && personLc.endsWith(' ' + displayLc)) ? personFullName
       : (personFullName + ' ' + detailLast);
-    html += '<h3>' + headingFull + '</h3>';
+    html += '<h3>' + escapeHtml(headingFull) + '</h3>';
     // When a preferred name is shown above, surface the given name in a
     // muted line so directory lookups by legal name still make sense.
     if (String(person.nickname || '').trim()) {
       var givenLc = String(person.name || '').toLowerCase();
       var givenFull = (lastLc && givenLc.endsWith(' ' + lastLc)) ? person.name : (person.name + (detailLast ? ' ' + detailLast : ''));
-      html += '<p class="detail-given-name">Given name: ' + givenFull + '</p>';
+      html += '<p class="detail-given-name">Given name: ' + escapeHtml(givenFull) + '</p>';
     }
     if (boardInfo) {
       html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
     }
     if (person.type === 'kid') {
-      html += '<p class="detail-group">' + (person.age ? 'Age ' + person.age + ' &middot; ' : '') + groupWithAge(person.group) + '</p>';
-      if (person.pronouns) html += '<p class="detail-pronouns">' + person.pronouns + '</p>';
+      html += '<p class="detail-group">' + (person.age ? 'Age ' + escapeHtml(String(person.age)) + ' &middot; ' : '') + groupWithAge(person.group) + '</p>';
+      if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
       if (person.schedule && person.schedule !== 'all-day') {
         html += '<p class="detail-schedule">' + (person.schedule === 'morning' ? 'Morning only' : 'Afternoon only') + '</p>';
       }
-      if (person.allergies) html += '<p class="detail-allergy-info">Allergies / Medical: ' + person.allergies + '</p>';
+      if (person.allergies) html += '<p class="detail-allergy-info">Allergies / Medical: ' + escapeHtml(person.allergies) + '</p>';
       if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — this child is opted out of photos in co-op materials.</p>';
       // Parents line prefers each adult's "goes by" name when set.
       var parentsLine = (fam.parentInfo && fam.parentInfo.length)
         ? fam.parentInfo.map(function (pi) { return nickOr(pi.nickname, pi.firstName || String(pi.name || '').split(/\s+/)[0]); }).filter(Boolean).join(' & ')
         : fam.parents;
-      html += '<p class="detail-parents">Parents: ' + (parentsLine || fam.parents) + '</p>';
+      html += '<p class="detail-parents">Parents: ' + escapeHtml(parentsLine || fam.parents) + '</p>';
     } else {
       // Role badge for adults: Main Learning Coach / Back Up LC / Parent
       // (P4 of directory→DB migration). Falls back to "Parent" when the
@@ -3143,7 +3137,7 @@
       var roleLabels = { mlc: 'Main Learning Coach', blc: 'Back Up Learning Coach', parent: 'Parent' };
       var personRoleLabel = roleLabels[person.role] || 'Parent';
       if (!boardInfo) html += '<p class="detail-group">' + personRoleLabel + '</p>';
-      if (person.pronouns) html += '<p class="detail-pronouns">' + person.pronouns + '</p>';
+      if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
       if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — opted out of photo and film use.</p>';
       // Kids shown in family grid below
     }
@@ -18929,7 +18923,7 @@
     if (notifState.unreadCount > 0) html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
     html += '</div>';
     if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
-    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + n.id + '"><div class="notif-item-title">' + n.title + '</div><div class="notif-item-body">' + n.body + '</div><div class="notif-item-time">' + timeAgo(n.created_at) + '</div></div>'; }); }
+    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '"><div class="notif-item-title">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
     html += '</div>';
     bell.insertAdjacentHTML('afterend', html);
     var dropdown = document.getElementById('notifDropdown');

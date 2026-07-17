@@ -344,21 +344,27 @@ module.exports = async function handler(req, res) {
           return res.status(409).json({ error: 'You are already on that area for this session.' });
         }
         const ins = await sql`
-          INSERT INTO cleaning_assignments (cleaning_area_id, session_number, family_name, school_year, sort_order)
-          VALUES (${areaId}, ${csSess}, ${csName}, ${csYear}, ${taken.length})
+          INSERT INTO cleaning_assignments (cleaning_area_id, session_number, family_name, school_year, sort_order, created_by_email)
+          VALUES (${areaId}, ${csSess}, ${csName}, ${csYear}, ${taken.length}, ${csEmail})
           RETURNING id`;
         return res.status(201).json({ ok: true, id: ins[0].id, area: areaRows[0].area_name });
       }
       if (req.method === 'DELETE') {
         const rowId = parseInt(req.query.id, 10);
         if (!Number.isFinite(rowId)) return res.status(400).json({ error: 'id required' });
-        // Own row only: the stored name must match the acting person (or
-        // start with their family surname for legacy family-name rows).
-        const csLast = csPeople.length ? String(csPeople[0].last_name || '').trim().toLowerCase() : '';
-        const rows = await sql`SELECT id, family_name FROM cleaning_assignments WHERE id = ${rowId}`;
+        // Own row only. Primary gate = created_by_email (recorded at POST
+        // time). For legacy rows created before that column existed, fall
+        // back to an EXACT name match — the old surname-SUBSTRING match let
+        // "lee" release "kleeman" and any same-surname family release
+        // another's spot (2026-07-17 review). Liaison/VP admin release goes
+        // through the separate 'assignment' action, not this self-signup one.
+        const rows = await sql`SELECT id, family_name, created_by_email FROM cleaning_assignments WHERE id = ${rowId}`;
         if (!rows.length) return res.status(404).json({ error: 'Assignment not found.' });
+        const rowOwner = String(rows[0].created_by_email || '').trim().toLowerCase();
         const nm = String(rows[0].family_name || '').trim().toLowerCase();
-        const mineRow = nm === csName.toLowerCase() || (csLast && nm.indexOf(csLast) !== -1);
+        const mineRow = rowOwner
+          ? rowOwner === csEmail
+          : nm === csName.toLowerCase();
         if (!mineRow) return res.status(403).json({ error: 'That cleaning spot isn’t yours to release.' });
         await sql`DELETE FROM cleaning_assignments WHERE id = ${rowId}`;
         return res.status(200).json({ ok: true });

@@ -11,7 +11,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
-const { canEditAsRole, BOARD_ROLE_EMAILS } = require('./_permissions');
+const { canEditAsRole, BOARD_ROLE_EMAILS, isSuperUser } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 
@@ -210,6 +210,23 @@ module.exports = async function handler(req, res) {
       }
       if (!session_number || !absence_date || blocks.length === 0) {
         return res.status(400).json({ error: 'session_number, absence_date, and blocks required' });
+      }
+      // Ownership gate (2026-07-17 review): PATCH/DELETE already enforce
+      // this, but POST used to accept ANY family_email — letting any member
+      // file a fake absence for another family and broadcast-push spoofed
+      // content to everyone. Allow: your own family, a family you can act
+      // for (co-parent), the coverage admin (VP), or a super user (whose
+      // View-As posts the viewed family's email under their own token).
+      const canFileFor =
+        family_email === user.email
+        || isSuperUser(user.email)
+        || (await isVP(user.email))
+        || (await canActAs(sql, user.email, family_email));
+      if (!canFileFor) {
+        return res.status(403).json({
+          error: 'You can only report an absence for your own family.',
+          youAre: (user.viewedBy || user.email)
+        });
       }
       // Validate date format
       if (!/^\d{4}-\d{2}-\d{2}$/.test(absence_date)) {

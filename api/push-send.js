@@ -11,9 +11,19 @@ function getSql() {
 }
 
 module.exports = async function handler(req, res) {
-  // Cron jobs come from Vercel's infrastructure, verify with the cron secret if configured
-  // For now, accept GET requests (Vercel crons use GET)
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  // Cron-only endpoint: without this gate ANYONE could curl it and fire a
+  // push broadcast + notification insert for every member at will
+  // (2026-07-17 review). Vercel Cron sends `Authorization: Bearer
+  // $CRON_SECRET` automatically when CRON_SECRET is set. Mirror the check
+  // in api/tour.js handleReconcileCron.
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const auth = req.headers['authorization'] || '';
+    if (auth !== 'Bearer ' + cronSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
 
   try {
     const sql = getSql();

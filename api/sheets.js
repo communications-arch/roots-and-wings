@@ -4,7 +4,7 @@ const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser, canImpersonate } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
-const { resolveFamily } = require('./_family');
+const { resolveFamily, canActAs } = require('./_family');
 
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL not configured');
@@ -1099,7 +1099,7 @@ async function handleBillingGet(req, res, sheets) {
   return res.status(200).json(parsed);
 }
 
-async function handleBillingPost(req, res) {
+async function handleBillingPost(req, res, authResult) {
   var body = req.body || {};
   var familyName = String(body.family_name || '').trim();
   var familyEmail = String(body.family_email || '').trim().toLowerCase();
@@ -1122,6 +1122,15 @@ async function handleBillingPost(req, res) {
 
   try {
     var sql = getDb();
+    // Ownership gate (2026-07-17 review): billing rows used to accept any
+    // family_email from any member, letting anyone pollute the Treasurer's
+    // reconcile view with fabricated Pending payments. Only your own family
+    // (or a super user recording on their behalf) may post.
+    var billingActor = authResult && authResult.email ? authResult.email : '';
+    if (!billingActor) return res.status(401).json({ error: 'Unauthorized' });
+    if (familyEmail && !isSuperUser(billingActor) && !(await canActAs(sql, billingActor, familyEmail))) {
+      return res.status(403).json({ error: 'You can only record a payment for your own family.' });
+    }
     var rows = await sql`
       INSERT INTO payments (
         family_name, family_email, semester_key, payment_type, school_year,
@@ -2902,7 +2911,7 @@ module.exports = async function handler(req, res) {
       var billingAuth = getAuth();
       var billingSheets = google.sheets({ version: 'v4', auth: billingAuth });
       if (req.method === 'GET') return handleBillingGet(req, res, billingSheets);
-      if (req.method === 'POST') return handleBillingPost(req, res);
+      if (req.method === 'POST') return handleBillingPost(req, res, authResult);
       return res.status(405).json({ error: 'Method not allowed' });
     } catch (err) {
       console.error('Billing action error:', err);
