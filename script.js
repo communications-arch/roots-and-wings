@@ -3381,7 +3381,10 @@
         groupKids.forEach(function (k) { haveKid[_kidKey(k.name, k.family || k.lastName)] = true; });
         _communityRoster.forEach(function (fam) {
           (fam.kids || []).forEach(function (k) {
-            if (String(k.class || '').toLowerCase() !== _grpLower) return;
+            // A blank group ('') is "not placed yet", NOT a bucket — skip it
+            // so unplaced kids don't all collapse into one shared roster
+            // (the "everyone sees Baby Test + Juni Bogan" bug, 2026-07-17).
+            if (!_grpLower || String(k.class || '').toLowerCase() !== _grpLower) return;
             if (haveKid[_kidKey(k.name, fam.name)]) return;
             groupKids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name });
           });
@@ -3403,6 +3406,9 @@
           html += '</div>';
         });
         html += '</div>';
+      } else if (!_grpLower) {
+        // Unplaced kid: no morning group yet, so there's no roster to show.
+        html += '<p class="mf-vol-optional">Not placed in a morning class yet — once the Morning Class Builder assigns a group, classmates will appear here.</p>';
       }
     }
 

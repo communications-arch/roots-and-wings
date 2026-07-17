@@ -4542,14 +4542,18 @@ async function handleMorningBuilderGet(req, res) {
   const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
   try {
     const sql = getSql();
-    // Include not-yet-paid morning registrations too. They're placed/seeded/
-    // finalized exactly like paid kids — `pending` is only a visual flag so
-    // Membership knows payment hasn't landed yet.
+    // Pull EVERY non-declined registration for the season (not just morning-
+    // track ones). Morning eligibility is decided PER KID from the live
+    // kids.schedule below, not the family-level registration track — a kid
+    // switched PM→full-day via Edit My Info (or in an afternoon-track family)
+    // updates kids.schedule but never registrations.track, so the old
+    // track filter hid them from the builder entirely (2026-07-17).
+    // Include not-yet-paid morning registrations too — `pending` is only a
+    // visual flag so Membership knows payment hasn't landed yet.
     const regs = await sql`
       SELECT main_learning_coach, existing_family_name, track, placement_notes, payment_status, kids
       FROM registrations
       WHERE season = ${schoolYear}
-        AND track = ANY(${MORNING_TRACKS})
         AND declined_at IS NULL
     `;
     const draftRows = await sql`
@@ -4561,6 +4565,27 @@ async function handleMorningBuilderGet(req, res) {
     draftRows.forEach(r => {
       draftMap[r.family_email + '|' + r.kid_first_name] = { group: r.class_group, finalized: !!r.finalized };
     });
+    // Live per-kid schedule from the kids table (the source of truth EMI
+    // writes). Keyed by LOWER(family_email)|LOWER(first_name) to match the
+    // roster's derived key. Missing rows fall back to the registration track.
+    const scheduleMap = {};
+    try {
+      const schedRows = await sql`SELECT family_email, first_name, schedule FROM kids`;
+      schedRows.forEach(k => {
+        scheduleMap[String(k.family_email || '').toLowerCase() + '|' + String(k.first_name || '').toLowerCase()] =
+          String(k.schedule || '').toLowerCase();
+      });
+    } catch (schedErr) {
+      console.error('Morning builder schedule lookup failed (non-fatal):', schedErr);
+    }
+    // A family track maps to a default schedule for kids with no kids-table
+    // row yet. 'Both' → all-day, 'Morning Only' → morning, else afternoon.
+    const trackDefaultSchedule = (t) => {
+      const tl = String(t || '').toLowerCase();
+      if (tl === 'both') return 'all-day';
+      if (tl === 'morning only') return 'morning';
+      return 'afternoon';
+    };
     const planRows = await sql`
       SELECT status, finalized_at, finalized_by, seeded_at FROM morning_class_plans
       WHERE school_year = ${schoolYear} LIMIT 1
@@ -4584,11 +4609,22 @@ async function handleMorningBuilderGet(req, res) {
         if (!rawName) return;
         const first = rawName.split(/\s+/)[0].toLowerCase();
         if (!first) return;
+        const rosterKey = familyEmail + '|' + first;
+        const entry = draftMap[rosterKey];
+        // Morning eligibility, per kid: use the LIVE kids.schedule; fall back
+        // to the family track when there's no kids row yet. Include the kid
+        // when they do mornings (all-day / morning) OR when they're already
+        // placed (never drop an existing placement, even if their schedule
+        // later changed). This is what lets a PM→full-day switch and a late
+        // full-day registrant surface for placement (2026-07-17).
+        const liveSched = scheduleMap[rosterKey];
+        const effSched = liveSched || trackDefaultSchedule(r.track);
+        const morningEligible = effSched === 'all-day' || effSched === 'morning';
+        if (!morningEligible && !(entry && entry.group)) return;
         // Displayed name uses the explicit first/last the registration now
         // stores (b03fe12), with the family surname as a fallback so a kid
         // never renders without a last name.
         const display = morningKidDisplayName(k, familyName);
-        const entry = draftMap[familyEmail + '|' + first];
         roster.push({
           key: familyEmail + '|' + first,
           family_email: familyEmail,
