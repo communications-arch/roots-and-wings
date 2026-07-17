@@ -2420,8 +2420,14 @@ module.exports = async function handler(req, res) {
           WHERE school_year = ${sy} AND session_number = ${session} LIMIT 1
         `;
         const wstatus = winRows[0] ? winRows[0].status : null;
-        if (wstatus === 'locked') return res.status(409).json({ error: 'Sign-ups are locked for this session.' });
-        if (wstatus !== 'open' && !isReviewer) return res.status(409).json({ error: 'Sign-ups are not open right now.' });
+        // The deadline (closed/locked) only stops MEMBER self-signup — the
+        // VP + Afternoon Class Liaison place and move kids regardless of
+        // window status (Erin, 2026-07-17: "the deadline just means members
+        // can pick classes; the ACL should still be able to place/move").
+        if (!isReviewer) {
+          if (wstatus === 'locked') return res.status(409).json({ error: 'Sign-ups are locked for this session.' });
+          if (wstatus !== 'open') return res.status(409).json({ error: 'Sign-ups are not open right now.' });
+        }
 
         // Reviewers (VP + ACL) place other families' kids from the To Do
         // card — honor their view_as even without canImpersonate (testers,

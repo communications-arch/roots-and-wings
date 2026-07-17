@@ -5779,6 +5779,26 @@ async function handleBoardCalendarGet(req, res) {
     const derived = [];
     years.forEach(yr => { computeDerivedCalendarEvents(sessions, yr).forEach(e => derived.push(e)); });
 
+    // Afternoon sign-up close dates on the calendar (Erin, 2026-07-17). This
+    // is the deadline after which members can no longer pick and the
+    // Afternoon Class Liaison places the kids who didn't sign up.
+    try {
+      const scWins = await sql`
+        SELECT school_year, session_number, signup_end_date
+        FROM class_signup_windows WHERE signup_end_date IS NOT NULL
+      `;
+      scWins.forEach(w => {
+        derived.push({
+          id: 'derived:signupclose:' + w.school_year + ':' + w.session_number,
+          school_year: w.school_year,
+          title: 'Afternoon sign-ups close — Session ' + w.session_number,
+          event_date: calDateStr(w.signup_end_date), end_date: '',
+          note: 'Member afternoon class sign-ups close; the Afternoon Class Liaison then places any kids who didn’t pick.',
+          role: 'Afternoon Class Liaison', icon: '🎨', derived: true
+        });
+      });
+    } catch (scErr) { console.error('signup-close calendar events failed (non-fatal):', scErr); }
+
     const events = manual.concat(derived)
       .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || ''));
 

@@ -22833,15 +22833,18 @@
       if (lbl) lbl.textContent = label;
       item.hidden = n <= 0;
     }
+    // The sign-up window's status gates the placement To Dos: placing kids
+    // only makes sense AFTER sign-ups close (before that, members are still
+    // picking). Erin, 2026-07-17.
+    var closed = d.window_status === 'closed';
     paint('ws-todo-vp-adults-item', 'ws-vp-adults-count', 'ws-vp-adults-label',
       (d.adults_unplaced || []).length, 'Place adults — Session ' + d.session);
     paint('ws-todo-kids-unpicked-item', 'ws-kids-unpicked-count', 'ws-kids-unpicked-label',
-      (d.kids_unpicked || []).length, 'Place kids in afternoon classes — Session ' + d.session);
+      closed ? (d.kids_unpicked || []).length : 0, 'Place kids in afternoon classes — Session ' + d.session);
     paint('ws-todo-vp-assist-item', 'ws-vp-assist-count', 'ws-vp-assist-label',
       (d.assistant_gaps || []).length, 'Fill assistant spots — Session ' + d.session);
     // Post-close resolution (Erin, 2026-07-15): over-max first; only when
     // the window is closed AND nothing is over do confirmations surface.
-    var closed = d.window_status === 'closed';
     var overN = closed ? (d.overmax || []).length : 0;
     var unsent = (d.confirm_pending || []).filter(function (c) { return !c.sent; }).length;
     var confirmN = (closed && !overN) ? unsent : 0;
@@ -22952,10 +22955,10 @@
         var list = (pools && pools[hour]) || [];
         return '<option value="">— pick… —</option>' + list.map(function (c) {
           var openTo = classOpenToText(c);
-          // Fullness so placement decisions don't need the (closed)
-          // sign-up card: "3/8 in" (testers, 2026-07-16).
+          // Fullness so placement decisions don't need the (closed) sign-up
+          // card: "3/8" = signed up / max (Erin, 2026-07-17: drop the "in").
           var fullness = (typeof c.signedUp === 'number')
-            ? ' — ' + c.signedUp + (c.max ? '/' + c.max : '') + ' in'
+            ? ' — ' + c.signedUp + (c.max ? '/' + c.max : '')
             : '';
           return '<option value="' + c.id + '">' + escapeHtml(c.name)
             + (c.hour === 'both' ? ' (2-hour)' : '')
@@ -27586,26 +27589,36 @@
         }
       }
     }
-    // Double-booking guard (testers, 2026-07-16): warn when this class's
-    // leader already leads another class that session in an overlapping
-    // hour. Soft confirm, not a block — intentional back-to-back setups
-    // and co-led classes exist, so the reviewer decides.
+    // Double-booking guard (testers 2026-07-16; extended 2026-07-17, Erin):
+    // warn when this class's LEADER is already committed to another class in
+    // an overlapping hour — as that class's lead, a co-lead, OR an assistant.
+    // Soft confirm, not a block — intentional setups exist, so the reviewer
+    // decides (same pattern as the out-of-preferred-hours warning).
     var dbLeadEmail = String(sub.submitted_by_email || '').toLowerCase();
-    if (dbLeadEmail) {
+    var dbLeadName = String(sub.submitted_by_name || '').trim().toLowerCase();
+    if (dbLeadEmail || dbLeadName) {
       var sbSpansAll = function (period, h) { return period === 'AM' ? (h === 'AM' || h === '') : h === 'both'; };
-      var dbDupe = scheduleBuilderState.submissions.filter(function (s) {
+      var nameHit = function (hay) {
+        var s = String(hay || '').toLowerCase();
+        return (dbLeadName && s.indexOf(dbLeadName) !== -1);
+      };
+      var dbConflict = null, dbRole = '';
+      scheduleBuilderState.submissions.some(function (s) {
         if (s.id === subId) return false;
         if (s.status !== 'scheduled' && s.status !== 'drafted') return false;
         if (String(s.scheduled_session) !== String(scheduleBuilderState.session)) return false;
         if ((s.class_period === 'AM' ? 'AM' : 'PM') !== subPeriod) return false;
-        if (String(s.submitted_by_email || '').toLowerCase() !== dbLeadEmail) return false;
-        var oh = String(s.scheduled_hour || '');
-        var nh = String(scheduledHour || '');
-        return sbSpansAll(subPeriod, oh) || sbSpansAll(subPeriod, nh) || oh === nh;
-      })[0];
-      if (dbDupe) {
+        var oh = String(s.scheduled_hour || ''), nh = String(scheduledHour || '');
+        if (!(sbSpansAll(subPeriod, oh) || sbSpansAll(subPeriod, nh) || oh === nh)) return false;
+        // Is our leader this class's lead / co-lead / assistant?
+        if (dbLeadEmail && String(s.submitted_by_email || '').toLowerCase() === dbLeadEmail) { dbConflict = s; dbRole = 'leads'; return true; }
+        if (nameHit(s.co_teachers)) { dbConflict = s; dbRole = 'co-leads'; return true; }
+        if ((s.helpers || []).some(function (hp) { return (hp.email && String(hp.email).toLowerCase() === dbLeadEmail) || nameHit(hp.name); })) { dbConflict = s; dbRole = 'assists'; return true; }
+        return false;
+      });
+      if (dbConflict) {
         var dbWho = sub.submitted_by_name || sub.submitted_by_email;
-        if (!confirm('Heads up — double booking:\n\n' + dbWho + ' already leads “' + dbDupe.class_name + '” in Session ' + scheduleBuilderState.session + ' (' + (dbDupe.scheduled_hour || subPeriod) + '), which overlaps ' + (scheduledHour || subPeriod) + '.\n\nPlace “' + sub.class_name + '” anyway?')) return;
+        if (!confirm('Heads up — double booking:\n\n' + dbWho + ' already ' + dbRole + ' “' + dbConflict.class_name + '” in Session ' + scheduleBuilderState.session + ' (' + (dbConflict.scheduled_hour || subPeriod) + '), which overlaps ' + (scheduledHour || subPeriod) + '.\n\nPlace “' + sub.class_name + '” anyway?')) return;
       }
     }
     var ageRange = prettyAgesClient(sub.age_groups, sub.age_groups_other) || sub.scheduled_age_range || '';
