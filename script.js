@@ -23938,11 +23938,11 @@
       h += '<p class="ws-empty" style="margin-top:12px;">Nothing here yet for ' + escapeHtml(year) + '.</p>';
     } else {
       h += '<p class="board-cal-legend">📚 Session dates'
-        + (canEditSessions ? ' edit right in their rows — everything marked ' : ' drive everything marked ')
+        + (canEditSessions ? ' edit from the row’s Manage menu — everything marked ' : ' drive everything marked ')
         + '<span class="board-cal-auto-pill">Auto</span>'
         + (canEditSessions ? ' recalculates from them' : ' (recalculated automatically)')
         + '. 🎉 Special-event dates are proposed at the summer meeting, then approved'
-        + (canSE ? ' — set them right in the row.' : '.')
+        + (canSE ? ' — use each row’s Manage menu.' : '.')
         + (viewerIsBoard ? ' One-off dates go in with “+ Add event”.' : '')
         + '</p>';
       h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
@@ -23951,24 +23951,10 @@
       visibleRows.forEach(function (r) {
         var e = r.ev;
         var sessEditable = r.kind === 'session' && canEditSessions;
-        // Entered session dates rest read-only with an Edit button
-        // (Erin, 2026-07-14) — inline pickers render only for sessions
-        // still missing dates, or the one row Edit was tapped on.
-        var sessEditing = sessEditable && (!e.event_date || _boardCalState.editingSessNum === r.sessNum);
         h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + (sessEditable ? ' data-sess-num="' + r.sessNum + '"' : '') + '>';
-        // Date cell: inline pickers for editable session rows (start → end)
-        // and editable special events; plain text otherwise.
-        if (sessEditing) {
-          // Session 1 defaults to the first Wednesday of September (Erin,
-          // 2026-07-15) — a suggestion in the picker; nothing is real until
-          // Save, and saved dates stay "Proposed" until board approval.
-          var sessStartDefault = e.event_date || (r.sessNum === 1 ? firstWedOfSeptember(year) : '');
-          h += '<td style="white-space:nowrap;">'
-            + '<input type="date" class="cl-input board-cal-sess-start" value="' + escapeHtml(sessStartDefault) + '" aria-label="Session ' + r.sessNum + ' start">'
-            + ' <span class="board-cal-se-unset">→</span> '
-            + '<input type="date" class="cl-input board-cal-sess-end" value="' + escapeHtml(e.end_date || '') + '" aria-label="Session ' + r.sessNum + ' end">'
-            + '</td>';
-        } else {
+        // Date cell — plain text for every row now; sessions (like special
+        // events) edit their dates through the Manage ▾ → Edit form.
+        {
           var dateInner = (e.event_date
             ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
               + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
@@ -23981,9 +23967,7 @@
           }
           h += '<td style="white-space:nowrap;">' + dateInner + '</td>';
         }
-        if (sessEditing) {
-          h += '<td>' + (e.icon ? e.icon + ' ' : '') + '<input type="text" class="cl-input board-cal-sess-name" maxlength="80" value="' + escapeHtml(e.title) + '" aria-label="Session ' + r.sessNum + ' name"></td>';
-        } else {
+        {
           h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
         }
         // Notes cell (location first, then note + status chip for special events).
@@ -24013,17 +23997,20 @@
           notes = '<span class="se-status se-status-' + (e.dates_status === 'approved' ? 'approved' : 'proposed') + '">' + (e.dates_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
         }
         h += '<td>' + notes + '</td>';
-        // Actions cell by kind.
+        // Actions cell by kind. Sessions now use the same Manage ▾ dropdown
+        // + Edit form as the other rows (Erin, 2026-07-18).
         if (r.kind === 'session') {
-          if (sessEditing) {
-            h += '<td class="coop-cal-actions" style="white-space:nowrap;">'
-              + '<button type="button" class="btn btn-primary btn-sm board-cal-sess-save" data-sess-num="' + r.sessNum + '">Save</button>'
-              + (e.event_date ? ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-canceledit" data-sess-num="' + r.sessNum + '">Cancel</button>' : '')
-              + '</td>';
-          } else if (sessEditable) {
-            h += '<td class="coop-cal-actions" style="white-space:nowrap;">'
-              + (e.dates_status === 'proposed' && e.event_date ? '<button type="button" class="btn btn-primary btn-sm board-cal-sess-approvebtn" data-sess-num="' + r.sessNum + '">Approve</button> ' : '')
-              + '<button type="button" class="btn btn-outline-dark btn-sm board-cal-sess-editbtn" data-sess-num="' + r.sessNum + '">Edit</button></td>';
+          if (sessEditable) {
+            var sessApprovable = (e.dates_status === 'proposed' && e.event_date) ? '1' : '';
+            h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
+            h += '<button type="button" class="btn btn-outline-dark btn-sm cal-actions-trigger" data-menu-kind="session"'
+              + ' data-sess-num="' + r.sessNum + '"'
+              + ' data-name="' + escapeAttr(e.title || '') + '"'
+              + ' data-start="' + escapeAttr(e.event_date || '') + '"'
+              + ' data-end="' + escapeAttr(e.end_date || '') + '"'
+              + ' data-approvable="' + sessApprovable + '"'
+              + ' aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
+            h += '</td>';
           } else {
             h += '<td></td>';
           }
@@ -24112,8 +24099,6 @@
           if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
           return;
         }
-        // Saved — the row rests read-only again on the reload below.
-        _boardCalState.editingSessNum = null;
         // Session dates ripple everywhere: the dashboard's SESSION_DATES
         // cache, every derived trigger date, and the To Do nudge.
         localStorage.removeItem(CACHE_SESSIONS_KEY);
@@ -24126,6 +24111,58 @@
         boardCalShowMsg('Session ' + sessNum + ': network error — ' + (err.message || 'unknown'));
         if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
       });
+  }
+
+  // Session Edit form (Erin, 2026-07-18) — sessions now edit through the same
+  // inline form + Manage ▾ menu as special/general events, instead of the old
+  // in-row date pickers. Name + start + end; saving reuses boardCalSaveSession.
+  function boardCalShowSessionForm(sess) {
+    var wrap = document.getElementById('board-cal-form-wrap');
+    if (!wrap || !sess) return;
+    boardCalShowMsg('');
+    var startVal = sess.start || '';
+    // Session 1 with no date yet suggests the first Wednesday of September.
+    if (!startVal && sess.sessNum === 1) {
+      var sy = parseInt(String(_boardCalState.schoolYear).slice(0, 4), 10);
+      if (sy) startVal = firstWedOfSeptember(sy);
+    }
+    var h = '<div class="board-cal-form">';
+    h += '<h4 style="margin:0 0 10px;">📚 Edit Session ' + sess.sessNum + '</h4>';
+    h += '<div class="board-cal-field"><label>Session name<br><input type="text" id="sess-edit-name" class="cl-input" maxlength="80" value="' + escapeAttr(sess.name || ('Session ' + sess.sessNum)) + '"></label></div>';
+    h += '<div class="board-cal-field board-cal-fields-row">';
+    h += '<label>Start date<br><input type="date" id="sess-edit-start" class="cl-input" value="' + escapeAttr(startVal) + '"></label>';
+    h += '<label>End date<br><input type="date" id="sess-edit-end" class="cl-input" value="' + escapeAttr(sess.end || '') + '"></label>';
+    h += '</div>';
+    h += '<p class="board-cal-legend" style="margin:0 0 10px;">Session dates drive every “Auto” date on the calendar. Saved dates stay Proposed until approved.</p>';
+    h += '<div class="coop-cal-save-bar">';
+    h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
+    h += '<button id="sess-edit-save" class="btn btn-primary btn-sm" type="button" data-sess-num="' + sess.sessNum + '">Save session</button>';
+    h += '</div></div>';
+    wrap.innerHTML = h;
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.getElementById('board-cal-form-cancel').addEventListener('click', function () { wrap.innerHTML = ''; boardCalShowMsg(''); });
+    document.getElementById('sess-edit-save').addEventListener('click', function () {
+      boardCalSaveSession(
+        parseInt(this.getAttribute('data-sess-num'), 10),
+        (document.getElementById('sess-edit-name') || {}).value || '',
+        (document.getElementById('sess-edit-start') || {}).value || '',
+        (document.getElementById('sess-edit-end') || {}).value || '',
+        this
+      );
+    });
+  }
+
+  // Approve a session's proposed dates — flips dates_status and (on prod)
+  // publishes the recurring co-op-day event to the Google Calendar.
+  function boardCalApproveSession(sessNum) {
+    fetch('/api/cleaning?action=session-dates-status', {
+      method: 'POST', headers: rwAuthHeaders(true),
+      body: JSON.stringify({ school_year: _boardCalState.schoolYear, session_number: sessNum, status: 'approved' })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { boardCalShowMsg((res.d && res.d.error) || 'Approve failed.'); return; }
+        loadBoardCalendar();
+      }).catch(function (err) { boardCalShowMsg('Network error: ' + (err.message || 'unknown')); });
   }
 
   // POST a special-event date/status change, then reload the calendar
@@ -24296,15 +24333,16 @@
   function openCalActionsMenu(trigger) {
     // Namespace the key by kind so a special event and a general event that
     // happen to share a numeric id don't toggle each other's menu.
-    var ownerKey = (trigger.getAttribute('data-menu-kind') || '') + ':'
-      + (trigger.getAttribute('data-se-id') || trigger.getAttribute('data-id') || '');
+    var menuKind = trigger.getAttribute('data-menu-kind') || '';
+    var ownerKey = menuKind + ':'
+      + (trigger.getAttribute('data-se-id') || trigger.getAttribute('data-sess-num') || trigger.getAttribute('data-id') || '');
     var open = document.getElementById('cal-actions-menu');
     // Second click on the same trigger closes it.
     if (open && open.getAttribute('data-owner') === ownerKey) { boardCalCloseActionsMenu(); return; }
     boardCalCloseActionsMenu();
 
     var items = [];
-    if (trigger.getAttribute('data-menu-kind') === 'special') {
+    if (menuKind === 'special') {
       var sid = parseInt(trigger.getAttribute('data-se-id'), 10);
       var sdate = trigger.getAttribute('data-date') || '';
       var sauto = trigger.getAttribute('data-auto') === '1';
@@ -24314,6 +24352,17 @@
       items.push({ label: 'Edit…', fn: function () { boardCalShowSpecialForm(sev, sauto, sdate); } });
       items.push({ label: sapproved ? 'Mark proposed' : 'Approve', fn: function () { boardCalSaveSpecialEvent(sid, sdate, sapproved ? 'proposed' : 'approved'); } });
       if (scanDelete) items.push({ label: 'Delete', danger: true, fn: function () { boardCalDeleteSpecial(sev); } });
+    } else if (menuKind === 'session') {
+      var snum = parseInt(trigger.getAttribute('data-sess-num'), 10);
+      var sess = {
+        sessNum: snum,
+        name: trigger.getAttribute('data-name') || '',
+        start: trigger.getAttribute('data-start') || '',
+        end: trigger.getAttribute('data-end') || ''
+      };
+      var sessApprovable = trigger.getAttribute('data-approvable') === '1';
+      items.push({ label: 'Edit…', fn: function () { boardCalShowSessionForm(sess); } });
+      if (sessApprovable) items.push({ label: 'Approve', fn: function () { boardCalApproveSession(snum); } });
     } else {
       var eid = parseInt(trigger.getAttribute('data-id'), 10);
       var gev = (_boardCalState.events || []).filter(function (x) { return x.id === eid; })[0];
@@ -24383,64 +24432,9 @@
       });
     });
 
-    // Approve proposed session dates — flips dates_status and (on prod)
-    // publishes the recurring co-op-day event to the Google Calendar.
-    body.querySelectorAll('.board-cal-sess-approvebtn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var n = parseInt(this.getAttribute('data-sess-num'), 10);
-        var self = this;
-        self.disabled = true; self.textContent = 'Approving…';
-        fetch('/api/cleaning?action=session-dates-status', {
-          method: 'POST', headers: rwAuthHeaders(true),
-          body: JSON.stringify({ school_year: _boardCalState.schoolYear, session_number: n, status: 'approved' })
-        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-          .then(function (res) {
-            if (!res.ok) {
-              boardCalShowMsg((res.d && res.d.error) || 'Approve failed.');
-              self.disabled = false; self.textContent = 'Approve';
-              return;
-            }
-            loadBoardCalendar();
-          }).catch(function (err) {
-            boardCalShowMsg('Network error: ' + (err.message || 'unknown'));
-            self.disabled = false; self.textContent = 'Approve';
-          });
-      });
-    });
-
-    // Entered sessions rest read-only; Edit swaps the row to inline
-    // pickers, Cancel puts it back untouched.
-    body.querySelectorAll('.board-cal-sess-editbtn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        _boardCalState.editingSessNum = parseInt(this.getAttribute('data-sess-num'), 10);
-        renderBoardCalendarBody();
-      });
-    });
-    body.querySelectorAll('.board-cal-sess-canceledit').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        _boardCalState.editingSessNum = null;
-        renderBoardCalendarBody();
-      });
-    });
-
-    // Session rows save inline (Pres/VP only — inputs + button only
-    // render for them).
-    body.querySelectorAll('.board-cal-sess-save').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var tr = this.closest('tr');
-        if (!tr) return;
-        boardCalSaveSession(
-          parseInt(this.getAttribute('data-sess-num'), 10),
-          (tr.querySelector('.board-cal-sess-name') || {}).value || '',
-          (tr.querySelector('.board-cal-sess-start') || {}).value || '',
-          (tr.querySelector('.board-cal-sess-end') || {}).value || '',
-          this
-        );
-      });
-    });
-
-    // Special-event actions (Edit / Approve · Mark proposed / Delete) are
-    // built inside the shared Manage dropdown — see openCalActionsMenu.
+    // Session + special-event + general-event actions (Edit / Approve ·
+    // Mark proposed / Delete) are all built inside the shared Manage ▾
+    // dropdown — see openCalActionsMenu.
   }
 
   // Inline add/edit form. ev = null for a new event, or the existing event row.
