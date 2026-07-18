@@ -23940,6 +23940,36 @@
     var view = _boardCalState.view || 'all';
     var visibleRows = rows.filter(function (r) { return view === 'all' || r.kind === view; });
 
+    // Sortable grid (Erin, 2026-07-18): Auto gets its own leading column; Type
+    // shows only in the All view; headers sort. Default order stays by date.
+    var calTypeMeta = {
+      session:    { rank: 1, label: '📚 Session' },
+      special:    { rank: 2, label: '🎉 Special Event' },
+      field_trip: { rank: 3, label: '🚌 Field Trip' },
+      general:    { rank: 4, label: '🗓 General' },
+      task:       { rank: 5, label: '📌 Board Task' }
+    };
+    var isAutoRow = function (r) { return !!(r.ev.derived || (r.kind === 'special' && r.autoDate)); };
+    var sortKey = _boardCalState.sortKey || 'date';
+    var sortDir = _boardCalState.sortDir || 'asc';
+    var sortVal = function (r, key) {
+      if (key === 'type') return String((calTypeMeta[r.kind] || {}).rank || 9);
+      if (key === 'event') return String(r.ev.title || '').toLowerCase();
+      if (key === 'auto') return isAutoRow(r) ? '0' : '1';
+      return r.ev.event_date || '9999-99-99'; // date (default)
+    };
+    visibleRows.sort(function (a, b) {
+      var c = String(sortVal(a, sortKey)).localeCompare(String(sortVal(b, sortKey)));
+      if (c === 0) c = (a.ev.event_date || '9999-99-99').localeCompare(b.ev.event_date || '9999-99-99');
+      return sortDir === 'desc' ? -c : c;
+    });
+    var calCols = [{ key: 'auto', label: 'Auto' }, { key: 'date', label: 'Date' }];
+    if (view === 'all') calCols.push({ key: 'type', label: 'Type' });
+    calCols.push({ key: 'event', label: 'Event' });
+    calCols.push({ key: 'notes', label: 'Details', nosort: true });
+    calCols.push({ key: 'actions', label: '', nosort: true });
+    var numCols = calCols.length;
+
     var h = '<div class="coop-cal-toolbar">';
     h += '<label class="coop-cal-yearpick">School year ';
     h += '<select id="board-cal-year">';
@@ -23977,7 +24007,14 @@
         + (viewerIsBoard ? ' One-off dates go in with “+ Add event”.' : '')
         + '</p>';
       h += '<div class="coop-cal-table-wrap"><table class="coop-cal-table"><thead><tr>';
-      h += '<th>Date</th><th>Event</th><th>Notes</th><th></th>';
+      calCols.forEach(function (c) {
+        if (c.nosort) { h += '<th>' + escapeHtml(c.label) + '</th>'; return; }
+        var sorted = sortKey === c.key;
+        var arrow = sorted ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        h += '<th class="coop-cal-th-sort' + (sorted ? ' is-sorted' : '') + '" data-cal-sort="' + c.key
+          + '" role="button" tabindex="0" title="Sort by ' + escapeHtml(c.label || 'this column') + '">'
+          + escapeHtml(c.label) + '<span class="coop-cal-sort-arrow">' + arrow + '</span></th>';
+      });
       h += '</tr></thead><tbody>';
       visibleRows.forEach(function (r) {
         var e = r.ev;
@@ -23987,6 +24024,12 @@
           : (r.kind === 'special' && r.seRow) ? ('special:' + r.seRow.id)
           : (!e.derived && e.id != null) ? ('event:' + e.id) : '';
         h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + (sessEditable ? ' data-sess-num="' + r.sessNum + '"' : '') + '>';
+        // Auto column (Erin, 2026-07-18) — an auto-calculated date (derived
+        // trigger dates + Field Day / Ice Cream) is flagged here, ahead of the
+        // date, instead of under it.
+        h += '<td class="board-cal-col-auto">' + (isAutoRow(r)
+          ? '<span class="board-cal-auto-pill board-cal-auto-inline" title="This date is calculated automatically from the session calendar">Auto</span>'
+          : '') + '</td>';
         // Date cell — plain text for every row now; sessions (like special
         // events) edit their dates through the Manage ▾ → Edit form.
         {
@@ -23994,13 +24037,11 @@
             ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
               + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
             : '<span class="board-cal-se-unset">—</span>');
-          // Any auto-calculated date (derived trigger dates + auto special
-          // events like Field Day / Ice Cream) flags it right on the date
-          // itself, not as a pill in the actions column (Erin, 2026-07-18).
-          if (e.derived || (r.kind === 'special' && r.autoDate)) {
-            dateInner += '<br><span class="board-cal-auto-pill board-cal-auto-inline" title="This date is calculated automatically from the session calendar">Auto</span>';
-          }
           h += '<td style="white-space:nowrap;">' + dateInner + '</td>';
+        }
+        // Type column — only in the All view (a filtered view already knows).
+        if (view === 'all') {
+          h += '<td class="board-cal-col-type">' + escapeHtml((calTypeMeta[r.kind] || {}).label || '') + '</td>';
         }
         {
           h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
@@ -24094,7 +24135,7 @@
         // In-place Edit panel: a full-width expansion row directly beneath the
         // row being edited (Erin, 2026-07-18 — replaces the top-of-table form).
         if (rowKey && _boardCalState.editingRow === rowKey) {
-          h += '<tr class="board-cal-edit-row"><td colspan="4"><div id="board-cal-form-wrap"></div></td></tr>';
+          h += '<tr class="board-cal-edit-row"><td colspan="' + numCols + '"><div id="board-cal-form-wrap"></div></td></tr>';
         }
       });
       h += '</tbody></table></div>';
@@ -24426,6 +24467,22 @@
         _boardCalState.view = this.getAttribute('data-cal-view');
         renderBoardCalendarBody();
       });
+    });
+
+    // Sortable column headers — click to sort, click again to flip direction.
+    body.querySelectorAll('.coop-cal-th-sort').forEach(function (th) {
+      var doSort = function () {
+        var key = th.getAttribute('data-cal-sort');
+        if (_boardCalState.sortKey === key) {
+          _boardCalState.sortDir = (_boardCalState.sortDir === 'asc') ? 'desc' : 'asc';
+        } else {
+          _boardCalState.sortKey = key;
+          _boardCalState.sortDir = 'asc';
+        }
+        renderBoardCalendarBody();
+      };
+      th.addEventListener('click', doSort);
+      th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doSort(); } });
     });
 
     // Row actions — inline chips (the common tabular pattern). Edit opens an

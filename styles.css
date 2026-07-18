@@ -14739,6 +14739,14 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 0 6px;
   opacity: 0.85;
 }
+/* Leading Auto column + All-view Type column keep to their content width. */
+.coop-cal-table .board-cal-col-auto { width: 1%; white-space: nowrap; text-align: center; }
+.coop-cal-table .board-cal-col-type { white-space: nowrap; color: var(--color-text-light); font-size: 0.86em; }
+/* Sortable headers (shared grid look). */
+.coop-cal-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.coop-cal-th-sort:hover { color: var(--color-primary, #523A79); }
+.coop-cal-th-sort.is-sorted { color: var(--color-primary, #523A79); }
+.coop-cal-sort-arrow { font-size: 0.8em; }
 /* Shared row-actions "Manage ▾" dropdown for the co-op calendar table.
    Fixed-positioned (JS sets top/left) so the scrollable table can't clip it. */
 .cal-actions-menu {
