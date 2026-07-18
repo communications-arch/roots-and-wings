@@ -1850,3 +1850,16 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS end_date   DATE;
 -- to the co-op calendar; un-approving or deleting removes it (Erin, 2026-07-18:
 -- "make Special Events work the same as Field Trips and on that same calendar").
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';
+
+-- Default times + location for the standard special events (Erin, 2026-07-18).
+-- Idempotent: only fills a BLANK time (won't overwrite a board edit), so it's
+-- safe to re-run on every build. Location is the co-op's home, First Mennonite
+-- Church, for the listed events (Camp + Dance intentionally left unset).
+UPDATE special_events SET start_time = '12:30', end_time = '14:30' WHERE name = 'Ice Cream Social' AND start_time IS NULL;
+UPDATE special_events SET start_time = '10:30', end_time = '13:30' WHERE name = 'Maker''s Market'  AND start_time IS NULL;
+UPDATE special_events SET start_time = '10:30', end_time = '13:30' WHERE name = 'Service Project'  AND start_time IS NULL;
+UPDATE special_events SET start_time = '10:30', end_time = '13:30' WHERE name = 'PJ Party'         AND start_time IS NULL;
+UPDATE special_events SET start_time = '10:30', end_time = '13:30' WHERE name = 'Passion Fair'     AND start_time IS NULL;
+UPDATE special_events SET start_time = '10:30', end_time = '12:00' WHERE name = 'Variety Show'     AND start_time IS NULL;
+UPDATE special_events SET start_time = '12:00', end_time = '13:30' WHERE name = 'Field Day'        AND start_time IS NULL;
+UPDATE special_events SET location = 'First Mennonite Church 4601 Knollton Rd, Indianapolis, IN 46228' WHERE name IN ('Ice Cream Social', 'Maker''s Market', 'Service Project', 'PJ Party', 'Passion Fair', 'Variety Show', 'Field Day') AND (location IS NULL OR location = '');
