@@ -14485,10 +14485,11 @@
       });
 
       body.querySelectorAll('.ws-part-exempt-delete').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var row = this.closest('tr');
-          var id = row.getAttribute('data-exempt-id');
-          if (!confirm('Delete this exemption?')) return;
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var self = this;
+          var id = (self.closest('tr') || {}).getAttribute ? self.closest('tr').getAttribute('data-exempt-id') : null;
+          rwArmTwoStep(self, 'delete', function () {
           fetch('/api/sheets?action=participation-exemption-delete', {
             method: 'POST',
             headers: rwAuthHeaders(true),
@@ -14498,6 +14499,7 @@
             if (!res2.ok) { alert((res2.data && res2.data.error) || 'Delete failed'); return; }
             _participationSettingsChanged = true;
             loadParticipationExemptions();
+          });
           });
         });
       });
@@ -20808,10 +20810,12 @@
       });
     });
     body.querySelectorAll('.evs-del').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-task-id'), 10);
-        if (!confirm('Delete this task?')) return;
-        btn.disabled = true;
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        rwArmTwoStep(self, 'delete', function () {
+        var id = parseInt(self.getAttribute('data-task-id'), 10);
+        self.disabled = true;
         fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-task-delete', id: id }) })
           .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
           .then(function (res) {
@@ -20819,7 +20823,8 @@
             _eventSpaceState.data.tasks = (_eventSpaceState.data.tasks || []).filter(function (x) { return x.id !== id; });
             renderEventSpaceBody();
           })
-          .catch(function () { btn.disabled = false; alert('Network error.'); });
+          .catch(function () { self.disabled = false; alert('Network error.'); });
+        });
       });
     });
     var addBtn = body.querySelector('#evs-add-task');
@@ -25098,12 +25103,12 @@
       });
     });
     body.querySelectorAll('.roles-row-archive').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(this.getAttribute('data-role-id'), 10);
-        var role = findRoleById(id);
-        if (!role) return;
-        if (!confirm('Archive "' + role.title + '"? It stays in the database for history but hides from the default list. You can restore it from "Show archived".')) return;
-        patchRoleStatusInline(id, 'archived');
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        var id = parseInt(self.getAttribute('data-role-id'), 10);
+        if (!findRoleById(id)) return;
+        rwArmTwoStep(self, 'archive', function () { patchRoleStatusInline(id, 'archived'); });
       });
     });
     body.querySelectorAll('.roles-row-restore').forEach(function (btn) {
@@ -25120,11 +25125,11 @@
       });
     });
     body.querySelectorAll('.roles-row-holder-remove').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var holderId = parseInt(this.getAttribute('data-holder-id'), 10);
-        var name = this.getAttribute('data-holder-name') || 'this person';
-        if (!confirm('Remove ' + name + ' from this role for ' + _rolesMgrState.schoolYear + '?')) return;
-        deleteRoleHolder(holderId);
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        var holderId = parseInt(self.getAttribute('data-holder-id'), 10);
+        rwArmTwoStep(self, 'remove', function () { deleteRoleHolder(holderId); });
       });
     });
   }
