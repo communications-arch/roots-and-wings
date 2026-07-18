@@ -3413,7 +3413,7 @@ async function handleProfileGet(req, res) {
   try {
     const famRows = await sql`
       SELECT family_email, family_name, phone, address,
-             placement_notes, updated_at, updated_by
+             placement_notes, additional_emails, alt_logins, updated_at, updated_by
       FROM member_profiles
       WHERE family_email = ${familyEmail}
       LIMIT 1
@@ -3511,28 +3511,59 @@ async function handleProfileUpdate(body, req, res) {
     // it. New profiles default to '' from the column default; existing
     // values are preserved across updates.
     //
-    // additional_emails kept in lockstep with non-MLC people emails for
-    // back-compat with the legacy auth path (resolveFamily still falls
-    // back to it when no people row matches). Drop in the follow-up.
-    const additionalEmails = Array.from(new Set(
-      people
-        .filter(p => p.role !== 'mlc' && p.email && p.email.toLowerCase() !== familyEmail)
-        .map(p => p.email.toLowerCase())
-    ));
+    // additional_emails is the alternate-login set resolveFamily falls back
+    // to when a sign-in email matches neither the primary family_email nor a
+    // people row. It carries (a) co-parent Workspace emails, auto-derived
+    // here, and (b) super-user-registered alternate logins for the PRIMARY
+    // account holder whose real @rootsandwingsindy.com address doesn't match
+    // the auto-generated family_email — the only way such a member can log in
+    // (the family_email PK is wired into ~30 tables and is NOT renamed).
+    //
+    // Derived co-parent emails are unioned with the EXISTING stored set so a
+    // routine family save never drops a super-user-added alternate. A super
+    // user editing the family can pass `additional_logins` to set the manual
+    // portion authoritatively (add or prune); non-super saves are additive.
+    const derivedEmails = people
+      .filter(p => p.role !== 'mlc' && p.email && p.email.toLowerCase() !== familyEmail)
+      .map(p => p.email.toLowerCase());
+    // alt_logins is the sticky super-user set. A routine family save leaves it
+    // exactly as stored; only a super user passing `additional_logins` changes
+    // it (add or prune). additional_emails is then the union of the ephemeral
+    // co-parent mirror and alt_logins — so removing a co-parent still revokes
+    // their login (they drop out of derivedEmails) while a super-user-added
+    // alternate persists in alt_logins.
+    const priorRows = await sql`SELECT alt_logins FROM member_profiles WHERE family_email = ${familyEmail} LIMIT 1`;
+    const priorAlt = (priorRows[0] && Array.isArray(priorRows[0].alt_logins))
+      ? priorRows[0].alt_logins.map(e => String(e || '').toLowerCase()).filter(Boolean)
+      : [];
+    const requesterIsSuper = isSuperUser(user.realEmail || user.email);
+    let altLogins = priorAlt;
+    if (requesterIsSuper && Array.isArray(body.additional_logins)) {
+      // Only on-domain Workspace addresses can actually authenticate
+      // (verifyWorkspaceAuth gates on ALLOWED_DOMAIN), so silently drop
+      // anything that couldn't ever log in. Exclude the primary itself.
+      altLogins = Array.from(new Set(
+        body.additional_logins
+          .map(e => normalizeEmail(e))
+          .filter(e => e && e.endsWith('@' + ALLOWED_DOMAIN) && e !== familyEmail)
+      ));
+    }
+    const additionalEmails = Array.from(new Set(derivedEmails.concat(altLogins)));
     await sql`
       INSERT INTO member_profiles (
         family_email, family_name, phone, address, parents, kids,
-        additional_emails, updated_by
+        additional_emails, alt_logins, updated_by
       ) VALUES (
         ${familyEmail}, ${familyName}, ${phone}, ${address},
         '[]'::jsonb, '[]'::jsonb,
-        ${additionalEmails}::text[], ${user.realEmail || user.email}
+        ${additionalEmails}::text[], ${altLogins}::text[], ${user.realEmail || user.email}
       )
       ON CONFLICT (family_email) DO UPDATE SET
         family_name = EXCLUDED.family_name,
         phone = EXCLUDED.phone,
         address = EXCLUDED.address,
         additional_emails = EXCLUDED.additional_emails,
+        alt_logins = EXCLUDED.alt_logins,
         updated_at = NOW(),
         updated_by = EXCLUDED.updated_by
     `;
@@ -3808,6 +3839,7 @@ async function handleProfileUpdate(body, req, res) {
       family_name: familyName,
       people_count: people.length,
       kids_count: kids.length,
+      alt_logins: altLogins,
       blc_waivers_sent: newBlcRows.map(r => ({ name: r.name, email: r.email })),
       blc_waivers_skipped: skippedBlcs
     });
@@ -4591,8 +4623,10 @@ async function handleMorningBuilderGet(req, res) {
     // writes). Keyed by LOWER(family_email)|LOWER(first_name) to match the
     // roster's derived key. Missing rows fall back to the registration track.
     const scheduleMap = {};
+    let liveKids = [];
     try {
-      const schedRows = await sql`SELECT family_email, first_name, schedule FROM kids`;
+      const schedRows = await sql`SELECT family_email, first_name, last_name, nickname, birth_date, schedule FROM kids`;
+      liveKids = schedRows;
       schedRows.forEach(k => {
         scheduleMap[String(k.family_email || '').toLowerCase() + '|' + String(k.first_name || '').toLowerCase()] =
           String(k.schedule || '').toLowerCase();
@@ -4616,12 +4650,25 @@ async function handleMorningBuilderGet(req, res) {
 
     const roster = [];
     const familyEmails = new Set();
+    // Per-family registration metadata, keyed by LOWER(family_email). Lets us
+    // fold in kids that exist in the live kids table but not the registration
+    // snapshot (see merge below) using the same family name / track / notes.
+    const regMetaByEmail = {};
     regs.forEach(r => {
       const familyName = deriveFamilyName(r.main_learning_coach, r.existing_family_name);
       const familyEmail = deriveFamilyEmail(r.main_learning_coach, familyName);
       if (!familyEmail) return;
       const pending = String(r.payment_status || '').toLowerCase() !== 'paid';
       familyEmails.add(familyEmail);
+      if (!regMetaByEmail[String(familyEmail).toLowerCase()]) {
+        regMetaByEmail[String(familyEmail).toLowerCase()] = {
+          family_email: familyEmail,
+          family_name: familyName,
+          track: r.track,
+          placement_notes: String(r.placement_notes || '').trim(),
+          pending: pending
+        };
+      }
       const kids = Array.isArray(r.kids) ? r.kids : [];
       kids.forEach(k => {
         // rawName is the combined name (or bare first) as stored. Keep the
@@ -4664,6 +4711,48 @@ async function handleMorningBuilderGet(req, res) {
           locked: false
         });
       });
+    });
+
+    // Fold in kids that live in the kids table but never made it into the
+    // registration's kids JSON — e.g. a child added AFTER registration via
+    // Edit My Info, which writes the kids table but never registrations.kids.
+    // Without this they're invisible to the builder (bug: a new daughter added
+    // via EMI didn't appear under the family's placement pool, 2026-07-18).
+    // Only for families with a current non-declined registration this season;
+    // keyed and morning-eligibility-filtered exactly like the roster above.
+    const rosterKeyNorm = new Set(roster.map(it => String(it.family_email).toLowerCase() + '|' + it.first_name));
+    liveKids.forEach(k => {
+      const feLower = String(k.family_email || '').toLowerCase();
+      const meta = regMetaByEmail[feLower];
+      if (!meta) return;                        // family not registered this season
+      const rawName = String(k.first_name || '').trim();
+      if (!rawName) return;
+      const first = rawName.split(/\s+/)[0].toLowerCase();
+      if (!first) return;
+      const normKey = feLower + '|' + first;
+      if (rosterKeyNorm.has(normKey)) return;   // already sourced from the registration snapshot
+      const rosterKey = meta.family_email + '|' + first;
+      const entry = draftMap[rosterKey];
+      const effSched = String(k.schedule || '').toLowerCase() || trackDefaultSchedule(meta.track);
+      const morningEligible = effSched === 'all-day' || effSched === 'morning';
+      if (!morningEligible && !(entry && entry.group)) return;
+      const display = morningKidDisplayName(
+        { first_name: k.first_name, last_name: k.last_name }, meta.family_name);
+      roster.push({
+        key: rosterKey,
+        family_email: meta.family_email,
+        family_name: meta.family_name,
+        first_name: first,
+        display_name: display,
+        birth_date: k.birth_date || null,
+        age: ageAsOfFall(k.birth_date, schoolYear),
+        placement_notes: meta.placement_notes,
+        allergies: '',
+        pending: meta.pending,
+        group: entry ? entry.group : '',
+        locked: false
+      });
+      rosterKeyNorm.add(normKey);
     });
 
     // One-time age-based auto-placement. Runs only on an explicit seed=1
