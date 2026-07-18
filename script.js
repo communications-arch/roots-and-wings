@@ -15444,8 +15444,7 @@
         });
 
         if (affected.length === 0) {
-          if (!confirm('Delete "' + locName + '"? No items are using this location.')) return;
-          doDeleteLocation(id, '', btn);
+          rwArmTwoStep(btn, 'delete', function () { doDeleteLocation(id, '', btn); });
           return;
         }
 
@@ -15658,21 +15657,24 @@
       });
     });
 
-    // Delete
+    // Delete (two-step inline confirm)
     personDetailCard.querySelectorAll('.sc-del-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        if (!confirm('Delete this item from the inventory?')) return;
-        var id = btn.getAttribute('data-id');
-        var cred = localStorage.getItem('rw_google_credential');
-        fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
-          method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
-        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-          .then(function (res) {
-            if (!res.ok) { alert('Error: ' + (res.data.error || 'delete failed')); return; }
-            loadSupplyClosetAndRender();
-          })
-          .catch(function (err) { alert('Network error: ' + err.message); });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        rwArmTwoStep(self, 'delete', function () {
+          var id = self.getAttribute('data-id');
+          var cred = localStorage.getItem('rw_google_credential');
+          fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + cred }
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert('Error: ' + (res.data.error || 'delete failed')); return; }
+              loadSupplyClosetAndRender();
+            })
+            .catch(function (err) { alert('Network error: ' + err.message); });
+        });
       });
     });
 
@@ -15888,19 +15890,22 @@
       .catch(function (err) { alert('Network error: ' + err.message); btn.disabled = false; btn.textContent = 'Save'; });
   }
 
-  function handleSupplyClosetDelete() {
-    if (!confirm('Delete this item from the inventory?')) return;
-    var id = this.getAttribute('data-id');
-    var cred = localStorage.getItem('rw_google_credential');
-    fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
-      method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + cred }
-    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) { alert('Error: ' + (res.data.error || 'delete failed')); return; }
-        loadSupplyClosetAndRender();
-      })
-      .catch(function (err) { alert('Network error: ' + err.message); });
+  function handleSupplyClosetDelete(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    var self = this;
+    rwArmTwoStep(self, 'delete', function () {
+      var id = self.getAttribute('data-id');
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + cred }
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert('Error: ' + (res.data.error || 'delete failed')); return; }
+          loadSupplyClosetAndRender();
+        })
+        .catch(function (err) { alert('Network error: ' + err.message); });
+    });
   }
 
   function loadSupplyClosetAndRender() {
@@ -21741,18 +21746,21 @@
       });
     });
     container.querySelectorAll('.fac-archive').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var rid = parseInt(btn.getAttribute('data-room-id'), 10);
-        if (!confirm('Archive this room? It disappears from the room picker; classes already assigned to it keep the name.')) return;
-        btn.disabled = true;
-        fetch('/api/cleaning?action=rooms&id=' + rid, { method: 'DELETE', headers: rwAuthHeaders() })
-          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-          .then(function (res) {
-            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Archive failed.'); return; }
-            scheduleBuilderState.rooms = [];
-            loadFacilitiesAdmin();
-          })
-          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        rwArmTwoStep(self, 'archive', function () {
+          var rid = parseInt(self.getAttribute('data-room-id'), 10);
+          self.disabled = true;
+          fetch('/api/cleaning?action=rooms&id=' + rid, { method: 'DELETE', headers: rwAuthHeaders() })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { self.disabled = false; alert((res.data && res.data.error) || 'Archive failed.'); return; }
+              scheduleBuilderState.rooms = [];
+              loadFacilitiesAdmin();
+            })
+            .catch(function () { self.disabled = false; alert('Network error — try again.'); });
+        });
       });
     });
     container.querySelectorAll('.fac-restore').forEach(function (btn) {
@@ -24402,27 +24410,34 @@
   // swaps the label to "Confirm <verb>?", a second click on the SAME button
   // commits, and any other click cancels it back. No popup. (Erin, 2026-07-18
   // — the common tabular pattern's delete affordance.)
-  var _calTwoStepBtn = null;
-  function calResetTwoStep() {
-    if (_calTwoStepBtn) {
-      if (_calTwoStepBtn.getAttribute('data-label')) _calTwoStepBtn.textContent = _calTwoStepBtn.getAttribute('data-label');
-      _calTwoStepBtn.removeAttribute('data-confirming');
-      _calTwoStepBtn = null;
+  // SHARED across all tabular views (extracted from the Admin Calendar pilot,
+  // Erin 2026-07-18): rwArmTwoStep(btn, verb, onConfirm) makes a destructive
+  // button confirm in place — first click → "Confirm <verb>?", a second click
+  // on the SAME button runs onConfirm, any other click cancels. No popup.
+  var _rwTwoStepBtn = null;
+  function rwTwoStepReset() {
+    if (_rwTwoStepBtn) {
+      if (_rwTwoStepBtn.getAttribute('data-2step-label') != null) _rwTwoStepBtn.textContent = _rwTwoStepBtn.getAttribute('data-2step-label');
+      _rwTwoStepBtn.removeAttribute('data-confirming');
+      _rwTwoStepBtn = null;
     }
-    document.removeEventListener('click', calTwoStepOutside, true);
+    document.removeEventListener('click', rwTwoStepOutside, true);
   }
-  function calTwoStepOutside(e) {
-    if (_calTwoStepBtn && e.target !== _calTwoStepBtn) calResetTwoStep();
+  function rwTwoStepOutside(e) {
+    if (_rwTwoStepBtn && e.target !== _rwTwoStepBtn) rwTwoStepReset();
   }
-  function calArmTwoStep(btn, verb, commitFn) {
-    if (_calTwoStepBtn === btn) { var b = btn; calResetTwoStep(); commitFn(b); return; }
-    calResetTwoStep();
-    _calTwoStepBtn = btn;
-    btn.setAttribute('data-label', btn.textContent);
+  function rwArmTwoStep(btn, verb, onConfirm) {
+    if (_rwTwoStepBtn === btn) { var b = btn; rwTwoStepReset(); onConfirm(b); return; }
+    rwTwoStepReset();
+    _rwTwoStepBtn = btn;
+    btn.setAttribute('data-2step-label', btn.textContent);
     btn.setAttribute('data-confirming', '1');
     btn.textContent = 'Confirm ' + (verb || 'delete') + '?';
-    setTimeout(function () { document.addEventListener('click', calTwoStepOutside, true); }, 0);
+    setTimeout(function () { document.addEventListener('click', rwTwoStepOutside, true); }, 0);
   }
+  // Back-compat aliases for the Admin Calendar's original call sites.
+  function calArmTwoStep(btn, verb, onConfirm) { return rwArmTwoStep(btn, verb, onConfirm); }
+  function calResetTwoStep() { return rwTwoStepReset(); }
 
   function boardCalDeleteSpecial(ev) {
     if (!ev || !ev.id) return;
