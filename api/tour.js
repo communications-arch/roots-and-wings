@@ -6634,7 +6634,9 @@ async function handleBoardGlance(req, res) {
       if (awaitingReg != null) m.push({ label: 'awaiting registration', value: awaitingReg });
       return { metrics: m, views: [
         { key: 'member-pipeline', label: 'Pipeline' },
-        { key: 'reg-links', label: 'Reg Links' }
+        { key: 'reg-links', label: 'Reg Links' },
+        { key: 'morning-classes', label: 'Morning Classes' },
+        { key: 'membership-report', label: 'Members' }
       ] };
     }
     if (key === 'treasurer') {

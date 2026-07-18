@@ -25828,6 +25828,7 @@
         b.addEventListener('click', function () {
           var v = b.getAttribute('data-bg-view');
           if (v === 'member-pipeline' && typeof showTourPipelineModal === 'function') showTourPipelineModal();
+          else if (v === 'morning-classes' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
           else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
           else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
           else if (v === 'admin-calendar' && typeof showBoardCalendarModal === 'function') showBoardCalendarModal();
