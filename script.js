@@ -113,6 +113,11 @@
   // 5. Member Portal Authentication (Google Sign-In only)
   // ──────────────────────────────────────────────
 
+  // Start every visit at the top: browsers restore the prior scroll position
+  // on reload ('auto'), which left the portal loading scrolled partway down on
+  // sign-in / refresh (Erin, 2026-07-18, desktop).
+  if ('scrollRestoration' in history) { try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ } }
+
   var loginSection = document.getElementById('loginSection');
   var dashboard = document.getElementById('dashboard');
   var logoutBtn = document.getElementById('logoutBtn');
@@ -2047,6 +2052,10 @@
   function showDashboard() {
     if (loginSection) loginSection.style.display = 'none';
     if (dashboard) dashboard.classList.add('visible');
+    // Always reveal My Family from the top. Browsers restore the prior scroll
+    // position on reload (scrollRestoration 'auto'), which landed the portal
+    // scrolled partway down on sign-in / refresh (Erin, 2026-07-18, desktop).
+    window.scrollTo(0, 0);
     wirePortalHeaderResize();
     requestAnimationFrame(syncPortalHeaderHeight);
     // Load live data, profile photos, and calendar now that user is authenticated
