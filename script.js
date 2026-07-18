@@ -29128,6 +29128,10 @@
       family_name: fam.displayName || fam.name,
       phone: fam.phone || '',
       address: fam.address || '',
+      // Alternate login emails (member_profiles.additional_emails) — only the
+      // super-user admin box below reads/writes these. Populated by an async
+      // fetch after the form renders (FAMILIES doesn't carry them).
+      additional_emails: [],
       parents: parentSeed,
       kids: (fam.kids || []).map(function (k) {
         return {
@@ -29315,6 +29319,21 @@
       html += '<label class="rd-label">Home address</label>';
       html += '<input class="rd-input" id="emiAddress" placeholder="123 Main St, Indianapolis, IN" value="' + escapeHtml(state.address) + '">';
 
+      // Super-user only: alternate login emails. Fixes the case where the
+      // primary account holder's real @rootsandwingsindy.com Workspace address
+      // doesn't match the auto-generated family login (odd name, duplicate,
+      // nickname), so sign-in can't resolve their family and they're locked
+      // out. Registering their real address here lets them log in — without
+      // renaming the family_email primary key (which is wired into ~30 tables).
+      if (isCommsUser()) {
+        html += '<div class="emi-admin-box">';
+        html += '<div class="emi-admin-title">🔑 Alternate login emails <span class="emi-admin-tag">super-user only</span></div>';
+        html += '<p class="emi-admin-note">Extra <strong>@' + escapeHtml('rootsandwingsindy.com') + '</strong> Workspace addresses this family can sign in with, in addition to their primary login (<code>' + escapeHtml(state.family_email) + '</code>). Use this when a member\'s real Workspace email doesn\'t match their auto-generated login and they can\'t get in. One per line; co-parent logins are managed automatically and don\'t need to be listed here.</p>';
+        html += '<textarea class="rd-input" id="emiAltLogins" rows="2" placeholder="jane.smith@rootsandwingsindy.com" style="font-family:inherit;">' + escapeHtml((state.additional_emails || []).join('\n')) + '</textarea>';
+        html += '<div class="emi-admin-status" id="emiAltStatus" style="display:none;"></div>';
+        html += '</div>';
+      }
+
       html += '<div class="emi-section-head"><h4>Adults in your family</h4><button type="button" class="sc-btn" id="emiAddParent">+ Add adult</button></div>';
       html += '<div id="emiParentList" class="emi-list">';
       state.parents.forEach(function (p, idx) { html += parentRowHtml(p, idx); });
@@ -29462,6 +29481,15 @@
       if (familyNameEl) state.family_name = familyNameEl.value.trim();
       if (phoneEl) state.phone = phoneEl.value;
       if (addressEl) state.address = addressEl.value;
+      // Super-user alternate-logins textarea (one email per line). Kept in
+      // state so an add-adult/add-kid re-render doesn't lose unsaved edits.
+      var altEl = document.getElementById('emiAltLogins');
+      if (altEl) {
+        state.additional_emails = String(altEl.value || '')
+          .split(/[\n,]/)
+          .map(function (s) { return s.trim().toLowerCase(); })
+          .filter(Boolean);
+      }
       var pRows = personDetailCard.querySelectorAll('#emiParentList [data-parent-idx]');
       pRows.forEach(function (row) {
         var idx = parseInt(row.getAttribute('data-parent-idx'), 10);
@@ -29728,6 +29756,9 @@
           people: people,
           kids: state.kids.map(function (k) { return { name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
         };
+        // Only the super-user admin box sends alternate logins; the server
+        // ignores this field for anyone else and keeps the stored set intact.
+        if (isCommsUser()) payload.additional_logins = state.additional_emails || [];
         return fetch('/api/tour', {
           method: 'POST',
           headers: rwAuthHeaders(true),
@@ -29790,6 +29821,23 @@
     render();
     personDetail.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+
+    // Super-user only: fetch the family's current alternate logins (not
+    // carried in the FAMILIES directory payload) and drop them into the admin
+    // box once they arrive. Best-effort — a failure just leaves it empty.
+    if (isCommsUser()) {
+      fetch('/api/tour?action=profile&family_email=' + encodeURIComponent(state.family_email), {
+        headers: rwAuthHeaders(true)
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+        var prof = data && data.profile;
+        var alts = prof && Array.isArray(prof.alt_logins) ? prof.alt_logins : [];
+        state.additional_emails = alts.map(function (e) { return String(e || '').toLowerCase(); }).filter(Boolean);
+        var altEl = document.getElementById('emiAltLogins');
+        // Only overwrite if the admin hasn't started typing (field still matches
+        // the pre-fetch empty state) — never clobber an in-progress edit.
+        if (altEl && !altEl.value.trim()) altEl.value = state.additional_emails.join('\n');
+      }).catch(function () { /* non-fatal */ });
+    }
   }
 
 })();

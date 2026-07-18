@@ -708,6 +708,18 @@ ALTER TABLE member_profiles
 CREATE INDEX IF NOT EXISTS member_profiles_additional_emails_idx
   ON member_profiles USING GIN (additional_emails);
 
+-- Super-user-managed alternate LOGIN emails, kept separate from the auto
+-- co-parent mirror above. Needed when a member's real @rootsandwingsindy.com
+-- Workspace address doesn't match their auto-generated family_email (odd name,
+-- duplicate, nickname) so sign-in can't resolve their family. These are STICKY
+-- (a routine family save never touches them), whereas additional_emails is
+-- recomputed each save as (current co-parent emails ∪ alt_logins) — so removing
+-- a co-parent still revokes their login while a super-user alternate persists.
+-- resolveFamily/canActAs only read additional_emails, which carries the union,
+-- so no auth-path change is required.
+ALTER TABLE member_profiles
+  ADD COLUMN IF NOT EXISTS alt_logins TEXT[] NOT NULL DEFAULT '{}'::text[];
+
 -- ──────────────────────────────────────────────
 -- Normalized people + kids tables. Replace the JSONB blobs on
 -- member_profiles.parents / .kids so each person and each kid is its own
