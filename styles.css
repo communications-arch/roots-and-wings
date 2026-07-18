@@ -11195,6 +11195,13 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 1rem;
   flex-shrink: 0;
 }
+/* Muted qualifier after a workspace link label (e.g. "Class Builder
+   Morning Classes") so one tool can distinguish its scope. */
+.ws-link-sub {
+  color: var(--color-text-light);
+  font-size: 0.82em;
+  font-weight: 600;
+}
 .ws-mylink-del {
   flex-shrink: 0;
 }

@@ -8575,7 +8575,13 @@
           // it; the pending pill rides this row). Special-events dates +
           // helpers live in the Admin Calendar / Roles Assignments rows the
           // VP already has on this card — no separate special-events row.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder <span class="ws-link-sub">Afternoon Classes</span><span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
+        }
+        if (role === 'Membership Director') {
+          // Membership owns the morning age-group placement builder (Erin,
+          // 2026-07-18). Membership Director passes the morning_builder
+          // capability by default; server re-checks (morningBuilderAccess).
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">📋</span>Class Builder <span class="ws-link-sub">Morning Classes</span></button></li>';
         }
         // Facilities — rooms admin lives HERE, not inside the Class
         // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).
