@@ -24064,7 +24064,10 @@
             var seDisplayDate = e.event_date || '';
             var seCanDelete = (!r.autoDate && !r.seRow.seeded);
             var seEditingThis = _boardCalState.editingRow === rowKey;
-            var seToggleChip = '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Propose' : 'Approve') + '</button>';
+            // Once approved there's no "Propose" toggle — an approved event is
+            // just editable (Erin, 2026-07-18). Only proposed events show Approve.
+            var seToggleChip = seApproved ? ''
+              : '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="">Approve</button>';
             var seDelChip = seCanDelete
               ? '<button type="button" class="sc-btn sc-btn-del board-cal-del-se" data-se-id="' + r.seRow.id + '" data-name="' + escapeAttr(r.seRow.name || '') + '">Delete</button>' : '';
             var seEditChip = '<button type="button" class="sc-btn board-cal-edit-btn' + (seEditingThis ? ' is-editing' : '') + '" data-edit-kind="special"'
