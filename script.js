@@ -1541,6 +1541,10 @@
     // reliable signal for imported field trips, whose titles are just
     // the destination ("First Thursday at Newfields").
     if (ev && ev.boardType === 'field_trip') return 'fieldtrip';
+    // General one-off board events carry event_type 'general' — an explicit
+    // board choice, so it wins over the title keyword rules below (a general
+    // event titled "... meeting" is still General, not a Meeting).
+    if (ev && ev.boardType === 'general') return 'general';
     var s = String((ev && ev.summary) || '');
     if (/deadline/i.test(s)) return 'deadline';
     if (/field trip/i.test(s)) return 'fieldtrip';
@@ -1715,6 +1719,7 @@
 
       var color = GCAL_EVENT_COLORS[ev.colorId]
         || (ev.boardType === 'field_trip' ? '#3F51B5' : null) // Blueberry — typed field trips
+        || (ev.boardType === 'general' ? '#039BE5' : null) // Peacock — typed general events
         || matchTitleColor(ev.summary)
         || GCAL_SOURCE_COLORS[ev.sourceCalendarId]
         || GCAL_DEFAULT_COLOR;
