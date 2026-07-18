@@ -24040,7 +24040,7 @@
             h += '<button type="button" class="sc-btn board-cal-edit-btn' + (seEditingThis ? ' is-editing' : '') + '" data-edit-kind="special"'
               + ' data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '"'
               + (r.autoDate ? ' data-auto="1"' : '') + '>' + (seEditingThis ? 'Editing…' : 'Edit') + '</button>';
-            h += '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Mark proposed' : 'Approve') + '</button>';
+            h += '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Propose' : 'Approve') + '</button>';
             if (seCanDelete) {
               h += '<button type="button" class="sc-btn sc-btn-del board-cal-del-se" data-se-id="' + r.seRow.id + '" data-name="' + escapeAttr(r.seRow.name || '') + '">Delete</button>';
             }
