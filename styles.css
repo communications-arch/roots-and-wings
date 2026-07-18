@@ -14628,6 +14628,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 .coop-cal-actions .btn { vertical-align: middle; }
 .coop-cal-actions .btn + .btn { margin-left: 6px; }
+/* Keep a row's action chips on ONE line; the text columns (Event, Notes)
+   wrap instead when space is tight (Erin, 2026-07-18). */
+.coop-cal-table .ws-srt-actions { flex-wrap: nowrap; }
+.coop-cal-table .coop-cal-actions { width: 1%; }
 .coop-cal-add-row {
   margin-top: 12px;
   display: flex;
