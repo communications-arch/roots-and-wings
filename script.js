@@ -2211,9 +2211,15 @@
     el.addEventListener('click', function (e) {
       var mode = this.getAttribute('data-view');
       showViewMode(mode);
-      // For info-view links, let the browser scroll to the anchor — don't
-      // preventDefault. For Workspace, #page-workspace is the natural anchor
-      // target so scrolling there is fine too.
+      // Both view-mode pills land at the TOP of the page — My Family's top is
+      // the greeting, and the Workspace panel renders from the top too. The
+      // generic anchor handler measured #page-workspace while it was still
+      // display:none (garbage target) and raced #myFamily, so neither pill
+      // reliably reached the top. Own the scroll here and preventDefault so
+      // this wins over the anchor handler (Erin, 2026-07-18).
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
       // Close the hamburger menu if it's open.
       var toggle = document.querySelector('.nav-toggle');
       var links = document.querySelector('.nav-links');
