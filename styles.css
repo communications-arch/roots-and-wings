@@ -14708,6 +14708,48 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   font-weight: 600;
   vertical-align: middle;
 }
+/* Smaller, quieter variant shown inline under an auto date (Field Day / Ice
+   Cream) instead of a button in the actions column. */
+.board-cal-auto-inline {
+  font-size: 0.66rem;
+  padding: 0 6px;
+  opacity: 0.85;
+}
+/* Shared row-actions "Manage ▾" dropdown for the co-op calendar table.
+   Fixed-positioned (JS sets top/left) so the scrollable table can't clip it. */
+.cal-actions-menu {
+  position: fixed;
+  z-index: 4000;
+  min-width: 150px;
+  background: var(--color-white, #fff);
+  border: 1px solid var(--color-border, #e2ddd3);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.cal-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 8px 12px;
+  font-size: 0.86rem;
+  font-family: inherit;
+  color: var(--color-text, #2e2a26);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cal-menu-item:hover,
+.cal-menu-item:focus {
+  background: var(--color-bg-soft, #f5f2ec);
+  outline: none;
+}
+.cal-menu-danger { color: #c0392b; }
+.cal-menu-danger:hover,
+.cal-menu-danger:focus { background: rgba(192, 57, 43, 0.10); }
 .board-cal-role {
   display: block;
   margin-top: 2px;
