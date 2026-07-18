@@ -23963,8 +23963,6 @@
             + ' <span class="board-cal-se-unset">→</span> '
             + '<input type="date" class="cl-input board-cal-sess-end" value="' + escapeHtml(e.end_date || '') + '" aria-label="Session ' + r.sessNum + ' end">'
             + '</td>';
-        } else if (r.kind === 'special' && !r.autoDate && canSE) {
-          h += '<td style="white-space:nowrap;"><input type="date" class="cl-input board-cal-se-date" data-se-id="' + r.seRow.id + '" value="' + escapeHtml(e.event_date || '') + '"></td>';
         } else {
           h += '<td style="white-space:nowrap;">' + (e.event_date
             ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
@@ -24019,13 +24017,19 @@
           }
         } else if (r.kind === 'special') {
           if (canSE && r.seRow) {
+            // Unified with the other event types (Erin, 2026-07-18): a single
+            // Edit button opens the same form (date + times + location + end
+            // date + notes) instead of the old inline date input + Save +
+            // Details…, plus a one-click Approve/Mark-proposed toggle that
+            // special events carry and the others don't. Field Day / Ice Cream
+            // (auto date) get the same Edit + Approve — their date stays
+            // session-derived (read-only in the form), everything else edits.
+            var seApproved = r.seRow.date_status === 'approved';
+            var seDisplayDate = e.event_date || '';
             h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
-            if (!r.autoDate) h += '<button type="button" class="btn btn-primary btn-sm board-cal-se-save" data-se-id="' + r.seRow.id + '">Save</button> ';
-            else h += '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span> ';
-            h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '">' + (r.seRow.date_status === 'approved' ? 'Mark proposed' : 'Approve') + '</button>';
-            // Times / location / notes / end date (Erin, 2026-07-17). Auto
-            // events (Ice Cream / Field Day) keep only their calendar date.
-            if (!r.autoDate) h += ' <button type="button" class="btn btn-outline-dark btn-sm board-cal-se-details" data-se-id="' + r.seRow.id + '">Details…</button>';
+            h += '<button type="button" class="btn btn-outline-dark btn-sm board-cal-se-edit" data-se-id="' + r.seRow.id + '" data-date="' + escapeHtml(seDisplayDate) + '"' + (r.autoDate ? ' data-auto="1"' : '') + '>Edit</button> ';
+            h += '<button type="button" class="btn ' + (seApproved ? 'btn-outline-dark' : 'btn-primary') + ' btn-sm board-cal-se-toggle" data-se-id="' + r.seRow.id + '" data-date="' + escapeHtml(seDisplayDate) + '">' + (seApproved ? 'Mark proposed' : 'Approve') + '</button>';
+            if (r.autoDate) h += ' <span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto date</span>';
             // Custom (non-seeded) special events can be removed; the
             // standard nine would just re-seed, so no Delete for them.
             if (!r.autoDate && !r.seRow.seeded) {
@@ -24124,6 +24128,74 @@
         loadBoardCalendar();
       })
       .catch(function (err) { alert('Network error: ' + ((err && err.message) || 'unknown')); });
+  }
+
+  // Unified special-event Edit form (Erin, 2026-07-18). Renders in the SAME
+  // inline form area and styling as the general/one-off event form so all
+  // calendar edits look and behave alike. Covers date (unless the date is
+  // auto-derived from the session calendar — Field Day / Ice Cream), end date,
+  // times, location, and notes. Approval stays a one-click row button.
+  function boardCalShowSpecialForm(ev, auto, displayDate) {
+    var wrap = document.getElementById('board-cal-form-wrap');
+    if (!wrap || !ev) return;
+    boardCalShowMsg('');
+    var h = '<div class="board-cal-form">';
+    h += '<h4 style="margin:0 0 10px;">🎉 Edit special event</h4>';
+    h += '<div class="board-cal-field"><label>Event name<br><input type="text" class="cl-input" value="' + escapeAttr(ev.name || '') + '" readonly tabindex="-1" title="Special-event names are fixed."></label></div>';
+    if (auto) {
+      h += '<div class="board-cal-field"><label>Date<br><input type="date" class="cl-input" value="' + escapeAttr(displayDate || '') + '" readonly tabindex="-1"></label>';
+      h += '<p class="board-cal-legend" style="margin:4px 0 0;">This date comes from the session calendar and updates automatically. Times, place, and notes below are still editable.</p></div>';
+      h += '<div class="board-cal-field"><label>End date <span class="board-cal-opt">(optional, for a multi-day event)</span><br><input type="date" id="se-edit-edate" class="cl-input" value="' + escapeAttr(ev.end_date || '') + '"></label></div>';
+    } else {
+      h += '<div class="board-cal-field board-cal-fields-row"><label>Date<br><input type="date" id="se-edit-date" class="cl-input" value="' + escapeAttr(displayDate || '') + '"></label>';
+      h += '<label>End date <span class="board-cal-opt">(optional, for a multi-day event)</span><br><input type="date" id="se-edit-edate" class="cl-input" value="' + escapeAttr(ev.end_date || '') + '"></label></div>';
+    }
+    h += '<div class="board-cal-field board-cal-fields-row">';
+    h += '<label>Start time <span class="board-cal-opt">(optional)</span><br><input type="time" id="se-edit-stime" class="cl-input" value="' + escapeAttr(String(ev.start_time || '').slice(0, 5)) + '"></label>';
+    h += '<label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="se-edit-etime" class="cl-input" value="' + escapeAttr(String(ev.end_time || '').slice(0, 5)) + '"></label>';
+    h += '</div>';
+    h += '<div class="board-cal-field"><label>Location <span class="board-cal-opt">(optional)</span><br><input type="text" id="se-edit-loc" class="cl-input" maxlength="200" value="' + escapeAttr(ev.location || '') + '" placeholder="e.g. Fellowship Hall"></label></div>';
+    h += '<div class="board-cal-field"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="se-edit-note" class="cl-input" maxlength="1000" rows="2" placeholder="Details for this event">' + escapeHtml(ev.notes || '') + '</textarea></label>';
+    h += '<div class="board-cal-note-vis is-public">⚠ Shown to members — special-event times, place, and notes appear on the co-op calendar everyone sees.</div></div>';
+    h += '<div class="coop-cal-save-bar">';
+    h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
+    h += '<button id="se-edit-save" class="btn btn-primary btn-sm" type="button" data-se-id="' + ev.id + '"' + (auto ? ' data-auto="1"' : '') + '>Save event</button>';
+    h += '</div></div>';
+    wrap.innerHTML = h;
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.getElementById('board-cal-form-cancel').addEventListener('click', function () { wrap.innerHTML = ''; boardCalShowMsg(''); });
+    document.getElementById('se-edit-save').addEventListener('click', boardCalSaveSpecialEdit);
+  }
+
+  // Save the unified special-event Edit form → special-event-details (which now
+  // also carries the date for non-auto events; auto events send none so their
+  // session-derived date is preserved). Approval status is untouched.
+  function boardCalSaveSpecialEdit() {
+    var btn = document.getElementById('se-edit-save');
+    if (!btn) return;
+    var auto = btn.getAttribute('data-auto') === '1';
+    var payload = {
+      kind: 'special-event-details',
+      event_id: parseInt(btn.getAttribute('data-se-id'), 10),
+      start_time: (document.getElementById('se-edit-stime') || {}).value || '',
+      end_time: (document.getElementById('se-edit-etime') || {}).value || '',
+      end_date: (document.getElementById('se-edit-edate') || {}).value || '',
+      location: ((document.getElementById('se-edit-loc') || {}).value || '').trim(),
+      notes: ((document.getElementById('se-edit-note') || {}).value || '').trim()
+    };
+    if (!auto) payload.event_date = (document.getElementById('se-edit-date') || {}).value || '';
+    if (payload.end_time && !payload.start_time) { boardCalShowMsg('An end time needs a start time.'); return; }
+    if (payload.start_time && payload.end_time && !payload.end_date && payload.end_time <= payload.start_time) { boardCalShowMsg('End time must be after the start time.'); return; }
+    if (payload.event_date && payload.end_date && payload.end_date < payload.event_date) { boardCalShowMsg('End date must be on or after the date.'); return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    boardCalShowMsg('');
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok) { boardCalShowMsg((r.data && r.data.error) || 'Save failed.'); btn.disabled = false; btn.textContent = 'Save event'; return; }
+        loadBoardCalendar();
+      })
+      .catch(function (err) { boardCalShowMsg('Network error: ' + (err.message || 'unknown')); btn.disabled = false; btn.textContent = 'Save event'; });
   }
 
   // Edit a special event's times / location / notes / end date (Erin,
@@ -24267,31 +24339,28 @@
       });
     });
 
-    // Special-event date save + Proposed↔Approved toggle (SEL/VP only —
-    // the buttons only render for them).
+    // Special-event Edit + Proposed↔Approved toggle (SEL/VP only — the
+    // buttons only render for them). The date now lives in the Edit form,
+    // so the row carries the current display date on data-date instead of an
+    // inline input — the Approve toggle uses it to persist a still-suggested
+    // date when it flips status.
     function seRowBits(btn) {
       var id = parseInt(btn.getAttribute('data-se-id'), 10);
-      var tr = btn.closest('tr');
-      var dateInp = tr && tr.querySelector('.board-cal-se-date');
+      var dataDate = btn.getAttribute('data-date');
       var ev = (_boardCalState.specialEvents || []).filter(function (x) { return x.id === id; })[0] || {};
-      return { id: id, date: dateInp ? dateInp.value : (ev.event_date || ''), ev: ev };
+      return { id: id, date: (dataDate != null ? dataDate : (ev.event_date || '')), ev: ev };
     }
-    body.querySelectorAll('.board-cal-se-save').forEach(function (btn) {
+    body.querySelectorAll('.board-cal-se-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var b = seRowBits(this);
-        boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status || 'proposed');
+        if (!b.ev || !b.ev.id) return;
+        boardCalShowSpecialForm(b.ev, this.getAttribute('data-auto') === '1', b.date);
       });
     });
     body.querySelectorAll('.board-cal-se-toggle').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var b = seRowBits(this);
         boardCalSaveSpecialEvent(b.id, b.date, b.ev.date_status === 'approved' ? 'proposed' : 'approved');
-      });
-    });
-    body.querySelectorAll('.board-cal-se-details').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var b = seRowBits(this);
-        if (typeof showSpecialEventDetailsModal === 'function') showSpecialEventDetailsModal(b.ev);
       });
     });
     body.querySelectorAll('.board-cal-se-delete').forEach(function (btn) {

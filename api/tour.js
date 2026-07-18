@@ -5496,9 +5496,12 @@ async function handleSpecialEventDate(body, req, res) {
 }
 
 // POST kind='special-event-details' — set a special event's time/location/
-// notes/end-date without touching its date or approval status (Erin,
-// 2026-07-17). Separate from special-event-date so an inline date save
-// never clobbers these and vice versa.
+// notes/end-date, and (as of the unified Edit form, 2026-07-18) optionally
+// its date. Approval status is never touched here — that stays a one-click
+// Approve/Mark-proposed button on the calendar row. A blank event_date leaves
+// the stored date untouched (via COALESCE) so editing an AUTO event (Field
+// Day / Ice Cream, whose date comes from the session calendar) never clobbers
+// the derived date — the form simply doesn't send one for those.
 async function handleSpecialEventDetails(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
   if (!auth) return;
@@ -5508,9 +5511,12 @@ async function handleSpecialEventDetails(body, req, res) {
   const startTime = String(body.start_time || '').trim();
   const endTime = String(body.end_time || '').trim();
   const endDate = String(body.end_date || '').trim();
+  const eventDate = String(body.event_date || '').trim();
   if (startTime && !timeRe.test(startTime)) return res.status(400).json({ error: 'Start time must be HH:MM.' });
   if (endTime && !timeRe.test(endTime)) return res.status(400).json({ error: 'End time must be HH:MM.' });
   if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return res.status(400).json({ error: 'End date must be YYYY-MM-DD.' });
+  if (eventDate && !/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) return res.status(400).json({ error: 'Date must be YYYY-MM-DD.' });
+  if (endDate && eventDate && endDate < eventDate) return res.status(400).json({ error: 'End date must be on or after the date.' });
   const location = String(body.location || '').trim().slice(0, 200);
   const notes = String(body.notes || '').trim().slice(0, 1000);
   try {
@@ -5519,6 +5525,7 @@ async function handleSpecialEventDetails(body, req, res) {
       UPDATE special_events
       SET start_time = ${startTime || null}, end_time = ${endTime || null},
           end_date = ${endDate || null}, location = ${location}, notes = ${notes},
+          event_date = COALESCE(${eventDate || null}, event_date),
           updated_by = ${auth.realEmail}, updated_at = NOW()
       WHERE id = ${eventId} RETURNING id
     `;
