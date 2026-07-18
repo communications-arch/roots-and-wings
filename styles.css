@@ -14742,10 +14742,12 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 /* Leading Auto column + All-view Type column keep to their content width. */
 .coop-cal-table .board-cal-col-auto { width: 1%; white-space: nowrap; text-align: center; }
 .coop-cal-table .board-cal-col-type { white-space: nowrap; color: var(--color-text-light); font-size: 0.86em; }
-/* Sortable headers (shared grid look). */
+/* Sortable headers (shared grid look). The thead is purple with white text,
+   so indicate hover/sort with a background tint + underline — NOT a color
+   change, which would vanish into the purple (Erin, 2026-07-18). */
 .coop-cal-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
-.coop-cal-th-sort:hover { color: var(--color-primary, #523A79); }
-.coop-cal-th-sort.is-sorted { color: var(--color-primary, #523A79); }
+.coop-cal-th-sort:hover { background: rgba(255, 255, 255, 0.14); }
+.coop-cal-th-sort.is-sorted { text-decoration: underline; text-underline-offset: 3px; }
 .coop-cal-sort-arrow { font-size: 0.8em; }
 /* Shared row-actions "Manage ▾" dropdown for the co-op calendar table.
    Fixed-positioned (JS sets top/left) so the scrollable table can't clip it. */
