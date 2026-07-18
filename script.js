@@ -1547,6 +1547,9 @@
     // reliable signal for imported field trips, whose titles are just
     // the destination ("First Thursday at Newfields").
     if (ev && ev.boardType === 'field_trip') return 'fieldtrip';
+    // Approved special events publish to the co-op calendar tagged 'special'
+    // (server board_type lookup), so they land under the Special Events pill.
+    if (ev && ev.boardType === 'special') return 'special';
     // General one-off board events carry event_type 'general' — an explicit
     // board choice, so it wins over the title keyword rules below (a general
     // event titled "... meeting" is still General, not a Meeting).
@@ -1729,6 +1732,7 @@
 
       var color = GCAL_EVENT_COLORS[ev.colorId]
         || (ev.boardType === 'field_trip' ? '#3F51B5' : null) // Blueberry — typed field trips
+        || (ev.boardType === 'special' ? '#D81B60' : null) // Raspberry — typed special events
         || (ev.boardType === 'general' ? '#039BE5' : null) // Peacock — typed general events
         || matchTitleColor(ev.summary)
         || GCAL_SOURCE_COLORS[ev.sourceCalendarId]

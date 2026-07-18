@@ -5488,9 +5488,13 @@ async function handleSpecialEventDate(body, req, res) {
       UPDATE special_events
       SET event_date = ${eventDate || null}, date_status = ${status},
           updated_by = ${auth.realEmail}, updated_at = NOW()
-      WHERE id = ${eventId} RETURNING id
+      WHERE id = ${eventId}
+      RETURNING id, name, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
     `;
     if (!upd.length) return res.status(404).json({ error: 'Event not found' });
+    // Approve → publish to the co-op Google Calendar; propose → remove it.
+    try { await syncSpecialEventToGoogleCalendar(sql, upd[0]); }
+    catch (gErr) { console.error('special-event gcal sync (non-fatal):', (gErr && gErr.message) || gErr); }
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('special-event-date error:', err);
@@ -5530,9 +5534,14 @@ async function handleSpecialEventDetails(body, req, res) {
           end_date = ${endDate || null}, location = ${location}, notes = ${notes},
           event_date = COALESCE(${eventDate || null}, event_date),
           updated_by = ${auth.realEmail}, updated_at = NOW()
-      WHERE id = ${eventId} RETURNING id
+      WHERE id = ${eventId}
+      RETURNING id, name, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
     `;
     if (!upd.length) return res.status(404).json({ error: 'Event not found' });
+    // Keep the published Google event (if approved) in step with edited
+    // times / location / date.
+    try { await syncSpecialEventToGoogleCalendar(sql, upd[0]); }
+    catch (gErr) { console.error('special-event gcal sync (non-fatal):', (gErr && gErr.message) || gErr); }
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('special-event-details error:', err);
@@ -5579,10 +5588,15 @@ async function handleSpecialEventDelete(body, req, res) {
   if (!Number.isInteger(eventId) || eventId <= 0) return res.status(400).json({ error: 'event_id required' });
   try {
     const sql = getSql();
-    const rows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    const rows = await sql`SELECT name, gcal_event_id FROM special_events WHERE id = ${eventId}`;
     if (!rows.length) return res.status(404).json({ error: 'Event not found' });
     if (SPECIAL_EVENT_SEED.indexOf(rows[0].name) !== -1) {
       return res.status(400).json({ error: '“' + rows[0].name + '” is a standard event and can’t be deleted.' });
+    }
+    // Pull its published Google event too (if any).
+    if (process.env.VERCEL_ENV === 'production' && rows[0].gcal_event_id) {
+      try { await getCalendarWriteClient().events.delete({ calendarId: RW_GCAL_ID, eventId: rows[0].gcal_event_id }); }
+      catch (gErr) { console.error('special-event gcal delete (non-fatal):', (gErr && gErr.message) || gErr); }
     }
     await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
     await sql`DELETE FROM special_events WHERE id = ${eventId}`;
@@ -6085,6 +6099,42 @@ async function syncEventToGoogleCalendar(sql, row) {
     await sql`UPDATE board_calendar_events SET gcal_event_id = ${newId} WHERE id = ${row.id}`;
   }
   return newId;
+}
+
+// Publish (or remove) an APPROVED special event on the co-op Google Calendar,
+// exactly like a field trip (Erin, 2026-07-18). Only an approved event with a
+// date is published; a proposed/undated/deleted event is removed. Gated to
+// production — dev + prod share the ONE real Google Calendar, so an ungated
+// dev sync would double-publish. The row must carry: id, name, date_status,
+// event_date, end_date, start_time, end_time, location, gcal_event_id.
+async function syncSpecialEventToGoogleCalendar(sql, seRow) {
+  if (process.env.VERCEL_ENV !== 'production') return;
+  if (!seRow || !seRow.id) return;
+  const cal = getCalendarWriteClient();
+  const gid = String(seRow.gcal_event_id || '');
+  const shouldPublish = seRow.date_status === 'approved' && !!calDateStr(seRow.event_date);
+  if (!shouldPublish) {
+    if (gid) {
+      try { await cal.events.delete({ calendarId: RW_GCAL_ID, eventId: gid }); } catch (e) { /* already gone */ }
+      await sql`UPDATE special_events SET gcal_event_id = '' WHERE id = ${seRow.id}`;
+    }
+    return;
+  }
+  // Reuse the field-trip body builder (note intentionally blank — the Notes
+  // field was removed board-wide).
+  const body = gcalBodyFromEvent({
+    title: seRow.name, event_date: seRow.event_date, end_date: seRow.end_date,
+    start_time: seRow.start_time, end_time: seRow.end_time, location: seRow.location, note: ''
+  });
+  if (gid) {
+    try { await cal.events.patch({ calendarId: RW_GCAL_ID, eventId: gid, requestBody: body }); return; }
+    catch (e) { /* linked event vanished — recreate below */ }
+  }
+  const ins = await cal.events.insert({ calendarId: RW_GCAL_ID, requestBody: body });
+  const newId = (ins.data && ins.data.id) || '';
+  if (newId && newId !== gid) {
+    await sql`UPDATE special_events SET gcal_event_id = ${newId} WHERE id = ${seRow.id}`;
+  }
 }
 
 // Co-op sessions publish as WEEKLY RECURRING co-op days, 9:40 AM –

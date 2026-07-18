@@ -113,6 +113,12 @@ module.exports = async function handler(req, res) {
         SELECT gcal_event_id, event_type FROM board_calendar_events
         WHERE gcal_event_id <> ''`;
       typed.forEach(function (r) { boardTypeByGid[r.gcal_event_id] = r.event_type || ''; });
+      // Approved special events publish to the SAME co-op calendar as field
+      // trips (Erin, 2026-07-18); tag them 'special' so the client files them
+      // under the Special Events pill rather than plain Co-op Days.
+      var se = await sql`
+        SELECT gcal_event_id FROM special_events WHERE gcal_event_id <> ''`;
+      se.forEach(function (r) { boardTypeByGid[r.gcal_event_id] = 'special'; });
     } catch (e) {
       // Feed still works untyped if the DB hiccups.
     }

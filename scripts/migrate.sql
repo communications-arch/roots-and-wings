@@ -1845,3 +1845,8 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS start_time TIME;
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS end_time   TIME;
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS location   TEXT NOT NULL DEFAULT '';
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS end_date   DATE;
+-- gcal_event_id links an APPROVED special event to its Google Calendar event
+-- (same mechanism as board_calendar_events field trips). Approving publishes
+-- to the co-op calendar; un-approving or deleting removes it (Erin, 2026-07-18:
+-- "make Special Events work the same as Field Trips and on that same calendar").
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS gcal_event_id TEXT NOT NULL DEFAULT '';
