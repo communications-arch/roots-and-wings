@@ -14719,7 +14719,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
    Fixed-positioned (JS sets top/left) so the scrollable table can't clip it. */
 .cal-actions-menu {
   position: fixed;
-  z-index: 4000;
+  /* Must clear the calendar modal overlay (.person-detail-overlay @ 9999),
+     since the menu is appended to <body> to escape the table's clipping. */
+  z-index: 10001;
   min-width: 150px;
   background: var(--color-white, #fff);
   border: 1px solid var(--color-border, #e2ddd3);

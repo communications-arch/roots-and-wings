@@ -24294,7 +24294,10 @@
   // Build + open the "Manage" dropdown for a row's actions. Fixed-positioned
   // (appended to <body>) so the scrollable calendar table can't clip it.
   function openCalActionsMenu(trigger) {
-    var ownerKey = trigger.getAttribute('data-se-id') || trigger.getAttribute('data-id') || '';
+    // Namespace the key by kind so a special event and a general event that
+    // happen to share a numeric id don't toggle each other's menu.
+    var ownerKey = (trigger.getAttribute('data-menu-kind') || '') + ':'
+      + (trigger.getAttribute('data-se-id') || trigger.getAttribute('data-id') || '');
     var open = document.getElementById('cal-actions-menu');
     // Second click on the same trigger closes it.
     if (open && open.getAttribute('data-owner') === ownerKey) { boardCalCloseActionsMenu(); return; }
