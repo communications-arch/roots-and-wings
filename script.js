@@ -24301,8 +24301,10 @@
     if (m) m.parentNode.removeChild(m);
     document.removeEventListener('click', boardCalCloseActionsMenu);
     window.removeEventListener('resize', boardCalCloseActionsMenu);
-    var tw = document.querySelector('.coop-cal-table-wrap');
-    if (tw) tw.removeEventListener('scroll', boardCalCloseActionsMenu);
+    // Capture-phase scroll: closes the menu when ANY container scrolls (the
+    // modal body on mobile, the table wrap, the page), so a fixed-positioned
+    // menu never floats detached from its button.
+    document.removeEventListener('scroll', boardCalCloseActionsMenu, true);
     var opened = document.querySelector('.cal-actions-trigger[aria-expanded="true"]');
     if (opened) opened.setAttribute('aria-expanded', 'false');
   }
@@ -24396,12 +24398,13 @@
     menu.style.top = top + 'px';
     trigger.setAttribute('aria-expanded', 'true');
 
-    // Defer so the click that opened the menu doesn't immediately close it.
+    // Defer so the click/tap that opened the menu doesn't immediately close it.
     setTimeout(function () {
       document.addEventListener('click', boardCalCloseActionsMenu);
       window.addEventListener('resize', boardCalCloseActionsMenu);
-      var tw = document.querySelector('.coop-cal-table-wrap');
-      if (tw) tw.addEventListener('scroll', boardCalCloseActionsMenu);
+      // Capture-phase catches scroll from any container (modal body on mobile,
+      // table wrap, page) since scroll events don't bubble.
+      document.addEventListener('scroll', boardCalCloseActionsMenu, true);
     }, 0);
   }
 
