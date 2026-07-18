@@ -4568,7 +4568,10 @@ async function morningBuilderAccess(req, res) {
   // unlocks kid placement + seed. Both Permissions-table editable
   // (defaults: view = Membership + VP; place = Membership only).
   const canPlace = await hasCapability(auth.email, 'morning_builder_place');
-  const canView = canPlace || await hasCapability(auth.email, 'morning_builder');
+  // Any board member may VIEW the builder read-only (Erin, 2026-07-18: board
+  // tools are reachable board-wide; the workspace/To-Do stays role-focused).
+  // Kid placement + seed stay gated to morning_builder_place (Membership).
+  const canView = canPlace || await hasCapability(auth.email, 'morning_builder') || await isBoardMember(auth.email);
   if (!canView) {
     const expected = await getRoleHolderEmail('Membership Director');
     res.status(403).json({
