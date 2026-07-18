@@ -14655,6 +14655,19 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: var(--radius-md);
   background: var(--color-cream, #fbf8f2);
 }
+/* In-place edit panel: a full-width row beneath the row being edited. The
+   form sits flush inside the cell (its own border/bg provides the framing). */
+.board-cal-edit-row > td {
+  padding: 0 6px 10px;
+  background: var(--color-cream, #fbf8f2);
+}
+.board-cal-edit-row .board-cal-form { margin: 0; }
+/* The row's Edit chip shows an active state while its panel is open. */
+.sc-btn.board-cal-edit-btn.is-editing {
+  background: var(--color-primary, #523A79);
+  border-color: var(--color-primary, #523A79);
+  color: #fff;
+}
 .board-cal-field { margin-bottom: 10px; }
 .board-cal-field label { font-weight: 600; font-size: 0.9rem; }
 .board-cal-field input,

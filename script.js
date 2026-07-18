@@ -23789,6 +23789,10 @@
   function loadBoardCalendar() {
     var body = document.getElementById('board-cal-body');
     if (!body) return;
+    // A full reload (after any save/approve/delete) closes any open inline
+    // edit/add form so it doesn't re-open on the fresh render.
+    _boardCalState.editingRow = null;
+    _boardCalState.editingRowData = null;
     body.innerHTML = '<p class="ws-empty">Loading calendar…</p>';
     fetch('/api/tour?calendar=1', { headers: rwAuthHeaders() })
       .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
@@ -23932,7 +23936,10 @@
     h += '</div>';
 
     h += '<div class="coop-cal-msg cls-error" id="board-cal-msg" style="display:none;"></div>';
-    h += '<div id="board-cal-form-wrap"></div>';
+    // The Add-event form mounts here at the top (creating a brand-new row has
+    // no row to attach to). EDITS mount inline under their own row instead —
+    // see the per-row edit-row appended after each </tr> below.
+    if (_boardCalState.editingRow === 'new') h += '<div id="board-cal-form-wrap"></div>';
 
     if (visibleRows.length === 0) {
       h += '<p class="ws-empty" style="margin-top:12px;">Nothing here yet for ' + escapeHtml(year) + '.</p>';
@@ -23951,6 +23958,10 @@
       visibleRows.forEach(function (r) {
         var e = r.ev;
         var sessEditable = r.kind === 'session' && canEditSessions;
+        // Stable key so the inline Edit panel can attach to this exact row.
+        var rowKey = (r.kind === 'session') ? ('session:' + r.sessNum)
+          : (r.kind === 'special' && r.seRow) ? ('special:' + r.seRow.id)
+          : (!e.derived && e.id != null) ? ('event:' + e.id) : '';
         h += '<tr' + (e.derived ? ' class="board-cal-derived-row"' : '') + (sessEditable ? ' data-sess-num="' + r.sessNum + '"' : '') + '>';
         // Date cell — plain text for every row now; sessions (like special
         // events) edit their dates through the Manage ▾ → Edit form.
@@ -24001,40 +24012,39 @@
         // + Edit form as the other rows (Erin, 2026-07-18).
         if (r.kind === 'session') {
           if (sessEditable) {
-            var sessApprovable = (e.dates_status === 'proposed' && e.event_date) ? '1' : '';
-            h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
-            h += '<button type="button" class="btn btn-outline-dark btn-sm cal-actions-trigger" data-menu-kind="session"'
+            var sessEditingThis = _boardCalState.editingRow === rowKey;
+            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
+            h += '<button type="button" class="sc-btn board-cal-edit-btn' + (sessEditingThis ? ' is-editing' : '') + '" data-edit-kind="session"'
               + ' data-sess-num="' + r.sessNum + '"'
               + ' data-name="' + escapeAttr(e.title || '') + '"'
               + ' data-start="' + escapeAttr(e.event_date || '') + '"'
-              + ' data-end="' + escapeAttr(e.end_date || '') + '"'
-              + ' data-approvable="' + sessApprovable + '"'
-              + ' aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
-            h += '</td>';
+              + ' data-end="' + escapeAttr(e.end_date || '') + '">' + (sessEditingThis ? 'Editing…' : 'Edit') + '</button>';
+            if (e.dates_status === 'proposed' && e.event_date) {
+              h += '<button type="button" class="sc-btn board-cal-approve-sess" data-sess-num="' + r.sessNum + '">Approve</button>';
+            }
+            h += '</div></td>';
           } else {
             h += '<td></td>';
           }
         } else if (r.kind === 'special') {
           if (canSE && r.seRow) {
-            // Unified with the other event types (Erin, 2026-07-18): a single
-            // Edit button opens the same form (date + times + location + end
-            // date + notes) instead of the old inline date input + Save +
-            // Details…, plus a one-click Approve/Mark-proposed toggle that
-            // special events carry and the others don't. Field Day / Ice Cream
-            // (auto date) get the same Edit + Approve — their date stays
-            // session-derived (read-only in the form), everything else edits.
+            // Inline chips (Erin, 2026-07-18): Edit opens an in-place panel
+            // beneath the row; Approve/Mark-proposed is one click; Delete is a
+            // two-step inline confirm. Field Day / Ice Cream (auto date) get
+            // Edit + Approve — their date stays session-derived, read-only.
             var seApproved = r.seRow.date_status === 'approved';
             var seDisplayDate = e.event_date || '';
-            // One consolidated "Manage" menu instead of a row of buttons
-            // (Erin, 2026-07-18: the table was too busy). Data rides on the
-            // trigger; the menu builds Edit / Approve·Propose / Delete from it.
-            var seCanDelete = (!r.autoDate && !r.seRow.seeded) ? '1' : '';
-            h += '<td class="coop-cal-actions" style="white-space:nowrap;">';
-            h += '<button type="button" class="btn btn-outline-dark btn-sm cal-actions-trigger" data-menu-kind="special"'
-              + ' data-se-id="' + r.seRow.id + '" data-date="' + escapeHtml(seDisplayDate) + '"'
-              + ' data-approved="' + (seApproved ? '1' : '') + '" data-can-delete="' + seCanDelete + '"'
-              + (r.autoDate ? ' data-auto="1"' : '') + ' aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
-            h += '</td>';
+            var seCanDelete = (!r.autoDate && !r.seRow.seeded);
+            var seEditingThis = _boardCalState.editingRow === rowKey;
+            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
+            h += '<button type="button" class="sc-btn board-cal-edit-btn' + (seEditingThis ? ' is-editing' : '') + '" data-edit-kind="special"'
+              + ' data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '"'
+              + (r.autoDate ? ' data-auto="1"' : '') + '>' + (seEditingThis ? 'Editing…' : 'Edit') + '</button>';
+            h += '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Mark proposed' : 'Approve') + '</button>';
+            if (seCanDelete) {
+              h += '<button type="button" class="sc-btn sc-btn-del board-cal-del-se" data-se-id="' + r.seRow.id + '" data-name="' + escapeAttr(r.seRow.name || '') + '">Delete</button>';
+            }
+            h += '</div></td>';
           } else {
             // Non-editor viewing a special row: nothing to manage, and the
             // Auto flag (if any) now lives on the date cell.
@@ -24044,19 +24054,44 @@
           // Derived trigger dates are read-only; the Auto flag is on the date.
           h += '<td></td>';
         } else if (viewerIsBoard) {
-          h += '<td class="coop-cal-actions">';
-          h += '<button class="btn btn-outline-dark btn-sm cal-actions-trigger" data-menu-kind="event" data-id="' + e.id + '" type="button" aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
-          h += '</td>';
+          var evEditingThis = _boardCalState.editingRow === rowKey;
+          h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
+          h += '<button type="button" class="sc-btn board-cal-edit-btn' + (evEditingThis ? ' is-editing' : '') + '" data-edit-kind="event" data-id="' + e.id + '">' + (evEditingThis ? 'Editing…' : 'Edit') + '</button>';
+          h += '<button type="button" class="sc-btn sc-btn-del board-cal-del-event" data-id="' + e.id + '">Delete</button>';
+          h += '</div></td>';
         } else {
           h += '<td></td>';
         }
         h += '</tr>';
+        // In-place Edit panel: a full-width expansion row directly beneath the
+        // row being edited (Erin, 2026-07-18 — replaces the top-of-table form).
+        if (rowKey && _boardCalState.editingRow === rowKey) {
+          h += '<tr class="board-cal-edit-row"><td colspan="4"><div id="board-cal-form-wrap"></div></td></tr>';
+        }
       });
       h += '</tbody></table></div>';
     }
 
     body.innerHTML = h;
     wireBoardCalendarBody();
+    // Populate the inline edit panel (or the top Add form) into the now-
+    // rendered #board-cal-form-wrap. Kept out of the HTML string because the
+    // form functions attach their own input listeners.
+    if (_boardCalState.editingRow) {
+      var d = _boardCalState.editingRowData || {};
+      if (_boardCalState.editingRow === 'new') boardCalShowForm(null);
+      else if (d.kind === 'session') boardCalShowSessionForm(d.sess);
+      else if (d.kind === 'special') boardCalShowSpecialForm(d.ev, d.auto, d.date);
+      else if (d.kind === 'event' && d.ev) boardCalShowForm(d.ev);
+    }
+  }
+
+  // Clear any in-place edit/add form and re-render the calendar rows.
+  function boardCalCancelEdit() {
+    _boardCalState.editingRow = null;
+    _boardCalState.editingRowData = null;
+    boardCalShowMsg('');
+    renderBoardCalendarBody();
   }
 
   // Default Session 1 start: the first Wednesday of September of the
@@ -24140,7 +24175,7 @@
     h += '</div></div>';
     wrap.innerHTML = h;
     wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    document.getElementById('board-cal-form-cancel').addEventListener('click', function () { wrap.innerHTML = ''; boardCalShowMsg(''); });
+    document.getElementById('board-cal-form-cancel').addEventListener('click', boardCalCancelEdit);
     document.getElementById('sess-edit-save').addEventListener('click', function () {
       boardCalSaveSession(
         parseInt(this.getAttribute('data-sess-num'), 10),
@@ -24214,7 +24249,7 @@
     h += '</div></div>';
     wrap.innerHTML = h;
     wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    document.getElementById('board-cal-form-cancel').addEventListener('click', function () { wrap.innerHTML = ''; boardCalShowMsg(''); });
+    document.getElementById('board-cal-form-cancel').addEventListener('click', boardCalCancelEdit);
     document.getElementById('se-edit-save').addEventListener('click', boardCalSaveSpecialEdit);
   }
 
@@ -24296,22 +24331,34 @@
 
   // Close the shared row-actions dropdown and detach its outside-close
   // listeners. Safe to call when nothing is open.
-  function boardCalCloseActionsMenu() {
-    var m = document.getElementById('cal-actions-menu');
-    if (m) m.parentNode.removeChild(m);
-    document.removeEventListener('click', boardCalCloseActionsMenu);
-    window.removeEventListener('resize', boardCalCloseActionsMenu);
-    // Capture-phase scroll: closes the menu when ANY container scrolls (the
-    // modal body on mobile, the table wrap, the page), so a fixed-positioned
-    // menu never floats detached from its button.
-    document.removeEventListener('scroll', boardCalCloseActionsMenu, true);
-    var opened = document.querySelector('.cal-actions-trigger[aria-expanded="true"]');
-    if (opened) opened.setAttribute('aria-expanded', 'false');
+  // Reusable two-step inline confirm for a destructive row chip: first click
+  // swaps the label to "Confirm <verb>?", a second click on the SAME button
+  // commits, and any other click cancels it back. No popup. (Erin, 2026-07-18
+  // — the common tabular pattern's delete affordance.)
+  var _calTwoStepBtn = null;
+  function calResetTwoStep() {
+    if (_calTwoStepBtn) {
+      if (_calTwoStepBtn.getAttribute('data-label')) _calTwoStepBtn.textContent = _calTwoStepBtn.getAttribute('data-label');
+      _calTwoStepBtn.removeAttribute('data-confirming');
+      _calTwoStepBtn = null;
+    }
+    document.removeEventListener('click', calTwoStepOutside, true);
+  }
+  function calTwoStepOutside(e) {
+    if (_calTwoStepBtn && e.target !== _calTwoStepBtn) calResetTwoStep();
+  }
+  function calArmTwoStep(btn, verb, commitFn) {
+    if (_calTwoStepBtn === btn) { var b = btn; calResetTwoStep(); commitFn(b); return; }
+    calResetTwoStep();
+    _calTwoStepBtn = btn;
+    btn.setAttribute('data-label', btn.textContent);
+    btn.setAttribute('data-confirming', '1');
+    btn.textContent = 'Confirm ' + (verb || 'delete') + '?';
+    setTimeout(function () { document.addEventListener('click', calTwoStepOutside, true); }, 0);
   }
 
   function boardCalDeleteSpecial(ev) {
     if (!ev || !ev.id) return;
-    if (!confirm('Delete “' + (ev.name || 'this event') + '”?\nIts lead/assistant assignments are removed too.')) return;
     fetch('/api/tour', {
       method: 'POST', headers: rwAuthHeaders(true),
       body: JSON.stringify({ kind: 'special-event-delete', event_id: ev.id })
@@ -24325,87 +24372,7 @@
   }
 
   function boardCalDeleteEvent(id) {
-    var ev = (_boardCalState.events || []).filter(function (x) { return x.id === id; })[0];
-    if (!confirm('Delete “' + ((ev && ev.title) || 'this event') + '”?')) return;
     boardCalDelete(id, null);
-  }
-
-  // Build + open the "Manage" dropdown for a row's actions. Fixed-positioned
-  // (appended to <body>) so the scrollable calendar table can't clip it.
-  function openCalActionsMenu(trigger) {
-    // Namespace the key by kind so a special event and a general event that
-    // happen to share a numeric id don't toggle each other's menu.
-    var menuKind = trigger.getAttribute('data-menu-kind') || '';
-    var ownerKey = menuKind + ':'
-      + (trigger.getAttribute('data-se-id') || trigger.getAttribute('data-sess-num') || trigger.getAttribute('data-id') || '');
-    var open = document.getElementById('cal-actions-menu');
-    // Second click on the same trigger closes it.
-    if (open && open.getAttribute('data-owner') === ownerKey) { boardCalCloseActionsMenu(); return; }
-    boardCalCloseActionsMenu();
-
-    var items = [];
-    if (menuKind === 'special') {
-      var sid = parseInt(trigger.getAttribute('data-se-id'), 10);
-      var sdate = trigger.getAttribute('data-date') || '';
-      var sauto = trigger.getAttribute('data-auto') === '1';
-      var sapproved = trigger.getAttribute('data-approved') === '1';
-      var scanDelete = trigger.getAttribute('data-can-delete') === '1';
-      var sev = (_boardCalState.specialEvents || []).filter(function (x) { return x.id === sid; })[0] || {};
-      items.push({ label: 'Edit…', fn: function () { boardCalShowSpecialForm(sev, sauto, sdate); } });
-      items.push({ label: sapproved ? 'Mark proposed' : 'Approve', fn: function () { boardCalSaveSpecialEvent(sid, sdate, sapproved ? 'proposed' : 'approved'); } });
-      if (scanDelete) items.push({ label: 'Delete', danger: true, fn: function () { boardCalDeleteSpecial(sev); } });
-    } else if (menuKind === 'session') {
-      var snum = parseInt(trigger.getAttribute('data-sess-num'), 10);
-      var sess = {
-        sessNum: snum,
-        name: trigger.getAttribute('data-name') || '',
-        start: trigger.getAttribute('data-start') || '',
-        end: trigger.getAttribute('data-end') || ''
-      };
-      var sessApprovable = trigger.getAttribute('data-approvable') === '1';
-      items.push({ label: 'Edit…', fn: function () { boardCalShowSessionForm(sess); } });
-      if (sessApprovable) items.push({ label: 'Approve', fn: function () { boardCalApproveSession(snum); } });
-    } else {
-      var eid = parseInt(trigger.getAttribute('data-id'), 10);
-      var gev = (_boardCalState.events || []).filter(function (x) { return x.id === eid; })[0];
-      items.push({ label: 'Edit…', fn: function () { if (gev) boardCalShowForm(gev); } });
-      items.push({ label: 'Delete', danger: true, fn: function () { boardCalDeleteEvent(eid); } });
-    }
-
-    var menu = document.createElement('div');
-    menu.id = 'cal-actions-menu';
-    menu.className = 'cal-actions-menu';
-    menu.setAttribute('data-owner', ownerKey);
-    menu.addEventListener('click', function (e) { e.stopPropagation(); });
-    items.forEach(function (it) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'cal-menu-item' + (it.danger ? ' cal-menu-danger' : '');
-      b.textContent = it.label;
-      b.addEventListener('click', function () { boardCalCloseActionsMenu(); it.fn(); });
-      menu.appendChild(b);
-    });
-    document.body.appendChild(menu);
-
-    var r = trigger.getBoundingClientRect();
-    var mw = menu.offsetWidth || 170;
-    var mh = menu.offsetHeight || 120;
-    var left = Math.min(r.left, window.innerWidth - mw - 8);
-    if (left < 8) left = 8;
-    var top = r.bottom + 4;
-    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
-    menu.style.left = left + 'px';
-    menu.style.top = top + 'px';
-    trigger.setAttribute('aria-expanded', 'true');
-
-    // Defer so the click/tap that opened the menu doesn't immediately close it.
-    setTimeout(function () {
-      document.addEventListener('click', boardCalCloseActionsMenu);
-      window.addEventListener('resize', boardCalCloseActionsMenu);
-      // Capture-phase catches scroll from any container (modal body on mobile,
-      // table wrap, page) since scroll events don't bubble.
-      document.addEventListener('scroll', boardCalCloseActionsMenu, true);
-    }, 0);
   }
 
   function wireBoardCalendarBody() {
@@ -24416,15 +24383,15 @@
       _boardCalState.schoolYear = this.value;
       renderBoardCalendarBody();
     });
+    // Any prior armed two-step delete is stale after a re-render.
+    calResetTwoStep();
     var addBtn = document.getElementById('board-cal-add');
-    if (addBtn) addBtn.addEventListener('click', function () { boardCalShowForm(null); });
-    // Every row's actions collapse into one "Manage ▾" dropdown (Erin,
-    // 2026-07-18: the table read as too busy with 3-4 buttons per row).
-    body.querySelectorAll('.cal-actions-trigger').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        openCalActionsMenu(this);
-      });
+    if (addBtn) addBtn.addEventListener('click', function () {
+      // Toggle the top Add form open/closed.
+      if (_boardCalState.editingRow === 'new') { boardCalCancelEdit(); return; }
+      _boardCalState.editingRow = 'new';
+      _boardCalState.editingRowData = { kind: 'new' };
+      renderBoardCalendarBody();
     });
 
     // View pills — one list, four lenses.
@@ -24435,9 +24402,68 @@
       });
     });
 
-    // Session + special-event + general-event actions (Edit / Approve ·
-    // Mark proposed / Delete) are all built inside the shared Manage ▾
-    // dropdown — see openCalActionsMenu.
+    // Row actions — inline chips (the common tabular pattern). Edit opens an
+    // in-place panel beneath the row; Approve/Mark-proposed is one click;
+    // Delete is a two-step inline confirm.
+    body.querySelectorAll('.board-cal-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var kind = this.getAttribute('data-edit-kind');
+        var key, data;
+        if (kind === 'session') {
+          var n = parseInt(this.getAttribute('data-sess-num'), 10);
+          key = 'session:' + n;
+          data = { kind: 'session', sess: { sessNum: n, name: this.getAttribute('data-name') || '', start: this.getAttribute('data-start') || '', end: this.getAttribute('data-end') || '' } };
+        } else if (kind === 'special') {
+          var sid = parseInt(this.getAttribute('data-se-id'), 10);
+          key = 'special:' + sid;
+          var sev = (_boardCalState.specialEvents || []).filter(function (x) { return x.id === sid; })[0] || {};
+          data = { kind: 'special', ev: sev, auto: this.getAttribute('data-auto') === '1', date: this.getAttribute('data-date') || '' };
+        } else {
+          var eid = parseInt(this.getAttribute('data-id'), 10);
+          key = 'event:' + eid;
+          var gev = (_boardCalState.events || []).filter(function (x) { return x.id === eid; })[0];
+          data = { kind: 'event', ev: gev };
+        }
+        // Second click on an open row's Edit closes it (toggle).
+        if (_boardCalState.editingRow === key) { boardCalCancelEdit(); return; }
+        _boardCalState.editingRow = key;
+        _boardCalState.editingRowData = data;
+        renderBoardCalendarBody();
+      });
+    });
+    body.querySelectorAll('.board-cal-approve-sess').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        boardCalApproveSession(parseInt(this.getAttribute('data-sess-num'), 10));
+      });
+    });
+    body.querySelectorAll('.board-cal-toggle-se').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-se-id'), 10);
+        var date = this.getAttribute('data-date') || '';
+        var approved = this.getAttribute('data-approved') === '1';
+        boardCalSaveSpecialEvent(id, date, approved ? 'proposed' : 'approved');
+      });
+    });
+    body.querySelectorAll('.board-cal-del-se').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        calArmTwoStep(self, 'delete', function () {
+          var id = parseInt(self.getAttribute('data-se-id'), 10);
+          var ev = (_boardCalState.specialEvents || []).filter(function (x) { return x.id === id; })[0] || { id: id, name: self.getAttribute('data-name') };
+          boardCalDeleteSpecial(ev);
+        });
+      });
+    });
+    body.querySelectorAll('.board-cal-del-event').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        calArmTwoStep(self, 'delete', function () {
+          boardCalDeleteEvent(parseInt(self.getAttribute('data-id'), 10));
+        });
+      });
+    });
   }
 
   // Inline add/edit form. ev = null for a new event, or the existing event row.
@@ -24509,10 +24535,7 @@
     wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     var titleInp = document.getElementById('board-cal-f-title');
     if (titleInp) titleInp.focus();
-    document.getElementById('board-cal-form-cancel').addEventListener('click', function () {
-      wrap.innerHTML = '';
-      boardCalShowMsg('');
-    });
+    document.getElementById('board-cal-form-cancel').addEventListener('click', boardCalCancelEdit);
     document.getElementById('board-cal-form-save').addEventListener('click', boardCalSave);
     var typeSelEl = document.getElementById('board-cal-f-type-select');
     if (typeSelEl) typeSelEl.addEventListener('change', boardCalApplyTypeUi);
