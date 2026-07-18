@@ -11628,6 +11628,14 @@
         if (opts.expandable && expanded && typeof opts.renderDetail === 'function') {
           h += '<tr class="ws-srt-detail-row"><td colspan="' + colCount + '"><div class="ws-srt-detail">' + opts.renderDetail(row) + '</div></td></tr>';
         }
+        // In-place EDIT row (the common tabular pattern): when editRowKey
+        // matches this row, render a full-width edit panel beneath it. Driven
+        // by the caller re-rendering with a new editRowKey — no caret, no
+        // row-click change, so read-only-expand views are unaffected.
+        if (typeof opts.renderEditRow === 'function' && typeof opts.rowKey === 'function'
+            && opts.editRowKey != null && String(opts.rowKey(row)) === String(opts.editRowKey)) {
+          h += '<tr class="ws-srt-edit-row"><td colspan="' + colCount + '"><div class="ws-srt-edit">' + opts.renderEditRow(row) + '</div></td></tr>';
+        }
       });
       h += '</tbody></table></div>';
       // Preserve the modal's scroll position across re-renders. Replacing
@@ -21557,6 +21565,7 @@
   var _facAdminState = { rooms: [], loaded: false };
 
   function showFacilitiesAdminModal() {
+    _facAdminState.editRowId = null; // fresh open — no row mid-edit
     var body = renderReportModal({
       title: 'Facilities — Rooms',
       subtitle: 'The rooms the Class Builder can assign — one class per room per hour. The builder note shows right in the room picker; details are for anything longer. Archiving hides a room from the picker without touching past assignments.',
@@ -21674,9 +21683,29 @@
       return;
     }
     renderSortableTable(tableTarget, cols, shown, {
-      initialSort: { key: 'name', dir: 'asc' }
+      initialSort: { key: 'name', dir: 'asc' },
+      rowKey: function (r) { return r.id; },
+      editRowKey: _facAdminState.editRowId,
+      renderEditRow: facEditRowHtml
     });
     wireFacilitiesAdmin(tableTarget);
+  }
+
+  // In-place edit panel for a room (renders beneath its row via the shared
+  // table's editRowKey). Mirrors the old drawer's fields.
+  function facEditRowHtml(room) {
+    var v = room || {};
+    var h = '<div class="fac-edit-form board-cal-form" style="margin:0;">';
+    h += '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(v.name || '') + '"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(v.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="3" maxlength="2000">' + escapeHtmlWs(v.details || '') + '</textarea></div>';
+    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> 🌳 Outdoor space — needs an indoor rain backup when assigned</label>';
+    h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm fac-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm fac-save" data-room-id="' + v.id + '">Save changes</button>';
+    h += '<span class="perm-status fac-status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
   }
 
   // Add/Edit lives in the shared settings drawer over the rooms table —
@@ -21746,8 +21775,33 @@
     container.querySelectorAll('.fac-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var rid = parseInt(btn.getAttribute('data-room-id'), 10);
-        var room = (_facAdminState.rooms || []).filter(function (r) { return r.id === rid; })[0];
-        if (room) facOpenRoomDrawer(room);
+        // Toggle the in-place edit panel beneath this row (Erin, 2026-07-18:
+        // common tabular pattern — replaces the slide-over drawer for edits).
+        _facAdminState.editRowId = (_facAdminState.editRowId === rid) ? null : rid;
+        renderFacilitiesAdmin();
+      });
+    });
+    container.querySelectorAll('.fac-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _facAdminState.editRowId = null;
+        renderFacilitiesAdmin();
+      });
+    });
+    container.querySelectorAll('.fac-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var form = btn.closest('.fac-edit-form');
+        if (!form) return;
+        var st = form.querySelector('.fac-status');
+        var name = ((form.querySelector('.fac-name') || {}).value || '').trim();
+        if (!name) { if (st) { st.className = 'perm-status fac-status ws-wv-err'; st.textContent = 'A room name is required'; } return; }
+        var payload = {
+          id: parseInt(btn.getAttribute('data-room-id'), 10),
+          name: name,
+          builder_note: ((form.querySelector('.fac-note') || {}).value || '').trim(),
+          details: ((form.querySelector('.fac-details') || {}).value || '').trim(),
+          is_outdoor: !!(form.querySelector('.fac-outdoor') || {}).checked
+        };
+        facSaveRoom(payload, st, btn, function () { _facAdminState.editRowId = null; });
       });
     });
     container.querySelectorAll('.fac-archive').forEach(function (btn) {
