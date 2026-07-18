@@ -23973,10 +23973,11 @@
             ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
               + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
             : '<span class="board-cal-se-unset">—</span>');
-          // Auto-date special events (Field Day / Ice Cream) flag it right on
-          // the date, not as a button in the actions column (Erin, 2026-07-18).
-          if (r.kind === 'special' && r.autoDate) {
-            dateInner += '<br><span class="board-cal-auto-pill board-cal-auto-inline" title="This date comes from the session calendar and updates automatically">Auto</span>';
+          // Any auto-calculated date (derived trigger dates + auto special
+          // events like Field Day / Ice Cream) flags it right on the date
+          // itself, not as a pill in the actions column (Erin, 2026-07-18).
+          if (e.derived || (r.kind === 'special' && r.autoDate)) {
+            dateInner += '<br><span class="board-cal-auto-pill board-cal-auto-inline" title="This date is calculated automatically from the session calendar">Auto</span>';
           }
           h += '<td style="white-space:nowrap;">' + dateInner + '</td>';
         }
@@ -24048,10 +24049,13 @@
               + (r.autoDate ? ' data-auto="1"' : '') + ' aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
             h += '</td>';
           } else {
-            h += '<td class="board-cal-auto-cell">' + (r.autoDate ? '<span class="board-cal-auto-pill" title="Date comes from the session calendar">Auto</span>' : '') + '</td>';
+            // Non-editor viewing a special row: nothing to manage, and the
+            // Auto flag (if any) now lives on the date cell.
+            h += '<td></td>';
           }
         } else if (e.derived) {
-          h += '<td class="board-cal-auto-cell"><span class="board-cal-auto-pill" title="Auto-calculated from the session calendar">Auto</span></td>';
+          // Derived trigger dates are read-only; the Auto flag is on the date.
+          h += '<td></td>';
         } else if (viewerIsBoard) {
           h += '<td class="coop-cal-actions">';
           h += '<button class="btn btn-outline-dark btn-sm cal-actions-trigger" data-menu-kind="event" data-id="' + e.id + '" type="button" aria-haspopup="true" aria-expanded="false">Manage ▾</button>';
