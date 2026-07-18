@@ -12396,32 +12396,14 @@
         }
       });
       renderSortableTable(target, cols, rowsForFilter(), {
-        initialSort: { key: 'item', dir: 'asc' }
+        initialSort: { key: 'item', dir: 'asc' },
+        rowKey: function (r) { return r.id; },
+        editRowKey: _merchInventoryEditId,
+        renderEditRow: merchInvEditRowHtml
       });
-      // Tag each tbody row with its own inventory id, derived from the
-      // Edit button's data-inv-id in that row. This is the only reliable
-      // way to map tbody rows back to inventory rows after the sortable
-      // table reorders them — walking by index would give us the wrong
-      // row whenever the current sort doesn't match inv's natural order
-      // (which is most of the time, e.g. sorting by On hand).
-      target.querySelectorAll('tbody tr').forEach(function (tr) {
-        var btn = tr.querySelector('.merch-inv-edit-btn');
-        if (btn) tr.setAttribute('data-row-id', btn.getAttribute('data-inv-id'));
-      });
-      // If a row is in edit mode, swap it after tagging.
-      if (_merchInventoryEditId != null) {
-        var editRow = target.querySelector('tr[data-row-id="' + _merchInventoryEditId + '"]');
-        if (!editRow) {
-          // The filtered view doesn't contain the editing row anymore
-          // (e.g. user switched filter mid-edit). Cancel the edit.
-          _merchInventoryEditId = null;
-        } else {
-          var src = inv.find(function (r) { return r.id === _merchInventoryEditId; });
-          if (src) renderInventoryEditRow(editRow, src);
-        }
-      }
-      // Wire Edit clicks AFTER the swap so we don't attach to a button
-      // that's about to be replaced by the editor.
+      // Edit → toggle the in-place edit panel BENEATH the row (Erin,
+      // 2026-07-18: common tabular pattern — the row stays visible, matching
+      // Facilities + the Admin Calendar, instead of replacing the row).
       target.querySelectorAll('.merch-inv-edit-btn').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
@@ -12430,19 +12412,20 @@
           renderTable();
         });
       });
+      wireMerchInvEdit(target);
     }
     renderTable();
   }
 
-  function renderInventoryEditRow(tr, row) {
-    var colspan = tr.children.length;
+  // In-place edit panel HTML for a merch inventory row (rendered beneath the
+  // row via the shared table's editRowKey). Wiring is in wireMerchInvEdit.
+  function merchInvEditRowHtml(row) {
     var label = (MERCH_CATALOG_CLIENT[row.item] && MERCH_CATALOG_CLIENT[row.item].label) || row.item;
     var variantBits = [];
     if (row.size) variantBits.push(escapeHtml(row.size));
     if (row.color) variantBits.push(escapeHtml(row.color));
     var variant = variantBits.length ? variantBits.join(' · ') : '';
-    tr.innerHTML = '<td colspan="' + colspan + '">'
-      + '<div class="merch-inv-edit">'
+    return '<div class="merch-inv-edit">'
       +   '<div class="merch-inv-edit-title"><strong>' + escapeHtml(label) + '</strong>' + (variant ? ' <span class="ws-wv-context">' + variant + '</span>' : '') + '</div>'
       +   '<div class="merch-inv-edit-grid">'
       +     '<label><span>On hand</span><input type="number" min="0" max="100000" id="merch-inv-onhand-' + row.id + '" value="' + row.on_hand + '"></label>'
@@ -12454,54 +12437,47 @@
       +   '</div>'
       +   '<div class="merch-inv-edit-actions">'
       +     '<button type="button" class="btn btn-outline-dark btn-sm merch-inv-cancel">Cancel</button>'
-      +     '<button type="button" class="btn btn-primary btn-sm merch-inv-save">Save</button>'
+      +     '<button type="button" class="btn btn-primary btn-sm merch-inv-save" data-inv-id="' + row.id + '">Save</button>'
       +     '<span class="merch-inv-status" role="status" aria-live="polite"></span>'
       +   '</div>'
-      + '</div>'
-      + '</td>';
-    var statusEl = tr.querySelector('.merch-inv-status');
-    tr.querySelector('.merch-inv-cancel').addEventListener('click', function () {
+      + '</div>';
+  }
+
+  function wireMerchInvEdit(target) {
+    var cancelBtn = target.querySelector('.merch-inv-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () {
       _merchInventoryEditId = null;
-      // Re-render the inventory body to drop the editor.
       var ib = document.getElementById('ws-merch-inventory-body');
       if (ib) renderMerchInventoryBody(ib);
     });
-    tr.querySelector('.merch-inv-save').addEventListener('click', function () {
-      var btn = tr.querySelector('.merch-inv-save');
+    var saveBtn = target.querySelector('.merch-inv-save');
+    if (!saveBtn) return;
+    saveBtn.addEventListener('click', function () {
+      var id = parseInt(saveBtn.getAttribute('data-inv-id'), 10);
+      var statusEl = target.querySelector('.merch-inv-status');
+      var g = function (p) { var el = document.getElementById('merch-inv-' + p + '-' + id); return el ? el.value : ''; };
       var payload = {
-        kind: 'merch-inventory-update',
-        id: row.id,
-        on_hand:         tr.querySelector('#merch-inv-onhand-' + row.id).value,
-        low_threshold:   tr.querySelector('#merch-inv-low-' + row.id).value,
-        reorder_minimum: tr.querySelector('#merch-inv-min-' + row.id).value,
-        vendor_name:     tr.querySelector('#merch-inv-vname-' + row.id).value,
-        vendor_url:      tr.querySelector('#merch-inv-vurl-' + row.id).value,
-        notes:           tr.querySelector('#merch-inv-notes-' + row.id).value
+        kind: 'merch-inventory-update', id: id,
+        on_hand: g('onhand'), low_threshold: g('low'), reorder_minimum: g('min'),
+        vendor_name: g('vname'), vendor_url: g('vurl'), notes: g('notes')
       };
-      btn.disabled = true;
-      statusEl.textContent = 'Saving…';
-      statusEl.className = 'merch-inv-status';
-      fetch('/api/tour', {
-        method: 'POST',
-        headers: rwAuthHeaders(true),
-        body: JSON.stringify(payload)
-      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
-        // Replace the cached row so the next render reflects the new values.
-        var idx = _merchInventoryCache.findIndex(function (r) { return r.id === row.id; });
-        if (idx !== -1 && res.data.row) _merchInventoryCache[idx] = res.data.row;
-        _merchInventoryEditId = null;
-        var ib = document.getElementById('ws-merch-inventory-body');
-        if (ib) renderMerchInventoryBody(ib);
-        // Also refresh the tab nav so the "N low" badge updates.
-        var nav = document.querySelector('.merch-tab-nav');
-        if (nav) renderMerchTabNav(nav);
-      }).catch(function (err) {
-        btn.disabled = false;
-        statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown');
-        statusEl.className = 'merch-inv-status ws-wv-err';
-      });
+      saveBtn.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+          var idx = _merchInventoryCache.findIndex(function (r) { return r.id === id; });
+          if (idx !== -1 && res.data.row) _merchInventoryCache[idx] = res.data.row;
+          _merchInventoryEditId = null;
+          var ib = document.getElementById('ws-merch-inventory-body');
+          if (ib) renderMerchInventoryBody(ib);
+          var nav = document.querySelector('.merch-tab-nav');
+          if (nav) renderMerchTabNav(nav);
+        }).catch(function (err) {
+          saveBtn.disabled = false;
+          if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
+        });
     });
   }
 
