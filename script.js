@@ -24001,17 +24001,18 @@
         {
           h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
         }
-        // Notes cell (location first, then note + status chip for special events).
-        var notes = escapeHtml(e.note || '');
-        if (e.location) notes = '📍 ' + escapeHtml(e.location) + (notes ? '<br>' + notes : '');
+        // Details cell — location + times + status chip. The freeform Notes
+        // field was removed board-wide (Erin, 2026-07-18: "the board doesn't
+        // need something extra").
+        var notes = '';
+        if (e.location) notes = '📍 ' + escapeHtml(e.location);
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
         if (r.kind === 'special' && r.seRow) {
-          // Surface the saved details (time / location / notes) on the row.
+          // Surface the saved details (time / location) on the row.
           var seDet = '';
           var seR = r.seRow;
           if (seR.start_time) seDet += '🕑 ' + escapeHtml(boardCalFmtTimeRange(seR.start_time, seR.end_time));
           if (seR.location) seDet += (seDet ? '<br>' : '') + '📍 ' + escapeHtml(seR.location);
-          if (seR.notes) seDet += (seDet ? '<br>' : '') + escapeHtml(seR.notes);
           if (seDet) notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + seDet + '</span>';
           // One status for everything pre-approval (Erin, 2026-07-18):
           // "Suggested" and "Proposed" were separate labels for essentially
@@ -24261,8 +24262,6 @@
     h += '<label>End time <span class="board-cal-opt">(optional)</span><br><input type="time" id="se-edit-etime" class="cl-input" value="' + escapeAttr(String(ev.end_time || '').slice(0, 5)) + '"></label>';
     h += '</div>';
     h += '<div class="board-cal-field"><label>Location <span class="board-cal-opt">(optional)</span><br><input type="text" id="se-edit-loc" class="cl-input" maxlength="200" value="' + escapeAttr(ev.location || '') + '" placeholder="e.g. Fellowship Hall"></label></div>';
-    h += '<div class="board-cal-field"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="se-edit-note" class="cl-input" maxlength="1000" rows="2" placeholder="Details for this event">' + escapeHtml(ev.notes || '') + '</textarea></label>';
-    h += '<div class="board-cal-note-vis is-public">⚠ Shown to members — special-event times, place, and notes appear on the co-op calendar everyone sees.</div></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
     h += '<button id="se-edit-save" class="btn btn-primary btn-sm" type="button" data-se-id="' + ev.id + '"' + (auto ? ' data-auto="1"' : '') + '>Save event</button>';
@@ -24287,7 +24286,7 @@
       end_time: (document.getElementById('se-edit-etime') || {}).value || '',
       end_date: (document.getElementById('se-edit-edate') || {}).value || '',
       location: ((document.getElementById('se-edit-loc') || {}).value || '').trim(),
-      notes: ((document.getElementById('se-edit-note') || {}).value || '').trim()
+      notes: ''
     };
     if (!auto) payload.event_date = (document.getElementById('se-edit-date') || {}).value || '';
     if (payload.end_time && !payload.start_time) { boardCalShowMsg('An end time needs a start time.'); return; }
@@ -24541,12 +24540,6 @@
     // Location (Erin, 2026-07-15) — rides to the Google event's location
     // for member-facing types, and shows on the Admin Calendar row.
     h += '<div class="board-cal-field" id="board-cal-loc-wrap"><label>Location <span class="board-cal-opt">(optional)</span><br><input type="text" id="board-cal-f-loc" maxlength="200" value="' + escapeHtml(v.location || '') + '" placeholder="e.g. Southeastway Park, Fellowship Hall" /></label></div>';
-    h += '<div class="board-cal-field" id="board-cal-note-wrap"><label>Notes <span class="board-cal-opt">(optional)</span><br><textarea id="board-cal-f-note" maxlength="1000" rows="2" placeholder="Details for this event">' + escapeHtml(v.note || '') + '</textarea></label>';
-    // Visibility warning (Erin, 2026-07-17): notes ride to the shared Google
-    // Calendar description for member-facing types, so they are NOT board-only
-    // there. Board tasks never sync, so their notes stay board-only. Updated
-    // live by the type radios below.
-    h += '<div class="board-cal-note-vis" id="board-cal-note-vis"></div></div>';
     h += '<div class="coop-cal-save-bar">';
     h += '<button id="board-cal-form-cancel" class="btn btn-outline-dark btn-sm" type="button">Cancel</button>';
     h += '<button id="board-cal-form-save" class="btn btn-primary btn-sm" type="button"' + (isEdit ? ' data-id="' + ev.id + '"' : '') + '>Save event</button>';
@@ -24579,31 +24572,13 @@
     var ftype = boardCalFormType();
     var isSpecial = ftype === 'special';
     var endWrap = document.getElementById('board-cal-end-wrap');
-    var noteWrap = document.getElementById('board-cal-note-wrap');
     var locWrap = document.getElementById('board-cal-loc-wrap');
     var timesWrap = document.getElementById('board-cal-times-wrap');
     var dateOpt = document.getElementById('board-cal-date-opt');
     if (endWrap) endWrap.hidden = isSpecial;
-    if (noteWrap) noteWrap.hidden = isSpecial;
     if (locWrap) locWrap.hidden = isSpecial;
     if (timesWrap) timesWrap.hidden = isSpecial;
     if (dateOpt) dateOpt.hidden = !isSpecial;
-    // Notes-visibility hint (Erin, 2026-07-17): member-facing types publish
-    // the notes to the shared co-op Google Calendar; board tasks stay board-only.
-    var vis = document.getElementById('board-cal-note-vis');
-    if (vis) {
-      var memberFacing = ftype === 'general' || ftype === 'field_trip';
-      if (memberFacing) {
-        vis.textContent = '⚠ Visible to everyone — these notes publish to the shared co-op Google Calendar all members see.';
-        vis.className = 'board-cal-note-vis is-public';
-      } else if (ftype === 'task') {
-        vis.textContent = '🔒 Board-only — board tasks stay on this Admin Calendar and don’t publish anywhere members can see.';
-        vis.className = 'board-cal-note-vis is-private';
-      } else {
-        vis.textContent = '';
-        vis.className = 'board-cal-note-vis';
-      }
-    }
   }
 
   function boardCalSave() {
@@ -24647,7 +24622,7 @@
       title: (document.getElementById('board-cal-f-title').value || '').trim(),
       event_date: document.getElementById('board-cal-f-date').value || '',
       end_date: document.getElementById('board-cal-f-end').value || '',
-      note: (document.getElementById('board-cal-f-note').value || '').trim(),
+      note: '',
       location: ((document.getElementById('board-cal-f-loc') || {}).value || '').trim(),
       start_time: (document.getElementById('board-cal-f-stime') || {}).value || '',
       end_time: (document.getElementById('board-cal-f-etime') || {}).value || '',
