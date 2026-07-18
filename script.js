@@ -24010,41 +24010,39 @@
         h += '<td>' + notes + '</td>';
         // Actions cell by kind. Sessions now use the same Manage ▾ dropdown
         // + Edit form as the other rows (Erin, 2026-07-18).
+        // Edit is always the rightmost chip (Erin, 2026-07-18) — state-change
+        // and Delete chips render first, Edit last in each action group.
         if (r.kind === 'session') {
           if (sessEditable) {
             var sessEditingThis = _boardCalState.editingRow === rowKey;
-            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
-            h += '<button type="button" class="sc-btn board-cal-edit-btn' + (sessEditingThis ? ' is-editing' : '') + '" data-edit-kind="session"'
+            var sessEditChip = '<button type="button" class="sc-btn board-cal-edit-btn' + (sessEditingThis ? ' is-editing' : '') + '" data-edit-kind="session"'
               + ' data-sess-num="' + r.sessNum + '"'
               + ' data-name="' + escapeAttr(e.title || '') + '"'
               + ' data-start="' + escapeAttr(e.event_date || '') + '"'
               + ' data-end="' + escapeAttr(e.end_date || '') + '">' + (sessEditingThis ? 'Editing…' : 'Edit') + '</button>';
-            if (e.dates_status === 'proposed' && e.event_date) {
-              h += '<button type="button" class="sc-btn board-cal-approve-sess" data-sess-num="' + r.sessNum + '">Approve</button>';
-            }
-            h += '</div></td>';
+            var sessState = (e.dates_status === 'proposed' && e.event_date)
+              ? '<button type="button" class="sc-btn board-cal-approve-sess" data-sess-num="' + r.sessNum + '">Approve</button>' : '';
+            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">' + sessState + sessEditChip + '</div></td>';
           } else {
             h += '<td></td>';
           }
         } else if (r.kind === 'special') {
           if (canSE && r.seRow) {
             // Inline chips (Erin, 2026-07-18): Edit opens an in-place panel
-            // beneath the row; Approve/Mark-proposed is one click; Delete is a
+            // beneath the row; Approve/Propose is one click; Delete is a
             // two-step inline confirm. Field Day / Ice Cream (auto date) get
-            // Edit + Approve — their date stays session-derived, read-only.
+            // Approve + Edit — their date stays session-derived, read-only.
             var seApproved = r.seRow.date_status === 'approved';
             var seDisplayDate = e.event_date || '';
             var seCanDelete = (!r.autoDate && !r.seRow.seeded);
             var seEditingThis = _boardCalState.editingRow === rowKey;
-            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
-            h += '<button type="button" class="sc-btn board-cal-edit-btn' + (seEditingThis ? ' is-editing' : '') + '" data-edit-kind="special"'
+            var seToggleChip = '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Propose' : 'Approve') + '</button>';
+            var seDelChip = seCanDelete
+              ? '<button type="button" class="sc-btn sc-btn-del board-cal-del-se" data-se-id="' + r.seRow.id + '" data-name="' + escapeAttr(r.seRow.name || '') + '">Delete</button>' : '';
+            var seEditChip = '<button type="button" class="sc-btn board-cal-edit-btn' + (seEditingThis ? ' is-editing' : '') + '" data-edit-kind="special"'
               + ' data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '"'
               + (r.autoDate ? ' data-auto="1"' : '') + '>' + (seEditingThis ? 'Editing…' : 'Edit') + '</button>';
-            h += '<button type="button" class="sc-btn board-cal-toggle-se" data-se-id="' + r.seRow.id + '" data-date="' + escapeAttr(seDisplayDate) + '" data-approved="' + (seApproved ? '1' : '') + '">' + (seApproved ? 'Propose' : 'Approve') + '</button>';
-            if (seCanDelete) {
-              h += '<button type="button" class="sc-btn sc-btn-del board-cal-del-se" data-se-id="' + r.seRow.id + '" data-name="' + escapeAttr(r.seRow.name || '') + '">Delete</button>';
-            }
-            h += '</div></td>';
+            h += '<td class="coop-cal-actions"><div class="ws-srt-actions">' + seToggleChip + seDelChip + seEditChip + '</div></td>';
           } else {
             // Non-editor viewing a special row: nothing to manage, and the
             // Auto flag (if any) now lives on the date cell.
@@ -24055,10 +24053,9 @@
           h += '<td></td>';
         } else if (viewerIsBoard) {
           var evEditingThis = _boardCalState.editingRow === rowKey;
-          h += '<td class="coop-cal-actions"><div class="ws-srt-actions">';
-          h += '<button type="button" class="sc-btn board-cal-edit-btn' + (evEditingThis ? ' is-editing' : '') + '" data-edit-kind="event" data-id="' + e.id + '">' + (evEditingThis ? 'Editing…' : 'Edit') + '</button>';
-          h += '<button type="button" class="sc-btn sc-btn-del board-cal-del-event" data-id="' + e.id + '">Delete</button>';
-          h += '</div></td>';
+          var evDelChip = '<button type="button" class="sc-btn sc-btn-del board-cal-del-event" data-id="' + e.id + '">Delete</button>';
+          var evEditChip = '<button type="button" class="sc-btn board-cal-edit-btn' + (evEditingThis ? ' is-editing' : '') + '" data-edit-kind="event" data-id="' + e.id + '">' + (evEditingThis ? 'Editing…' : 'Edit') + '</button>';
+          h += '<td class="coop-cal-actions"><div class="ws-srt-actions">' + evDelChip + evEditChip + '</div></td>';
         } else {
           h += '<td></td>';
         }
