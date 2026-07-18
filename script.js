@@ -2172,12 +2172,17 @@
     });
   });
 
-  // A #myFamily hash left in the URL by an older visit would re-anchor
-  // every page load below the header — clean it and start at the top.
-  if (location.hash === '#myFamily') {
-    if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
-    window.addEventListener('load', function () { window.scrollTo(0, 0); });
+  // Always (re)load the portal at the top. A stray #myFamily hash would
+  // re-anchor below the header, and the browser's own scroll restoration
+  // fires around the load event — so clean the hash AND scroll to top once
+  // the page has loaded, which beats restoration (Erin, 2026-07-18: hard
+  // refresh was landing partway down). Pairs with scrollRestoration='manual'
+  // and the scrollTo in showDashboard.
+  if (location.hash === '#myFamily' && history.replaceState) {
+    history.replaceState(null, '', location.pathname + location.search);
   }
+  window.addEventListener('load', function () { window.scrollTo(0, 0); });
+  if (document.readyState === 'complete') window.scrollTo(0, 0);
 
   // ──────────────────────────────────────────────
   // Tour Modal — close on Escape key
@@ -24008,17 +24013,17 @@
           if (seR.location) seDet += (seDet ? '<br>' : '') + '📍 ' + escapeHtml(seR.location);
           if (seR.notes) seDet += (seDet ? '<br>' : '') + escapeHtml(seR.notes);
           if (seDet) notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + seDet + '</span>';
-          // While the date is still just a session-anchored suggestion (not
-          // saved), show ONLY "Suggested" — the "Proposed" chip is redundant
-          // until there's a real saved date (Erin, 2026-07-18: PJ Party etc.
-          // ride the mini session two weeks after Session 2, Passion Fair
-          // after Session 3, Camp after Session 4). Save or Approve makes it
-          // official, at which point the Proposed/Approved chip takes over.
-          if (r.seRow.date_is_default) {
-            notes = '<span class="board-cal-auto-pill" title="Suggested from the session calendar — Save or Approve to make it official">Suggested</span> ' + notes;
-          } else {
-            notes = '<span class="se-status se-status-' + r.seRow.date_status + '">' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
-          }
+          // One status for everything pre-approval (Erin, 2026-07-18):
+          // "Suggested" and "Proposed" were separate labels for essentially
+          // the same not-yet-approved state, which read as clutter. Show a
+          // single Proposed → ✓ Approved chip. A still-suggested (session-
+          // anchored, unsaved) date gets a tooltip so the date's provenance
+          // isn't lost.
+          var seStatusTitle = r.seRow.date_is_default
+            ? 'Date suggested from the session calendar — Save or Approve to lock it in' : '';
+          notes = '<span class="se-status se-status-' + r.seRow.date_status + '"'
+            + (seStatusTitle ? ' title="' + escapeAttr(seStatusTitle) + '"' : '')
+            + '>' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
         }
         // Session dates carry the same Proposed/Approved chip — entered
         // dates stay pending until the board approves them (Erin, 2026-07-15).
