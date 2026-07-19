@@ -29819,6 +29819,7 @@
       parents: parentSeed,
       kids: (fam.kids || []).map(function (k) {
         return {
+          id: k.id || null, // DB row id — save upserts by it (enrollment build)
           name: k.name || '',
           // Per-kid last name. Empty in form = use family last name in display.
           // Useful for kids who use a different surname than the family unit.
@@ -30447,7 +30448,7 @@
           phone: state.phone,
           address: state.address,
           people: people,
-          kids: state.kids.map(function (k) { return { name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
+          kids: state.kids.map(function (k) { return { id: k.id || null, name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
         };
         // Only the super-user admin box sends alternate logins; the server
         // ignores this field for anyone else and keeps the stored set intact.

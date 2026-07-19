@@ -1875,3 +1875,34 @@ CREATE TABLE IF NOT EXISTS todo_confirmations (
   confirmed_by_email TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (kind, school_year)
 );
+
+-- ══ Per-season, per-kid enrollment (2026-07-19, the enrollment build) ══
+-- One row per kid per season = the season-scoped truth the kids table
+-- never had ("who is enrolled THIS season, mornings or afternoons?").
+-- kids becomes the stable roster (ids persist across seasons — writers
+-- upsert instead of delete+reinsert); enrollment rows carry the season
+-- membership + schedule. status: 'enrolled' | 'not_returning' (Erin:
+-- non-returning kids stay VISIBLE, marked — never silently deleted).
+-- source: 'registration' | 'emi' | 'backfill'. kid_first_name +
+-- family_email are denormalized transition keys for the name-keyed
+-- tables (morning_class_assignments etc.) until those re-key on kid_id.
+CREATE TABLE IF NOT EXISTS kid_enrollments (
+  id             SERIAL PRIMARY KEY,
+  kid_id         INTEGER NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+  family_email   TEXT NOT NULL DEFAULT '',
+  kid_first_name TEXT NOT NULL DEFAULT '',
+  season         TEXT NOT NULL,
+  schedule       TEXT NOT NULL DEFAULT 'all-day',
+  status         TEXT NOT NULL DEFAULT 'enrolled',
+  source         TEXT NOT NULL DEFAULT 'registration',
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by     TEXT NOT NULL DEFAULT '',
+  UNIQUE (kid_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_kid_enrollments_season
+  ON kid_enrollments (season, status, schedule);
+CREATE INDEX IF NOT EXISTS idx_kid_enrollments_family
+  ON kid_enrollments (family_email, season);
+-- Transition column: assignments gain a real kid link; the name-keyed
+-- columns stay until every reader has re-keyed.
+ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS kid_id INTEGER;

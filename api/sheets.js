@@ -1360,6 +1360,8 @@ async function applyMemberProfileOverlay(families) {
       if (ov.last_name) kid.lastName = ov.last_name;
       if (ov.nickname) kid.nickname = ov.nickname;
       kid.photo_consent = ov.photo_consent !== false;
+      // DB row id → Edit My Info → save upserts by id (enrollment build).
+      if (ov.id) kid.id = ov.id;
     });
     // DB-only kids (not in the sheet's classlist).
     dbKids.forEach(function (k) {
@@ -1371,6 +1373,7 @@ async function applyMemberProfileOverlay(families) {
       if (!exists) {
         fam.kids = fam.kids || [];
         fam.kids.push({
+          id: k.id || null,
           name: first,
           lastName: k.last_name || '',
           nickname: k.nickname || '',
@@ -1953,7 +1956,7 @@ async function loadFamiliesFromProfiles(sql) {
     ORDER BY family_email, sort_order, email
   `;
   var kidRows = await sql`
-    SELECT family_email, first_name, last_name, nickname, birth_date, pronouns,
+    SELECT id, family_email, first_name, last_name, nickname, birth_date, pronouns,
            allergies, schedule, class_group, photo_url, photo_consent, sort_order
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
@@ -1976,6 +1979,7 @@ async function loadFamiliesFromProfiles(sql) {
     var k = String(kr.family_email || '').toLowerCase();
     if (!kidsByFamily[k]) kidsByFamily[k] = [];
     kidsByFamily[k].push({
+      id: kr.id || null, // → EMI → save upserts by id (enrollment build)
       name: String(kr.first_name || '').trim(),
       lastName: String(kr.last_name || '').trim(),
       nickname: String(kr.nickname || ''),

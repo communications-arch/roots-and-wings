@@ -891,7 +891,8 @@ async function handleRegistration(body, req, res) {
           track: track,
           phone: phone,
           address: address,
-          placementNotes: placement_notes
+          placementNotes: placement_notes,
+          season: DEFAULT_SEASON
         });
       }
     } catch (profileErr) {
@@ -1858,7 +1859,8 @@ async function handleRegistrationUndecline(body, req, res) {
           track: reg.track,
           phone: reg.phone,
           address: reg.address,
-          placementNotes: reg.placement_notes
+          placementNotes: reg.placement_notes,
+          season: reg.season
         });
       }
     } catch (profileErr) {
@@ -3165,7 +3167,7 @@ async function upsertProfileFromRegistration(sql, params) {
     ORDER BY sort_order, id
   `;
   const exKidsRows = await sql`
-    SELECT first_name, last_name, nickname, birth_date, pronouns, allergies,
+    SELECT id, first_name, last_name, nickname, birth_date, pronouns, allergies,
            schedule, photo_url, photo_consent, sort_order
     FROM kids WHERE family_email = ${familyEmail}
     ORDER BY sort_order, id
@@ -3266,6 +3268,12 @@ async function upsertProfileFromRegistration(sql, params) {
     const ex = aggregateKidMatches(exMatches);
     const kidMatchedByNickname = ex.first_name && String(ex.first_name).trim().split(/\s+/)[0].toLowerCase() !== key;
     mergedKids.push({
+      // Enrollment build (2026-07-19): carry the matched row's DB id so
+      // the write below UPDATEs it in place (stable kids.id), and flag
+      // that this kid IS in the current registration (→ 'enrolled'; the
+      // carried-over priors appended after this loop are 'not_returning').
+      _id: (exMatches[0] && exMatches[0].id) || null,
+      _inReg: true,
       // Prefer the explicitly-entered first name; fall back to the first
       // token of the combined name for older clients. When the match came
       // through the goes-by nickname, keep the stored legal name.
@@ -3285,7 +3293,9 @@ async function upsertProfileFromRegistration(sql, params) {
       photo_consent: typeof nk.photo_consent === 'boolean' ? nk.photo_consent : (ex.photo_consent !== false)
     });
   });
-  exKids.forEach(k => { if (!matchedExKids.has(k)) mergedKids.push(k); });
+  exKids.forEach(k => {
+    if (!matchedExKids.has(k)) mergedKids.push(Object.assign({}, k, { _id: k.id, _inReg: false }));
+  });
 
   const phone = String(params.phone || '').trim();
   const address = String(params.address || '').trim();
@@ -3316,9 +3326,14 @@ async function upsertProfileFromRegistration(sql, params) {
       updated_by        = 'registration'
   `;
 
-  // 2) Replace people + kids wholesale with the merged sets.
+  // 2) Replace people wholesale; UPSERT kids by identity (enrollment
+  // build, 2026-07-19). kids.id must survive every save — kid_enrollments
+  // FKs it, and the old delete+reinsert also silently dropped class_group
+  // placements on every re-registration. Matched rows UPDATE in place
+  // (class_group untouched → preserved), unmatched insert, and rows that
+  // matched nothing are deleted (mergedKids already carries every
+  // existing row, so that only fires on duplicate-name leftovers).
   await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
-  await sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`;
 
   for (let i = 0; i < mergedParents.length; i++) {
     const pp = mergedParents[i];
@@ -3338,20 +3353,86 @@ async function upsertProfileFromRegistration(sql, params) {
       )
     `;
   }
+  const keptKidIds = [];
+  const enrollmentEntries = [];
   for (let i = 0; i < mergedKids.length; i++) {
     const k = mergedKids[i];
     if (!k.first_name) continue;
+    let kidId = k._id || null;
+    if (kidId) {
+      await sql`
+        UPDATE kids SET
+          first_name = ${k.first_name}, last_name = ${k.last_name || ''},
+          nickname = ${k.nickname || ''}, birth_date = ${k.birth_date || null},
+          pronouns = ${k.pronouns || ''}, allergies = ${k.allergies || ''},
+          schedule = ${k.schedule || 'all-day'}, photo_url = ${k.photo_url || ''},
+          photo_consent = ${k.photo_consent !== false}, sort_order = ${i},
+          updated_at = NOW()
+        WHERE id = ${kidId}
+      `;
+    } else {
+      const ins = await sql`
+        INSERT INTO kids (
+          family_email, first_name, last_name, nickname, birth_date,
+          pronouns, allergies, schedule, photo_url, photo_consent,
+          sort_order
+        ) VALUES (
+          ${familyEmail}, ${k.first_name}, ${k.last_name || ''}, ${k.nickname || ''},
+          ${k.birth_date || null}, ${k.pronouns || ''}, ${k.allergies || ''},
+          ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
+          ${i}
+        ) RETURNING id
+      `;
+      kidId = ins[0].id;
+    }
+    keptKidIds.push(kidId);
+    enrollmentEntries.push({
+      kid_id: kidId,
+      first_name: k.first_name,
+      schedule: ['all-day', 'morning', 'afternoon'].indexOf(String(k.schedule || '').toLowerCase()) !== -1 ? String(k.schedule).toLowerCase() : 'all-day',
+      status: k._inReg ? 'enrolled' : 'not_returning'
+    });
+  }
+  if (keptKidIds.length > 0) {
+    await sql`DELETE FROM kids WHERE family_email = ${familyEmail} AND NOT (id = ANY(${keptKidIds}::int[]))`;
+  } else {
+    await sql`DELETE FROM kids WHERE family_email = ${familyEmail}`;
+  }
+
+  // 3) Season enrollment truth: one row per kid per season. Kids in THIS
+  // registration → enrolled with their (track-derived or per-kid)
+  // schedule; prior kids the family did NOT re-register → not_returning
+  // for the season (row kept, kid stays visible — Erin's rule). Non-fatal:
+  // a registration must never fail on enrollment bookkeeping.
+  try {
+    const season = String(params.season || DEFAULT_SEASON);
+    await upsertKidEnrollments(sql, familyEmail, season, enrollmentEntries, 'registration', 'registration');
+  } catch (enrErr) {
+    console.error('kid_enrollments write failed (non-fatal):', enrErr);
+  }
+}
+
+// Upsert one kid_enrollments row per entry ({kid_id, first_name,
+// schedule, status}) for the season. Shared by the registration writer,
+// the EMI writer, and (semantics-wise) the backfill script.
+async function upsertKidEnrollments(sql, familyEmail, season, entries, source, updatedBy) {
+  for (const e of entries) {
+    if (!e || !e.kid_id) continue;
     await sql`
-      INSERT INTO kids (
-        family_email, first_name, last_name, nickname, birth_date,
-        pronouns, allergies, schedule, photo_url, photo_consent,
-        sort_order
+      INSERT INTO kid_enrollments (
+        kid_id, family_email, kid_first_name, season, schedule, status, source, updated_by
       ) VALUES (
-        ${familyEmail}, ${k.first_name}, ${k.last_name || ''}, ${k.nickname || ''},
-        ${k.birth_date || null}, ${k.pronouns || ''}, ${k.allergies || ''},
-        ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
-        ${i}
+        ${e.kid_id}, ${familyEmail}, ${e.first_name || ''}, ${season},
+        ${e.schedule || 'all-day'}, ${e.status || 'enrolled'}, ${source}, ${updatedBy}
       )
+      ON CONFLICT (kid_id, season) DO UPDATE SET
+        family_email = EXCLUDED.family_email,
+        kid_first_name = EXCLUDED.kid_first_name,
+        schedule = EXCLUDED.schedule,
+        status = EXCLUDED.status,
+        source = EXCLUDED.source,
+        updated_at = NOW(),
+        updated_by = EXCLUDED.updated_by
     `;
   }
 }
@@ -3368,7 +3449,11 @@ function sanitizeKid(k) {
   const schedule = String(k.schedule || '').trim().toLowerCase();
   let sch = '';
   if (['all-day', 'morning', 'afternoon'].indexOf(schedule) !== -1) sch = schedule;
+  // DB row id, when the client has one (EMI sends it since the enrollment
+  // build) — lets the writers UPDATE the existing row instead of re-minting.
+  const idNum = parseInt(k.id, 10);
   return {
+    id: Number.isFinite(idNum) && idNum > 0 ? idNum : null,
     name,
     first_name,
     last_name,
@@ -3580,13 +3665,17 @@ async function handleProfileUpdate(body, req, res) {
     const priorKidGroups = {};
     const priorKidNames = new Set();
     const priorKidSchedules = {};
+    const priorKidIdsByFirst = {};
+    const priorKidIds = new Set();
     try {
-      const priorKids = await sql`SELECT first_name, class_group, schedule FROM kids WHERE family_email = ${familyEmail}`;
+      const priorKids = await sql`SELECT id, first_name, class_group, schedule FROM kids WHERE family_email = ${familyEmail}`;
       priorKids.forEach(r => {
         const key = String(r.first_name || '').trim().toLowerCase();
         if (key && r.class_group) priorKidGroups[key] = r.class_group;
         if (key) priorKidNames.add(key);
         if (key) priorKidSchedules[key] = String(r.schedule || '').trim().toLowerCase() || 'all-day';
+        if (key && !(key in priorKidIdsByFirst)) priorKidIdsByFirst[key] = r.id;
+        priorKidIds.add(r.id);
       });
     } catch (e) { /* non-fatal — worst case the group is blank, same as before */ }
 
@@ -3623,15 +3712,16 @@ async function handleProfileUpdate(body, req, res) {
         if (k.schedule === 'morning') scheduleSwitchedToMorning.push(key);
       }
     }
-    // Atomic replace (2026-07-17 review): the DELETE of people+kids and the
-    // per-row re-inserts used to autocommit separately, so a failing insert
-    // (e.g. the global unique email index, or a duplicate first name in the
-    // submitted form) committed the DELETEs and left the family with zero
-    // people/kids. One transaction — either the whole family rewrites or
-    // nothing changes.
+    // Atomic write (2026-07-17 review; reshaped 2026-07-19 enrollment
+    // build): people still replace wholesale, but kids UPSERT by identity
+    // so kids.id survives every save — kid_enrollments FKs it, and the
+    // old delete+reinsert re-minted ids (and needed the fragile name-keyed
+    // class_group/schedule carry). Matching: the client-sent kids.id
+    // (threaded through EMI since the enrollment build), else the prior
+    // row with the same first name. Everything still rides ONE
+    // transaction — a failing statement changes nothing.
     const profileStmts = [
-      sql`DELETE FROM people WHERE family_email = ${familyEmail}`,
-      sql`DELETE FROM kids   WHERE family_email = ${familyEmail}`
+      sql`DELETE FROM people WHERE family_email = ${familyEmail}`
     ];
     for (let i = 0; i < people.length; i++) {
       const pp = people[i];
@@ -3648,25 +3738,83 @@ async function handleProfileUpdate(body, req, res) {
         )
       `);
     }
+    const usedKidIds = new Set();
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
-      // Carry forward the VP-assigned class group (preserved above). A
-      // brand-new kid with no prior row gets '' — the VP assigns it later.
-      const kidGroup = priorKidGroups[String(k.name || '').trim().toLowerCase()] || '';
-      profileStmts.push(sql`
-        INSERT INTO kids (
-          family_email, first_name, last_name, nickname, birth_date,
-          pronouns, allergies, schedule, photo_url, photo_consent,
-          sort_order, class_group
-        ) VALUES (
-          ${familyEmail}, ${k.name}, ${k.last_name || ''}, ${k.nickname || ''},
-          ${k.birth_date || null}, ${k.pronouns || ''}, ${k.allergies || ''},
-          ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
-          ${i}, ${kidGroup}
-        )
-      `);
+      const nameKey = String(k.name || '').trim().toLowerCase();
+      // Carry forward the VP-assigned class group for NEW rows only —
+      // updates leave class_group untouched (preserved by not listing it).
+      const kidGroup = priorKidGroups[nameKey] || '';
+      let matchId = null;
+      if (k.id && priorKidIds.has(k.id) && !usedKidIds.has(k.id)) {
+        matchId = k.id;
+      } else if (priorKidIdsByFirst[nameKey] && !usedKidIds.has(priorKidIdsByFirst[nameKey])) {
+        matchId = priorKidIdsByFirst[nameKey];
+      }
+      if (matchId) {
+        usedKidIds.add(matchId);
+        profileStmts.push(sql`
+          UPDATE kids SET
+            first_name = ${k.name}, last_name = ${k.last_name || ''},
+            nickname = ${k.nickname || ''}, birth_date = ${k.birth_date || null},
+            pronouns = ${k.pronouns || ''}, allergies = ${k.allergies || ''},
+            schedule = ${k.schedule || 'all-day'}, photo_url = ${k.photo_url || ''},
+            photo_consent = ${k.photo_consent !== false}, sort_order = ${i},
+            updated_at = NOW()
+          WHERE id = ${matchId}
+        `);
+      } else {
+        profileStmts.push(sql`
+          INSERT INTO kids (
+            family_email, first_name, last_name, nickname, birth_date,
+            pronouns, allergies, schedule, photo_url, photo_consent,
+            sort_order, class_group
+          ) VALUES (
+            ${familyEmail}, ${k.name}, ${k.last_name || ''}, ${k.nickname || ''},
+            ${k.birth_date || null}, ${k.pronouns || ''}, ${k.allergies || ''},
+            ${k.schedule || 'all-day'}, ${k.photo_url || ''}, ${k.photo_consent !== false},
+            ${i}, ${kidGroup}
+          )
+        `);
+      }
+    }
+    // Rows the family removed from the form: delete just those (their
+    // enrollment rows cascade). An explicit removal is the family's call;
+    // the Membership-approval workflow layers on top later.
+    const removedIds = [...priorKidIds].filter(id => !usedKidIds.has(id));
+    if (removedIds.length > 0) {
+      profileStmts.push(sql`DELETE FROM kids WHERE family_email = ${familyEmail} AND id = ANY(${removedIds}::int[])`);
     }
     await sql.transaction(profileStmts);
+
+    // Season enrollment truth for the ACTIVE season (enrollment build):
+    // schedule updates ride through; status is only ever CREATED here
+    // ('enrolled' for kids with no row yet) — an EMI save must never
+    // silently flip a not_returning kid back to enrolled. Non-fatal.
+    try {
+      const nowKids = await sql`SELECT id, first_name, schedule FROM kids WHERE family_email = ${familyEmail}`;
+      for (const nk of nowKids) {
+        const sch = ['all-day', 'morning', 'afternoon'].indexOf(String(nk.schedule || '').toLowerCase()) !== -1
+          ? String(nk.schedule).toLowerCase() : 'all-day';
+        await sql`
+          INSERT INTO kid_enrollments (
+            kid_id, family_email, kid_first_name, season, schedule, status, source, updated_by
+          ) VALUES (
+            ${nk.id}, ${familyEmail}, ${nk.first_name || ''}, ${DEFAULT_SEASON},
+            ${sch}, 'enrolled', 'emi', ${user.realEmail || user.email}
+          )
+          ON CONFLICT (kid_id, season) DO UPDATE SET
+            schedule = EXCLUDED.schedule,
+            kid_first_name = EXCLUDED.kid_first_name,
+            family_email = EXCLUDED.family_email,
+            source = 'emi',
+            updated_at = NOW(),
+            updated_by = EXCLUDED.updated_by
+        `;
+      }
+    } catch (enrErr) {
+      console.error('EMI kid_enrollments sync failed (non-fatal):', enrErr);
+    }
 
     // Keep the family's registration TRACK in step with the kids' live
     // schedules (Erin, 2026-07-17: the Membership Report + PM-only labels
