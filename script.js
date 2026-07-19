@@ -29901,17 +29901,21 @@
       // first name.
       h += '<input class="rd-input emi-full" type="text" placeholder="Goes by (shown in directory — optional)" data-field="nickname" value="' + escapeHtml(k.nickname || '') + '">';
       h += '<label class="emi-inline-label"><span>Birthday <span style="color:#d35a48;font-weight:700;">*</span></span><input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
-      // Schedule is read-only for members because changing it has billing
+      // Schedule is read-only for members because CHANGING it has billing
       // implications (half-day vs. full-day dues) — they contact the
       // Membership Director. The Membership Director (capability
       // member_schedule_edit, checked on the REAL login so it works
       // through View As) gets a live select; the server enforces the
-      // same gate (Erin, 2026-07-16).
+      // same gate (Erin, 2026-07-16). A JUST-ADDED kid (k._isNew) gets
+      // the live select for everyone — there's no prior value to protect
+      // and the server accepts an initial schedule on new kids (Erin,
+      // 2026-07-19).
       var schedLabel = k.schedule === 'morning' ? 'Morning only'
                     : k.schedule === 'afternoon' ? 'Afternoon only'
                     : 'All day';
-      if (typeof realUserHasCapability === 'function'
-          && realUserHasCapability('member_schedule_edit', ['Membership Director'])) {
+      if (k._isNew
+          || (typeof realUserHasCapability === 'function'
+          && realUserHasCapability('member_schedule_edit', ['Membership Director']))) {
         var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
         h += '<label class="emi-inline-label">Schedule' +
              '<select class="rd-input" data-field="schedule" title="Half-day ↔ full-day — affects dues.">' +
@@ -30250,7 +30254,11 @@
       var addKidBtn = document.getElementById('emiAddKid');
       if (addKidBtn) addKidBtn.addEventListener('click', function () {
         syncStateFromDom();
-        state.kids.push({ name: '', last_name: '', nickname: '', birth_date: '', pronouns: '', allergies: '', schedule: 'all-day', photo_url: '', photo_consent: true, _queuedPhoto: null });
+        // _isNew: a just-added kid gets a live Schedule picker for everyone —
+        // there's no prior dues-bearing value to protect yet, and the server
+        // passes new kids through the schedule gate (Erin, 2026-07-19:
+        // "when I add a kid I can't change their Schedule").
+        state.kids.push({ name: '', last_name: '', nickname: '', birth_date: '', pronouns: '', allergies: '', schedule: 'all-day', photo_url: '', photo_consent: true, _queuedPhoto: null, _isNew: true });
         render();
       });
       var saveBtn = document.getElementById('emiSaveBtn');
