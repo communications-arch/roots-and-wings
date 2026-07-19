@@ -1875,3 +1875,11 @@ CREATE TABLE IF NOT EXISTS todo_confirmations (
   confirmed_by_email TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (kind, school_year)
 );
+
+-- 2026-07-19: family identity phase 4 — a registration remembers the MLC's
+-- people row once the profile upsert lands (stable adult id, groundwork for
+-- per-season enrollment). Plain INTEGER, no FK: profile upserts rewrite a
+-- family's people rows wholesale (fresh ids each time), so this is a
+-- best-effort snapshot pointer, not a referential constraint.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS mlc_person_id INTEGER;
+CREATE INDEX IF NOT EXISTS registrations_mlc_person_id_idx ON registrations (mlc_person_id);

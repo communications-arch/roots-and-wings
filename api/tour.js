@@ -861,10 +861,25 @@ async function handleRegistration(body, req, res) {
       let famEmail;
       if (known_family_email && known_family_email.endsWith('@' + ALLOWED_DOMAIN)) {
         famEmail = known_family_email;
-      } else if (mlc_first_name && mlc_last_name) {
-        famEmail = deriveFamilyEmail(mlc_first_name, mlc_last_name);
       } else {
-        famEmail = deriveFamilyEmail(main_learning_coach, famName);
+        // No frozen identity from an invite link. Before deriving a fresh
+        // key from the typed name (which mints a NEW profile when the name
+        // drifts — compound surnames, typos), look for the family this
+        // contact email already belongs to. Exact stable keys only.
+        let resolved = null;
+        try {
+          resolved = await resolveFamilyByContactEmail(sql, email, id);
+        } catch (resolveErr) {
+          console.error('Family resolution error (non-fatal, deriving as before):', resolveErr);
+        }
+        if (resolved) {
+          famEmail = resolved.familyEmail;
+          console.log('Registration ' + id + ': resolved existing family via ' + resolved.rule + ' (no fresh profile minted).');
+        } else if (mlc_first_name && mlc_last_name) {
+          famEmail = deriveFamilyEmail(mlc_first_name, mlc_last_name);
+        } else {
+          famEmail = deriveFamilyEmail(main_learning_coach, famName);
+        }
       }
       if (famEmail) {
         // Record the EXACT key + whether we're creating a brand-new profile
@@ -893,6 +908,22 @@ async function handleRegistration(body, req, res) {
           address: address,
           placementNotes: placement_notes
         });
+        // Stable adult id (phase 4): the profile writer just created/kept
+        // the family's MLC people row — stamp its id on the registration.
+        // Best-effort snapshot: profile upserts rewrite people rows
+        // wholesale (fresh ids), so this is a pointer, not a FK.
+        try {
+          const mlcPerson = await sql`
+            SELECT id FROM people
+            WHERE LOWER(family_email) = ${famEmail} AND role = 'mlc'
+            ORDER BY sort_order, id LIMIT 1
+          `;
+          if (mlcPerson.length > 0) {
+            await sql`UPDATE registrations SET mlc_person_id = ${mlcPerson[0].id} WHERE id = ${id}`;
+          }
+        } catch (mlcIdErr) {
+          console.error('mlc_person_id stamp error (non-fatal):', mlcIdErr);
+        }
       }
     } catch (profileErr) {
       console.error('Registration → member_profiles upsert error (non-fatal):', profileErr);
@@ -2855,6 +2886,79 @@ function sanitizeParent(p) {
         .filter(Boolean)
     )).slice(0, 8)
   };
+}
+
+// Family identity phase 4 (2026-07-19): before minting a fresh derived
+// family email for a registration with NO known_family_email (cold
+// re-registrations without an invite link), try to resolve the family the
+// typed contact email already belongs to. EXACT email equality against
+// stable keys ONLY — never fuzzy name matching (name drift + compound
+// surnames minting duplicate profiles is exactly the disease this treats;
+// see scripts/consolidate-family.js for the O'Connor Gading anatomy).
+// Rules, in order:
+//   1. member_profiles.family_email        (they typed their login key)
+//   2. member_profiles.additional_emails   (a co-parent / alternate login)
+//   3. people.email                        (an adult's Workspace email)
+//   4. people.personal_email               (an adult's personal email)
+//   5. a prior non-declined registration's email/family_email whose
+//      family_email still points at a live profile
+// A rule that matches MORE than one distinct family is ambiguous — abort
+// resolution entirely (fall back to today's derive) rather than guess.
+// Returns { familyEmail, rule } or null. Resolution only ever PICKS an
+// existing profile instead of minting a new one; it never merges profiles.
+async function resolveFamilyByContactEmail(sql, contactEmail, excludeRegId) {
+  const ce = String(contactEmail || '').trim().toLowerCase();
+  if (!ce) return null;
+  const regId = Number(excludeRegId) || 0;
+
+  function pick(rows, rule) {
+    const fams = Array.from(new Set(rows.map(r => String(r.family_email || '').trim().toLowerCase()).filter(Boolean)));
+    if (fams.length === 1) return { familyEmail: fams[0], rule };
+    if (fams.length > 1) {
+      console.log('Family resolution: contact email matches ' + fams.length + ' families via ' + rule + ' — ambiguous, falling back to derive.');
+      return { ambiguous: true };
+    }
+    return null;
+  }
+
+  let hit = pick(await sql`
+    SELECT family_email FROM member_profiles WHERE LOWER(family_email) = ${ce} LIMIT 2
+  `, 'member_profiles.family_email');
+  if (hit) return hit.ambiguous ? null : hit;
+
+  hit = pick(await sql`
+    SELECT family_email FROM member_profiles
+    WHERE EXISTS (SELECT 1 FROM unnest(additional_emails) ae WHERE LOWER(ae) = ${ce})
+    LIMIT 2
+  `, 'member_profiles.additional_emails');
+  if (hit) return hit.ambiguous ? null : hit;
+
+  hit = pick(await sql`
+    SELECT family_email FROM people WHERE LOWER(email) = ${ce} LIMIT 2
+  `, 'people.email');
+  if (hit) return hit.ambiguous ? null : hit;
+
+  hit = pick(await sql`
+    SELECT family_email FROM people WHERE LOWER(personal_email) = ${ce} LIMIT 2
+  `, 'people.personal_email');
+  if (hit) return hit.ambiguous ? null : hit;
+
+  // Prior registrations: only rows whose family_email still resolves to a
+  // live profile (consolidation re-points these; a stale key must not
+  // resurrect a deleted duplicate). The current registration is excluded —
+  // its family_email is still '' at this point anyway, but be explicit.
+  hit = pick(await sql`
+    SELECT r.family_email FROM registrations r
+    WHERE r.declined_at IS NULL
+      AND r.family_email <> ''
+      AND r.id <> ${regId}
+      AND (LOWER(r.email) = ${ce} OR LOWER(r.family_email) = ${ce})
+      AND EXISTS (SELECT 1 FROM member_profiles mp WHERE LOWER(mp.family_email) = LOWER(r.family_email))
+    ORDER BY r.created_at DESC LIMIT 2
+  `, 'prior registration');
+  if (hit) return hit.ambiguous ? null : hit;
+
+  return null;
 }
 
 // Derive the family's portal email from Main LC name + family surname — same
@@ -7239,6 +7343,7 @@ module.exports = async function handler(req, res) {
 module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
 module.exports.deriveFamilyName = deriveFamilyName;
 module.exports.deriveFamilyEmail = deriveFamilyEmail;
+module.exports.resolveFamilyByContactEmail = resolveFamilyByContactEmail;
 module.exports.DEFAULT_SEASON = DEFAULT_SEASON;
 module.exports.morningKidDisplayName = morningKidDisplayName;
 module.exports.validateBoardCalendarEvent = validateBoardCalendarEvent;
