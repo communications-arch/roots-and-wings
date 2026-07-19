@@ -4098,6 +4098,48 @@ async function handleProfileUpdate(body, req, res) {
             'Enrollment approval needed — ' + familyName,
             'The ' + familyName + ' family requested: ' + summary + '. Review it in the Enrollment Requests queue.');
         }
+      } else {
+        // Privileged adds enroll directly — but the child's waiver is
+        // STILL required (Erin, 2026-07-19: this path silently skipped
+        // it, which is why the waiver felt missable). Create the pending
+        // kid_addition waiver, tell the family, and hand the token back
+        // so the client can open the signing page. Comms' waiver To Do +
+        // the My Family gold banner chase any unsigned stragglers.
+        for (const nameKey of addedKidNames) {
+          const kidId = newIdByFirst[nameKey];
+          if (!kidId) continue;
+          const kidRow2 = kids.filter(k => String(k.name || '').trim().toLowerCase() === nameKey)[0] || {};
+          const kidLabel = kidRow2.name || nameKey;
+          const dupeWv = await sql`
+            SELECT id FROM waiver_signatures
+            WHERE season = ${DEFAULT_SEASON} AND role = 'kid_addition'
+              AND LOWER(family_email) = LOWER(${familyEmail})
+              AND note = ${'Covers newly added child: ' + kidLabel}
+          `;
+          if (dupeWv.length) continue;
+          const mlcRow2 = people.filter(p => p.role === 'mlc')[0] || {};
+          const mlcName2 = ((mlcRow2.first_name || '') + ' ' + (mlcRow2.last_name || '')).trim() || familyName;
+          const reg2 = await sql`
+            SELECT id FROM registrations
+            WHERE LOWER(family_email) = LOWER(${familyEmail}) AND season = ${DEFAULT_SEASON} AND declined_at IS NULL
+            ORDER BY created_at DESC LIMIT 1
+          `;
+          const wvToken2 = crypto.randomUUID().replace(/-/g, '');
+          await sql`
+            INSERT INTO waiver_signatures (
+              season, role, person_name, person_email, family_email, registration_id,
+              pending_token, sent_at, sent_by_email, note
+            ) VALUES (
+              ${DEFAULT_SEASON}, 'kid_addition', ${mlcName2}, ${familyEmail}, ${familyEmail},
+              ${reg2.length ? reg2[0].id : null}, ${wvToken2}, NOW(), ${user.realEmail || user.email},
+              ${'Covers newly added child: ' + kidLabel}
+            )
+          `;
+          await notifyEnrollment(sql, familyEmail,
+            'Waiver needed: ' + kidLabel,
+            'A waiver signature is needed for ' + kidLabel + ' — sign it from the gold banner on your My Family page.');
+          createdRequests.push({ kind: 'waiver_only', kid_first_name: kidLabel, waiver_token: wvToken2 });
+        }
       }
     } catch (enrErr) {
       console.error('EMI kid_enrollments sync failed (non-fatal):', enrErr);
@@ -7530,7 +7572,22 @@ async function handleEnrollmentRequestList(req, res) {
         if (!r.waiver_signed && w[0]) r.waiver_token = w[0].pending_token;
       }
     }
-    return res.status(200).json({ requests: rows });
+    // Unsigned kid_addition waivers WITHOUT a queue row (privileged adds
+    // enroll directly) also feed the My Family banner. Kid name lives in
+    // the note ("Covers newly added child: X") — our own format.
+    let pendingWaivers = [];
+    try {
+      const wvRows = await sql`
+        SELECT pending_token, note FROM waiver_signatures
+        WHERE season = ${DEFAULT_SEASON} AND role = 'kid_addition'
+          AND LOWER(family_email) = ${famScope} AND signed_at IS NULL AND pending_token IS NOT NULL
+      `;
+      pendingWaivers = wvRows.map(w => ({
+        waiver_token: w.pending_token,
+        kid_first_name: String(w.note || '').replace(/^Covers newly added child:\s*/i, '').trim().split(/\s+/)[0] || 'your new kid'
+      }));
+    } catch (e) { /* banner extra only */ }
+    return res.status(200).json({ requests: rows, pending_waivers: pendingWaivers });
   }
   if (!(await membershipMayDecide(user.realEmail || user.email))) {
     return res.status(403).json({ error: 'Only the Membership Director can review enrollment requests.' });

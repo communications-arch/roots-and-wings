@@ -7130,6 +7130,16 @@
         var needs = ((d && d.requests) || []).filter(function (rq) {
           return rq.status !== 'denied' && rq.kind === 'add_kid' && rq.waiver_token && !rq.waiver_signed;
         });
+        // Privileged adds have no queue row — their unsigned waivers ride
+        // in pending_waivers. Merge, deduped by token.
+        var seenTok = {};
+        needs.forEach(function (rq) { seenTok[rq.waiver_token] = true; });
+        ((d && d.pending_waivers) || []).forEach(function (w) {
+          if (w.waiver_token && !seenTok[w.waiver_token]) {
+            seenTok[w.waiver_token] = true;
+            needs.push({ kid_first_name: w.kid_first_name, waiver_token: w.waiver_token });
+          }
+        });
         if (!needs.length) { el2.style.display = 'none'; return; }
         var h = '<h3 class="mf-card-title">✍️ Waiver needed</h3>';
         needs.forEach(function (rq) {
@@ -31354,8 +31364,12 @@
             var pendReqs = (resp.body && resp.body.pending_requests) || [];
             var reopenEmiForWaiver = false;
             if (pendReqs.length) {
-              var addWithWaiver = pendReqs.filter(function (p) { return p.kind === 'add_kid' && p.waiver_token; });
-              var summary = pendReqs.map(function (p) {
+              // waiver_only = a privileged add that enrolled directly but
+              // still needs the child's waiver signed (Erin, 2026-07-19:
+              // this path used to skip the waiver entirely).
+              var addWithWaiver = pendReqs.filter(function (p) { return (p.kind === 'add_kid' || p.kind === 'waiver_only') && p.waiver_token; });
+              var approvalReqs = pendReqs.filter(function (p) { return p.kind !== 'waiver_only'; });
+              var summary = approvalReqs.map(function (p) {
                 return p.kind === 'add_kid' ? 'Adding ' + p.kid_first_name
                   : p.kind === 'remove_kid' ? 'Removing ' + p.kid_first_name
                   : p.kid_first_name + '’s schedule change';
@@ -31367,12 +31381,13 @@
                 // enough). Any additional kids' waivers stay reachable
                 // from the gold banner on My Family afterward.
                 var wvNames = addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ');
-                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for ' + wvNames
+                alert((summary ? 'Sent to the Membership Director for approval: ' + summary + '.\n\n' : '')
+                  + 'One more step for ' + wvNames
                   + ': a waiver signature. Taking you to the signing page now'
                   + (addWithWaiver.length > 1 ? ' — the other waivers wait in the gold banner on your My Family page' : '')
                   + '.');
                 window.location.href = 'waiver.html?token=' + encodeURIComponent(addWithWaiver[0].waiver_token);
-              } else {
+              } else if (approvalReqs.length) {
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
               }
             }
