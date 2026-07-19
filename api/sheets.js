@@ -1737,9 +1737,14 @@ function nextYearLabel(label) {
 //     family re-registering, returning not new → omitted entirely.
 //
 // Each family's label is emitted under EVERY identity seen on its rows:
-// the raw registration email (personal) AND the derived Workspace family
-// email — registrations store the personal email while member_profiles
-// is keyed by deriveFamilyEmail's output, so callers can join on
+// the raw registration email (personal), the STORED family_email column
+// (authoritative — stamped at registration since 2026-07-17), AND the
+// re-derived Workspace family email. The stored column matters (bug log
+// #10): registration derives the family email from the SPLIT first/last
+// fields ("Erin" + "Testing Account" → erint@…) while re-derivation here
+// only has main_learning_coach ("Erin Testing Account" → last word
+// "Account" → erina@…), so a fresh family's member_profiles key was
+// unreachable and they rendered dimmed / badge-less. Callers join on
 // whichever identity they hold (family-identity-by-email rule).
 function firstSeasonFromRows(rows) {
   // Lazy require: tour.js requires sheets.js at module load, so a
@@ -1750,9 +1755,13 @@ function firstSeasonFromRows(rows) {
     var label = seasonToYearLabel(r.season);
     if (!label) return;
     var rawEmail = String(r.email || '').toLowerCase().trim();
+    var storedFam = String(r.family_email || '').toLowerCase().trim();
     var famName = tour.deriveFamilyName(r.main_learning_coach, r.existing_family_name);
     var famEmail = String(tour.deriveFamilyEmail(r.main_learning_coach, famName) || '').toLowerCase();
-    var groupKey = famEmail || rawEmail;
+    // Grouping stays on the derived/raw key so pre-column rows (stored
+    // family_email='') keep collapsing into the same family group; the
+    // stored email joins the emitted KEYS below.
+    var groupKey = famEmail || rawEmail || storedFam;
     if (!groupKey) return;
 
     // Mid-year join: registered after the season already started → the
@@ -1768,6 +1777,7 @@ function firstSeasonFromRows(rows) {
     if (!groups[groupKey]) groups[groupKey] = { keys: {}, earliest: null };
     var g = groups[groupKey];
     if (rawEmail) g.keys[rawEmail] = true;
+    if (storedFam) g.keys[storedFam] = true;
     if (famEmail) g.keys[famEmail] = true;
     var sortKey = (createdIso || '9999-99-99') + '|' + label;
     if (!g.earliest || sortKey < g.earliest.sortKey) {
@@ -1793,7 +1803,8 @@ function firstSeasonFromRows(rows) {
 async function firstSeasonByEmail(sql) {
   try {
     var regRows = await sql`
-      SELECT email, season, created_at, main_learning_coach, existing_family_name
+      SELECT email, season, created_at, main_learning_coach,
+             existing_family_name, family_email
       FROM registrations
       WHERE declined_at IS NULL
     `;
@@ -1808,23 +1819,29 @@ async function firstSeasonByEmail(sql) {
 // currently open for registration (tour.js DEFAULT_SEASON) — drives the
 // Directory's "hasn't re-enrolled" state (Erin, 2026-07-16). Any payment
 // status counts (pending cash/check families ARE re-enrolled). Same
-// dual-key emission as firstSeasonFromRows: the flag is reachable by BOTH
-// the raw registration (personal) email and the derived Workspace family
-// email. {} on failure so the directory degrades to no indicator.
+// multi-key emission as firstSeasonFromRows: the flag is reachable by the
+// raw registration (personal) email, the STORED family_email column
+// (authoritative, stamped at registration since 2026-07-17 — bug log #10:
+// re-derivation from main_learning_coach alone can disagree with what
+// registration actually stored, dimming a family who registered today),
+// and the re-derived Workspace family email as fallback for legacy rows.
+// {} on failure so the directory degrades to no indicator.
 async function registeredSeasonByEmail(sql) {
   var tour = require('./tour.js'); // lazy: top-level require would cycle
   try {
     var rows = await sql`
-      SELECT email, main_learning_coach, existing_family_name
+      SELECT email, main_learning_coach, existing_family_name, family_email
       FROM registrations
       WHERE declined_at IS NULL AND season = ${tour.DEFAULT_SEASON}
     `;
     var out = {};
     rows.forEach(function (r) {
       var rawEmail = String(r.email || '').toLowerCase().trim();
+      var storedFam = String(r.family_email || '').toLowerCase().trim();
       var famName = tour.deriveFamilyName(r.main_learning_coach, r.existing_family_name);
       var famEmail = String(tour.deriveFamilyEmail(r.main_learning_coach, famName) || '').toLowerCase();
       if (rawEmail) out[rawEmail] = true;
+      if (storedFam) out[storedFam] = true;
       if (famEmail) out[famEmail] = true;
     });
     return out;

@@ -415,6 +415,25 @@
     return n || String(name || '').trim();
   }
 
+  // Person-name equality for duty + absence-slot matching (bug log #9).
+  // BOTH the first and last name must correspond — case- and extra-
+  // whitespace-tolerant, middle tokens ignored ("Erin R. Bogan" still
+  // matches "Erin Bogan"). A single-token name ("Erin") only matches
+  // another single-token name: first-name-only matching is how a fresh
+  // "Erin Testing Account" login inherited the real Erin's duties.
+  // Matching stays on LEGAL first/last names — nickOr() display names
+  // never participate (see the note above).
+  function personNamesMatch(a, b) {
+    if (!a || !b) return false;
+    var ta = String(a).trim().toLowerCase().split(/\s+/);
+    var tb = String(b).trim().toLowerCase().split(/\s+/);
+    if (!ta[0] || !tb[0]) return false;
+    if (ta[0] !== tb[0]) return false; // first names differ
+    // Never let a bare first name claim a full name (or vice versa).
+    if (ta.length === 1 || tb.length === 1) return ta.length === tb.length;
+    return ta[ta.length - 1] === tb[tb.length - 1]; // last names must agree
+  }
+
   // True when the host is a dev environment (localhost or a Vercel
   // preview deploy). In dev, every signed-in tester gets the View As
   // picker + super-user affordances so they can impersonate any role-
@@ -5903,9 +5922,16 @@
     // Kept named `parentFullNames` so the forEach blocks below stay readable.
     var parentFullNames = matchTargets;
 
+    // Person names: first AND last must correspond (bug log #9 — a fresh
+    // "Erin Testing Account" login must not inherit "Erin Bogan" duties).
     function nameMatch(a, b) {
+      return personNamesMatch(a, b);
+    }
+    // Role/duty TITLES keep plain exact comparison — first/last-token
+    // semantics don't apply to strings like "Cleaning Crew Liaison".
+    function titleEq(a, b) {
       if (!a || !b) return false;
-      return a.trim().toLowerCase() === b.trim().toLowerCase();
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
     }
 
     // ── Session-bound duties (AM, PM, Cleaning, Coverage) ──
@@ -6043,10 +6069,21 @@
       var cleanAreas = ['mainFloor', 'upstairs', 'outside'];
       function matchesCleaning(names) {
         return names.some(function(n) {
-          var nl = n.toLowerCase();
-          return nl === fam.name.toLowerCase() ||
-            parentFullNames.some(function(pf) { return nl.indexOf(pf.split(' ')[0].toLowerCase()) !== -1 && nl.indexOf(fam.name.toLowerCase()) !== -1; }) ||
-            parentFullNames.some(function(pf) { return nl === pf.toLowerCase(); });
+          var nl = n.trim().toLowerCase();
+          if (nl === fam.name.toLowerCase()) return true; // family-level entry
+          // Person-level (or "Erin & Jay Bogan" style) entries: the first
+          // name AND every family-name word must appear as WHOLE tokens.
+          // Substring matching let "Katherine Bogan" claim Erin's duty
+          // ("erin" hides inside "katherine") — bug log #9 hardening.
+          var nlToks = nl.split(/\s+/);
+          var famToks = fam.name.toLowerCase().split(/\s+/);
+          return parentFullNames.some(function(pf) {
+            var pfl = pf.trim().toLowerCase();
+            if (nl === pfl) return true; // exact person entry
+            var first = pfl.split(/\s+/)[0];
+            return nlToks.indexOf(first) !== -1 &&
+              famToks.every(function (ft) { return nlToks.indexOf(ft) !== -1; });
+          });
         });
       }
       // Include the floor grouping in the duty label (Erin, 2026-07-16):
@@ -6088,7 +6125,12 @@
         if (_mfDutySession && (parseInt(a.session_number, 10) || currentSession) !== dutySession) return;
         (a.slots || []).forEach(function (s) {
           if (!s.claimed_by_email && !s.claimed_by_name) return;
-          var mine = parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
+          // Email is authoritative when the claim carries one (bug log #9:
+          // entities with emails match by email ONLY — no name fallback
+          // that could hand the duty to a same-named stranger).
+          var mine = s.claimed_by_email
+            ? String(s.claimed_by_email).toLowerCase() === String(email || '').toLowerCase()
+            : parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
           if (!mine) return;
           var blk = (s.block === 'AM' || s.block === 'PM1' || s.block === 'PM2' || s.block === 'Cleaning') ? s.block : 'AM';
           var icon = s.role_type === 'teacher' ? 'teach' : s.role_type === 'cleaning' ? 'clean' : 'assist';
@@ -6128,7 +6170,7 @@
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
       if (committee.chair && committee.chair.person) {
         var chairTitle = committee.chair.title.replace(/\bDir\.\s*$/, 'Director');
-        if (!fam.boardRole || !nameMatch(chairTitle, fam.boardRole)) {
+        if (!fam.boardRole || !titleEq(chairTitle, fam.boardRole)) {
           parentFullNames.forEach(function (full) {
             if (nameMatch(committee.chair.person, full))
               duties.push({block: 'annual', icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board', popup: {type: 'committee', name: committee.name}});
@@ -6198,16 +6240,18 @@
       });
     }
     SPECIAL_EVENTS.forEach(function (ev) {
-      // Coordinator strings come from the master sheet and may include
-      // "Erin" or "Erin Bogan" or even free-form ("Erin & Joey"). Match
-      // the active person's first name against any whitespace-separated
-      // token in the coordinator string.
-      var firstNames = (Array.isArray(fam.people) ? fam.people.map(function(pp) { return pp.first_name; }) : [])
-        .filter(Boolean);
-      if (activePerson) firstNames = [activePerson.first_name].filter(Boolean);
-      var isCoord = ev.coordinator && firstNames.some(function (fn) {
-        return ev.coordinator.indexOf(fn) !== -1;
-      });
+      // Coordinator strings come from the master sheet and are free-form:
+      // "Erin Bogan", "Erin Bogan & Joey Smith". Split on the usual
+      // separators and require a full first+last nameMatch against the
+      // active person (bug log #9: substring-matching any first name
+      // handed a fresh "Erin Testing Account" login the real Erin's
+      // coordinator duties). Bare-first-name cells ("Erin") no longer
+      // match anyone — first-name-only identity is inherently ambiguous.
+      var isCoord = ev.coordinator && String(ev.coordinator)
+        .split(/\s*(?:&|,|\/|\+|\band\b)\s*/i)
+        .some(function (seg) {
+          return parentFullNames.some(function (full) { return nameMatch(seg, full); });
+        });
       // Only UPCOMING events are responsibilities — the master-sheet tab
       // still lists last season's events (2026-07-06, Erin saw "Field Day
       // Coordinator · May 20, 2026" on prod in July). A parseable date in
@@ -6240,10 +6284,10 @@
       var titles = (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[emailLc]) || [];
       titles.forEach(function (title) {
         // Skip anything the legacy sheet block (or board role) already listed.
-        if (duties.some(function (d) { return nameMatch(d.text, title); })) return;
+        if (duties.some(function (d) { return titleEq(d.text, title); })) return;
         var rd = null;
         for (var ri = 0; ri < roleDescriptions.length; ri++) {
-          if (nameMatch(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
+          if (titleEq(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
         }
         var committeeName = (rd && rd.committee) || 'Committee';
         duties.push({
@@ -18460,9 +18504,11 @@
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
+  // Same first+last person-name semantics as the duty matcher (bug log #9)
+  // — the absence-slot builder must not offer a slot to a same-first-name
+  // stranger either.
   function nameMatchAbsence(a, b) {
-    if (!a || !b) return false;
-    return a.trim().toLowerCase() === b.trim().toLowerCase();
+    return personNamesMatch(a, b);
   }
 
   // Committee titles held by ONE named person — the same two sources
