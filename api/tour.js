@@ -2217,12 +2217,22 @@ async function handleSendWelcomeEmail(body, req, res) {
     if (rows.length === 0) return res.status(404).json({ error: 'Registration not found.' });
     const reg = rows[0];
 
+    // CC the Welcome Coordinator (Erin, 2026-07-19) — they reach out to
+    // each new family, so they should see the welcome email land.
+    // Resolved live so a role handoff needs no code change; lookup
+    // failure just means no extra cc.
+    const welcomeCc = [];
+    try {
+      const wcEmail = await getRoleHolderEmail('Welcome Coordinator');
+      if (wcEmail && wcEmail.toLowerCase() !== 'communications@rootsandwingsindy.com') welcomeCc.push(wcEmail);
+    } catch (e) { /* no Welcome Coordinator on file */ }
+
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
       await resend.emails.send({
         from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
         to: reg.email,
-        cc: ['communications@rootsandwingsindy.com'],
+        cc: ['communications@rootsandwingsindy.com'].concat(welcomeCc),
         replyTo: 'communications@rootsandwingsindy.com',
         subject: emailSubject(subject),
         html: html
