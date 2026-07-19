@@ -11796,20 +11796,29 @@
         }
       });
       h += '</tbody></table></div>';
-      // Preserve the modal's scroll position across re-renders. Replacing
-      // the table's innerHTML momentarily collapses its height, so the
-      // browser clamps the scroll container's scrollTop to 0 (the "jumps to
-      // top" bug when expanding a row). Snapshot before, restore after — so
-      // the clicked row stays under the cursor.
+      // Preserve scroll across re-renders. TWO scrollers matter: the table
+      // scrolls inside its OWN wrapper (.ws-waivers-table-wrap, max-height
+      // + overflow-y) which is destroyed and rebuilt by the innerHTML swap
+      // — the position must be carried from the old wrap to the new one
+      // (missing this was the REAL "jumps to top on + Fill" bug, Erin
+      // 2026-07-19; the ancestor restore below never fired because the
+      // modal card wasn't the thing scrolling). The modal-card restore
+      // stays for hosts where the page/card scrolls too.
+      var _oldWrap = containerEl.querySelector('.ws-waivers-table-wrap');
+      var _wrapTop = _oldWrap ? _oldWrap.scrollTop : 0;
+      var _wrapLeft = _oldWrap ? _oldWrap.scrollLeft : 0;
       var _scroller = findScrollableAncestor(containerEl);
       var _savedScrollTop = _scroller ? _scroller.scrollTop : 0;
       containerEl.innerHTML = h;
-      if (_scroller) {
-        _scroller.scrollTop = _savedScrollTop;
-        // Belt-and-suspenders: if a post-render reflow re-clamps scrollTop,
-        // restore once more on the next frame.
-        requestAnimationFrame(function () { _scroller.scrollTop = _savedScrollTop; });
-      }
+      var _newWrap = containerEl.querySelector('.ws-waivers-table-wrap');
+      if (_newWrap) { _newWrap.scrollTop = _wrapTop; _newWrap.scrollLeft = _wrapLeft; }
+      if (_scroller) _scroller.scrollTop = _savedScrollTop;
+      // Belt-and-suspenders: if a post-render reflow re-clamps either
+      // scroller, restore once more on the next frame.
+      requestAnimationFrame(function () {
+        if (_newWrap) { _newWrap.scrollTop = _wrapTop; _newWrap.scrollLeft = _wrapLeft; }
+        if (_scroller) _scroller.scrollTop = _savedScrollTop;
+      });
 
       // Funnel button → filter popover. Wired BEFORE the th-click sort
       // handler with stopPropagation so clicking the funnel doesn't
@@ -24106,9 +24115,21 @@
   function schedPreserveScroll(fn) {
     var sc = schedScroller();
     var top = sc ? sc.scrollTop : 0;
+    // The table's own scroll wrapper is rebuilt by full-body re-renders
+    // (renderSchedulesBody empties the target, so renderSortableTable's
+    // old-wrap carry-over finds nothing) — carry its position here too.
+    var wrap = document.querySelector('#ws-sched-table-target .ws-waivers-table-wrap');
+    var wTop = wrap ? wrap.scrollTop : 0;
+    var wLeft = wrap ? wrap.scrollLeft : 0;
     fn();
-    sc = schedScroller();
-    if (sc) sc.scrollTop = top;
+    var restore = function () {
+      var sc2 = schedScroller() || sc;
+      if (sc2) sc2.scrollTop = top;
+      var w2 = document.querySelector('#ws-sched-table-target .ws-waivers-table-wrap');
+      if (w2) { w2.scrollTop = wTop; w2.scrollLeft = wLeft; }
+    };
+    restore();
+    requestAnimationFrame(restore);
   }
 
   // Re-pull the grid (and the workspace To Do counts) after a placement.
