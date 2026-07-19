@@ -1,0 +1,9 @@
+# Roots & Wings Indy — public site is crawlable; the member portal and
+# the dev-only bug log are not for robots (they're sign-in-gated anyway;
+# this keeps their shells out of indexes and AI crawlers entirely).
+User-agent: *
+Disallow: /bugs.html
+Disallow: /bugs
+Disallow: /members.html
+Disallow: /members
+Disallow: /api/
