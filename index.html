@@ -11,6 +11,10 @@
   <meta name="description" content="Roots & Wings Indy is a nurturing homeschool co-op in Indianapolis, IN. We grow curious, confident learners through community-centered education.">
   <meta name="theme-color" content="#523A79">
   <title>Roots & Wings Indy — Homeschool Co-op in Indianapolis</title>
+  <!-- Page-render stamp for the public forms' bot screening (see botScreen
+       in api/tour.js): humans take seconds between load and submit; bots
+       posting straight at the API never carry it. -->
+  <script>window.__rwPageTs = Date.now();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Brand fonts (2026 guide): Playfair Display Black for display
@@ -736,6 +740,8 @@
       <h2 class="tour-modal-title">Schedule a Tour</h2>
       <p class="tour-modal-subtitle">We'd love to welcome your family! Fill this out and we'll be in touch to find a time for you to visit.</p>
       <form id="tour-modal-form" class="tour-modal-form">
+        <!-- Bot screening: honeypot (never visible; humans leave it empty). -->
+        <input type="text" id="tour-website" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;border:0;padding:0;">
         <div class="tour-form-field">
           <label for="tour-name">Your Name</label>
           <input type="text" id="tour-name" name="name" required placeholder="First and Last Name">
@@ -835,7 +841,9 @@
                 numKids: document.getElementById('tour-num-kids').value,
                 ages: document.getElementById('tour-ages').value,
                 preferred_date: pickedDate || null,
-                preferred_time: pickedTime || null
+                preferred_time: pickedTime || null,
+                website: document.getElementById('tour-website').value,
+                form_ts: window.__rwPageTs || 0
               })
             });
             if (!res.ok) {
@@ -871,6 +879,8 @@
       <h2 class="tour-modal-title">Get in Touch</h2>
       <p class="tour-modal-subtitle">Have a question about Roots &amp; Wings? Send us a note and our Membership team will get back to you.</p>
       <form id="contact-modal-form" class="tour-modal-form">
+        <!-- Bot screening: honeypot (never visible; humans leave it empty). -->
+        <input type="text" id="contact-website" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;border:0;padding:0;">
         <div class="tour-form-field">
           <label for="contact-name">Your Name</label>
           <input type="text" id="contact-name" name="name" required placeholder="First and Last Name">
@@ -907,7 +917,9 @@
                 name: document.getElementById('contact-name').value,
                 email: document.getElementById('contact-email').value,
                 phone: document.getElementById('contact-phone').value,
-                message: document.getElementById('contact-message').value
+                message: document.getElementById('contact-message').value,
+                website: document.getElementById('contact-website').value,
+                form_ts: window.__rwPageTs || 0
               })
             });
             if (!res.ok) {
