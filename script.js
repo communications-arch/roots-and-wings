@@ -452,13 +452,66 @@
   // which page (My Family, Workspace, etc.) is active. Backed by the same
   // VIEW_AS_KEY session slot as the (legacy) in-page picker so they stay
   // in sync.
+  // "First Last" label for the impersonated login — person row first,
+  // email-prefix derivation as the fallback (with the dupe guard from the
+  // old in-page banner, e.g. communications@ + family "Communications").
+  function viewAsHeaderLabel(viewAsEmail) {
+    var emLc = String(viewAsEmail || '').toLowerCase();
+    var fam = null;
+    (Array.isArray(FAMILIES) ? FAMILIES : []).some(function (f) {
+      if (!f) return false;
+      var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+      if (logins.some(function (e) { return String(e || '').toLowerCase() === emLc; })) { fam = f; return true; }
+      return false;
+    });
+    if (fam && Array.isArray(fam.people)) {
+      for (var vp = 0; vp < fam.people.length; vp++) {
+        var ppl = fam.people[vp];
+        if (ppl && String(ppl.email || '').toLowerCase() === emLc) return personFullName(ppl, fam);
+      }
+    }
+    var first = deriveFirstNameFromLogin(emLc, fam ? fam.name : '');
+    var last = fam ? (fam.displayName || fam.name || '') : '';
+    if (first && last && first.toLowerCase() === last.toLowerCase()) return first;
+    return (first ? (first + ' ' + last).trim() : (last || emLc));
+  }
+
   function renderHeaderViewAs() {
-    // Dev-only "Bug log" link for helper testers (opens bugs.html in a
-    // new tab). Sits next to the View As picker in the header; hidden
-    // everywhere except dev hosts, and independent of the picker's own
-    // visibility rules below so it survives an empty FAMILIES load.
+    // The testing strip: ONE container gate for every piece of testing
+    // chrome (Erin, 2026-07-19 — after the bug-log pill leaked onto prod
+    // via a per-element hide, everything testing-ish now lives together).
+    // Strip shows for super users (View As is a real prod feature for
+    // Comms/VP) and for everyone on dev hosts; the bug-log link inside
+    // keeps its own stricter dev-only gate.
+    var testbar = document.getElementById('qsbTestbar');
+    if (testbar) testbar.hidden = !isCommsUser();
     var bugLink = document.getElementById('qsbBugLog');
     if (bugLink) bugLink.hidden = !isDevHost();
+    // "Viewing as <name>" + Back to my view — lives in the strip, shown
+    // only while impersonating.
+    var viewAsNow = sessionStorage.getItem(VIEW_AS_KEY) || '';
+    var viewingWrap = document.getElementById('qsbViewingAs');
+    var viewingName = document.getElementById('qsbViewingAsName');
+    var resetBtn = document.getElementById('qsbViewAsReset');
+    var showViewing = !!(viewAsNow && isCommsUser());
+    if (viewingWrap) viewingWrap.hidden = !showViewing;
+    if (viewingName && showViewing) viewingName.textContent = viewAsHeaderLabel(viewAsNow);
+    if (resetBtn) {
+      resetBtn.hidden = !showViewing;
+      if (!resetBtn._rwWired) {
+        resetBtn._rwWired = true;
+        resetBtn.addEventListener('click', function () {
+          sessionStorage.removeItem(VIEW_AS_KEY);
+          if (typeof renderMyFamily === 'function') renderMyFamily();
+          if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
+          if (typeof loadNotifications === 'function') loadNotifications();
+          if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
+          if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+          renderHeaderViewAs();
+          requestAnimationFrame(syncPortalHeaderHeight);
+        });
+      }
+    }
     var wrap = document.getElementById('qsbViewAs');
     var select = document.getElementById('qsbViewAsSelect');
     if (!wrap || !select) return;
@@ -549,6 +602,7 @@
         if (typeof loadNotifications === 'function') loadNotifications();
         if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
         if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+        renderHeaderViewAs(); // refresh the strip's "Viewing as" chunk
         requestAnimationFrame(syncPortalHeaderHeight);
       });
       select._rwWired = true;
@@ -5787,52 +5841,9 @@
 
     var html = '';
 
-    // ──── View As banner (communications@ only, when impersonating) ────
-    // The picker itself lives in the sticky header (see renderHeaderViewAs);
-    // the banner below just makes it obvious which family is in view and
-    // offers a one-click "back to my view" button.
-    var viewAsEmail = sessionStorage.getItem(VIEW_AS_KEY);
-    if (isCommsUser() && viewAsEmail && fam) {
-      html += '<div class="view-as-bar">';
-      html += '<div class="view-as-banner">';
-      html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-      // Label the banner as "First Last" for the specific person being
-      // impersonated. Look the person up in fam.people by email so we get
-      // their ACTUAL first + last name — not whatever the email prefix
-      // parses to (which duplicates the family name when the prefix and
-      // family name happen to share their first letter, e.g.
-      // communications@ + family "Communications" → "Communications
-      // Communications" via the email-derived fallback).
-      var viewAsLabel = '';
-      if (Array.isArray(fam.people)) {
-        var emLc = String(viewAsEmail || '').toLowerCase();
-        for (var vp = 0; vp < fam.people.length; vp++) {
-          var ppl = fam.people[vp];
-          if (ppl && String(ppl.email || '').toLowerCase() === emLc) {
-            viewAsLabel = personFullName(ppl, fam);
-            break;
-          }
-        }
-      }
-      if (!viewAsLabel) {
-        // Fallback for sheet-only / no-people-row families: use the
-        // legacy email-prefix derivation but DON'T re-append the family
-        // name when it already collapses into a duplicate.
-        var fallbackFirst = deriveFirstNameFromLogin(viewAsEmail, fam.name);
-        var fallbackLast = fam.displayName || fam.name || '';
-        if (fallbackFirst && fallbackLast && fallbackFirst.toLowerCase() === fallbackLast.toLowerCase()) {
-          viewAsLabel = fallbackFirst; // would otherwise dupe
-        } else if (fallbackFirst) {
-          viewAsLabel = (fallbackFirst + ' ' + fallbackLast).trim();
-        } else {
-          viewAsLabel = fallbackLast;
-        }
-      }
-      html += ' Viewing as <strong>' + viewAsLabel + '</strong>';
-      html += '<button class="view-as-reset" id="viewAsReset">Back to my view</button>';
-      html += '</div>';
-      html += '</div>';
-    }
+    // View As status now lives in the header testing strip (Erin,
+    // 2026-07-19) — see renderHeaderViewAs/viewAsHeaderLabel. No in-page
+    // banner anymore.
 
     // If no matching family (e.g. communications@ with no View As), show
     // empty-state prompt pointing to the header picker.
@@ -6783,18 +6794,8 @@
     // Keep the header picker in sync with the active family.
     renderHeaderViewAs();
 
-    // "Back to my view" button from the impersonation banner.
-    var viewAsReset = document.getElementById('viewAsReset');
-    if (viewAsReset) {
-      viewAsReset.onclick = function () {
-        sessionStorage.removeItem(VIEW_AS_KEY);
-        renderMyFamily();
-        if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
-        if (typeof loadNotifications === 'function') loadNotifications();
-        if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
-        if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
-      };
-    }
+    // ("Back to my view" now lives in the header testing strip — wired
+    // once in renderHeaderViewAs.)
 
     // Wire up duty detail popups
     grid.querySelectorAll('.mf-duty-clickable').forEach(function (row) {

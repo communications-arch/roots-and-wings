@@ -27,7 +27,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260720l">
+  <link rel="stylesheet" href="styles.css?v=20260720m">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <script src="https://accounts.google.com/gsi/client" async defer onload="if(window.__initGSI)window.__initGSI()"></script>
@@ -204,17 +204,26 @@
           </button>
           <span id="dashboardSubtitle">Your hub for co-op resources, schedules, and communication.</span>
         </div>
-        <div class="qsb-pills">
+        <!-- Testing strip (Erin, 2026-07-19): ALL impersonation/testing
+             chrome lives in this ONE row — View As picker, the "Viewing
+             as" status + back button, and the dev-only bug log — so a
+             single container gate controls visibility and dev tools
+             can't leak into the member UI one element at a time.
+             Managed by renderHeaderViewAs(). -->
+        <div class="qsb-testbar" id="qsbTestbar" hidden>
+          <span class="qsb-testbar-label" title="Only super users (and dev-site testers) see this row">🧪 Testing</span>
           <div class="qsb-view-as" id="qsbViewAs" hidden>
             <label for="qsbViewAsSelect" class="qsb-view-as-label">View as:</label>
             <select class="view-as-select" id="qsbViewAsSelect"></select>
           </div>
-          <!-- Dev-only bug log for helper testers — unhidden by
-               renderHeaderViewAs() when the host is a dev host. -->
+          <span class="qsb-testbar-viewing" id="qsbViewingAs" hidden>Viewing as <strong id="qsbViewingAsName"></strong></span>
+          <button type="button" class="view-as-reset" id="qsbViewAsReset" hidden>Back to my view</button>
           <a href="bugs.html" target="_blank" rel="noopener" class="qsb-pill" id="qsbBugLog" hidden>
             <span aria-hidden="true">🐞</span>
             <span>Bug log</span>
           </a>
+        </div>
+        <div class="qsb-pills">
           <a href="#myFamily" class="qsb-pill active" data-view="info">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             <span>My Family</span>
@@ -490,7 +499,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260720l"></script>
+  <script src="script.js?v=20260720m"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board

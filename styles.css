@@ -10653,6 +10653,29 @@ button.staff-role:hover {
    renders anyway because the class's display wins over the UA sheet's
    [hidden] { display:none }. (Bug: pill leaked onto prod, 2026-07-19.) */
 .qsb-pill[hidden] { display: none !important; }
+
+/* ── Testing strip (Erin, 2026-07-19) ──
+   ONE row holding every piece of impersonation/testing chrome: the
+   View As picker, "Viewing as <name>" + Back to my view, and the
+   dev-only 🐞 Bug log. A single container gate (renderHeaderViewAs)
+   controls it, and the dashed amber look makes any visibility leak
+   instantly obvious instead of blending into the member nav. */
+.qsb-testbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 14px;
+  margin: 0 0 8px;
+  border: 1px dashed rgba(var(--color-primary-rgb), 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(var(--color-accent-light-rgb), 0.18);
+  font-size: 0.85rem;
+}
+.qsb-testbar[hidden] { display: none !important; }
+.qsb-testbar-label { font-weight: 700; color: var(--color-primary-dark); white-space: nowrap; }
+.qsb-testbar-viewing { color: var(--color-text); }
+.qsb-testbar-viewing[hidden], .qsb-testbar .view-as-reset[hidden], .qsb-testbar .qsb-view-as[hidden] { display: none !important; }
 .qsb-pill {
   display: inline-flex;
   align-items: center;
