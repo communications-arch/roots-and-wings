@@ -10665,17 +10665,44 @@ button.staff-role:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 6px 14px;
+  padding: 8px 14px;
   margin: 0 0 8px;
-  border: 1px dashed rgba(var(--color-primary-rgb), 0.35);
+  /* Sits on the portal header's purple gradient — needs a near-opaque
+     light surface or the text drowns (Erin, 2026-07-19: hard to read). */
+  background: rgba(255, 252, 245, 0.95);
+  border: 1.5px dashed var(--color-accent, #E0A526);
   border-radius: var(--radius-md);
-  background: rgba(var(--color-accent-light-rgb), 0.18);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 .qsb-testbar[hidden] { display: none !important; }
-.qsb-testbar-label { font-weight: 700; color: var(--color-primary-dark); white-space: nowrap; }
-.qsb-testbar-viewing { color: var(--color-text); }
+.qsb-testbar-label { font-weight: 800; color: var(--color-primary); white-space: nowrap; letter-spacing: 0.02em; }
+.qsb-testbar-viewing { color: var(--color-text); font-weight: 600; }
 .qsb-testbar-viewing[hidden], .qsb-testbar .view-as-reset[hidden], .qsb-testbar .qsb-view-as[hidden] { display: none !important; }
+/* Children were styled white-for-the-gradient — re-color for the light strip. */
+.qsb-testbar .qsb-pill {
+  color: var(--color-primary-dark);
+  border-color: rgba(var(--color-primary-rgb), 0.35);
+  background: rgba(var(--color-primary-rgb), 0.06);
+}
+.qsb-testbar .qsb-pill:hover {
+  color: var(--color-primary-dark);
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.12);
+}
+.qsb-testbar .qsb-view-as-label { color: var(--color-text); font-weight: 600; }
+.qsb-testbar .view-as-reset {
+  background: var(--color-white);
+  color: var(--color-primary-dark);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.4);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.qsb-testbar .view-as-reset:hover { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.06); }
 .qsb-pill {
   display: inline-flex;
   align-items: center;
