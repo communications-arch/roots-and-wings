@@ -29014,7 +29014,15 @@
     loadClassLinks();
     loadMyClassSubmissions();
     loadNotifications();
-    setInterval(loadNotifications, 60000);
+    // Poll only while the tab is actually visible, and at 3 minutes instead
+    // of 1. A hidden/background tab makes ZERO requests — a forgotten open
+    // tab used to wake the Neon compute every 60s around the clock, which
+    // burned the project's entire free CU-hour allowance (2026-07-19: the
+    // dev compute ran 8+ days nonstop). The visibilitychange handler below
+    // refreshes immediately on return, so backgrounded tabs lose nothing.
+    setInterval(function () {
+      if (document.visibilityState === 'visible') loadNotifications();
+    }, 180000);
     // Re-check notifications when the tab becomes visible again so users
     // returning after a break see the current state instead of waiting up
     // to a full polling interval.
