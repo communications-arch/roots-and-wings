@@ -6624,22 +6624,30 @@ function gcalBodyFromEvent(row) {
     // clears it on the Google event too.
     location: row.location || ''
   };
-  if (st && !endDate) {
+  if (st) {
+    // Times apply even with an end date (a multi-day event spans from the
+    // start time on day one to the end time on the last day) — the old
+    // `st && !endDate` guard silently dropped times whenever an end date
+    // was set (Erin, 2026-07-19: "entered times and they aren't showing
+    // up on the google calendar").
     let end = et;
     if (!end) {
       const h = String(Math.min(23, parseInt(st.slice(0, 2), 10) + 1)).padStart(2, '0');
       end = h + st.slice(2);
     }
-    body.start = { dateTime: `${date}T${st}:00`, timeZone: 'America/Indianapolis' };
-    body.end = { dateTime: `${date}T${end}:00`, timeZone: 'America/Indianapolis' };
+    // Explicit date:null — events.patch merges per-field, so converting a
+    // formerly all-day event to timed must clear the old `date` or Google
+    // rejects/keeps the all-day form.
+    body.start = { dateTime: `${date}T${st}:00`, timeZone: 'America/Indianapolis', date: null };
+    body.end = { dateTime: `${endDate || date}T${end}:00`, timeZone: 'America/Indianapolis', date: null };
   } else {
     const plusOne = (d) => {
       const t = new Date(d + 'T00:00:00Z');
       t.setUTCDate(t.getUTCDate() + 1);
       return t.toISOString().slice(0, 10);
     };
-    body.start = { date: date };
-    body.end = { date: plusOne(endDate || date) };
+    body.start = { date: date, dateTime: null };
+    body.end = { date: plusOne(endDate || date), dateTime: null };
   }
   return body;
 }
@@ -6648,6 +6656,11 @@ function gcalBodyFromEvent(row) {
 // Google event id ('' when the row doesn't sync). Keeps gcal_event_id
 // in step in the DB.
 async function syncEventToGoogleCalendar(sql, row) {
+  // Same gate as special events/sessions: dev + prod share the ONE real
+  // Google Calendar, so only production may write to it. (Board events
+  // were the lone ungated path — dev Admin Calendar testing could have
+  // published or deleted real member-facing events.)
+  if (process.env.VERCEL_ENV !== 'production') return '';
   const cal = getCalendarWriteClient();
   const synced = GCAL_SYNCED_TYPES.indexOf(row.event_type) !== -1;
   const gid = String(row.gcal_event_id || '');
@@ -6845,9 +6858,10 @@ async function handleBoardCalendarDelete(body, req, res) {
     const existing = await sql`SELECT id, gcal_event_id FROM board_calendar_events WHERE id = ${id}`;
     if (existing.length === 0) return res.status(404).json({ error: 'Event not found.' });
     await sql`DELETE FROM board_calendar_events WHERE id = ${id}`;
-    // Take the linked Google event with it (non-fatal).
+    // Take the linked Google event with it (non-fatal). Prod-only — the
+    // real calendar is shared, dev must never delete member-facing events.
     const gid = String(existing[0].gcal_event_id || '');
-    if (gid) {
+    if (gid && process.env.VERCEL_ENV === 'production') {
       try {
         await getCalendarWriteClient().events.delete({ calendarId: RW_GCAL_ID, eventId: gid });
       } catch (gErr) {

@@ -5919,7 +5919,9 @@
 
     // ──── Coverage Board (full width, collapsible) ────
     // Hidden during summer break — no co-op days = no coverage to claim.
-    if (!isSummerBreak) {
+    // EXCEPT when upcoming absences already exist (next season's rows get
+    // entered over the summer): real data always outranks the season gate.
+    if (!isSummerBreak || (loadedAbsences || []).length > 0) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
       html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage"><img class="brand-accent" src="brand/secondary/accent-33.png" alt=""> Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
       html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
@@ -18905,10 +18907,11 @@
   function loadCoverageBoard() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    // Current session AND every later one, so members can review/claim
-    // coverage for upcoming sessions (Session pills on the board) and
-    // absences entered ahead of time stay visible.
-    fetch('/api/absences?from_session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
+    // Every upcoming absence BY DATE, not by session number — session
+    // numbers repeat every school year, so a from_session=currentSession
+    // filter silently dropped next-season absences around the boundary
+    // (the board vanished right after a claim re-fetch, Erin 2026-07-19).
+    fetch('/api/absences?upcoming=1', { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       var raw = data.absences || [];
@@ -18916,10 +18919,17 @@
       // Publish first so renderMyFamily can inject any coverage assignments
       // into the user's My Responsibilities card. renderMyFamily() then calls
       // renderCoverageBoard(loadedAbsences) at the end, which repopulates the
-      // coverage card — avoiding a separate second render here.
+      // coverage card — avoiding a separate second render here. If that
+      // full-page rebuild ever throws, fall back to rendering the board
+      // directly so a claim can never make the tracker disappear.
       loadedAbsences = filtered;
-      if (typeof renderMyFamily === 'function') renderMyFamily();
-      else renderCoverageBoard(filtered);
+      try {
+        if (typeof renderMyFamily === 'function') renderMyFamily();
+        else renderCoverageBoard(filtered);
+      } catch (rmErr) {
+        console.error('renderMyFamily failed after coverage load:', rmErr);
+        renderCoverageBoard(filtered);
+      }
     })
     .catch(function (err) { console.error('Coverage fetch failed:', err); var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
   }
@@ -18992,6 +19002,14 @@
     pillSessions.sort(function (a, b) { return a - b; });
     var viewSess = (coverageViewSession && pillSessions.indexOf(coverageViewSession) !== -1) ? coverageViewSession : currentSession;
     if (pillSessions.indexOf(viewSess) === -1) viewSess = pillSessions[0];
+    // Never default to an empty pill while another session has absences —
+    // around the season boundary "current" can be a session with nothing
+    // in it while next season's rows sit one pill over (Erin, 2026-07-19).
+    if (!coverageViewSession && !absences.some(function (a) { return parseInt(a.session_number, 10) === viewSess; })) {
+      for (var pi2 = 0; pi2 < pillSessions.length; pi2++) {
+        if (absences.some(function (a) { return parseInt(a.session_number, 10) === pillSessions[pi2]; })) { viewSess = pillSessions[pi2]; break; }
+      }
+    }
 
     var html = '';
     if (pillSessions.length > 1) {
