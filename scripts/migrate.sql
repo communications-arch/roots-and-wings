@@ -1782,9 +1782,11 @@ CREATE INDEX IF NOT EXISTS board_notes_created_idx ON board_notes (created_at DE
 --    granted capabilities later via the Permissions admin. Parented
 --    under the Membership Director; movable in the role editor.
 -- ──────────────────────────────────────────────
-ALTER TABLE waiver_signatures DROP CONSTRAINT IF EXISTS waiver_signatures_role_check;
-ALTER TABLE waiver_signatures ADD CONSTRAINT waiver_signatures_role_check
-  CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison'));
+-- (The role_check widening that lived here was superseded by the
+-- kid_addition pair further down — keeping BOTH pairs breaks the build
+-- once rows with the newer role exist, because this whole file re-runs
+-- on every deploy and the intermediate list rejects them. Only the
+-- final drop/add pair for a constraint may remain in this file.)
 
 INSERT INTO roles (role_key, title, category, parent_role_id, display_order, term_length, overview, icon_emoji, updated_by)
 SELECT
