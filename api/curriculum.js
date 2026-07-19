@@ -531,6 +531,23 @@ function actingEmailFor(user, req) {
 async function isReviewerReq(user, req) {
   return !!(await reviewerScopeReq(user, req));
 }
+// Identity for PLACEMENT writes (volunteer-signup / volunteer-assist):
+// the caller targets another adult via view_as. actingEmailFor only
+// honors view_as for canImpersonate callers (super users on prod), so a
+// real VP placing adults from the To Do / Schedules grid silently
+// signed THEMSELVES up. Reviewers (VP + Afternoon Class Liaison) place
+// adults as part of the job — honor their view_as too, mirroring the
+// class-signup-picks fix (testers, 2026-07-16).
+async function actingEmailForPlacement(user, req) {
+  const direct = actingEmailFor(user, req);
+  if (direct.toLowerCase() !== String((user && user.email) || '').toLowerCase()) return direct;
+  const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
+  if (va && va !== direct.toLowerCase() && (va.split('@')[1] || '') === ALLOWED_DOMAIN
+      && await reviewerScope((user && user.email) || '')) {
+    return va;
+  }
+  return direct;
+}
 // Can this scope touch (schedule/edit/decline/delete) this submission row?
 function scopeAllowsSub(scope, row) {
   if (!scope) return false;
@@ -1304,6 +1321,187 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // ── Schedules report (issue #8, Erin 2026-07-19) — the one-grid
+      // replacement view behind the VP/ACL placement To Dos: every adult
+      // (MLC) × the four co-op hours and every kid × Morning/PM1/PM2 for
+      // one session. Cells derive from the SAME sources signup-todos and
+      // the volunteer matrix read (classes + helpers + volunteer_signups;
+      // morning_class_assignments + rank-1 class_signup_picks for kids),
+      // so its "unplaced" pills agree with the To Do counts. Reviewers
+      // (VP + Afternoon Class Liaison + super users) can place from it;
+      // other board members read it read-only (Board at a Glance
+      // precedent — same as the tour funnel).
+      if (action === 'schedules-report') {
+        const srScope = await isReviewerReq(user, req);
+        let srReadOnly = false;
+        if (!srScope) {
+          const srViewer = actingEmailFor(user, req).toLowerCase();
+          if (await isBoardMember(srViewer)) srReadOnly = true;
+          else return res.status(403).json({ error: 'Only the VP, Afternoon Class Liaison, or a board member can view Schedules.' });
+        }
+        const srSess = parseInt(req.query.session, 10) || 1;
+        const srYear = activeSchoolYear(new Date());
+
+        const [srCls, srHelpers, srSignups, srApproval, srWin, srMlcs, srKids, srMorning, srPicks, srFirsts] = await Promise.all([
+          sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
+                     c.max_students,
+                     LOWER(c.submitted_by_email) AS teacher_email,
+                     (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                       WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                          OR LOWER(p.personal_email) = LOWER(c.submitted_by_email) LIMIT 1) AS teacher_name
+              FROM class_submissions c
+              WHERE c.school_year = ${srYear} AND c.scheduled_session = ${srSess}
+                AND c.status IN ('scheduled', 'drafted')`,
+          sql`SELECT h.class_submission_id, LOWER(h.person_email) AS email, h.person_name, h.block
+              FROM class_assignment_helpers h
+              JOIN class_submissions c ON c.id = h.class_submission_id
+              WHERE c.school_year = ${srYear} AND c.scheduled_session = ${srSess}`,
+          sql`SELECT block, role, LOWER(person_email) AS email, person_name FROM volunteer_signups
+              WHERE school_year = ${srYear} AND session_number = ${srSess}`,
+          sql`SELECT approved_at FROM co_op_sessions
+              WHERE school_year = ${srYear} AND session_number = ${srSess}`,
+          sql`SELECT status FROM class_signup_windows
+              WHERE school_year = ${srYear} AND session_number = ${srSess} LIMIT 1`,
+          sql`SELECT LOWER(p.email) AS email, LOWER(p.personal_email) AS personal_email,
+                     NULLIF(TRIM(CONCAT_WS(' ', p.first_name, NULLIF(p.last_name, ''))), '') AS pname,
+                     p.first_name, mp.family_name
+              FROM people p
+              LEFT JOIN member_profiles mp ON mp.family_email = p.family_email
+              WHERE p.role = 'mlc'`,
+          sql`SELECT k.first_name, k.class_group, k.birth_date, k.schedule, LOWER(k.family_email) AS fam,
+                     COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
+                     COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
+              FROM kids k
+              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)`,
+          sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid, class_group, finalized
+              FROM morning_class_assignments WHERE school_year = ${srYear}`,
+          sql`SELECT LOWER(p.family_email) AS fam, LOWER(p.kid_first_name) AS kid, p.hour,
+                     c.id AS class_id, c.class_name, c.scheduled_hour
+              FROM class_signup_picks p
+              JOIN class_submissions c ON c.id = p.class_submission_id
+              WHERE p.school_year = ${srYear} AND p.session_number = ${srSess} AND p.rank = 1`,
+          sql`SELECT class_submission_id,
+                     COUNT(DISTINCT (LOWER(family_email) || '|' || LOWER(kid_first_name)))::int AS firsts
+              FROM class_signup_picks
+              WHERE school_year = ${srYear} AND session_number = ${srSess} AND rank = 1
+              GROUP BY class_submission_id`
+        ]);
+        const srPmApproved = !!(srApproval.length && srApproval[0].approved_at);
+        const srWinStatus = srWin.length ? srWin[0].status : null;
+        const srBlocksOf = r => r.class_period === 'AM'
+          ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+          : r.scheduled_hour === 'both' ? ['PM1', 'PM2']
+          : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+        const srHelpersBySub = {};
+        srHelpers.forEach(h => {
+          (srHelpersBySub[h.class_submission_id] || (srHelpersBySub[h.class_submission_id] = [])).push(h);
+        });
+
+        // Per-block whereabouts, keyed by email AND lowercased name (the
+        // same identity matching signup-todos uses to decide "placed").
+        // whereab['AM1'][id] = { kind, class_name? } — first commitment wins.
+        const whereab = { AM1: {}, AM2: {}, PM1: {}, PM2: {} };
+        const srPut = (b, email, name, cell) => {
+          if (email && !whereab[b][email]) whereab[b][email] = cell;
+          const nl = String(name || '').trim().toLowerCase();
+          if (nl && !whereab[b][nl]) whereab[b][nl] = cell;
+        };
+        // Assistant gaps per hour, same math as signup-todos (per-hour
+        // helper counting; whole-class rows count every hour).
+        const srOpenAssist = { AM1: 0, AM2: 0, PM1: 0, PM2: 0 };
+        srCls.forEach(r => {
+          const hs = srHelpersBySub[r.id] || [];
+          const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+          srBlocksOf(r).forEach(b => {
+            srPut(b, r.teacher_email, r.teacher_name, { kind: 'lead', class_name: r.class_name });
+            const hsB = hs.filter(h => !h.block || h.block === b);
+            hsB.forEach(h => srPut(b, h.email, h.person_name, { kind: 'assist', class_name: r.class_name }));
+            srOpenAssist[b] += Math.max(0, wants - hsB.length);
+          });
+        });
+        srSignups.forEach(s2 => {
+          (s2.block === 'AM' ? ['AM1', 'AM2'] : [s2.block]).forEach(b => {
+            if (whereab[b]) srPut(b, s2.email, s2.person_name, { kind: s2.role });
+          });
+        });
+
+        const srExpected = srPmApproved ? ['AM1', 'AM2', 'PM1', 'PM2'] : ['AM1', 'AM2'];
+        const srAdults = srMlcs.map(m => {
+          const fullName = (m.pname || ((m.first_name || '') + ' ' + (m.family_name || '')).trim()).toLowerCase();
+          const ids = [m.email, m.personal_email, fullName].filter(Boolean);
+          const cells = {};
+          ['AM1', 'AM2', 'PM1', 'PM2'].forEach(b => {
+            let hit = null;
+            ids.some(idv => { hit = whereab[b][idv] || null; return !!hit; });
+            cells[b] = hit;
+          });
+          return {
+            name: m.pname || ((m.first_name || '') + ' ' + (m.family_name || '')).trim(),
+            email: m.email || '',
+            cells
+          };
+        }).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Kids grid. Morning = this year's group placement (finalized
+        // assignment, else the kid's current group as pending — the same
+        // fallback class-info uses); PM1/PM2 = rank-1 picks (a 2-hour
+        // 'both' class rides under PM1 and fills both).
+        const srMorningBy = {};
+        srMorning.forEach(r => { srMorningBy[r.fam + '|' + r.kid] = r; });
+        const srPickBy = {};
+        srPicks.forEach(r => { srPickBy[r.fam + '|' + r.kid + '|' + r.hour] = r; });
+        const srKidRows = srKids.map(k => {
+          const kidKey = k.fam + '|' + String(k.first_name || '').toLowerCase();
+          const sched = String(k.schedule || '').trim().toLowerCase();
+          const age = ageFromBirthDate(k.birth_date);
+          const isGreenhouse = String(k.class_group || '').trim().toLowerCase() === 'greenhouse';
+          const pmEligible = !isGreenhouse && sched !== 'morning' && !(age != null && age < 3);
+          const amApplicable = sched !== 'afternoon';
+          const mRow = srMorningBy[kidKey];
+          const am = (mRow && mRow.class_group)
+            ? { group: mRow.class_group, finalized: mRow.finalized === true }
+            : (k.class_group ? { group: k.class_group, finalized: false } : null);
+          const mkPick = h => {
+            const p = srPickBy[kidKey + '|' + h];
+            return p ? { class_id: p.class_id, class_name: p.class_name, both: p.scheduled_hour === 'both' } : null;
+          };
+          return {
+            name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
+            first_name: k.first_name,
+            family_email: k.fam,
+            age: age,
+            group: k.class_group || '',
+            am_applicable: amApplicable,
+            pm_eligible: pmEligible,
+            am: amApplicable ? am : null,
+            pm1: pmEligible ? mkPick('PM1') : null,
+            pm2: pmEligible ? mkPick('PM2') : null
+          };
+        }).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Open seats per PM hour = sum of (max − 1st-choice kids) over
+        // that hour's classes ('both' classes count under both hours).
+        const srFirstBy = {};
+        srFirsts.forEach(r => { srFirstBy[r.class_submission_id] = r.firsts; });
+        const srOpenSeats = { PM1: 0, PM2: 0 };
+        srCls.forEach(r => {
+          if (r.class_period !== 'PM') return;
+          const open = Math.max(0, (r.max_students || 0) - (srFirstBy[r.id] || 0));
+          srBlocksOf(r).forEach(b => { if (srOpenSeats[b] != null) srOpenSeats[b] += open; });
+        });
+
+        return res.status(200).json({
+          session: srSess, school_year: srYear, pm_approved: srPmApproved,
+          window_status: srWinStatus,
+          can_place: !srReadOnly,
+          blocks_expected: srExpected,
+          adults: srAdults,
+          open_assist: srOpenAssist,
+          kids: srKidRows,
+          open_seats: srOpenSeats
+        });
+      }
+
       // ── "Went to lottery" report (Erin, 2026-07-15) — popular classes
       // whose lesson plans are worth starring for future sessions.
       if (action === 'lottery-report') {
@@ -1948,7 +2146,7 @@ module.exports = async function handler(req, res) {
         if (!Number.isFinite(vsSess) || vsSess < 1 || vsSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
         if (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM1, AM2, PM1, or PM2' });
         if (['floater', 'board', 'prep'].indexOf(vsRole) === -1) return res.status(400).json({ error: 'role must be floater, board, or prep' });
-        const vsEmail = actingEmailFor(user, req).toLowerCase();
+        const vsEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
         // Board Duties is a board-member commitment (Erin, 2026-07-15) —
         // the dropdown hides it for everyone else, and the server backs
         // that up here.
@@ -2048,7 +2246,7 @@ module.exports = async function handler(req, res) {
       if (action === 'volunteer-assist') {
         const vaSubId = parseInt((req.body || {}).class_submission_id, 10);
         if (!Number.isFinite(vaSubId)) return res.status(400).json({ error: 'class_submission_id required' });
-        const vaEmail = actingEmailFor(user, req).toLowerCase();
+        const vaEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
         const vaCls = await sql`SELECT id, class_name, class_period, scheduled_hour, school_year, scheduled_session, status, submitted_by_email, assistant_count
           FROM class_submissions WHERE id = ${vaSubId}`;
         if (!vaCls.length || !vaCls[0].scheduled_session || ['scheduled', 'drafted'].indexOf(vaCls[0].status) === -1) {

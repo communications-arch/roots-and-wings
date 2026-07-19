@@ -9220,12 +9220,17 @@
       { key: 'membership', title: 'Membership' }
     ],
     'Vice President': [
+      // Schedules (issue #8): every adult and kid × co-op hour for a
+      // session, with in-grid placement — the VP/ACL placement To Dos
+      // open the same report.
+      { key: 'schedules', title: 'Schedules' },
       { key: 'membership', title: 'Membership' }
     ],
-    // Listed with an empty array so the widget's roleGate (derived below)
-    // picks it up. Member Participation is injected dynamically inside
-    // the render fn for this role.
-    'Afternoon Class Liaison': []
+    // Member Participation is injected dynamically inside the render fn
+    // for this role (the widget's roleGate derives from this map).
+    'Afternoon Class Liaison': [
+      { key: 'schedules', title: 'Schedules' }
+    ]
   };
   var ROLE_FORMS = {
     'Communications Director': [
@@ -10076,6 +10081,7 @@
         else if (key === 'morning-classes') showMorningClassBuilder();
         else if (key === 'merch-orders') showMerchOrdersModal();
         else if (key === 'cleaning-crew') showCleaningManagementModal();
+        else if (key === 'schedules') showSchedulesReportModal();
       });
     });
 
@@ -18143,9 +18149,13 @@
     }
     else if (action === 'membership-reginv-wait' && typeof showRegInvitesModal === 'function') showRegInvitesModal();
     else if (action === 'cleaning-crew-manage' && typeof showCleaningManagementModal === 'function') showCleaningManagementModal();
-    else if (action === 'signup-todo-adults' && typeof showSignupTodoModal === 'function') showSignupTodoModal('adults');
-    else if (action === 'signup-todo-kids' && typeof showSignupTodoModal === 'function') showSignupTodoModal('kids');
-    else if (action === 'signup-todo-assist' && typeof showSignupTodoModal === 'function') showSignupTodoModal('assist');
+    // The three placement To Dos land on the Schedules report now
+    // (issue #8) — Adults tab for Place adults / Fill assistant spots,
+    // Kids tab for Place kids. The old showSignupTodoModal list panels
+    // remain in the codebase as a fallback.
+    else if (action === 'signup-todo-adults' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults' });
+    else if (action === 'signup-todo-kids' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'kids' });
+    else if (action === 'signup-todo-assist' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults' });
     else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
     else if (action === 'acl-lottery-moves' && typeof showLotteryMovesModal === 'function') showLotteryMovesModal();
     else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
@@ -23714,6 +23724,443 @@
     });
   }
 
+  // ══════════════════════════════════════════════
+  // Schedules report (issue #8, Erin 2026-07-19)
+  // ══════════════════════════════════════════════
+  // The tabular replacement for the cluttered Place adults / Fill
+  // assistant spots / Place kids To Do panels: Adults and Kids tabs
+  // (Merchandise-style), one row per person, one column per co-op hour,
+  // session pills across the top. Empty cells open the standard in-place
+  // edit panel with the SAME pickers + write APIs the To Do flows use
+  // (volSlotOptionsHtml → volunteer-signup / volunteer-assist for
+  // adults; class pools → class-signup-picks for kids). Data comes from
+  // the schedules-report action, which mirrors signup-todos' occupancy
+  // math so the pills agree with the To Do counts. VP + Afternoon Class
+  // Liaison (+ super users via View As) place people; other board
+  // members get the grid read-only.
+  var _schedRep = null;        // last schedules-report payload
+  var _schedTab = 'adults';    // 'adults' | 'kids'
+  var _schedSession = null;    // sticky across open/close within a visit
+  var _schedMatrix = null;     // { session, data } — volunteer-matrix for adult pickers
+  var _schedPools = null;      // { session, classes } — class-signup pools for kid pickers
+  var _schedEditKey = null;    // row key with the picker panel open
+  var _schedFilter = 'all';    // 'all' | 'unplaced' | 'placed'
+  var SCHED_BLOCK_LABELS = { AM1: 'AM Hour 1', AM2: 'AM Hour 2', PM1: 'PM Hour 1', PM2: 'PM Hour 2' };
+
+  function showSchedulesReportModal(opts) {
+    opts = opts || {};
+    if (opts.tab === 'adults' || opts.tab === 'kids') _schedTab = opts.tab;
+    _schedEditKey = null;
+    _schedFilter = 'all';
+    if (_schedSession == null) _schedSession = (_signup && _signup.session) || currentSession;
+    renderReportModal({
+      title: 'Schedules',
+      subtitle: 'Who is where each co-op hour — every adult and every kid, one row each. Open cells offer the qualifying spots still available.',
+      meta: 'Session ' + _schedSession,
+      bodyId: 'ws-sched-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    schedFetchReport(function () { renderSchedulesBody(); });
+  }
+
+  function schedFetchReport(cb) {
+    fetch('/api/curriculum?action=schedules-report&session=' + _schedSession + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+      .then(function (res) {
+        var body = document.getElementById('ws-sched-body');
+        if (!body) return;
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtml((res.data && res.data.error) || 'Could not load the schedules.') + '</p>';
+          return;
+        }
+        _schedRep = res.data;
+        var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+        if (metaEl) metaEl.textContent = 'Session ' + _schedRep.session + ' · ' + _schedRep.school_year;
+        if (cb) cb();
+      })
+      .catch(function () {
+        var body = document.getElementById('ws-sched-body');
+        if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>';
+      });
+  }
+
+  // Picker option sources, loaded lazily per session. The matrix feeds
+  // volSlotOptionsHtml (adult spots); the pools feed the kid class lists.
+  function schedEnsureMatrix(cb) {
+    if (_schedMatrix && _schedMatrix.session === _schedSession) return cb();
+    fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((_schedRep && _schedRep.school_year) || '') + '&session=' + _schedSession, { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (m && !m.error) _schedMatrix = { session: _schedSession, data: m };
+        cb();
+      })
+      .catch(function () { cb(); });
+  }
+  function schedEnsurePools(cb) {
+    if (_schedPools && _schedPools.session === _schedSession) return cb();
+    fetch('/api/curriculum?action=class-signup&session=' + _schedSession, { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (c) {
+        if (c && !c.error) _schedPools = { session: _schedSession, classes: c.classes || { PM1: [], PM2: [] } };
+        cb();
+      })
+      .catch(function () { cb(); });
+  }
+
+  function schedRowKey(row) {
+    return _schedTab === 'adults'
+      ? 'a:' + (row.email || row.name)
+      : 'k:' + row.family_email + '|' + String(row.first_name || '').toLowerCase();
+  }
+  function schedMissingBlocks(kind, row) {
+    if (kind === 'adults') {
+      return ((_schedRep && _schedRep.blocks_expected) || []).filter(function (b) { return !row.cells[b]; });
+    }
+    if (!row.pm_eligible) return [];
+    var missing = [];
+    if (!row.pm1) missing.push('PM1');
+    if (!row.pm2 && !(row.pm1 && row.pm1.both)) missing.push('PM2');
+    return missing;
+  }
+  function schedMissingFor(row) { return schedMissingBlocks(_schedTab, row); }
+  function schedAdultsUnplacedCount() {
+    return ((_schedRep && _schedRep.adults) || []).filter(function (a) { return schedMissingBlocks('adults', a).length > 0; }).length;
+  }
+  function schedKidsUnplacedCount() {
+    return ((_schedRep && _schedRep.kids) || []).filter(function (k) { return schedMissingBlocks('kids', k).length > 0; }).length;
+  }
+
+  function renderSchedulesBody() {
+    var body = document.getElementById('ws-sched-body');
+    if (!body || !_schedRep) return;
+    var h = '<div class="board-cal-views">';
+    for (var i = 1; i <= 5; i++) {
+      h += '<button type="button" class="board-cal-view-pill sched-sess' + (i === _schedSession ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
+    }
+    h += '</div>';
+    // Tab strip — same visual treatment as the Merchandise report tabs.
+    var aUn = schedAdultsUnplacedCount();
+    var kUn = schedKidsUnplacedCount();
+    h += '<div class="merch-tab-nav" role="tablist">'
+      + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'adults' ? ' active' : '') + '" data-sched-tab="adults" role="tab">'
+      +   'Adults' + (aUn > 0 ? ' <span class="merch-tab-badge">' + aUn + ' unplaced</span>' : '')
+      + '</button>'
+      + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'kids' ? ' active' : '') + '" data-sched-tab="kids" role="tab">'
+      +   'Kids' + (kUn > 0 ? ' <span class="merch-tab-badge">' + kUn + ' unplaced</span>' : '')
+      + '</button>'
+      + '</div>';
+    h += '<div id="ws-sched-tab-body"></div>';
+    body.innerHTML = h;
+    body.querySelectorAll('.sched-sess').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var s = parseInt(this.getAttribute('data-sess'), 10);
+        if (s === _schedSession) return;
+        _schedSession = s;
+        _schedEditKey = null;
+        _schedFilter = 'all';
+        _schedMatrix = null;
+        _schedPools = null;
+        var tb = document.getElementById('ws-sched-tab-body');
+        if (tb) tb.innerHTML = '<p class="ws-empty">Loading…</p>';
+        schedFetchReport(function () { renderSchedulesBody(); });
+      });
+    });
+    body.querySelectorAll('.sched-tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var t = this.getAttribute('data-sched-tab');
+        if (t === _schedTab) return;
+        _schedTab = t;
+        _schedEditKey = null;
+        _schedFilter = 'all';
+        renderSchedulesBody();
+      });
+    });
+    renderSchedTabBody();
+  }
+
+  function renderSchedTabBody() {
+    var wrap = document.getElementById('ws-sched-tab-body');
+    if (!wrap || !_schedRep) return;
+    var d = _schedRep;
+    var rowsAll = (_schedTab === 'adults' ? d.adults : d.kids) || [];
+    var unplacedN = _schedTab === 'adults' ? schedAdultsUnplacedCount() : schedKidsUnplacedCount();
+
+    // Pills: unplaced people (tap = filter toggle, membership-report
+    // pattern) + open spots (informational, merch-report pattern).
+    var pills = '<div class="rd-counts" id="ws-sched-counts">';
+    pills += '<button type="button" class="rd-count-pill ws-wv-pending' + (_schedFilter === 'unplaced' ? ' is-active' : '') + '" data-sched-pill="unplaced" aria-pressed="' + (_schedFilter === 'unplaced' ? 'true' : 'false') + '" title="Show only rows with an open hour">'
+      + unplacedN + ' unplaced</button>';
+    if (_schedTab === 'adults') {
+      var gapTotal = 0;
+      (d.blocks_expected || []).forEach(function (b) { gapTotal += (d.open_assist && d.open_assist[b]) || 0; });
+      pills += '<span class="ws-wv-pending">' + gapTotal + ' open assistant spot' + (gapTotal === 1 ? '' : 's') + '</span>';
+    } else {
+      pills += '<span class="ws-wv-pending">' + ((d.open_seats && d.open_seats.PM1) || 0) + ' seats open PM 1</span>';
+      pills += '<span class="ws-wv-pending">' + ((d.open_seats && d.open_seats.PM2) || 0) + ' seats open PM 2</span>';
+    }
+    if (!d.pm_approved && _schedTab === 'adults') {
+      pills += '<span class="ws-wv-context">Afternoon hours appear once the session’s PM schedule is approved.</span>';
+    }
+    pills += '</div>';
+
+    if (!rowsAll.length) {
+      wrap.innerHTML = pills + '<p class="ws-empty">Nobody to show yet.</p>';
+      return;
+    }
+    wrap.innerHTML = pills + '<div id="ws-sched-table-target"></div>';
+    wrap.querySelector('#ws-sched-counts').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-sched-pill]');
+      if (!btn) return;
+      _schedFilter = (_schedFilter === 'unplaced') ? 'all' : 'unplaced';
+      renderSchedTabBody();
+    });
+    renderSchedTable();
+  }
+
+  function schedRowsForFilter() {
+    var rows = ((_schedTab === 'adults' ? _schedRep.adults : _schedRep.kids) || []);
+    if (_schedFilter === 'unplaced') return rows.filter(function (r) { return schedMissingFor(r).length > 0; });
+    if (_schedFilter === 'placed') return rows.filter(function (r) { return schedMissingFor(r).length === 0; });
+    return rows;
+  }
+
+  function schedCellFillBtn(row) {
+    return '<button type="button" class="sc-btn sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '">+ Fill</button>';
+  }
+  var SCHED_KIND_TAG = { lead: 'Leads', assist: 'Assists', floater: 'Floater', board: 'Board Duties', prep: 'Prep Period' };
+  function schedAdultCellHtml(row, b) {
+    var c = row.cells[b];
+    if (c) {
+      if (c.class_name) {
+        return '<span class="ws-wv-context">' + (SCHED_KIND_TAG[c.kind] || c.kind) + '</span> ' + escapeHtml(c.class_name);
+      }
+      return escapeHtml(SCHED_KIND_TAG[c.kind] || c.kind);
+    }
+    if ((_schedRep.blocks_expected || []).indexOf(b) === -1) return '<span class="sb-subdetail-dim">—</span>';
+    if (_schedRep.can_place && row.email) return schedCellFillBtn(row);
+    return '<span class="st-flag-coral">open</span>';
+  }
+  function schedKidAmCellHtml(row) {
+    if (!row.am_applicable) return '<span class="sb-subdetail-dim" title="Afternoon-only schedule">—</span>';
+    if (row.am && row.am.group) {
+      return kidGroupBadge(row.am.group) + (row.am.finalized ? '' : ' <span class="ws-wv-context">pending</span>');
+    }
+    // Morning groups are placed in the Morning Class Builder, so the
+    // grid flags the gap but doesn't offer a picker here.
+    return '<span class="st-flag-coral" title="Place them in the Morning Class Builder">not placed</span>';
+  }
+  function schedKidPmCellHtml(row, hour) {
+    if (!row.pm_eligible) return '<span class="sb-subdetail-dim" title="Not in afternoon programming (Greenhouse, under 3, or morning-only)">—</span>';
+    var pick = hour === 'PM1' ? row.pm1 : row.pm2;
+    if (!pick && hour === 'PM2' && row.pm1 && row.pm1.both) {
+      return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>';
+    }
+    if (pick) {
+      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '');
+    }
+    if (_schedRep.can_place) return schedCellFillBtn(row);
+    return '<span class="st-flag-coral">open</span>';
+  }
+
+  // Same "open to" + fullness annotations as the Place kids To Do picker.
+  function schedClassOpts(hour) {
+    var pools = (_schedPools && _schedPools.classes) || {};
+    var list = pools[hour] || [];
+    return '<option value="">— pick… —</option>' + list.map(function (c) {
+      var groups = Array.isArray(c.ageGroups) ? c.ageGroups : [];
+      var names = groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean);
+      var openTo = names.length ? 'open to ' + names.join(', ')
+        : ((typeof signupAgeText === 'function' && signupAgeText(c)) ? 'ages ' + signupAgeText(c) : '');
+      var fullness = (typeof c.signedUp === 'number') ? ' — ' + c.signedUp + (c.max ? '/' + c.max : '') : '';
+      return '<option value="' + c.id + '">' + escapeHtml(c.name)
+        + (c.hour === 'both' ? ' (2-hour)' : '')
+        + (openTo ? ' — ' + escapeHtml(openTo) : '')
+        + fullness + '</option>';
+    }).join('');
+  }
+
+  function schedEditRowHtml(row) {
+    var missing = schedMissingFor(row);
+    if (_schedTab === 'adults') {
+      if (!_schedMatrix || _schedMatrix.session !== _schedSession) return '<p class="ws-empty">Loading open spots…</p>';
+      var h = '<div class="st-place-row">';
+      missing.forEach(function (b) {
+        h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
+          + '<select class="cl-input sched-place-adult" data-email="' + escapeHtml(row.email) + '" data-block="' + b + '">'
+          + volSlotOptionsHtml(b, _schedMatrix.data) + '</select></label>';
+      });
+      h += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
+      return h + '</div>';
+    }
+    if (!_schedPools || _schedPools.session !== _schedSession) return '<p class="ws-empty">Loading open classes…</p>';
+    var hk = '<div class="st-place-row">';
+    missing.forEach(function (hour) {
+      hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
+        + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">' + schedClassOpts(hour) + '</select></label>';
+    });
+    hk += '<button type="button" class="btn btn-primary btn-sm sched-kid-save" data-fam="' + escapeHtml(row.family_email) + '" data-kid="' + escapeHtml(row.first_name) + '">Save</button>';
+    hk += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
+    return hk + '</div>';
+  }
+
+  function schedRowByKey(key) {
+    var rows = ((_schedTab === 'adults' ? _schedRep.adults : _schedRep.kids) || []);
+    for (var i = 0; i < rows.length; i++) if (schedRowKey(rows[i]) === key) return rows[i];
+    return null;
+  }
+
+  // Re-pull the grid (and the workspace To Do counts) after a placement.
+  // The picker sources reload lazily so fullness/needs stay accurate.
+  function schedRefresh() {
+    if (typeof fetchSignupTodos === 'function') { try { fetchSignupTodos(); } catch (e) { /* counts refresh is best-effort */ } }
+    _schedMatrix = null;
+    _schedPools = null;
+    schedFetchReport(function () {
+      if (_schedEditKey) {
+        var row = schedRowByKey(_schedEditKey);
+        if (!row || schedMissingFor(row).length === 0) _schedEditKey = null;
+      }
+      renderSchedulesBody();
+      // A still-open picker panel needs its option source back (the
+      // caches were just invalidated) — reload, then swap the panel's
+      // "Loading…" for the fresh selects.
+      if (_schedEditKey) {
+        var ensure = _schedTab === 'adults' ? schedEnsureMatrix : schedEnsurePools;
+        ensure(function () { renderSchedTable(); });
+      }
+    });
+  }
+
+  function renderSchedTable() {
+    var target = document.getElementById('ws-sched-table-target');
+    if (!target || !_schedRep) return;
+    var rows = schedRowsForFilter();
+    var all = ((_schedTab === 'adults' ? _schedRep.adults : _schedRep.kids) || []);
+    var unplacedN = all.filter(function (r) { return schedMissingFor(r).length > 0; }).length;
+    var nameCol = {
+      key: 'name', label: _schedTab === 'adults' ? 'Member' : 'Kid', type: 'string',
+      render: function (r) {
+        var extra = '';
+        if (_schedTab === 'kids' && r.age != null) extra = ' <span class="ws-wv-context">age ' + r.age + '</span>';
+        return '<strong>' + escapeHtml(r.name) + '</strong>' + extra;
+      },
+      filter: {
+        options: [
+          { value: 'all',      label: 'Everyone',      count: all.length },
+          { value: 'unplaced', label: 'Unplaced only', count: unplacedN },
+          { value: 'placed',   label: 'Fully placed',  count: all.length - unplacedN }
+        ],
+        current: _schedFilter,
+        onChange: function (v) { _schedFilter = v; renderSchedTabBody(); }
+      }
+    };
+    var cols;
+    if (_schedTab === 'adults') {
+      cols = [nameCol].concat(['AM1', 'AM2', 'PM1', 'PM2'].map(function (b) {
+        return {
+          key: b, label: SCHED_BLOCK_LABELS[b], type: 'string',
+          sortValue: function (r) { return r.cells[b] ? (r.cells[b].class_name || r.cells[b].kind) : ''; },
+          render: function (r) { return schedAdultCellHtml(r, b); }
+        };
+      }));
+    } else {
+      cols = [nameCol,
+        { key: 'am', label: 'Morning', type: 'string',
+          sortValue: function (r) { return (r.am && r.am.group) || ''; },
+          render: schedKidAmCellHtml },
+        { key: 'pm1', label: 'PM Hour 1', type: 'string',
+          sortValue: function (r) { return (r.pm1 && r.pm1.class_name) || ''; },
+          render: function (r) { return schedKidPmCellHtml(r, 'PM1'); } },
+        { key: 'pm2', label: 'PM Hour 2', type: 'string',
+          sortValue: function (r) { return (r.pm2 && r.pm2.class_name) || (r.pm1 && r.pm1.both && r.pm1.class_name) || ''; },
+          render: function (r) { return schedKidPmCellHtml(r, 'PM2'); } }
+      ];
+    }
+    renderSortableTable(target, cols, rows, {
+      initialSort: { key: 'name', dir: 'asc' },
+      rowKey: schedRowKey,
+      editRowKey: _schedEditKey,
+      renderEditRow: schedEditRowHtml,
+      onRender: function () { wireSchedRowActions(target); }
+    });
+  }
+
+  function wireSchedRowActions(target) {
+    target.querySelectorAll('.sched-fill-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var key = btn.getAttribute('data-skey');
+        _schedEditKey = (_schedEditKey === key) ? null : key;
+        renderSchedTable();
+        if (_schedEditKey) {
+          // Picker sources load lazily; re-render swaps the "Loading…"
+          // panel for the real selects once options arrive.
+          var ensure = _schedTab === 'adults' ? schedEnsureMatrix : schedEnsurePools;
+          ensure(function () { renderSchedTable(); });
+        }
+      });
+    });
+    target.querySelectorAll('.sched-edit-close').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        _schedEditKey = null;
+        renderSchedTable();
+      });
+    });
+    // Adult placement — the exact writes the Place adults To Do uses:
+    // assist → volunteer-assist, floater/board/prep → volunteer-signup,
+    // both targeting the adult via view_as (server honors reviewers).
+    target.querySelectorAll('.sched-place-adult').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var v = this.value;
+        if (!v) return;
+        var email = this.getAttribute('data-email');
+        var block = this.getAttribute('data-block');
+        var isAssist = v.indexOf('assist:') === 0;
+        var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + '&view_as=' + encodeURIComponent(email);
+        var payload = isAssist
+          ? { class_submission_id: parseInt(v.slice(7), 10), block: block }
+          : { school_year: _schedRep.school_year, session: _schedRep.session, block: block, role: v };
+        var selEl = this;
+        selEl.disabled = true;
+        fetch(url, { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not place them.'); selEl.disabled = false; selEl.value = ''; return; }
+            schedRefresh();
+          })
+          .catch(function () { alert('Network error — try again.'); selEl.disabled = false; });
+      });
+    });
+    // Kid placement — same class-signup-picks write as the Place kids To
+    // Do (single pick per hour; the family can refine the ranking later).
+    target.querySelectorAll('.sched-kid-save').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var panel = btn.closest('.st-place-row');
+        var picks = {};
+        panel.querySelectorAll('.sched-kid-pick').forEach(function (sel) {
+          picks[sel.getAttribute('data-hour')] = sel.value;
+        });
+        if (!picks.PM1 && !picks.PM2) { alert('Pick at least one class first.'); return; }
+        var fam = btn.getAttribute('data-fam');
+        var kid = btn.getAttribute('data-kid');
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        function postHour(hour, cid) {
+          if (!cid) return Promise.resolve();
+          return fetch('/api/curriculum?action=class-signup-picks', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ session: _schedRep.session, hour: hour, kid_first_name: kid, ranked_class_ids: [parseInt(cid, 10)], view_as: fam })
+          }).then(function (r) { return r.json().then(function (x) { if (!r.ok) throw new Error((x && x.error) || 'Save failed'); }); });
+        }
+        postHour('PM1', picks.PM1).then(function () { return postHour('PM2', picks.PM2); })
+          .then(function () { schedRefresh(); })
+          .catch(function (e2) { alert(e2.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = 'Save'; });
+      });
+    });
+  }
+
   // ── Over-full classes (Afternoon Class Liaison, Erin 2026-07-15) ──
   // Three resolutions per class: raise the max, spin up a 2nd section,
   // or run the lottery (lead's kids + any prior lottery loser are exempt).
@@ -26516,6 +26963,7 @@
         b.addEventListener('click', function () {
           var v = b.getAttribute('data-bg-view');
           if (v === 'member-pipeline' && typeof showTourPipelineModal === 'function') showTourPipelineModal();
+          else if (v === 'schedules' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal();
           else if (v === 'morning-classes' && typeof showMorningClassBuilder === 'function') showMorningClassBuilder();
           else if (v === 'membership-report' && typeof showMembershipReportModal === 'function') showMembershipReportModal();
           else if (v === 'waivers-report' && typeof showWaiversReportModal === 'function') showWaiversReportModal();
