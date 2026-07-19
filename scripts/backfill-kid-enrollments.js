@@ -81,7 +81,7 @@ async function main() {
   // ══ STEP 1 — dedupe kids sharing (family_email, first_name) ═════════════
   console.log('\n════════ STEP 1 — dedupe duplicate kids rows ════════');
   const allKids = await sql`
-    SELECT id, family_email, first_name, last_name, schedule, class_group, updated_at
+    SELECT id, family_email, first_name, last_name, nickname, schedule, class_group, updated_at
     FROM kids ORDER BY id`;
   const groups = new Map();
   for (const k of allKids) {
@@ -141,15 +141,22 @@ async function main() {
   const regDerived = regs.map(r => {
     let regKids = r.kids;
     if (typeof regKids === 'string') { try { regKids = JSON.parse(regKids); } catch (e) { regKids = []; } }
-    const kidFirsts = new Set((Array.isArray(regKids) ? regKids : [])
-      .map(k => String((k && (k.first_name || k.name)) || '').trim().split(/\s+/)[0].toLowerCase())
-      .filter(Boolean));
+    const kidFirsts = new Set();
+    const kidDates = new Map(); // first-name token → birth_date (YYYY-MM-DD)
+    (Array.isArray(regKids) ? regKids : []).forEach(k => {
+      const first = String((k && (k.first_name || k.name)) || '').trim().split(/\s+/)[0].toLowerCase();
+      if (!first) return;
+      kidFirsts.add(first);
+      const bd = String((k && k.birth_date) || '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(bd) && !kidDates.has(first)) kidDates.set(first, bd);
+    });
     return {
       id: r.id,
       stored: String(r.family_email || '').toLowerCase(),
       email: deriveEmail(r.main_learning_coach, r.existing_family_name).toLowerCase(),
       famName: deriveFamilyName(r.main_learning_coach, r.existing_family_name).toLowerCase(),
-      kidFirsts
+      kidFirsts,
+      kidDates
     };
   });
 
@@ -171,16 +178,36 @@ async function main() {
 
   const famStats = new Map(); // familyEmailLower → {enrolled, not_returning}
   let plannedInserts = 0;
+  let birthdateFixes = 0;
   for (const k of kids) {
     const fe = String(k.family_email || '').toLowerCase();
     // PER-KID enrollment (ship-gate 2026-07-19): a matching registration
     // makes only the kids it actually CONTAINS 'enrolled' — a dropped
     // sibling in a partially re-registered family stays not_returning
     // (the exact over-count this refactor exists to fix).
+    // Nickname-aware, like the registration merge's kidAnswersTo: a kid
+    // registered under their goes-by ("Cammie") must still count for the
+    // stored legal-name row ("Camm").
     const kidFirst = String(k.first_name || '').trim().split(/\s+/)[0].toLowerCase();
+    const kidNick = String(k.nickname || '').trim().split(/\s+/)[0].toLowerCase();
     const famRegs = matchingRegs(fe);
-    const inAReg = famRegs.some(r => r.kidFirsts.has(kidFirst));
+    const inAReg = famRegs.some(r => r.kidFirsts.has(kidFirst) || (kidNick && r.kidFirsts.has(kidNick)));
     const status = inAReg ? 'enrolled' : 'not_returning';
+    // Missing birth date but the registration knew it ("age ?" in the
+    // Morning Builder, Erin 2026-07-19) — repair the kids row from the
+    // registration snapshot.
+    if (!k.birth_date) {
+      let regBd = null;
+      for (const r of famRegs) {
+        regBd = r.kidDates.get(kidFirst) || (kidNick && r.kidDates.get(kidNick)) || null;
+        if (regBd) break;
+      }
+      if (regBd) {
+        birthdateFixes++;
+        console.log('  birthdate fix: ' + (k.first_name || '?') + ' @ ' + mask(fe) + ' → ' + regBd);
+        ops.push(() => sql`UPDATE kids SET birth_date = ${regBd}, updated_at = NOW() WHERE id = ${k.id} AND birth_date IS NULL`);
+      }
+    }
     const schedule = normalizeSchedule(k.schedule);
     if (!famStats.has(fe)) famStats.set(fe, { enrolled: 0, not_returning: 0 });
     famStats.get(fe)[status]++;
@@ -199,6 +226,7 @@ async function main() {
   console.log('  Planned INSERT ... ON CONFLICT DO NOTHING: ' + plannedInserts
     + ' kid_enrollments rows across ' + famStats.size + ' families'
     + ' (existing rows for the same kid+season are left untouched).');
+  console.log('  Birth-date repairs from registration snapshots: ' + birthdateFixes);
 
   // ══ STEP 3 — map morning_class_assignments → kid_id ══════════════════════
   console.log('\n════════ STEP 3 — map morning_class_assignments (' + season + ') to kid_id ════════');

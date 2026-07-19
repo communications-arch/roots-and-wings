@@ -30553,6 +30553,12 @@
         if (!String(state.kids[ki].name || '').trim()) {
           showError('Please name each kid or remove blank rows.'); return;
         }
+        // Birthday is marked required in the form but was never enforced —
+        // kids saved without one show as "age ?" in the Morning Builder and
+        // can't be age-placed (Erin, 2026-07-19).
+        if (!String(state.kids[ki].birth_date || '').trim()) {
+          showError('Please add a birthday for ' + String(state.kids[ki].name).trim() + ' — it drives class placement.'); return;
+        }
       }
 
       var cred = localStorage.getItem('rw_google_credential');
