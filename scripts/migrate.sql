@@ -473,8 +473,15 @@ CREATE TABLE IF NOT EXISTS waiver_signatures (
   note TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_idx
-  ON waiver_signatures (LOWER(person_email), season);
+-- One row per person per season EXCEPT kid_addition (the MLC signs one
+-- waiver per added child on top of their own main_lc row — see the
+-- 2026-07-19 enrollment block near the end of this file). This statement
+-- must stay in the _v2 partial form: the old full-uniqueness CREATE here
+-- re-created the dropped index on every deploy and blew up once a family
+-- had a kid_addition row (ship-gate finding, 2026-07-19).
+CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_v2
+  ON waiver_signatures (LOWER(person_email), season)
+  WHERE role <> 'kid_addition';
 CREATE INDEX IF NOT EXISTS waiver_signatures_registration_idx
   ON waiver_signatures (registration_id);
 CREATE INDEX IF NOT EXISTS waiver_signatures_family_email_idx
@@ -1875,3 +1882,106 @@ CREATE TABLE IF NOT EXISTS todo_confirmations (
   confirmed_by_email TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (kind, school_year)
 );
+
+-- ══ Per-season, per-kid enrollment (2026-07-19, the enrollment build) ══
+-- One row per kid per season = the season-scoped truth the kids table
+-- never had ("who is enrolled THIS season, mornings or afternoons?").
+-- kids becomes the stable roster (ids persist across seasons — writers
+-- upsert instead of delete+reinsert); enrollment rows carry the season
+-- membership + schedule. status: 'enrolled' | 'not_returning' (Erin:
+-- non-returning kids stay VISIBLE, marked — never silently deleted).
+-- source: 'registration' | 'emi' | 'backfill'. kid_first_name +
+-- family_email are denormalized transition keys for the name-keyed
+-- tables (morning_class_assignments etc.) until those re-key on kid_id.
+CREATE TABLE IF NOT EXISTS kid_enrollments (
+  id             SERIAL PRIMARY KEY,
+  kid_id         INTEGER NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+  family_email   TEXT NOT NULL DEFAULT '',
+  kid_first_name TEXT NOT NULL DEFAULT '',
+  season         TEXT NOT NULL,
+  schedule       TEXT NOT NULL DEFAULT 'all-day',
+  status         TEXT NOT NULL DEFAULT 'enrolled',
+  source         TEXT NOT NULL DEFAULT 'registration',
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by     TEXT NOT NULL DEFAULT '',
+  UNIQUE (kid_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_kid_enrollments_season
+  ON kid_enrollments (season, status, schedule);
+CREATE INDEX IF NOT EXISTS idx_kid_enrollments_family
+  ON kid_enrollments (family_email, season);
+-- Transition column: assignments gain a real kid link; the name-keyed
+-- columns stay until every reader has re-keyed.
+ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+
+-- ══ Membership approval queue (Erin, 2026-07-19 Option B) ══
+-- Enrollment-affecting changes are Membership-approved EVENTS, not silent
+-- edits. A family's schedule change / kid add / kid removal creates a
+-- PENDING request; nothing dues- or roster-bearing moves until Membership
+-- approves. kind: 'add_kid' | 'schedule_change' | 'remove_kid'.
+-- add_kid also requires a signed waiver (waiver_signature_id) before it
+-- can be approved. kid_enrollments.status gains 'pending' for add_kid
+-- kids (excluded from every enrolled read automatically).
+CREATE TABLE IF NOT EXISTS enrollment_change_requests (
+  id                  SERIAL PRIMARY KEY,
+  kind                TEXT NOT NULL,
+  -- SET NULL (not CASCADE): a denied add or an approved removal deletes
+  -- the kid row, but the decision record must survive for history.
+  kid_id              INTEGER REFERENCES kids(id) ON DELETE SET NULL,
+  family_email        TEXT NOT NULL,
+  kid_first_name      TEXT NOT NULL DEFAULT '',
+  season              TEXT NOT NULL,
+  requested_schedule  TEXT NOT NULL DEFAULT '',
+  prior_schedule      TEXT NOT NULL DEFAULT '',
+  waiver_signature_id INTEGER,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  requested_by        TEXT NOT NULL DEFAULT '',
+  requested_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_by          TEXT NOT NULL DEFAULT '',
+  decided_at          TIMESTAMPTZ,
+  decision_note       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_enroll_req_status
+  ON enrollment_change_requests (status, season);
+CREATE INDEX IF NOT EXISTS idx_enroll_req_family
+  ON enrollment_change_requests (family_email, season, status);
+-- kid_addition waivers: the MLC signs one waiver PER ADDED KID, which
+-- collides with the one-row-per-person-per-season unique index (they
+-- already hold a signed main_lc row). Widen the CHECK and exempt
+-- kid_addition rows from the uniqueness rule (partial index swap —
+-- idempotent: the recreate only runs when the old full index exists).
+ALTER TABLE waiver_signatures DROP CONSTRAINT IF EXISTS waiver_signatures_role_check;
+ALTER TABLE waiver_signatures ADD CONSTRAINT waiver_signatures_role_check
+  CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition'));
+-- Flat statements (the migration runner splits on semicolons and can't
+-- carry DO $$ blocks): drop the old full-uniqueness index (no-op after
+-- the first run) and create the kid_addition-exempt replacement under a
+-- new name so IF NOT EXISTS keeps this idempotent.
+DROP INDEX IF EXISTS waiver_signatures_person_season_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_v2
+  ON waiver_signatures (LOWER(person_email), season)
+  WHERE role <> 'kid_addition';
+
+-- 2026-07-19: family identity phase 4 — a registration remembers the MLC's
+-- people row once the profile upsert lands (stable adult id, groundwork for
+-- per-season enrollment). Plain INTEGER, no FK: profile upserts rewrite a
+-- family's people rows wholesale (fresh ids each time), so this is a
+-- best-effort snapshot pointer, not a referential constraint.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS mlc_person_id INTEGER;
+CREATE INDEX IF NOT EXISTS registrations_mlc_person_id_idx ON registrations (mlc_person_id);
+
+-- 2026-07-19 enrollment re-key phase: class_signup_picks +
+-- class_lottery_bumps were purely name-keyed (family_email,
+-- kid_first_name), so renaming a kid orphaned their picks and lottery
+-- exemptions. Both gain a kid_id transition column (same pattern as
+-- morning_class_assignments.kid_id above): writers dual-key (kid_id
+-- alongside the name columns), readers prefer kid_id with a name
+-- fallback for unmapped legacy rows, and scripts/backfill-pick-kid-ids.js
+-- maps the existing rows. No FK on purpose — additive-only migration
+-- ordering, and rows may legitimately stay unmapped until the backfill runs.
+ALTER TABLE class_signup_picks  ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+CREATE INDEX IF NOT EXISTS class_signup_picks_kid_id_idx
+  ON class_signup_picks (school_year, session_number, kid_id);
+CREATE INDEX IF NOT EXISTS class_lottery_bumps_kid_id_idx
+  ON class_lottery_bumps (school_year, kid_id);

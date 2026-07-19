@@ -160,9 +160,24 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') {
       const fromSession = parseInt(req.query.from_session, 10);
       const session = parseInt(req.query.session, 10);
-      if (!fromSession && !session) return res.status(400).json({ error: 'session or from_session query param required' });
+      // upcoming=1: every non-cancelled absence dated today-or-later
+      // (server "today" = America/Indianapolis). Session numbers are NOT
+      // year-qualified, so around the season boundary a from_session
+      // filter can silently drop next-season rows (the Coverage Board
+      // vanished mid-test for Erin, 2026-07-19) — dates can't.
+      const upcoming = req.query.upcoming === '1' || req.query.upcoming === 'true';
+      if (!upcoming && !fromSession && !session) return res.status(400).json({ error: 'session or from_session query param required' });
 
-      const absences = fromSession
+      const absences = upcoming
+        ? await sql`
+            SELECT id, family_email, family_name, absent_person, session_number, absence_date,
+                   blocks, notes, created_by, created_at
+            FROM absences
+            WHERE cancelled_at IS NULL
+              AND absence_date >= (NOW() AT TIME ZONE 'America/Indianapolis')::date
+            ORDER BY session_number, absence_date, absent_person
+          `
+        : fromSession
         ? await sql`
             SELECT id, family_email, family_name, absent_person, session_number, absence_date,
                    blocks, notes, created_by, created_at

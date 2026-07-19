@@ -415,6 +415,25 @@
     return n || String(name || '').trim();
   }
 
+  // Person-name equality for duty + absence-slot matching (bug log #9).
+  // BOTH the first and last name must correspond — case- and extra-
+  // whitespace-tolerant, middle tokens ignored ("Erin R. Bogan" still
+  // matches "Erin Bogan"). A single-token name ("Erin") only matches
+  // another single-token name: first-name-only matching is how a fresh
+  // "Erin Testing Account" login inherited the real Erin's duties.
+  // Matching stays on LEGAL first/last names — nickOr() display names
+  // never participate (see the note above).
+  function personNamesMatch(a, b) {
+    if (!a || !b) return false;
+    var ta = String(a).trim().toLowerCase().split(/\s+/);
+    var tb = String(b).trim().toLowerCase().split(/\s+/);
+    if (!ta[0] || !tb[0]) return false;
+    if (ta[0] !== tb[0]) return false; // first names differ
+    // Never let a bare first name claim a full name (or vice versa).
+    if (ta.length === 1 || tb.length === 1) return ta.length === tb.length;
+    return ta[ta.length - 1] === tb[tb.length - 1]; // last names must agree
+  }
+
   // True when the host is a dev environment (localhost or a Vercel
   // preview deploy). In dev, every signed-in tester gets the View As
   // picker + super-user affordances so they can impersonate any role-
@@ -452,13 +471,50 @@
   // which page (My Family, Workspace, etc.) is active. Backed by the same
   // VIEW_AS_KEY session slot as the (legacy) in-page picker so they stay
   // in sync.
+  // "First Last" label for the impersonated login — person row first,
+  // email-prefix derivation as the fallback (with the dupe guard from the
+  // old in-page banner, e.g. communications@ + family "Communications").
+  function viewAsHeaderLabel(viewAsEmail) {
+    var emLc = String(viewAsEmail || '').toLowerCase();
+    var fam = null;
+    (Array.isArray(FAMILIES) ? FAMILIES : []).some(function (f) {
+      if (!f) return false;
+      var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+      if (logins.some(function (e) { return String(e || '').toLowerCase() === emLc; })) { fam = f; return true; }
+      return false;
+    });
+    if (fam && Array.isArray(fam.people)) {
+      for (var vp = 0; vp < fam.people.length; vp++) {
+        var ppl = fam.people[vp];
+        if (ppl && String(ppl.email || '').toLowerCase() === emLc) return personFullName(ppl, fam);
+      }
+    }
+    var first = deriveFirstNameFromLogin(emLc, fam ? fam.name : '');
+    var last = fam ? (fam.displayName || fam.name || '') : '';
+    if (first && last && first.toLowerCase() === last.toLowerCase()) return first;
+    return (first ? (first + ' ' + last).trim() : (last || emLc));
+  }
+
   function renderHeaderViewAs() {
-    // Dev-only "Bug log" link for helper testers (opens bugs.html in a
-    // new tab). Sits next to the View As picker in the header; hidden
-    // everywhere except dev hosts, and independent of the picker's own
-    // visibility rules below so it survives an empty FAMILIES load.
+    // The testing strip: ONE container gate for every piece of testing
+    // chrome (Erin, 2026-07-19 — after the bug-log pill leaked onto prod
+    // via a per-element hide, everything testing-ish now lives together).
+    // Strip shows for super users (View As is a real prod feature for
+    // Comms/VP) and for everyone on dev hosts; the bug-log link inside
+    // keeps its own stricter dev-only gate.
+    var testbar = document.getElementById('qsbTestbar');
+    if (testbar) testbar.hidden = !isCommsUser();
     var bugLink = document.getElementById('qsbBugLog');
     if (bugLink) bugLink.hidden = !isDevHost();
+    // "Viewing as <name>" — lives in the strip, shown only while
+    // impersonating. (The "Back to my view" button was removed per bug
+    // #7 — the View As dropdown's "— My Dashboard —" option resets.)
+    var viewAsNow = sessionStorage.getItem(VIEW_AS_KEY) || '';
+    var viewingWrap = document.getElementById('qsbViewingAs');
+    var viewingName = document.getElementById('qsbViewingAsName');
+    var showViewing = !!(viewAsNow && isCommsUser());
+    if (viewingWrap) viewingWrap.hidden = !showViewing;
+    if (viewingName && showViewing) viewingName.textContent = viewAsHeaderLabel(viewAsNow);
     var wrap = document.getElementById('qsbViewAs');
     var select = document.getElementById('qsbViewAsSelect');
     if (!wrap || !select) return;
@@ -549,6 +605,7 @@
         if (typeof loadNotifications === 'function') loadNotifications();
         if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
         if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+        renderHeaderViewAs(); // refresh the strip's "Viewing as" chunk
         requestAnimationFrame(syncPortalHeaderHeight);
       });
       select._rwWired = true;
@@ -687,11 +744,15 @@
               });
             });
             (fam.kids || []).forEach(function (kid) {
+              // Awaiting Membership approval (Option B adds) → not in the
+              // Directory; the family sees them in Edit My Info only.
+              if (kid.pending_approval) return;
               allPeople.push({
                 name: kid.name,
                 lastName: kid.lastName || fam.name,
                 nickname: kid.nickname || '',
                 type: 'kid',
+                notReturning: kid.not_returning === true,
                 family: fam.name,
                 familyDisplay: fam.displayName || fam.name,
                 email: fam.email || '',
@@ -2541,11 +2602,15 @@
       });
     });
     fam.kids.forEach(function (kid) {
+      // Kids awaiting Membership approval (Option B adds) stay out of the
+      // Directory — the family sees them in Edit My Info only.
+      if (kid.pending_approval) return;
       allPeople.push({
         name: kid.name,
         lastName: kid.lastName || fam.name, // defaults to family name
         nickname: kid.nickname || '',
         type: 'kid',
+        notReturning: kid.not_returning === true,
         family: fam.name,
         email: fam.email,
         phone: fam.phone,
@@ -2892,6 +2957,24 @@
           ? '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>'
           : '';
 
+        // Half-day kids get an AM/PM badge in the main grid too (Erin,
+        // 2026-07-19) — the class view already showed "AM only"; all-day
+        // kids stay unbadged. NOTE: reads kids.schedule, which can be
+        // stale for some returning families until the per-season
+        // enrollment build lands — this surface flips to enrollment data
+        // then.
+        var schedTag = '';
+        if (person.type === 'kid' && person.schedule === 'morning') {
+          schedTag = '<div class="yb-schedule">AM only</div>';
+        } else if (person.type === 'kid' && person.schedule === 'afternoon') {
+          schedTag = '<div class="yb-schedule">PM only</div>';
+        }
+        // Per-kid "not returning this year" (enrollment record) — the kid
+        // stays LISTED during the transition, just marked (Erin's rule).
+        if (person.type === 'kid' && person.notReturning) {
+          schedTag += '<div class="yb-inactive-badge" title="Not enrolled for the upcoming year.">Not returning</div>';
+        }
+
         // First-year families: green card outline (.yb-card-new) instead of a
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
         var isNewM = isNewMemberPerson(person);
@@ -2912,6 +2995,7 @@
           pronounTag +
           '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
           parentOfTag +
+          schedTag +
           absenceTag +
           allergyTag +
           noPhotoTag +
@@ -5787,52 +5871,9 @@
 
     var html = '';
 
-    // ──── View As banner (communications@ only, when impersonating) ────
-    // The picker itself lives in the sticky header (see renderHeaderViewAs);
-    // the banner below just makes it obvious which family is in view and
-    // offers a one-click "back to my view" button.
-    var viewAsEmail = sessionStorage.getItem(VIEW_AS_KEY);
-    if (isCommsUser() && viewAsEmail && fam) {
-      html += '<div class="view-as-bar">';
-      html += '<div class="view-as-banner">';
-      html += '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-      // Label the banner as "First Last" for the specific person being
-      // impersonated. Look the person up in fam.people by email so we get
-      // their ACTUAL first + last name — not whatever the email prefix
-      // parses to (which duplicates the family name when the prefix and
-      // family name happen to share their first letter, e.g.
-      // communications@ + family "Communications" → "Communications
-      // Communications" via the email-derived fallback).
-      var viewAsLabel = '';
-      if (Array.isArray(fam.people)) {
-        var emLc = String(viewAsEmail || '').toLowerCase();
-        for (var vp = 0; vp < fam.people.length; vp++) {
-          var ppl = fam.people[vp];
-          if (ppl && String(ppl.email || '').toLowerCase() === emLc) {
-            viewAsLabel = personFullName(ppl, fam);
-            break;
-          }
-        }
-      }
-      if (!viewAsLabel) {
-        // Fallback for sheet-only / no-people-row families: use the
-        // legacy email-prefix derivation but DON'T re-append the family
-        // name when it already collapses into a duplicate.
-        var fallbackFirst = deriveFirstNameFromLogin(viewAsEmail, fam.name);
-        var fallbackLast = fam.displayName || fam.name || '';
-        if (fallbackFirst && fallbackLast && fallbackFirst.toLowerCase() === fallbackLast.toLowerCase()) {
-          viewAsLabel = fallbackFirst; // would otherwise dupe
-        } else if (fallbackFirst) {
-          viewAsLabel = (fallbackFirst + ' ' + fallbackLast).trim();
-        } else {
-          viewAsLabel = fallbackLast;
-        }
-      }
-      html += ' Viewing as <strong>' + viewAsLabel + '</strong>';
-      html += '<button class="view-as-reset" id="viewAsReset">Back to my view</button>';
-      html += '</div>';
-      html += '</div>';
-    }
+    // View As status now lives in the header testing strip (Erin,
+    // 2026-07-19) — see renderHeaderViewAs/viewAsHeaderLabel. No in-page
+    // banner anymore.
 
     // If no matching family (e.g. communications@ with no View As), show
     // empty-state prompt pointing to the header picker.
@@ -5862,7 +5903,9 @@
 
     // ──── Coverage Board (full width, collapsible) ────
     // Hidden during summer break — no co-op days = no coverage to claim.
-    if (!isSummerBreak) {
+    // EXCEPT when upcoming absences already exist (next season's rows get
+    // entered over the summer): real data always outranks the season gate.
+    if (!isSummerBreak || (loadedAbsences || []).length > 0) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
       html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage"><img class="brand-accent" src="brand/secondary/accent-33.png" alt=""> Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
       html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
@@ -5903,9 +5946,16 @@
     // Kept named `parentFullNames` so the forEach blocks below stay readable.
     var parentFullNames = matchTargets;
 
+    // Person names: first AND last must correspond (bug log #9 — a fresh
+    // "Erin Testing Account" login must not inherit "Erin Bogan" duties).
     function nameMatch(a, b) {
+      return personNamesMatch(a, b);
+    }
+    // Role/duty TITLES keep plain exact comparison — first/last-token
+    // semantics don't apply to strings like "Cleaning Crew Liaison".
+    function titleEq(a, b) {
       if (!a || !b) return false;
-      return a.trim().toLowerCase() === b.trim().toLowerCase();
+      return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
     }
 
     // ── Session-bound duties (AM, PM, Cleaning, Coverage) ──
@@ -6043,10 +6093,21 @@
       var cleanAreas = ['mainFloor', 'upstairs', 'outside'];
       function matchesCleaning(names) {
         return names.some(function(n) {
-          var nl = n.toLowerCase();
-          return nl === fam.name.toLowerCase() ||
-            parentFullNames.some(function(pf) { return nl.indexOf(pf.split(' ')[0].toLowerCase()) !== -1 && nl.indexOf(fam.name.toLowerCase()) !== -1; }) ||
-            parentFullNames.some(function(pf) { return nl === pf.toLowerCase(); });
+          var nl = n.trim().toLowerCase();
+          if (nl === fam.name.toLowerCase()) return true; // family-level entry
+          // Person-level (or "Erin & Jay Bogan" style) entries: the first
+          // name AND every family-name word must appear as WHOLE tokens.
+          // Substring matching let "Katherine Bogan" claim Erin's duty
+          // ("erin" hides inside "katherine") — bug log #9 hardening.
+          var nlToks = nl.split(/\s+/);
+          var famToks = fam.name.toLowerCase().split(/\s+/);
+          return parentFullNames.some(function(pf) {
+            var pfl = pf.trim().toLowerCase();
+            if (nl === pfl) return true; // exact person entry
+            var first = pfl.split(/\s+/)[0];
+            return nlToks.indexOf(first) !== -1 &&
+              famToks.every(function (ft) { return nlToks.indexOf(ft) !== -1; });
+          });
         });
       }
       // Include the floor grouping in the duty label (Erin, 2026-07-16):
@@ -6088,7 +6149,12 @@
         if (_mfDutySession && (parseInt(a.session_number, 10) || currentSession) !== dutySession) return;
         (a.slots || []).forEach(function (s) {
           if (!s.claimed_by_email && !s.claimed_by_name) return;
-          var mine = parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
+          // Email is authoritative when the claim carries one (bug log #9:
+          // entities with emails match by email ONLY — no name fallback
+          // that could hand the duty to a same-named stranger).
+          var mine = s.claimed_by_email
+            ? String(s.claimed_by_email).toLowerCase() === String(email || '').toLowerCase()
+            : parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
           if (!mine) return;
           var blk = (s.block === 'AM' || s.block === 'PM1' || s.block === 'PM2' || s.block === 'Cleaning') ? s.block : 'AM';
           var icon = s.role_type === 'teacher' ? 'teach' : s.role_type === 'cleaning' ? 'clean' : 'assist';
@@ -6128,7 +6194,7 @@
     VOLUNTEER_COMMITTEES.forEach(function (committee) {
       if (committee.chair && committee.chair.person) {
         var chairTitle = committee.chair.title.replace(/\bDir\.\s*$/, 'Director');
-        if (!fam.boardRole || !nameMatch(chairTitle, fam.boardRole)) {
+        if (!fam.boardRole || !titleEq(chairTitle, fam.boardRole)) {
           parentFullNames.forEach(function (full) {
             if (nameMatch(committee.chair.person, full))
               duties.push({block: 'annual', icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board', popup: {type: 'committee', name: committee.name}});
@@ -6198,16 +6264,18 @@
       });
     }
     SPECIAL_EVENTS.forEach(function (ev) {
-      // Coordinator strings come from the master sheet and may include
-      // "Erin" or "Erin Bogan" or even free-form ("Erin & Joey"). Match
-      // the active person's first name against any whitespace-separated
-      // token in the coordinator string.
-      var firstNames = (Array.isArray(fam.people) ? fam.people.map(function(pp) { return pp.first_name; }) : [])
-        .filter(Boolean);
-      if (activePerson) firstNames = [activePerson.first_name].filter(Boolean);
-      var isCoord = ev.coordinator && firstNames.some(function (fn) {
-        return ev.coordinator.indexOf(fn) !== -1;
-      });
+      // Coordinator strings come from the master sheet and are free-form:
+      // "Erin Bogan", "Erin Bogan & Joey Smith". Split on the usual
+      // separators and require a full first+last nameMatch against the
+      // active person (bug log #9: substring-matching any first name
+      // handed a fresh "Erin Testing Account" login the real Erin's
+      // coordinator duties). Bare-first-name cells ("Erin") no longer
+      // match anyone — first-name-only identity is inherently ambiguous.
+      var isCoord = ev.coordinator && String(ev.coordinator)
+        .split(/\s*(?:&|,|\/|\+|\band\b)\s*/i)
+        .some(function (seg) {
+          return parentFullNames.some(function (full) { return nameMatch(seg, full); });
+        });
       // Only UPCOMING events are responsibilities — the master-sheet tab
       // still lists last season's events (2026-07-06, Erin saw "Field Day
       // Coordinator · May 20, 2026" on prod in July). A parseable date in
@@ -6240,10 +6308,10 @@
       var titles = (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[emailLc]) || [];
       titles.forEach(function (title) {
         // Skip anything the legacy sheet block (or board role) already listed.
-        if (duties.some(function (d) { return nameMatch(d.text, title); })) return;
+        if (duties.some(function (d) { return titleEq(d.text, title); })) return;
         var rd = null;
         for (var ri = 0; ri < roleDescriptions.length; ri++) {
-          if (nameMatch(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
+          if (titleEq(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
         }
         var committeeName = (rd && rd.committee) || 'Committee';
         duties.push({
@@ -6783,18 +6851,8 @@
     // Keep the header picker in sync with the active family.
     renderHeaderViewAs();
 
-    // "Back to my view" button from the impersonation banner.
-    var viewAsReset = document.getElementById('viewAsReset');
-    if (viewAsReset) {
-      viewAsReset.onclick = function () {
-        sessionStorage.removeItem(VIEW_AS_KEY);
-        renderMyFamily();
-        if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
-        if (typeof loadNotifications === 'function') loadNotifications();
-        if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
-        if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
-      };
-    }
+    // ("Back to my view" now lives in the header testing strip — wired
+    // once in renderHeaderViewAs.)
 
     // Wire up duty detail popups
     grid.querySelectorAll('.mf-duty-clickable').forEach(function (row) {
@@ -8758,6 +8816,10 @@
             + '<button type="button" class="sc-btn" id="ws-todo-handbook-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
+          // Enrollment approval queue (Erin, 2026-07-19 Option B): schedule
+          // changes / kid adds / removals wait here for approval. Painted
+          // by loadEnrollmentRequestCount.
+          h += '<li id="ws-todo-enroll-req-item" hidden><button type="button" class="ws-link-btn" data-resource-action="enrollment-requests"><span class="ws-link-count" id="ws-enroll-req-count">0</span><span class="ws-link-icon">🗂️</span><span id="ws-enroll-req-label">Approve enrollment changes</span></button></li>';
           // General inquiries from the public Contact Us form — a separate
           // bucket from tour requests so questions don't mix into the tour
           // queue. Opens the pipeline scoped to inquiries. Listed FIRST,
@@ -8844,6 +8906,7 @@
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
         if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
+        if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
         // Personal event-planning tasks (Collaboration spaces): repaint
         // from cache instantly, then refresh from the server.
         if (typeof updateEventTasksTodoItems === 'function') updateEventTasksTodoItems();
@@ -18045,6 +18108,7 @@
       showBoardCalendarModal({ view: btn.getAttribute('data-cal-view') || undefined });
     }
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
+    else if (action === 'enrollment-requests' && typeof showEnrollmentRequestsModal === 'function') showEnrollmentRequestsModal();
     else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') {
       var wf = btn.getAttribute('data-welcome-filter');
       showWelcomeListModal(wf === '0' ? 0 : (wf === '1' ? 1 : (wf === '2' ? 2 : null)));
@@ -18460,9 +18524,11 @@
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
+  // Same first+last person-name semantics as the duty matcher (bug log #9)
+  // — the absence-slot builder must not offer a slot to a same-first-name
+  // stranger either.
   function nameMatchAbsence(a, b) {
-    if (!a || !b) return false;
-    return a.trim().toLowerCase() === b.trim().toLowerCase();
+    return personNamesMatch(a, b);
   }
 
   // Committee titles held by ONE named person — the same two sources
@@ -18825,10 +18891,11 @@
   function loadCoverageBoard() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
-    // Current session AND every later one, so members can review/claim
-    // coverage for upcoming sessions (Session pills on the board) and
-    // absences entered ahead of time stay visible.
-    fetch('/api/absences?from_session=' + currentSession, { headers: { 'Authorization': 'Bearer ' + cred } })
+    // Every upcoming absence BY DATE, not by session number — session
+    // numbers repeat every school year, so a from_session=currentSession
+    // filter silently dropped next-season absences around the boundary
+    // (the board vanished right after a claim re-fetch, Erin 2026-07-19).
+    fetch('/api/absences?upcoming=1', { headers: { 'Authorization': 'Bearer ' + cred } })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       var raw = data.absences || [];
@@ -18836,10 +18903,17 @@
       // Publish first so renderMyFamily can inject any coverage assignments
       // into the user's My Responsibilities card. renderMyFamily() then calls
       // renderCoverageBoard(loadedAbsences) at the end, which repopulates the
-      // coverage card — avoiding a separate second render here.
+      // coverage card — avoiding a separate second render here. If that
+      // full-page rebuild ever throws, fall back to rendering the board
+      // directly so a claim can never make the tracker disappear.
       loadedAbsences = filtered;
-      if (typeof renderMyFamily === 'function') renderMyFamily();
-      else renderCoverageBoard(filtered);
+      try {
+        if (typeof renderMyFamily === 'function') renderMyFamily();
+        else renderCoverageBoard(filtered);
+      } catch (rmErr) {
+        console.error('renderMyFamily failed after coverage load:', rmErr);
+        renderCoverageBoard(filtered);
+      }
     })
     .catch(function (err) { console.error('Coverage fetch failed:', err); var el = document.getElementById('coverageBoardContent'); if (el) el.innerHTML = '<p>Could not load coverage data.</p>'; });
   }
@@ -18912,6 +18986,14 @@
     pillSessions.sort(function (a, b) { return a - b; });
     var viewSess = (coverageViewSession && pillSessions.indexOf(coverageViewSession) !== -1) ? coverageViewSession : currentSession;
     if (pillSessions.indexOf(viewSess) === -1) viewSess = pillSessions[0];
+    // Never default to an empty pill while another session has absences —
+    // around the season boundary "current" can be a session with nothing
+    // in it while next season's rows sit one pill over (Erin, 2026-07-19).
+    if (!coverageViewSession && !absences.some(function (a) { return parseInt(a.session_number, 10) === viewSess; })) {
+      for (var pi2 = 0; pi2 < pillSessions.length; pi2++) {
+        if (absences.some(function (a) { return parseInt(a.session_number, 10) === pillSessions[pi2]; })) { viewSess = pillSessions[pi2]; break; }
+      }
+    }
 
     var html = '';
     if (pillSessions.length > 1) {
@@ -23006,6 +23088,115 @@
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
       })
       .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
+  }
+
+  // ══ Enrollment Requests queue (Membership Director) ══════════════
+  // Option B (Erin, 2026-07-19): families' schedule changes, kid adds
+  // (waiver-gated), and removals wait here; nothing dues- or roster-
+  // bearing moves until approved. Deny reverts (and un-adds).
+  function enrollReqLabel(r) {
+    var schedName = function (s) {
+      return s === 'morning' ? 'Morning only' : s === 'afternoon' ? 'Afternoon only' : s === 'all-day' ? 'All day' : (s || '?');
+    };
+    if (r.kind === 'add_kid') return 'Add ' + r.kid_first_name + ' (' + schedName(r.requested_schedule) + ')';
+    if (r.kind === 'remove_kid') return 'Remove ' + r.kid_first_name;
+    return r.kid_first_name + ': ' + schedName(r.prior_schedule) + ' → ' + schedName(r.requested_schedule);
+  }
+
+  function showEnrollmentRequestsModal() {
+    var body = renderReportModal({
+      title: 'Enrollment Requests',
+      subtitle: 'Schedule changes, added kids, and removals wait here until you approve them — dues and rosters only move on approval. Added kids also need their waiver signed before you can approve.',
+      bodyId: 'ws-enroll-req-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    loadEnrollmentRequestsInto(body);
+  }
+
+  function loadEnrollmentRequestsInto(body) {
+    fetch('/api/tour?list=enrollment_requests', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>';
+          return;
+        }
+        var rows = (res.data && res.data.requests) || [];
+        var pending = rows.filter(function (r) { return r.status === 'pending'; });
+        var decided = rows.filter(function (r) { return r.status !== 'pending'; }).slice(0, 15);
+        var h = '';
+        if (pending.length === 0) h += '<p class="ws-empty">Nothing waiting — all caught up. 🎉</p>';
+        pending.forEach(function (r) {
+          var waiverBit = '';
+          if (r.kind === 'add_kid') {
+            waiverBit = r.waiver_signed_at
+              ? ' <span class="ws-wv-ok">waiver signed</span>'
+              : ' <span class="ws-wv-pending">waiver not signed yet</span>';
+          }
+          h += '<div class="st-place-row">'
+            + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
+            + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>' + waiverBit
+            + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.requested_at)) + '</span>'
+            + '<div class="ws-srt-actions">'
+            + '<button type="button" class="sc-btn enroll-req-approve" data-req-id="' + r.id + '"'
+            + (r.kind === 'add_kid' && !r.waiver_signed_at ? ' disabled title="Waiting on the family to sign the waiver first"' : '')
+            + '>Approve</button>'
+            + '<button type="button" class="sc-btn sc-btn-del enroll-req-deny" data-req-id="' + r.id + '">Deny</button>'
+            + '</div></div>';
+        });
+        if (decided.length > 0) {
+          h += '<h5 class="ws-part-exempt-existing">Recent decisions</h5>';
+          decided.forEach(function (r) {
+            h += '<div class="st-place-row">'
+              + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
+              + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>'
+              + '<span class="' + (r.status === 'approved' ? 'ws-wv-ok' : 'ws-wv-declined') + '">' + (r.status === 'approved' ? '✓ Approved' : 'Denied') + '</span>'
+              + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.decided_at)) + '</span>'
+              + '</div>';
+          });
+        }
+        body.innerHTML = h;
+        function decide(id, approve, btn) {
+          btn.disabled = true;
+          fetch('/api/tour', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'enrollment-request-decide', id: id, approve: approve })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res2) {
+              if (!res2.ok) { alert((res2.data && res2.data.error) || 'Could not save the decision.'); btn.disabled = false; return; }
+              loadEnrollmentRequestsInto(body);
+              if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
+            })
+            .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+        }
+        body.querySelectorAll('.enroll-req-approve').forEach(function (btn) {
+          btn.addEventListener('click', function () { decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn); });
+        });
+        body.querySelectorAll('.enroll-req-deny').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var self = this;
+            rwArmTwoStep(self, 'deny', function () { decide(parseInt(self.getAttribute('data-req-id'), 10), false, self); });
+          });
+        });
+      })
+      .catch(function () { body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
+  }
+
+  function loadEnrollmentRequestCount() {
+    var item = document.getElementById('ws-todo-enroll-req-item');
+    if (!item) return; // not the Membership Director's tab
+    fetch('/api/tour?list=enrollment_requests', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var n = (d.requests || []).filter(function (r) { return r.status === 'pending'; }).length;
+        var pill = document.getElementById('ws-enroll-req-count');
+        if (pill) pill.textContent = n;
+        item.hidden = n <= 0;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () {});
   }
 
   // ── Group-liaison morning-class nag ──────────────────────────────
@@ -29804,6 +29995,7 @@
       parents: parentSeed,
       kids: (fam.kids || []).map(function (k) {
         return {
+          id: k.id || null, // DB row id — save upserts by it (enrollment build)
           name: k.name || '',
           // Per-kid last name. Empty in form = use family last name in display.
           // Useful for kids who use a different surname than the family unit.
@@ -29930,35 +30122,25 @@
       // first name.
       h += '<input class="rd-input emi-full" type="text" placeholder="Goes by (shown in directory — optional)" data-field="nickname" value="' + escapeHtml(k.nickname || '') + '">';
       h += '<label class="emi-inline-label"><span>Birthday <span style="color:#d35a48;font-weight:700;">*</span></span><input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
-      // Schedule is read-only for members because CHANGING it has billing
-      // implications (half-day vs. full-day dues) — they contact the
-      // Membership Director. The Membership Director (capability
-      // member_schedule_edit, checked on the REAL login so it works
-      // through View As) gets a live select; the server enforces the
-      // same gate (Erin, 2026-07-16). A JUST-ADDED kid (k._isNew) gets
-      // the live select for everyone — there's no prior value to protect
-      // and the server accepts an initial schedule on new kids (Erin,
-      // 2026-07-19).
-      var schedLabel = k.schedule === 'morning' ? 'Morning only'
-                    : k.schedule === 'afternoon' ? 'Afternoon only'
-                    : 'All day';
-      if (k._isNew
-          || (typeof realUserHasCapability === 'function'
-          && realUserHasCapability('member_schedule_edit', ['Membership Director']))) {
-        var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
-        h += '<label class="emi-inline-label">Schedule' +
-             '<select class="rd-input" data-field="schedule" title="Half-day ↔ full-day — affects dues.">' +
-             '<option value="all-day"' + (schedVal === 'all-day' ? ' selected' : '') + '>All day</option>' +
-             '<option value="morning"' + (schedVal === 'morning' ? ' selected' : '') + '>Morning only</option>' +
-             '<option value="afternoon"' + (schedVal === 'afternoon' ? ' selected' : '') + '>Afternoon only</option>' +
-             '</select>' +
-             '</label>';
-      } else {
-        h += '<label class="emi-inline-label">Schedule' +
-             '<input class="rd-input emi-readonly" value="' + escapeHtml(schedLabel) + '" readonly tabindex="-1" title="Contact the Membership Director to change schedule — affects dues.">' +
-             '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
-             '</label>';
-      }
+      // Everyone gets the live schedule select (Option B, ship-gate
+      // 2026-07-19: the old read-only fallback left prod families with
+      // NO way to even request a change). For non-Membership users the
+      // server queues the change for approval instead of applying it —
+      // the title says so. Membership Director (member_schedule_edit,
+      // real login) and brand-new kids apply directly.
+      var schedPriv = (typeof realUserHasCapability === 'function'
+        && realUserHasCapability('member_schedule_edit', ['Membership Director']));
+      var schedTitle = k._isNew ? 'Pick this child’s schedule.'
+        : schedPriv ? 'Half-day ↔ full-day — affects dues.'
+        : 'Schedule changes are sent to the Membership Director for approval (they affect dues).';
+      var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
+      h += '<label class="emi-inline-label">Schedule' +
+           '<select class="rd-input" data-field="schedule" title="' + schedTitle + '">' +
+           '<option value="all-day"' + (schedVal === 'all-day' ? ' selected' : '') + '>All day</option>' +
+           '<option value="morning"' + (schedVal === 'morning' ? ' selected' : '') + '>Morning only</option>' +
+           '<option value="afternoon"' + (schedVal === 'afternoon' ? ' selected' : '') + '>Afternoon only</option>' +
+           '</select>' +
+           '</label>';
       h += '<label class="emi-inline-label emi-full">' +
              'Allergies, medical &amp; notes ' +
              '<span style="font-weight:400;font-size:0.8em;color:var(--color-text-light);">— visible to all co-op members; share what teachers + leaders should know to keep your child safe.</span>' +
@@ -29969,6 +30151,22 @@
            '<input type="checkbox" data-field="photo_consent_optout"' + (optOut ? ' checked' : '') + '>' +
            '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use this child\'s photo, video, or quote in any co-op material.</span>' +
            '</label>';
+      // Pending Membership-approval chip (Option B). Adds also carry the
+      // waiver link until it's signed.
+      var pendReq = (state._pendingReqs || {})[String(k.name || '').trim().split(/\s+/)[0].toLowerCase()];
+      if (pendReq) {
+        var chipTxt = '';
+        if (pendReq.kind === 'add_kid') {
+          chipTxt = (pendReq.waiver_signed || !pendReq.waiver_token)
+            ? '⏳ Awaiting Membership approval to join the co-op.'
+            : '✍️ One more step: <a href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">sign the waiver for this child</a> — then Membership approves.';
+        } else if (pendReq.kind === 'remove_kid') {
+          chipTxt = '⏳ Removal requested — awaiting Membership approval (still enrolled until then).';
+        } else {
+          chipTxt = '⏳ Schedule change requested — awaiting Membership approval (the current schedule stays until then).';
+        }
+        h += '<div class="emi-full emi-pending-chip">' + chipTxt + '</div>';
+      }
       h += '</div>';
       h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-kid" data-idx="' + idx + '" aria-label="Remove kid">&times;</button>';
       h += '</div>';
@@ -30357,6 +30555,12 @@
         if (!String(state.kids[ki].name || '').trim()) {
           showError('Please name each kid or remove blank rows.'); return;
         }
+        // Birthday is marked required in the form but was never enforced —
+        // kids saved without one show as "age ?" in the Morning Builder and
+        // can't be age-placed (Erin, 2026-07-19).
+        if (!String(state.kids[ki].birth_date || '').trim()) {
+          showError('Please add a birthday for ' + String(state.kids[ki].name).trim() + ' — it drives class placement.'); return;
+        }
       }
 
       var cred = localStorage.getItem('rw_google_credential');
@@ -30431,7 +30635,7 @@
           phone: state.phone,
           address: state.address,
           people: people,
-          kids: state.kids.map(function (k) { return { name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
+          kids: state.kids.map(function (k) { return { id: k.id || null, name: k.name, last_name: k.last_name || '', nickname: String(k.nickname || '').trim(), birth_date: k.birth_date, pronouns: k.pronouns, allergies: k.allergies, schedule: k.schedule, photo_url: k.photo_url, photo_consent: k.photo_consent !== false }; })
         };
         // Only the super-user admin box sends alternate logins; the server
         // ignores this field for anyone else and keeps the stored set intact.
@@ -30467,6 +30671,31 @@
               }
               alert(lines.join('\n\n'));
             }
+            // Option B (2026-07-19): changes that went to the Membership
+            // approval queue instead of applying. Tell the family what's
+            // pending, and for an added kid open the waiver to sign NOW —
+            // approval can't happen until it's signed.
+            var pendReqs = (resp.body && resp.body.pending_requests) || [];
+            var reopenEmiForWaiver = false;
+            if (pendReqs.length) {
+              var addWithWaiver = pendReqs.filter(function (p) { return p.kind === 'add_kid' && p.waiver_token; });
+              var summary = pendReqs.map(function (p) {
+                return p.kind === 'add_kid' ? 'Adding ' + p.kid_first_name
+                  : p.kind === 'remove_kid' ? 'Removing ' + p.kid_first_name
+                  : p.kid_first_name + '’s schedule change';
+              }).join(', ');
+              if (addWithWaiver.length) {
+                // No window.open here — popup blockers eat async opens
+                // (ship-gate 2026-07-19). The form reopens with a real
+                // "sign the waiver" link on the kid's row instead.
+                reopenEmiForWaiver = true;
+                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
+                  + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
+                  + ': a waiver signature. The form will reopen — click the “sign the waiver” link on their row. Membership can approve once it’s signed.');
+              } else {
+                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
+              }
+            }
             // Refresh sheets data so the overlay renders immediately.
             return fetch('/api/sheets', { headers: { 'Authorization': 'Bearer ' + cred } })
               .then(function (r) { return r.json(); })
@@ -30483,8 +30712,14 @@
                   if (typeof renderHeaderViewAs === 'function') renderHeaderViewAs();
                 }
                 closeDetail();
+                // Waiver pending: land the family back in the form where
+                // the kid's row carries the real signing link.
+                if (reopenEmiForWaiver && typeof showEditMyInfo === 'function') showEditMyInfo();
               })
-              .catch(function () { closeDetail(); });
+              .catch(function () {
+                closeDetail();
+                if (reopenEmiForWaiver && typeof showEditMyInfo === 'function') showEditMyInfo();
+              });
           });
       }
 
@@ -30498,6 +30733,31 @@
     render();
     personDetail.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+
+    // Pending approval requests for this family (Option B, 2026-07-19):
+    // badge the affected kid rows so the family sees "awaiting Membership"
+    // (and, for adds, the waiver link) right in the form. Best-effort.
+    fetch('/api/tour?list=enrollment_requests&family_email=' + encodeURIComponent(state.family_email), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var map = {};
+        (d.requests || []).forEach(function (rq) {
+          if (rq.status !== 'pending') return;
+          var key = String(rq.kid_first_name || '').trim().split(/\s+/)[0].toLowerCase();
+          if (key && !map[key]) map[key] = rq;
+        });
+        state._pendingReqs = map;
+        // Re-render ONLY if the EMI modal is still open, and capture any
+        // typing that happened while the fetch was in flight first —
+        // a bare render() here wiped in-progress edits (ship-gate
+        // 2026-07-19).
+        if (Object.keys(map).length > 0 && document.getElementById('emiKidList')) {
+          syncStateFromDom();
+          render();
+        }
+      })
+      .catch(function () { /* chips just don't show */ });
 
     // Super-user only: fetch the family's current alternate logins (not
     // carried in the FAMILIES directory payload) and drop them into the admin
