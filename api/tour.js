@@ -3854,15 +3854,18 @@ async function handleProfileUpdate(body, req, res) {
     const actorMayEdit = async () => {
       if (actorMayEditDirect === null) {
         const realEmail0 = user.realEmail || user.email;
-        // Impersonation acts AS the family (bug #22): a super/Membership
-        // login using View As follows the member path — schedule
-        // changes, adds, and removals QUEUE for approval instead of
-        // applying silently. Direct (non-impersonated) privileged edits
-        // stay immediate.
+        // Impersonation acts AS the family (bug #22): a privileged login
+        // using View As follows the member path — schedule changes,
+        // adds, and removals QUEUE for approval instead of applying
+        // silently. And direct-edit privilege belongs to the Membership
+        // Director capability ONLY — supers are deliberately NOT exempt
+        // (Erin, 2026-07-19: the VP's direct edit skipped every approval
+        // flow; the rule is ANY schedule change gets Membership's
+        // approval, and supers can approve their own queue entry).
         const impersonating = user.realEmail
           && String(user.realEmail).toLowerCase() !== String(user.email || '').toLowerCase();
         actorMayEditDirect = !impersonating
-          && (isSuperUser(realEmail0) || (await hasCapability(realEmail0, 'member_schedule_edit')));
+          && (await hasCapability(realEmail0, 'member_schedule_edit'));
       }
       return actorMayEditDirect;
     };
@@ -7587,7 +7590,23 @@ async function handleEnrollmentRequestList(req, res) {
         kid_first_name: String(w.note || '').replace(/^Covers newly added child:\s*/i, '').trim().split(/\s+/)[0] || 'your new kid'
       }));
     } catch (e) { /* banner extra only */ }
-    return res.status(200).json({ requests: rows, pending_waivers: pendingWaivers });
+    // Unsigned Backup Learning Coach waivers too (Erin, 2026-07-19): the
+    // family should see their BLC hasn't signed. EMI-era rows store the
+    // family key; registration-era rows store the personal email, so
+    // match those through the registration's stored family_email.
+    let pendingBlc = [];
+    try {
+      const blcRows = await sql`
+        SELECT ws.person_name, ws.pending_token FROM waiver_signatures ws
+        WHERE ws.season = ${DEFAULT_SEASON} AND ws.role = 'backup_coach'
+          AND ws.signed_at IS NULL AND ws.pending_token IS NOT NULL
+          AND (LOWER(ws.family_email) = ${famScope}
+               OR ws.registration_id IN (
+                 SELECT id FROM registrations WHERE LOWER(family_email) = ${famScope} AND season = ${DEFAULT_SEASON}))
+      `;
+      pendingBlc = blcRows.map(w => ({ name: w.person_name || 'Your Backup Learning Coach', waiver_token: w.pending_token }));
+    } catch (e) { /* banner extra only */ }
+    return res.status(200).json({ requests: rows, pending_waivers: pendingWaivers, pending_blc_waivers: pendingBlc });
   }
   if (!(await membershipMayDecide(user.realEmail || user.email))) {
     return res.status(403).json({ error: 'Only the Membership Director can review enrollment requests.' });

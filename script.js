@@ -7140,12 +7140,21 @@
             needs.push({ kid_first_name: w.kid_first_name, waiver_token: w.waiver_token });
           }
         });
-        if (!needs.length) { el2.style.display = 'none'; return; }
+        // Unsigned BLC waivers ride the same banner (Erin, 2026-07-19):
+        // the BLC signs personally (their link was emailed), but the
+        // family should see it's outstanding and can open it for them.
+        var blcNeeds = ((d && d.pending_blc_waivers) || []).filter(function (w) { return w.waiver_token; });
+        if (!needs.length && !blcNeeds.length) { el2.style.display = 'none'; return; }
         var h = '<h3 class="mf-card-title">✍️ Waiver needed</h3>';
         needs.forEach(function (rq) {
           var kidFirst = escapeHtml(String(rq.kid_first_name || '').trim() || 'Your new kid');
           h += '<p>' + kidFirst + ' was added to your family — an adult still needs to sign their waiver so the co-op has it on file.</p>';
           h += '<a class="btn btn-primary btn-sm" href="waiver.html?token=' + escapeHtml(rq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + kidFirst + '’s waiver</a>';
+        });
+        blcNeeds.forEach(function (w) {
+          var blcName = escapeHtml(String(w.name || '').trim() || 'Your Backup Learning Coach');
+          h += '<p>' + blcName + ' hasn’t signed their Backup Learning Coach waiver yet — the link was emailed to them, or open it here and have them sign.</p>';
+          h += '<a class="btn btn-primary btn-sm" href="waiver.html?token=' + escapeHtml(w.waiver_token) + '" target="_blank" rel="noopener">Open ' + blcName + '’s waiver</a>';
         });
         el2.innerHTML = h;
         el2.style.display = '';
@@ -30804,8 +30813,21 @@
         var _vaVal = sessionStorage.getItem(VIEW_AS_KEY) || '';
         _schedViewAs = !!_vaVal && _vaVal.toLowerCase() !== String(getRealEmail() || '').toLowerCase();
       } catch (e) { /* default: not impersonating */ }
-      var schedPriv = !_schedViewAs && (typeof realUserHasCapability === 'function'
-        && realUserHasCapability('member_schedule_edit', ['Membership Director']));
+      // Mirrors the server rule: direct-edit belongs to the Membership
+      // Director capability only — supers queue like everyone else, so
+      // no realUserHasCapability here (its super shortcut would lie).
+      var schedPriv = !_schedViewAs && (function () {
+        try {
+          var _spReal = getRealEmail();
+          if (!_spReal) return false;
+          var _spTitles = (typeof grantTitlesFor === 'function' && grantTitlesFor('member_schedule_edit')) || ['Membership Director'];
+          var _spMine = getWorkspaceRoles(_spReal);
+          for (var _spI = 0; _spI < _spTitles.length; _spI++) {
+            if (_spMine.indexOf(normalizeWorkspaceTitle(_spTitles[_spI])) !== -1) return true;
+          }
+        } catch (e) { /* fall through */ }
+        return false;
+      })();
       var schedTitle = k._isNew ? 'Pick this child’s schedule.'
         : schedPriv ? 'Half-day ↔ full-day — affects dues.'
         : 'Schedule changes are sent to the Membership Director for approval (they affect dues).';
