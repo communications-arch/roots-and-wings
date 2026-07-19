@@ -5371,7 +5371,12 @@
   ];
 
   // Pure options builder — extracted for harness testing.
-  function volSlotOptionsHtml(blockKey, d) {
+  function volSlotOptionsHtml(blockKey, d, opts) {
+    // opts.vpAssign (bugs #14/#18): VP/ACL placement surfaces (To Do
+    // modals, Schedules report + Fill) list EVERY support role
+    // regardless of caps — the server lets reviewer view_as placements
+    // through, so the picker must too.
+    var vpAssign = !!(opts && opts.vpAssign);
     var b = (d.blocks || {})[blockKey] || { classes: [], floaters: [], board: [], prep: [] };
     var h = '<option value="">— sign up… —</option>';
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
@@ -5405,19 +5410,24 @@
     // offered — it's the overflow role, so neither the support-capacity
     // rule nor the AM 2-floater cap should orphan a willing adult.
     var assistsOpen = sorted.some(function (c) { return (c.helpers_needed || 0) > 0; });
-    if (blockKey.indexOf('AM') === 0) {
-      if ((fl < 2 && !supportFull) || !assistsOpen) h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
-    } else if (!supportFull || !assistsOpen) {
+    var floaterOpen = blockKey.indexOf('AM') === 0
+      ? ((fl < 2 && !supportFull) || !assistsOpen)
+      : (!supportFull || !assistsOpen);
+    if (vpAssign || floaterOpen) {
       h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
     }
-    // Board Duties only offers itself to board members (Erin, 2026-07-15).
-    // d.me.is_board comes from the matrix; older payloads / test fixtures
-    // without it keep the option (server enforces regardless).
+    // Board Duties (bug #16): board members can take it any hour, even
+    // several hours a day — no cap, no capacity gate. Still hidden from
+    // non-board members in self-serve; VP assign lists it for anyone.
     var showBoard = !(d.me && d.me.is_board === false);
-    if (showBoard && b.board.length < 2 && !supportFull) {
+    if (vpAssign || showBoard) {
       h += '<option value="board">Board Duties' + (b.board.length > 0 ? ' · ' + b.board.length + ' signed up' : '') + '</option>';
     }
-    if (b.prep.length < 2 && !supportFull) {
+    // Prep Period (bug #17): open to every member, 4 per hour — the cap
+    // lifts once the hour is fully assisted and has a floater. (The
+    // server also holds each member to ONE prep hour per session.)
+    var prepOpen = b.prep.length < 4 || (!assistsOpen && fl > 0);
+    if (vpAssign || prepOpen) {
       h += '<option value="prep">Prep Period' + (b.prep.length > 0 ? ' · ' + b.prep.length + ' signed up' : '') + '</option>';
     }
     return h;
@@ -23703,7 +23713,7 @@
           (a.missing || []).forEach(function (b) {
             row += '<label class="st-place-slot">' + (BLOCK_LABELS_ST[b] || b) +
               '<select class="cl-input st-place-adult" data-email="' + escapeHtml(a.email) + '" data-block="' + b + '">' +
-              volSlotOptionsHtml(b, _signupTodoAux.matrix) + '</select></label>';
+              volSlotOptionsHtml(b, _signupTodoAux.matrix, { vpAssign: true }) + '</select></label>';
           });
         } else {
           row += ' <span class="ws-wv-context">needs: ' + escapeHtml((a.missing || []).map(function (b) { return BLOCK_LABELS_ST[b] || b; }).join(', ')) + '</span>';
@@ -24081,7 +24091,7 @@
       missing.forEach(function (b) {
         h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
           + '<select class="cl-input sched-place-adult" data-email="' + escapeHtml(row.email) + '" data-block="' + b + '">'
-          + volSlotOptionsHtml(b, _schedMatrix.data) + '</select></label>';
+          + volSlotOptionsHtml(b, _schedMatrix.data, { vpAssign: true }) + '</select></label>';
       });
       h += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
       return h + '</div>';

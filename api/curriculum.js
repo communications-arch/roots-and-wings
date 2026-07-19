@@ -2134,9 +2134,15 @@ module.exports = async function handler(req, res) {
       // Self-serve for the acting member. One commitment per block per
       // session (a lead/assist in that block also counts). Blocks are
       // per-hour: AM1 / AM2 / PM1 / PM2 (morning split 2026-07-11).
-      // Caps: board 2, prep 2 per block; floater AM 2 per hour; floater
-      // PM uncapped BUT gated on every placed class in that hour having
-      // its helper spots covered.
+      // Rules (reworked per bugs #16/#17/#18, Erin 2026-07-19):
+      //   board   — board members only, ANY hour, multiple hours, no cap.
+      //   prep    — open to every member, ONE hour per session, 4 per
+      //             hour (cap lifts once the hour is fully assisted AND
+      //             has a floater).
+      //   floater — AM 2 per hour, PM classes-fill-first; both limits
+      //             lift once the hour is fully assisted.
+      //   VP/ACL placing someone via view_as (#18) bypasses every
+      //   threshold — only the duplicate/busy integrity checks remain.
       if (action === 'volunteer-signup') {
         const vsBody = req.body || {};
         const vsYear = String(vsBody.school_year || '').trim().slice(0, 20) || activeSchoolYear();
@@ -2147,10 +2153,15 @@ module.exports = async function handler(req, res) {
         if (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(vsBlock) === -1) return res.status(400).json({ error: 'block must be AM1, AM2, PM1, or PM2' });
         if (['floater', 'board', 'prep'].indexOf(vsRole) === -1) return res.status(400).json({ error: 'role must be floater, board, or prep' });
         const vsEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
+        // VP override (#18): a reviewer assigning someone else via
+        // view_as isn't bound by caps or capacity — they're balancing
+        // the whole schedule and may deliberately exceed thresholds.
+        const vsViewAsParam = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim();
+        const vsOverride = !!vsViewAsParam && !!(await reviewerScope((user && user.email) || ''));
         // Board Duties is a board-member commitment (Erin, 2026-07-15) —
         // the dropdown hides it for everyone else, and the server backs
-        // that up here.
-        if (vsRole === 'board' && !(await isBoardMember(vsEmail))) {
+        // that up here. A VP override may assign it to anyone (#18).
+        if (vsRole === 'board' && !vsOverride && !(await isBoardMember(vsEmail))) {
           return res.status(403).json({ error: 'Board Duties is for board members.' });
         }
         const vsPeople = await sql`SELECT first_name, last_name FROM people
@@ -2198,14 +2209,14 @@ module.exports = async function handler(req, res) {
             + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
             + Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
         });
-        // Floater unlock (bugs #14/#15, Erin 2026-07-19): once every class
-        // in the hour has its assistant spots covered, Floater is ALWAYS
-        // signable — it's the overflow role, so neither the support-
-        // capacity rule nor the AM 2-floater cap applies then. (The PM
-        // classes-fill-first gate below is the same rule from the other
-        // side: needy classes imply hourAllCovered=false.)
+        // Floater/prep unlock (bugs #14/#15/#17): once every class in the
+        // hour has its assistant spots covered, Floater is ALWAYS
+        // signable and the prep cap can lift — the overflow roles stop
+        // being rationed. (The PM classes-fill-first gate below is the
+        // same rule from the other side: needy classes imply
+        // hourAllCovered=false.)
         let hourAllCovered = false;
-        if (vsRole === 'floater') {
+        if (vsRole === 'floater' || vsRole === 'prep') {
           const covCls = await sql`
             SELECT id, scheduled_hour, class_period, assistant_count
             FROM class_submissions
@@ -2223,21 +2234,41 @@ module.exports = async function handler(req, res) {
             if (got[0].n < want) { hourAllCovered = false; break; }
           }
         }
+        // Support capacity now rations FLOATERS only (#16/#17 opened
+        // board + prep): floater slots exist for adults beyond the
+        // hour's key classroom positions, unless the hour is already
+        // fully assisted or a VP is overriding.
         const mlcRows = await sql`SELECT COUNT(*)::int AS n FROM people WHERE role = 'mlc'`;
         const supportCapacity = Math.max(0, mlcRows[0].n - keyNeededHour);
         const supportTaken = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
           WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks})`;
-        if (supportTaken[0].n >= supportCapacity && !(vsRole === 'floater' && hourAllCovered)) {
+        if (vsRole === 'floater' && !hourAllCovered && !vsOverride && supportTaken[0].n >= supportCapacity) {
           return res.status(409).json({ error: 'Support slots for that hour are full — every remaining adult is needed to lead or assist a class.' });
         }
-        // Caps.
+        // Caps. Board Duties is uncapped (#16). Prep: one hour per member
+        // per session, 4 per hour — the cap lifts once the hour is fully
+        // assisted AND has at least one floater (#17). VP override skips
+        // all of them (#18).
         const capCount = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
           WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks}) AND role = ${vsRole}`;
         const n = capCount[0].n;
-        if (vsRole === 'board' && n >= 2) return res.status(409).json({ error: 'Board Duties is full for that hour (2 max).' });
-        if (vsRole === 'prep' && n >= 2) return res.status(409).json({ error: 'Prep Period is full for that hour (2 max).' });
-        if (vsRole === 'floater' && vsPeriod === 'AM' && n >= 2 && !hourAllCovered) return res.status(409).json({ error: 'Morning floaters are full for that hour (2 max).' });
-        if (vsRole === 'floater' && vsPeriod === 'PM') {
+        if (vsRole === 'prep' && !vsOverride) {
+          const myPrep = await sql`SELECT block FROM volunteer_signups
+            WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND role = 'prep'
+              AND LOWER(person_email) = ${vsEmail} LIMIT 1`;
+          if (myPrep.length) {
+            return res.status(409).json({ error: 'One Prep Period hour per member per session — you already have ' + myPrep[0].block + '. Remove it first to switch hours.' });
+          }
+          if (n >= 4) {
+            const flCount = await sql`SELECT COUNT(*)::int AS fn FROM volunteer_signups
+              WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks}) AND role = 'floater'`;
+            if (!(hourAllCovered && flCount[0].fn > 0)) {
+              return res.status(409).json({ error: 'Prep Period is full for that hour (4 max until every class is assisted and a floater is in place).' });
+            }
+          }
+        }
+        if (vsRole === 'floater' && vsPeriod === 'AM' && n >= 2 && !hourAllCovered && !vsOverride) return res.status(409).json({ error: 'Morning floaters are full for that hour (2 max).' });
+        if (vsRole === 'floater' && vsPeriod === 'PM' && !vsOverride) {
           // PM gate: floaters open only once every placed class that hour
           // has its helper spots covered.
           // Count helpers PER HOUR (2026-07-17 review): assists on a 2-hour
