@@ -66,6 +66,17 @@
       color: var(--color-text-light);
       margin-top: 2px;
     }
+    .bug-card-main { flex: 1 1 260px; min-width: 0; }
+    .bug-card-note {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: rgba(var(--color-primary-rgb), 0.05);
+      border-left: 3px solid rgba(var(--color-primary-rgb), 0.35);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      color: var(--color-text);
+    }
     .bug-status {
       display: inline-block;
       padding: 4px 14px;
@@ -280,10 +291,17 @@
         // "Fixed — please re-test" cards get a ✓ Works now button so
         // helpers can verify fixes themselves (Erin trusts her testers).
         var canVerify = st.cls === 'bug-status-fixed';
+        // Latest note from the fixer (re-test instructions, status
+        // explanations) renders right on the card — no GitHub needed.
+        var noteHtml = '';
+        if (bug.latest_note) {
+          noteHtml = '<div class="bug-card-note">💬 ' + escapeHtml(bug.latest_note).replace(/\n/g, '<br>') + '</div>';
+        }
         html += '<div class="bug-card">'
-          + '<div>'
+          + '<div class="bug-card-main">'
           + '<div class="bug-card-title">' + escapeHtml(bug.title) + '</div>'
           + (when ? '<div class="bug-card-date">Reported ' + escapeHtml(when) + '</div>' : '')
+          + noteHtml
           + '</div>'
           + '<span class="bug-status ' + st.cls + '">' + escapeHtml(st.text) + '</span>'
           + (canVerify

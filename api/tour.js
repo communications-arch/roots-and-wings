@@ -7203,10 +7203,35 @@ async function handleBugReportsList(req, res) {
         title: String(it.title || ''),
         created_at: it.created_at || '',
         state: it.state === 'closed' ? 'closed' : 'open',
+        comments: it.comments || 0,
         labels: Array.isArray(it.labels)
           ? it.labels.map(l => String((l && l.name) || '')).filter(Boolean)
           : []
       }));
+    // Latest note per OPEN issue with comments (Erin, 2026-07-19: fix
+    // explanations + re-test instructions should read right on the bug
+    // page, not in GitHub). Bounded: open issues only, first 15, one
+    // comments call each, all inside the same 60s cache. The note is
+    // plain text — image markdown is stripped to keep cards tidy.
+    const wantNotes = items.filter(it => it.state === 'open' && it.comments > 0).slice(0, 15);
+    for (const it of wantNotes) {
+      try {
+        const cm = await fetch(
+          'https://api.github.com/repos/' + BUGLOG_REPO + '/issues/' + it.number + '/comments?per_page=100',
+          { headers: bugLogGithubHeaders(token) }
+        );
+        if (!cm.ok) continue;
+        const comments = await cm.json();
+        const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
+        if (last && last.body) {
+          it.latest_note = String(last.body)
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, '(screenshot)')
+            .slice(0, 600);
+          it.latest_note_at = last.created_at || '';
+        }
+      } catch (cmErr) { /* card just renders without a note */ }
+    }
+    items.forEach(it => { delete it.comments; });
     bugListCache = { at: Date.now(), items };
     return res.status(200).json({ bugs: items });
   } catch (err) {
