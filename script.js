@@ -11865,6 +11865,7 @@
   var _merchInventoryEditId = null;
   var _merchInventoryItemFilter = 'all';
   var _merchOrderEditId = null; // order id with the in-place edit panel open
+  var _merchInventoryAddOpen = false; // "+ Add item" form visibility
 
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'customer_name', label: 'Name', type: 'string',
@@ -11916,7 +11917,10 @@
     },
     { key: '_actions', label: '', type: 'string', sortable: false,
       render: function (o) {
-        return '<button type="button" class="sc-btn merch-order-edit-btn" data-merch-id="' + o.id + '">Edit</button>';
+        return '<div class="ws-srt-actions">'
+          + '<button type="button" class="sc-btn merch-order-edit-btn" data-merch-id="' + o.id + '">Edit</button>'
+          + '<button type="button" class="sc-btn sc-btn-del merch-order-del-btn" data-merch-id="' + o.id + '">Delete</button>'
+          + '</div>';
       }
     }
   ];
@@ -12335,6 +12339,34 @@
           renderTable();
         });
       });
+      // Delete — standard two-step inline confirm (rwArmTwoStep), then the
+      // row disappears from the cache + table. No native confirm().
+      target.querySelectorAll('.merch-order-del-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var self = this;
+          rwArmTwoStep(self, 'delete', function () {
+            var id = parseInt(self.getAttribute('data-merch-id'), 10);
+            self.disabled = true;
+            fetch('/api/tour', {
+              method: 'POST',
+              headers: rwAuthHeaders(true),
+              body: JSON.stringify({ kind: 'merch-order-delete', id: id })
+            }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res) {
+                if (!res.ok) {
+                  alert((res.data && res.data.error) || 'Could not delete the order.');
+                  self.disabled = false;
+                  return;
+                }
+                if (_merchOrderEditId === id) _merchOrderEditId = null;
+                _merchOrdersCache = (_merchOrdersCache || []).filter(function (o) { return o.id !== id; });
+                renderMerchOrdersBody(body);
+              })
+              .catch(function () { alert('Network error — try again.'); self.disabled = false; });
+          });
+        });
+      });
       wireMerchOrderEdit(target, function () { renderMerchOrdersBody(body); });
       target.querySelectorAll('.merch-toggle-btn').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
@@ -12407,8 +12439,15 @@
   function renderMerchInventoryBody(body) {
     if (!body) return;
     var inv = _merchInventoryCache || [];
+    // "+ Add item" toolbar — standard placement above the table (Erin,
+    // 2026-07-19: allow adding item types beyond the seeded catalog).
+    var addToolbar = '<div class="coop-cal-toolbar">'
+      + '<button id="ws-merch-inv-add-btn" class="btn btn-outline-dark btn-sm" type="button">+ Add item</button>'
+      + '</div>'
+      + '<div id="ws-merch-inv-add-form"' + (_merchInventoryAddOpen ? '' : ' hidden') + '>' + merchInvAddFormHtml() + '</div>';
     if (inv.length === 0) {
-      body.innerHTML = '<p class="ws-empty">No inventory rows yet — run the migration to seed them.</p>';
+      body.innerHTML = addToolbar + '<p class="ws-empty">No inventory yet — add your first item above.</p>';
+      wireMerchInvAdd(body);
       return;
     }
     var lowCount = inv.filter(function (r) { return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold); }).length;
@@ -12421,7 +12460,9 @@
       + '</div>';
     body.innerHTML = countsHtml
       + '<p class="ws-body-hint">Adjust counts as you sell, restock, or take stock. Set <strong>Low at</strong> to get a Low pill when on-hand drops to that number. <strong>Reorder min</strong> is the smallest batch the supplier will print — useful when deciding to order extra for stock.</p>'
+      + addToolbar
       + '<div id="ws-merch-inventory-table-target"></div>';
+    wireMerchInvAdd(body);
     var target = body.querySelector('#ws-merch-inventory-table-target');
 
     function rowsForFilter() {
@@ -12539,6 +12580,81 @@
         }).catch(function (err) {
           saveBtn.disabled = false;
           if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
+        });
+    });
+  }
+
+  // ── Inventory: "+ Add item" form (Erin, 2026-07-19) ──
+  // Free-text item name so the manager can stock new product types beyond
+  // the hardcoded order catalog. Same visual shell as the edit panel.
+  function merchInvAddFormHtml() {
+    var h = '<div class="merch-inv-edit merch-inv-add">';
+    h += '<div class="merch-inv-edit-title"><strong>Add an item</strong> <span class="ws-wv-context">new product type or variant</span></div>';
+    h += '<div class="merch-inv-edit-grid">';
+    h += '<label><span>Item name</span><input type="text" maxlength="100" id="merch-inv-new-item" placeholder="e.g. Sticker"></label>';
+    h += '<label><span>Size (optional)</span><input type="text" maxlength="100" id="merch-inv-new-size" placeholder="e.g. Youth M"></label>';
+    h += '<label><span>Color (optional)</span><input type="text" maxlength="100" id="merch-inv-new-color" placeholder="e.g. Purple"></label>';
+    h += '<label><span>On hand</span><input type="number" min="0" max="100000" id="merch-inv-new-onhand" value="0"></label>';
+    h += '<label><span>Low at</span><input type="number" min="0" max="100000" id="merch-inv-new-low" value="0"></label>';
+    h += '<label><span>Reorder min</span><input type="number" min="0" max="100000" id="merch-inv-new-min" value="0"></label>';
+    h += '<label><span>Vendor name</span><input type="text" maxlength="200" id="merch-inv-new-vname" placeholder="e.g. PrintCo"></label>';
+    h += '<label><span>Vendor website</span><input type="url" maxlength="500" id="merch-inv-new-vurl" placeholder="https://printco.com"></label>';
+    h += '<label class="merch-inv-edit-notes"><span>Notes (optional)</span><textarea maxlength="1000" rows="2" id="merch-inv-new-notes"></textarea></label>';
+    h += '</div>';
+    h += '<div class="merch-inv-edit-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm merch-inv-add-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm merch-inv-add-save">Add item</button>';
+    h += '<span class="merch-inv-status" role="status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+  function wireMerchInvAdd(body) {
+    var toggleBtn = body.querySelector('#ws-merch-inv-add-btn');
+    var formWrap = body.querySelector('#ws-merch-inv-add-form');
+    if (!toggleBtn || !formWrap) return;
+    toggleBtn.addEventListener('click', function () {
+      _merchInventoryAddOpen = !_merchInventoryAddOpen;
+      formWrap.hidden = !_merchInventoryAddOpen;
+      if (_merchInventoryAddOpen) {
+        var itemInp = formWrap.querySelector('#merch-inv-new-item');
+        if (itemInp) itemInp.focus();
+      }
+    });
+    var cancelBtn = formWrap.querySelector('.merch-inv-add-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () {
+      _merchInventoryAddOpen = false;
+      formWrap.hidden = true;
+    });
+    var saveBtn = formWrap.querySelector('.merch-inv-add-save');
+    if (saveBtn) saveBtn.addEventListener('click', function () {
+      var statusEl = formWrap.querySelector('.merch-inv-status');
+      var g = function (p) { var el = formWrap.querySelector('#merch-inv-new-' + p); return el ? el.value : ''; };
+      if (!String(g('item')).trim()) {
+        if (statusEl) { statusEl.textContent = 'An item name is required.'; statusEl.className = 'merch-inv-status ws-wv-err'; }
+        return;
+      }
+      saveBtn.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
+      fetch('/api/tour', {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          kind: 'merch-inventory-add',
+          item: g('item'), size: g('size'), color: g('color'),
+          on_hand: g('onhand'), low_threshold: g('low'), reorder_minimum: g('min'),
+          vendor_name: g('vname'), vendor_url: g('vurl'), notes: g('notes')
+        })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error((res.data && res.data.error) || 'add failed');
+          if (res.data.row) (_merchInventoryCache = _merchInventoryCache || []).push(res.data.row);
+          _merchInventoryAddOpen = false;
+          var ib = document.getElementById('ws-merch-inventory-body');
+          if (ib) renderMerchInventoryBody(ib);
+          var nav = document.querySelector('.merch-tab-nav');
+          if (nav) renderMerchTabNav(nav);
+        }).catch(function (err) {
+          saveBtn.disabled = false;
+          if (statusEl) { statusEl.textContent = 'Could not add: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
         });
     });
   }

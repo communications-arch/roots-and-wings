@@ -4379,6 +4379,81 @@ async function handleMerchOrderEdit(body, req, res) {
   }
 }
 
+// Add a new inventory row (Erin, 2026-07-19: "add an Item type") — item is
+// free text so the manager can stock products beyond the hardcoded order
+// catalog (those still validate against MERCH_CATALOG; inventory rendering
+// already falls back to the raw item string when it's not a catalog key).
+async function handleMerchInventoryAdd(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to edit merch inventory.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const item = String(body.item || '').trim();
+  const size = String(body.size || '').trim();
+  const color = String(body.color || '').trim();
+  const notes = String(body.notes || '').trim();
+  const vendorName = String(body.vendor_name || '').trim();
+  const vendorUrl = String(body.vendor_url || '').trim();
+  if (!item) return res.status(400).json({ error: 'An item name is required.' });
+  if (item.length > 100 || size.length > 100 || color.length > 100 || vendorName.length > 200 || vendorUrl.length > 500 || notes.length > 1000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  const num = (v, fallback) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n >= 0 && n <= 100000 ? n : fallback;
+  };
+  const onHand = num(body.on_hand, 0);
+  const lowAt = num(body.low_threshold, 0);
+  const reorderMin = num(body.reorder_minimum, 0);
+  try {
+    const sql = getSql();
+    const dup = await sql`
+      SELECT id FROM merch_inventory
+      WHERE LOWER(item) = LOWER(${item}) AND LOWER(COALESCE(size,'')) = LOWER(${size}) AND LOWER(COALESCE(color,'')) = LOWER(${color})
+    `;
+    if (dup.length > 0) return res.status(409).json({ error: 'That item/variant already exists — edit its row instead.' });
+    const rows = await sql`
+      INSERT INTO merch_inventory (item, size, color, on_hand, low_threshold, reorder_minimum, vendor_name, vendor_url, notes, updated_by)
+      VALUES (${item}, ${size}, ${color}, ${onHand}, ${lowAt}, ${reorderMin}, ${vendorName}, ${vendorUrl}, ${notes}, ${auth.realEmail})
+      RETURNING id, item, size, color, on_hand, low_threshold, reorder_minimum, vendor_name, vendor_url, notes, updated_at
+    `;
+    return res.status(200).json({ ok: true, row: rows[0] });
+  } catch (err) {
+    console.error('Merch inventory add error:', err);
+    return res.status(500).json({ error: 'Failed to add the item.' });
+  }
+}
+
+// Hard-delete an order (Erin, 2026-07-19) — two-step confirmed client-side.
+// Merch-Manager gated like every other order write.
+async function handleMerchOrderDelete(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to delete merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`DELETE FROM merch_orders WHERE id = ${id} RETURNING id`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
+    return res.status(200).json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('Merch order delete error:', err);
+    return res.status(500).json({ error: 'Failed to delete order.' });
+  }
+}
+
 async function handleMerchUpdate(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -6951,6 +7026,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'merch-order-edit') return handleMerchOrderEdit(body, req, res);
+    if (kind === 'merch-order-delete') return handleMerchOrderDelete(body, req, res);
+    if (kind === 'merch-inventory-add') return handleMerchInventoryAdd(body, req, res);
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
