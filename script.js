@@ -8193,12 +8193,16 @@
     if (!container) return;
     var myNames = getMyNames();
 
-    // Match by first name since event coordinator field is first-name only
+    // Person-name matching per bug log #9 (issue #11 cousin sweep): first
+    // AND last name must correspond. The old bare-first-name fallback let a
+    // coordinator cell reading just "Erin" flag ANY member named Erin —
+    // including a fresh "Erin Testing Account" login — as the event's
+    // owner. Bare-first-name cells are inherently ambiguous and now match
+    // no one, same trade-off the My Responsibilities matcher made.
     function isMyEvent(name) {
       if (!name || !myNames.fullNames.length) return false;
-      var nl = name.trim().toLowerCase();
       return myNames.fullNames.some(function (fn) {
-        return fn.toLowerCase() === nl || fn.split(' ')[0].toLowerCase() === nl;
+        return personNamesMatch(name, fn);
       });
     }
 
