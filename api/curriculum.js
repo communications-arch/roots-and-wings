@@ -999,7 +999,10 @@ module.exports = async function handler(req, res) {
           }
         }
         // Afternoon classes: who has ranked this class so far (1st/2nd
-        // choice + assistant flag) — pending the lottery.
+        // choice + assistant flag) — pending the lottery. Enrollment-scoped
+        // (2026-07-19): stale picks from kids not ENROLLED this season
+        // don't count; NULL-kid_id legacy rows keep counting (transition
+        // tolerance).
         let ciSignups = [];
         if (ci.class_period === 'PM' && ci.scheduled_session) {
           const suRows = await sql`
@@ -1017,6 +1020,10 @@ module.exports = async function handler(req, res) {
               ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE p.class_submission_id = ${ciId}
               AND p.school_year = ${ci.school_year} AND p.session_number = ${ci.scheduled_session}
+              AND (p.kid_id IS NULL OR EXISTS (
+                SELECT 1 FROM kid_enrollments e
+                WHERE e.kid_id = p.kid_id AND e.season = ${ci.school_year}
+                  AND e.status = 'enrolled'))
             GROUP BY p.kid_first_name, LOWER(p.family_email), k.nickname, k.last_name, mp.family_name
           `;
           ciSignups = suRows.map(r => ({
@@ -1093,11 +1100,18 @@ module.exports = async function handler(req, res) {
           sql`SELECT status FROM class_signup_windows
               WHERE school_year = ${stYear} AND session_number = ${stSess} LIMIT 1`,
           // Enrollment = 1st-choice picks (distinct kids) per class.
-          sql`SELECT class_submission_id,
-                     COUNT(DISTINCT (LOWER(family_email) || '|' || LOWER(kid_first_name)))::int AS firsts
-              FROM class_signup_picks
-              WHERE school_year = ${stYear} AND session_number = ${stSess} AND rank = 1
-              GROUP BY class_submission_id`
+          // Enrollment-scoped (2026-07-19): stale picks from kids not
+          // ENROLLED this season don't count toward over-max / confirm
+          // headcounts; NULL-kid_id legacy rows keep counting.
+          sql`SELECT p.class_submission_id,
+                     COUNT(DISTINCT (LOWER(p.family_email) || '|' || LOWER(p.kid_first_name)))::int AS firsts
+              FROM class_signup_picks p
+              WHERE p.school_year = ${stYear} AND p.session_number = ${stSess} AND p.rank = 1
+                AND (p.kid_id IS NULL OR EXISTS (
+                  SELECT 1 FROM kid_enrollments e
+                  WHERE e.kid_id = p.kid_id AND e.season = ${stYear}
+                    AND e.status = 'enrolled'))
+              GROUP BY p.class_submission_id`
         ]);
         const stPmApproved = !!(stApproval.length && stApproval[0].approved_at);
         const stWinStatus = stWin.length ? stWin[0].status : null;
@@ -1325,6 +1339,9 @@ module.exports = async function handler(req, res) {
         const cd = cdRows[0];
         if (!cdScope || !scopeAllowsSub(cdScope, cd)) return res.status(403).json({ error: 'Reviewers only.' });
         const cdHour = (cd.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+        // Enrollment-scoped (2026-07-19): stale picks from kids not
+        // ENROLLED this season stay off the class list + budget;
+        // NULL-kid_id legacy rows keep counting (transition tolerance).
         const cdKids = await sql`
           SELECT COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS last
@@ -1336,6 +1353,10 @@ module.exports = async function handler(req, res) {
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.class_submission_id = ${cdId} AND p.rank = 1 AND p.hour = ${cdHour}
             AND p.school_year = ${cd.school_year} AND p.session_number = ${cd.scheduled_session}
+            AND (p.kid_id IS NULL OR EXISTS (
+              SELECT 1 FROM kid_enrollments e
+              WHERE e.kid_id = p.kid_id AND e.season = ${cd.school_year}
+                AND e.status = 'enrolled'))
           ORDER BY 1, 2`;
         const cdHelpers = await sql`SELECT person_name, person_email, block FROM class_assignment_helpers
           WHERE class_submission_id = ${cdId} ORDER BY sort_order`;
@@ -1619,6 +1640,9 @@ module.exports = async function handler(req, res) {
         // orphaned by a rename — those must not surface as phantom students
         // ("Test Family", 2026-07-15). Rows carrying kid_id (enrollment
         // re-key phase) join by id, so mapped picks survive a rename.
+        // Enrollment-scoped (2026-07-19): stale picks from kids not
+        // ENROLLED this season don't inflate demand; NULL-kid_id legacy
+        // rows keep counting (transition tolerance).
         const pickKidRows = await sql`
           SELECT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
                  MIN(p.rank) AS pick_rank,
@@ -1634,6 +1658,10 @@ module.exports = async function handler(req, res) {
           LEFT JOIN member_profiles mp
             ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.school_year = ${sy} AND p.session_number = ${session}
+            AND (p.kid_id IS NULL OR EXISTS (
+              SELECT 1 FROM kid_enrollments e
+              WHERE e.kid_id = p.kid_id AND e.season = ${sy}
+                AND e.status = 'enrolled'))
           GROUP BY p.class_submission_id, p.kid_first_name, LOWER(p.family_email),
                    k.nickname, k.last_name, mp.family_name
         `;
@@ -2294,6 +2322,9 @@ module.exports = async function handler(req, res) {
         // 1st-choice kids, with display names for the result summary.
         // kid_id rides along (kid_id-first join, name fallback for legacy
         // rows) so the bump insert + 2nd-choice promotion are rename-proof.
+        // Enrollment-scoped (2026-07-19): stale picks from kids not
+        // ENROLLED this season don't enter the lottery pool; NULL-kid_id
+        // legacy rows keep counting (transition tolerance).
         const signed = await sql`
           SELECT p.id AS pick_id, LOWER(p.family_email) AS fam, p.kid_first_name,
                  k.id AS kid_id,
@@ -2306,7 +2337,11 @@ module.exports = async function handler(req, res) {
                           AND LOWER(k.first_name) = LOWER(p.kid_first_name))
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.class_submission_id = ${ltId} AND p.rank = 1 AND p.hour = ${ltHour}
-            AND p.school_year = ${lt.school_year} AND p.session_number = ${lt.scheduled_session}`;
+            AND p.school_year = ${lt.school_year} AND p.session_number = ${lt.scheduled_session}
+            AND (p.kid_id IS NULL OR EXISTS (
+              SELECT 1 FROM kid_enrollments e
+              WHERE e.kid_id = p.kid_id AND e.season = ${lt.school_year}
+                AND e.status = 'enrolled'))`;
         if (signed.length <= max) return res.status(409).json({ error: 'This class is not over its max — no lottery needed.' });
         // Exempt (never bumped): the lead's own kids, and any kid who
         // already lost a lottery this school year.
@@ -2604,13 +2639,18 @@ module.exports = async function handler(req, res) {
         // picks and write nothing back (the "dev kid lost 3 picks" incident).
         // The DELETE matches by kid_id first (rename-proof — clears rows
         // saved under an old first name) with the name key as the fallback
-        // for unmapped legacy rows; INSERTs dual-key (name + kid_id).
+        // for unmapped legacy rows; INSERTs dual-key (name + kid_id). The
+        // kid_id branch deliberately ignores family_email: backfilled rows
+        // can carry an old DERIVED family_email that differs from the kid's
+        // real one, and those must not survive the replace (kid_id is
+        // globally unique + already family-verified by the kidOk lookup).
         const pickStmts = [sql`
           DELETE FROM class_signup_picks
           WHERE school_year=${sy} AND session_number=${session}
-            AND LOWER(family_email)=LOWER(${familyEmail})
             AND (kid_id = ${kidId}
-              OR (kid_id IS NULL AND LOWER(kid_first_name)=LOWER(${kidFirst})))
+              OR (kid_id IS NULL
+                  AND LOWER(family_email)=LOWER(${familyEmail})
+                  AND LOWER(kid_first_name)=LOWER(${kidFirst})))
             AND hour=${hour}
         `];
         for (let i = 0; i < cleanIds.length; i++) {
