@@ -67,6 +67,16 @@
       margin-top: 2px;
     }
     .bug-card-main { flex: 1 1 260px; min-width: 0; }
+    .bug-card-num {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: rgba(var(--color-primary-rgb), 0.08);
+      color: var(--color-primary-dark);
+      font-size: 0.78rem;
+      font-weight: 800;
+      vertical-align: 1px;
+    }
     .bug-card-note {
       margin-top: 8px;
       padding: 8px 12px;
@@ -299,7 +309,7 @@
         }
         html += '<div class="bug-card">'
           + '<div class="bug-card-main">'
-          + '<div class="bug-card-title">' + escapeHtml(bug.title) + '</div>'
+          + '<div class="bug-card-title"><span class="bug-card-num">#' + parseInt(bug.number, 10) + '</span> ' + escapeHtml(bug.title) + '</div>'
           + (when ? '<div class="bug-card-date">Reported ' + escapeHtml(when) + '</div>' : '')
           + noteHtml
           + '</div>'
