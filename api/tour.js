@@ -7590,12 +7590,9 @@ async function handleEnrollmentRequestDecide(body, req, res) {
         } catch (e) { console.error('approve track re-sync (non-fatal):', e); }
       } else if (rq.kind === 'add_kid') {
         if (!rq.kid_id) return res.status(409).json({ error: 'That kid no longer exists.' });
-        if (rq.waiver_signature_id) {
-          const w = await sql`SELECT signed_at FROM waiver_signatures WHERE id = ${rq.waiver_signature_id}`;
-          if (!w[0] || !w[0].signed_at) {
-            return res.status(409).json({ error: 'The waiver for this child hasn’t been signed yet — the family signs first, then you approve.' });
-          }
-        }
+        // No waiver gate (Erin, 2026-07-19): approval doesn't wait on the
+        // signature — the unsigned waiver stays pending in the Waivers
+        // Report / Comms To Do, and the Communications Director follows up.
         await sql`
           UPDATE kid_enrollments SET status = 'enrolled', updated_at = NOW(), updated_by = ${real}
           WHERE kid_id = ${rq.kid_id} AND season = ${rq.season} AND status = 'pending'

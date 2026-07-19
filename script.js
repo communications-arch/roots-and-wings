@@ -7096,14 +7096,17 @@
       .then(function (d) {
         var el2 = document.getElementById('mfWaiverBanner');
         if (!el2) return;
+        // Approval doesn't gate on the signature (Erin, 2026-07-19) —
+        // the banner persists for APPROVED adds too, until it's signed
+        // (Comms follows up on stragglers). Denied adds drop out.
         var needs = ((d && d.requests) || []).filter(function (rq) {
-          return rq.status === 'pending' && rq.kind === 'add_kid' && rq.waiver_token && !rq.waiver_signed;
+          return rq.status !== 'denied' && rq.kind === 'add_kid' && rq.waiver_token && !rq.waiver_signed;
         });
         if (!needs.length) { el2.style.display = 'none'; return; }
         var h = '<h3 class="mf-card-title">✍️ Waiver needed</h3>';
         needs.forEach(function (rq) {
           var kidFirst = escapeHtml(String(rq.kid_first_name || '').trim() || 'Your new kid');
-          h += '<p>' + kidFirst + ' was added to your family. An adult signs the waiver, then the Membership Director approves the enrollment — nothing moves until both happen.</p>';
+          h += '<p>' + kidFirst + ' was added to your family — an adult still needs to sign their waiver so the co-op has it on file.</p>';
           h += '<a class="btn btn-primary btn-sm" href="waiver.html?token=' + escapeHtml(rq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + kidFirst + '’s waiver</a>';
         });
         el2.innerHTML = h;
@@ -23190,24 +23193,21 @@
         if (pending.length === 0) h += '<p class="ws-empty">Nothing waiting — all caught up. 🎉</p>';
         else h += '<h5 class="ws-part-exempt-existing">Waiting for your decision (' + pending.length + ')</h5>';
         pending.forEach(function (r) {
-          // A blocked Approve (unsigned waiver) stays CLICKABLE and
-          // explains itself — the old disabled button did nothing on
-          // click and read as broken (Erin, 2026-07-19, Coyote Shine).
-          var wvBlocked = r.kind === 'add_kid' && !r.waiver_signed_at;
+          // Unsigned waiver is INFO, not a gate (Erin, 2026-07-19): the
+          // Communications Director's waiver To Do chases signatures, so
+          // Approve always works.
           var waiverBit = '';
           if (r.kind === 'add_kid') {
             waiverBit = r.waiver_signed_at
               ? ' <span class="ws-wv-ok">waiver signed</span>'
-              : ' <span class="ws-wv-pending">⏳ waiver not signed yet</span>';
+              : ' <span class="ws-wv-pending" title="Fine to approve — the Communications Director follows up on unsigned waivers.">⏳ waiver not signed yet</span>';
           }
           h += '<div class="st-place-row enroll-req-card">'
             + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
             + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>' + waiverBit
             + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.requested_at)) + '</span>'
             + '<div class="ws-srt-actions">'
-            + '<button type="button" class="sc-btn' + (wvBlocked ? ' enroll-req-blocked' : ' mcb-primary') + ' enroll-req-approve" data-req-id="' + r.id + '"'
-            + (wvBlocked ? ' data-wv-blocked="1" title="Waiting on the family to sign the waiver first"' : '')
-            + '>Approve</button>'
+            + '<button type="button" class="sc-btn mcb-primary enroll-req-approve" data-req-id="' + r.id + '">Approve</button>'
             + '<button type="button" class="sc-btn sc-btn-del enroll-req-deny" data-req-id="' + r.id + '">Deny</button>'
             + '</div></div>';
         });
@@ -23237,13 +23237,7 @@
             .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
         }
         body.querySelectorAll('.enroll-req-approve').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            if (btn.getAttribute('data-wv-blocked')) {
-              alert('Not yet — the family hasn’t signed the waiver for this child.\n\nThey have a gold "Sign the waiver" button on their My Family page (and in Edit My Info on the kid’s row). Once it’s signed, this Approve button unlocks.');
-              return;
-            }
-            decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn);
-          });
+          btn.addEventListener('click', function () { decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn); });
         });
         body.querySelectorAll('.enroll-req-deny').forEach(function (btn) {
           btn.addEventListener('click', function () {
@@ -24067,6 +24061,28 @@
     return null;
   }
 
+  // Re-renders swap innerHTML, which momentarily collapses the modal's
+  // content and clamps the scroll position to 0 — clicking + Fill far
+  // down the table dumped the viewer back at the top (Erin, 2026-07-19).
+  // Save/restore the nearest scrollable ancestor around any re-render.
+  function schedScroller() {
+    var el = document.getElementById('ws-sched-body');
+    var sc = el && el.parentElement;
+    while (sc && sc !== document.body) {
+      var oy = getComputedStyle(sc).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && sc.scrollHeight > sc.clientHeight) return sc;
+      sc = sc.parentElement;
+    }
+    return null;
+  }
+  function schedPreserveScroll(fn) {
+    var sc = schedScroller();
+    var top = sc ? sc.scrollTop : 0;
+    fn();
+    sc = schedScroller();
+    if (sc) sc.scrollTop = top;
+  }
+
   // Re-pull the grid (and the workspace To Do counts) after a placement.
   // The picker sources reload lazily so fullness/needs stay accurate.
   function schedRefresh() {
@@ -24078,13 +24094,13 @@
         var row = schedRowByKey(_schedEditKey);
         if (!row || schedMissingFor(row).length === 0) _schedEditKey = null;
       }
-      renderSchedulesBody();
+      schedPreserveScroll(renderSchedulesBody);
       // A still-open picker panel needs its option source back (the
       // caches were just invalidated) — reload, then swap the panel's
       // "Loading…" for the fresh selects.
       if (_schedEditKey) {
         var ensure = _schedTab === 'adults' ? schedEnsureMatrix : schedEnsurePools;
-        ensure(function () { renderSchedTable(); });
+        ensure(function () { schedPreserveScroll(renderSchedTable); });
       }
     });
   }
@@ -24149,12 +24165,16 @@
         e.stopPropagation();
         var key = btn.getAttribute('data-skey');
         _schedEditKey = (_schedEditKey === key) ? null : key;
-        renderSchedTable();
+        schedPreserveScroll(renderSchedTable);
         if (_schedEditKey) {
+          // Keep the freshly opened picker on screen (it renders below
+          // the clicked row and can land past the fold).
+          var editRow = target.querySelector('.ws-srt-edit-row');
+          if (editRow && editRow.scrollIntoView) editRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           // Picker sources load lazily; re-render swaps the "Loading…"
           // panel for the real selects once options arrive.
           var ensure = _schedTab === 'adults' ? schedEnsureMatrix : schedEnsurePools;
-          ensure(function () { renderSchedTable(); });
+          ensure(function () { schedPreserveScroll(renderSchedTable); });
         }
       });
     });
@@ -24162,7 +24182,7 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         _schedEditKey = null;
-        renderSchedTable();
+        schedPreserveScroll(renderSchedTable);
       });
     });
     // Adult placement — the exact writes the Place adults To Do uses:
@@ -30671,12 +30691,13 @@
           if (pendReq.waiver_signed || !pendReq.waiver_token) {
             chipTxt = '⏳ Awaiting Membership approval to join the co-op.';
           } else {
-            // Unsigned waiver blocks Membership's Approve button — make
-            // this the loudest thing on the row (Erin, 2026-07-19: the
-            // old inline text link wasn't visible enough).
+            // Make the signing link the loudest thing on the row (Erin,
+            // 2026-07-19: the old inline text link wasn't visible
+            // enough). Not an approval gate — Comms follows up on
+            // unsigned waivers.
             var wvKid = escapeHtml(String(pendReq.kid_first_name || k.name || '').trim().split(/\s+/)[0] || 'This child');
             chipCls += ' emi-pending-waiver';
-            chipTxt = '<strong>✍️ One more step: ' + wvKid + ' needs a waiver signature.</strong> Membership can approve once it’s signed.'
+            chipTxt = '<strong>✍️ One more step: ' + wvKid + ' needs a waiver signature</strong> so the co-op has it on file.'
               + '<div><a class="btn btn-primary btn-sm emi-waiver-btn" href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + wvKid + '’s waiver</a></div>';
           }
         } else if (pendReq.kind === 'remove_kid') {
@@ -31210,7 +31231,7 @@
                 reopenEmiForWaiver = true;
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
                   + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
-                  + ': a waiver signature. The form will reopen — click the gold “Sign the waiver” button on their row. Membership can approve once it’s signed.');
+                  + ': a waiver signature. The form will reopen — click the gold “Sign the waiver” button on their row so the co-op has it on file.');
               } else {
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
               }

@@ -8484,9 +8484,6 @@ button.staff-role:hover {
   margin-bottom: 8px;
 }
 .st-place-row.enroll-req-card .ws-srt-actions { margin-left: auto; }
-/* Waiver-blocked Approve: stays clickable (click explains why) but
-   reads as locked, not broken. */
-.sc-btn.enroll-req-blocked { opacity: 0.55; cursor: not-allowed; }
 .age-group-emoji img {
   height: 1em;
   width: auto;
