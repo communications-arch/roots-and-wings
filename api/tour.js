@@ -2967,14 +2967,19 @@ async function resolveFamilyByContactEmail(sql, contactEmail, excludeRegId) {
   `, 'member_profiles.additional_emails');
   if (hit) return hit.ambiguous ? null : hit;
 
+  // People-table rules are MLC-ONLY (ship-gate blocker, 2026-07-19): a
+  // registrant's personal email also lives on OTHER families' rows when
+  // they're listed as someone's Backup Learning Coach — matching those
+  // would merge a brand-new family into their friend's profile. Only the
+  // main-coach row identifies "this person's own family".
   hit = pick(await sql`
-    SELECT family_email FROM people WHERE LOWER(email) = ${ce} LIMIT 2
-  `, 'people.email');
+    SELECT family_email FROM people WHERE LOWER(email) = ${ce} AND role = 'mlc' LIMIT 2
+  `, 'people.email (mlc)');
   if (hit) return hit.ambiguous ? null : hit;
 
   hit = pick(await sql`
-    SELECT family_email FROM people WHERE LOWER(personal_email) = ${ce} LIMIT 2
-  `, 'people.personal_email');
+    SELECT family_email FROM people WHERE LOWER(personal_email) = ${ce} AND role = 'mlc' LIMIT 2
+  `, 'people.personal_email (mlc)');
   if (hit) return hit.ambiguous ? null : hit;
 
   // Prior registrations: only rows whose family_email still resolves to a
@@ -3399,7 +3404,11 @@ async function upsertProfileFromRegistration(sql, params) {
   newKids.forEach(nk => {
     const key = kidFirst(nk);
     if (!key) return;
-    const exMatches = exKids.filter(k => kidAnswersTo(k).indexOf(key) !== -1);
+    // Matched-row exclusion (ship-gate 2026-07-19, mirrors the parent
+    // merge): each existing row folds into AT MOST one registered kid, so
+    // two distinct kids sharing a first name/nickname can't collapse into
+    // one row (which deleted the other and cascaded its enrollments).
+    const exMatches = exKids.filter(k => !matchedExKids.has(k) && kidAnswersTo(k).indexOf(key) !== -1);
     exMatches.forEach(k => matchedExKids.add(k));
     const ex = aggregateKidMatches(exMatches);
     const kidMatchedByNickname = ex.first_name && String(ex.first_name).trim().split(/\s+/)[0].toLowerCase() !== key;
@@ -3803,6 +3812,7 @@ async function handleProfileUpdate(body, req, res) {
     const priorKidSchedules = {};
     const priorKidIdsByFirst = {};
     const priorKidIds = new Set();
+    const priorSchedById = {};
     try {
       const priorKids = await sql`SELECT id, first_name, class_group, schedule FROM kids WHERE family_email = ${familyEmail}`;
       priorKids.forEach(r => {
@@ -3812,6 +3822,7 @@ async function handleProfileUpdate(body, req, res) {
         if (key) priorKidSchedules[key] = String(r.schedule || '').trim().toLowerCase() || 'all-day';
         if (key && !(key in priorKidIdsByFirst)) priorKidIdsByFirst[key] = r.id;
         priorKidIds.add(r.id);
+        priorSchedById[r.id] = String(r.schedule || '').trim().toLowerCase() || 'all-day';
       });
     } catch (e) { /* non-fatal — worst case the group is blank, same as before */ }
 
@@ -3842,9 +3853,11 @@ async function handleProfileUpdate(body, req, res) {
       let mayEditSchedule = null; // resolved lazily — most saves change nothing
       for (const k of kids) {
         // Same name key as priorKidGroups: kids.first_name stores the
-        // EMI "name" field verbatim.
+        // EMI "name" field verbatim. The DB id wins when the client sent
+        // one (ship-gate 2026-07-19: a rename + schedule change in one
+        // save otherwise misses the prior row and bypasses the queue).
         const key = String(k.name || '').trim().toLowerCase();
-        const prior = priorKidSchedules[key];
+        const prior = (k.id && priorSchedById[k.id]) || priorKidSchedules[key];
         if (!prior) continue;               // new kid — no prior to protect
         if (!k.schedule) { k.schedule = prior; continue; }
         if (k.schedule === prior) continue;
@@ -3854,6 +3867,7 @@ async function handleProfileUpdate(body, req, res) {
           // the LIVE schedule as-is (dues + rosters move only on approve).
           queuedRequests.push({
             kind: 'schedule_change',
+            kid_id: (k.id && priorSchedById[k.id]) ? k.id : null,
             nameKey: key,
             first_name: String(k.name || '').trim(),
             requested_schedule: k.schedule,
@@ -3960,13 +3974,21 @@ async function handleProfileUpdate(body, req, res) {
       const privileged = await actorMayEdit();
       const pendingAddNames = new Set(privileged ? [] : addedKidNames);
       const nowKids = await sql`SELECT id, first_name, schedule FROM kids WHERE family_email = ${familyEmail}`;
-      const idByFirstNow = {};
+      // Genuinely-NEW rows only (id not present before this save) — a
+      // same-first-name sibling must never absorb the add request or the
+      // pending flag (ship-gate 2026-07-19: deny would then delete the
+      // enrolled sibling).
+      const newIdByFirst = {};
+      for (const nk of nowKids) {
+        if (priorKidIds.has(nk.id)) continue;
+        const fl = String(nk.first_name || '').trim().toLowerCase();
+        if (fl && !(fl in newIdByFirst)) newIdByFirst[fl] = nk.id;
+      }
       for (const nk of nowKids) {
         const firstLc = String(nk.first_name || '').trim().toLowerCase();
-        if (firstLc && !(firstLc in idByFirstNow)) idByFirstNow[firstLc] = nk.id;
         const sch = ['all-day', 'morning', 'afternoon'].indexOf(String(nk.schedule || '').toLowerCase()) !== -1
           ? String(nk.schedule).toLowerCase() : 'all-day';
-        const newStatus = pendingAddNames.has(firstLc) ? 'pending' : 'enrolled';
+        const newStatus = (!priorKidIds.has(nk.id) && pendingAddNames.has(firstLc)) ? 'pending' : 'enrolled';
         await sql`
           INSERT INTO kid_enrollments (
             kid_id, family_email, kid_first_name, season, schedule, status, source, updated_by
@@ -3991,7 +4013,7 @@ async function handleProfileUpdate(body, req, res) {
         const mlcRow = people.filter(p => p.role === 'mlc')[0] || {};
         const mlcName = ((mlcRow.first_name || '') + ' ' + (mlcRow.last_name || '')).trim() || familyName;
         for (const nameKey of addedKidNames) {
-          const kidId = idByFirstNow[nameKey];
+          const kidId = newIdByFirst[nameKey];
           if (!kidId) continue;
           const dupe = await sql`
             SELECT id FROM enrollment_change_requests
@@ -4093,6 +4115,13 @@ async function handleProfileUpdate(body, req, res) {
     // the new name. Anything else that vanished (kid removed, ambiguous
     // multi-rename) gets its current-year picks cleaned up instead.
     try {
+      // Option B guard (ship-gate blocker, 2026-07-19): when this save
+      // QUEUED requests instead of applying (family removals/schedule
+      // changes), the kids are all still here — running the name-diff
+      // cleanup would delete a queued-removal kid's picks immediately,
+      // and a remove+add pair would masquerade as a rename. Approval
+      // does its own cleanup; skip the heuristics entirely.
+      if (queuedRequests.length > 0) throw { skip: true };
       const newNames = new Set(kids.map(k => String(k.name || '').trim().toLowerCase()).filter(Boolean));
       const removed = [...priorKidNames].filter(n => !newNames.has(n));
       const addedLc = [...newNames].filter(n => !priorKidNames.has(n));
@@ -4123,7 +4152,7 @@ async function handleProfileUpdate(body, req, res) {
         `;
       }
     } catch (e) {
-      console.error('class_signup_picks rename sync failed (non-fatal):', e);
+      if (!e || e.skip !== true) console.error('class_signup_picks rename sync failed (non-fatal):', e);
     }
 
     // A kid switched to morning-only leaves afternoon programming — drop
@@ -7494,6 +7523,34 @@ async function handleEnrollmentRequestDecide(body, req, res) {
           UPDATE kid_enrollments SET schedule = ${rq.requested_schedule}, updated_at = NOW(), updated_by = ${real}
           WHERE kid_id = ${rq.kid_id} AND season = ${rq.season}
         `;
+        // Parity with the direct (privileged) edit path — ship-gate
+        // 2026-07-19: a switch to morning-only drops the kid's current-
+        // season afternoon picks, and the family's registration track
+        // re-syncs from the live kid schedules.
+        if (rq.requested_schedule === 'morning') {
+          try {
+            await sql`
+              DELETE FROM class_signup_picks
+              WHERE school_year = ${rq.season}
+                AND (kid_id = ${rq.kid_id}
+                     OR (kid_id IS NULL AND LOWER(family_email) = LOWER(${rq.family_email})
+                         AND LOWER(kid_first_name) = LOWER(${rq.kid_first_name})))
+            `;
+          } catch (e) { console.error('approve morning-switch pick cleanup (non-fatal):', e); }
+        }
+        try {
+          const famKids = await sql`SELECT schedule FROM kids WHERE LOWER(family_email) = LOWER(${rq.family_email})`;
+          const s = k => String(k.schedule || '').toLowerCase();
+          const hasAM = famKids.some(k => s(k) === 'all-day' || s(k) === 'morning');
+          const hasPM = famKids.some(k => s(k) === 'all-day' || s(k) === 'afternoon');
+          const newTrack = (hasAM && hasPM) ? 'Both' : hasAM ? 'Morning Only' : hasPM ? 'Afternoon Only' : '';
+          if (newTrack) {
+            await sql`
+              UPDATE registrations SET track = ${newTrack}, updated_at = NOW()
+              WHERE LOWER(family_email) = LOWER(${rq.family_email}) AND declined_at IS NULL
+            `;
+          }
+        } catch (e) { console.error('approve track re-sync (non-fatal):', e); }
       } else if (rq.kind === 'add_kid') {
         if (!rq.kid_id) return res.status(409).json({ error: 'That kid no longer exists.' });
         if (rq.waiver_signature_id) {
@@ -7504,16 +7561,29 @@ async function handleEnrollmentRequestDecide(body, req, res) {
         }
         await sql`
           UPDATE kid_enrollments SET status = 'enrolled', updated_at = NOW(), updated_by = ${real}
-          WHERE kid_id = ${rq.kid_id} AND season = ${rq.season}
+          WHERE kid_id = ${rq.kid_id} AND season = ${rq.season} AND status = 'pending'
         `;
       } else if (rq.kind === 'remove_kid') {
         if (rq.kid_id) {
+          // Staleness guard (ship-gate 2026-07-19): a full re-registration
+          // AFTER this request re-enrolled the kid — deciding the old
+          // request must not delete them.
+          const fresher = await sql`
+            SELECT 1 FROM kid_enrollments
+            WHERE kid_id = ${rq.kid_id} AND season = ${rq.season}
+              AND source = 'registration' AND updated_at > ${rq.requested_at}
+          `;
+          if (fresher.length > 0) {
+            return res.status(409).json({ error: 'The family re-registered this kid after asking to remove them — this request is stale. Deny it instead.' });
+          }
           // Same cleanup a direct removal does: current-year picks go too.
           try {
             await sql`
               DELETE FROM class_signup_picks
-              WHERE school_year = ${rq.season} AND LOWER(family_email) = LOWER(${rq.family_email})
-                AND LOWER(kid_first_name) = LOWER(${rq.kid_first_name})
+              WHERE school_year = ${rq.season}
+                AND (kid_id = ${rq.kid_id}
+                     OR (kid_id IS NULL AND LOWER(family_email) = LOWER(${rq.family_email})
+                         AND LOWER(kid_first_name) = LOWER(${rq.kid_first_name})))
             `;
           } catch (e) { /* non-fatal */ }
           await sql`DELETE FROM kids WHERE id = ${rq.kid_id}`;
@@ -7522,8 +7592,23 @@ async function handleEnrollmentRequestDecide(body, req, res) {
         return res.status(400).json({ error: 'Unknown request kind.' });
       }
     } else if (rq.kind === 'add_kid' && rq.kid_id) {
-      // Denied add: the pending kid row (and its pending enrollment) go away.
-      await sql`DELETE FROM kids WHERE id = ${rq.kid_id}`;
+      // Denied add: the pending kid row (and its pending enrollment) go
+      // away — but ONLY while still pending (never delete a kid a later
+      // registration enrolled, or a mis-keyed sibling; ship-gate
+      // 2026-07-19). The unsigned waiver row goes too so it doesn't
+      // linger in the Waivers Report's pending counts.
+      await sql`
+        DELETE FROM kids WHERE id = ${rq.kid_id}
+          AND EXISTS (
+            SELECT 1 FROM kid_enrollments e
+            WHERE e.kid_id = kids.id AND e.season = ${rq.season} AND e.status = 'pending'
+          )
+      `;
+      if (rq.waiver_signature_id) {
+        try {
+          await sql`DELETE FROM waiver_signatures WHERE id = ${rq.waiver_signature_id} AND signed_at IS NULL`;
+        } catch (e) { /* non-fatal */ }
+      }
     }
 
     await sql`

@@ -473,8 +473,15 @@ CREATE TABLE IF NOT EXISTS waiver_signatures (
   note TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_idx
-  ON waiver_signatures (LOWER(person_email), season);
+-- One row per person per season EXCEPT kid_addition (the MLC signs one
+-- waiver per added child on top of their own main_lc row — see the
+-- 2026-07-19 enrollment block near the end of this file). This statement
+-- must stay in the _v2 partial form: the old full-uniqueness CREATE here
+-- re-created the dropped index on every deploy and blew up once a family
+-- had a kid_addition row (ship-gate finding, 2026-07-19).
+CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_v2
+  ON waiver_signatures (LOWER(person_email), season)
+  WHERE role <> 'kid_addition';
 CREATE INDEX IF NOT EXISTS waiver_signatures_registration_idx
   ON waiver_signatures (registration_id);
 CREATE INDEX IF NOT EXISTS waiver_signatures_family_email_idx

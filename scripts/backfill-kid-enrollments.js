@@ -119,22 +119,39 @@ async function main() {
   // ══ STEP 2 — seed kid_enrollments for the season ═════════════════════════
   console.log('\n════════ STEP 2 — seed kid_enrollments for ' + season + ' ════════');
   const regs = await sql`
-    SELECT id, family_email, main_learning_coach, existing_family_name
+    SELECT id, family_email, main_learning_coach, existing_family_name, kids
     FROM registrations
     WHERE season = ${season} AND declined_at IS NULL`;
   const profiles = await sql`SELECT family_email, family_name FROM member_profiles`;
   const profileNameByEmail = new Map(profiles.map(p =>
     [String(p.family_email || '').toLowerCase(), String(p.family_name || '').trim()]));
+  // Family-name fallback rule is only safe when the surname is UNIQUE
+  // across profiles (ship-gate 2026-07-19: two "Smith" families must not
+  // cross-match). Count occurrences.
+  const profileNameCounts = new Map();
+  for (const name of profileNameByEmail.values()) {
+    const n = name.toLowerCase();
+    if (n) profileNameCounts.set(n, (profileNameCounts.get(n) || 0) + 1);
+  }
 
   // Per registration: the STORED family_email (authoritative link, set at
   // registration time since 2026-07-17) plus the derived Workspace email +
-  // derived family name as legacy fallbacks for older rows.
-  const regDerived = regs.map(r => ({
-    id: r.id,
-    stored: String(r.family_email || '').toLowerCase(),
-    email: deriveEmail(r.main_learning_coach, r.existing_family_name).toLowerCase(),
-    famName: deriveFamilyName(r.main_learning_coach, r.existing_family_name).toLowerCase()
-  }));
+  // derived family name as legacy fallbacks for older rows. kidFirsts =
+  // the first-name tokens the registration actually enrolled.
+  const regDerived = regs.map(r => {
+    let regKids = r.kids;
+    if (typeof regKids === 'string') { try { regKids = JSON.parse(regKids); } catch (e) { regKids = []; } }
+    const kidFirsts = new Set((Array.isArray(regKids) ? regKids : [])
+      .map(k => String((k && (k.first_name || k.name)) || '').trim().split(/\s+/)[0].toLowerCase())
+      .filter(Boolean));
+    return {
+      id: r.id,
+      stored: String(r.family_email || '').toLowerCase(),
+      email: deriveEmail(r.main_learning_coach, r.existing_family_name).toLowerCase(),
+      famName: deriveFamilyName(r.main_learning_coach, r.existing_family_name).toLowerCase(),
+      kidFirsts
+    };
+  });
 
   // For each family (by kids.family_email), the season registrations that
   // match it — used both here (enrolled?) and in STEP 3 (derived emails).
@@ -143,10 +160,11 @@ async function main() {
     const fe = String(familyEmail || '').toLowerCase();
     if (regsByFamily.has(fe)) return regsByFamily.get(fe);
     const profName = (profileNameByEmail.get(fe) || '').toLowerCase();
+    const nameIsUnique = profName && profileNameCounts.get(profName) === 1;
     const hits = regDerived.filter(r =>
       (r.stored && r.stored === fe)
       || (r.email && r.email === fe)
-      || (r.famName && profName && r.famName === profName));
+      || (r.famName && nameIsUnique && r.famName === profName));
     regsByFamily.set(fe, hits);
     return hits;
   }
@@ -155,7 +173,14 @@ async function main() {
   let plannedInserts = 0;
   for (const k of kids) {
     const fe = String(k.family_email || '').toLowerCase();
-    const status = matchingRegs(fe).length > 0 ? 'enrolled' : 'not_returning';
+    // PER-KID enrollment (ship-gate 2026-07-19): a matching registration
+    // makes only the kids it actually CONTAINS 'enrolled' — a dropped
+    // sibling in a partially re-registered family stays not_returning
+    // (the exact over-count this refactor exists to fix).
+    const kidFirst = String(k.first_name || '').trim().split(/\s+/)[0].toLowerCase();
+    const famRegs = matchingRegs(fe);
+    const inAReg = famRegs.some(r => r.kidFirsts.has(kidFirst));
+    const status = inAReg ? 'enrolled' : 'not_returning';
     const schedule = normalizeSchedule(k.schedule);
     if (!famStats.has(fe)) famStats.set(fe, { enrolled: 0, not_returning: 0 });
     famStats.get(fe)[status]++;

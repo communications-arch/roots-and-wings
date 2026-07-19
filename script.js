@@ -30120,36 +30120,25 @@
       // first name.
       h += '<input class="rd-input emi-full" type="text" placeholder="Goes by (shown in directory — optional)" data-field="nickname" value="' + escapeHtml(k.nickname || '') + '">';
       h += '<label class="emi-inline-label"><span>Birthday <span style="color:#d35a48;font-weight:700;">*</span></span><input type="date" class="rd-input" data-field="birth_date" value="' + escapeHtml(k.birth_date) + '"></label>';
-      // Schedule is read-only for members because CHANGING it has billing
-      // implications (half-day vs. full-day dues) — they contact the
-      // Membership Director. The Membership Director (capability
-      // member_schedule_edit, checked on the REAL login so it works
-      // through View As) gets a live select; the server enforces the
-      // same gate (Erin, 2026-07-16). A JUST-ADDED kid (k._isNew) gets
-      // the live select for everyone — there's no prior value to protect
-      // and the server accepts an initial schedule on new kids (Erin,
-      // 2026-07-19).
-      var schedLabel = k.schedule === 'morning' ? 'Morning only'
-                    : k.schedule === 'afternoon' ? 'Afternoon only'
-                    : 'All day';
-      if (k._isNew
-          || isDevHost() // dev/preview: schedule editing is testable by anyone, like View-As (bug log #4)
-          || (typeof realUserHasCapability === 'function'
-          && realUserHasCapability('member_schedule_edit', ['Membership Director']))) {
-        var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
-        h += '<label class="emi-inline-label">Schedule' +
-             '<select class="rd-input" data-field="schedule" title="Half-day ↔ full-day — affects dues.">' +
-             '<option value="all-day"' + (schedVal === 'all-day' ? ' selected' : '') + '>All day</option>' +
-             '<option value="morning"' + (schedVal === 'morning' ? ' selected' : '') + '>Morning only</option>' +
-             '<option value="afternoon"' + (schedVal === 'afternoon' ? ' selected' : '') + '>Afternoon only</option>' +
-             '</select>' +
-             '</label>';
-      } else {
-        h += '<label class="emi-inline-label">Schedule' +
-             '<input class="rd-input emi-readonly" value="' + escapeHtml(schedLabel) + '" readonly tabindex="-1" title="Contact the Membership Director to change schedule — affects dues.">' +
-             '<input type="hidden" data-field="schedule" value="' + escapeHtml(k.schedule) + '">' +
-             '</label>';
-      }
+      // Everyone gets the live schedule select (Option B, ship-gate
+      // 2026-07-19: the old read-only fallback left prod families with
+      // NO way to even request a change). For non-Membership users the
+      // server queues the change for approval instead of applying it —
+      // the title says so. Membership Director (member_schedule_edit,
+      // real login) and brand-new kids apply directly.
+      var schedPriv = (typeof realUserHasCapability === 'function'
+        && realUserHasCapability('member_schedule_edit', ['Membership Director']));
+      var schedTitle = k._isNew ? 'Pick this child’s schedule.'
+        : schedPriv ? 'Half-day ↔ full-day — affects dues.'
+        : 'Schedule changes are sent to the Membership Director for approval (they affect dues).';
+      var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';
+      h += '<label class="emi-inline-label">Schedule' +
+           '<select class="rd-input" data-field="schedule" title="' + schedTitle + '">' +
+           '<option value="all-day"' + (schedVal === 'all-day' ? ' selected' : '') + '>All day</option>' +
+           '<option value="morning"' + (schedVal === 'morning' ? ' selected' : '') + '>Morning only</option>' +
+           '<option value="afternoon"' + (schedVal === 'afternoon' ? ' selected' : '') + '>Afternoon only</option>' +
+           '</select>' +
+           '</label>';
       h += '<label class="emi-inline-label emi-full">' +
              'Allergies, medical &amp; notes ' +
              '<span style="font-weight:400;font-size:0.8em;color:var(--color-text-light);">— visible to all co-op members; share what teachers + leaders should know to keep your child safe.</span>' +
@@ -30679,6 +30668,7 @@
             // pending, and for an added kid open the waiver to sign NOW —
             // approval can't happen until it's signed.
             var pendReqs = (resp.body && resp.body.pending_requests) || [];
+            var reopenEmiForWaiver = false;
             if (pendReqs.length) {
               var addWithWaiver = pendReqs.filter(function (p) { return p.kind === 'add_kid' && p.waiver_token; });
               var summary = pendReqs.map(function (p) {
@@ -30687,12 +30677,13 @@
                   : p.kid_first_name + '’s schedule change';
               }).join(', ');
               if (addWithWaiver.length) {
+                // No window.open here — popup blockers eat async opens
+                // (ship-gate 2026-07-19). The form reopens with a real
+                // "sign the waiver" link on the kid's row instead.
+                reopenEmiForWaiver = true;
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
                   + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
-                  + ': a waiver signature. The signing page opens next — approval can’t happen until it’s signed.');
-                addWithWaiver.forEach(function (p) {
-                  window.open('waiver.html?token=' + p.waiver_token, '_blank', 'noopener');
-                });
+                  + ': a waiver signature. The form will reopen — click the “sign the waiver” link on their row. Membership can approve once it’s signed.');
               } else {
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
               }
@@ -30713,8 +30704,14 @@
                   if (typeof renderHeaderViewAs === 'function') renderHeaderViewAs();
                 }
                 closeDetail();
+                // Waiver pending: land the family back in the form where
+                // the kid's row carries the real signing link.
+                if (reopenEmiForWaiver && typeof showEditMyInfo === 'function') showEditMyInfo();
               })
-              .catch(function () { closeDetail(); });
+              .catch(function () {
+                closeDetail();
+                if (reopenEmiForWaiver && typeof showEditMyInfo === 'function') showEditMyInfo();
+              });
           });
       }
 
@@ -30743,7 +30740,14 @@
           if (key && !map[key]) map[key] = rq;
         });
         state._pendingReqs = map;
-        if (Object.keys(map).length > 0) render();
+        // Re-render ONLY if the EMI modal is still open, and capture any
+        // typing that happened while the fetch was in flight first —
+        // a bare render() here wiped in-progress edits (ship-gate
+        // 2026-07-19).
+        if (Object.keys(map).length > 0 && document.getElementById('emiKidList')) {
+          syncStateFromDom();
+          render();
+        }
       })
       .catch(function () { /* chips just don't show */ });
 
