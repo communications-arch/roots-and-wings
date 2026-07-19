@@ -8592,6 +8592,12 @@ button.staff-role:hover {
   justify-content: center;
   padding: 1rem;
 }
+/* Detail popups launched FROM the builder (class description on card
+   click) must paint ABOVE it — both overlays sit at 9999 and the
+   builder is appended later in the DOM, so it otherwise wins (bug #12).
+   Scoped to while-the-builder-is-open so showScheduleBuilder's
+   "close stale modals, open on top" behavior stays intact elsewhere. */
+body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 .sb-panel {
   background: #fff;
   border-radius: var(--radius-md, 8px);

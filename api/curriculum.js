@@ -2198,11 +2198,36 @@ module.exports = async function handler(req, res) {
             + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
             + Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
         });
+        // Floater unlock (bugs #14/#15, Erin 2026-07-19): once every class
+        // in the hour has its assistant spots covered, Floater is ALWAYS
+        // signable — it's the overflow role, so neither the support-
+        // capacity rule nor the AM 2-floater cap applies then. (The PM
+        // classes-fill-first gate below is the same rule from the other
+        // side: needy classes imply hourAllCovered=false.)
+        let hourAllCovered = false;
+        if (vsRole === 'floater') {
+          const covCls = await sql`
+            SELECT id, scheduled_hour, class_period, assistant_count
+            FROM class_submissions
+            WHERE school_year = ${vsYear} AND scheduled_session = ${vsSess}
+              AND class_period = ${vsPeriod} AND status IN ('scheduled', 'drafted')`;
+          hourAllCovered = true;
+          for (const r of covCls) {
+            const occ = r.class_period === 'AM'
+              ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+              : r.scheduled_hour === 'both' ? ['PM1', 'PM2'] : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+            if (occ.indexOf(vsBlock) === -1) continue;
+            const want = (r.assistant_count && r.assistant_count.length) ? Math.min.apply(null, r.assistant_count) : 1;
+            const got = await sql`SELECT COUNT(*)::int AS n FROM class_assignment_helpers
+              WHERE class_submission_id = ${r.id} AND (block = '' OR block = ${vsBlock})`;
+            if (got[0].n < want) { hourAllCovered = false; break; }
+          }
+        }
         const mlcRows = await sql`SELECT COUNT(*)::int AS n FROM people WHERE role = 'mlc'`;
         const supportCapacity = Math.max(0, mlcRows[0].n - keyNeededHour);
         const supportTaken = await sql`SELECT COUNT(*)::int AS n FROM volunteer_signups
           WHERE school_year = ${vsYear} AND session_number = ${vsSess} AND block = ANY(${vsDupeBlocks})`;
-        if (supportTaken[0].n >= supportCapacity) {
+        if (supportTaken[0].n >= supportCapacity && !(vsRole === 'floater' && hourAllCovered)) {
           return res.status(409).json({ error: 'Support slots for that hour are full — every remaining adult is needed to lead or assist a class.' });
         }
         // Caps.
@@ -2211,7 +2236,7 @@ module.exports = async function handler(req, res) {
         const n = capCount[0].n;
         if (vsRole === 'board' && n >= 2) return res.status(409).json({ error: 'Board Duties is full for that hour (2 max).' });
         if (vsRole === 'prep' && n >= 2) return res.status(409).json({ error: 'Prep Period is full for that hour (2 max).' });
-        if (vsRole === 'floater' && vsPeriod === 'AM' && n >= 2) return res.status(409).json({ error: 'Morning floaters are full for that hour (2 max).' });
+        if (vsRole === 'floater' && vsPeriod === 'AM' && n >= 2 && !hourAllCovered) return res.status(409).json({ error: 'Morning floaters are full for that hour (2 max).' });
         if (vsRole === 'floater' && vsPeriod === 'PM') {
           // PM gate: floaters open only once every placed class that hour
           // has its helper spots covered.

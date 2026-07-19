@@ -5400,9 +5400,14 @@
     // key classroom positions) can close them all at once.
     var fl = b.floaters.length;
     var flTag = fl > 0 ? ' · ' + fl + ' signed up' : '';
+    // Floater unlock (bugs #14/#15, Erin 2026-07-19): once every class in
+    // the hour has its assistant spots covered, Floater is ALWAYS
+    // offered — it's the overflow role, so neither the support-capacity
+    // rule nor the AM 2-floater cap should orphan a willing adult.
+    var assistsOpen = sorted.some(function (c) { return (c.helpers_needed || 0) > 0; });
     if (blockKey.indexOf('AM') === 0) {
-      if (fl < 2 && !supportFull) h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
-    } else if (!supportFull) {
+      if ((fl < 2 && !supportFull) || !assistsOpen) h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
+    } else if (!supportFull || !assistsOpen) {
       h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
     }
     // Board Duties only offers itself to board members (Erin, 2026-07-15).
