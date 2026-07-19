@@ -1946,16 +1946,11 @@ CREATE INDEX IF NOT EXISTS idx_enroll_req_family
 ALTER TABLE waiver_signatures DROP CONSTRAINT IF EXISTS waiver_signatures_role_check;
 ALTER TABLE waiver_signatures ADD CONSTRAINT waiver_signatures_role_check
   CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition'));
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_indexes
-    WHERE indexname = 'waiver_signatures_person_season_idx'
-      AND indexdef NOT LIKE '%kid_addition%'
-  ) THEN
-    DROP INDEX waiver_signatures_person_season_idx;
-    CREATE UNIQUE INDEX waiver_signatures_person_season_idx
-      ON waiver_signatures (LOWER(person_email), season)
-      WHERE role <> 'kid_addition';
-  END IF;
-END $$;
+-- Flat statements (the migration runner splits on semicolons and can't
+-- carry DO $$ blocks): drop the old full-uniqueness index (no-op after
+-- the first run) and create the kid_addition-exempt replacement under a
+-- new name so IF NOT EXISTS keeps this idempotent.
+DROP INDEX IF EXISTS waiver_signatures_person_season_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_v2
+  ON waiver_signatures (LOWER(person_email), season)
+  WHERE role <> 'kid_addition';
