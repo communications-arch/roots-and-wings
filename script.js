@@ -166,14 +166,14 @@
                   localStorage.setItem('rw_google_credential', data.token);
                   sessionExpiredHandled = false; // recovered silently
                 } else {
-                  try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+                  try { handleDeadSession(); } catch (e) { console.error(e); }
                 }
               })
               .catch(function () {
-                try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+                try { handleDeadSession(); } catch (e) { console.error(e); }
               });
           } else {
-            try { showSessionExpiredBanner(); } catch (e) { console.error(e); }
+            try { handleDeadSession(); } catch (e) { console.error(e); }
           }
         }
         return res;
@@ -181,6 +181,25 @@
     };
     window._rwFetchWrapped = true;
   })();
+
+  // A refused /api/session exchange means the stored token is DEAD (expired
+  // or invalidated by a SESSION_SECRET rotation) — not a transient blip.
+  // Clear it and land on the sign-in screen instead of leaving a broken,
+  // half-empty portal behind a dismissable banner (2026-07-19: the secret
+  // rotation stranded every signed-in browser — My Family "disappeared" and
+  // the dev View-As picker vanished until people found "Sign in again").
+  // The banner still renders on top so members know WHY they're signed out.
+  function handleDeadSession() {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('rw_google_credential');
+      localStorage.removeItem('rw_user_email');
+      sessionStorage.removeItem(VIEW_AS_KEY);
+    } catch (e) { /* ignore */ }
+    showSessionExpiredBanner();
+    if (typeof showLogin === 'function') showLogin();
+    window.scrollTo(0, 0);
+  }
 
   function showSessionExpiredBanner() {
     if (document.getElementById('rw-session-expired')) return;
