@@ -8750,12 +8750,12 @@
           var rhCount  = (_roleHolderTodoState && _roleHolderTodoState.count) || 0;
           var rhLabel  = (_roleHolderTodoState && _roleHolderTodoState.label) || 'Confirm role holders';
           h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
-          // Review the Membership Handbook before the Ice Cream Social
-          // (Erin, 2026-07-19). Date-gated by loadHandbookReviewTodo —
-          // shows the ~3 weeks leading up to the social, opens the
-          // handbook PDF. Mirrors the Admin Calendar's derived
-          // "Review & update the Membership Handbook" trigger date.
-          h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">📘</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button></li>';
+          // Review the Membership Handbook — appears a week before the
+          // summer board meeting and STAYS until ticked done for the year
+          // (Erin, 2026-07-19). Row click opens the handbook PDF; the
+          // ✓ Done chip stamps todo_confirmations via loadHandbookReviewTodo.
+          h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">📘</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button>'
+            + '<button type="button" class="sc-btn" id="ws-todo-handbook-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
           // General inquiries from the public Contact Us form — a separate
@@ -22950,33 +22950,62 @@
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
-  // Comms Director: "Review & update the Membership Handbook" — shows the
+  // Comms Director: "Review & update the Membership Handbook" — appears a
   // week before the FIRST board meeting of the year (3rd Wednesday of July,
-  // same anchor the Admin Calendar's derived Board Meeting row uses),
-  // through the meeting itself. Click opens the handbook PDF.
-  // (Erin, 2026-07-19; retimed same day from the Ice-Cream-Social anchor.)
+  // same anchor as the Admin Calendar's derived Board Meeting row) and
+  // STAYS until marked done for the school year (todo_confirmations row,
+  // kind='handbook'). Row click opens the handbook PDF; ✓ Done stamps the
+  // year. (Erin, 2026-07-19: "show until it is checked off".)
   function loadHandbookReviewTodo() {
     var item = document.getElementById('ws-todo-handbook-item');
     if (!item) return; // not the Comms Director's tab
     var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var activeYr = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '';
     // 3rd Wednesday of July of the active year's fall year — pure date
     // math on UTC (mirrors the server's nthWeekdayOf), no data needed.
     var boardDay = '';
-    var m = /^(\d{4})-\d{4}$/.exec((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '');
+    var m = /^(\d{4})-\d{4}$/.exec(activeYr);
     if (m) {
       var yr = parseInt(m[1], 10);
       var firstDow = new Date(Date.UTC(yr, 6, 1)).getUTCDay();
       var day = 1 + ((3 - firstDow + 7) % 7) + 14; // 3rd Wednesday
       boardDay = yr + '-07-' + String(day).padStart(2, '0');
     }
-    var show = !!(boardDay && today >= welcomeDaysBefore(boardDay, 7) && today <= boardDay);
-    item.hidden = !show;
+    var inWindow = !!(boardDay && today >= welcomeDaysBefore(boardDay, 7));
+    if (!inWindow) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
     var btn = document.getElementById('ws-todo-handbook-btn');
     if (btn && !btn._rwWired) {
       btn._rwWired = true;
       btn.addEventListener('click', function () { window.open('/handbook.pdf', '_blank', 'noopener'); });
     }
-    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+    var doneBtn = document.getElementById('ws-todo-handbook-done');
+    if (doneBtn && !doneBtn._rwWired) {
+      doneBtn._rwWired = true;
+      doneBtn.addEventListener('click', function () {
+        doneBtn.disabled = true;
+        fetch('/api/cleaning?action=todo-confirm', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ kind: 'handbook', school_year: activeYr })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not mark it done.'); doneBtn.disabled = false; return; }
+            item.hidden = true;
+            if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+          })
+          .catch(function () { alert('Network error — try again.'); doneBtn.disabled = false; });
+      });
+    }
+    // In the window: visible unless this year is already ticked done.
+    fetch('/api/cleaning?action=todo-confirm', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var done = !!(d && (d.confirmations || []).some(function (c) {
+          return c.kind === 'handbook' && c.school_year === activeYr;
+        }));
+        item.hidden = done;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
   }
 
   // ── Group-liaison morning-class nag ──────────────────────────────

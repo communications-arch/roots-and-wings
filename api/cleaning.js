@@ -232,7 +232,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -1147,6 +1147,46 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'school_year query parameter is required.' });
         }
         await sql`DELETE FROM role_holder_confirmations WHERE school_year = ${schoolYear}`;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // ── Generic per-year To Do confirmations ──
+    // "This to-do is DONE for this school year" ticks (Erin, 2026-07-19:
+    // the handbook-review To Do should show until checked off, not on a
+    // date window). One row per (kind, school_year); existence = done.
+    // Any signed-in member can read; writes are gated per kind to the
+    // role that owns the to-do (super users pass via canEditAsRole).
+    if (action === 'todo-confirm') {
+      const TODO_CONFIRM_OWNERS = { handbook: 'Communications Director' };
+      if (req.method === 'GET') {
+        const rows = await sql`
+          SELECT kind, school_year, confirmed_at, confirmed_by_email
+          FROM todo_confirmations ORDER BY kind, school_year
+        `;
+        return res.status(200).json({ confirmations: rows });
+      }
+      const tcBody = req.body || {};
+      const tcKind = String((req.method === 'DELETE' ? req.query.kind : tcBody.kind) || '').trim();
+      const tcYear = String((req.method === 'DELETE' ? req.query.school_year : tcBody.school_year) || '').trim();
+      if (!TODO_CONFIRM_OWNERS[tcKind]) return res.status(400).json({ error: 'Unknown to-do kind.' });
+      if (!/^\d{4}-\d{4}$/.test(tcYear)) return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
+      if (!(await canEditAsRole(user.email, TODO_CONFIRM_OWNERS[tcKind]))) {
+        return res.status(403).json({ error: 'Only the ' + TODO_CONFIRM_OWNERS[tcKind] + ' can mark this done.' });
+      }
+      if (req.method === 'POST') {
+        const inserted = await sql`
+          INSERT INTO todo_confirmations (kind, school_year, confirmed_at, confirmed_by_email)
+          VALUES (${tcKind}, ${tcYear}, NOW(), ${user.email})
+          ON CONFLICT (kind, school_year) DO UPDATE
+            SET confirmed_at = NOW(), confirmed_by_email = EXCLUDED.confirmed_by_email
+          RETURNING kind, school_year, confirmed_at
+        `;
+        return res.status(200).json({ confirmation: inserted[0] });
+      }
+      if (req.method === 'DELETE') {
+        await sql`DELETE FROM todo_confirmations WHERE kind = ${tcKind} AND school_year = ${tcYear}`;
         return res.status(200).json({ ok: true });
       }
       return res.status(405).json({ error: 'Method not allowed' });

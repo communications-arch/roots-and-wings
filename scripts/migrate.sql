@@ -1863,3 +1863,15 @@ UPDATE special_events SET start_time = '10:30', end_time = '13:30' WHERE name = 
 UPDATE special_events SET start_time = '10:30', end_time = '12:00' WHERE name = 'Variety Show'     AND start_time IS NULL;
 UPDATE special_events SET start_time = '12:00', end_time = '13:30' WHERE name = 'Field Day'        AND start_time IS NULL;
 UPDATE special_events SET location = 'First Mennonite Church 4601 Knollton Rd, Indianapolis, IN 46228' WHERE name IN ('Ice Cream Social', 'Maker''s Market', 'Service Project', 'PJ Party', 'Passion Fair', 'Variety Show', 'Field Day') AND (location IS NULL OR location = '');
+
+-- Generic per-year To Do confirmations (Erin, 2026-07-19): "this to-do is
+-- done for this school year" ticks. Existence of a row = done. First user:
+-- the Comms Director's handbook-review To Do (kind = 'handbook'), which
+-- shows from a week before the summer board meeting until ticked off.
+CREATE TABLE IF NOT EXISTS todo_confirmations (
+  kind               TEXT NOT NULL,
+  school_year        TEXT NOT NULL,
+  confirmed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirmed_by_email TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (kind, school_year)
+);
