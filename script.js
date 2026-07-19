@@ -5423,10 +5423,17 @@
     if (vpAssign || showBoard) {
       h += '<option value="board">Board Duties' + (b.board.length > 0 ? ' · ' + b.board.length + ' signed up' : '') + '</option>';
     }
-    // Prep Period (bug #17): open to every member, 4 per hour — the cap
-    // lifts once the hour is fully assisted and has a floater. (The
-    // server also holds each member to ONE prep hour per session.)
-    var prepOpen = b.prep.length < 4 || (!assistsOpen && fl > 0);
+    // Prep Period (bugs #17/#21): open to every member, 4 per hour — the
+    // cap lifts once the hour is fully assisted and has a floater. ONE
+    // prep hour per member per session: once the acting member holds
+    // one, the other hours stop offering it (server enforces too).
+    var havePrep = false;
+    if (!vpAssign && d.mine) {
+      Object.keys(d.mine).forEach(function (mb) {
+        if (d.mine[mb] && d.mine[mb].kind === 'prep') havePrep = true;
+      });
+    }
+    var prepOpen = !havePrep && (b.prep.length < 4 || (!assistsOpen && fl > 0));
     if (vpAssign || prepOpen) {
       h += '<option value="prep">Prep Period' + (b.prep.length > 0 ? ' · ' + b.prep.length + ' signed up' : '') + '</option>';
     }
