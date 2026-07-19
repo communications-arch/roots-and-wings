@@ -24429,10 +24429,16 @@
           : '') + '</td>';
         // Date cell — plain text for every row now; sessions (like special
         // events) edit their dates through the Manage ▾ → Edit form.
+        // Times ALWAYS render here under the date (Erin, 2026-07-19: field
+        // trips showed times here but special events showed theirs over in
+        // Details — one place for everything now). Special events keep their
+        // times on the special_events row, hence the seRow fallback.
         {
+          var rowStartTime = e.start_time || (r.seRow && r.seRow.start_time) || '';
+          var rowEndTime = e.end_time || (r.seRow && r.seRow.end_time) || '';
           var dateInner = (e.event_date
             ? escapeHtml(boardCalFmtRange(e.event_date, e.end_date))
-              + (e.start_time ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(e.start_time, e.end_time)) + '</span>' : '')
+              + (rowStartTime ? '<br><span class="ws-wv-context">' + escapeHtml(boardCalFmtTimeRange(rowStartTime, rowEndTime)) + '</span>' : '')
             : '<span class="board-cal-se-unset">—</span>');
           h += '<td style="white-space:nowrap;">' + dateInner + '</td>';
         }
@@ -24466,13 +24472,10 @@
         var notes = '';
         if (e.location) notes = '📍 ' + escapeHtml(e.location);
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
-        if (r.kind === 'special' && r.seRow) {
-          // Surface the saved details (time / location) on the row.
-          var seDet = '';
-          var seR = r.seRow;
-          if (seR.start_time) seDet += '🕑 ' + escapeHtml(boardCalFmtTimeRange(seR.start_time, seR.end_time));
-          if (seR.location) seDet += (seDet ? '<br>' : '') + '📍 ' + escapeHtml(seR.location);
-          if (seDet) notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + seDet + '</span>';
+        if (r.kind === 'special' && r.seRow && r.seRow.location) {
+          // Location only — times moved up under the date like every other
+          // row (Erin, 2026-07-19).
+          notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">📍 ' + escapeHtml(r.seRow.location) + '</span>';
         }
         h += '<td>' + notes + '</td>';
         // Actions cell by kind. Sessions now use the same Manage ▾ dropdown
