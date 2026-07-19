@@ -407,7 +407,32 @@ async function mergeDuplicateOpenTours(sql) {
 // if they leave them blank, the row lands in the pipeline as
 // "requested" without a proposed slot, and Membership coordinates via
 // reply.
+// ── Public-form bot screening (Erin, 2026-07-19: junk tour/inquiry spam) ──
+// Layered: (1) honeypot — a visually-hidden "website" field real users never
+// fill; (2) time-trap — the page stamps its render time (form_ts, epoch ms);
+// direct-to-API posts lack it and instant submits are bots; (3) junk
+// heuristics — URLs in the name field, link-stuffed messages. Returns a
+// log-only reason or null. Callers answer 200 {success:true} on a trip —
+// SILENT discard, so bots don't get a signal to adapt around.
+function botScreen(body) {
+  if (String(body.website || '').trim()) return 'honeypot filled';
+  const ts = parseInt(body.form_ts, 10);
+  if (!Number.isFinite(ts) || ts <= 0) return 'missing form_ts (direct API post)';
+  const age = Date.now() - ts;
+  if (age >= 0 && age < 4000) return 'submitted ' + age + 'ms after page render';
+  if (age < 0 || age > 24 * 3600 * 1000) return 'stale/future form_ts';
+  if (/https?:\/\//i.test(String(body.name || ''))) return 'URL in name field';
+  const msg = String(body.message || '');
+  if ((msg.match(/https?:\/\//gi) || []).length >= 3) return 'link-stuffed message';
+  return null;
+}
+
 async function handleTour(body, res) {
+  const botReason = botScreen(body);
+  if (botReason) {
+    console.warn('tour-request bot screen tripped:', botReason);
+    return res.status(200).json({ success: true });
+  }
   const { name, email, phone, numKids, ages } = body;
   const preferredDate = body.preferred_date ? String(body.preferred_date).trim() : null;
   const preferredTime = body.preferred_time ? String(body.preferred_time).trim() : null;
@@ -574,6 +599,11 @@ async function handleTour(body, res) {
 // stay null/empty. Mirrors handleTour's best-effort email pattern: persist
 // the row first, then fire the two Resend emails in the background.
 async function handleContact(body, res) {
+  const botReason = botScreen(body);
+  if (botReason) {
+    console.warn('contact-form bot screen tripped:', botReason);
+    return res.status(200).json({ success: true });
+  }
   const name = body.name ? String(body.name).trim() : '';
   const email = body.email ? String(body.email).trim() : '';
   const phone = body.phone ? String(body.phone).trim() : '';
