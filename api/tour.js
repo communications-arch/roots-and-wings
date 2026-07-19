@@ -5895,10 +5895,14 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
   push('allmember-spring', 'All Member Meeting', calAddDays(aprilBoard, 7), '',
     'All-member meeting — one week after the spring board meeting', '', '📣');
 
-  const ics = iceCreamSocialForYear(sessions, schoolYear);
-  push('handbook', 'Review & update the Membership Handbook', calAddDays(ics, -21), '',
-    'Communications Director reviews the Membership Handbook and publishes updates before new families arrive at the Ice Cream Social',
+  // Handbook review leads the FIRST board meeting of the year by a week
+  // (Erin, 2026-07-19 — retimed from the original Ice-Cream-Social anchor)
+  // so the updated handbook is ready to present there.
+  push('handbook', 'Review & update the Membership Handbook', calAddDays(julyBoard, -7), '',
+    'Communications Director reviews the Membership Handbook and publishes updates a week before the summer board meeting',
     'Communications Director', '📘');
+
+  const ics = iceCreamSocialForYear(sessions, schoolYear);
   push('removemembers', 'Remove non-returning members', calAddDays(ics, -3), '',
     'Workspace cleanup for families who did not re-enroll (a few days before the Ice Cream Social)',
     'Communications Director', '🧹');

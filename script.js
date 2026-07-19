@@ -22951,24 +22951,25 @@
   }
 
   // Comms Director: "Review & update the Membership Handbook" — shows the
-  // ~3 weeks before the Ice Cream Social (the Wednesday strictly before the
-  // first session's start, same rule the Admin Calendar derives), through
-  // the social itself. Click opens the handbook PDF. (Erin, 2026-07-19.)
+  // week before the FIRST board meeting of the year (3rd Wednesday of July,
+  // same anchor the Admin Calendar's derived Board Meeting row uses),
+  // through the meeting itself. Click opens the handbook PDF.
+  // (Erin, 2026-07-19; retimed same day from the Ice-Cream-Social anchor.)
   function loadHandbookReviewTodo() {
     var item = document.getElementById('ws-todo-handbook-item');
     if (!item) return; // not the Comms Director's tab
     var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
-    var s1 = welcomeNextCoopStart();
-    var ics = '';
-    if (s1) {
-      var d = new Date(s1 + 'T00:00:00Z');
-      if (!isNaN(d.getTime())) {
-        d.setUTCDate(d.getUTCDate() - 1);
-        while (d.getUTCDay() !== 3) d.setUTCDate(d.getUTCDate() - 1);
-        ics = d.toISOString().slice(0, 10);
-      }
+    // 3rd Wednesday of July of the active year's fall year — pure date
+    // math on UTC (mirrors the server's nthWeekdayOf), no data needed.
+    var boardDay = '';
+    var m = /^(\d{4})-\d{4}$/.exec((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '');
+    if (m) {
+      var yr = parseInt(m[1], 10);
+      var firstDow = new Date(Date.UTC(yr, 6, 1)).getUTCDay();
+      var day = 1 + ((3 - firstDow + 7) % 7) + 14; // 3rd Wednesday
+      boardDay = yr + '-07-' + String(day).padStart(2, '0');
     }
-    var show = !!(ics && today >= welcomeDaysBefore(ics, 21) && today <= ics);
+    var show = !!(boardDay && today >= welcomeDaysBefore(boardDay, 7) && today <= boardDay);
     item.hidden = !show;
     var btn = document.getElementById('ws-todo-handbook-btn');
     if (btn && !btn._rwWired) {
@@ -24188,7 +24189,7 @@
       var notes = [e.note || '', e.role || ''].filter(Boolean).join(' · ');
       doc += '<tr>';
       doc += '<td style="white-space:nowrap;">' + escapeHtml(when) + '</td>';
-      doc += '<td>' + (e.icon ? e.icon + ' ' : '') + escapeHtml(e.title || '') + '</td>';
+      doc += '<td>' + escapeHtml(e.title || '') + '</td>';
       doc += '<td>' + escapeHtml(notes) + '</td>';
       doc += '</tr>';
     });
@@ -24430,7 +24431,10 @@
           h += '<td class="board-cal-col-type">' + escapeHtml((calTypeMeta[r.kind] || {}).label || '') + '</td>';
         }
         {
-          h += '<td>' + (e.icon ? e.icon + ' ' : (r.kind === 'general' ? '🗓 ' : (r.kind === 'field_trip' ? '🚌 ' : ''))) + escapeHtml(e.title) + '</td>';
+          // Bare title — the emoji icons in front of event names read as
+          // clutter in the table (Erin, 2026-07-19). The type pills/views
+          // already say what kind of row it is.
+          h += '<td>' + escapeHtml(e.title) + '</td>';
         }
         // Details cell — location + times + status chip. The freeform Notes
         // field was removed board-wide (Erin, 2026-07-18: "the board doesn't

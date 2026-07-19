@@ -169,8 +169,8 @@ t('participation-reset title names the next school year', () =>
   assert.ok(/2026-2027/.test(byKey.participationreset.title)));
 t('remove-members is 3 days before the Ice Cream Social', () =>
   assert.strictEqual(byKey.removemembers.event_date, server.calAddDays(ics, -3)));
-t('handbook review is 3 weeks before the Ice Cream Social', () =>
-  assert.strictEqual(byKey.handbook.event_date, server.calAddDays(ics, -21)));
+t('handbook review is 1 week before the summer board meeting', () =>
+  assert.strictEqual(byKey.handbook.event_date, server.calAddDays(byKey['boardmtg-summer'].event_date, -7)));
 t('handbook review is a Communications Director task', () =>
   assert.strictEqual(byKey.handbook.role, 'Communications Director'));
 t('ice cream social matches iceCreamSocialForYear', () =>
