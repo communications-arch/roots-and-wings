@@ -1241,6 +1241,7 @@ async function applyMemberProfileOverlay(families) {
     if (!kidsByFamily[k]) kidsByFamily[k] = [];
     kidsByFamily[k].push(kr);
   });
+  var overlayPendingKidIds = await pendingApprovalKidIds(sql);
 
   families.forEach(function (fam) {
     var key = String(fam.email || '').toLowerCase();
@@ -1361,7 +1362,10 @@ async function applyMemberProfileOverlay(families) {
       if (ov.nickname) kid.nickname = ov.nickname;
       kid.photo_consent = ov.photo_consent !== false;
       // DB row id → Edit My Info → save upserts by id (enrollment build).
-      if (ov.id) kid.id = ov.id;
+      if (ov.id) {
+        kid.id = ov.id;
+        kid.pending_approval = overlayPendingKidIds.has(ov.id);
+      }
     });
     // DB-only kids (not in the sheet's classlist).
     dbKids.forEach(function (k) {
@@ -1374,6 +1378,7 @@ async function applyMemberProfileOverlay(families) {
         fam.kids = fam.kids || [];
         fam.kids.push({
           id: k.id || null,
+          pending_approval: overlayPendingKidIds.has(k.id),
           name: first,
           lastName: k.last_name || '',
           nickname: k.nickname || '',
@@ -1814,6 +1819,21 @@ async function firstSeasonByEmail(sql) {
 // dual-key emission as firstSeasonFromRows: the flag is reachable by BOTH
 // the raw registration (personal) email and the derived Workspace family
 // email. {} on failure so the directory degrades to no indicator.
+// Kid ids whose active-season enrollment is awaiting Membership approval
+// (Option B kid-adds, 2026-07-19) — the Directory + rosters hide them
+// until approved; the family still sees them in Edit My Info.
+async function pendingApprovalKidIds(sql) {
+  try {
+    var rows = await sql`
+      SELECT kid_id FROM kid_enrollments
+      WHERE season = ${tour.DEFAULT_SEASON} AND status = 'pending'
+    `;
+    return new Set(rows.map(function (r) { return r.kid_id; }));
+  } catch (e) {
+    return new Set();
+  }
+}
+
 async function registeredSeasonByEmail(sql) {
   var tour = require('./tour.js'); // lazy: top-level require would cycle
   try {
@@ -1961,6 +1981,7 @@ async function loadFamiliesFromProfiles(sql) {
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
   `;
+  var pendingKidIds = await pendingApprovalKidIds(sql);
   // First registration per family — drives the Directory's "new member"
   // indicator (family hasn't completed a full co-op year yet). The client
   // derives newness from firstSeason against the Field-Day year boundary.
@@ -1980,6 +2001,7 @@ async function loadFamiliesFromProfiles(sql) {
     if (!kidsByFamily[k]) kidsByFamily[k] = [];
     kidsByFamily[k].push({
       id: kr.id || null, // → EMI → save upserts by id (enrollment build)
+      pending_approval: pendingKidIds.has(kr.id),
       name: String(kr.first_name || '').trim(),
       lastName: String(kr.last_name || '').trim(),
       nickname: String(kr.nickname || ''),

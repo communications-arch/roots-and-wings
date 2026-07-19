@@ -1906,3 +1906,56 @@ CREATE INDEX IF NOT EXISTS idx_kid_enrollments_family
 -- Transition column: assignments gain a real kid link; the name-keyed
 -- columns stay until every reader has re-keyed.
 ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+
+-- ══ Membership approval queue (Erin, 2026-07-19 Option B) ══
+-- Enrollment-affecting changes are Membership-approved EVENTS, not silent
+-- edits. A family's schedule change / kid add / kid removal creates a
+-- PENDING request; nothing dues- or roster-bearing moves until Membership
+-- approves. kind: 'add_kid' | 'schedule_change' | 'remove_kid'.
+-- add_kid also requires a signed waiver (waiver_signature_id) before it
+-- can be approved. kid_enrollments.status gains 'pending' for add_kid
+-- kids (excluded from every enrolled read automatically).
+CREATE TABLE IF NOT EXISTS enrollment_change_requests (
+  id                  SERIAL PRIMARY KEY,
+  kind                TEXT NOT NULL,
+  -- SET NULL (not CASCADE): a denied add or an approved removal deletes
+  -- the kid row, but the decision record must survive for history.
+  kid_id              INTEGER REFERENCES kids(id) ON DELETE SET NULL,
+  family_email        TEXT NOT NULL,
+  kid_first_name      TEXT NOT NULL DEFAULT '',
+  season              TEXT NOT NULL,
+  requested_schedule  TEXT NOT NULL DEFAULT '',
+  prior_schedule      TEXT NOT NULL DEFAULT '',
+  waiver_signature_id INTEGER,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  requested_by        TEXT NOT NULL DEFAULT '',
+  requested_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_by          TEXT NOT NULL DEFAULT '',
+  decided_at          TIMESTAMPTZ,
+  decision_note       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_enroll_req_status
+  ON enrollment_change_requests (status, season);
+CREATE INDEX IF NOT EXISTS idx_enroll_req_family
+  ON enrollment_change_requests (family_email, season, status);
+-- kid_addition waivers: the MLC signs one waiver PER ADDED KID, which
+-- collides with the one-row-per-person-per-season unique index (they
+-- already hold a signed main_lc row). Widen the CHECK and exempt
+-- kid_addition rows from the uniqueness rule (partial index swap —
+-- idempotent: the recreate only runs when the old full index exists).
+ALTER TABLE waiver_signatures DROP CONSTRAINT IF EXISTS waiver_signatures_role_check;
+ALTER TABLE waiver_signatures ADD CONSTRAINT waiver_signatures_role_check
+  CHECK (role IN ('main_lc', 'backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition'));
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'waiver_signatures_person_season_idx'
+      AND indexdef NOT LIKE '%kid_addition%'
+  ) THEN
+    DROP INDEX waiver_signatures_person_season_idx;
+    CREATE UNIQUE INDEX waiver_signatures_person_season_idx
+      ON waiver_signatures (LOWER(person_email), season)
+      WHERE role <> 'kid_addition';
+  END IF;
+END $$;

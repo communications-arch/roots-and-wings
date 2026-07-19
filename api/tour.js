@@ -2205,7 +2205,7 @@ async function handleWaiversCounts(req, res) {
         COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NOT NULL) AS resent
       FROM waiver_signatures ws
       LEFT JOIN registrations r ON r.id = ws.registration_id
-      WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison')
+      WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition')
         AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
     `;
     const r = rows[0] || {};
@@ -2283,10 +2283,12 @@ async function handleWaiversReport(req, res) {
           season: ws.season, waiver_version: ws.waiver_version,
           photo_consent: ws.photo_consent
         });
-      } else if (ws.role === 'one_off' || ws.role === 'guest' || ws.role === 'community_liaison') {
+      } else if (ws.role === 'one_off' || ws.role === 'guest' || ws.role === 'community_liaison' || ws.role === 'kid_addition') {
         // Guest + Community Liaison (2026-07-16) ride the one-off bucket —
         // same send/resend mechanics — and carry waiver_role so the client
-        // can label the Source column distinctly.
+        // can label the Source column distinctly. kid_addition (2026-07-19,
+        // the enrollment approval flow) rides here too: the MLC's waiver
+        // covering a newly added child.
         oneOff.push({
           source: 'one_off', waiver_role: ws.role,
           id: ws.id, name: ws.name, email: ws.email,
@@ -2504,7 +2506,7 @@ async function handleWaiverResend(body, req, res) {
     if (!row) return res.status(404).json({ error: 'Waiver not found.' });
     if (row.signed_at) return res.status(409).json({ error: 'Already signed — nothing to resend.' });
     if (!row.token) return res.status(409).json({ error: 'No pending token on this row — cannot resend.' });
-    if (['backup_coach', 'one_off', 'guest', 'community_liaison'].indexOf(row.role) === -1) {
+    if (['backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition'].indexOf(row.role) === -1) {
       return res.status(400).json({ error: 'Only backup-coach, guest, or one-off waivers can be resent.' });
     }
 
@@ -3686,6 +3688,21 @@ async function handleProfileUpdate(body, req, res) {
     // (registration sets their schedule). A blank incoming value means
     // "keep what they had" so stale clients can never flip anyone.
     const scheduleSwitchedToMorning = [];
+    // Option B approval queue (Erin, 2026-07-19): unprivileged schedule
+    // changes DON'T apply — they become pending enrollment_change_requests
+    // for the Membership Director, and the live schedule stays put. The
+    // Membership Director (member_schedule_edit) + super users still edit
+    // directly. (This replaces both the old 403 AND the short-lived
+    // blanket dev unlock — the request path is what testers exercise now.)
+    const queuedRequests = []; // filled below; written after the transaction
+    let actorMayEditDirect = null;
+    const actorMayEdit = async () => {
+      if (actorMayEditDirect === null) {
+        const realEmail0 = user.realEmail || user.email;
+        actorMayEditDirect = isSuperUser(realEmail0) || (await hasCapability(realEmail0, 'member_schedule_edit'));
+      }
+      return actorMayEditDirect;
+    };
     {
       const realEmail = user.realEmail || user.email;
       let mayEditSchedule = null; // resolved lazily — most saves change nothing
@@ -3697,17 +3714,19 @@ async function handleProfileUpdate(body, req, res) {
         if (!prior) continue;               // new kid — no prior to protect
         if (!k.schedule) { k.schedule = prior; continue; }
         if (k.schedule === prior) continue;
-        if (mayEditSchedule === null) {
-          // Dev/preview: any tester may flip schedules — mirrors the
-          // canImpersonate dev unlock so the Membership flow is actually
-          // testable (bug log #4). Prod keeps the capability gate.
-          mayEditSchedule = (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')
-            || isSuperUser(realEmail) || (await hasCapability(realEmail, 'member_schedule_edit'));
-        }
+        if (mayEditSchedule === null) mayEditSchedule = await actorMayEdit();
         if (!mayEditSchedule) {
-          return res.status(403).json({
-            error: 'Schedule changes (half-day ↔ full-day) affect dues — contact the Membership Director to switch ' + (k.first_name || k.name) + '’s schedule.'
+          // Option B: queue the change for Membership approval and keep
+          // the LIVE schedule as-is (dues + rosters move only on approve).
+          queuedRequests.push({
+            kind: 'schedule_change',
+            nameKey: key,
+            first_name: String(k.name || '').trim(),
+            requested_schedule: k.schedule,
+            prior_schedule: prior
           });
+          k.schedule = prior;
+          continue;
         }
         if (k.schedule === 'morning') scheduleSwitchedToMorning.push(key);
       }
@@ -3739,6 +3758,7 @@ async function handleProfileUpdate(body, req, res) {
       `);
     }
     const usedKidIds = new Set();
+    const addedKidNames = []; // lowercased first-name keys of brand-new rows
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
       const nameKey = String(k.name || '').trim().toLowerCase();
@@ -3764,6 +3784,7 @@ async function handleProfileUpdate(body, req, res) {
           WHERE id = ${matchId}
         `);
       } else {
+        addedKidNames.push(nameKey);
         profileStmts.push(sql`
           INSERT INTO kids (
             family_email, first_name, last_name, nickname, birth_date,
@@ -3778,30 +3799,46 @@ async function handleProfileUpdate(body, req, res) {
         `);
       }
     }
-    // Rows the family removed from the form: delete just those (their
-    // enrollment rows cascade). An explicit removal is the family's call;
-    // the Membership-approval workflow layers on top later.
+    // Rows the family removed from the form. Privileged actors delete
+    // directly (enrollments cascade); families queue a remove_kid request
+    // and the kid STAYS until Membership approves (Option B).
     const removedIds = [...priorKidIds].filter(id => !usedKidIds.has(id));
     if (removedIds.length > 0) {
-      profileStmts.push(sql`DELETE FROM kids WHERE family_email = ${familyEmail} AND id = ANY(${removedIds}::int[])`);
+      if (await actorMayEdit()) {
+        profileStmts.push(sql`DELETE FROM kids WHERE family_email = ${familyEmail} AND id = ANY(${removedIds}::int[])`);
+      } else {
+        const firstById = {};
+        Object.keys(priorKidIdsByFirst).forEach(f => { firstById[priorKidIdsByFirst[f]] = f; });
+        removedIds.forEach(idr => queuedRequests.push({
+          kind: 'remove_kid', kid_id: idr, first_name: firstById[idr] || ''
+        }));
+      }
     }
     await sql.transaction(profileStmts);
 
     // Season enrollment truth for the ACTIVE season (enrollment build):
-    // schedule updates ride through; status is only ever CREATED here
-    // ('enrolled' for kids with no row yet) — an EMI save must never
-    // silently flip a not_returning kid back to enrolled. Non-fatal.
+    // schedule updates ride through; status is only ever CREATED here —
+    // 'enrolled' for privileged adds, 'pending' for family adds awaiting
+    // Membership approval (Option B) — and never flipped for existing
+    // rows (a save must not resurrect a not_returning kid). Non-fatal.
+    const createdRequests = [];
     try {
+      const privileged = await actorMayEdit();
+      const pendingAddNames = new Set(privileged ? [] : addedKidNames);
       const nowKids = await sql`SELECT id, first_name, schedule FROM kids WHERE family_email = ${familyEmail}`;
+      const idByFirstNow = {};
       for (const nk of nowKids) {
+        const firstLc = String(nk.first_name || '').trim().toLowerCase();
+        if (firstLc && !(firstLc in idByFirstNow)) idByFirstNow[firstLc] = nk.id;
         const sch = ['all-day', 'morning', 'afternoon'].indexOf(String(nk.schedule || '').toLowerCase()) !== -1
           ? String(nk.schedule).toLowerCase() : 'all-day';
+        const newStatus = pendingAddNames.has(firstLc) ? 'pending' : 'enrolled';
         await sql`
           INSERT INTO kid_enrollments (
             kid_id, family_email, kid_first_name, season, schedule, status, source, updated_by
           ) VALUES (
             ${nk.id}, ${familyEmail}, ${nk.first_name || ''}, ${DEFAULT_SEASON},
-            ${sch}, 'enrolled', 'emi', ${user.realEmail || user.email}
+            ${sch}, ${newStatus}, 'emi', ${user.realEmail || user.email}
           )
           ON CONFLICT (kid_id, season) DO UPDATE SET
             schedule = EXCLUDED.schedule,
@@ -3811,6 +3848,82 @@ async function handleProfileUpdate(body, req, res) {
             updated_at = NOW(),
             updated_by = EXCLUDED.updated_by
         `;
+      }
+
+      // Family adds queue an add_kid request WITH a waiver the adult signs
+      // (Erin: "they need to do the entire registration" — same agreement
+      // the registration form collects, one signature per added child).
+      if (!privileged) {
+        const mlcRow = people.filter(p => p.role === 'mlc')[0] || {};
+        const mlcName = ((mlcRow.first_name || '') + ' ' + (mlcRow.last_name || '')).trim() || familyName;
+        for (const nameKey of addedKidNames) {
+          const kidId = idByFirstNow[nameKey];
+          if (!kidId) continue;
+          const dupe = await sql`
+            SELECT id FROM enrollment_change_requests
+            WHERE kid_id = ${kidId} AND kind = 'add_kid' AND status = 'pending' AND season = ${DEFAULT_SEASON}
+          `;
+          if (dupe.length) continue;
+          const kidRow = kids.filter(k => String(k.name || '').trim().toLowerCase() === nameKey)[0] || {};
+          const reg = await sql`
+            SELECT id FROM registrations
+            WHERE LOWER(family_email) = LOWER(${familyEmail}) AND season = ${DEFAULT_SEASON} AND declined_at IS NULL
+            ORDER BY created_at DESC LIMIT 1
+          `;
+          const wvToken = crypto.randomUUID().replace(/-/g, '');
+          const wv = await sql`
+            INSERT INTO waiver_signatures (
+              season, role, person_name, person_email, family_email, registration_id,
+              pending_token, sent_at, sent_by_email, note
+            ) VALUES (
+              ${DEFAULT_SEASON}, 'kid_addition', ${mlcName}, ${familyEmail}, ${familyEmail},
+              ${reg.length ? reg[0].id : null}, ${wvToken}, NOW(), ${user.realEmail || user.email},
+              ${'Covers newly added child: ' + (kidRow.name || nameKey)}
+            ) RETURNING id
+          `;
+          const ins = await sql`
+            INSERT INTO enrollment_change_requests (
+              kind, kid_id, family_email, kid_first_name, season,
+              requested_schedule, prior_schedule, waiver_signature_id, requested_by
+            ) VALUES (
+              'add_kid', ${kidId}, ${familyEmail}, ${kidRow.name || nameKey}, ${DEFAULT_SEASON},
+              ${kidRow.schedule || 'all-day'}, '', ${wv[0].id}, ${user.realEmail || user.email}
+            ) RETURNING id
+          `;
+          createdRequests.push({ id: ins[0].id, kind: 'add_kid', kid_first_name: kidRow.name || nameKey, waiver_token: wvToken });
+        }
+
+        // Schedule changes + removals queued during the write loop.
+        for (const q of queuedRequests) {
+          const kidId = q.kid_id || priorKidIdsByFirst[q.nameKey] || null;
+          if (!kidId) continue;
+          const dupe = q.kind === 'schedule_change'
+            ? await sql`SELECT id FROM enrollment_change_requests
+                        WHERE kid_id = ${kidId} AND kind = 'schedule_change' AND status = 'pending'
+                          AND season = ${DEFAULT_SEASON} AND requested_schedule = ${q.requested_schedule}`
+            : await sql`SELECT id FROM enrollment_change_requests
+                        WHERE kid_id = ${kidId} AND kind = ${q.kind} AND status = 'pending' AND season = ${DEFAULT_SEASON}`;
+          if (dupe.length) continue;
+          const ins = await sql`
+            INSERT INTO enrollment_change_requests (
+              kind, kid_id, family_email, kid_first_name, season,
+              requested_schedule, prior_schedule, requested_by
+            ) VALUES (
+              ${q.kind}, ${kidId}, ${familyEmail}, ${q.first_name || q.nameKey || ''}, ${DEFAULT_SEASON},
+              ${q.requested_schedule || ''}, ${q.prior_schedule || ''}, ${user.realEmail || user.email}
+            ) RETURNING id
+          `;
+          createdRequests.push({ id: ins[0].id, kind: q.kind, kid_first_name: q.first_name || q.nameKey || '' });
+        }
+
+        if (createdRequests.length > 0) {
+          const summary = createdRequests.map(r =>
+            (r.kind === 'add_kid' ? 'add ' : r.kind === 'remove_kid' ? 'remove ' : 'schedule change for ') + r.kid_first_name
+          ).join(', ');
+          await notifyMembershipDirector(sql,
+            'Enrollment approval needed — ' + familyName,
+            'The ' + familyName + ' family requested: ' + summary + '. Review it in the Enrollment Requests queue.');
+        }
       }
     } catch (enrErr) {
       console.error('EMI kid_enrollments sync failed (non-fatal):', enrErr);
@@ -3993,7 +4106,11 @@ async function handleProfileUpdate(body, req, res) {
       kids_count: kids.length,
       alt_logins: altLogins,
       blc_waivers_sent: newBlcRows.map(r => ({ name: r.name, email: r.email })),
-      blc_waivers_skipped: skippedBlcs
+      blc_waivers_skipped: skippedBlcs,
+      // Option B approval queue: changes that did NOT apply directly —
+      // the client surfaces "awaiting Membership approval" chips and, for
+      // add_kid, the waiver link the adult signs right away.
+      pending_requests: createdRequests
     });
   } catch (err) {
     console.error('Profile update error:', err);
@@ -6887,7 +7004,7 @@ async function handleBoardGlance(req, res) {
         SELECT COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NULL)::int AS pending
         FROM waiver_signatures ws
         LEFT JOIN registrations reg ON reg.id = ws.registration_id
-        WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison')
+        WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition')
           AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)`;
       return r[0].pending;
     }),
@@ -7136,6 +7253,166 @@ async function handleBoardNoteDelete(body, req, res) {
   return res.status(200).json({ ok: true, id });
 }
 
+// ══ Enrollment change requests — the Membership approval queue ══════
+// (Erin, 2026-07-19, Option B: gate BEFORE.) A family's schedule change /
+// kid add / kid removal creates a PENDING request; builders, rosters, and
+// dues keep the old truth until the Membership Director approves. add_kid
+// additionally requires a signed waiver before approval. Deny reverts
+// (and for add_kid deletes the pending kid row). Every transition
+// notifies the affected side in-portal.
+
+async function membershipMayDecide(realEmail) {
+  if (isSuperUser(realEmail)) return true;
+  if (await hasCapability(realEmail, 'member_schedule_edit')) return true;
+  // Dev/preview: testers exercise the queue while impersonating.
+  return !!(process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production');
+}
+
+async function notifyEnrollment(sql, recipientEmail, title, bodyTxt) {
+  try {
+    await sql`
+      INSERT INTO notifications (recipient_email, type, title, body, link_url)
+      VALUES (${String(recipientEmail || '').toLowerCase()}, 'enrollment_request', ${title}, ${bodyTxt}, '')
+    `;
+  } catch (e) { console.error('enrollment notification failed (non-fatal):', e.message); }
+}
+
+async function notifyMembershipDirector(sql, title, bodyTxt) {
+  let to = '';
+  try { to = await getRoleHolderEmail('Membership Director'); } catch (e) { /* fallback below */ }
+  await notifyEnrollment(sql, to || 'membership@rootsandwingsindy.com', title, bodyTxt);
+}
+
+// GET ?list=enrollment_requests — Membership's queue (pending first, then
+// recent decisions). ?list=enrollment_requests&family_email=… — a family's
+// own requests (drives the pending chips in Edit My Info).
+async function handleEnrollmentRequestList(req, res) {
+  const user = await verifyWorkspaceAuthWithViewAs(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const sql = getSql();
+  const famScope = normalizeEmail(req.query.family_email || '');
+  if (famScope) {
+    if (!(await canEditFamily(sql, user.email, famScope))) {
+      return res.status(403).json({ error: 'You can only view your own family’s requests.' });
+    }
+    const rows = await sql`
+      SELECT id, kind, kid_id, kid_first_name, season, requested_schedule,
+             prior_schedule, waiver_signature_id, status, requested_at, decided_at, decision_note
+      FROM enrollment_change_requests
+      WHERE LOWER(family_email) = ${famScope} AND season = ${DEFAULT_SEASON}
+      ORDER BY requested_at DESC
+      LIMIT 50
+    `;
+    // Ride the waiver signing state along so the EMI chip can say
+    // "waiver needed" vs "awaiting Membership".
+    for (const r of rows) {
+      if (r.kind === 'add_kid' && r.waiver_signature_id) {
+        const w = await sql`SELECT signed_at, pending_token FROM waiver_signatures WHERE id = ${r.waiver_signature_id}`;
+        r.waiver_signed = !!(w[0] && w[0].signed_at);
+        if (!r.waiver_signed && w[0]) r.waiver_token = w[0].pending_token;
+      }
+    }
+    return res.status(200).json({ requests: rows });
+  }
+  if (!(await membershipMayDecide(user.realEmail || user.email))) {
+    return res.status(403).json({ error: 'Only the Membership Director can review enrollment requests.' });
+  }
+  const rows = await sql`
+    SELECT r.id, r.kind, r.kid_id, r.family_email, r.kid_first_name, r.season,
+           r.requested_schedule, r.prior_schedule, r.waiver_signature_id,
+           r.status, r.requested_by, r.requested_at, r.decided_by, r.decided_at, r.decision_note,
+           mp.family_name,
+           w.signed_at AS waiver_signed_at
+    FROM enrollment_change_requests r
+    LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(r.family_email)
+    LEFT JOIN waiver_signatures w ON w.id = r.waiver_signature_id
+    WHERE r.season = ${DEFAULT_SEASON}
+    ORDER BY (r.status = 'pending') DESC, r.requested_at DESC
+    LIMIT 100
+  `;
+  return res.status(200).json({ requests: rows });
+}
+
+// POST kind='enrollment-request-decide' { id, approve, note }
+async function handleEnrollmentRequestDecide(body, req, res) {
+  const user = await verifyWorkspaceAuthWithViewAs(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const real = user.realEmail || user.email;
+  if (!(await membershipMayDecide(real))) {
+    return res.status(403).json({ error: 'Only the Membership Director can decide enrollment requests.' });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+  const approve = body.approve === true || String(body.approve) === 'true';
+  const note = String(body.note || '').trim().slice(0, 500);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM enrollment_change_requests WHERE id = ${id}`;
+  if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
+  const rq = rows[0];
+  if (rq.status !== 'pending') return res.status(409).json({ error: 'That request was already decided.' });
+
+  try {
+    if (approve) {
+      if (rq.kind === 'schedule_change') {
+        if (!rq.kid_id) return res.status(409).json({ error: 'That kid no longer exists.' });
+        await sql`UPDATE kids SET schedule = ${rq.requested_schedule}, updated_at = NOW() WHERE id = ${rq.kid_id}`;
+        await sql`
+          UPDATE kid_enrollments SET schedule = ${rq.requested_schedule}, updated_at = NOW(), updated_by = ${real}
+          WHERE kid_id = ${rq.kid_id} AND season = ${rq.season}
+        `;
+      } else if (rq.kind === 'add_kid') {
+        if (!rq.kid_id) return res.status(409).json({ error: 'That kid no longer exists.' });
+        if (rq.waiver_signature_id) {
+          const w = await sql`SELECT signed_at FROM waiver_signatures WHERE id = ${rq.waiver_signature_id}`;
+          if (!w[0] || !w[0].signed_at) {
+            return res.status(409).json({ error: 'The waiver for this child hasn’t been signed yet — the family signs first, then you approve.' });
+          }
+        }
+        await sql`
+          UPDATE kid_enrollments SET status = 'enrolled', updated_at = NOW(), updated_by = ${real}
+          WHERE kid_id = ${rq.kid_id} AND season = ${rq.season}
+        `;
+      } else if (rq.kind === 'remove_kid') {
+        if (rq.kid_id) {
+          // Same cleanup a direct removal does: current-year picks go too.
+          try {
+            await sql`
+              DELETE FROM class_signup_picks
+              WHERE school_year = ${rq.season} AND LOWER(family_email) = LOWER(${rq.family_email})
+                AND LOWER(kid_first_name) = LOWER(${rq.kid_first_name})
+            `;
+          } catch (e) { /* non-fatal */ }
+          await sql`DELETE FROM kids WHERE id = ${rq.kid_id}`;
+        }
+      } else {
+        return res.status(400).json({ error: 'Unknown request kind.' });
+      }
+    } else if (rq.kind === 'add_kid' && rq.kid_id) {
+      // Denied add: the pending kid row (and its pending enrollment) go away.
+      await sql`DELETE FROM kids WHERE id = ${rq.kid_id}`;
+    }
+
+    await sql`
+      UPDATE enrollment_change_requests
+      SET status = ${approve ? 'approved' : 'denied'}, decided_by = ${real}, decided_at = NOW(), decision_note = ${note}
+      WHERE id = ${id}
+    `;
+
+    const kindLabel = rq.kind === 'add_kid' ? 'Adding ' + rq.kid_first_name
+      : rq.kind === 'remove_kid' ? 'Removing ' + rq.kid_first_name
+      : rq.kid_first_name + '’s schedule change (' + rq.prior_schedule + ' → ' + rq.requested_schedule + ')';
+    await notifyEnrollment(sql, rq.family_email,
+      approve ? 'Approved: ' + kindLabel : 'Not approved: ' + kindLabel,
+      (approve ? 'The Membership Director approved this change.' : 'The Membership Director didn’t approve this change.')
+      + (note ? ' Note: ' + note : '')
+      + (approve && rq.kind === 'add_kid' ? ' Welcome, ' + rq.kid_first_name + '!' : ''));
+    return res.status(200).json({ ok: true, id, status: approve ? 'approved' : 'denied' });
+  } catch (err) {
+    console.error('enrollment-request-decide error:', err);
+    return res.status(500).json({ error: 'Could not apply that decision.' });
+  }
+}
+
 // ── Dev-only bug reports (bugs.html) ─────────────────────────────────
 // Helper testers on the dev site report bugs and watch fix status
 // without ever seeing GitHub. Backed by GitHub Issues on this repo so
@@ -7382,6 +7659,7 @@ module.exports = async function handler(req, res) {
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
+    if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
@@ -7410,6 +7688,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'bug-report') return handleBugReport(body, req, res);
     if (kind === 'bug-verify') return handleBugVerify(body, req, res);
+    if (kind === 'enrollment-request-decide') return handleEnrollmentRequestDecide(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);

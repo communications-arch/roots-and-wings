@@ -741,6 +741,9 @@
               });
             });
             (fam.kids || []).forEach(function (kid) {
+              // Awaiting Membership approval (Option B adds) → not in the
+              // Directory; the family sees them in Edit My Info only.
+              if (kid.pending_approval) return;
               allPeople.push({
                 name: kid.name,
                 lastName: kid.lastName || fam.name,
@@ -2595,6 +2598,9 @@
       });
     });
     fam.kids.forEach(function (kid) {
+      // Kids awaiting Membership approval (Option B adds) stay out of the
+      // Directory — the family sees them in Edit My Info only.
+      if (kid.pending_approval) return;
       allPeople.push({
         name: kid.name,
         lastName: kid.lastName || fam.name, // defaults to family name
@@ -8773,6 +8779,10 @@
             + '<button type="button" class="sc-btn" id="ws-todo-handbook-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
+          // Enrollment approval queue (Erin, 2026-07-19 Option B): schedule
+          // changes / kid adds / removals wait here for approval. Painted
+          // by loadEnrollmentRequestCount.
+          h += '<li id="ws-todo-enroll-req-item" hidden><button type="button" class="ws-link-btn" data-resource-action="enrollment-requests"><span class="ws-link-count" id="ws-enroll-req-count">0</span><span class="ws-link-icon">🗂️</span><span id="ws-enroll-req-label">Approve enrollment changes</span></button></li>';
           // General inquiries from the public Contact Us form — a separate
           // bucket from tour requests so questions don't mix into the tour
           // queue. Opens the pipeline scoped to inquiries. Listed FIRST,
@@ -8859,6 +8869,7 @@
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
         if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
+        if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
         // Personal event-planning tasks (Collaboration spaces): repaint
         // from cache instantly, then refresh from the server.
         if (typeof updateEventTasksTodoItems === 'function') updateEventTasksTodoItems();
@@ -18060,6 +18071,7 @@
       showBoardCalendarModal({ view: btn.getAttribute('data-cal-view') || undefined });
     }
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
+    else if (action === 'enrollment-requests' && typeof showEnrollmentRequestsModal === 'function') showEnrollmentRequestsModal();
     else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') {
       var wf = btn.getAttribute('data-welcome-filter');
       showWelcomeListModal(wf === '0' ? 0 : (wf === '1' ? 1 : (wf === '2' ? 2 : null)));
@@ -23021,6 +23033,115 @@
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
       })
       .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
+  }
+
+  // ══ Enrollment Requests queue (Membership Director) ══════════════
+  // Option B (Erin, 2026-07-19): families' schedule changes, kid adds
+  // (waiver-gated), and removals wait here; nothing dues- or roster-
+  // bearing moves until approved. Deny reverts (and un-adds).
+  function enrollReqLabel(r) {
+    var schedName = function (s) {
+      return s === 'morning' ? 'Morning only' : s === 'afternoon' ? 'Afternoon only' : s === 'all-day' ? 'All day' : (s || '?');
+    };
+    if (r.kind === 'add_kid') return 'Add ' + r.kid_first_name + ' (' + schedName(r.requested_schedule) + ')';
+    if (r.kind === 'remove_kid') return 'Remove ' + r.kid_first_name;
+    return r.kid_first_name + ': ' + schedName(r.prior_schedule) + ' → ' + schedName(r.requested_schedule);
+  }
+
+  function showEnrollmentRequestsModal() {
+    var body = renderReportModal({
+      title: 'Enrollment Requests',
+      subtitle: 'Schedule changes, added kids, and removals wait here until you approve them — dues and rosters only move on approval. Added kids also need their waiver signed before you can approve.',
+      bodyId: 'ws-enroll-req-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    loadEnrollmentRequestsInto(body);
+  }
+
+  function loadEnrollmentRequestsInto(body) {
+    fetch('/api/tour?list=enrollment_requests', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>';
+          return;
+        }
+        var rows = (res.data && res.data.requests) || [];
+        var pending = rows.filter(function (r) { return r.status === 'pending'; });
+        var decided = rows.filter(function (r) { return r.status !== 'pending'; }).slice(0, 15);
+        var h = '';
+        if (pending.length === 0) h += '<p class="ws-empty">Nothing waiting — all caught up. 🎉</p>';
+        pending.forEach(function (r) {
+          var waiverBit = '';
+          if (r.kind === 'add_kid') {
+            waiverBit = r.waiver_signed_at
+              ? ' <span class="ws-wv-ok">waiver signed</span>'
+              : ' <span class="ws-wv-pending">waiver not signed yet</span>';
+          }
+          h += '<div class="st-place-row">'
+            + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
+            + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>' + waiverBit
+            + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.requested_at)) + '</span>'
+            + '<div class="ws-srt-actions">'
+            + '<button type="button" class="sc-btn enroll-req-approve" data-req-id="' + r.id + '"'
+            + (r.kind === 'add_kid' && !r.waiver_signed_at ? ' disabled title="Waiting on the family to sign the waiver first"' : '')
+            + '>Approve</button>'
+            + '<button type="button" class="sc-btn sc-btn-del enroll-req-deny" data-req-id="' + r.id + '">Deny</button>'
+            + '</div></div>';
+        });
+        if (decided.length > 0) {
+          h += '<h5 class="ws-part-exempt-existing">Recent decisions</h5>';
+          decided.forEach(function (r) {
+            h += '<div class="st-place-row">'
+              + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
+              + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>'
+              + '<span class="' + (r.status === 'approved' ? 'ws-wv-ok' : 'ws-wv-declined') + '">' + (r.status === 'approved' ? '✓ Approved' : 'Denied') + '</span>'
+              + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.decided_at)) + '</span>'
+              + '</div>';
+          });
+        }
+        body.innerHTML = h;
+        function decide(id, approve, btn) {
+          btn.disabled = true;
+          fetch('/api/tour', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'enrollment-request-decide', id: id, approve: approve })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res2) {
+              if (!res2.ok) { alert((res2.data && res2.data.error) || 'Could not save the decision.'); btn.disabled = false; return; }
+              loadEnrollmentRequestsInto(body);
+              if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
+            })
+            .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+        }
+        body.querySelectorAll('.enroll-req-approve').forEach(function (btn) {
+          btn.addEventListener('click', function () { decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn); });
+        });
+        body.querySelectorAll('.enroll-req-deny').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var self = this;
+            rwArmTwoStep(self, 'deny', function () { decide(parseInt(self.getAttribute('data-req-id'), 10), false, self); });
+          });
+        });
+      })
+      .catch(function () { body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
+  }
+
+  function loadEnrollmentRequestCount() {
+    var item = document.getElementById('ws-todo-enroll-req-item');
+    if (!item) return; // not the Membership Director's tab
+    fetch('/api/tour?list=enrollment_requests', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var n = (d.requests || []).filter(function (r) { return r.status === 'pending'; }).length;
+        var pill = document.getElementById('ws-enroll-req-count');
+        if (pill) pill.textContent = n;
+        item.hidden = n <= 0;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () {});
   }
 
   // ── Group-liaison morning-class nag ──────────────────────────────
@@ -29986,6 +30107,22 @@
            '<input type="checkbox" data-field="photo_consent_optout"' + (optOut ? ' checked' : '') + '>' +
            '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use this child\'s photo, video, or quote in any co-op material.</span>' +
            '</label>';
+      // Pending Membership-approval chip (Option B). Adds also carry the
+      // waiver link until it's signed.
+      var pendReq = (state._pendingReqs || {})[String(k.name || '').trim().split(/\s+/)[0].toLowerCase()];
+      if (pendReq) {
+        var chipTxt = '';
+        if (pendReq.kind === 'add_kid') {
+          chipTxt = (pendReq.waiver_signed || !pendReq.waiver_token)
+            ? '⏳ Awaiting Membership approval to join the co-op.'
+            : '✍️ One more step: <a href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">sign the waiver for this child</a> — then Membership approves.';
+        } else if (pendReq.kind === 'remove_kid') {
+          chipTxt = '⏳ Removal requested — awaiting Membership approval (still enrolled until then).';
+        } else {
+          chipTxt = '⏳ Schedule change requested — awaiting Membership approval (the current schedule stays until then).';
+        }
+        h += '<div class="emi-full emi-pending-chip">' + chipTxt + '</div>';
+      }
       h += '</div>';
       h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-kid" data-idx="' + idx + '" aria-label="Remove kid">&times;</button>';
       h += '</div>';
@@ -30484,6 +30621,29 @@
               }
               alert(lines.join('\n\n'));
             }
+            // Option B (2026-07-19): changes that went to the Membership
+            // approval queue instead of applying. Tell the family what's
+            // pending, and for an added kid open the waiver to sign NOW —
+            // approval can't happen until it's signed.
+            var pendReqs = (resp.body && resp.body.pending_requests) || [];
+            if (pendReqs.length) {
+              var addWithWaiver = pendReqs.filter(function (p) { return p.kind === 'add_kid' && p.waiver_token; });
+              var summary = pendReqs.map(function (p) {
+                return p.kind === 'add_kid' ? 'Adding ' + p.kid_first_name
+                  : p.kind === 'remove_kid' ? 'Removing ' + p.kid_first_name
+                  : p.kid_first_name + '’s schedule change';
+              }).join(', ');
+              if (addWithWaiver.length) {
+                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
+                  + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
+                  + ': a waiver signature. The signing page opens next — approval can’t happen until it’s signed.');
+                addWithWaiver.forEach(function (p) {
+                  window.open('waiver.html?token=' + p.waiver_token, '_blank', 'noopener');
+                });
+              } else {
+                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
+              }
+            }
             // Refresh sheets data so the overlay renders immediately.
             return fetch('/api/sheets', { headers: { 'Authorization': 'Bearer ' + cred } })
               .then(function (r) { return r.json(); })
@@ -30515,6 +30675,24 @@
     render();
     personDetail.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+
+    // Pending approval requests for this family (Option B, 2026-07-19):
+    // badge the affected kid rows so the family sees "awaiting Membership"
+    // (and, for adds, the waiver link) right in the form. Best-effort.
+    fetch('/api/tour?list=enrollment_requests&family_email=' + encodeURIComponent(state.family_email), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        var map = {};
+        (d.requests || []).forEach(function (rq) {
+          if (rq.status !== 'pending') return;
+          var key = String(rq.kid_first_name || '').trim().split(/\s+/)[0].toLowerCase();
+          if (key && !map[key]) map[key] = rq;
+        });
+        state._pendingReqs = map;
+        if (Object.keys(map).length > 0) render();
+      })
+      .catch(function () { /* chips just don't show */ });
 
     // Super-user only: fetch the family's current alternate logins (not
     // carried in the FAMILIES directory payload) and drop them into the admin
