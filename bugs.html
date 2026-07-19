@@ -39,6 +39,7 @@
     }
     .bug-form-msg { font-size: 0.9rem; margin: 10px 0 0; }
     .bug-shot-hint { font-size: 0.85rem; color: var(--color-text-light); margin: 6px 0 0; }
+    .bug-verify-btn { flex-shrink: 0; white-space: nowrap; }
     .bug-form-msg.ok { color: var(--color-success); font-weight: 700; }
     .bug-form-msg.err { color: var(--color-error); font-weight: 700; }
     .bug-list-title { font-size: 1.3rem; margin-bottom: 14px; }
@@ -276,15 +277,44 @@
       sorted.forEach(function (bug) {
         var st = bugStatus(bug);
         var when = friendlyDate(bug.created_at);
+        // "Fixed — please re-test" cards get a ✓ Works now button so
+        // helpers can verify fixes themselves (Erin trusts her testers).
+        var canVerify = st.cls === 'bug-status-fixed';
         html += '<div class="bug-card">'
           + '<div>'
           + '<div class="bug-card-title">' + escapeHtml(bug.title) + '</div>'
           + (when ? '<div class="bug-card-date">Reported ' + escapeHtml(when) + '</div>' : '')
           + '</div>'
           + '<span class="bug-status ' + st.cls + '">' + escapeHtml(st.text) + '</span>'
+          + (canVerify
+            ? '<button type="button" class="btn btn-primary btn-sm bug-verify-btn" data-bug-number="' + parseInt(bug.number, 10) + '">✓ Works now</button>'
+            : '')
           + '</div>';
       });
       listEl.innerHTML = html;
+      listEl.querySelectorAll('.bug-verify-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          btn.disabled = true;
+          btn.textContent = 'Saving…';
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: authHeaders(true),
+            body: JSON.stringify({ kind: 'bug-verify', number: parseInt(btn.getAttribute('data-bug-number'), 10) })
+          })
+            .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+            .then(function (out) {
+              if (out.status === 200 && out.data && out.data.ok) { loadBugs(); return; }
+              btn.disabled = false;
+              btn.textContent = '✓ Works now';
+              alert((out.data && out.data.error) || 'Could not save that — please try again.');
+            })
+            .catch(function () {
+              btn.disabled = false;
+              btn.textContent = '✓ Works now';
+              alert('Could not save that — please try again.');
+            });
+        });
+      });
     }
 
     function loadBugs() {

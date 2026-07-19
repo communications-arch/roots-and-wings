@@ -7103,6 +7103,54 @@ async function uploadBugScreenshot(shot) {
   return blob.url;
 }
 
+// POST kind='bug-verify' — a helper confirms a fixed-on-dev bug works
+// (Erin, 2026-07-19: helpers are trusted to verify fixes themselves).
+// Adds the 'verified' label + a signed comment. Only valid on OPEN
+// issues currently labeled fixed-on-dev — anything else 409s so the
+// button can't strand a bug in a weird state.
+async function handleBugVerify(body, req, res) {
+  if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ error: 'Not found.' });
+  const auth = await verifyBugReporter(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const token = process.env.GITHUB_BUGLOG_TOKEN;
+  if (!token) return res.status(503).json({ error: 'Bug log not configured' });
+  const num = parseInt(body.number, 10);
+  if (!Number.isFinite(num) || num < 1) return res.status(400).json({ error: 'number required' });
+  try {
+    const issueUrl = 'https://api.github.com/repos/' + BUGLOG_REPO + '/issues/' + num;
+    const cur = await fetch(issueUrl, { headers: bugLogGithubHeaders(token) });
+    if (!cur.ok) return res.status(404).json({ error: 'That bug isn’t on the list anymore.' });
+    const issue = await cur.json();
+    const labels = (issue.labels || []).map(l => String((l && l.name) || ''));
+    if (issue.state !== 'open' || labels.indexOf('fixed-on-dev') === -1 || labels.indexOf('verified') !== -1) {
+      return res.status(409).json({ error: 'That one isn’t waiting on a re-test right now — refresh the list.' });
+    }
+    const cm = await fetch(issueUrl + '/comments', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, bugLogGithubHeaders(token)),
+      body: JSON.stringify({ body: '✅ Verified on dev by ' + (auth.name || auth.email) + ' (' + auth.email + ') via the dev portal bug log.' })
+    });
+    if (cm.status !== 201) {
+      console.error('Bug verify comment error:', cm.status, await cm.text().catch(() => ''));
+      return res.status(502).json({ error: 'Could not save that right now — please try again.' });
+    }
+    const lb = await fetch(issueUrl + '/labels', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, bugLogGithubHeaders(token)),
+      body: JSON.stringify({ labels: ['verified'] })
+    });
+    if (!lb.ok) {
+      console.error('Bug verify label error:', lb.status, await lb.text().catch(() => ''));
+      return res.status(502).json({ error: 'Could not save that right now — please try again.' });
+    }
+    bugListCache = null;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('Bug verify error:', err);
+    return res.status(502).json({ error: 'Could not save that right now — please try again.' });
+  }
+}
+
 // POST kind='bug-report' — file a tester's report as a GitHub issue.
 async function handleBugReport(body, req, res) {
   if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ error: 'Not found.' });
@@ -7192,6 +7240,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'bug-report') return handleBugReport(body, req, res);
+    if (kind === 'bug-verify') return handleBugVerify(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);
