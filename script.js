@@ -3177,7 +3177,7 @@
       // Kids shown in family grid below
     }
     if (isNewMemberPerson(person)) {
-      html += '<p class="detail-new-member">\u{1F331} First-year family</p>';
+      html += '<p class="detail-new-member"><img class="new-fam-icon" src="brand/secondary/accent-24.png" alt=""> First-year family</p>';
     }
     if (isNotReEnrolledPerson(person)) {
       html += '<p class="detail-not-reenrolled">⏳ Not re-enrolled — this family hasn’t registered for the upcoming year yet.</p>';
@@ -8725,6 +8725,12 @@
           var rhCount  = (_roleHolderTodoState && _roleHolderTodoState.count) || 0;
           var rhLabel  = (_roleHolderTodoState && _roleHolderTodoState.label) || 'Confirm role holders';
           h += '<li id="ws-todo-role-holders-item"' + (rhHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="confirm-role-holders"><span class="ws-link-count" id="ws-role-holders-count">' + rhCount + '</span><span class="ws-link-icon">🧭</span><span id="ws-role-holders-label">' + escapeHtml(rhLabel) + '</span></button></li>';
+          // Review the Membership Handbook before the Ice Cream Social
+          // (Erin, 2026-07-19). Date-gated by loadHandbookReviewTodo —
+          // shows the ~3 weeks leading up to the social, opens the
+          // handbook PDF. Mirrors the Admin Calendar's derived
+          // "Review & update the Membership Handbook" trigger date.
+          h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">📘</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button></li>';
         }
         if (role === 'Membership Director') {
           // General inquiries from the public Contact Us form — a separate
@@ -8812,6 +8818,7 @@
         // date-gated pre-co-op outreach nudge.
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
+        if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
         // Personal event-planning tasks (Collaboration spaces): repaint
         // from cache instantly, then refresh from the server.
         if (typeof updateEventTasksTodoItems === 'function') updateEventTasksTodoItems();
@@ -11617,7 +11624,8 @@
       idxs.forEach(function (i) {
         var row = rows[i];
         var expanded = !!state.expanded[i];
-        h += '<tr class="ws-srt-row' + (opts.expandable ? ' ws-srt-row-expandable' : '') + '" data-row-idx="' + i + '">';
+        var extraRowCls = (typeof opts.rowClass === 'function') ? (opts.rowClass(row) || '') : '';
+        h += '<tr class="ws-srt-row' + (opts.expandable ? ' ws-srt-row-expandable' : '') + (extraRowCls ? ' ' + extraRowCls : '') + '" data-row-idx="' + i + '">';
         if (opts.expandable) {
           h += '<td class="ws-srt-caret">' + (expanded ? '\u25BC' : '\u25B6') + '</td>';
         }
@@ -11682,6 +11690,13 @@
           render();
         });
       });
+
+      // Caller hook — re-runs the caller's row-button wiring after EVERY
+      // render, including the internal sort-header re-renders that used to
+      // orphan externally-attached listeners (Erin, 2026-07-19: "Edit
+      // button doesn't work for Merchandise Inventory" — it died after a
+      // sort click). Runs before the expandable wiring; order irrelevant.
+      if (typeof opts.onRender === 'function') opts.onRender(containerEl);
 
       // Row click → toggle expansion (expandable mode). Clicks that
       // originate on a button, link, or inside an Actions cell are
@@ -11830,6 +11845,7 @@
   var _merchActiveTab = 'orders'; // 'orders' | 'inventory'
   var _merchInventoryEditId = null;
   var _merchInventoryItemFilter = 'all';
+  var _merchOrderEditId = null; // order id with the in-place edit panel open
 
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'customer_name', label: 'Name', type: 'string',
@@ -11878,6 +11894,11 @@
     },
     { key: 'created_at', label: 'Ordered', type: 'date',
       render: function (o) { return formatReportDate(o.created_at); }
+    },
+    { key: '_actions', label: '', type: 'string', sortable: false,
+      render: function (o) {
+        return '<button type="button" class="sc-btn merch-order-edit-btn" data-merch-id="' + o.id + '">Edit</button>';
+      }
     }
   ];
 
@@ -11980,16 +12001,9 @@
   };
 
   function showMerchOrdersModal() {
-    // Header chrome: Add Order always available — if Inventory tab is
-    // active when it's clicked, we flip back to Orders first since the
-    // form lives in that tab's content area.
-    var icons = [
-      { label: 'Add Order', icon: ICON_SVG.add, aria: 'Record a manual order', action: function () {
-          if (_merchActiveTab !== 'orders') { _merchActiveTab = 'orders'; renderMerchTabbedBody(); }
-          toggleMerchAddOrderForm();
-        }
-      }
-    ];
+    // Add Order lives in the Orders tab's toolbar above the table (the
+    // standard add placement, Erin 2026-07-19) — not in the header chrome.
+    var icons = [];
     var outer = renderReportModal({
       title: 'Merchandise',
       subtitle: 'Customer orders from the public site plus on-hand inventory counts. Use the tabs to switch.',
@@ -12002,6 +12016,7 @@
     // Reset per-open state: tab to Orders, clear any stale edit.
     _merchActiveTab = 'orders';
     _merchInventoryEditId = null;
+    _merchOrderEditId = null;
     renderMerchTabbedBody();
     // Kick off both loaders. Orders fills its tab; inventory loads in
     // the background so the low-stock badge on the Inventory tab is
@@ -12231,11 +12246,20 @@
     countsHtml += '<span class="ws-wv-ok">' + delivered + ' Delivered</span>';
     countsHtml += '</div>';
 
+    // "+ Add order" toolbar above the table — standard add placement
+    // (Admin Calendar / Facilities pattern; Erin, 2026-07-19).
+    var addToolbar = '<div class="coop-cal-toolbar">'
+      + '<button id="ws-merch-add-order-btn" class="btn btn-outline-dark btn-sm" type="button">+ Add order</button>'
+      + '</div>';
     if (total === 0) {
-      body.innerHTML = countsHtml + '<p class="ws-empty">No orders yet — the public form is open and will land orders here.</p>';
+      body.innerHTML = countsHtml + addToolbar + '<p class="ws-empty">No orders yet — the public form is open and will land orders here.</p>';
+      var addBtnEmpty = body.querySelector('#ws-merch-add-order-btn');
+      if (addBtnEmpty) addBtnEmpty.addEventListener('click', toggleMerchAddOrderForm);
       return;
     }
-    body.innerHTML = countsHtml + '<div id="ws-merch-orders-table-target"></div>';
+    body.innerHTML = countsHtml + addToolbar + '<div id="ws-merch-orders-table-target"></div>';
+    var addBtn = body.querySelector('#ws-merch-add-order-btn');
+    if (addBtn) addBtn.addEventListener('click', toggleMerchAddOrderForm);
     var target = body.querySelector('#ws-merch-orders-table-target');
 
     function rowsForFilter() {
@@ -12274,9 +12298,25 @@
         }
       });
       renderSortableTable(target, cols, rowsForFilter(), {
-        initialSort: { key: 'created_at', dir: 'desc' }
+        initialSort: { key: 'created_at', dir: 'desc' },
+        rowKey: function (r) { return r.id; },
+        editRowKey: _merchOrderEditId,
+        renderEditRow: merchOrderEditRowHtml,
+        onRender: function () { wireMerchOrdersRowActions(); }
       });
-      // Wire pill click → optimistic toggle.
+      // Wire pill click → optimistic toggle + Edit → in-place panel beneath
+      // the row. Runs via onRender so the buttons survive the table's own
+      // sort-header re-renders (same fix as Inventory).
+      function wireMerchOrdersRowActions() {
+      target.querySelectorAll('.merch-order-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var id = parseInt(btn.getAttribute('data-merch-id'), 10);
+          _merchOrderEditId = (_merchOrderEditId === id) ? null : id;
+          renderTable();
+        });
+      });
+      wireMerchOrderEdit(target, function () { renderMerchOrdersBody(body); });
       target.querySelectorAll('.merch-toggle-btn').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
@@ -12313,6 +12353,7 @@
           });
         });
       });
+      }
     }
     renderTable();
   }
@@ -12399,20 +12440,22 @@
         initialSort: { key: 'item', dir: 'asc' },
         rowKey: function (r) { return r.id; },
         editRowKey: _merchInventoryEditId,
-        renderEditRow: merchInvEditRowHtml
+        renderEditRow: merchInvEditRowHtml,
+        // Edit → toggle the in-place edit panel BENEATH the row (the common
+        // tabular pattern). Wired via onRender so the buttons survive the
+        // table's own sort-header re-renders.
+        onRender: function () {
+          target.querySelectorAll('.merch-inv-edit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var id = parseInt(btn.getAttribute('data-inv-id'), 10);
+              _merchInventoryEditId = (_merchInventoryEditId === id) ? null : id;
+              renderTable();
+            });
+          });
+          wireMerchInvEdit(target);
+        }
       });
-      // Edit → toggle the in-place edit panel BENEATH the row (Erin,
-      // 2026-07-18: common tabular pattern — the row stays visible, matching
-      // Facilities + the Admin Calendar, instead of replacing the row).
-      target.querySelectorAll('.merch-inv-edit-btn').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-          e.stopPropagation();
-          var id = parseInt(btn.getAttribute('data-inv-id'), 10);
-          _merchInventoryEditId = (_merchInventoryEditId === id) ? null : id;
-          renderTable();
-        });
-      });
-      wireMerchInvEdit(target);
     }
     renderTable();
   }
@@ -12474,6 +12517,100 @@
           if (ib) renderMerchInventoryBody(ib);
           var nav = document.querySelector('.merch-tab-nav');
           if (nav) renderMerchTabNav(nav);
+        }).catch(function (err) {
+          saveBtn.disabled = false;
+          if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
+        });
+    });
+  }
+
+  // ── Orders: in-place edit panel (Erin, 2026-07-19) ──
+  // Same shape as the manual-add form, rendered beneath the order's row via
+  // the shared table's editRowKey. Item select drives size/color options.
+  function merchOrderCatalogKeyFor(label) {
+    var keys = Object.keys(MERCH_CATALOG_CLIENT);
+    for (var i = 0; i < keys.length; i++) {
+      if (MERCH_CATALOG_CLIENT[keys[i]].label === label || keys[i] === String(label || '').toLowerCase()) return keys[i];
+    }
+    return '';
+  }
+  function merchOrderEditRowHtml(o) {
+    var curKey = merchOrderCatalogKeyFor(o.item);
+    var itemOpts = Object.keys(MERCH_CATALOG_CLIENT).map(function (key) {
+      return '<option value="' + key + '"' + (key === curKey ? ' selected' : '') + '>' + escapeHtml(MERCH_CATALOG_CLIENT[key].label) + '</option>';
+    }).join('');
+    var h = '<div class="merch-inv-edit merch-order-edit" data-order-id="' + o.id + '">';
+    h += '<div class="merch-inv-edit-title"><strong>Edit order</strong> <span class="ws-wv-context">#' + o.id + ' · ordered ' + escapeHtml(formatReportDate(o.created_at)) + '</span></div>';
+    h += '<div class="merch-inv-edit-grid">';
+    h += '<label><span>Customer name</span><input type="text" maxlength="200" id="merch-ord-name-' + o.id + '" value="' + escapeAttr(o.customer_name || '') + '"></label>';
+    h += '<label><span>Email</span><input type="email" maxlength="200" id="merch-ord-email-' + o.id + '" value="' + escapeAttr(o.customer_email || '') + '"></label>';
+    h += '<label><span>Phone</span><input type="tel" maxlength="50" id="merch-ord-phone-' + o.id + '" value="' + escapeAttr(o.customer_phone || '') + '"></label>';
+    h += '<label><span>Item</span><select id="merch-ord-item-' + o.id + '">' + itemOpts + '</select></label>';
+    h += '<label id="merch-ord-size-wrap-' + o.id + '"><span>Size</span><select id="merch-ord-size-' + o.id + '"></select></label>';
+    h += '<label id="merch-ord-color-wrap-' + o.id + '"><span>Color</span><select id="merch-ord-color-' + o.id + '"></select></label>';
+    h += '<label><span>Quantity</span><input type="number" min="1" max="999" id="merch-ord-qty-' + o.id + '" value="' + (o.qty || 1) + '"></label>';
+    h += '<label class="merch-inv-edit-notes"><span>Notes (optional)</span><textarea maxlength="1000" rows="2" id="merch-ord-notes-' + o.id + '">' + escapeHtml(o.notes || '') + '</textarea></label>';
+    h += '</div>';
+    h += '<div class="merch-inv-edit-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm merch-order-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm merch-order-save" data-merch-id="' + o.id + '">Save</button>';
+    h += '<span class="merch-inv-status" role="status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+  function wireMerchOrderEdit(target, refresh) {
+    var panel = target.querySelector('.merch-order-edit');
+    if (!panel) return;
+    var id = parseInt(panel.getAttribute('data-order-id'), 10);
+    var order = (_merchOrdersCache || []).filter(function (o) { return o.id === id; })[0];
+    var itemSel = document.getElementById('merch-ord-item-' + id);
+    var sizeSel = document.getElementById('merch-ord-size-' + id);
+    var colorSel = document.getElementById('merch-ord-color-' + id);
+    var sizeWrap = document.getElementById('merch-ord-size-wrap-' + id);
+    var colorWrap = document.getElementById('merch-ord-color-wrap-' + id);
+    function syncVariants(preserve) {
+      var def = MERCH_CATALOG_CLIENT[itemSel.value] || { sizes: [], colors: [] };
+      if (def.sizes.length === 0) { sizeWrap.style.display = 'none'; sizeSel.innerHTML = ''; }
+      else {
+        sizeWrap.style.display = '';
+        sizeSel.innerHTML = def.sizes.map(function (s) {
+          return '<option value="' + escapeAttr(s) + '"' + (preserve && order && order.size === s ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
+        }).join('');
+      }
+      if (def.colors.length === 0) { colorWrap.style.display = 'none'; colorSel.innerHTML = ''; }
+      else {
+        colorWrap.style.display = '';
+        colorSel.innerHTML = def.colors.map(function (c) {
+          return '<option value="' + escapeAttr(c) + '"' + (preserve && order && order.color === c ? ' selected' : '') + '>' + escapeHtml(c) + '</option>';
+        }).join('');
+      }
+    }
+    syncVariants(true);
+    itemSel.addEventListener('change', function () { syncVariants(false); });
+    panel.querySelector('.merch-order-cancel').addEventListener('click', function () {
+      _merchOrderEditId = null;
+      refresh();
+    });
+    var saveBtn = panel.querySelector('.merch-order-save');
+    saveBtn.addEventListener('click', function () {
+      var statusEl = panel.querySelector('.merch-inv-status');
+      var g = function (p) { var el = document.getElementById('merch-ord-' + p + '-' + id); return el ? el.value : ''; };
+      var payload = {
+        kind: 'merch-order-edit', id: id,
+        name: g('name'), email: g('email'), phone: g('phone'),
+        item: itemSel.value, size: sizeSel ? sizeSel.value : '', color: colorSel ? colorSel.value : '',
+        qty: g('qty'), notes: g('notes')
+      };
+      saveBtn.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+          var idx = (_merchOrdersCache || []).findIndex(function (o) { return o.id === id; });
+          if (idx !== -1 && res.data.order) _merchOrdersCache[idx] = res.data.order;
+          _merchOrderEditId = null;
+          refresh();
         }).catch(function (err) {
           saveBtn.disabled = false;
           if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
@@ -12598,7 +12735,7 @@
       sortValue: function (r) { return r.isNewMember ? 'z' : 'a'; },
       render: function (r) {
         return r.isNewMember
-          ? '<span class="ws-wv-new">\u{1F331} New</span>'
+          ? '<span class="ws-wv-new"><img class="new-fam-icon" src="brand/secondary/accent-24.png" alt=""> New</span>'
           : '<span class="ws-srt-actions-empty">&mdash;</span>';
       }
     },
@@ -12799,11 +12936,17 @@
       }
       function regsForFilter() {
         return regs.filter(function (r) {
-          // Declined rows are their own bucket: hidden everywhere except
-          // behind the Declined filter, where they're the only rows shown.
+          // Declined rows work like archived/deleted rows elsewhere (Erin,
+          // 2026-07-19): visible in the default view — dimmed, with an Undo
+          // action — but excluded from every scoped filter except their own
+          // Declined pill, and never counted as paid/pending.
           if (_membershipFilter === 'declined') {
             if (!r.declined_at) return false;
-          } else if (r.declined_at) return false;
+          } else if (r.declined_at) {
+            if (_membershipFilter !== 'all') return false;
+            if (_membershipNewFilter !== 'all' || _membershipTrackFilter !== 'all') return false;
+            return true;
+          }
           var paid = String(r.payment_status || '').toLowerCase() === 'paid';
           if (_membershipFilter === 'paid' && !paid) return false;
           if (_membershipFilter === 'pending' && paid) return false;
@@ -12845,7 +12988,8 @@
         renderSortableTable(tableTarget, cols, regsForFilter(), {
           initialSort: { key: 'created_at', dir: 'desc' },
           expandable: true,
-          renderDetail: renderMembershipRegDetail
+          renderDetail: renderMembershipRegDetail,
+          rowClass: function (r) { return r.declined_at ? 'ws-srt-row-declined' : ''; }
         });
       }
 
@@ -14431,7 +14575,12 @@
     .then(function (res) {
       if (!res.ok) { body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
       var list = (res.data && res.data.exemptions) || [];
-      var h = '<div class="ws-part-exempt-form"><h5>Add / Edit</h5>';
+      // "+ Add exemption" toolbar above the table (standard add placement,
+      // Erin 2026-07-19) — the form stays hidden until Add or a row's Edit.
+      var h = '<div class="coop-cal-toolbar">';
+      h += '<button type="button" id="ws-part-exempt-add" class="btn btn-outline-dark btn-sm">+ Add exemption</button>';
+      h += '</div>';
+      h += '<div class="ws-part-exempt-form"' + (prefill ? '' : ' hidden') + '><h5>Add / Edit</h5>';
       h += participationExemptionFormHtml(prefill || null);
       h += '</div>';
       h += '<h5 class="ws-part-exempt-existing">Current & past exemptions</h5>';
@@ -14456,6 +14605,15 @@
 
       wireParticipationExemptionForm(body, prefill || null);
 
+      var exAddBtn = body.querySelector('#ws-part-exempt-add');
+      if (exAddBtn) exAddBtn.addEventListener('click', function () {
+        var form = body.querySelector('.ws-part-exempt-form');
+        if (!form.hidden) { form.hidden = true; return; } // toggle closed
+        form.hidden = false;
+        form.innerHTML = '<h5>Add exemption</h5>' + participationExemptionFormHtml(null);
+        wireParticipationExemptionForm(body, null);
+      });
+
       body.querySelectorAll('.ws-part-exempt-edit').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var row = this.closest('tr');
@@ -14463,6 +14621,7 @@
           var target = list.filter(function (x) { return String(x.id) === String(id); })[0];
           if (!target) return;
           var form = body.querySelector('.ws-part-exempt-form');
+          form.hidden = false;
           form.innerHTML = '<h5>Edit exemption</h5>' + participationExemptionFormHtml(target);
           wireParticipationExemptionForm(body, target);
         });
@@ -15092,20 +15251,24 @@
     });
     html += '</div>';
 
-    // Count
+    // Count + Add toolbar — the Add button sits above the table like every
+    // other tabular surface (Admin Calendar / Facilities pattern; Erin,
+    // 2026-07-19: "the add button for tabular data should be in the same
+    // place").
     var totalCount = state.items ? state.items.length : 0;
+    html += '<div class="coop-cal-toolbar">';
+    if (state.canEdit) {
+      html += '<button id="sc-add-btn" class="btn btn-outline-dark btn-sm" type="button">+ Add item</button>';
+    }
     html += '<div class="sc-count">Showing ' + rows.length + ' of ' + totalCount + ' items</div>';
+    html += '</div>';
 
     // Item list
     html += '<div class="sc-list">' + renderSupplyListBody(rows, state) + '</div>';
 
     // Footer
     html += '<div class="sc-footer">';
-    if (state.canEdit) {
-      html += '<button id="sc-add-btn" class="sc-add">+ Add Item</button>';
-    } else {
-      html += '<span></span>';
-    }
+    html += '<span></span>';
     var coord = getSupplyCoordinatorName();
     if (coord) {
       html += '<span class="sc-coord">Supply Coordinator: <strong>' + escapeAttr(coord) + '</strong></span>';
@@ -15340,9 +15503,16 @@
 
     var html = '<p class="sc-intro">Add, rename, or remove the locations that appear in the supply closet location dropdown.</p>';
 
+    // Add row ABOVE the list — same placement as every other tabular
+    // surface's add control (Erin, 2026-07-19).
+    html += '<div class="sc-loc-add-row">';
+    html += '<input class="cl-input sc-loc-new-input" placeholder="New location name…" id="sc-loc-new-input">';
+    html += '<button class="sc-btn sc-save" id="sc-loc-add-btn">Add</button>';
+    html += '</div>';
+
     html += '<div class="sc-locs-list">';
     if (locs.length === 0) {
-      html += '<div class="sc-empty">No locations yet. Add one below.</div>';
+      html += '<div class="sc-empty">No locations yet. Add one above.</div>';
     }
     locs.forEach(function (loc) {
       html += '<div class="sc-loc-row" data-loc-id="' + loc.id + '">';
@@ -15351,11 +15521,6 @@
       html += '<button class="sc-btn sc-loc-delete" data-loc-id="' + loc.id + '" title="Delete location">&times;</button>';
       html += '</div>';
     });
-    html += '</div>';
-
-    html += '<div class="sc-loc-add-row">';
-    html += '<input class="cl-input sc-loc-new-input" placeholder="New location name…" id="sc-loc-new-input">';
-    html += '<button class="sc-btn sc-save" id="sc-loc-add-btn">Add</button>';
     html += '</div>';
 
     body.innerHTML = html;
@@ -20338,7 +20503,8 @@
       return ['President', 'Vice President', 'Communications Director'].indexOf(r) !== -1;
     });
     var icons = [];
-    if (canAddRole) icons.push({ label: 'Add Role', icon: ICON_SVG.add, aria: 'Add a new role', action: function () { showRoleEditModal(null); } });
+    // Add Role now lives in the body toolbar above the tree — the standard
+    // add placement (Erin, 2026-07-19) — not in the header chrome.
     icons.push({ label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } });
     var body = renderReportModal({
       title: 'Roles & Committees',
@@ -20355,6 +20521,7 @@
     // separate #roles-mgr-tree target so the toolbar isn't re-created
     // on every reload.
     var toolbar = '<div class="roles-mgr-toolbar">';
+    if (canAddRole) toolbar += '<button id="roles-mgr-add-role" class="btn btn-outline-dark btn-sm" type="button">+ Add role</button>';
     toolbar += '<label class="roles-mgr-yearpick">School year ';
     toolbar += '<select id="roles-school-year">';
     ROLES_MGR_YEARS.forEach(function (yr) {
@@ -20387,6 +20554,8 @@
       + '<div id="roles-mgr-pm" hidden></div>'
       + '<div id="roles-mgr-cleaning" hidden></div>';
 
+    var addRoleBtn = document.getElementById('roles-mgr-add-role');
+    if (addRoleBtn) addRoleBtn.addEventListener('click', function () { showRoleEditModal(null); });
     document.getElementById('roles-show-archived').addEventListener('change', function () {
       _rolesMgrState.showArchived = this.checked;
       renderRolesManagerTree();
@@ -21662,9 +21831,10 @@
       initialSort: { key: 'name', dir: 'asc' },
       rowKey: function (r) { return r.id; },
       editRowKey: _facAdminState.editRowId,
-      renderEditRow: facEditRowHtml
+      renderEditRow: facEditRowHtml,
+      // onRender so Edit/Archive/Restore survive sort-header re-renders.
+      onRender: function () { wireFacilitiesAdmin(tableTarget); }
     });
-    wireFacilitiesAdmin(tableTarget);
   }
 
   // In-place edit panel for a room (renders beneath its row via the shared
@@ -22639,6 +22809,34 @@
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
+  // Comms Director: "Review & update the Membership Handbook" — shows the
+  // ~3 weeks before the Ice Cream Social (the Wednesday strictly before the
+  // first session's start, same rule the Admin Calendar derives), through
+  // the social itself. Click opens the handbook PDF. (Erin, 2026-07-19.)
+  function loadHandbookReviewTodo() {
+    var item = document.getElementById('ws-todo-handbook-item');
+    if (!item) return; // not the Comms Director's tab
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var s1 = welcomeNextCoopStart();
+    var ics = '';
+    if (s1) {
+      var d = new Date(s1 + 'T00:00:00Z');
+      if (!isNaN(d.getTime())) {
+        d.setUTCDate(d.getUTCDate() - 1);
+        while (d.getUTCDay() !== 3) d.setUTCDate(d.getUTCDate() - 1);
+        ics = d.toISOString().slice(0, 10);
+      }
+    }
+    var show = !!(ics && today >= welcomeDaysBefore(ics, 21) && today <= ics);
+    item.hidden = !show;
+    var btn = document.getElementById('ws-todo-handbook-btn');
+    if (btn && !btn._rwWired) {
+      btn._rwWired = true;
+      btn.addEventListener('click', function () { window.open('/handbook.pdf', '_blank', 'noopener'); });
+    }
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
   // ── Group-liaison morning-class nag ──────────────────────────────
   // "<Group> Liaison" To Do: shows when a session is within 2 weeks of
   // its start (through the session's end) and the group has no placed
@@ -23089,9 +23287,13 @@
         return row + '</div>';
       }).join('');
     } else {
-      h = '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + (d.assistant_gaps || []).map(function (g) {
-        return '<li><strong>' + escapeHtml(g.class_name) + '</strong> <span class="ws-wv-context">' + escapeHtml(BLOCK_LABELS_ST[g.block] || g.block) + '</span> — needs ' + g.needs + ' more</li>';
-      }).join('') + '</ul>';
+      // Same st-place-row layout as the adults/kids panels (Erin,
+      // 2026-07-19: VP To Do panels were each doing their own thing).
+      h = (d.assistant_gaps || []).map(function (g) {
+        return '<div class="st-place-row"><strong>' + escapeHtml(g.class_name) + '</strong> '
+          + '<span class="ws-wv-context">' + escapeHtml(BLOCK_LABELS_ST[g.block] || g.block) + '</span> '
+          + '<span class="ws-wv-context">needs ' + g.needs + ' more</span></div>';
+      }).join('');
     }
     body.innerHTML = h || '<p class="ws-empty">All caught up — nothing pending.</p>';
 
@@ -23177,7 +23379,7 @@
       h += '<span class="ws-wv-context">' + escapeHtml(c.hour === 'both' ? 'Both PM hours' : (c.hour === 'PM2' ? 'PM Hour 2' : 'PM Hour 1'))
         + (c.teacher ? ' · led by ' + escapeHtml(c.teacher) : '') + '</span>';
       h += '<span class="signup-class-count">' + c.firsts + ' signed up · max ' + c.max + ' (+' + c.over + ')</span>';
-      h += '<label class="st-place-slot">Max <input type="number" class="cl-input om-max-input" min="1" max="60" value="' + c.max + '" style="width:70px;"></label>';
+      h += '<label class="st-place-slot">Max <input type="number" class="cl-input om-max-input st-num-input" min="1" max="60" value="' + c.max + '"></label>';
       h += '<button type="button" class="btn btn-primary btn-sm om-set-max">Set max</button>';
       h += '<button type="button" class="sc-btn om-duplicate">Add 2nd section</button>';
       h += '<button type="button" class="sc-btn om-lottery">Run lottery</button>';
@@ -23260,7 +23462,7 @@
       h += '<span class="ws-wv-context">"' + escapeHtml(m.from_class) + '" lottery</span>';
       h += m.moved_to
         ? '<span class="signup-class-count">→ moved to “' + escapeHtml(m.moved_to) + '”</span>'
-        : '<span class="signup-class-count" style="color:var(--color-coral,#d35a48);">→ no 2nd choice — place them from “Place kids”</span>';
+        : '<span class="signup-class-count st-flag-coral">→ no 2nd choice — place them from “Place kids”</span>';
       h += '<button type="button" class="btn btn-primary btn-sm lm-told">Mark told</button>';
       h += '</div>';
       return h;
@@ -23301,7 +23503,7 @@
         if (!body) return;
         var list = (d && d.classes) || [];
         if (!list.length) { body.innerHTML = '<p class="ws-empty">No lotteries have run this school year.</p>'; return; }
-        body.innerHTML = '<ul class="absence-slot-list signup-detail-list" style="margin-top:8px;">' + list.map(function (c) {
+        body.innerHTML = '<ul class="absence-slot-list signup-detail-list st-list-spaced">' + list.map(function (c) {
           return '<li><strong>' + escapeHtml(c.class_name) + '</strong>'
             + ' <span class="ws-wv-context">Session ' + c.session + (c.leader ? ' · ' + escapeHtml(c.leader) : '') + '</span>'
             + ' — max ' + c.max + ', ' + c.bumped + ' bumped</li>';
@@ -26114,7 +26316,7 @@
         }
         var h = '<div class="ws-msum-grid">';
         h += msumTile(returningFams, 'Returning ' + (returningFams === 1 ? 'family' : 'families'), 'returning', '');
-        h += msumTile(newFams, '🌱 New ' + (newFams === 1 ? 'family' : 'families'), 'new', 'ws-msum-stat-new');
+        h += msumTile(newFams, '<img class="new-fam-icon" src="brand/secondary/accent-24.png" alt=""> New ' + (newFams === 1 ? 'family' : 'families'), 'new', 'ws-msum-stat-new');
         h += msumTile(total, 'Total ' + (total === 1 ? 'family' : 'families'), 'all', '');
         h += msumTile(totalKids, (totalKids === 1 ? 'Child' : 'Children'), 'all', '');
         h += '</div>';
@@ -26205,8 +26407,8 @@
       var kids = Array.isArray(f.kids) ? f.kids : [];
       h += '<li class="ws-roster-item">';
       h += '<div class="ws-roster-head">';
-      // Icon before the name: 🌱 marks a new family.
-      h += '<span class="ws-roster-name">' + (f.isNewMember ? '<span class="ws-roster-newicon" title="New family">🌱</span>' : '') + escapeHtml(f.name || '(family)') + '</span>';
+      // Icon before the name: the gold-bloom accent marks a new family.
+      h += '<span class="ws-roster-name">' + (f.isNewMember ? '<span class="ws-roster-newicon" title="New family"><img class="new-fam-icon" src="brand/secondary/accent-24.png" alt=""></span>' : '') + escapeHtml(f.name || '(family)') + '</span>';
       h += '<span class="ws-roster-track ' + (COMMUNITY_TRACK_PILL[f.track] || 'is-other') + '">' + escapeHtml(f.trackLabel || '') + '</span>';
       h += '</div>';
       // Main Learning Coach + kids all on one wrapping row; kids are
@@ -28266,9 +28468,14 @@
     var isAmPick = String(hour).indexOf('AM') === 0;
     var amGroup = isAmPick ? (String(hour).split(':')[1] || '') : '';
     var pickerPeriod = isAmPick ? 'AM' : 'PM';
+    // Scoped liaisons only ever see submissions they can actually place —
+    // offering other groups' classes just to deny the click with a scope
+    // error confused testers (Erin, 2026-07-19: Cedars Liaison picked from
+    // "Other submissions" and got "not allowed").
     var pool = scheduleBuilderState.submissions.filter(function (s) {
       return s.status === 'submitted'
-        && ((s.class_period === 'AM' ? 'AM' : 'PM') === pickerPeriod);
+        && ((s.class_period === 'AM' ? 'AM' : 'PM') === pickerPeriod)
+        && sbCanTouchSub(s);
     });
     function matchesSession(s) {
       var prefs = s.session_preferences || [];
@@ -28319,7 +28526,11 @@
     html += '<p class="cls-help" style="margin:0 0 1rem;">Showing submissions that fit this session + hour preference. Expand "Other submissions" to broaden.</p>';
 
     if (matched.length === 0 && others.length === 0) {
-      html += '<p style="color:var(--color-text-light);">No submissions in the inbox yet. Check back after members submit.</p>';
+      html += '<p style="color:var(--color-text-light);">'
+        + (sbScopeAll()
+          ? 'No submissions in the inbox yet. Check back after members submit.'
+          : 'No ' + (amGroup || 'your group') + ' submissions in the inbox yet — use “+ New Class” below to create one.')
+        + '</p>';
     } else {
       html += '<h4 class="sb-pick-section-title">Matches (' + matched.length + ')</h4>';
       if (matched.length === 0) {

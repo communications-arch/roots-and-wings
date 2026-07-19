@@ -4319,6 +4319,66 @@ async function handleMerchOrdersList(req, res) {
   }
 }
 
+// Full-field edit of an existing order (Erin, 2026-07-19) — same
+// validation as the manual add. Item arrives as a catalog KEY; stored as
+// the catalog label like every other write path.
+async function handleMerchOrderEdit(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to update merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim();
+  const phone = String(body.phone || '').trim();
+  const qty = parseInt(body.qty, 10);
+  const notes = String(body.notes || '').trim();
+  if (!name) return res.status(400).json({ error: 'Customer name is required.' });
+  if (name.length > 200 || email.length > 200 || phone.length > 50 || notes.length > 1000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+  if (!Number.isFinite(qty) || qty < 1 || qty > 999) {
+    return res.status(400).json({ error: 'Quantity must be between 1 and 999.' });
+  }
+  const itemErr = validateMerchOrder(body);
+  if (itemErr) return res.status(400).json({ error: itemErr });
+  const itemDef = MERCH_CATALOG[String(body.item).toLowerCase().trim()];
+  const size = String(body.size || '').trim();
+  const color = String(body.color || '').trim();
+
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      UPDATE merch_orders SET
+        customer_name = ${name},
+        customer_email = ${email.toLowerCase()},
+        customer_phone = ${phone},
+        item = ${itemDef.label}, size = ${size}, color = ${color},
+        qty = ${qty}, notes = ${notes},
+        updated_at = NOW(), updated_by = ${auth.realEmail}
+      WHERE id = ${id}
+      RETURNING id, customer_name, customer_email, customer_phone,
+                item, size, color, qty, notes,
+                paid_at, delivered_at, created_at, updated_at, updated_by
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
+    return res.status(200).json({ order: rows[0] });
+  } catch (err) {
+    console.error('Merch order edit error:', err);
+    return res.status(500).json({ error: 'Failed to update order.' });
+  }
+}
+
 async function handleMerchUpdate(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -5761,6 +5821,9 @@ function computeDerivedCalendarEvents(sessions, schoolYear) {
     'All-member meeting — one week after the spring board meeting', '', '📣');
 
   const ics = iceCreamSocialForYear(sessions, schoolYear);
+  push('handbook', 'Review & update the Membership Handbook', calAddDays(ics, -21), '',
+    'Communications Director reviews the Membership Handbook and publishes updates before new families arrive at the Ice Cream Social',
+    'Communications Director', '📘');
   push('removemembers', 'Remove non-returning members', calAddDays(ics, -3), '',
     'Workspace cleanup for families who did not re-enroll (a few days before the Ice Cream Social)',
     'Communications Director', '🧹');
@@ -6887,6 +6950,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'merch-order') return handleMerchOrder(body, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
+    if (kind === 'merch-order-edit') return handleMerchOrderEdit(body, req, res);
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);

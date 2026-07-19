@@ -6509,6 +6509,8 @@ button.staff-role:hover {
   color: var(--color-text-light);
   margin-bottom: 0.5rem;
 }
+/* Count rides the shared add-toolbar row (right-aligned, no stacked margin). */
+.coop-cal-toolbar .sc-count { margin-bottom: 0; margin-left: auto; }
 .sc-list {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -8443,7 +8445,9 @@ button.staff-role:hover {
   white-space: nowrap;
   vertical-align: middle;
 }
-.kid-group-badge .ag-name { font-weight: 700; }
+/* Quiet weight — the badge identifies the group without competing with
+   the kid's name it sits next to (Erin, 2026-07-19). */
+.kid-group-badge .ag-name { font-weight: 500; font-size: 0.95em; }
 .age-group-emoji img {
   height: 1em;
   width: auto;
@@ -8455,6 +8459,14 @@ button.staff-role:hover {
   width: auto;
   vertical-align: -0.3em;
   margin-right: 4px;
+  display: inline-block;
+}
+/* New-family mark (gold bloom, accent-24) — replaces the 🌱 emoji so it
+   can't be confused with the Greenhouse/Saplings group marks. */
+.new-fam-icon {
+  height: 1.05em;
+  width: auto;
+  vertical-align: -0.15em;
   display: inline-block;
 }
 /* Group marks sitting in the My Responsibilities duty-icon slot. */
@@ -12092,6 +12104,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 .ws-srt-row-expandable { cursor: pointer; }
 .ws-srt-row-expandable:hover { background: rgba(var(--color-accent-light-rgb), 0.15); }
+/* Declined registrations ride in the default Membership view like archived
+   rows elsewhere — dimmed, restorable from the Actions column. */
+.ws-srt-row-declined td { opacity: 0.55; }
+.ws-srt-row-declined td:last-child { opacity: 1; }
 .ws-srt-caret {
   width: 1.5em;
   text-align: center;
@@ -12988,6 +13004,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-bottom: 1px solid var(--color-border);
 }
 .st-place-row:last-child { border-bottom: none; }
+/* Shared bits for the st-place-row panels (VP/ACL To Do details) — kept as
+   classes so the panels stay visually identical without inline styles. */
+.st-num-input { width: 70px; }
+.st-flag-coral { color: var(--color-coral, #d35a48); }
+.st-list-spaced { margin-top: 8px; }
 .st-place-slot {
   display: inline-flex;
   align-items: center;
