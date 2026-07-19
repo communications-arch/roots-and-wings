@@ -1241,7 +1241,7 @@ async function applyMemberProfileOverlay(families) {
     if (!kidsByFamily[k]) kidsByFamily[k] = [];
     kidsByFamily[k].push(kr);
   });
-  var overlayPendingKidIds = await pendingApprovalKidIds(sql);
+  var overlayKidFlags = await kidEnrollmentFlags(sql);
 
   families.forEach(function (fam) {
     var key = String(fam.email || '').toLowerCase();
@@ -1364,7 +1364,8 @@ async function applyMemberProfileOverlay(families) {
       // DB row id → Edit My Info → save upserts by id (enrollment build).
       if (ov.id) {
         kid.id = ov.id;
-        kid.pending_approval = overlayPendingKidIds.has(ov.id);
+        kid.pending_approval = overlayKidFlags.pending.has(ov.id);
+        kid.not_returning = overlayKidFlags.notReturning.has(ov.id);
       }
     });
     // DB-only kids (not in the sheet's classlist).
@@ -1378,7 +1379,8 @@ async function applyMemberProfileOverlay(families) {
         fam.kids = fam.kids || [];
         fam.kids.push({
           id: k.id || null,
-          pending_approval: overlayPendingKidIds.has(k.id),
+          pending_approval: overlayKidFlags.pending.has(k.id),
+          not_returning: overlayKidFlags.notReturning.has(k.id),
           name: first,
           lastName: k.last_name || '',
           nickname: k.nickname || '',
@@ -1835,20 +1837,24 @@ async function firstSeasonByEmail(sql) {
 // and the re-derived Workspace family email as fallback for legacy rows.
 // {} on failure so the directory degrades to no indicator.
 
-// Kid ids whose active-season enrollment is awaiting Membership approval
-// (Option B kid-adds, 2026-07-19) — the Directory + rosters hide them
-// until approved; the family still sees them in Edit My Info.
-async function pendingApprovalKidIds(sql) {
+// Per-kid enrollment flags for the active season (enrollment build):
+// pending = kid-add awaiting Membership approval (hidden from Directory;
+// family's EMI only); notReturning = enrolled last year, not this one
+// (stays LISTED in the Directory, marked — Erin's rule).
+async function kidEnrollmentFlags(sql) {
   var tour = require('./tour.js'); // lazy: top-level require would cycle
+  var out = { pending: new Set(), notReturning: new Set() };
   try {
     var rows = await sql`
-      SELECT kid_id FROM kid_enrollments
-      WHERE season = ${tour.DEFAULT_SEASON} AND status = 'pending'
+      SELECT kid_id, status FROM kid_enrollments
+      WHERE season = ${tour.DEFAULT_SEASON} AND status IN ('pending', 'not_returning')
     `;
-    return new Set(rows.map(function (r) { return r.kid_id; }));
-  } catch (e) {
-    return new Set();
-  }
+    rows.forEach(function (r) {
+      if (r.status === 'pending') out.pending.add(r.kid_id);
+      else out.notReturning.add(r.kid_id);
+    });
+  } catch (e) { /* flags just don't render */ }
+  return out;
 }
 
 async function registeredSeasonByEmail(sql) {
@@ -2000,7 +2006,7 @@ async function loadFamiliesFromProfiles(sql) {
     FROM kids
     ORDER BY family_email, sort_order, LOWER(first_name)
   `;
-  var pendingKidIds = await pendingApprovalKidIds(sql);
+  var kidFlags = await kidEnrollmentFlags(sql);
   // First registration per family — drives the Directory's "new member"
   // indicator (family hasn't completed a full co-op year yet). The client
   // derives newness from firstSeason against the Field-Day year boundary.
@@ -2020,7 +2026,8 @@ async function loadFamiliesFromProfiles(sql) {
     if (!kidsByFamily[k]) kidsByFamily[k] = [];
     kidsByFamily[k].push({
       id: kr.id || null, // → EMI → save upserts by id (enrollment build)
-      pending_approval: pendingKidIds.has(kr.id),
+      pending_approval: kidFlags.pending.has(kr.id),
+      not_returning: kidFlags.notReturning.has(kr.id),
       name: String(kr.first_name || '').trim(),
       lastName: String(kr.last_name || '').trim(),
       nickname: String(kr.nickname || ''),

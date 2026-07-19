@@ -768,6 +768,7 @@
                 lastName: kid.lastName || fam.name,
                 nickname: kid.nickname || '',
                 type: 'kid',
+                notReturning: kid.not_returning === true,
                 family: fam.name,
                 familyDisplay: fam.displayName || fam.name,
                 email: fam.email || '',
@@ -2625,6 +2626,7 @@
         lastName: kid.lastName || fam.name, // defaults to family name
         nickname: kid.nickname || '',
         type: 'kid',
+        notReturning: kid.not_returning === true,
         family: fam.name,
         email: fam.email,
         phone: fam.phone,
@@ -2982,6 +2984,11 @@
           schedTag = '<div class="yb-schedule">AM only</div>';
         } else if (person.type === 'kid' && person.schedule === 'afternoon') {
           schedTag = '<div class="yb-schedule">PM only</div>';
+        }
+        // Per-kid "not returning this year" (enrollment record) — the kid
+        // stays LISTED during the transition, just marked (Erin's rule).
+        if (person.type === 'kid' && person.notReturning) {
+          schedTag += '<div class="yb-inactive-badge" title="Not enrolled for the upcoming year.">Not returning</div>';
         }
 
         // First-year families: green card outline (.yb-card-new) instead of a
