@@ -10648,6 +10648,11 @@ button.staff-role:hover {
   flex-shrink: 0;
 }
 .quick-shortcut-bar .container::-webkit-scrollbar { display: none; }
+/* The hidden ATTRIBUTE must beat the display rule below — without this,
+   any .qsb-pill marked hidden (the dev-only 🐞 Bug log link on prod)
+   renders anyway because the class's display wins over the UA sheet's
+   [hidden] { display:none }. (Bug: pill leaked onto prod, 2026-07-19.) */
+.qsb-pill[hidden] { display: none !important; }
 .qsb-pill {
   display: inline-flex;
   align-items: center;
