@@ -7071,6 +7071,38 @@ async function handleBugReportsList(req, res) {
   }
 }
 
+// Optional screenshot riding a bug report: base64 image → Vercel Blob under
+// bugshots/, markdown-embedded in the issue. Uploading also sweeps bugshots/
+// blobs older than 30 days (Erin, 2026-07-19: "delete images after 30 days
+// so they don't build up") — cleanup rides usage, so an idle store never
+// needs a cron. Failures never block the report itself.
+const BUGSHOT_TYPES = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+const BUGSHOT_MAX_BYTES = 3 * 1024 * 1024;
+async function uploadBugScreenshot(shot) {
+  if (!shot || typeof shot !== 'object') return '';
+  const ext = BUGSHOT_TYPES[String(shot.type || '')];
+  if (!ext) return '';
+  const b64 = String(shot.data || '');
+  if (!b64 || b64.length > 4.5 * 1024 * 1024) return '';
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (e) { return ''; }
+  if (!buf.length || buf.length > BUGSHOT_MAX_BYTES) return '';
+  const { put, list, del } = require('@vercel/blob');
+  const name = 'bugshots/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
+  const blob = await put(name, buf, { access: 'public', contentType: shot.type, addRandomSuffix: false });
+  // 30-day sweep, prefix-scoped so nothing else in the store is touched.
+  try {
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+    const old = (await list({ prefix: 'bugshots/', limit: 1000 })).blobs
+      .filter(b => b.uploadedAt && new Date(b.uploadedAt).getTime() < cutoff)
+      .map(b => b.url);
+    if (old.length) await del(old);
+  } catch (sweepErr) {
+    console.error('Bug screenshot sweep failed (non-fatal):', sweepErr.message);
+  }
+  return blob.url;
+}
+
 // POST kind='bug-report' — file a tester's report as a GitHub issue.
 async function handleBugReport(body, req, res) {
   if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ error: 'Not found.' });
@@ -7084,11 +7116,18 @@ async function handleBugReport(body, req, res) {
   if (what.length > 5000 || where.length > 300) {
     return res.status(400).json({ error: 'That report is a little too long — could you trim it down?' });
   }
+  // Optional screenshot — a failed upload never sinks the report.
+  let shotUrl = '';
+  if (body.screenshot) {
+    try { shotUrl = await uploadBugScreenshot(body.screenshot); }
+    catch (shotErr) { console.error('Bug screenshot upload failed (non-fatal):', shotErr.message); }
+  }
   // Title = first ~80 chars of the report, collapsed to one line.
   const oneLine = what.replace(/\s+/g, ' ').trim();
   const title = oneLine.length > 80 ? oneLine.slice(0, 80).trimEnd() + '…' : oneLine;
   const issueBody = what
     + (where ? '\n\nWhere: ' + where : '')
+    + (shotUrl ? '\n\n![screenshot](' + shotUrl + ')' : '')
     + '\n\nReported by: ' + (auth.name || auth.email) + ' (' + auth.email + ') via dev portal';
   try {
     const gh = await fetch('https://api.github.com/repos/' + BUGLOG_REPO + '/issues', {

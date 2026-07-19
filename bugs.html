@@ -38,6 +38,7 @@
       margin-bottom: 18px;
     }
     .bug-form-msg { font-size: 0.9rem; margin: 10px 0 0; }
+    .bug-shot-hint { font-size: 0.85rem; color: var(--color-text-light); margin: 6px 0 0; }
     .bug-form-msg.ok { color: var(--color-success); font-weight: 700; }
     .bug-form-msg.err { color: var(--color-error); font-weight: 700; }
     .bug-list-title { font-size: 1.3rem; margin-bottom: 14px; }
@@ -157,6 +158,11 @@
                 <label for="bugWhere">Where on the site were you? (optional)</label>
                 <input type="text" id="bugWhere" maxlength="300"
                   placeholder="e.g., My Family page, the class sign-up form&hellip;">
+              </div>
+              <div class="tour-form-field">
+                <label for="bugShot">Screenshot (optional — a picture really helps!)</label>
+                <input type="file" id="bugShot" accept="image/png,image/jpeg,image/webp">
+                <p class="bug-shot-hint" id="bugShotHint" hidden></p>
               </div>
               <button type="submit" class="btn btn-primary btn-sm tour-form-submit" id="bugSubmitBtn">Send bug report</button>
               <p class="bug-form-msg" id="bugFormMsg" hidden></p>
@@ -309,6 +315,33 @@
       formMsg.hidden = false;
     }
 
+    // Optional screenshot — read into base64 on pick, capped at 3 MB.
+    var shotInput = document.getElementById('bugShot');
+    var shotHint = document.getElementById('bugShotHint');
+    var pickedShot = null; // { data: <base64, no data: prefix>, type }
+    var SHOT_MAX = 3 * 1024 * 1024;
+    if (shotInput) shotInput.addEventListener('change', function () {
+      pickedShot = null;
+      shotHint.hidden = true;
+      var f = shotInput.files && shotInput.files[0];
+      if (!f) return;
+      if (f.size > SHOT_MAX) {
+        shotInput.value = '';
+        shotHint.textContent = 'That image is a bit big (over 3 MB) — a cropped screenshot of just the broken part works best.';
+        shotHint.hidden = false;
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var s = String(reader.result || '');
+        var comma = s.indexOf(',');
+        if (comma !== -1) pickedShot = { data: s.slice(comma + 1), type: f.type };
+        shotHint.textContent = '📎 ' + f.name + ' attached.';
+        shotHint.hidden = false;
+      };
+      reader.readAsDataURL(f);
+    });
+
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var what = document.getElementById('bugWhat').value.trim();
@@ -317,15 +350,19 @@
       submitBtn.disabled = true;
       submitBtn.textContent = 'Sending…';
       formMsg.hidden = true;
+      var payload = { kind: 'bug-report', what: what, where: where };
+      if (pickedShot) payload.screenshot = pickedShot;
       fetch('/api/tour', {
         method: 'POST',
         headers: authHeaders(true),
-        body: JSON.stringify({ kind: 'bug-report', what: what, where: where })
+        body: JSON.stringify(payload)
       })
         .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
         .then(function (out) {
           if (out.status === 200 && out.data && out.data.ok) {
             form.reset();
+            pickedShot = null;
+            if (shotHint) shotHint.hidden = true;
             showFormMsg('Thank you! Your report is on the list below.', true);
             loadBugs();
             return;
