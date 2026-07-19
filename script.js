@@ -29943,6 +29943,7 @@
                     : k.schedule === 'afternoon' ? 'Afternoon only'
                     : 'All day';
       if (k._isNew
+          || isDevHost() // dev/preview: schedule editing is testable by anyone, like View-As (bug log #4)
           || (typeof realUserHasCapability === 'function'
           && realUserHasCapability('member_schedule_edit', ['Membership Director']))) {
         var schedVal = (k.schedule === 'morning' || k.schedule === 'afternoon') ? k.schedule : 'all-day';

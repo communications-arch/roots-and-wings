@@ -3609,7 +3609,11 @@ async function handleProfileUpdate(body, req, res) {
         if (!k.schedule) { k.schedule = prior; continue; }
         if (k.schedule === prior) continue;
         if (mayEditSchedule === null) {
-          mayEditSchedule = isSuperUser(realEmail) || (await hasCapability(realEmail, 'member_schedule_edit'));
+          // Dev/preview: any tester may flip schedules — mirrors the
+          // canImpersonate dev unlock so the Membership flow is actually
+          // testable (bug log #4). Prod keeps the capability gate.
+          mayEditSchedule = (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production')
+            || isSuperUser(realEmail) || (await hasCapability(realEmail, 'member_schedule_edit'));
         }
         if (!mayEditSchedule) {
           return res.status(403).json({
