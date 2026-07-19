@@ -19672,6 +19672,19 @@
     html += '</div>';
     bell.insertAdjacentHTML('afterend', html);
     var dropdown = document.getElementById('notifDropdown');
+    // Clamp on-screen (Erin, 2026-07-19: on mobile the bell can sit close
+    // enough to the viewport edge that the dropdown — and its "Mark all
+    // read" button — rendered off screen). Nudge via the `right` offset
+    // in whichever direction overflows.
+    try {
+      var ddRect = dropdown.getBoundingClientRect();
+      var ddRight = parseFloat(getComputedStyle(dropdown).right) || 0;
+      if (ddRect.right > window.innerWidth - 4) {
+        dropdown.style.right = (ddRight + (ddRect.right - window.innerWidth) + 8) + 'px';
+      } else if (ddRect.left < 4) {
+        dropdown.style.right = (ddRight - (4 - ddRect.left)) + 'px';
+      }
+    } catch (e) { /* keep default position */ }
     var markAllBtn = document.getElementById('notifMarkAllBtn');
     if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true' + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
     dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function () { var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });

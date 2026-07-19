@@ -7656,7 +7656,7 @@ button.staff-role:hover {
   position: absolute;
   top: 100%;
   right: 0;
-  width: 320px;
+  width: min(320px, calc(100vw - 16px));
   max-height: 400px;
   overflow-y: auto;
   background: #fff;
@@ -9706,7 +9706,7 @@ button.staff-role:hover {
 }
 
 @media (max-width: 640px) {
-  .notif-dropdown { width: 280px; right: -20px; }
+  .notif-dropdown { width: min(280px, calc(100vw - 16px)); right: -20px; }
   .absence-modal { padding: 1rem; }
   .coverage-slot { flex-wrap: wrap; }
   .coverage-slot-actions { width: 100%; justify-content: flex-end; margin-top: 0.35rem; }
