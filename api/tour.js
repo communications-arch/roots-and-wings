@@ -5506,7 +5506,17 @@ async function handleMorningFinalize(body, req, res) {
       `;
       written += updated.length;
     }
-    await sql`UPDATE morning_class_assignments SET finalized = TRUE WHERE school_year = ${schoolYear} AND class_group <> ''`;
+    // Same existence guard as the Board tile (2026-07-19): only finalize
+    // rows whose kid still resolves (kid_id-first, name fallback for
+    // unmapped legacy rows) — orphaned assignments stay out of the sweep.
+    await sql`UPDATE morning_class_assignments a SET finalized = TRUE
+      WHERE a.school_year = ${schoolYear} AND a.class_group <> ''
+        AND EXISTS (
+          SELECT 1 FROM kids k
+          WHERE (a.kid_id IS NOT NULL AND k.id = a.kid_id)
+             OR (a.kid_id IS NULL
+                 AND LOWER(k.family_email) = LOWER(a.family_email)
+                 AND LOWER(k.first_name) = LOWER(a.kid_first_name)))`;
     await sql`
       INSERT INTO morning_class_plans (school_year, status, finalized_at, finalized_by, updated_by, updated_at)
       VALUES (${schoolYear}, 'final', NOW(), ${auth.realEmail}, ${auth.realEmail}, NOW())
@@ -7150,11 +7160,20 @@ async function handleBoardGlance(req, res) {
       return r[0];
     }),
     metric(async () => {
+      // Only assignments whose kid still exists count (kid_id-first, name
+      // fallback for unmapped legacy rows) — orphaned rows are invisible
+      // in the builder and must not inflate the tile (2026-07-19).
       const r = await sql`
-        SELECT COUNT(*) FILTER (WHERE class_group <> '')::int AS placed,
+        SELECT COUNT(*) FILTER (WHERE a.class_group <> '')::int AS placed,
                COUNT(*)::int AS total,
                (SELECT status FROM morning_class_plans WHERE school_year = ${year}) AS plan_status
-        FROM morning_class_assignments WHERE school_year = ${year}`;
+        FROM morning_class_assignments a
+        JOIN kids k
+          ON (a.kid_id IS NOT NULL AND k.id = a.kid_id)
+          OR (a.kid_id IS NULL
+              AND LOWER(k.family_email) = LOWER(a.family_email)
+              AND LOWER(k.first_name) = LOWER(a.kid_first_name))
+        WHERE a.school_year = ${year}`;
       return r[0];
     }),
     metric(async () => {
