@@ -1519,7 +1519,7 @@ async function handleBackupWaiverInfo(req, res) {
     const rows = await sql`
       SELECT ws.role, ws.person_name, ws.person_email, ws.season,
              ws.signed_at, ws.signature_name, ws.signature_date, ws.waiver_version,
-             ws.family_email,
+             ws.family_email, ws.note,
              r.main_learning_coach, r.existing_family_name,
              mp.family_name AS profile_family_name,
              (
@@ -1546,10 +1546,18 @@ async function handleBackupWaiverInfo(req, res) {
     // The email body uses the same live source, so both stay consistent.
     const mlcName = String(row.profile_mlc_name || row.main_learning_coach || '').trim();
     const familyName = String(row.profile_family_name || row.existing_family_name || mlcName || row.person_name).trim();
+    // kid_addition rows stamp the covered child in the note
+    // ("Covers newly added child: X") — surface the name so the signing
+    // page can say whose waiver this is.
+    const kidName = row.role === 'kid_addition'
+      ? String(row.note || '').replace(/^Covers newly added child:\s*/i, '').trim()
+      : '';
     return res.status(200).json({
       // Keep the legacy 'source' field shape so the existing waiver.html
       // client-side branch ("if isOneOff…") keeps working unmodified.
       source: isOneOff ? 'one_off' : 'backup',
+      waiver_role: row.role,
+      kid_name: kidName,
       name: row.person_name,
       email: row.person_email,
       main_learning_coach: mlcName,

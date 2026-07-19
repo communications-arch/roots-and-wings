@@ -84,7 +84,7 @@
 
   <main class="wv-container">
     <div class="wv-card" id="wv-sign-card-top" style="display:none;">
-      <h2 style="font-family:'Playfair Display',serif;color:var(--color-primary-dark);margin:0 0 10px;">Sign as a backup Learning Coach</h2>
+      <h2 id="wv-sign-top-title" style="font-family:'Playfair Display',serif;color:var(--color-primary-dark);margin:0 0 10px;">Sign your waiver</h2>
       <p id="wv-sign-intro" style="color:#555;margin:0 0 16px;"></p>
       <div id="wv-sign-status" style="display:none;padding:14px 16px;border-radius:8px;"></div>
     </div>
@@ -262,14 +262,19 @@
           }
           var d = result.data;
           var isOneOff = d.source === 'one_off';
-          heroTitle.textContent = isOneOff ? 'Roots & Wings Co-op Waiver' : 'Backup Learning Coach Waiver';
+          var isKidAdd = d.waiver_role === 'kid_addition';
+          heroTitle.textContent = isKidAdd ? 'New Child Waiver' : (isOneOff ? 'Roots & Wings Co-op Waiver' : 'Backup Learning Coach Waiver');
           heroSub.textContent = 'Review the agreement, then sign at the bottom of this page.';
+          var topTitle = document.getElementById('wv-sign-top-title');
+          if (topTitle && !isOneOff) topTitle.textContent = 'Sign as a backup Learning Coach';
           if (d.signed) {
             showStatus('ok', 'This waiver was signed on ' + (d.signature_date || '').slice(0, 10) + ' by ' + (d.signature_name || d.name) + '. No further action needed.');
             cardBottom.style.display = 'none';
             return;
           }
-          if (isOneOff) {
+          if (isKidAdd && d.kid_name) {
+            intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — this waiver covers your newly added child, <strong>' + escapeText(d.kid_name) + '</strong>. Review the Member Agreement &amp; Waivers below, then sign at the bottom of this page to put ' + escapeText(d.kid_name) + '’s waiver on file.';
+          } else if (isOneOff) {
             intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — please review the Roots &amp; Wings Member Agreement &amp; Waivers below, then sign at the bottom of this page to put your waiver on file.';
           } else {
             intro.innerHTML = 'Hi <strong>' + escapeText(d.name) + '</strong> — ' + escapeText(d.main_learning_coach) + ' listed you as a backup Learning Coach for the <strong>' + escapeText(d.family_name) + ' family</strong>. Review the Member Agreement &amp; Waivers below, then sign at the bottom of this page to put your waiver on file.';
