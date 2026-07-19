@@ -4886,164 +4886,143 @@ async function handleMorningBuilderGet(req, res) {
   const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
   try {
     const sql = getSql();
-    // Pull EVERY non-declined registration for the season (not just morning-
-    // track ones). Morning eligibility is decided PER KID from the live
-    // kids.schedule below, not the family-level registration track — a kid
-    // switched PM→full-day via Edit My Info (or in an afternoon-track family)
-    // updates kids.schedule but never registrations.track, so the old
-    // track filter hid them from the builder entirely (2026-07-17).
-    // Include not-yet-paid morning registrations too — `pending` is only a
-    // visual flag so Membership knows payment hasn't landed yet.
+    // ── Enrollment-driven roster (enrollment build, 2026-07-19) ──
+    // The season's morning pool now comes STRAIGHT from kid_enrollments
+    // (status='enrolled', schedule all-day/morning) joined to kids — no
+    // more parsing registrations.kids JSON, no live-kids merge, and no
+    // name-derived family emails deciding who exists (the bug Erin repro'd:
+    // a schedule flip was invisible for any family whose real mailbox
+    // breaks the first-name+last-initial convention). Registrations only
+    // contribute per-family meta (pending payment, placement notes),
+    // matched by the registration's STORED family_email first and the
+    // derived email as a legacy fallback.
     const regs = await sql`
-      SELECT main_learning_coach, existing_family_name, track, placement_notes, payment_status, kids
+      SELECT family_email, main_learning_coach, existing_family_name, track,
+             placement_notes, payment_status
       FROM registrations
       WHERE season = ${schoolYear}
         AND declined_at IS NULL
     `;
     const draftRows = await sql`
-      SELECT family_email, kid_first_name, class_group, finalized
+      SELECT family_email, kid_first_name, class_group, finalized, kid_id
       FROM morning_class_assignments
       WHERE school_year = ${schoolYear}
     `;
     const draftMap = {};
+    const draftByKidId = {};
     draftRows.forEach(r => {
       draftMap[r.family_email + '|' + r.kid_first_name] = { group: r.class_group, finalized: !!r.finalized };
+      if (r.kid_id) draftByKidId[r.kid_id] = { group: r.class_group, finalized: !!r.finalized };
     });
-    // Live per-kid schedule from the kids table (the source of truth EMI
-    // writes). Keyed by LOWER(family_email)|LOWER(first_name) to match the
-    // roster's derived key. Missing rows fall back to the registration track.
-    const scheduleMap = {};
-    let liveKids = [];
-    try {
-      const schedRows = await sql`SELECT family_email, first_name, last_name, nickname, birth_date, schedule FROM kids`;
-      liveKids = schedRows;
-      schedRows.forEach(k => {
-        scheduleMap[String(k.family_email || '').toLowerCase() + '|' + String(k.first_name || '').toLowerCase()] =
-          String(k.schedule || '').toLowerCase();
-      });
-    } catch (schedErr) {
-      console.error('Morning builder schedule lookup failed (non-fatal):', schedErr);
-    }
-    // A family track maps to a default schedule for kids with no kids-table
-    // row yet. 'Both' → all-day, 'Morning Only' → morning, else afternoon.
-    const trackDefaultSchedule = (t) => {
-      const tl = String(t || '').toLowerCase();
-      if (tl === 'both') return 'all-day';
-      if (tl === 'morning only') return 'morning';
-      return 'afternoon';
-    };
     const planRows = await sql`
       SELECT status, finalized_at, finalized_by, seeded_at FROM morning_class_plans
       WHERE school_year = ${schoolYear} LIMIT 1
     `;
     const plan = planRows[0] || { status: 'draft', finalized_at: null, finalized_by: '', seeded_at: null };
 
+    // Family display names from member_profiles (real family_email keys).
+    const profileNames = {};
+    try {
+      const profRows = await sql`SELECT family_email, family_name FROM member_profiles`;
+      profRows.forEach(p => { profileNames[String(p.family_email || '').toLowerCase()] = String(p.family_name || ''); });
+    } catch (pnErr) {
+      console.error('morning-builder profile-name lookup failed (non-fatal):', pnErr);
+    }
+
     const roster = [];
     const familyEmails = new Set();
-    // Per-family registration metadata, keyed by LOWER(family_email). Lets us
-    // fold in kids that exist in the live kids table but not the registration
-    // snapshot (see merge below) using the same family name / track / notes.
     const regMetaByEmail = {};
     regs.forEach(r => {
       const familyName = deriveFamilyName(r.main_learning_coach, r.existing_family_name);
-      const familyEmail = deriveFamilyEmail(r.main_learning_coach, familyName);
-      if (!familyEmail) return;
       const pending = String(r.payment_status || '').toLowerCase() !== 'paid';
-      familyEmails.add(familyEmail);
-      if (!regMetaByEmail[String(familyEmail).toLowerCase()]) {
-        regMetaByEmail[String(familyEmail).toLowerCase()] = {
-          family_email: familyEmail,
-          family_name: familyName,
-          track: r.track,
-          placement_notes: String(r.placement_notes || '').trim(),
-          pending: pending
-        };
-      }
-      const kids = Array.isArray(r.kids) ? r.kids : [];
-      kids.forEach(k => {
-        // rawName is the combined name (or bare first) as stored. Keep the
-        // matching key derived from its first token exactly as before so
-        // existing placements/draft rows still resolve.
-        const rawName = String((k && (k.name || k.first_name)) || '').trim();
-        if (!rawName) return;
-        const first = rawName.split(/\s+/)[0].toLowerCase();
-        if (!first) return;
-        const rosterKey = familyEmail + '|' + first;
-        const entry = draftMap[rosterKey];
-        // Morning eligibility, per kid: use the LIVE kids.schedule; fall back
-        // to the family track when there's no kids row yet. Include the kid
-        // when they do mornings (all-day / morning) OR when they're already
-        // placed (never drop an existing placement, even if their schedule
-        // later changed). This is what lets a PM→full-day switch and a late
-        // full-day registrant surface for placement (2026-07-17).
-        const liveSched = scheduleMap[rosterKey];
-        const effSched = liveSched || trackDefaultSchedule(r.track);
-        const morningEligible = effSched === 'all-day' || effSched === 'morning';
-        if (!morningEligible && !(entry && entry.group)) return;
-        // Displayed name uses the explicit first/last the registration now
-        // stores (b03fe12), with the family surname as a fallback so a kid
-        // never renders without a last name.
-        const display = morningKidDisplayName(k, familyName);
-        roster.push({
-          key: familyEmail + '|' + first,
-          family_email: familyEmail,
-          family_name: familyName,
-          first_name: first,
-          display_name: display,
-          birth_date: k.birth_date || null,
-          age: ageAsOfFall(k.birth_date, schoolYear),
-          placement_notes: String(r.placement_notes || '').trim(),
-          allergies: '',
-          // Pending (unpaid) kids are treated the same as paid for placement;
-          // `pending` is just a visual flag on the client.
-          pending: pending,
-          group: entry ? entry.group : '',
-          locked: false
-        });
-      });
+      const meta = {
+        family_name: familyName,
+        track: r.track,
+        placement_notes: String(r.placement_notes || '').trim(),
+        pending: pending
+      };
+      // Stored family_email is authoritative (set at registration time);
+      // the derived email stays as a fallback key for pre-linking rows.
+      const stored = String(r.family_email || '').toLowerCase();
+      if (stored && !regMetaByEmail[stored]) regMetaByEmail[stored] = meta;
+      const derived = deriveFamilyEmail(r.main_learning_coach, familyName);
+      if (derived && !regMetaByEmail[String(derived).toLowerCase()]) regMetaByEmail[String(derived).toLowerCase()] = meta;
     });
 
-    // Fold in kids that live in the kids table but never made it into the
-    // registration's kids JSON — e.g. a child added AFTER registration via
-    // Edit My Info, which writes the kids table but never registrations.kids.
-    // Without this they're invisible to the builder (bug: a new daughter added
-    // via EMI didn't appear under the family's placement pool, 2026-07-18).
-    // Only for families with a current non-declined registration this season;
-    // keyed and morning-eligibility-filtered exactly like the roster above.
-    const rosterKeyNorm = new Set(roster.map(it => String(it.family_email).toLowerCase() + '|' + it.first_name));
-    liveKids.forEach(k => {
-      const feLower = String(k.family_email || '').toLowerCase();
-      const meta = regMetaByEmail[feLower];
-      if (!meta) return;                        // family not registered this season
-      const rawName = String(k.first_name || '').trim();
-      if (!rawName) return;
-      const first = rawName.split(/\s+/)[0].toLowerCase();
-      if (!first) return;
-      const normKey = feLower + '|' + first;
-      if (rosterKeyNorm.has(normKey)) return;   // already sourced from the registration snapshot
-      const rosterKey = meta.family_email + '|' + first;
-      const entry = draftMap[rosterKey];
-      const effSched = String(k.schedule || '').toLowerCase() || trackDefaultSchedule(meta.track);
-      const morningEligible = effSched === 'all-day' || effSched === 'morning';
-      if (!morningEligible && !(entry && entry.group)) return;
-      const display = morningKidDisplayName(
-        { first_name: k.first_name, last_name: k.last_name }, meta.family_name);
+    const enrollRows = await sql`
+      SELECT e.kid_id, e.family_email, e.schedule AS enr_schedule,
+             k.first_name, k.last_name, k.nickname, k.birth_date, k.allergies
+      FROM kid_enrollments e
+      JOIN kids k ON k.id = e.kid_id
+      WHERE e.season = ${schoolYear}
+        AND e.status = 'enrolled'
+        AND e.schedule IN ('all-day', 'morning')
+      ORDER BY e.family_email, k.sort_order, k.id
+    `;
+    const seenKidIds = new Set();
+    enrollRows.forEach(er => {
+      const familyEmail = String(er.family_email || '').toLowerCase();
+      const first = String(er.first_name || '').trim().split(/\s+/)[0].toLowerCase();
+      if (!familyEmail || !first) return;
+      const meta = regMetaByEmail[familyEmail] || {};
+      const familyName = profileNames[familyEmail] || meta.family_name || '';
+      const key = familyEmail + '|' + first;
+      const entry = draftByKidId[er.kid_id] || draftMap[key];
       roster.push({
-        key: rosterKey,
-        family_email: meta.family_email,
-        family_name: meta.family_name,
+        key: key,
+        kid_id: er.kid_id,
+        family_email: familyEmail,
+        family_name: familyName,
         first_name: first,
-        display_name: display,
-        birth_date: k.birth_date || null,
-        age: ageAsOfFall(k.birth_date, schoolYear),
-        placement_notes: meta.placement_notes,
-        allergies: '',
-        pending: meta.pending,
+        display_name: morningKidDisplayName({ first_name: er.first_name, last_name: er.last_name }, familyName),
+        birth_date: er.birth_date || null,
+        age: ageAsOfFall(er.birth_date, schoolYear),
+        placement_notes: meta.placement_notes || '',
+        allergies: String(er.allergies || '').trim(),
+        // Pending (unpaid) kids place like paid ones; it's a visual flag.
+        pending: !!meta.pending,
         group: entry ? entry.group : '',
         locked: false
       });
-      rosterKeyNorm.add(normKey);
+      familyEmails.add(familyEmail);
+      seenKidIds.add(er.kid_id);
     });
+
+    // Never drop an existing placement: assignments whose kid is no longer
+    // morning-enrolled (schedule flipped, not returning) still render so
+    // the Membership Director consciously removes them.
+    for (const dr of draftRows) {
+      if (!dr.class_group) continue;
+      if (dr.kid_id && seenKidIds.has(dr.kid_id)) continue;
+      const nameKey = String(dr.family_email || '').toLowerCase() + '|' + String(dr.kid_first_name || '').toLowerCase();
+      if (!dr.kid_id && roster.some(it => it.key === nameKey)) continue;
+      const kidRow = dr.kid_id
+        ? (await sql`SELECT id, family_email, first_name, last_name, birth_date, allergies FROM kids WHERE id = ${dr.kid_id}`)[0]
+        : (await sql`SELECT id, family_email, first_name, last_name, birth_date, allergies FROM kids
+                     WHERE LOWER(family_email) = ${String(dr.family_email || '').toLowerCase()}
+                       AND LOWER(first_name) = ${String(dr.kid_first_name || '').toLowerCase()} LIMIT 1`)[0];
+      if (!kidRow) continue; // kid deleted entirely — assignment is an orphan
+      const fe = String(kidRow.family_email || '').toLowerCase();
+      const meta = regMetaByEmail[fe] || {};
+      const familyName = profileNames[fe] || meta.family_name || '';
+      roster.push({
+        key: fe + '|' + String(kidRow.first_name || '').toLowerCase(),
+        kid_id: kidRow.id,
+        family_email: fe,
+        family_name: familyName,
+        first_name: String(kidRow.first_name || '').toLowerCase(),
+        display_name: morningKidDisplayName({ first_name: kidRow.first_name, last_name: kidRow.last_name }, familyName),
+        birth_date: kidRow.birth_date || null,
+        age: ageAsOfFall(kidRow.birth_date, schoolYear),
+        placement_notes: meta.placement_notes || '',
+        allergies: String(kidRow.allergies || '').trim(),
+        pending: !!meta.pending,
+        group: dr.class_group,
+        locked: false
+      });
+      familyEmails.add(fe);
+      if (kidRow.id) seenKidIds.add(kidRow.id);
+    }
 
     // One-time age-based auto-placement. Runs only on an explicit seed=1
     // load (the builder modal), in season, while the plan is draft and has
@@ -5057,8 +5036,8 @@ async function handleMorningBuilderGet(req, res) {
         if (!g) continue;                      // unknown/out-of-range age → leave unplaced
         await sql`
           INSERT INTO morning_class_assignments
-            (school_year, family_email, kid_first_name, class_group, finalized, updated_by, updated_at)
-          VALUES (${schoolYear}, ${item.family_email}, ${item.first_name}, ${g}, FALSE, ${auth.realEmail}, NOW())
+            (school_year, family_email, kid_first_name, class_group, finalized, kid_id, updated_by, updated_at)
+          VALUES (${schoolYear}, ${item.family_email}, ${item.first_name}, ${g}, FALSE, ${item.kid_id || null}, ${auth.realEmail}, NOW())
           ON CONFLICT (school_year, family_email, kid_first_name) DO NOTHING
         `;
         item.group = g;
@@ -5077,7 +5056,7 @@ async function handleMorningBuilderGet(req, res) {
     // additions placed after a finalize stay unlocked until re-finalized.
     if (plan.status === 'final') {
       roster.forEach(item => {
-        const entry = draftMap[item.key];
+        const entry = (item.kid_id && draftByKidId[item.kid_id]) || draftMap[item.key];
         item.locked = !!(entry && entry.finalized);
       });
     }
@@ -5208,13 +5187,26 @@ async function handleMorningAssign(body, req, res) {
         return res.status(409).json({ error: 'That placement is finalized. Reopen the plan to change finalized kids.' });
       }
     }
+    // Resolve the real kid row so the assignment carries kid_id (the
+    // stable key; name columns stay for the transition). Best-effort —
+    // an unresolvable name still writes the legacy-keyed row.
+    let placeKidId = null;
+    try {
+      const kr = await sql`
+        SELECT id FROM kids
+        WHERE LOWER(family_email) = LOWER(${familyEmail}) AND LOWER(first_name) = LOWER(${firstName})
+        LIMIT 1
+      `;
+      placeKidId = (kr[0] && kr[0].id) || null;
+    } catch (e) { /* legacy write below */ }
     await sql`
       INSERT INTO morning_class_assignments
-        (school_year, family_email, kid_first_name, class_group, finalized, updated_by, updated_at)
-      VALUES (${schoolYear}, ${familyEmail}, ${firstName}, ${group}, FALSE, ${auth.realEmail}, NOW())
+        (school_year, family_email, kid_first_name, class_group, finalized, kid_id, updated_by, updated_at)
+      VALUES (${schoolYear}, ${familyEmail}, ${firstName}, ${group}, FALSE, ${placeKidId}, ${auth.realEmail}, NOW())
       ON CONFLICT (school_year, family_email, kid_first_name) DO UPDATE SET
         class_group = EXCLUDED.class_group,
         finalized   = FALSE,
+        kid_id      = COALESCE(EXCLUDED.kid_id, morning_class_assignments.kid_id),
         updated_by  = EXCLUDED.updated_by,
         updated_at  = NOW()
     `;
