@@ -63,6 +63,24 @@ t('keys the label under BOTH the raw registration email and the derived family e
   assert.strictEqual(out['erinl@rootsandwingsindy.com'], '2026-2027');
 });
 
+t('stored family_email column is emitted as a key even when derivation disagrees (bug #10)', () => {
+  // Registration stored family_email from the SPLIT first/last fields
+  // ("Erin" + "Testing Account" → erint@…) while re-derivation from
+  // main_learning_coach lands on the last word ("Account" → erina@…).
+  // member_profiles is keyed by the STORED value — it must be reachable.
+  const out = firstSeasonFromRows([{
+    email: 'metest@gmail.com', season: '2026-2027',
+    created_at: '2026-07-19T04:41:24Z',
+    main_learning_coach: 'Erin Testing Account', existing_family_name: '',
+    family_email: 'erint@rootsandwingsindy.com'
+  }]);
+  // Registered July 19, ahead of the Sept-1 season start → 2026-2027 is
+  // their first full year (no mid-year roll).
+  assert.strictEqual(out['erint@rootsandwingsindy.com'], '2026-2027', 'stored family_email key must be emitted');
+  assert.strictEqual(out['metest@gmail.com'], '2026-2027', 'raw email key still emitted');
+  assert.strictEqual(out['erina@rootsandwingsindy.com'], '2026-2027', 'derived key still emitted as fallback');
+});
+
 t('mid-year sign-up rolls the first FULL year to the next season', () => {
   const out = firstSeasonFromRows([{
     email: 'jane@gmail.com', season: '2025-2026',

@@ -53,9 +53,17 @@ function getActivePerson(fam, activeEmail) {
   return null;
 }
 
+// Mirrors personNamesMatch in script.js (bug log #9): BOTH first and last
+// name must correspond — case/whitespace tolerant, middle tokens ignored,
+// and a bare first name never matches a full name.
 function nameMatch(a, b) {
   if (!a || !b) return false;
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
+  var ta = String(a).trim().toLowerCase().split(/\s+/);
+  var tb = String(b).trim().toLowerCase().split(/\s+/);
+  if (!ta[0] || !tb[0]) return false;
+  if (ta[0] !== tb[0]) return false;
+  if (ta.length === 1 || tb.length === 1) return ta.length === tb.length;
+  return ta[ta.length - 1] === tb[tb.length - 1];
 }
 
 // Pure function: given the active person + family + AM/PM/cleaning data,
@@ -83,12 +91,21 @@ function collectDutiesForPerson(activePerson, fam, ctx) {
 
   // Cleaning
   var sessClean = ctx.CLEANING_CREW && ctx.CLEANING_CREW.sessions && ctx.CLEANING_CREW.sessions[ctx.currentSession];
+  // Mirrors the hardened matchesCleaning in script.js (bug log #9):
+  // whole-token first-name + family-name matching, no substrings.
   function matchesCleaning(names) {
     return names.some(function(n) {
-      var nl = n.toLowerCase();
-      return nl === fam.name.toLowerCase() ||
-        matchTargets.some(function(pf) { return nl.indexOf(pf.split(' ')[0].toLowerCase()) !== -1 && nl.indexOf(fam.name.toLowerCase()) !== -1; }) ||
-        matchTargets.some(function(pf) { return nl === pf.toLowerCase(); });
+      var nl = n.trim().toLowerCase();
+      if (nl === fam.name.toLowerCase()) return true;
+      var nlToks = nl.split(/\s+/);
+      var famToks = fam.name.toLowerCase().split(/\s+/);
+      return matchTargets.some(function(pf) {
+        var pfl = pf.trim().toLowerCase();
+        if (nl === pfl) return true;
+        var first = pfl.split(/\s+/)[0];
+        return nlToks.indexOf(first) !== -1 &&
+          famToks.every(function (ft) { return nlToks.indexOf(ft) !== -1; });
+      });
     });
   }
   if (sessClean) {
@@ -206,6 +223,56 @@ t('No active person (super-user impersonating): all family members surface dutie
   // Should see both Erin's and Jay's duties.
   assert.ok(duties.filter(d => d.group === 'Saplings').length > 0, 'Erin\'s duties should appear');
   assert.ok(duties.filter(d => d.group === 'Pigeons').length > 0, 'Jay\'s duties should appear');
+});
+
+// ── Bug log #9: fresh "Erin Testing Account" must not inherit Erin Bogan ──
+const testerFam = {
+  name: 'Testing Account',
+  email: 'erint@rootsandwingsindy.com',
+  people: [
+    { email: 'erint@rootsandwingsindy.com', first_name: 'Erin', last_name: 'Testing Account', role: 'mlc' }
+  ]
+};
+
+t('Same-first-name stranger gets ZERO duties (bug #9)', () => {
+  const tester = getActivePerson(testerFam, 'erint@rootsandwingsindy.com');
+  assert.ok(tester, 'tester person should resolve');
+  const duties = collectDutiesForPerson(tester, testerFam, fixture.ctx);
+  assert.strictEqual(duties.length, 0, 'Erin Testing Account must not match Erin Bogan\'s duties');
+});
+
+t('nameMatch requires BOTH first and last name', () => {
+  assert.strictEqual(nameMatch('Erin Bogan', 'Erin Testing Account'), false, 'first-name-only must not match');
+  assert.strictEqual(nameMatch('Erin', 'Erin Bogan'), false, 'bare first name must not claim a full name');
+  assert.strictEqual(nameMatch('Erin Bogan', ' erin  BOGAN '), true, 'case/whitespace tolerant');
+  assert.strictEqual(nameMatch('Erin R. Bogan', 'Erin Bogan'), true, 'middle tokens ignored');
+  assert.strictEqual(nameMatch('Jay Bogan', 'Erin Bogan'), false, 'different first names never match');
+});
+
+t('Cleaning: substring first names no longer match ("Katherine" vs "Erin")', () => {
+  // "katherine" CONTAINS "erin" — the old indexOf matcher handed
+  // Katherine's duty to Erin. Whole-token matching must not.
+  const fam = {
+    name: 'Bogan',
+    email: 'erin@rootsandwingsindy.com',
+    people: [{ email: 'erin@rootsandwingsindy.com', first_name: 'Erin', last_name: 'Bogan', role: 'mlc' }]
+  };
+  const ctx = JSON.parse(JSON.stringify(fixture.ctx));
+  ctx.AM_CLASSES = {};
+  ctx.CLEANING_CREW.sessions[4].mainFloor.Kitchen = ['Katherine Bogan'];
+  const erin = getActivePerson(fam, 'erin@rootsandwingsindy.com');
+  const duties = collectDutiesForPerson(erin, fam, ctx);
+  assert.strictEqual(duties.filter(d => d.block === 'Cleaning').length, 0, 'Katherine\'s entry must not match Erin');
+});
+
+t('Cleaning: "Erin & Jay Bogan" style entries still match both parents', () => {
+  const ctx = JSON.parse(JSON.stringify(fixture.ctx));
+  ctx.AM_CLASSES = {};
+  ctx.CLEANING_CREW.sessions[4].mainFloor.Kitchen = ['Erin & Jay Bogan'];
+  const erin = getActivePerson(fixture.fam, 'erin@rootsandwingsindy.com');
+  assert.strictEqual(collectDutiesForPerson(erin, fixture.fam, ctx).filter(d => d.block === 'Cleaning').length, 1);
+  const jay = getActivePerson(fixture.fam, 'jay@rootsandwingsindy.com');
+  assert.strictEqual(collectDutiesForPerson(jay, fixture.fam, ctx).filter(d => d.block === 'Cleaning').length, 1);
 });
 
 t('Family email logging in maps to MLC even if MLC.email is the family_email', () => {

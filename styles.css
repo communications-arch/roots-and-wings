@@ -8448,6 +8448,18 @@ button.staff-role:hover {
 /* Quiet weight — the badge identifies the group without competing with
    the kid's name it sits next to (Erin, 2026-07-19). */
 .kid-group-badge .ag-name { font-weight: 500; font-size: 0.95em; }
+
+/* Edit My Info: "awaiting Membership approval" chip on a kid row
+   (Option B enrollment queue, 2026-07-19). */
+.emi-pending-chip {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(var(--color-accent-light-rgb), 0.25);
+  border-left: 3px solid var(--color-accent, #E0A526);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
 .age-group-emoji img {
   height: 1em;
   width: auto;
