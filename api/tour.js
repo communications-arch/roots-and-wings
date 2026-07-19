@@ -6988,6 +6988,123 @@ async function handleBoardNoteDelete(body, req, res) {
   return res.status(200).json({ ok: true, id });
 }
 
+// ── Dev-only bug reports (bugs.html) ─────────────────────────────────
+// Helper testers on the dev site report bugs and watch fix status
+// without ever seeing GitHub. Backed by GitHub Issues on this repo so
+// the dev workflow labels (fixed-on-dev / verified / shipped-prod) ARE
+// the status source. The whole feature is dev-only: both handlers 404
+// on production. Requires a fine-grained PAT in GITHUB_BUGLOG_TOKEN
+// (Issues read/write on the one repo); without it we return a clear
+// 503 the page renders as a friendly "not set up yet" note.
+const BUGLOG_REPO = 'communications-arch/roots-and-wings';
+
+// 60s module-level cache for the issue list — helper testers refreshing
+// the page shouldn't hammer the GitHub API (5k req/hr, shared).
+let bugListCache = null; // { at: ms, items: [...] }
+
+// Same verification body as verifyWorkspaceAuth, but also returns the
+// signer's display name for the issue's "Reported by" line.
+async function verifyBugReporter(req) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) return null;
+  try {
+    const ticket = await verifyBearer(authHeader.slice(7));
+    const payload = ticket.getPayload();
+    const email = payload.email || '';
+    if ((email.split('@')[1] || '') !== ALLOWED_DOMAIN) return null;
+    return { email, name: payload.name || '' };
+  } catch (e) { return null; }
+}
+
+function bugLogGithubHeaders(token) {
+  return {
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'rw-portal-buglog'
+  };
+}
+
+// GET ?list=bug_reports — trimmed issue list for the dev bug-log page.
+// Never proxies raw GitHub payloads: only number/title/created_at/state/
+// label names go to the client.
+async function handleBugReportsList(req, res) {
+  if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ error: 'Not found.' });
+  const auth = await verifyBugReporter(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const token = process.env.GITHUB_BUGLOG_TOKEN;
+  if (!token) return res.status(503).json({ error: 'Bug log not configured' });
+  if (bugListCache && Date.now() - bugListCache.at < 60000) {
+    return res.status(200).json({ bugs: bugListCache.items });
+  }
+  try {
+    const gh = await fetch(
+      'https://api.github.com/repos/' + BUGLOG_REPO + '/issues?state=all&per_page=50&sort=created&direction=desc',
+      { headers: bugLogGithubHeaders(token) }
+    );
+    if (!gh.ok) {
+      console.error('Bug list GitHub error:', gh.status, await gh.text().catch(() => ''));
+      return res.status(502).json({ error: 'Could not load the bug list right now.' });
+    }
+    const raw = await gh.json();
+    // The issues endpoint also returns pull requests — skip those.
+    const items = (Array.isArray(raw) ? raw : [])
+      .filter(it => it && !it.pull_request)
+      .map(it => ({
+        number: it.number,
+        title: String(it.title || ''),
+        created_at: it.created_at || '',
+        state: it.state === 'closed' ? 'closed' : 'open',
+        labels: Array.isArray(it.labels)
+          ? it.labels.map(l => String((l && l.name) || '')).filter(Boolean)
+          : []
+      }));
+    bugListCache = { at: Date.now(), items };
+    return res.status(200).json({ bugs: items });
+  } catch (err) {
+    console.error('Bug list error:', err);
+    return res.status(502).json({ error: 'Could not load the bug list right now.' });
+  }
+}
+
+// POST kind='bug-report' — file a tester's report as a GitHub issue.
+async function handleBugReport(body, req, res) {
+  if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ error: 'Not found.' });
+  const auth = await verifyBugReporter(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const token = process.env.GITHUB_BUGLOG_TOKEN;
+  if (!token) return res.status(503).json({ error: 'Bug log not configured' });
+  const what = String(body.what || '').trim();
+  const where = String(body.where || '').trim();
+  if (!what) return res.status(400).json({ error: 'Please describe what happened.' });
+  if (what.length > 5000 || where.length > 300) {
+    return res.status(400).json({ error: 'That report is a little too long — could you trim it down?' });
+  }
+  // Title = first ~80 chars of the report, collapsed to one line.
+  const oneLine = what.replace(/\s+/g, ' ').trim();
+  const title = oneLine.length > 80 ? oneLine.slice(0, 80).trimEnd() + '…' : oneLine;
+  const issueBody = what
+    + (where ? '\n\nWhere: ' + where : '')
+    + '\n\nReported by: ' + (auth.name || auth.email) + ' (' + auth.email + ') via dev portal';
+  try {
+    const gh = await fetch('https://api.github.com/repos/' + BUGLOG_REPO + '/issues', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, bugLogGithubHeaders(token)),
+      body: JSON.stringify({ title, body: issueBody })
+    });
+    if (gh.status !== 201) {
+      console.error('Bug report GitHub error:', gh.status, await gh.text().catch(() => ''));
+      return res.status(502).json({ error: 'Could not save the report right now — please try again in a minute.' });
+    }
+    const created = await gh.json();
+    bugListCache = null; // so the fresh report shows on the next list load
+    return res.status(200).json({ ok: true, number: created.number });
+  } catch (err) {
+    console.error('Bug report error:', err);
+    return res.status(502).json({ error: 'Could not save the report right now — please try again in a minute.' });
+  }
+}
+
 module.exports = async function handler(req, res) {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -7004,6 +7121,7 @@ module.exports = async function handler(req, res) {
     if (req.query.action === 'profile') return handleProfileGet(req, res);
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
+    if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
@@ -7030,6 +7148,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'merch-inventory-add') return handleMerchInventoryAdd(body, req, res);
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
+    if (kind === 'bug-report') return handleBugReport(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);

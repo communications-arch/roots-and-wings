@@ -453,6 +453,12 @@
   // VIEW_AS_KEY session slot as the (legacy) in-page picker so they stay
   // in sync.
   function renderHeaderViewAs() {
+    // Dev-only "Bug log" link for helper testers (opens bugs.html in a
+    // new tab). Sits next to the View As picker in the header; hidden
+    // everywhere except dev hosts, and independent of the picker's own
+    // visibility rules below so it survives an empty FAMILIES load.
+    var bugLink = document.getElementById('qsbBugLog');
+    if (bugLink) bugLink.hidden = !isDevHost();
     var wrap = document.getElementById('qsbViewAs');
     var select = document.getElementById('qsbViewAsSelect');
     if (!wrap || !select) return;

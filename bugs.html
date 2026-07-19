@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Report a bug on the Roots & Wings Indy test site and see when it gets fixed.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#523A79">
+  <title>Bug Log — Roots & Wings Indy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
+  <link rel="stylesheet" href="styles.css?v=20260515c">
+  <style>
+    /* Page-scoped chrome for the bug log — the card/pill shapes below
+       don't exist as standalone-page classes in styles.css, so they're
+       defined here from the brand tokens instead of inventing global
+       classes for a dev-only page. Everything else (navbar, page-header,
+       form fields, buttons) reuses the global catalog. */
+    .bug-section { padding: 60px 0 100px; background-color: var(--color-cream); }
+    .bug-wrap { max-width: 720px; margin: 0 auto; }
+    .bug-panel {
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 28px 28px 32px;
+      margin-bottom: 36px;
+      box-shadow: var(--shadow-sm);
+    }
+    .bug-panel h2 {
+      font-size: 1.3rem;
+      margin-bottom: 6px;
+    }
+    .bug-panel-sub {
+      font-size: 0.92rem;
+      color: var(--color-text-light);
+      margin-bottom: 18px;
+    }
+    .bug-form-msg { font-size: 0.9rem; margin: 10px 0 0; }
+    .bug-form-msg.ok { color: var(--color-success); font-weight: 700; }
+    .bug-form-msg.err { color: var(--color-error); font-weight: 700; }
+    .bug-list-title { font-size: 1.3rem; margin-bottom: 14px; }
+    .bug-card {
+      background: var(--color-white);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .bug-card-title {
+      font-weight: 700;
+      color: var(--color-text);
+      font-size: 0.98rem;
+      line-height: 1.45;
+    }
+    .bug-card-date {
+      font-size: 0.8rem;
+      color: var(--color-text-light);
+      margin-top: 2px;
+    }
+    .bug-status {
+      display: inline-block;
+      padding: 4px 14px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .bug-status-reported { background: rgba(var(--color-primary-rgb), 0.10); color: var(--color-primary-dark); }
+    .bug-status-fixed    { background: rgba(var(--color-accent-light-rgb), 0.45); color: #7A6210; }
+    .bug-status-verified { background: rgba(var(--color-teal-rgb), 0.12); color: var(--color-teal); }
+    .bug-status-live     { background: rgba(90, 107, 57, 0.14); color: var(--color-leaf); }
+    .bug-note {
+      text-align: center;
+      color: var(--color-text-light);
+      font-size: 0.95rem;
+      padding: 24px 0;
+    }
+    @media (max-width: 500px) {
+      .bug-panel { padding: 22px 18px 26px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ====== Navigation ====== -->
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="container">
+      <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
+        <img src="logo-combined.svg?v=20260430g" alt="Roots & Wings Indianapolis" onerror="this.style.display='none'">
+        <div class="nav-brand-text">
+          ROOTS & WINGS
+          <span>Indianapolis</span>
+        </div>
+      </a>
+
+      <button class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <div class="nav-links" role="menubar">
+        <a href="index.html#about" role="menuitem">About</a>
+        <a href="index.html#programs" role="menuitem">Programs</a>
+        <a href="index.html#contact" role="menuitem">Contact</a>
+        <a href="members.html" class="btn btn-primary btn-sm" role="menuitem">Members</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ====== Page Header ====== -->
+  <header class="page-header">
+    <div class="hero-watermark" aria-hidden="true">
+      <img src="logo-mark.svg?v=20260430g" alt="">
+    </div>
+    <div class="container text-center" style="position: relative; z-index: 1;">
+      <h1>Test-Site Bug Log</h1>
+      <p class="hero-tagline">Spotted something odd? Tell us here — then watch it get fixed.</p>
+    </div>
+  </header>
+
+  <section class="bug-section">
+    <div class="container">
+      <div class="bug-wrap">
+
+        <!-- Shown when the page isn't usable (prod host or signed out) -->
+        <div class="bug-panel" id="bugGate" hidden>
+          <h2 id="bugGateTitle">Just for the test site</h2>
+          <p class="bug-panel-sub" id="bugGateMsg"></p>
+          <a href="members.html" class="btn btn-primary btn-sm" id="bugGateBtn">Go to the Members page</a>
+        </div>
+
+        <div id="bugMain" hidden>
+          <!-- Report form -->
+          <div class="bug-panel">
+            <h2>Report a bug</h2>
+            <p class="bug-panel-sub">
+              Found something that looks broken or just plain weird? Tell us
+              about it below — every report helps make the site better for
+              everyone.
+            </p>
+            <form id="bugForm" class="tour-modal-form">
+              <div class="tour-form-field">
+                <label for="bugWhat">What happened?</label>
+                <textarea id="bugWhat" rows="4" required maxlength="5000"
+                  placeholder="Tell us what you were doing and what went wrong — the more detail, the better."></textarea>
+              </div>
+              <div class="tour-form-field">
+                <label for="bugWhere">Where on the site were you? (optional)</label>
+                <input type="text" id="bugWhere" maxlength="300"
+                  placeholder="e.g., My Family page, the class sign-up form&hellip;">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm tour-form-submit" id="bugSubmitBtn">Send bug report</button>
+              <p class="bug-form-msg" id="bugFormMsg" hidden></p>
+            </form>
+          </div>
+
+          <!-- Bug log -->
+          <h2 class="bug-list-title">What's been reported</h2>
+          <div id="bugList">
+            <p class="bug-note">Loading the bug list&hellip;</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== Footer ====== -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-bottom">
+        <p>&copy; 2026 Roots & Wings Indy. All rights reserved.</p>
+        <p>Made with care in Indianapolis</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+  // Self-contained page logic — deliberately independent of script.js so
+  // this dev-only page can't drift with portal refactors. script.js is
+  // still loaded below for the shared navbar toggle only.
+  (function () {
+    'use strict';
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // Mirrors isDevHost() in script.js — localhost + preview deploys +
+    // the friendly dev domain count as dev; the real site does not.
+    function isDevHost() {
+      var h = (window.location && window.location.hostname || '').toLowerCase();
+      if (h === 'localhost' || h === '127.0.0.1') return true;
+      if (h === 'dev.rootsandwingsindy.com') return true;
+      if (h === 'roots-and-wings-topaz.vercel.app') return false;
+      if (h === 'rootsandwingsindy.com' || h === 'www.rootsandwingsindy.com') return false;
+      if (h.endsWith('.vercel.app')) return true;
+      return false;
+    }
+
+    var gate = document.getElementById('bugGate');
+    var gateTitle = document.getElementById('bugGateTitle');
+    var gateMsg = document.getElementById('bugGateMsg');
+    var main = document.getElementById('bugMain');
+    var listEl = document.getElementById('bugList');
+    var form = document.getElementById('bugForm');
+    var formMsg = document.getElementById('bugFormMsg');
+    var submitBtn = document.getElementById('bugSubmitBtn');
+
+    function showGate(title, msg) {
+      gateTitle.textContent = title;
+      gateMsg.textContent = msg;
+      gate.hidden = false;
+      main.hidden = true;
+    }
+
+    function getToken() {
+      try { return localStorage.getItem('rw_google_credential') || ''; }
+      catch (e) { return ''; }
+    }
+
+    function authHeaders(json) {
+      var headers = { 'Authorization': 'Bearer ' + getToken() };
+      if (json) headers['Content-Type'] = 'application/json';
+      return headers;
+    }
+
+    // Map a bug's state + labels to a friendly status. Order matters:
+    // the furthest-along status wins.
+    function bugStatus(bug) {
+      var labels = bug.labels || [];
+      if (bug.state === 'closed' || labels.indexOf('shipped-prod') !== -1) {
+        return { text: 'Live on the real site', cls: 'bug-status-live' };
+      }
+      if (labels.indexOf('verified') !== -1) {
+        return { text: 'Verified on dev', cls: 'bug-status-verified' };
+      }
+      if (labels.indexOf('fixed-on-dev') !== -1) {
+        return { text: 'Fixed on dev — please re-test', cls: 'bug-status-fixed' };
+      }
+      return { text: 'Reported — on the list', cls: 'bug-status-reported' };
+    }
+
+    function friendlyDate(iso) {
+      var d = new Date(iso || '');
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function renderBugs(bugs) {
+      if (!Array.isArray(bugs) || bugs.length === 0) {
+        listEl.innerHTML = '<p class="bug-note">Nothing reported yet — be the first!</p>';
+        return;
+      }
+      var sorted = bugs.slice().sort(function (a, b) {
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      });
+      var html = '';
+      sorted.forEach(function (bug) {
+        var st = bugStatus(bug);
+        var when = friendlyDate(bug.created_at);
+        html += '<div class="bug-card">'
+          + '<div>'
+          + '<div class="bug-card-title">' + escapeHtml(bug.title) + '</div>'
+          + (when ? '<div class="bug-card-date">Reported ' + escapeHtml(when) + '</div>' : '')
+          + '</div>'
+          + '<span class="bug-status ' + st.cls + '">' + escapeHtml(st.text) + '</span>'
+          + '</div>';
+      });
+      listEl.innerHTML = html;
+    }
+
+    function loadBugs() {
+      listEl.innerHTML = '<p class="bug-note">Loading the bug list&hellip;</p>';
+      fetch('/api/tour?list=bug_reports', { headers: authHeaders() })
+        .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+        .then(function (out) {
+          if (out.status === 200) return renderBugs(out.data && out.data.bugs);
+          if (out.status === 503) {
+            listEl.innerHTML = '<p class="bug-note">The bug log isn’t quite set up yet — check back soon.</p>';
+            return;
+          }
+          if (out.status === 401) {
+            showGate('Please sign in first',
+              'Head to the Members page and sign in, then come back here — the bug log needs to know who’s reporting.');
+            return;
+          }
+          listEl.innerHTML = '<p class="bug-note">Couldn’t load the bug list right now — try refreshing in a minute.</p>';
+        })
+        .catch(function () {
+          listEl.innerHTML = '<p class="bug-note">Couldn’t load the bug list right now — try refreshing in a minute.</p>';
+        });
+    }
+
+    function showFormMsg(text, ok) {
+      formMsg.textContent = text;
+      formMsg.className = 'bug-form-msg ' + (ok ? 'ok' : 'err');
+      formMsg.hidden = false;
+    }
+
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var what = document.getElementById('bugWhat').value.trim();
+      var where = document.getElementById('bugWhere').value.trim();
+      if (!what) { showFormMsg('Please tell us what happened first.', false); return; }
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Sending…';
+      formMsg.hidden = true;
+      fetch('/api/tour', {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify({ kind: 'bug-report', what: what, where: where })
+      })
+        .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+        .then(function (out) {
+          if (out.status === 200 && out.data && out.data.ok) {
+            form.reset();
+            showFormMsg('Thank you! Your report is on the list below.', true);
+            loadBugs();
+            return;
+          }
+          var msg = (out.data && out.data.error) || 'Something went wrong — please try again.';
+          if (out.status === 503) msg = 'The bug log isn’t quite set up yet — check back soon.';
+          if (out.status === 401) msg = 'Your sign-in looks expired — pop over to the Members page, sign in, and try again.';
+          showFormMsg(msg, false);
+        })
+        .catch(function () {
+          showFormMsg('Something went wrong — please try again.', false);
+        })
+        .then(function () {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Send bug report';
+        });
+    });
+
+    // ── Gate: dev host + signed in, or a friendly explanation ──
+    if (!isDevHost()) {
+      showGate('Just for the test site',
+        'This bug log lives on the dev/test version of the site. You’re on the real site right now, so there’s nothing to see here — thanks for stopping by!');
+      document.getElementById('bugGateBtn').textContent = 'Back to the Members page';
+    } else if (!getToken()) {
+      showGate('Please sign in first',
+        'Sign in on the Members page, then come back here to report a bug or check on one.');
+    } else {
+      main.hidden = false;
+      loadBugs();
+    }
+  })();
+  </script>
+  <script src="script.js?v=20260720d"></script>
+</body>
+</html>
