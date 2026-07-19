@@ -5378,7 +5378,7 @@
     // through, so the picker must too.
     var vpAssign = !!(opts && opts.vpAssign);
     var b = (d.blocks || {})[blockKey] || { classes: [], floaters: [], board: [], prep: [] };
-    var h = '<option value="">— sign up… —</option>';
+    var h = (opts && opts.noPlaceholder) ? '' : '<option value="">— sign up… —</option>';
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
     sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
@@ -24035,10 +24035,16 @@
   function schedAdultCellHtml(row, b) {
     var c = row.cells[b];
     if (c) {
-      if (c.class_name) {
-        return '<span class="ws-wv-context">' + (SCHED_KIND_TAG[c.kind] || c.kind) + '</span> ' + escapeHtml(c.class_name);
+      var lbl = c.class_name
+        ? '<span class="ws-wv-context">' + (SCHED_KIND_TAG[c.kind] || c.kind) + '</span> ' + escapeHtml(c.class_name)
+        : escapeHtml(SCHED_KIND_TAG[c.kind] || c.kind);
+      // VP reassign (bug #20): assists + support pledges are editable in
+      // place — ✎ opens the same panel + Fill uses. Leads change in the
+      // Class Builder, so they stay read-only here.
+      if (_schedRep.can_place && row.email && c.kind !== 'lead') {
+        lbl += ' <button type="button" class="sc-btn sched-fill-btn sched-reassign-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '" title="Change or remove this assignment">✎</button>';
       }
-      return escapeHtml(SCHED_KIND_TAG[c.kind] || c.kind);
+      return lbl;
     }
     if ((_schedRep.blocks_expected || []).indexOf(b) === -1) return '<span class="sb-subdetail-dim">—</span>';
     if (_schedRep.can_place && row.email) return schedCellFillBtn(row);
@@ -24087,11 +24093,32 @@
     var missing = schedMissingFor(row);
     if (_schedTab === 'adults') {
       if (!_schedMatrix || _schedMatrix.session !== _schedSession) return '<p class="ws-empty">Loading open spots…</p>';
+      // Every expected block renders (bug #20): open blocks get the fill
+      // picker, filled assists/pledges get a reassign picker (current
+      // role + Remove + every other role), leads stay read-only.
       var h = '<div class="st-place-row">';
-      missing.forEach(function (b) {
-        h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
-          + '<select class="cl-input sched-place-adult" data-email="' + escapeHtml(row.email) + '" data-block="' + b + '">'
-          + volSlotOptionsHtml(b, _schedMatrix.data, { vpAssign: true }) + '</select></label>';
+      (_schedRep.blocks_expected || []).forEach(function (b) {
+        var c = row.cells[b];
+        if (!c) {
+          h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
+            + '<select class="cl-input sched-place-adult" data-email="' + escapeHtml(row.email) + '" data-block="' + b + '">'
+            + volSlotOptionsHtml(b, _schedMatrix.data, { vpAssign: true }) + '</select></label>';
+        } else if (c.kind === 'lead') {
+          h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
+            + '<span class="ws-wv-context">Leading “' + escapeHtml(c.class_name || '') + '” — change in the Class Builder</span></label>';
+        } else {
+          var curLbl = (SCHED_KIND_TAG[c.kind] || c.kind) + (c.class_name ? ' “' + c.class_name + '”' : '');
+          h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
+            + '<select class="cl-input sched-place-adult" data-email="' + escapeHtml(row.email) + '" data-block="' + b + '"'
+            + ' data-cur-kind="' + escapeHtml(c.kind) + '"'
+            + (c.signup_id ? ' data-cur-signup="' + c.signup_id + '"' : '')
+            + (c.sub_id ? ' data-cur-sub="' + c.sub_id + '"' : '')
+            + '>'
+            + '<option value="">' + escapeHtml(curLbl) + ' (current)</option>'
+            + '<option value="remove">✕ Remove from this hour</option>'
+            + volSlotOptionsHtml(b, _schedMatrix.data, { vpAssign: true, noPlaceholder: true })
+            + '</select></label>';
+        }
       });
       h += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
       return h + '</div>';
@@ -24155,8 +24182,10 @@
     _schedPools = null;
     schedFetchReport(function () {
       if (_schedEditKey) {
-        var row = schedRowByKey(_schedEditKey);
-        if (!row || schedMissingFor(row).length === 0) _schedEditKey = null;
+        // Keep the panel open while the row exists — a fully-placed row
+        // is still editable now (reassign, bug #20), so "nothing
+        // missing" no longer means "nothing to do".
+        if (!schedRowByKey(_schedEditKey)) _schedEditKey = null;
       }
       schedPreserveScroll(renderSchedulesBody);
       // A still-open picker panel needs its option source back (the
@@ -24258,20 +24287,44 @@
         if (!v) return;
         var email = this.getAttribute('data-email');
         var block = this.getAttribute('data-block');
-        var isAssist = v.indexOf('assist:') === 0;
-        var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + '&view_as=' + encodeURIComponent(email);
-        var payload = isAssist
-          ? { class_submission_id: parseInt(v.slice(7), 10), block: block }
-          : { school_year: _schedRep.school_year, session: _schedRep.session, block: block, role: v };
+        // Reassign flow (bug #20): a filled block carries its current
+        // assignment — remove it first, then write the new one (or stop
+        // there for "✕ Remove"). The delete rides view_as; the server
+        // honors reviewer removals.
+        var curKind = this.getAttribute('data-cur-kind') || '';
+        var curSignup = this.getAttribute('data-cur-signup') || '';
+        var curSub = this.getAttribute('data-cur-sub') || '';
         var selEl = this;
         selEl.disabled = true;
-        fetch(url, { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
-          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
-          .then(function (res) {
-            if (!res.ok) { alert((res.data && res.data.error) || 'Could not place them.'); selEl.disabled = false; selEl.value = ''; return; }
-            schedRefresh();
-          })
-          .catch(function () { alert('Network error — try again.'); selEl.disabled = false; });
+        var removeCurrent = function () {
+          if (!curKind) return Promise.resolve({ ok: true });
+          var du = curKind === 'assist'
+            ? '/api/curriculum?action=volunteer-assist&id=' + encodeURIComponent(curSub) + '&block=' + encodeURIComponent(block) + '&view_as=' + encodeURIComponent(email)
+            : '/api/curriculum?action=volunteer-signup&id=' + encodeURIComponent(curSignup) + '&view_as=' + encodeURIComponent(email);
+          return fetch(du, { method: 'DELETE', headers: rwAuthHeaders() })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); });
+        };
+        removeCurrent().then(function (rr) {
+          if (!rr.ok) { alert((rr.data && rr.data.error) || 'Could not remove the current assignment.'); selEl.disabled = false; selEl.value = ''; return; }
+          if (v === 'remove') { schedRefresh(); return; }
+          var isAssist = v.indexOf('assist:') === 0;
+          var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + '&view_as=' + encodeURIComponent(email);
+          var payload = isAssist
+            ? { class_submission_id: parseInt(v.slice(7), 10), block: block }
+            : { school_year: _schedRep.school_year, session: _schedRep.session, block: block, role: v };
+          fetch(url, { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) {
+                alert((res.data && res.data.error) || 'Could not place them.'
+                  + (curKind ? '\n\nTheir previous assignment was already removed — re-place them from this panel.' : ''));
+                schedRefresh();
+                return;
+              }
+              schedRefresh();
+            })
+            .catch(function () { alert('Network error — try again.'); schedRefresh(); });
+        }).catch(function () { alert('Network error — try again.'); selEl.disabled = false; });
       });
     });
     // Kid placement — same class-signup-picks write as the Place kids To

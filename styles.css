@@ -8484,6 +8484,14 @@ button.staff-role:hover {
   margin-bottom: 8px;
 }
 .st-place-row.enroll-req-card .ws-srt-actions { margin-left: auto; }
+/* Schedules report reassign chip (bug #20) — compact ✎ beside a filled
+   cell, quieter than the + Fill chip so placed rows don't shout. */
+.sc-btn.sched-reassign-btn {
+  padding: 1px 7px;
+  font-size: 0.75rem;
+  margin-left: 4px;
+  vertical-align: middle;
+}
 .age-group-emoji img {
   height: 1em;
   width: auto;

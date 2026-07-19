@@ -1356,7 +1356,7 @@ module.exports = async function handler(req, res) {
               FROM class_assignment_helpers h
               JOIN class_submissions c ON c.id = h.class_submission_id
               WHERE c.school_year = ${srYear} AND c.scheduled_session = ${srSess}`,
-          sql`SELECT block, role, LOWER(person_email) AS email, person_name FROM volunteer_signups
+          sql`SELECT id, block, role, LOWER(person_email) AS email, person_name FROM volunteer_signups
               WHERE school_year = ${srYear} AND session_number = ${srSess}`,
           sql`SELECT approved_at FROM co_op_sessions
               WHERE school_year = ${srYear} AND session_number = ${srSess}`,
@@ -1415,13 +1415,15 @@ module.exports = async function handler(req, res) {
           srBlocksOf(r).forEach(b => {
             srPut(b, r.teacher_email, r.teacher_name, { kind: 'lead', class_name: r.class_name });
             const hsB = hs.filter(h => !h.block || h.block === b);
-            hsB.forEach(h => srPut(b, h.email, h.person_name, { kind: 'assist', class_name: r.class_name }));
+            // sub_id rides along so the VP can reassign the helper in
+            // place (bug #20) — the client DELETEs by class_submission_id.
+            hsB.forEach(h => srPut(b, h.email, h.person_name, { kind: 'assist', class_name: r.class_name, sub_id: r.id }));
             srOpenAssist[b] += Math.max(0, wants - hsB.length);
           });
         });
         srSignups.forEach(s2 => {
           (s2.block === 'AM' ? ['AM1', 'AM2'] : [s2.block]).forEach(b => {
-            if (whereab[b]) srPut(b, s2.email, s2.person_name, { kind: s2.role });
+            if (whereab[b]) srPut(b, s2.email, s2.person_name, { kind: s2.role, signup_id: s2.id });
           });
         });
 
@@ -3145,11 +3147,13 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
       // Volunteer sign-ups (2026-07-11): drop your own floater/board/prep
-      // pledge, or step out of a class you're assisting.
+      // pledge, or step out of a class you're assisting. Reviewers (VP /
+      // ACL) may remove on someone's behalf via view_as (bug #20 — the
+      // Schedules report reassign flow deletes before re-placing).
       if (action === 'volunteer-signup') {
         const dsId = parseInt(req.query.id, 10);
         if (!Number.isFinite(dsId)) return res.status(400).json({ error: 'id required' });
-        const dsEmail = actingEmailFor(user, req).toLowerCase();
+        const dsEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
         const gone = await sql`DELETE FROM volunteer_signups
           WHERE id = ${dsId} AND LOWER(person_email) = ${dsEmail} RETURNING id`;
         if (!gone.length) return res.status(404).json({ error: 'Pledge not found (or not yours).' });
@@ -3158,7 +3162,7 @@ module.exports = async function handler(req, res) {
       if (action === 'volunteer-assist') {
         const daSubId = parseInt(req.query.id, 10);
         if (!Number.isFinite(daSubId)) return res.status(400).json({ error: 'id required' });
-        const daEmail = actingEmailFor(user, req).toLowerCase();
+        const daEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
         // Optional hour scope: removing an hour-only assist leaves the
         // other hour's row; no block removes every row for the class.
         const daBlock = String(req.query.block || '').trim();
