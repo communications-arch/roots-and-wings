@@ -31361,13 +31361,17 @@
                   : p.kid_first_name + '’s schedule change';
               }).join(', ');
               if (addWithWaiver.length) {
-                // No window.open here — popup blockers eat async opens
-                // (ship-gate 2026-07-19). The form reopens with a real
-                // "sign the waiver" link on the kid's row instead.
-                reopenEmiForWaiver = true;
-                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
-                  + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
-                  + ': a waiver signature. The form will reopen — click the gold “Sign the waiver” button on their row so the co-op has it on file.');
+                // Async window.open gets eaten by popup blockers, so we
+                // NAVIGATE this tab to the signing page (bug #23 — the
+                // reopen-with-gold-button flow still wasn't direct
+                // enough). Any additional kids' waivers stay reachable
+                // from the gold banner on My Family afterward.
+                var wvNames = addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ');
+                alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for ' + wvNames
+                  + ': a waiver signature. Taking you to the signing page now'
+                  + (addWithWaiver.length > 1 ? ' — the other waivers wait in the gold banner on your My Family page' : '')
+                  + '.');
+                window.location.href = 'waiver.html?token=' + encodeURIComponent(addWithWaiver[0].waiver_token);
               } else {
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
               }
