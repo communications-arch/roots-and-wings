@@ -30787,7 +30787,14 @@
       // server queues the change for approval instead of applying it —
       // the title says so. Membership Director (member_schedule_edit,
       // real login) and brand-new kids apply directly.
-      var schedPriv = (typeof realUserHasCapability === 'function'
+      // Impersonating = acting AS the family (bug #22): the save queues,
+      // so the tooltip must say so even for a super/Membership login.
+      var _schedViewAs = false;
+      try {
+        var _vaVal = sessionStorage.getItem(VIEW_AS_KEY) || '';
+        _schedViewAs = !!_vaVal && _vaVal.toLowerCase() !== String(getRealEmail() || '').toLowerCase();
+      } catch (e) { /* default: not impersonating */ }
+      var schedPriv = !_schedViewAs && (typeof realUserHasCapability === 'function'
         && realUserHasCapability('member_schedule_edit', ['Membership Director']));
       var schedTitle = k._isNew ? 'Pick this child’s schedule.'
         : schedPriv ? 'Half-day ↔ full-day — affects dues.'

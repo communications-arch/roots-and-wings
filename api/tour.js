@@ -3854,7 +3854,15 @@ async function handleProfileUpdate(body, req, res) {
     const actorMayEdit = async () => {
       if (actorMayEditDirect === null) {
         const realEmail0 = user.realEmail || user.email;
-        actorMayEditDirect = isSuperUser(realEmail0) || (await hasCapability(realEmail0, 'member_schedule_edit'));
+        // Impersonation acts AS the family (bug #22): a super/Membership
+        // login using View As follows the member path — schedule
+        // changes, adds, and removals QUEUE for approval instead of
+        // applying silently. Direct (non-impersonated) privileged edits
+        // stay immediate.
+        const impersonating = user.realEmail
+          && String(user.realEmail).toLowerCase() !== String(user.email || '').toLowerCase();
+        actorMayEditDirect = !impersonating
+          && (isSuperUser(realEmail0) || (await hasCapability(realEmail0, 'member_schedule_edit')));
       }
       return actorMayEditDirect;
     };
@@ -7598,6 +7606,31 @@ async function handleEnrollmentRequestDecide(body, req, res) {
             `;
           }
         } catch (e) { console.error('approve track re-sync (non-fatal):', e); }
+        // Prompt the Morning Builder follow-up (bug #22): entering or
+        // leaving mornings changes the builder roster, and approving the
+        // request shouldn't leave that to memory.
+        try {
+          const wasAM = ['all-day', 'morning'].indexOf(String(rq.prior_schedule || '').toLowerCase()) !== -1;
+          const nowAM = ['all-day', 'morning'].indexOf(String(rq.requested_schedule || '').toLowerCase()) !== -1;
+          if (wasAM !== nowAM) {
+            let placedGroup = '';
+            try {
+              const pa = await sql`
+                SELECT class_group FROM morning_class_assignments
+                WHERE school_year = ${rq.season} AND class_group <> ''
+                  AND (kid_id = ${rq.kid_id}
+                       OR (kid_id IS NULL AND LOWER(family_email) = LOWER(${rq.family_email})
+                           AND LOWER(kid_first_name) = LOWER(${rq.kid_first_name})))
+                LIMIT 1`;
+              placedGroup = (pa[0] && pa[0].class_group) || '';
+            } catch (e) { /* group name is a nicety */ }
+            await notifyMembershipDirector(sql,
+              'Morning Class Builder: ' + rq.kid_first_name + (nowAM ? ' joined mornings' : ' left mornings'),
+              nowAM
+                ? rq.kid_first_name + '’s schedule now includes mornings — place them in the Morning Class Builder.'
+                : rq.kid_first_name + ' switched to afternoon-only' + (placedGroup ? ' but is still placed in ' + placedGroup : '') + ' — update the Morning Class Builder.');
+          }
+        } catch (e) { console.error('builder-prompt notification (non-fatal):', e); }
       } else if (rq.kind === 'add_kid') {
         if (!rq.kid_id) return res.status(409).json({ error: 'That kid no longer exists.' });
         // No waiver gate (Erin, 2026-07-19): approval doesn't wait on the
@@ -7607,6 +7640,14 @@ async function handleEnrollmentRequestDecide(body, req, res) {
           UPDATE kid_enrollments SET status = 'enrolled', updated_at = NOW(), updated_by = ${real}
           WHERE kid_id = ${rq.kid_id} AND season = ${rq.season} AND status = 'pending'
         `;
+        // A newly approved morning kid needs a builder placement (bug #22).
+        try {
+          if (['all-day', 'morning'].indexOf(String(rq.requested_schedule || '').toLowerCase()) !== -1) {
+            await notifyMembershipDirector(sql,
+              'Morning Class Builder: place ' + rq.kid_first_name,
+              rq.kid_first_name + ' was just approved with a morning schedule — place them in the Morning Class Builder.');
+          }
+        } catch (e) { /* non-fatal */ }
       } else if (rq.kind === 'remove_kid') {
         if (rq.kid_id) {
           // Staleness guard (ship-gate 2026-07-19): a full re-registration
