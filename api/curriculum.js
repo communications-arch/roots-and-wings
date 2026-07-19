@@ -925,14 +925,23 @@ module.exports = async function handler(req, res) {
         const famRec = await resolveFamily(sql, famEmail);
         const keyEmail = (famRec && famRec.family_email) || famEmail;
         const pYear = String(req.query.school_year || '').trim().slice(0, 20) || activeSchoolYear();
+        // Enrollment re-key phase (2026-07-19): assignments carry kid_id
+        // now — match the family via the kid's REAL family_email too, so
+        // rows keyed on a registration-derived email (compound-surname
+        // families) still surface, and a renamed kid shows their current
+        // first name instead of the stale assignment key.
         const pRows = await sql`
-          SELECT kid_first_name, class_group, finalized
-          FROM morning_class_assignments
-          WHERE school_year = ${pYear} AND LOWER(family_email) = LOWER(${keyEmail})`;
+          SELECT a.kid_first_name, a.class_group, a.finalized,
+                 COALESCE(NULLIF(k.first_name, ''), a.kid_first_name) AS kid_name
+          FROM morning_class_assignments a
+          LEFT JOIN kids k ON k.id = a.kid_id
+          WHERE a.school_year = ${pYear}
+            AND (LOWER(a.family_email) = LOWER(${keyEmail})
+              OR LOWER(k.family_email) = LOWER(${keyEmail}))`;
         return res.status(200).json({
           school_year: pYear,
           placements: pRows.filter(r => r.finalized && r.class_group)
-            .map(r => ({ kid: r.kid_first_name, group: r.class_group }))
+            .map(r => ({ kid: r.kid_name, group: r.class_group }))
         });
       }
 
@@ -972,11 +981,18 @@ module.exports = async function handler(req, res) {
             ciKids = kidRows.map(r => r.kid_first_name);
             // Placements not finalized yet — show the kids currently in the
             // class's age group as the pending roster (Erin, 2026-07-15:
-            // "I'm not seeing the kids").
+            // "I'm not seeing the kids"). Enrollment-scoped (2026-07-19):
+            // only kids ENROLLED for this season with a morning schedule
+            // count, mirroring the Morning Builder's kid_enrollments read.
             if (!ciKids.length) {
               const pend = await sql`
-                SELECT COALESCE(NULLIF(nickname, ''), first_name) AS n FROM kids
-                WHERE LOWER(class_group) = LOWER(${ciGroup}) ORDER BY 1`;
+                SELECT COALESCE(NULLIF(k.nickname, ''), k.first_name) AS n
+                FROM kid_enrollments e
+                JOIN kids k ON k.id = e.kid_id
+                WHERE e.season = ${ci.school_year} AND e.status = 'enrolled'
+                  AND e.schedule IN ('all-day', 'morning')
+                  AND LOWER(k.class_group) = LOWER(${ciGroup})
+                ORDER BY 1`;
               ciKids = pend.map(r => r.n);
               ciKidsPending = ciKids.length > 0;
             }
@@ -993,8 +1009,10 @@ module.exports = async function handler(req, res) {
                    MAX(k.class_group) AS class_group
             FROM class_signup_picks p
             JOIN kids k
-              ON LOWER(k.family_email) = LOWER(p.family_email)
-             AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+              ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
+              OR (p.kid_id IS NULL
+                  AND LOWER(k.family_email) = LOWER(p.family_email)
+                  AND LOWER(k.first_name) = LOWER(p.kid_first_name))
             LEFT JOIN member_profiles mp
               ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE p.class_submission_id = ${ciId}
@@ -1038,13 +1056,22 @@ module.exports = async function handler(req, res) {
         const stSess = parseInt(req.query.session, 10) || 1;
         const stYear = activeSchoolYear(new Date());
 
+        // The season's afternoon pool comes from kid_enrollments (enrollment
+        // re-key phase, 2026-07-19) — status='enrolled', schedule
+        // all-day/afternoon — mirroring the Morning Builder's morning read.
+        // Pending / not-returning / morning-only kids no longer show up as
+        // "needs picks"; the kids table supplies display metadata only.
         const [stKids, stPicked, stCls, stHelpers, stSignups, stApproval, stWin, stFirsts] = await Promise.all([
-          sql`SELECT k.first_name, k.class_group, k.birth_date, k.schedule, LOWER(k.family_email) AS fam,
+          sql`SELECT k.id AS kid_id, k.first_name, k.class_group, k.birth_date,
+                     LOWER(e.family_email) AS fam,
                      COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
                      COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
-              FROM kids k
-              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)`,
-          sql`SELECT DISTINCT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
+              FROM kid_enrollments e
+              JOIN kids k ON k.id = e.kid_id
+              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(e.family_email)
+              WHERE e.season = ${stYear} AND e.status = 'enrolled'
+                AND e.schedule IN ('all-day', 'afternoon')`,
+          sql`SELECT DISTINCT kid_id, LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
               FROM class_signup_picks WHERE school_year = ${stYear} AND session_number = ${stSess}`,
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
                      c.max_students, c.lead_email_sent_at, c.lottery_run_at,
@@ -1077,14 +1104,18 @@ module.exports = async function handler(req, res) {
         const stFirstBy = {};
         stFirsts.forEach(r => { stFirstBy[r.class_submission_id] = r.firsts; });
 
-        // 1. Kids without afternoon picks (Greenhouse / under-3 /
-        // morning-only half-day kids never pick).
+        // 1. Kids without afternoon picks. Morning-only / pending /
+        // not-returning kids are already filtered out by the enrollment
+        // read above; Greenhouse / under-3 never pick. "Picked" matches by
+        // kid_id when the pick row carries one (rename-proof), name key as
+        // the legacy fallback.
         const stPickedSet = new Set(stPicked.map(r => r.fam + '|' + r.kid));
+        const stPickedIds = new Set(stPicked.map(r => r.kid_id).filter(Boolean));
         const kidsUnpicked = stKids.filter(k => {
           if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
-          if (String(k.schedule || '').trim().toLowerCase() === 'morning') return false;
           const age = ageFromBirthDate(k.birth_date);
           if (age != null && age < 3) return false;
+          if (stPickedIds.has(k.kid_id)) return false;
           return !stPickedSet.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
         }).map(k => ({
           name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
@@ -1216,15 +1247,18 @@ module.exports = async function handler(req, res) {
                  (SELECT c2.class_name FROM class_signup_picks p2
                     JOIN class_submissions c2 ON c2.id = p2.class_submission_id
                    WHERE p2.school_year = b.school_year AND p2.session_number = b.session_number
-                     AND LOWER(p2.family_email) = LOWER(b.family_email)
-                     AND LOWER(p2.kid_first_name) = LOWER(b.kid_first_name)
+                     AND ((b.kid_id IS NOT NULL AND p2.kid_id = b.kid_id)
+                       OR (LOWER(p2.family_email) = LOWER(b.family_email)
+                           AND LOWER(p2.kid_first_name) = LOWER(b.kid_first_name)))
                      AND p2.hour = (CASE WHEN c.scheduled_hour = 'PM2' THEN 'PM2' ELSE 'PM1' END)
                      AND p2.rank = 1
                    LIMIT 1) AS moved_to
           FROM class_lottery_bumps b
           JOIN class_submissions c ON c.id = b.class_submission_id
-          LEFT JOIN kids k ON LOWER(k.family_email) = LOWER(b.family_email)
-                          AND LOWER(k.first_name) = LOWER(b.kid_first_name)
+          LEFT JOIN kids k ON (b.kid_id IS NOT NULL AND k.id = b.kid_id)
+                           OR (b.kid_id IS NULL
+                               AND LOWER(k.family_email) = LOWER(b.family_email)
+                               AND LOWER(k.first_name) = LOWER(b.kid_first_name))
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(b.family_email)
           WHERE b.school_year = ${stYear} AND b.session_number = ${stSess}
             AND b.notified_at IS NULL
@@ -1295,8 +1329,10 @@ module.exports = async function handler(req, res) {
           SELECT COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS last
           FROM class_signup_picks p
-          JOIN kids k ON LOWER(k.family_email) = LOWER(p.family_email)
-                     AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+          JOIN kids k ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
+                      OR (p.kid_id IS NULL
+                          AND LOWER(k.family_email) = LOWER(p.family_email)
+                          AND LOWER(k.first_name) = LOWER(p.kid_first_name))
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.class_submission_id = ${cdId} AND p.rank = 1 AND p.hour = ${cdHour}
             AND p.school_year = ${cd.school_year} AND p.session_number = ${cd.scheduled_session}
@@ -1579,10 +1615,10 @@ module.exports = async function handler(req, res) {
         // parent card. Distinct per kid so re-ranking doesn't double count.
         // Display name = the kid's "goes by" nickname (or first name) + the
         // family surname; placement itself happens at the lottery.
-        // INNER join on kids: picks are keyed by kid_first_name, so a kid
-        // renamed via Edit My Info orphans their old pick rows — those must
-        // not surface as phantom students ("Test Family", 2026-07-15).
-        // handleProfileUpdate migrates/cleans picks on rename going forward.
+        // INNER join on kids: picks keyed only by kid_first_name are
+        // orphaned by a rename — those must not surface as phantom students
+        // ("Test Family", 2026-07-15). Rows carrying kid_id (enrollment
+        // re-key phase) join by id, so mapped picks survive a rename.
         const pickKidRows = await sql`
           SELECT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
                  MIN(p.rank) AS pick_rank,
@@ -1591,8 +1627,10 @@ module.exports = async function handler(req, res) {
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
           FROM class_signup_picks p
           JOIN kids k
-            ON LOWER(k.family_email) = LOWER(p.family_email)
-           AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+            ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
+            OR (p.kid_id IS NULL
+                AND LOWER(k.family_email) = LOWER(p.family_email)
+                AND LOWER(k.first_name) = LOWER(p.kid_first_name))
           LEFT JOIN member_profiles mp
             ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.school_year = ${sy} AND p.session_number = ${session}
@@ -1651,18 +1689,26 @@ module.exports = async function handler(req, res) {
         const pickNotes = {};
         const pickAssists = {};
         if (fam && fam.family_email) {
+          // Afternoon eligibility comes from kid_enrollments (enrollment
+          // re-key phase, 2026-07-19): the family's kids ENROLLED for the
+          // season with an all-day/afternoon schedule — mirroring the
+          // Morning Builder's kid_enrollments read. Pending / not-returning
+          // / morning-only kids no longer surface in the picker; the kids
+          // table supplies age + group metadata.
           const kidRows = await sql`
-            SELECT first_name, birth_date, class_group, schedule FROM kids
-            WHERE LOWER(family_email) = LOWER(${fam.family_email})
-            ORDER BY sort_order, first_name
+            SELECT k.first_name, k.birth_date, k.class_group
+            FROM kid_enrollments e
+            JOIN kids k ON k.id = e.kid_id
+            WHERE e.season = ${sy} AND e.status = 'enrolled'
+              AND e.schedule IN ('all-day', 'afternoon')
+              AND LOWER(e.family_email) = LOWER(${fam.family_email})
+            ORDER BY k.sort_order, k.first_name
           `;
           // No programming under 3 (Erin, 2026-07-15): Greenhouse kids stay
           // with the littles all day, so they never enter afternoon
-          // sign-ups — leave them out of the picker entirely. Morning-only
-          // (half-day) kids skip afternoons too (Erin, 2026-07-16).
+          // sign-ups — leave them out of the picker entirely.
           const eligible = kidRows.filter(k => {
             if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
-            if (String(k.schedule || '').trim().toLowerCase() === 'morning') return false;
             const age = ageFromBirthDate(k.birth_date);
             return !(age != null && age < 3);
           });
@@ -1695,6 +1741,29 @@ module.exports = async function handler(req, res) {
               pickAssists[p.kid_first_name][p.class_submission_id] = true;
             }
           });
+          // Placed kids never vanish (same rule as the Morning Builder): a
+          // kid with saved picks whose enrollment has since flipped
+          // (morning-only, pending, not returning) stays visible so the
+          // family / liaison can consciously move or clear the placement
+          // instead of it silently disappearing.
+          const kidSetLc = new Set(kids.map(n => String(n).toLowerCase()));
+          const pickedOnly = Object.keys(picks)
+            .filter(n => !kidSetLc.has(String(n).toLowerCase()));
+          if (pickedOnly.length) {
+            const famKidRows = await sql`
+              SELECT first_name, birth_date, class_group FROM kids
+              WHERE LOWER(family_email) = LOWER(${fam.family_email})`;
+            const famByLc = new Map(famKidRows.map(k =>
+              [String(k.first_name || '').toLowerCase(), k]));
+            pickedOnly.forEach(n => {
+              const kRow = famByLc.get(String(n).toLowerCase());
+              if (!kRow) return; // orphaned name-keyed picks — no phantom tabs
+              kids.push(n);
+              const age = ageFromBirthDate(kRow.birth_date);
+              if (age != null) kidAges[n] = age;
+              if (kRow.class_group) kidGroups[n] = kRow.class_group;
+            });
+          }
         }
         return res.status(200).json({
           school_year: sy, session,
@@ -2223,13 +2292,18 @@ module.exports = async function handler(req, res) {
         if (max < 1) return res.status(400).json({ error: 'Set a max before running a lottery.' });
         const ltHour = (lt.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
         // 1st-choice kids, with display names for the result summary.
+        // kid_id rides along (kid_id-first join, name fallback for legacy
+        // rows) so the bump insert + 2nd-choice promotion are rename-proof.
         const signed = await sql`
           SELECT p.id AS pick_id, LOWER(p.family_email) AS fam, p.kid_first_name,
+                 k.id AS kid_id,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
           FROM class_signup_picks p
-          JOIN kids k ON LOWER(k.family_email) = LOWER(p.family_email)
-                     AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+          JOIN kids k ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
+                      OR (p.kid_id IS NULL
+                          AND LOWER(k.family_email) = LOWER(p.family_email)
+                          AND LOWER(k.first_name) = LOWER(p.kid_first_name))
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.class_submission_id = ${ltId} AND p.rank = 1 AND p.hour = ${ltHour}
             AND p.school_year = ${lt.school_year} AND p.session_number = ${lt.scheduled_session}`;
@@ -2240,14 +2314,16 @@ module.exports = async function handler(req, res) {
           WHERE LOWER(email) = LOWER(${lt.submitted_by_email})
              OR LOWER(personal_email) = LOWER(${lt.submitted_by_email}) LIMIT 1`;
         const leadFamEmail = leadFam.length ? String(leadFam[0].family_email || '').toLowerCase() : '';
-        const priorBumps = await sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
+        const priorBumps = await sql`SELECT kid_id, LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
           FROM class_lottery_bumps WHERE school_year = ${lt.school_year}`;
         const priorSet = new Set(priorBumps.map(r => r.fam + '|' + r.kid));
+        const priorIds = new Set(priorBumps.map(r => r.kid_id).filter(Boolean));
         const safe = [];
         const pool = [];
         signed.forEach(s2 => {
           const key = s2.fam + '|' + String(s2.kid_first_name).toLowerCase();
-          if ((leadFamEmail && s2.fam === leadFamEmail) || priorSet.has(key)) safe.push(s2);
+          const priorLoss = (s2.kid_id && priorIds.has(s2.kid_id)) || priorSet.has(key);
+          if ((leadFamEmail && s2.fam === leadFamEmail) || priorLoss) safe.push(s2);
           else pool.push(s2);
         });
         // Fisher-Yates, then keep enough from the pool to reach max.
@@ -2260,15 +2336,19 @@ module.exports = async function handler(req, res) {
         const losers = pool.slice(keepFromPool);
         const nameOf = s2 => (s2.display_first + ' ' + (s2.display_last || '')).trim();
         for (const l of losers) {
+          // Dual-keyed (enrollment re-key phase): kid_id alongside the name
+          // columns so the year-wide exemption survives a kid rename.
           await sql`INSERT INTO class_lottery_bumps
-            (school_year, session_number, class_submission_id, family_email, kid_first_name, created_by)
-            VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${user.email})`;
+            (school_year, session_number, class_submission_id, family_email, kid_first_name, kid_id, created_by)
+            VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${l.kid_id || null}, ${user.email})`;
           // Drop the lost 1st choice; their 2nd choice (same hour) becomes
           // their 1st so the family keeps a placement without re-picking.
+          // kid_id match first, name match for unmapped legacy rows.
           await sql`DELETE FROM class_signup_picks WHERE id = ${l.pick_id}`;
           await sql`UPDATE class_signup_picks SET rank = 1
             WHERE school_year = ${lt.school_year} AND session_number = ${lt.scheduled_session}
-              AND LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})
+              AND (kid_id = ${l.kid_id || null}
+                OR (LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})))
               AND hour = ${ltHour} AND rank = 2`;
         }
         await sql`UPDATE class_submissions SET lottery_run_at = NOW(), updated_at = NOW() WHERE id = ${ltId}`;
@@ -2459,22 +2539,35 @@ module.exports = async function handler(req, res) {
           }
         }
         const kidOk = await sql`
-          SELECT class_group, birth_date, schedule FROM kids
+          SELECT id, class_group, birth_date, schedule FROM kids
           WHERE LOWER(family_email) = LOWER(${familyEmail})
             AND LOWER(first_name) = LOWER(${kidFirst}) LIMIT 1
         `;
         if (kidOk.length === 0) return res.status(400).json({ error: 'That child is not in your family.' });
+        const kidId = kidOk[0].id;
         // Mirror the picker's eligibility server-side: Greenhouse /
-        // under-3 / morning-only kids aren't in afternoon programming.
+        // under-3 kids aren't in afternoon programming, and the season's
+        // kid_enrollments row is the schedule truth (enrollment re-key
+        // phase, 2026-07-19) — pending / not-returning / morning-only kids
+        // can't take picks. Kids without an enrollment row yet (legacy,
+        // pre-backfill) fall back to the kids.schedule column.
         {
           const kr = kidOk[0];
           const krAge = ageFromBirthDate(kr.birth_date);
+          const enrRows = await sql`
+            SELECT status, schedule FROM kid_enrollments
+            WHERE kid_id = ${kidId} AND season = ${sy} LIMIT 1
+          `;
+          const notAfternoon = enrRows.length
+            ? (enrRows[0].status !== 'enrolled'
+               || String(enrRows[0].schedule || '').trim().toLowerCase() === 'morning')
+            : String(kr.schedule || '').trim().toLowerCase() === 'morning';
           const ineligible =
             String(kr.class_group || '').trim().toLowerCase() === 'greenhouse'
-            || String(kr.schedule || '').trim().toLowerCase() === 'morning'
+            || notAfternoon
             || (krAge != null && krAge < 3);
           if (ineligible && ranked.length > 0) {
-            return res.status(400).json({ error: 'That child isn’t in afternoon programming (Greenhouse, under 3, or morning-only schedule).' });
+            return res.status(400).json({ error: 'That child isn’t in afternoon programming this season (Greenhouse, under 3, morning-only, or not enrolled).' });
           }
         }
 
@@ -2509,19 +2602,24 @@ module.exports = async function handler(req, res) {
         // Atomic replace (2026-07-17 review): DELETE + INSERTs run as one
         // transaction so a crash between them can't wipe the kid's existing
         // picks and write nothing back (the "dev kid lost 3 picks" incident).
+        // The DELETE matches by kid_id first (rename-proof — clears rows
+        // saved under an old first name) with the name key as the fallback
+        // for unmapped legacy rows; INSERTs dual-key (name + kid_id).
         const pickStmts = [sql`
           DELETE FROM class_signup_picks
           WHERE school_year=${sy} AND session_number=${session}
             AND LOWER(family_email)=LOWER(${familyEmail})
-            AND LOWER(kid_first_name)=LOWER(${kidFirst}) AND hour=${hour}
+            AND (kid_id = ${kidId}
+              OR (kid_id IS NULL AND LOWER(kid_first_name)=LOWER(${kidFirst})))
+            AND hour=${hour}
         `];
         for (let i = 0; i < cleanIds.length; i++) {
           const note = String(rawNotes[cleanIds[i]] || '').trim().slice(0, 300);
           const asAssistant = !!rawAssist[cleanIds[i]] && teenOkById[cleanIds[i]] === true;
           pickStmts.push(sql`
             INSERT INTO class_signup_picks
-              (school_year, session_number, family_email, kid_first_name, hour, rank, class_submission_id, note, as_assistant, created_by_email)
-            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${asAssistant}, ${user.email})
+              (school_year, session_number, family_email, kid_first_name, kid_id, hour, rank, class_submission_id, note, as_assistant, created_by_email)
+            VALUES (${sy}, ${session}, ${familyEmail}, ${kidFirst}, ${kidId}, ${hour}, ${i + 1}, ${cleanIds[i]}, ${note}, ${asAssistant}, ${user.email})
           `);
         }
         await sql.transaction(pickStmts);
