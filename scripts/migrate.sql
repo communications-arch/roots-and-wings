@@ -1954,3 +1954,21 @@ DROP INDEX IF EXISTS waiver_signatures_person_season_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS waiver_signatures_person_season_v2
   ON waiver_signatures (LOWER(person_email), season)
   WHERE role <> 'kid_addition';
+
+-- ══ Enrollment re-key phase (2026-07-19): kid_id on the name-keyed
+-- afternoon pick tables ══
+-- class_signup_picks + class_lottery_bumps were keyed only on
+-- (family_email, kid_first_name), so renaming a kid orphaned their picks
+-- and lottery exemptions. Both gain a kid_id transition column (same
+-- pattern as morning_class_assignments.kid_id above): writers dual-key
+-- (kid_id alongside the name columns), readers prefer kid_id with a name
+-- fallback for unmapped legacy rows, and
+-- scripts/backfill-pick-kid-ids.js maps the existing rows. No FK on
+-- purpose — additive-only migration ordering, and rows may legitimately
+-- stay unmapped until the backfill runs.
+ALTER TABLE class_signup_picks  ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS kid_id INTEGER;
+CREATE INDEX IF NOT EXISTS class_signup_picks_kid_id_idx
+  ON class_signup_picks (school_year, session_number, kid_id);
+CREATE INDEX IF NOT EXISTS class_lottery_bumps_kid_id_idx
+  ON class_lottery_bumps (school_year, kid_id);
