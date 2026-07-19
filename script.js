@@ -2946,6 +2946,19 @@
           ? '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>'
           : '';
 
+        // Half-day kids get an AM/PM badge in the main grid too (Erin,
+        // 2026-07-19) — the class view already showed "AM only"; all-day
+        // kids stay unbadged. NOTE: reads kids.schedule, which can be
+        // stale for some returning families until the per-season
+        // enrollment build lands — this surface flips to enrollment data
+        // then.
+        var schedTag = '';
+        if (person.type === 'kid' && person.schedule === 'morning') {
+          schedTag = '<div class="yb-schedule">AM only</div>';
+        } else if (person.type === 'kid' && person.schedule === 'afternoon') {
+          schedTag = '<div class="yb-schedule">PM only</div>';
+        }
+
         // First-year families: green card outline (.yb-card-new) instead of a
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
         var isNewM = isNewMemberPerson(person);
@@ -2966,6 +2979,7 @@
           pronounTag +
           '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
           parentOfTag +
+          schedTag +
           absenceTag +
           allergyTag +
           noPhotoTag +
