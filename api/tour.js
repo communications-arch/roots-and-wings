@@ -6891,6 +6891,10 @@ async function handleBoardGlance(req, res) {
         if (afternoon.inbox > 0) m.push({ label: 'class submissions to review in the Class Builder', value: afternoon.inbox });
       }
       return { metrics: m, views: [
+        // Schedules (issue #8): the adult × hour / kid × hour placement
+        // grid. Board members open it read-only; the VP + Afternoon
+        // Class Liaison place people from it.
+        { key: 'schedules', label: 'Schedules' },
         { key: 'roles-am', label: 'Morning' },
         { key: 'roles-pm', label: 'Afternoon' },
         { key: 'roles-cleaning', label: 'Cleaning' },
