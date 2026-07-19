@@ -8890,6 +8890,24 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   background: #fff;
   cursor: grab;
 }
+/* Morning Liaison inbox highlight (bug #19): submissions for the
+   signed-in liaison's own age group pop out of the shared pile. */
+.sb-palette-card.sb-palette-mine {
+  background: rgba(var(--color-accent-light-rgb), 0.28);
+  border-color: var(--color-accent);
+}
+.sb-palette-mine-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 /* ✗ Decline straight from the inbox card (Submissions Report parity). */
 .sb-palette-decline {
   position: absolute;

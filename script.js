@@ -28434,7 +28434,12 @@
           return '<span class="sb-sess-chip' + (match ? ' sb-sess-match' : '') + '">S' + escClsHtml(x) + '</span>';
         }).join('');
         if (!sessChips) sessChips = '<span class="sb-sess-chip sb-sess-none">no pref</span>';
-        paletteHtml += '<div class="sb-palette-card" draggable="true" data-sub-id="' + s.id + '">';
+        // Group-scoped Morning Liaisons: submissions for THEIR group get
+        // highlighted so they pop out of the shared inbox (bug #19).
+        var mineSub = !sbScopeAll() && sbCanTouchSub(s);
+        paletteHtml += '<div class="sb-palette-card' + (mineSub ? ' sb-palette-mine' : '') + '" draggable="true" data-sub-id="' + s.id + '"'
+          + (mineSub ? ' title="Submitted for your group"' : '') + '>';
+        if (mineSub) paletteHtml += '<span class="sb-palette-mine-badge">Your group</span>';
         // Decline straight from the inbox (Submissions Report parity) — the
         // reviewer shouldn't have to open a second modal to turn a class
         // down. Same PATCH the report's Decline button sends; re-queue
