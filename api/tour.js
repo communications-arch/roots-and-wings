@@ -7662,6 +7662,29 @@ async function handleEnrollmentRequestDecide(body, req, res) {
       (approve ? 'The Membership Director approved this change.' : 'The Membership Director didn’t approve this change.')
       + (note ? ' Note: ' + note : '')
       + (approve && rq.kind === 'add_kid' ? ' Welcome, ' + rq.kid_first_name + '!' : ''));
+    // Email too (Erin, 2026-07-19): the in-portal notification only helps
+    // members who happen to log in — decisions about their kids warrant
+    // an inbox ping. Non-fatal; _resend reroutes on dev via
+    // EMAIL_OVERRIDE_TO.
+    if (process.env.RESEND_API_KEY && rq.family_email) {
+      try {
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const verdict = approve ? 'Approved' : 'Not approved';
+        await resend.emails.send({
+          from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+          to: rq.family_email,
+          replyTo: 'membership@rootsandwingsindy.com',
+          subject: emailSubject(`${verdict}: ${kindLabel}`),
+          html: `
+            <h2>${escapeHtml(verdict)}: ${escapeHtml(kindLabel)}</h2>
+            <p>${approve ? 'The Membership Director approved this enrollment change.' : 'The Membership Director didn&rsquo;t approve this enrollment change.'}
+            ${note ? '<br><strong>Note from the Membership Director:</strong> ' + escapeHtml(note) : ''}</p>
+            ${approve && rq.kind === 'add_kid' ? '<p>Welcome, ' + escapeHtml(rq.kid_first_name) + '! 🎉 You&rsquo;ll see them in the directory and class lists shortly.</p>' : ''}
+            <p style="color:#666;font-size:13px;">Questions? Reply to this email to reach the Membership Director. You can also see this decision in the notifications bell on <a href="https://www.rootsandwingsindy.com/members.html">the members site</a>.</p>
+          `
+        });
+      } catch (e) { console.error('enrollment decision email failed (non-fatal):', e.message); }
+    }
     return res.status(200).json({ ok: true, id, status: approve ? 'approved' : 'denied' });
   } catch (err) {
     console.error('enrollment-request-decide error:', err);

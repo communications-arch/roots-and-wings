@@ -8460,6 +8460,33 @@ button.staff-role:hover {
   font-size: 0.85rem;
   line-height: 1.5;
 }
+/* Unsigned-waiver variant: the gold signing button gets breathing room
+   (Erin, 2026-07-19: the old inline text link wasn't visible enough). */
+.emi-waiver-btn { margin-top: 8px; }
+
+/* My Family: unsigned add-kid waiver banner — same gold to-do family
+   as .emi-pending-chip, sized as a full-width dashboard card. */
+.mf-waiver-banner {
+  background: rgba(var(--color-accent-light-rgb), 0.25);
+  border-left: 4px solid var(--color-accent);
+}
+.mf-waiver-banner .btn { margin-top: 4px; }
+
+/* Enrollment Requests queue: pending rows are ACTION cards — same gold
+   to-do treatment as .emi-pending-chip so "needs a decision" is
+   unmistakable (Erin, 2026-07-19: they read like instructions). */
+.st-place-row.enroll-req-card {
+  background: rgba(var(--color-accent-light-rgb), 0.22);
+  border-bottom: none;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.st-place-row.enroll-req-card .ws-srt-actions { margin-left: auto; }
+/* Waiver-blocked Approve: stays clickable (click explains why) but
+   reads as locked, not broken. */
+.sc-btn.enroll-req-blocked { opacity: 0.55; cursor: not-allowed; }
 .age-group-emoji img {
   height: 1em;
   width: auto;

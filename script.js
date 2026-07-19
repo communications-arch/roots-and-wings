@@ -2979,8 +2979,12 @@
         // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
         var isNewM = isNewMemberPerson(person);
         // Hasn't re-enrolled for the upcoming year: dimmed card + pill.
+        // A kid already badged "Not returning" above skips the family-
+        // level pill — to members the two labels say the same thing, and
+        // the stacked pair read as clutter (Erin, 2026-07-19). The card
+        // still dims.
         var notReEnrolled = isNotReEnrolledPerson(person);
-        var inactiveTag = notReEnrolled
+        var inactiveTag = (notReEnrolled && !(person.type === 'kid' && person.notReturning))
           ? '<div class="yb-inactive-badge">Not re-enrolled</div>'
           : '';
         var cardTitle = notReEnrolled
@@ -5901,6 +5905,13 @@
       || fam.parents.split(' & ')[0].split(' ')[0];
     if (greeting) greeting.textContent = 'Welcome, ' + firstName + '!';
 
+    // ──── Unsigned add-kid waiver banner (full width) ────
+    // A pending kid can't be approved until their waiver is signed, so
+    // the signing link can't live only inside Edit My Info (Erin,
+    // 2026-07-19: not visible enough). Filled async by
+    // loadMyFamilyWaiverBanner; stays hidden when nothing is pending.
+    html += '<div class="mf-card mf-card-full mf-waiver-banner" id="mfWaiverBanner" style="display:none;"></div>';
+
     // ──── Coverage Board (full width, collapsible) ────
     // Hidden during summer break — no co-op days = no coverage to claim.
     // EXCEPT when upcoming absences already exist (next season's rows get
@@ -6825,6 +6836,9 @@
     // Kids' finalized morning placements (re-renders once when they land).
     if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
 
+    // Unsigned add-kid waivers → signing banner at the top of the page.
+    loadMyFamilyWaiverBanner(fam);
+
     // Volunteer sign-up slots. Default = the CURRENT session; when the
     // S1–S5 chips are previewing another session (_mfDutySession), the
     // panel follows it so the duty rows and sign-up strip agree. Blocks
@@ -7067,6 +7081,35 @@
         buildPaypalNote(fam, semKey, sem.name + ' Class Fees'),
         semKey, 'class_fee');
     });
+  }
+
+  // Fill #mfWaiverBanner with signing buttons for any pending add-kid
+  // requests whose waiver is still unsigned (Erin, 2026-07-19: the link
+  // inside Edit My Info wasn't visible enough — Membership's Approve
+  // stays locked until this is done, so it can't hide). Best-effort:
+  // a fetch failure just leaves the banner hidden.
+  function loadMyFamilyWaiverBanner(fam) {
+    var el = document.getElementById('mfWaiverBanner');
+    if (!el || !fam || !fam.email) return;
+    fetch('/api/tour?list=enrollment_requests&family_email=' + encodeURIComponent(fam.email), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var el2 = document.getElementById('mfWaiverBanner');
+        if (!el2) return;
+        var needs = ((d && d.requests) || []).filter(function (rq) {
+          return rq.status === 'pending' && rq.kind === 'add_kid' && rq.waiver_token && !rq.waiver_signed;
+        });
+        if (!needs.length) { el2.style.display = 'none'; return; }
+        var h = '<h3 class="mf-card-title">✍️ Waiver needed</h3>';
+        needs.forEach(function (rq) {
+          var kidFirst = escapeHtml(String(rq.kid_first_name || '').trim() || 'Your new kid');
+          h += '<p>' + kidFirst + ' was added to your family. An adult signs the waiver, then the Membership Director approves the enrollment — nothing moves until both happen.</p>';
+          h += '<a class="btn btn-primary btn-sm" href="waiver.html?token=' + escapeHtml(rq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + kidFirst + '’s waiver</a>';
+        });
+        el2.innerHTML = h;
+        el2.style.display = '';
+      })
+      .catch(function () { /* banner just stays hidden */ });
   }
 
   // Elective detail popup (enhanced)
@@ -18957,7 +19000,7 @@
     // making sure every position is filled.
     if (absences.length === 0) {
       if (isVpUser) {
-        if (card) card.style.display = '';
+        if (card) { card.style.display = ''; card.open = false; }
         var summaryBadge0 = document.getElementById('coverageSummaryBadge');
         if (summaryBadge0) {
           summaryBadge0.textContent = 'All clear';
@@ -18982,6 +19025,10 @@
       summaryBadge.textContent = totalOpenAll > 0 ? totalOpenAll + ' open' : 'All covered';
       summaryBadge.className = 'coverage-summary-badge ' + (totalOpenAll > 0 ? 'coverage-summary-open' : 'coverage-summary-ok');
     }
+    // Fully covered board starts collapsed (Erin, 2026-07-19) — the "All
+    // covered" badge in the summary row says everything; open slots pop
+    // the card open so they can't be missed. Users can still toggle.
+    if (card) card.open = totalOpenAll > 0;
 
     var email = getActiveEmail();
     var me = null;
@@ -23120,7 +23167,7 @@
   function showEnrollmentRequestsModal() {
     var body = renderReportModal({
       title: 'Enrollment Requests',
-      subtitle: 'Schedule changes, added kids, and removals wait here until you approve them — dues and rosters only move on approval. Added kids also need their waiver signed before you can approve.',
+      subtitle: 'Each gold card is a family request waiting on YOUR decision — nothing changes for them until you Approve or Deny it.',
       bodyId: 'ws-enroll-req-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23141,20 +23188,25 @@
         var decided = rows.filter(function (r) { return r.status !== 'pending'; }).slice(0, 15);
         var h = '';
         if (pending.length === 0) h += '<p class="ws-empty">Nothing waiting — all caught up. 🎉</p>';
+        else h += '<h5 class="ws-part-exempt-existing">Waiting for your decision (' + pending.length + ')</h5>';
         pending.forEach(function (r) {
+          // A blocked Approve (unsigned waiver) stays CLICKABLE and
+          // explains itself — the old disabled button did nothing on
+          // click and read as broken (Erin, 2026-07-19, Coyote Shine).
+          var wvBlocked = r.kind === 'add_kid' && !r.waiver_signed_at;
           var waiverBit = '';
           if (r.kind === 'add_kid') {
             waiverBit = r.waiver_signed_at
               ? ' <span class="ws-wv-ok">waiver signed</span>'
-              : ' <span class="ws-wv-pending">waiver not signed yet</span>';
+              : ' <span class="ws-wv-pending">⏳ waiver not signed yet</span>';
           }
-          h += '<div class="st-place-row">'
+          h += '<div class="st-place-row enroll-req-card">'
             + '<strong>' + escapeHtmlWs(r.family_name || r.family_email || '') + '</strong>'
             + '<span>' + escapeHtmlWs(enrollReqLabel(r)) + '</span>' + waiverBit
             + '<span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(r.requested_at)) + '</span>'
             + '<div class="ws-srt-actions">'
-            + '<button type="button" class="sc-btn enroll-req-approve" data-req-id="' + r.id + '"'
-            + (r.kind === 'add_kid' && !r.waiver_signed_at ? ' disabled title="Waiting on the family to sign the waiver first"' : '')
+            + '<button type="button" class="sc-btn' + (wvBlocked ? ' enroll-req-blocked' : ' mcb-primary') + ' enroll-req-approve" data-req-id="' + r.id + '"'
+            + (wvBlocked ? ' data-wv-blocked="1" title="Waiting on the family to sign the waiver first"' : '')
             + '>Approve</button>'
             + '<button type="button" class="sc-btn sc-btn-del enroll-req-deny" data-req-id="' + r.id + '">Deny</button>'
             + '</div></div>';
@@ -23185,7 +23237,13 @@
             .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
         }
         body.querySelectorAll('.enroll-req-approve').forEach(function (btn) {
-          btn.addEventListener('click', function () { decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn); });
+          btn.addEventListener('click', function () {
+            if (btn.getAttribute('data-wv-blocked')) {
+              alert('Not yet — the family hasn’t signed the waiver for this child.\n\nThey have a gold "Sign the waiver" button on their My Family page (and in Edit My Info on the kid’s row). Once it’s signed, this Approve button unlocks.');
+              return;
+            }
+            decide(parseInt(btn.getAttribute('data-req-id'), 10), true, btn);
+          });
         });
         body.querySelectorAll('.enroll-req-deny').forEach(function (btn) {
           btn.addEventListener('click', function () {
@@ -30608,16 +30666,25 @@
       var pendReq = (state._pendingReqs || {})[String(k.name || '').trim().split(/\s+/)[0].toLowerCase()];
       if (pendReq) {
         var chipTxt = '';
+        var chipCls = 'emi-full emi-pending-chip';
         if (pendReq.kind === 'add_kid') {
-          chipTxt = (pendReq.waiver_signed || !pendReq.waiver_token)
-            ? '⏳ Awaiting Membership approval to join the co-op.'
-            : '✍️ One more step: <a href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">sign the waiver for this child</a> — then Membership approves.';
+          if (pendReq.waiver_signed || !pendReq.waiver_token) {
+            chipTxt = '⏳ Awaiting Membership approval to join the co-op.';
+          } else {
+            // Unsigned waiver blocks Membership's Approve button — make
+            // this the loudest thing on the row (Erin, 2026-07-19: the
+            // old inline text link wasn't visible enough).
+            var wvKid = escapeHtml(String(pendReq.kid_first_name || k.name || '').trim().split(/\s+/)[0] || 'This child');
+            chipCls += ' emi-pending-waiver';
+            chipTxt = '<strong>✍️ One more step: ' + wvKid + ' needs a waiver signature.</strong> Membership can approve once it’s signed.'
+              + '<div><a class="btn btn-primary btn-sm emi-waiver-btn" href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + wvKid + '’s waiver</a></div>';
+          }
         } else if (pendReq.kind === 'remove_kid') {
           chipTxt = '⏳ Removal requested — awaiting Membership approval (still enrolled until then).';
         } else {
           chipTxt = '⏳ Schedule change requested — awaiting Membership approval (the current schedule stays until then).';
         }
-        h += '<div class="emi-full emi-pending-chip">' + chipTxt + '</div>';
+        h += '<div class="' + chipCls + '">' + chipTxt + '</div>';
       }
       h += '</div>';
       h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-kid" data-idx="' + idx + '" aria-label="Remove kid">&times;</button>';
@@ -31143,7 +31210,7 @@
                 reopenEmiForWaiver = true;
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nOne more step for '
                   + addWithWaiver.map(function (p) { return p.kid_first_name; }).join(' and ')
-                  + ': a waiver signature. The form will reopen — click the “sign the waiver” link on their row. Membership can approve once it’s signed.');
+                  + ': a waiver signature. The form will reopen — click the gold “Sign the waiver” button on their row. Membership can approve once it’s signed.');
               } else {
                 alert('Sent to the Membership Director for approval: ' + summary + '.\n\nNothing changes until they approve — you’ll get a notification either way.');
               }
@@ -31207,6 +31274,11 @@
         if (Object.keys(map).length > 0 && document.getElementById('emiKidList')) {
           syncStateFromDom();
           render();
+          // An unsigned add-kid waiver is THE family's next step — put
+          // it on screen instead of leaving it below the fold (Erin,
+          // 2026-07-19: the waiver wasn't visible enough).
+          var wvChip = document.querySelector('.emi-pending-waiver');
+          if (wvChip && wvChip.scrollIntoView) wvChip.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       })
       .catch(function () { /* chips just don't show */ });

@@ -78,7 +78,11 @@
       vertical-align: 1px;
     }
     .bug-card-note {
-      margin-top: 8px;
+      /* Direct child of the flex card, after the status/verify column —
+         full-width row so long re-test notes read without the status
+         pill stealing a third of the line (Erin, 2026-07-19). */
+      flex-basis: 100%;
+      margin-top: 0;
       padding: 8px 12px;
       background: rgba(var(--color-primary-rgb), 0.05);
       border-left: 3px solid rgba(var(--color-primary-rgb), 0.35);
@@ -311,12 +315,12 @@
           + '<div class="bug-card-main">'
           + '<div class="bug-card-title"><span class="bug-card-num">#' + parseInt(bug.number, 10) + '</span> ' + escapeHtml(bug.title) + '</div>'
           + (when ? '<div class="bug-card-date">Reported ' + escapeHtml(when) + '</div>' : '')
-          + noteHtml
           + '</div>'
           + '<span class="bug-status ' + st.cls + '">' + escapeHtml(st.text) + '</span>'
           + (canVerify
             ? '<button type="button" class="btn btn-primary btn-sm bug-verify-btn" data-bug-number="' + parseInt(bug.number, 10) + '">✓ Works now</button>'
             : '')
+          + noteHtml
           + '</div>';
       });
       listEl.innerHTML = html;
