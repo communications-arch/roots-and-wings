@@ -506,31 +506,15 @@
     if (testbar) testbar.hidden = !isCommsUser();
     var bugLink = document.getElementById('qsbBugLog');
     if (bugLink) bugLink.hidden = !isDevHost();
-    // "Viewing as <name>" + Back to my view — lives in the strip, shown
-    // only while impersonating.
+    // "Viewing as <name>" — lives in the strip, shown only while
+    // impersonating. (The "Back to my view" button was removed per bug
+    // #7 — the View As dropdown's "— My Dashboard —" option resets.)
     var viewAsNow = sessionStorage.getItem(VIEW_AS_KEY) || '';
     var viewingWrap = document.getElementById('qsbViewingAs');
     var viewingName = document.getElementById('qsbViewingAsName');
-    var resetBtn = document.getElementById('qsbViewAsReset');
     var showViewing = !!(viewAsNow && isCommsUser());
     if (viewingWrap) viewingWrap.hidden = !showViewing;
     if (viewingName && showViewing) viewingName.textContent = viewAsHeaderLabel(viewAsNow);
-    if (resetBtn) {
-      resetBtn.hidden = !showViewing;
-      if (!resetBtn._rwWired) {
-        resetBtn._rwWired = true;
-        resetBtn.addEventListener('click', function () {
-          sessionStorage.removeItem(VIEW_AS_KEY);
-          if (typeof renderMyFamily === 'function') renderMyFamily();
-          if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
-          if (typeof loadNotifications === 'function') loadNotifications();
-          if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
-          if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
-          renderHeaderViewAs();
-          requestAnimationFrame(syncPortalHeaderHeight);
-        });
-      }
-    }
     var wrap = document.getElementById('qsbViewAs');
     var select = document.getElementById('qsbViewAsSelect');
     if (!wrap || !select) return;
