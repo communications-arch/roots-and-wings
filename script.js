@@ -24337,12 +24337,21 @@
       task:       { rank: 5, label: '📌 Board Task' }
     };
     var isAutoRow = function (r) { return !!(r.ev.derived || (r.kind === 'special' && r.autoDate)); };
+    // Proposed/Approved state for the row (sessions + special events carry
+    // one; everything else has none). Drives the dedicated Status column
+    // (Erin, 2026-07-19: status was buried in Details).
+    var calStatusOf = function (r) {
+      if (r.kind === 'special' && r.seRow) return r.seRow.date_status === 'approved' ? 'approved' : 'proposed';
+      if (r.kind === 'session' && r.ev.dates_status && r.ev.event_date) return r.ev.dates_status === 'approved' ? 'approved' : 'proposed';
+      return '';
+    };
     var sortKey = _boardCalState.sortKey || 'date';
     var sortDir = _boardCalState.sortDir || 'asc';
     var sortVal = function (r, key) {
       if (key === 'type') return String((calTypeMeta[r.kind] || {}).rank || 9);
       if (key === 'event') return String(r.ev.title || '').toLowerCase();
       if (key === 'auto') return isAutoRow(r) ? '0' : '1';
+      if (key === 'status') return calStatusOf(r) || 'zz';
       return r.ev.event_date || '9999-99-99'; // date (default)
     };
     visibleRows.sort(function (a, b) {
@@ -24353,6 +24362,7 @@
     var calCols = [{ key: 'auto', label: 'Auto' }, { key: 'date', label: 'Date' }];
     if (view === 'all') calCols.push({ key: 'type', label: 'Type' });
     calCols.push({ key: 'event', label: 'Event' });
+    calCols.push({ key: 'status', label: 'Status' });
     calCols.push({ key: 'notes', label: 'Details', nosort: true });
     calCols.push({ key: 'actions', label: '', nosort: true });
     var numCols = calCols.length;
@@ -24436,9 +24446,23 @@
           // already say what kind of row it is.
           h += '<td>' + escapeHtml(e.title) + '</td>';
         }
-        // Details cell — location + times + status chip. The freeform Notes
-        // field was removed board-wide (Erin, 2026-07-18: "the board doesn't
-        // need something extra").
+        // Status column — the Proposed/✓ Approved chip gets its own cell
+        // (Erin, 2026-07-19: it was buried at the front of Details). A
+        // still-suggested (session-anchored, unsaved) special-event date
+        // keeps its provenance tooltip.
+        var statusVal = calStatusOf(r);
+        var statusCell = '';
+        if (statusVal) {
+          var stTitle = (r.kind === 'special' && r.seRow && r.seRow.date_is_default)
+            ? 'Date suggested from the session calendar — Save or Approve to lock it in' : '';
+          statusCell = '<span class="se-status se-status-' + statusVal + '"'
+            + (stTitle ? ' title="' + escapeAttr(stTitle) + '"' : '')
+            + '>' + (statusVal === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
+        }
+        h += '<td class="board-cal-col-status">' + statusCell + '</td>';
+        // Details cell — location + times. The freeform Notes field was
+        // removed board-wide (Erin, 2026-07-18: "the board doesn't need
+        // something extra").
         var notes = '';
         if (e.location) notes = '📍 ' + escapeHtml(e.location);
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
@@ -24449,22 +24473,6 @@
           if (seR.start_time) seDet += '🕑 ' + escapeHtml(boardCalFmtTimeRange(seR.start_time, seR.end_time));
           if (seR.location) seDet += (seDet ? '<br>' : '') + '📍 ' + escapeHtml(seR.location);
           if (seDet) notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + seDet + '</span>';
-          // One status for everything pre-approval (Erin, 2026-07-18):
-          // "Suggested" and "Proposed" were separate labels for essentially
-          // the same not-yet-approved state, which read as clutter. Show a
-          // single Proposed → ✓ Approved chip. A still-suggested (session-
-          // anchored, unsaved) date gets a tooltip so the date's provenance
-          // isn't lost.
-          var seStatusTitle = r.seRow.date_is_default
-            ? 'Date suggested from the session calendar — Save or Approve to lock it in' : '';
-          notes = '<span class="se-status se-status-' + r.seRow.date_status + '"'
-            + (seStatusTitle ? ' title="' + escapeAttr(seStatusTitle) + '"' : '')
-            + '>' + (r.seRow.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
-        }
-        // Session dates carry the same Proposed/Approved chip — entered
-        // dates stay pending until the board approves them (Erin, 2026-07-15).
-        if (r.kind === 'session' && e.dates_status && e.event_date) {
-          notes = '<span class="se-status se-status-' + (e.dates_status === 'approved' ? 'approved' : 'proposed') + '">' + (e.dates_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span> ' + notes;
         }
         h += '<td>' + notes + '</td>';
         // Actions cell by kind. Sessions now use the same Manage ▾ dropdown
