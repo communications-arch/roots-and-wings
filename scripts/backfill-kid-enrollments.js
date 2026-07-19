@@ -119,16 +119,19 @@ async function main() {
   // ══ STEP 2 — seed kid_enrollments for the season ═════════════════════════
   console.log('\n════════ STEP 2 — seed kid_enrollments for ' + season + ' ════════');
   const regs = await sql`
-    SELECT id, main_learning_coach, existing_family_name
+    SELECT id, family_email, main_learning_coach, existing_family_name
     FROM registrations
     WHERE season = ${season} AND declined_at IS NULL`;
   const profiles = await sql`SELECT family_email, family_name FROM member_profiles`;
   const profileNameByEmail = new Map(profiles.map(p =>
     [String(p.family_email || '').toLowerCase(), String(p.family_name || '').trim()]));
 
-  // Per registration: derived Workspace email + derived family name.
+  // Per registration: the STORED family_email (authoritative link, set at
+  // registration time since 2026-07-17) plus the derived Workspace email +
+  // derived family name as legacy fallbacks for older rows.
   const regDerived = regs.map(r => ({
     id: r.id,
+    stored: String(r.family_email || '').toLowerCase(),
     email: deriveEmail(r.main_learning_coach, r.existing_family_name).toLowerCase(),
     famName: deriveFamilyName(r.main_learning_coach, r.existing_family_name).toLowerCase()
   }));
@@ -141,7 +144,9 @@ async function main() {
     if (regsByFamily.has(fe)) return regsByFamily.get(fe);
     const profName = (profileNameByEmail.get(fe) || '').toLowerCase();
     const hits = regDerived.filter(r =>
-      (r.email && r.email === fe) || (r.famName && profName && r.famName === profName));
+      (r.stored && r.stored === fe)
+      || (r.email && r.email === fe)
+      || (r.famName && profName && r.famName === profName));
     regsByFamily.set(fe, hits);
     return hits;
   }
