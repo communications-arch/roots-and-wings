@@ -600,6 +600,12 @@
       select.addEventListener('change', function () {
         if (this.value) sessionStorage.setItem(VIEW_AS_KEY, this.value);
         else sessionStorage.removeItem(VIEW_AS_KEY);
+        // The previous identity's submissions must never paint into the
+        // next family's duties ("Register New" repro, 2026-07-19: a
+        // fresh family briefly inherited communications@'s scheduled
+        // classes as Leading rows). Clear before the synchronous render;
+        // loadMyClassSubmissions below refetches for the new identity.
+        myClassSubmissions = [];
         if (typeof renderMyFamily === 'function') renderMyFamily();
         if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
         if (typeof loadNotifications === 'function') loadNotifications();
@@ -19818,6 +19824,9 @@
   // Change signature of the last fetch — guards the duties re-render in
   // loadMyClassSubmissions against a render↔load loop.
   var _myClassSubsSig = '';
+  // Whether the PREVIOUS fetch carried scheduled classes — a transition
+  // to none still needs a duties re-render to clear Leading rows.
+  var _myClassSubsHadScheduled = false;
   // Set from /api/curriculum?action=class-submissions response. True when the
   // caller holds VP / Afternoon Class Liaison, or is the super user.
   var classSubmissionReviewer = false;
@@ -19915,8 +19924,14 @@
       var changed = newSig !== _myClassSubsSig;
       _myClassSubsSig = newSig;
       renderClassSubsCardBody();
-      var dutyRelevant = myClassSubmissions.some(function (s) { return s.status === 'scheduled'; });
-      if (changed && dutyRelevant && typeof renderMyFamily === 'function') renderMyFamily();
+      // Duty-relevant when scheduled classes appeared OR disappeared —
+      // the old new-list-only check skipped the re-render on a switch to
+      // an identity with no submissions, leaving the previous identity's
+      // Leading rows painted until a hard refresh (Register New repro,
+      // 2026-07-19).
+      var hasScheduled = myClassSubmissions.some(function (s) { return s.status === 'scheduled'; });
+      if (changed && (hasScheduled || _myClassSubsHadScheduled) && typeof renderMyFamily === 'function') renderMyFamily();
+      _myClassSubsHadScheduled = hasScheduled;
     })
     .catch(function () {
       var body = document.getElementById('mfClassSubsBody');
