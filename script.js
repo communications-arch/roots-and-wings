@@ -15292,19 +15292,43 @@
     // VP / Afternoon Class Liaison curate the list (Erin, 2026-07-15).
     var canEditIdeas = typeof clientHasCapability === 'function'
       && clientHasCapability('class_inspiration_edit', ['Vice President', 'Afternoon Class Liaison']);
-    var dbGroups = _classInspirations && Object.keys(_classInspirations).length ? _classInspirations : null;
+    var dbGroups = _classInspirations || {};
+
+    // #30: organize by the site's canonical age groups — the same names
+    // used everywhere else (AGE_GROUP_LABELS supplies each header's age
+    // range). Stored group_name is the plain name ('Saplings'). Members
+    // see only groups with ideas; editors always get all eight, each
+    // with its own add box — which retires the free-text new-group row
+    // so group names can't drift again. Legacy/free-text groups still in
+    // the DB render after the canonical ones so nothing ever hides.
+    var CI_CANONICAL = ['Saplings', 'Sassafras', 'Oaks', 'Maples', 'Birch', 'Willows', 'Cedars', 'Pigeons'];
+    var ciUsed = {};
+    var ciOrdered = [];
+    CI_CANONICAL.forEach(function (name) {
+      var stored = null;
+      Object.keys(dbGroups).forEach(function (g) { if (!stored && g.toLowerCase() === name.toLowerCase()) stored = g; });
+      var rows = stored ? dbGroups[stored] : [];
+      if (stored) ciUsed[stored] = true;
+      if (rows.length || canEditIdeas) {
+        ciOrdered.push({ name: name, label: AGE_GROUP_LABELS[name.toLowerCase()] || name, rows: rows });
+      }
+    });
+    Object.keys(dbGroups).forEach(function (g) {
+      if (!ciUsed[g]) ciOrdered.push({ name: g, label: g, rows: dbGroups[g] });
+    });
 
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
     html += '<h3>Class Inspiration</h3>';
     html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
 
-    if (dbGroups) {
-      Object.keys(dbGroups).forEach(function (group) {
+    if (ciOrdered.length) {
+      ciOrdered.forEach(function (grp) {
+        var group = grp.name;
         html += '<div style="margin-bottom:1.25rem;">';
-        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(group) + '</h4>';
+        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(grp.label) + '</h4>';
         html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-        dbGroups[group].forEach(function (row) {
+        grp.rows.forEach(function (row) {
           html += '<span class="idea-chip">' + escapeHtml(row.idea)
             + (canEditIdeas ? ' <button type="button" class="ci-del" data-ci-id="' + row.id + '" aria-label="Remove idea" title="Remove" style="border:none;background:none;cursor:pointer;padding:0 0 0 2px;color:var(--color-text-light);">✕</button>' : '')
             + '</span>';
@@ -15321,12 +15345,6 @@
       // DB list empty / not yet loaded (the sheet-era fallback retired
       // with the Class Ideas tab — class_inspirations is the only source).
       html += '<p style="color:var(--color-text-light);">No ideas listed yet &mdash; check back soon!</p>';
-    }
-    if (canEditIdeas) {
-      html += '<div style="border-top:1px solid var(--color-border);padding-top:10px;margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">'
-        + '<input type="text" class="cl-input" id="ci-new-group" maxlength="80" placeholder="New group (e.g. Teens)" style="max-width:180px;">'
-        + '<input type="text" class="cl-input" id="ci-new-idea" maxlength="200" placeholder="First idea for it…" style="max-width:240px;">'
-        + '<button type="button" class="sc-btn" id="ci-new-add">Add group</button></div>';
     }
     html += '</div>';
     personDetailCard.innerHTML = html;
@@ -15360,10 +15378,6 @@
         var inp = personDetailCard.querySelector('.ci-add-input[data-ci-group="' + this.getAttribute('data-ci-group').replace(/"/g, '\\"') + '"]');
         ciPost(this.getAttribute('data-ci-group'), inp ? inp.value.trim() : '', this);
       });
-    });
-    var newAdd = document.getElementById('ci-new-add');
-    if (newAdd) newAdd.addEventListener('click', function () {
-      ciPost((document.getElementById('ci-new-group') || {}).value || '', ((document.getElementById('ci-new-idea') || {}).value || '').trim(), this);
     });
     personDetailCard.querySelectorAll('.ci-del').forEach(function (btn) {
       btn.addEventListener('click', function () {

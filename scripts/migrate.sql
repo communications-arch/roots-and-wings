@@ -855,6 +855,17 @@ CREATE TABLE IF NOT EXISTS class_inspirations (
 );
 CREATE INDEX IF NOT EXISTS class_inspirations_group_idx
   ON class_inspirations (group_name, sort_order, id);
+-- #30 (2026-07-20): Class Inspiration groups use the site's canonical age
+-- group names (Saplings..Pigeons) instead of the seed-era buckets. Each old
+-- bucket maps to the group its age range STARTS in ("Early Years (3-6)" ->
+-- Saplings (3-5)); the VP/ACL can re-shelve individual ideas from the popup.
+-- The middle rule runs before the teen rule on purpose so the sheet-era
+-- "Middle/TeenYears (ages~11+)" bucket lands on Willows (10-11), its entry
+-- point. Idempotent: canonical names never match these patterns again.
+UPDATE class_inspirations SET group_name = 'Saplings' WHERE group_name ILIKE '%early years%';
+UPDATE class_inspirations SET group_name = 'Oaks'     WHERE group_name ILIKE '%young years%';
+UPDATE class_inspirations SET group_name = 'Willows'  WHERE group_name ILIKE '%middle%';
+UPDATE class_inspirations SET group_name = 'Pigeons'  WHERE group_name ILIKE '%teen%';
 
 -- Kids bumped in a class lottery. Year-wide: a kid appearing here is
 -- EXEMPT from every later lottery that school year (they keep their spot).
