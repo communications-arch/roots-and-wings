@@ -5443,7 +5443,9 @@ async function handleMorningBuilderGet(req, res) {
         family_email: familyEmail,
         family_name: familyName,
         first_name: first,
-        display_name: morningKidDisplayName({ first_name: er.first_name, last_name: er.last_name }, familyName),
+        // Display prefers the "goes by" nickname (issue #27) — matching
+        // stays on the legal first_name/key per the nickname hard rule.
+        display_name: morningKidDisplayName({ first_name: er.nickname || er.first_name, last_name: er.last_name }, familyName),
         birth_date: er.birth_date || null,
         age: ageAsOfFall(er.birth_date, schoolYear),
         placement_notes: meta.placement_notes || '',
@@ -5466,8 +5468,8 @@ async function handleMorningBuilderGet(req, res) {
       const nameKey = String(dr.family_email || '').toLowerCase() + '|' + String(dr.kid_first_name || '').toLowerCase();
       if (!dr.kid_id && roster.some(it => it.key === nameKey)) continue;
       const kidRow = dr.kid_id
-        ? (await sql`SELECT id, family_email, first_name, last_name, birth_date, allergies FROM kids WHERE id = ${dr.kid_id}`)[0]
-        : (await sql`SELECT id, family_email, first_name, last_name, birth_date, allergies FROM kids
+        ? (await sql`SELECT id, family_email, first_name, last_name, nickname, birth_date, allergies FROM kids WHERE id = ${dr.kid_id}`)[0]
+        : (await sql`SELECT id, family_email, first_name, last_name, nickname, birth_date, allergies FROM kids
                      WHERE LOWER(family_email) = ${String(dr.family_email || '').toLowerCase()}
                        AND LOWER(first_name) = ${String(dr.kid_first_name || '').toLowerCase()} LIMIT 1`)[0];
       if (!kidRow) continue; // kid deleted entirely — assignment is an orphan
@@ -5480,7 +5482,7 @@ async function handleMorningBuilderGet(req, res) {
         family_email: fe,
         family_name: familyName,
         first_name: String(kidRow.first_name || '').toLowerCase(),
-        display_name: morningKidDisplayName({ first_name: kidRow.first_name, last_name: kidRow.last_name }, familyName),
+        display_name: morningKidDisplayName({ first_name: kidRow.nickname || kidRow.first_name, last_name: kidRow.last_name }, familyName),
         birth_date: kidRow.birth_date || null,
         age: ageAsOfFall(kidRow.birth_date, schoolYear),
         placement_notes: meta.placement_notes || '',
