@@ -15049,3 +15049,24 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .evs-done .evs-title { text-decoration: line-through; color: var(--color-text-light); font-weight: 400; }
 .evs-meta { display: block; font-size: 0.82rem; color: var(--color-text-light); margin-top: 2px; }
 .evs-task .ws-srt-actions { flex: 0 0 auto; }
+
+/* ── Morning Class Builder: touch tap-to-move (coarse pointers only) ──
+   Android fires no HTML5 drag events from touch, so phones/tablets pick
+   kids up by tapping instead. .mcb-picked = the lifted chip; .mcb-tap-hint
+   = the instruction bar that appears while a kid is picked up. */
+.mcb-kid.mcb-picked {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+}
+.mcb-tap-hint {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-accent-light);
+  border: 1px solid var(--color-accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}

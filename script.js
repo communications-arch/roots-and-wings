@@ -27926,6 +27926,9 @@
     // Wire DnD whenever any chip is draggable (drafts, or late additions
     // under a finalized plan). Locked/pending chips simply aren't draggable.
     wireMorningDnD();
+    // Touch fallback — Android fires no HTML5 drag events from touch, so
+    // coarse-pointer devices get tap-to-move instead. Desktop untouched.
+    wireMorningTapMove();
   }
 
   // ── AM Teaching (participation sheet→DB, Phase B1) ──
@@ -28127,6 +28130,66 @@
         if (!key) return;
         var group = zone.getAttribute('data-drop-group') || '';
         moveMorningKid(key, group, mcbDropBeforeKey(zone, e.clientY, key));
+      });
+    });
+  }
+
+  // ── Touch tap-to-move (Erin, 2026-07-20) ──
+  // Android never wires touch gestures to HTML5 drag events, so on
+  // coarse-pointer devices (phones/tablets) the Builder gets tap-to-move:
+  // tap a chip to pick the kid up, tap another chip to slot in FRONT of
+  // them, tap a class's empty area to drop at the END, tap the picked chip
+  // again to cancel. Wired ONLY when the primary pointer is coarse —
+  // desktop click behavior is completely unchanged. Reuses moveMorningKid,
+  // so persistence/revert/optimistic-render all match drag exactly.
+  function wireMorningTapMove() {
+    if (!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) return;
+    var pickedKey = null;
+
+    function clearPick() {
+      pickedKey = null;
+      document.querySelectorAll('#mcbBody .mcb-kid.mcb-picked').forEach(function (c) { c.classList.remove('mcb-picked'); });
+      var h = document.getElementById('mcbTapHint');
+      if (h) h.remove();
+    }
+    function showHint(name) {
+      var body = document.getElementById('mcbBody');
+      if (!body || document.getElementById('mcbTapHint')) return;
+      var h = document.createElement('div');
+      h.id = 'mcbTapHint';
+      h.className = 'mcb-tap-hint';
+      h.textContent = 'Moving ' + name + ' — tap a kid to slot in front of them, or a class’s empty space to add at the end. Tap ' + name + ' again to cancel.';
+      body.insertBefore(h, body.firstChild);
+    }
+
+    document.querySelectorAll('#mcbBody .mcb-kid').forEach(function (chip) {
+      chip.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var key = chip.getAttribute('data-key');
+        if (!pickedKey) {
+          // Only unlocked chips can be picked up (same rule as drag).
+          if (chip.getAttribute('draggable') !== 'true') return;
+          pickedKey = key;
+          chip.classList.add('mcb-picked');
+          var nameEl = chip.querySelector('.mcb-kid-name');
+          showHint(nameEl ? nameEl.textContent : 'this kid');
+          return;
+        }
+        if (key === pickedKey) { clearPick(); return; }
+        // Land in front of the tapped chip, in that chip's class.
+        var zone = chip.closest('[data-drop-group]');
+        var group = zone ? (zone.getAttribute('data-drop-group') || '') : '';
+        var moveKey = pickedKey;
+        clearPick();
+        moveMorningKid(moveKey, group, key);
+      });
+    });
+    document.querySelectorAll('#mcbBody [data-drop-group]').forEach(function (zone) {
+      zone.addEventListener('click', function () {
+        if (!pickedKey) return;
+        var moveKey = pickedKey;
+        clearPick();
+        moveMorningKid(moveKey, zone.getAttribute('data-drop-group') || '', null);
       });
     });
   }
