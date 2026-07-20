@@ -23953,6 +23953,7 @@
   // members get the grid read-only.
   var _schedRep = null;        // last schedules-report payload
   var _schedTab = 'adults';    // 'adults' | 'kids'
+  var _schedView = 'person';   // 'person' | 'class' (#37 toggle; sticky across session switches while open)
   var _schedSession = null;    // sticky across open/close within a visit
   var _schedMatrix = null;     // { session, data } — volunteer-matrix for adult pickers
   var _schedPools = null;      // { session, classes } — class-signup pools for kid pickers
@@ -23965,11 +23966,13 @@
     if (opts.tab === 'adults' || opts.tab === 'kids') _schedTab = opts.tab;
     _schedEditKey = null;
     _schedFilter = 'all';
+    _schedView = 'person'; // #37: each open starts on By person
     if (_schedSession == null) _schedSession = (_signup && _signup.session) || currentSession;
     renderReportModal({
       title: 'Schedules',
       subtitle: 'Who is where each co-op hour — every adult and every kid, one row each. Open cells offer the qualifying spots still available.',
       meta: 'Session ' + _schedSession,
+      icons: [{ label: 'Print', icon: ICON_SVG.print, aria: 'Print the current view', action: function () { schedPrint(); } }],
       bodyId: 'ws-sched-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -24050,19 +24053,30 @@
     for (var i = 1; i <= 5; i++) {
       h += '<button type="button" class="board-cal-view-pill sched-sess' + (i === _schedSession ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
     }
+    // #37 — By person / By class toggle beside the session pills. The
+    // choice sticks across session switches while the modal is open;
+    // a fresh open resets to By person (showSchedulesReportModal).
+    h += '<span class="sched-view-toggle" role="group" aria-label="Report view">'
+      + '<button type="button" class="board-cal-view-pill sched-view-pill' + (_schedView === 'person' ? ' is-active' : '') + '" data-sview="person">By person</button>'
+      + '<button type="button" class="board-cal-view-pill sched-view-pill' + (_schedView === 'class' ? ' is-active' : '') + '" data-sview="class">By class</button>'
+      + '</span>';
     h += '</div>';
-    // Tab strip — same visual treatment as the Merchandise report tabs.
-    var aUn = schedAdultsUnplacedCount();
-    var kUn = schedKidsUnplacedCount();
-    h += '<div class="merch-tab-nav" role="tablist">'
-      + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'adults' ? ' active' : '') + '" data-sched-tab="adults" role="tab">'
-      +   'Adults' + (aUn > 0 ? ' <span class="merch-tab-badge">' + aUn + ' unplaced</span>' : '')
-      + '</button>'
-      + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'kids' ? ' active' : '') + '" data-sched-tab="kids" role="tab">'
-      +   'Kids' + (kUn > 0 ? ' <span class="merch-tab-badge">' + kUn + ' unplaced</span>' : '')
-      + '</button>'
-      + '</div>';
-    h += '<div id="ws-sched-tab-body"></div>';
+    if (_schedView === 'class') {
+      h += '<div id="ws-sched-class-body"></div>';
+    } else {
+      // Tab strip — same visual treatment as the Merchandise report tabs.
+      var aUn = schedAdultsUnplacedCount();
+      var kUn = schedKidsUnplacedCount();
+      h += '<div class="merch-tab-nav" role="tablist">'
+        + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'adults' ? ' active' : '') + '" data-sched-tab="adults" role="tab">'
+        +   'Adults' + (aUn > 0 ? ' <span class="merch-tab-badge">' + aUn + ' unplaced</span>' : '')
+        + '</button>'
+        + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'kids' ? ' active' : '') + '" data-sched-tab="kids" role="tab">'
+        +   'Kids' + (kUn > 0 ? ' <span class="merch-tab-badge">' + kUn + ' unplaced</span>' : '')
+        + '</button>'
+        + '</div>';
+      h += '<div id="ws-sched-tab-body"></div>';
+    }
     body.innerHTML = h;
     body.querySelectorAll('.sched-sess').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -24073,11 +24087,24 @@
         _schedFilter = 'all';
         _schedMatrix = null;
         _schedPools = null;
-        var tb = document.getElementById('ws-sched-tab-body');
+        var tb = document.getElementById('ws-sched-tab-body') || document.getElementById('ws-sched-class-body');
         if (tb) tb.innerHTML = '<p class="ws-empty">Loading…</p>';
         schedFetchReport(function () { renderSchedulesBody(); });
       });
     });
+    body.querySelectorAll('.sched-view-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var v = this.getAttribute('data-sview') === 'class' ? 'class' : 'person';
+        if (v === _schedView) return;
+        _schedView = v;
+        _schedEditKey = null;
+        renderSchedulesBody();
+      });
+    });
+    if (_schedView === 'class') {
+      renderSchedByClassBody();
+      return;
+    }
     body.querySelectorAll('.sched-tab-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var t = this.getAttribute('data-sched-tab');
@@ -24089,6 +24116,245 @@
       });
     });
     renderSchedTabBody();
+  }
+
+  // ── "By class" view (#37) ─────────────────────────────────────
+  // Pure: folds the schedules-report payload into per-hour sections
+  // (AM1 / AM2 / PM1 / PM2), each listing that hour's classes with
+  // leader, assistants (hour-tagged when a 2-hour class's helper only
+  // covers one hour), and the student roster. Morning groups ARE
+  // classes here — a group with kids but no placed submission still
+  // gets an entry so its roster never disappears. Kept pure —
+  // exercised directly by scripts/test-schedules-byclass.js.
+  function schedByClassSections(rep) {
+    var kids = (rep && rep.kids) || [];
+    var classes = (rep && rep.classes) || [];
+    function blocksOfCls(c) {
+      if (c.class_period === 'AM') {
+        return c.scheduled_hour === 'AM1' ? ['AM1'] : c.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'];
+      }
+      return c.scheduled_hour === 'both' ? ['PM1', 'PM2'] : c.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+    }
+    // Morning rosters key on the kid's group (finalized assignment,
+    // else current group — same fallback the grid's Morning cell uses).
+    var amRoster = {};
+    kids.forEach(function (k) {
+      if (!k.am_applicable || !k.am || !k.am.group) return;
+      var g = String(k.am.group).trim().toLowerCase();
+      (amRoster[g] || (amRoster[g] = [])).push({ name: k.name, age: k.age });
+    });
+    // PM rosters key on the rank-1 pick's class id (a 2-hour 'both'
+    // class rides under pm1 and covers PM2 too).
+    var pmRoster = { PM1: {}, PM2: {} };
+    kids.forEach(function (k) {
+      if (!k.pm_eligible) return;
+      if (k.pm1 && k.pm1.class_id) {
+        (pmRoster.PM1[k.pm1.class_id] || (pmRoster.PM1[k.pm1.class_id] = [])).push({ name: k.name, age: k.age });
+        if (k.pm1.both && !(k.pm2 && k.pm2.class_id)) {
+          (pmRoster.PM2[k.pm1.class_id] || (pmRoster.PM2[k.pm1.class_id] = [])).push({ name: k.name, age: k.age });
+        }
+      }
+      if (k.pm2 && k.pm2.class_id) {
+        (pmRoster.PM2[k.pm2.class_id] || (pmRoster.PM2[k.pm2.class_id] = [])).push({ name: k.name, age: k.age });
+      }
+    });
+    function byName(x, y) { return String(x.name).localeCompare(String(y.name)); }
+    var sections = [];
+    ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (b) {
+      var isAm = b.indexOf('AM') === 0;
+      var entries = [];
+      var seenAmGroups = {};
+      classes.forEach(function (c) {
+        if (blocksOfCls(c).indexOf(b) === -1) return;
+        var spansTwo = blocksOfCls(c).length === 2;
+        var helpers = (c.helpers || []).filter(function (hp) { return !hp.block || hp.block === b; })
+          .map(function (hp) {
+            var tag = (spansTwo && hp.block) ? ((hp.block === 'PM1' || hp.block === 'AM1') ? 'Hour 1' : 'Hour 2') : '';
+            return { name: hp.name, tag: tag };
+          });
+        var groupKey = '';
+        var students;
+        if (isAm) {
+          groupKey = String((c.ageGroups || [])[0] || '').toLowerCase();
+          seenAmGroups[groupKey] = true;
+          students = (amRoster[groupKey] || []).slice().sort(byName);
+        } else {
+          students = (pmRoster[b][c.id] || []).slice().sort(byName);
+        }
+        entries.push({
+          id: c.id,
+          name: c.class_name,
+          group: groupKey,
+          ages: signupAgeText(c),
+          room: c.room || '',
+          leader: c.teacher || '',
+          assistants: helpers,
+          students: students,
+          needs_assistants: Math.max(0, (c.assistants_wanted || 0) - helpers.length),
+          open_seats: (!isAm && c.max) ? Math.max(0, c.max - students.length) : 0
+        });
+      });
+      if (isAm) {
+        Object.keys(amRoster).forEach(function (g) {
+          if (seenAmGroups[g]) return;
+          var meta = null;
+          for (var gi = 0; gi < MORNING_GROUP_ORDER.length; gi++) {
+            if (MORNING_GROUP_ORDER[gi].name.toLowerCase() === g) { meta = MORNING_GROUP_ORDER[gi]; break; }
+          }
+          entries.push({
+            id: null,
+            name: meta ? meta.name : (g.charAt(0).toUpperCase() + g.slice(1)),
+            group: g,
+            ages: meta ? meta.range : '',
+            room: '',
+            leader: '',
+            assistants: [],
+            students: amRoster[g].slice().sort(byName),
+            needs_assistants: 0,
+            open_seats: 0,
+            no_class: true
+          });
+        });
+        // Morning reads youngest group first (site-wide convention).
+        var order = {};
+        MORNING_GROUP_ORDER.forEach(function (gm, oi) { order[gm.name.toLowerCase()] = oi; });
+        entries.sort(function (x, y) {
+          var xo = order[x.group] != null ? order[x.group] : 99;
+          var yo = order[y.group] != null ? order[y.group] : 99;
+          if (xo !== yo) return xo - yo;
+          return String(x.name).localeCompare(String(y.name));
+        });
+      } else {
+        entries.sort(function (x, y) { return String(x.name).localeCompare(String(y.name)); });
+      }
+      sections.push({ block: b, label: SCHED_BLOCK_LABELS[b], entries: entries });
+    });
+    return sections;
+  }
+
+  // One class card's inner rows — shared by the modal and the print
+  // doc (the print CSS restyles the same class names).
+  function schedByClassEntryHtml(e) {
+    var head = '<div class="sched-bc-head"><strong>' + escapeHtml(e.name) + '</strong>';
+    var meta = [];
+    if (e.ages) meta.push('Ages ' + e.ages);
+    if (e.room) meta.push(e.room);
+    if (meta.length) head += ' <span class="ws-wv-context">— ' + escapeHtml(meta.join(' · ')) + '</span>';
+    // Open spots, quietly — the report's existing pill language.
+    if (e.needs_assistants > 0) head += ' <span class="ws-wv-pending">needs ' + e.needs_assistants + ' assistant' + (e.needs_assistants === 1 ? '' : 's') + '</span>';
+    if (e.open_seats > 0) head += ' <span class="ws-wv-pending">' + e.open_seats + ' seat' + (e.open_seats === 1 ? '' : 's') + ' open</span>';
+    if (e.no_class) head += ' <span class="ws-wv-context">no morning class placed yet</span>';
+    head += '</div>';
+    var rows = '';
+    rows += '<div class="sched-bc-row"><span class="sched-bc-role">Leader</span>'
+      + (e.leader ? escapeHtml(e.leader) : '<span class="st-flag-coral">open</span>') + '</div>';
+    var aNames = e.assistants.map(function (a) { return escapeHtml(a.name) + (a.tag ? ' <span class="ws-wv-context">(' + a.tag + ')</span>' : ''); });
+    rows += '<div class="sched-bc-row"><span class="sched-bc-role">Assistants</span>'
+      + (aNames.length ? aNames.join(', ') : '<span class="sb-subdetail-dim">—</span>') + '</div>';
+    var sNames = e.students.map(function (s) { return escapeHtml(s.name) + (s.age != null ? ' (' + s.age + ')' : ''); });
+    rows += '<div class="sched-bc-row"><span class="sched-bc-role">Students</span>'
+      + (sNames.length ? sNames.join(', ') : '<span class="sb-subdetail-dim">none yet</span>') + '</div>';
+    return head + rows;
+  }
+
+  function schedByClassHtml(rep) {
+    var sections = schedByClassSections(rep);
+    var h = '';
+    sections.forEach(function (sec) {
+      h += '<div class="sched-bc-section">';
+      h += '<h4 class="sched-bc-hour">' + escapeHtml(sec.label) + '</h4>';
+      if (!sec.entries.length) {
+        h += '<p class="ws-empty">No classes this hour yet.</p>';
+      } else {
+        sec.entries.forEach(function (e) {
+          h += '<div class="sched-bc-class">' + schedByClassEntryHtml(e) + '</div>';
+        });
+      }
+      h += '</div>';
+    });
+    return h;
+  }
+
+  function renderSchedByClassBody() {
+    var wrap = document.getElementById('ws-sched-class-body');
+    if (!wrap || !_schedRep) return;
+    wrap.innerHTML = schedByClassHtml(_schedRep);
+  }
+
+  // ── Print (#37): whichever view is active, via openPrintIframe ──
+  function schedPrint() {
+    if (!_schedRep) { alert('Report still loading — try again in a moment.'); return; }
+    openPrintIframe(_schedView === 'class' ? buildSchedByClassPrintHtml(_schedRep) : buildSchedByPersonPrintHtml(_schedRep));
+  }
+  function schedPrintShell(title, rep, bodyHtml, css) {
+    var sub = 'Session ' + rep.session + ' · ' + rep.school_year + ' · printed ' + new Date().toLocaleDateString();
+    return '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title><style>'
+      + 'body{font-family:Arial,sans-serif;font-size:12px;margin:24px;}'
+      + 'h1{font-size:18px;margin:0 0 4px;}'
+      + 'p.sub{color:#555;margin:0 0 16px;}'
+      + css
+      + '</style></head><body><h1>' + escapeHtml(title) + '</h1><p class="sub">' + escapeHtml(sub) + '</p>'
+      + bodyHtml + '</body></html>';
+  }
+  function buildSchedByClassPrintHtml(rep) {
+    var css = 'h2{font-size:14px;margin:16px 0 6px;border-bottom:1px solid #bbb;padding-bottom:2px;}'
+      + '.sched-bc-class{border:1px solid #ccc;border-radius:4px;padding:6px 8px;margin:0 0 8px;page-break-inside:avoid;}'
+      + '.sched-bc-head{margin-bottom:3px;}'
+      + '.sched-bc-role{display:inline-block;min-width:80px;font-weight:bold;font-size:10px;text-transform:uppercase;color:#555;}'
+      + '.ws-wv-context{color:#555;}'
+      + '.ws-wv-pending{font-size:10px;border:1px solid #999;border-radius:8px;padding:0 5px;margin-left:4px;}'
+      + '.st-flag-coral{color:#b3401f;}'
+      + '.sb-subdetail-dim{color:#999;}';
+    var body = '';
+    schedByClassSections(rep).forEach(function (sec) {
+      body += '<h2>' + escapeHtml(sec.label) + '</h2>';
+      if (!sec.entries.length) { body += '<p>No classes this hour.</p>'; return; }
+      sec.entries.forEach(function (e) {
+        body += '<div class="sched-bc-class">' + schedByClassEntryHtml(e) + '</div>';
+      });
+    });
+    return schedPrintShell('Schedules — By class', rep, body, css);
+  }
+  function buildSchedByPersonPrintHtml(rep) {
+    var css = 'h2{font-size:14px;margin:16px 0 6px;}'
+      + 'table{width:100%;border-collapse:collapse;margin-bottom:14px;}'
+      + 'th,td{border:1px solid #bbb;padding:3px 6px;text-align:left;vertical-align:top;}'
+      + 'th{background:#eee;}'
+      + '.open{color:#b3401f;}.dim{color:#999;}';
+    function adultCellText(r, b) {
+      var c = r.cells[b];
+      if (c) return escapeHtml((SCHED_KIND_TAG[c.kind] || c.kind) + (c.class_name ? ': ' + c.class_name : ''));
+      if ((rep.blocks_expected || []).indexOf(b) === -1) return '<span class="dim">—</span>';
+      return '<span class="open">open</span>';
+    }
+    var body = '<h2>Adults</h2><table><thead><tr><th>Member</th>';
+    ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (b) { body += '<th>' + SCHED_BLOCK_LABELS[b] + '</th>'; });
+    body += '</tr></thead><tbody>';
+    (rep.adults || []).forEach(function (r) {
+      body += '<tr><td>' + escapeHtml(r.name) + '</td>';
+      ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (b) { body += '<td>' + adultCellText(r, b) + '</td>'; });
+      body += '</tr>';
+    });
+    body += '</tbody></table>';
+    function kidPmText(r, hour) {
+      if (!r.pm_eligible) return '<span class="dim">—</span>';
+      var pick = hour === 'PM1' ? r.pm1 : r.pm2;
+      if (!pick && hour === 'PM2' && r.pm1 && r.pm1.both) return escapeHtml(r.pm1.class_name) + ' (2-hour)';
+      if (pick) return escapeHtml(pick.class_name) + (pick.both ? ' (2-hour)' : '');
+      return '<span class="open">open</span>';
+    }
+    body += '<h2>Kids</h2><table><thead><tr><th>Kid</th><th>Morning</th><th>PM Hour 1</th><th>PM Hour 2</th></tr></thead><tbody>';
+    (rep.kids || []).forEach(function (r) {
+      var am = !r.am_applicable ? '<span class="dim">—</span>'
+        : (r.am && r.am.group) ? escapeHtml(r.am.group) + (r.am.finalized ? '' : ' (pending)')
+        : '<span class="open">not placed</span>';
+      body += '<tr><td>' + escapeHtml(r.name) + (r.age != null ? ' (' + r.age + ')' : '') + '</td>'
+        + '<td>' + am + '</td>'
+        + '<td>' + kidPmText(r, 'PM1') + '</td>'
+        + '<td>' + kidPmText(r, 'PM2') + '</td></tr>';
+    });
+    body += '</tbody></table>';
+    return schedPrintShell('Schedules — By person', rep, body, css);
   }
 
   function renderSchedTabBody() {

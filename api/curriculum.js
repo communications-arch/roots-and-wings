@@ -1382,7 +1382,7 @@ module.exports = async function handler(req, res) {
 
         const [srCls, srHelpers, srSignups, srApproval, srWin, srMlcs, srKids, srMorning, srPicks, srFirsts] = await Promise.all([
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
-                     c.max_students,
+                     c.max_students, c.scheduled_room, c.age_groups, c.scheduled_age_range,
                      LOWER(c.submitted_by_email) AS teacher_email,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
                        WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
@@ -1538,6 +1538,26 @@ module.exports = async function handler(req, res) {
           srBlocksOf(r).forEach(b => { if (srOpenSeats[b] != null) srOpenSeats[b] += open; });
         });
 
+        // Class metadata for the "By class" toggle (#37): the same
+        // scheduled/drafted rows the grid derives from, with the age
+        // range (reviewer override + buckets → signupAgeText client-
+        // side), room, leader, per-hour helpers, and the open-spot
+        // inputs (assistants wanted, max vs 1st-choice enrollment).
+        const srClasses = srCls.map(r => ({
+          id: r.id,
+          class_name: r.class_name,
+          class_period: r.class_period === 'AM' ? 'AM' : 'PM',
+          scheduled_hour: r.scheduled_hour || '',
+          room: r.scheduled_room || '',
+          ageRange: r.scheduled_age_range || '',
+          ageGroups: Array.isArray(r.age_groups) ? r.age_groups : [],
+          teacher: r.teacher_name || '',
+          max: r.max_students || 0,
+          signed_up: srFirstBy[r.id] || 0,
+          assistants_wanted: Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]),
+          helpers: (srHelpersBySub[r.id] || []).map(h => ({ name: h.person_name || h.email || '', block: h.block || '' }))
+        }));
+
         return res.status(200).json({
           session: srSess, school_year: srYear, pm_approved: srPmApproved,
           window_status: srWinStatus,
@@ -1546,7 +1566,8 @@ module.exports = async function handler(req, res) {
           adults: srAdults,
           open_assist: srOpenAssist,
           kids: srKidRows,
-          open_seats: srOpenSeats
+          open_seats: srOpenSeats,
+          classes: srClasses
         });
       }
 
