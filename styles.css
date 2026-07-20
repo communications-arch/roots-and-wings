@@ -8055,9 +8055,11 @@ button.staff-role:hover {
   .cls-modal { padding: 1.1rem; }
 }
 
-/* ── My Family — PM class submissions card ── */
-.mf-classsubs-card .mf-classsubs-row:last-child { margin-bottom: 0; }
-.mf-classsubs-card .mf-classsubs-new-btn { margin-top: 0.25rem; }
+/* ── Class Ideas (class submissions) card ── */
+/* #38: the card moved from My Family into the Workspace grid — rules are
+   scoped to the body wrapper so they follow it anywhere it renders. */
+.mf-classsubs-body .mf-classsubs-row:last-child { margin-bottom: 0; }
+.mf-classsubs-body .mf-classsubs-new-btn { margin-top: 0.25rem; }
 
 /* ── Schedule Builder (VP + PM Assistant) ── */
 /* ---------- Morning Class Builder (Membership Director) ---------- */

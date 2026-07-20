@@ -6837,17 +6837,20 @@
     html += '</div>';
     html += '</div>';
 
-    // Class submissions — member-authored ideas for morning classes AND
-    // afternoon electives (renamed "Class Ideas" per Erin 2026-07-05).
-    // Shows ONLY the viewer's own submissions (server scope=mine).
-    // Card is always visible; body is populated by renderClassSubsCardBody()
-    // after loadMyClassSubmissions() fills `myClassSubmissions`.
-    html += '<div class="mf-card mf-classsubs-card" id="mfClassSubsCard">';
-    html += '<h3 class="mf-card-title" data-help-key="mf-class-ideas"><img class="brand-accent" src="brand/secondary/accent-2.png" alt=""> Class Ideas</h3>';
+    // "My Classes" (#38) — the acting family's APPROVED classes for a
+    // chosen session (status 'scheduled' IS the approval: the VP/ACL
+    // scheduling a class into a session/hour is the review), each with
+    // Supply list + Lesson plan buttons. Replaces the Class Ideas card,
+    // which moved to My Workspace (universal 'class-ideas' widget). Body
+    // renders from renderMyClassesCardBody() once loadMyClassSubmissions()
+    // fills `myClassSubmissions` (same data the teaching duty rows use, so
+    // "my family's classes" resolves identically in both places).
+    html += '<div class="mf-card mf-myclasses-card" id="mfMyClassesCard">';
+    html += '<h3 class="mf-card-title" data-help-key="mf-my-classes"><img class="brand-accent" src="brand/secondary/accent-2.png" alt=""> My Classes</h3>';
     html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
-    html += 'Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.';
+    html += 'Classes your family is teaching once the VP or Afternoon Class Liaison schedules them — with each class’s supply list and lesson plan.';
     html += '</p>';
-    html += '<div class="mf-classsubs-body" id="mfClassSubsBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
+    html += '<div id="mfMyClassesBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
     html += '</div>';
 
     grid.innerHTML = html;
@@ -6878,10 +6881,12 @@
     };
     if (typeof loadVolunteerSignupPanel === 'function') loadVolunteerSignupPanel(fam);
 
-    // Class Ideas card — ALWAYS refresh on a My Family render. The shell
-    // above resets the body to "Loading…", and renders triggered by tab
-    // switches / View-As changes / post-submit navigation previously left
-    // it stale (2026-07-05, Erin: card didn't refresh after submitting).
+    // Class submissions — ALWAYS refresh on a My Family render. The shell
+    // above resets the My Classes body to "Loading…", and renders triggered
+    // by tab switches / View-As changes / post-submit navigation previously
+    // left it stale (2026-07-05, Erin: card didn't refresh after
+    // submitting). Feeds the teaching duty rows, the My Classes card (#38)
+    // AND the Workspace Class Ideas widget.
     if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
     // My assigned event-planning tasks (Collaboration spaces) — the
     // loader re-renders once when the set changes.
@@ -6992,12 +6997,16 @@
     if (Object.keys(classLinks).length > 0) {
       updateClassLinkButtons();
     }
-    // Repopulate the PM class submissions card from already-fetched state.
-    // renderMyFamily is called many times per session (on login, after sheets
-    // load, after billing loads, etc.) — without this, every re-render leaves
-    // the card stuck on its "Loading…" placeholder.
+    // Repopulate the class submissions card (now a Workspace widget) and
+    // the My Classes card (#38) from already-fetched state. renderMyFamily
+    // is called many times per session (on login, after sheets load, after
+    // billing loads, etc.) — without this, every re-render leaves the My
+    // Classes card stuck on its "Loading…" placeholder.
     if (typeof renderClassSubsCardBody === 'function') {
       renderClassSubsCardBody();
+    }
+    if (typeof renderMyClassesCardBody === 'function') {
+      renderMyClassesCardBody();
     }
     // Refresh the personal participation badge in the greeting. Internally
     // caches by active email, so re-renders are cheap.
@@ -8516,8 +8525,8 @@
         h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCB5</span>Reimbursement Form</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
         // Renamed from "Class Ideas" (2026-07-05) \u2014 that name now belongs
-        // to the My Family card listing YOUR submitted classes; this is
-        // the browse-for-inspiration list.
+        // to the Workspace card listing YOUR submitted classes (#38 moved
+        // it from My Family); this is the browse-for-inspiration list.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
         h += '</ul>';
@@ -8665,6 +8674,26 @@
           h += '</ul>';
         }
         return h;
+      }
+    },
+    'class-ideas': {
+      // #38: moved here from My Family (was the mf-classsubs-card near
+      // Billing) — a universal Shared-section widget. Same body id, so
+      // renderClassSubsCardBody() keeps painting it wherever it lives;
+      // the submit modal + edit/withdraw/lesson-plan wiring all ride
+      // along unchanged.
+      title: 'Class Ideas',
+      roleGate: null,
+      render: function () {
+        var h = '<p class="ws-body-hint">Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.</p>';
+        h += '<div class="mf-classsubs-body" id="mfClassSubsBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
+        return h;
+      },
+      afterRender: function () {
+        // Paint instantly from already-fetched state, then refresh so a
+        // fresh Workspace open never sits on the loading placeholder.
+        if (typeof renderClassSubsCardBody === 'function') renderClassSubsCardBody();
+        if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
       }
     },
     'admin-consoles': {
@@ -9348,7 +9377,9 @@
     'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
     'Supply Coordinator': ['todos', 'supply-closet-mgmt', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
-    '*': ['members-summary', 'ways-to-help', 'resources']
+    // 'class-ideas' joined the universal set 2026-07-20 (#38 — moved
+    // from My Family, whose old slot now hosts the My Classes card).
+    '*': ['members-summary', 'class-ideas', 'ways-to-help', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -9388,7 +9419,10 @@
     'mf-responsibilities': 'Everything you’re signed up to do — teaching, assisting, cleaning, board and committee roles, and any coverage you’ve claimed. Grouped by block (morning, afternoon, cleaning, annual). Tap a duty for details.',
     'mf-kids-schedule': 'Your kids’ morning class and afternoon electives for the session. Elective names open a class detail popup; pending afternoon sign-ups show here with an Edit link.',
     'mf-billing': 'Your family’s fees and payments for the year — what’s due, what’s paid, and how to pay. Contact the Treasurer with questions.',
-    'mf-class-ideas': 'Class ideas and afternoon class submissions for your family — propose a class or track one you’ve submitted.',
+    // #38: the Class Ideas card moved to My Workspace (widget type
+    // 'class-ideas'); its old My Family slot hosts the My Classes card.
+    'class-ideas': 'Class ideas and afternoon class submissions for your family — propose a class or track one you’ve submitted.',
+    'mf-my-classes': 'Your family’s approved classes for the selected session — once the VP or Afternoon Class Liaison schedules a class you submitted, it appears here with its supply list and lesson plan.',
     'mf-signup': 'Afternoon class sign-ups. Rank the classes each kid wants during the sign-up window; the Afternoon Class Liaison runs the lottery when it closes.',
     'mf-coverage': 'The coverage board — days a member is out and the duties that need someone to cover. Claim an open slot to help out.'
   };
@@ -9499,7 +9533,8 @@
     'bg-sustaining': 'Board — Sustaining Director', 'bg-communications': 'Board — Communications Director',
     'bg-cleaning': 'Board — Cleaning Crew Liaison', 'bg-events-liaison': 'Board — Special Events Liaison',
     'mf-responsibilities': 'My Family — My Responsibilities', 'mf-kids-schedule': 'My Family — Kids’ Schedule',
-    'mf-billing': 'My Family — Billing & Fees', 'mf-class-ideas': 'My Family — Class Ideas',
+    'mf-billing': 'My Family — Billing & Fees', 'class-ideas': 'Class Ideas (Workspace)',
+    'mf-my-classes': 'My Family — My Classes',
     'mf-signup': 'My Family — Afternoon Sign-ups', 'mf-coverage': 'My Family — Coverage Board'
   };
   // Comms' Help-text editor. One row per card: edit the default ('*') text,
@@ -9996,7 +10031,7 @@
           var w = WORKSPACE_WIDGETS[type];
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
-          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-notes': 'accent-8' };
+          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-notes': 'accent-8', 'class-ideas': 'accent-2' };
           // Per-role board cards share one accent.
           var wsAccentKey = WS_ACCENTS[type] || (type.indexOf('bg-') === 0 ? 'accent-8' : '');
           var wsAccent = wsAccentKey ? '<img class="brand-accent" src="brand/secondary/' + wsAccentKey + '.png" alt=""> ' : '';
@@ -20222,6 +20257,8 @@
       var changed = newSig !== _myClassSubsSig;
       _myClassSubsSig = newSig;
       renderClassSubsCardBody();
+      // My Classes card (#38) rides the same fetch.
+      if (typeof renderMyClassesCardBody === 'function') renderMyClassesCardBody();
       // Duty-relevant when scheduled classes appeared OR disappeared —
       // the old new-list-only check skipped the re-render on a switch to
       // an identity with no submissions, leaving the previous identity's
@@ -20341,6 +20378,169 @@
           sub.class_period === 'AM' ? 'AM' : 'PM');
       });
     });
+  }
+
+  // ── "My Classes" card (#38) ─────────────────────────────────────
+  // The acting family's APPROVED classes per session on My Family —
+  // status 'scheduled' IS the approval (the VP/ACL scheduling a class
+  // into a session/hour is the review; there's no separate approve).
+  // Rides the same myClassSubmissions the teaching duty rows use, so
+  // "my family's classes" resolves identically in both places.
+  var _mfMyClassesSession = null; // null = follow currentSession
+
+  // class_curriculum_links per session — the global classLinks cache
+  // only ever holds currentSession, but the S1–S5 chips can preview any
+  // session, so links fetch lazily per session and cache here.
+  var _classLinksBySession = {};
+  function ensureClassLinksForSession(sess, cb) {
+    if (_classLinksBySession[sess]) { if (cb) cb(); return; }
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/curriculum?action=links&session=' + sess, { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var map = {};
+        (data.links || []).forEach(function (l) { map[l.class_key] = l; });
+        _classLinksBySession[sess] = map;
+        if (cb) cb();
+      })
+      .catch(function () { if (cb) cb(); });
+  }
+
+  // Same class_key convention as the dbClass popup / loadClassLinks:
+  // AM classes key on their (capitalised) age group, PM on 'PM:' + name.
+  function myClassLinkKey(s) {
+    if (s.class_period === 'AM') {
+      var g = String((s.age_groups || [])[0] || '');
+      return g ? g.charAt(0).toUpperCase() + g.slice(1) : '';
+    }
+    return 'PM:' + s.class_name;
+  }
+
+  // Pure: the family's approved classes for one session (#38) — status
+  // 'scheduled' only, guarded by school year (a legacy year's Session N
+  // must not bleed into this year's chip — same rule as the duty rows),
+  // AM before PM then by hour/name. Kept extractable for unit tests
+  // (scripts/test-myclasses.js).
+  function myClassesForSession(subs, sess, activeYear) {
+    var out = (subs || []).filter(function (s) {
+      if (s.status !== 'scheduled' || s.scheduled_session !== sess) return false;
+      if (activeYear && s.school_year && s.school_year !== activeYear) return false;
+      return true;
+    });
+    out.sort(function (a, b) {
+      var pa = a.class_period === 'AM' ? 0 : 1;
+      var pb = b.class_period === 'AM' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      var d = String(a.scheduled_hour || '').localeCompare(String(b.scheduled_hour || ''));
+      if (d) return d;
+      return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+    });
+    return out;
+  }
+
+  function renderMyClassesCardBody() {
+    var body = document.getElementById('mfMyClassesBody');
+    if (!body) return;
+    var sess = _mfMyClassesSession || currentSession;
+
+    // Session pills — same sb-sess-chip idiom as the volunteer panel.
+    var html = '<div style="display:inline-flex;gap:4px;margin:0 0 0.75rem;">';
+    for (var i = 1; i <= 5; i++) {
+      html += '<button type="button" class="sb-sess-chip mf-myclasses-sess' + (i === sess ? ' sb-sess-match' : '') + '" data-sess="' + i + '" style="cursor:pointer;border:none;">S' + i + '</button>';
+    }
+    html += '</div>';
+
+    var mine = myClassesForSession(myClassSubmissions, sess,
+      (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '');
+
+    if (mine.length === 0) {
+      html += '<p style="margin:0;color:var(--color-text-light);font-size:0.9rem;">No approved classes for Session ' + sess + ' yet. ';
+      html += 'Have an idea? Propose it from the <strong>Class Ideas</strong> card in <strong>My Workspace</strong> — or ';
+      html += '<button type="button" class="ws-inline-link" id="mfMyClassesSubmit">✨ submit a class now</button>.</p>';
+    } else {
+      html += '<ul style="list-style:none;padding:0;margin:0;">';
+      mine.forEach(function (s, idx) {
+        html += '<li style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
+        html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
+        html += '<strong style="font-size:1rem;">' + escClsHtml(s.class_name) + '</strong>';
+        html += '<span style="color:var(--color-text-light);font-size:0.85rem;">' + (s.class_period === 'AM' ? '🌅 ' : '🌇 ') + classHourLabel(s.class_period, s.scheduled_hour)
+          + (s.scheduled_room ? ' · ' + escClsHtml(s.scheduled_room) : '') + '</span>';
+        html += '</div>';
+        html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
+        html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">🧺 Supply list</button>';
+        html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">📖 Lesson plan</button>';
+        html += '</div>';
+        html += '</li>';
+      });
+      html += '</ul>';
+    }
+    body.innerHTML = html;
+
+    // Prefetch this session's plan links so the first button tap is
+    // instant (and correct even off the current session).
+    if (mine.length) ensureClassLinksForSession(sess);
+
+    body.querySelectorAll('.mf-myclasses-sess').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var v = parseInt(this.getAttribute('data-sess'), 10);
+        _mfMyClassesSession = v === currentSession ? null : v;
+        renderMyClassesCardBody();
+      });
+    });
+    var mcSubmitBtn = document.getElementById('mfMyClassesSubmit');
+    if (mcSubmitBtn) mcSubmitBtn.addEventListener('click', function () { showClassSubmissionModal(null); });
+
+    function mcLinkFor(s) {
+      var key = myClassLinkKey(s);
+      var map = _classLinksBySession[sess];
+      // The always-loaded currentSession cache covers a not-yet-fetched
+      // per-session map for the common (current session) case.
+      if (!map && sess === currentSession && classLinks) map = classLinks;
+      return (map && key) ? map[key] : null;
+    }
+    function mcOpenPlan(currId, wantSupplies) {
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/curriculum?id=' + currId, { headers: { 'Authorization': 'Bearer ' + cred } })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.curriculum) { alert('Could not load the lesson plan.'); return; }
+          curriculumState.current = data.curriculum;
+          curriculumState.view = 'detail';
+          renderCurriculumModal();
+          if (wantSupplies) {
+            // The supply list lives in the plan detail's Master Supply
+            // List — jump there. A plan with no supplies yet just opens
+            // at the top (the teacher can Edit to add them).
+            var target = personDetailCard && personDetailCard.querySelector('.cl-master-supplies');
+            if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        })
+        .catch(function () { alert('Network error — try again.'); });
+    }
+    function mcWire(selector, wantSupplies) {
+      body.querySelectorAll(selector).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var s = mine[parseInt(this.getAttribute('data-idx'), 10)];
+          if (!s) return;
+          var go = function () {
+            var link = mcLinkFor(s);
+            if (link) { mcOpenPlan(link.curriculum_id, wantSupplies); return; }
+            // No plan attached yet — it's their own class, so open the
+            // Curriculum editor prefilled (supplies live inside the
+            // lesson plan), matching the duty rows' 📖 Plan flow.
+            if (typeof startLessonPlanForClass === 'function') {
+              startLessonPlanForClass(s.class_name,
+                (typeof prettyAgesClient === 'function' ? prettyAgesClient(s.age_groups, s.age_groups_other) : ''),
+                s.class_period === 'AM' ? 'AM' : 'PM');
+            }
+          };
+          if (_classLinksBySession[sess]) go(); else ensureClassLinksForSession(sess, go);
+        });
+      });
+    }
+    mcWire('.mf-myclasses-supply', true);
+    mcWire('.mf-myclasses-plan', false);
   }
 
   function withdrawClassSubmission(id) {

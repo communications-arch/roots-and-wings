@@ -249,6 +249,7 @@ const unitTests = [
   'scripts/test-capabilities.js',
   'scripts/test-builder-filters.js',
   'scripts/test-inspiration-filters.js',
+  'scripts/test-myclasses.js',
   'scripts/test-schedules-byclass.js',
 ];
 
