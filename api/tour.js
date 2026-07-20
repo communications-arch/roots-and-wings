@@ -6071,7 +6071,7 @@ async function handleSpecialEventDate(body, req, res) {
       SET event_date = ${eventDate || null}, date_status = ${status},
           updated_by = ${auth.realEmail}, updated_at = NOW()
       WHERE id = ${eventId}
-      RETURNING id, name, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
+      RETURNING id, name, school_year, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
     `;
     if (!upd.length) return res.status(404).json({ error: 'Event not found' });
     // Approve → publish to the co-op Google Calendar; propose → remove it.
@@ -6117,7 +6117,7 @@ async function handleSpecialEventDetails(body, req, res) {
           event_date = COALESCE(${eventDate || null}, event_date),
           updated_by = ${auth.realEmail}, updated_at = NOW()
       WHERE id = ${eventId}
-      RETURNING id, name, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
+      RETURNING id, name, school_year, date_status, event_date, end_date, start_time, end_time, location, gcal_event_id
     `;
     if (!upd.length) return res.status(404).json({ error: 'Event not found' });
     // Keep the published Google event (if approved) in step with edited
@@ -6714,7 +6714,30 @@ async function syncSpecialEventToGoogleCalendar(sql, seRow) {
   if (!seRow || !seRow.id) return;
   const cal = getCalendarWriteClient();
   const gid = String(seRow.gcal_event_id || '');
-  const shouldPublish = seRow.date_status === 'approved' && !!calDateStr(seRow.event_date);
+  // Ice Cream Social + Field Day dates are session-derived — the Admin
+  // Calendar shows them read-only and never stores them on the row, so an
+  // APPROVED row can be dateless and used to silently skip publishing
+  // (issue #26). Derive here, and let the derivation WIN over any stored
+  // date so the published event follows session-date moves like the UI does.
+  let eventDate = calDateStr(seRow.event_date);
+  if (seRow.name === 'Ice Cream Social' || seRow.name === 'Field Day') {
+    try {
+      const sessRows = await sql`
+        SELECT session_number, school_year, start_date, end_date
+        FROM co_op_sessions WHERE school_year = ${seRow.school_year}`;
+      // DATE columns come back as Date objects; the cal helpers want
+      // YYYY-MM-DD strings (String(Date)+'T00:00:00Z' parses to NaN).
+      const sess = sessRows.map(s => ({
+        session_number: s.session_number, school_year: s.school_year,
+        start_date: calDateStr(s.start_date), end_date: calDateStr(s.end_date)
+      }));
+      const derived = seRow.name === 'Ice Cream Social'
+        ? iceCreamSocialForYear(sess, seRow.school_year)
+        : fieldDayForYear(sess, seRow.school_year);
+      if (derived) eventDate = derived;
+    } catch (e) { /* fall back to the stored date */ }
+  }
+  const shouldPublish = seRow.date_status === 'approved' && !!eventDate;
   if (!shouldPublish) {
     if (gid) {
       try { await cal.events.delete({ calendarId: RW_GCAL_ID, eventId: gid }); } catch (e) { /* already gone */ }
@@ -6725,7 +6748,7 @@ async function syncSpecialEventToGoogleCalendar(sql, seRow) {
   // Reuse the field-trip body builder (note intentionally blank — the Notes
   // field was removed board-wide).
   const body = gcalBodyFromEvent({
-    title: seRow.name, event_date: seRow.event_date, end_date: seRow.end_date,
+    title: seRow.name, event_date: eventDate, end_date: seRow.end_date,
     start_time: seRow.start_time, end_time: seRow.end_time, location: seRow.location, note: ''
   });
   if (gid) {
