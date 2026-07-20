@@ -8746,10 +8746,11 @@
         if (showsBuilder) {
           // The Submissions Report lives inside the builder; the pending
           // pill rides this row. VP keeps the "Afternoon Classes" sub-label
-          // to pair with Membership's morning row below.
+          // to pair with Membership's morning row below. The ACL's pill
+          // counts afternoon submissions only, matching her To Do (#36).
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder'
             + (role === 'Vice President' ? ' <span class="ws-link-sub">Afternoon Classes</span>' : '')
-            + '<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
+            + '<span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
         }
         if (role === 'Membership Director') {
           // Membership owns the morning age-group placement builder (Erin,
@@ -8817,7 +8818,11 @@
           // 2026-07-16: counts showed everywhere with no doorway and no
           // explanation — scheduling or declining IS the review). Opens
           // the Class Builder, whose inbox palette holds the pending ones.
-          h += '<li id="ws-todo-classreview-item" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">📋</span><span>Review class submissions — schedule, mark reviewed, or decline</span></button></li>';
+          // The ACL's count scopes to AFTERNOON submissions only (#36 —
+          // morning ones are the VP / group liaisons' lane); the
+          // data-pm-only mark drives loadPmSubmissionsPendingCount.
+          var crPmOnly = role === 'Afternoon Class Liaison';
+          h += '<li id="ws-todo-classreview-item"' + (crPmOnly ? ' data-pm-only="1"' : '') + ' hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">📋</span><span>Review ' + (crPmOnly ? 'afternoon ' : '') + 'class submissions — schedule, mark reviewed, or decline</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
@@ -27582,21 +27587,31 @@
         if (!data) return;
         var subs = Array.isArray(data.submissions) ? data.submissions : [];
         var year = scheduleBuilderState.schoolYear;
-        var pending = subs.filter(function (s) {
+        var pendingSubs = subs.filter(function (s) {
           return s.status === 'submitted' && s.school_year === year;
+        });
+        var pending = pendingSubs.length;
+        // Afternoon-only count for surfaces marked data-pm-only (#36 —
+        // the ACL's To Do + pill; morning submissions are the VP / group
+        // liaisons' lane). '' class_period counts as PM, mirroring the
+        // server's scopeAllowsSub fallback.
+        var pendingPm = pendingSubs.filter(function (s) {
+          return String(s.class_period || 'PM') !== 'AM';
         }).length;
         pills.forEach(function (pill) {
-          if (pending > 0) {
-            pill.textContent = pending + ' to review';
+          var n = pill.hasAttribute('data-pm-only') ? pendingPm : pending;
+          if (n > 0) {
+            pill.textContent = n + ' to review';
             pill.hidden = false;
           } else {
             pill.hidden = true;
           }
         });
         if (todoItem) {
+          var todoN = todoItem.hasAttribute('data-pm-only') ? pendingPm : pending;
           var cnt = document.getElementById('ws-todo-classreview-count');
-          if (cnt) cnt.textContent = pending;
-          todoItem.hidden = pending === 0;
+          if (cnt) cnt.textContent = todoN;
+          todoItem.hidden = todoN === 0;
           if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
         }
       })
