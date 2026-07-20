@@ -723,52 +723,6 @@ async function handleContact(body, res) {
   return res.status(200).json({ success: true, tourId });
 }
 
-// ── Membership Sheet dual-write ──
-// Appends a flat 52-column row to the Registrations tab of the Membership
-// Sheet so the Membership Director has a CSV-style view alongside the DB.
-// Best-effort: logged and swallowed on failure so a broken Sheet can't block
-// a paying family. Requires MEMBERSHIP_SHEET_ID env var and the sheet shared
-// with rw-sheets-reader@rw-members-auth.iam.gserviceaccount.com as Editor.
-async function appendRegistrationToSheet(row) {
-  const sheetId = process.env.MEMBERSHIP_SHEET_ID;
-  if (!sheetId) {
-    console.warn('MEMBERSHIP_SHEET_ID not set — skipping Sheet append');
-    return;
-  }
-  const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}'),
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-  });
-  const sheets = google.sheets({ version: 'v4', auth: await auth.getClient() });
-
-  const yn = v => v ? 'Yes' : 'No';
-  const kids = Array.isArray(row.kids) ? row.kids : [];
-  const coaches = Array.isArray(row.backup_coaches) ? row.backup_coaches : [];
-  const values = [row.submitted_at, row.id, row.season, row.main_learning_coach,
-    row.email, row.phone, row.address, row.track, row.track_other || '',
-    row.existing_family_name || ''];
-  for (let i = 0; i < 10; i++) {
-    const k = kids[i];
-    values.push(k ? (k.name || '') : '', k ? (k.birth_date || '') : '');
-  }
-  for (let i = 0; i < 4; i++) {
-    const c = coaches[i];
-    values.push(c ? (c.name || '') : '', c ? (c.email || '') : '', c ? 'No' : '');
-  }
-  values.push(row.placement_notes || '',
-    yn(row.waiver_member_agreement), yn(row.waiver_photo_consent), yn(row.waiver_liability),
-    row.signature_name, row.signature_date, row.student_signature || '',
-    row.payment_status, row.payment_amount, row.paypal_transaction_id);
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: sheetId,
-    range: 'Registrations!A:BZ',
-    valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [values] }
-  });
-}
-
 // ── Registration (public, no auth; PayPal has already captured) ──
 async function handleRegistration(body, req, res) {
   const email = String(body.email || '').trim().toLowerCase();
@@ -1074,21 +1028,9 @@ async function handleRegistration(body, req, res) {
       console.error('Registration → payments mirror error (non-fatal):', payErr);
     }
 
-    // Best-effort append to the Membership Sheet for the Membership Director's
-    // CSV-style view. Failures must not block the family's registration.
-    try {
-      await appendRegistrationToSheet({
-        id,
-        submitted_at: new Date().toISOString(),
-        season, email, existing_family_name, main_learning_coach, address, phone,
-        track, track_other, kids, backup_coaches, placement_notes,
-        waiver_member_agreement, waiver_photo_consent: true, waiver_liability,
-        signature_name, signature_date, student_signature,
-        payment_status: 'paid', payment_amount, paypal_transaction_id
-      });
-    } catch (sheetErr) {
-      console.error('Membership Sheet append error (non-fatal):', sheetErr);
-    }
+    // (The Membership-Sheet mirror append that used to live here was
+    // retired with the Sheets retirement, issue #25 — the Membership
+    // Report modal reads the registrations table directly.)
 
     // Best-effort confirmation email — failure does not fail the request.
     // Subject + lead vary by payment method: PayPal = "Confirmed & Paid",

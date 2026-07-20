@@ -265,608 +265,6 @@ function parseDirectory(dirRows, classlistRows, allergyRows) {
 }
 
 // ══════════════════════════════════════════════
-// AM CLASSES
-// ══════════════════════════════════════════════
-// Layout: sessions at cols 6,12,18,24,30 (row 0)
-// Each session data block starts 1 col before header: 5,11,17,23,29
-// Group pattern per group:
-//   Group header row: col 4/10/16/22/28 = group name, +1 = "Topic of Study", +2 = "Liaison", +3 = "Room"
-//   Data row (next): +1 = topic, +2 = liaison name, +3 = room name
-//   10-11 am row: +1 = teacher, +2..+5 = assistants
-//   11-12 pm row: same
-
-function parseAMClasses(rows) {
-  if (!rows || rows.length < 5) return { classes: {}, supportRoles: {} };
-
-  // Find session header columns from row 0
-  var sessionCols = []; // { session: N, dataStart: col }
-  for (var c = 0; c < (rows[0] ? rows[0].length : 0); c++) {
-    var v = cell(rows[0], c);
-    var match = v.match(/Session\s+(\d+)/i);
-    if (match) {
-      sessionCols.push({ session: parseInt(match[1]), dataStart: c - 1 });
-    }
-  }
-
-  var AGE_RANGES = {
-    'Greenhouse': '0-2', 'Green House': '0-2',
-    'Saplings': '3-5', 'Sassafras': '3-6',
-    'Oaks': '7-8', 'Maples': '8-9',
-    'Birch': '9-10', 'Willows': '10-12',
-    'Cedars': '12-13', 'Pigeons': '14+', 'Teens': '13+'
-  };
-
-  // Group start column is dataStart - 1 (i.e., col 4 for S1)
-  var groupCol = sessionCols.length > 0 ? sessionCols[0].dataStart - 1 : 4;
-
-  var classes = {};
-  var supportRoles = {};
-
-  for (var r = 0; r < rows.length; r++) {
-    var groupName = cell(rows[r], groupCol);
-
-    // Normalize
-    if (groupName === 'Green House') groupName = 'Greenhouse';
-
-    if (AGE_RANGES[groupName]) {
-      classes[groupName] = {
-        ages: AGE_RANGES[groupName],
-        liaison: '',
-        sessions: {}
-      };
-
-      // Data row is r+1 (has topic, liaison, room per session)
-      var dataRow = rows[r + 1] || [];
-
-      for (var si = 0; si < sessionCols.length; si++) {
-        var sNum = sessionCols[si].session;
-        var ds = sessionCols[si].dataStart;
-
-        var topic = cell(dataRow, ds);
-        var liaison = cell(dataRow, ds + 1);
-        var room = cell(dataRow, ds + 2);
-
-        // Set class-level liaison from first session (it's the same person across sessions)
-        if (si === 0 && liaison) classes[groupName].liaison = liaison;
-
-        // Find 10-11 am and 11-12 pm rows below
-        var teacher = '';
-        var assistants = [];
-        for (var tr = r + 2; tr < Math.min(r + 5, rows.length); tr++) {
-          var timeLabel = cell(rows[tr], groupCol);
-          if (timeLabel === '10-11 am') {
-            teacher = cell(rows[tr], ds);
-            for (var ac = ds + 1; ac <= ds + 4; ac++) {
-              var a = cell(rows[tr], ac);
-              if (a && a !== '10-11 am') assistants.push(a);
-            }
-            break;
-          }
-        }
-
-        classes[groupName].sessions[sNum] = {
-          topic: topic,
-          room: room,
-          teacher: teacher,
-          assistants: assistants
-        };
-      }
-      continue;
-    }
-
-    // Support roles: Floater*, Prep Period**, Board Duties
-    if (groupName.match(/^Floater/)) {
-      for (var tr = r + 1; tr < Math.min(r + 4, rows.length); tr++) {
-        var timeLabel = cell(rows[tr], groupCol);
-        if (timeLabel === '10-11 am' || timeLabel === '11-12 pm') {
-          var timeKey = timeLabel.replace(' am', '').replace(' pm', '');
-          for (var si = 0; si < sessionCols.length; si++) {
-            var sNum = sessionCols[si].session;
-            var ds = sessionCols[si].dataStart;
-            if (!supportRoles[sNum]) supportRoles[sNum] = { floaters: {}, prepPeriod: {}, boardDuties: {} };
-            if (!supportRoles[sNum].floaters[timeKey]) supportRoles[sNum].floaters[timeKey] = [];
-            for (var fc = ds; fc <= ds + 4; fc++) {
-              var name = cell(rows[tr], fc);
-              if (name && name !== '10-11 am' && name !== '11-12 pm') {
-                supportRoles[sNum].floaters[timeKey].push(name);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (groupName.match(/^Prep Period/)) {
-      for (var tr = r + 1; tr < Math.min(r + 4, rows.length); tr++) {
-        var timeLabel = cell(rows[tr], groupCol);
-        if (timeLabel === '10-11 am' || timeLabel === '11-12 pm') {
-          var timeKey = timeLabel.replace(' am', '').replace(' pm', '');
-          for (var si = 0; si < sessionCols.length; si++) {
-            var sNum = sessionCols[si].session;
-            var ds = sessionCols[si].dataStart;
-            if (!supportRoles[sNum]) supportRoles[sNum] = { floaters: {}, prepPeriod: {}, boardDuties: {} };
-            if (!supportRoles[sNum].prepPeriod[timeKey]) supportRoles[sNum].prepPeriod[timeKey] = [];
-            for (var fc = ds; fc <= ds + 4; fc++) {
-              var name = cell(rows[tr], fc);
-              if (name && name !== '10-11 am' && name !== '11-12 pm') {
-                supportRoles[sNum].prepPeriod[timeKey].push(name);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (groupName === 'Board Duties') {
-      for (var tr = r + 1; tr < Math.min(r + 4, rows.length); tr++) {
-        var timeLabel = cell(rows[tr], groupCol);
-        if (timeLabel === '10-11 am' || timeLabel === '11-12 pm') {
-          var timeKey = timeLabel.replace(' am', '').replace(' pm', '');
-          for (var si = 0; si < sessionCols.length; si++) {
-            var sNum = sessionCols[si].session;
-            var ds = sessionCols[si].dataStart;
-            if (!supportRoles[sNum]) supportRoles[sNum] = { floaters: {}, prepPeriod: {}, boardDuties: {} };
-            if (!supportRoles[sNum].boardDuties[timeKey]) supportRoles[sNum].boardDuties[timeKey] = [];
-            for (var fc = ds; fc <= ds + 4; fc++) {
-              var name = cell(rows[tr], fc);
-              if (name && name !== '10-11 am' && name !== '11-12 pm') {
-                supportRoles[sNum].boardDuties[timeKey].push(name);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return { classes: classes, supportRoles: supportRoles };
-}
-
-// ══════════════════════════════════════════════
-// PM ELECTIVES
-// ══════════════════════════════════════════════
-// Layout: Hour headers at row 3 (cols 5 and 18)
-// Row 4: "Age of student" + ages per class column
-// Row 5: "Title of Class" + titles
-// Row 6: "Class Description" + descriptions
-// Row 7: "Room/Location" + rooms
-// Row 8: "Class Leader" + leaders
-// Row 9+: "Student Names" + students (until "|" stops or section changes)
-// Row 34+: "Class Assistant" rows
-// Row 28-31: Board Duties
-// Row 38: Supply Closet
-
-function parsePMElectives(rows) {
-  if (!rows || rows.length < 9) return { electives: [], supportRoles: {} };
-
-  // Find key rows
-  var ageRow = -1, titleRow = -1, descRow = -1, roomRow = -1, leaderRow = -1;
-  var studentStartRow = -1;
-  var assistantRows = [];
-  var hour1StartCol = -1, hour2StartCol = -1;
-
-  for (var r = 0; r < Math.min(40, rows.length); r++) {
-    for (var c = 0; c < (rows[r] ? rows[r].length : 0); c++) {
-      var v = cell(rows[r], c);
-      if (v.match(/^HOUR ONE/i) && hour1StartCol === -1) hour1StartCol = c;
-      if (v.match(/^HOUR TWO/i) && hour2StartCol === -1) hour2StartCol = c;
-      if (v === 'Age of student' && ageRow === -1) ageRow = r;
-      if (v === 'Title of Class' && titleRow === -1) titleRow = r;
-      if (v === 'Class Description' && descRow === -1) descRow = r;
-      if (v.match(/^Room.*Location/i) && roomRow === -1) roomRow = r;
-      if (v === 'Class Leader' && leaderRow === -1) leaderRow = r;
-      if (v === 'Student Names' && studentStartRow === -1) studentStartRow = r;
-      if (v === 'Class Assistant') assistantRows.push(r);
-    }
-  }
-
-  if (titleRow === -1) return { electives: [], supportRoles: {} };
-
-  // Find class columns for each hour
-  // Hour 1 classes: columns between hour1StartCol and hour2StartCol with title data
-  // Hour 2 classes: columns after hour2StartCol with title data
-  var h1Cols = [], h2Cols = [];
-  var h1End = hour2StartCol > 0 ? hour2StartCol : 99;
-  var maxCol = 0;
-  for (var r = 0; r < rows.length; r++) {
-    if (rows[r] && rows[r].length > maxCol) maxCol = rows[r].length;
-  }
-
-  for (var c = hour1StartCol; c < h1End; c++) {
-    if (cell(rows[titleRow], c) && cell(rows[titleRow], c) !== 'Title of Class') {
-      h1Cols.push(c);
-    }
-  }
-  if (hour2StartCol > 0) {
-    for (var c = hour2StartCol; c < maxCol; c++) {
-      if (cell(rows[titleRow], c) && cell(rows[titleRow], c) !== 'Title of Class') {
-        h2Cols.push(c);
-      }
-    }
-  }
-
-  var electives = [];
-
-  function parseElective(col, hourNum) {
-    var title = cell(rows[titleRow], col);
-    if (!title) return;
-
-    var hour = hourNum;
-    if (title.match(/2\s*hr|two\s*hour|both\s*hour/i)) hour = 'both';
-
-    var ageRange = ageRow >= 0 ? cell(rows[ageRow], col) : '';
-    var description = descRow >= 0 ? cell(rows[descRow], col) : '';
-    var room = roomRow >= 0 ? cell(rows[roomRow], col) : '';
-    var leader = leaderRow >= 0 ? cell(rows[leaderRow], col) : '';
-
-    // Collect students
-    var students = [];
-    if (studentStartRow >= 0) {
-      for (var sr = studentStartRow; sr < rows.length; sr++) {
-        var sv = cell(rows[sr], col);
-        if (!sv) continue;
-        if (sv === '|' || sv === 'Student Names') continue;
-        // Stop at assistant/board sections
-        var col5 = cell(rows[sr], 5);
-        var col6 = cell(rows[sr], 6);
-        if (col5 === 'Class Assistant' || col5 === 'Student must provide:') break;
-        if (col6 === 'Board Duties' || col6 === 'Prep Period') continue;
-        // Skip floater/prep labels in the floater column
-        if (sv.match(/^(Prep Period|Board Duties|Supply Closet|Class Assistant|Student must)/i)) break;
-        students.push(sv);
-      }
-    }
-
-    // Collect assistants (deduplicate)
-    var assistants = [];
-    var assistantSeen = {};
-    for (var ai = 0; ai < assistantRows.length; ai++) {
-      var av = cell(rows[assistantRows[ai]], col);
-      if (av && av !== 'Class Assistant' && !assistantSeen[av.toLowerCase()]) {
-        assistants.push(av);
-        assistantSeen[av.toLowerCase()] = true;
-      }
-    }
-
-    // Clean up title
-    title = title.replace(/\s*\(This is a 2hr.*?\)/i, '').trim();
-
-    electives.push({
-      name: title,
-      hour: hour,
-      ageRange: String(ageRange),
-      description: description,
-      room: room,
-      leader: leader,
-      assistants: assistants,
-      maxCapacity: Math.max(students.length + 3, 10),
-      students: students
-    });
-  }
-
-  h1Cols.forEach(function(c) { parseElective(c, 1); });
-  h2Cols.forEach(function(c) { parseElective(c, 2); });
-
-  // Parse support roles (floaters, board duties, supply closet)
-  var supportRoles = {
-    floaters: [],           // combined list (kept for backward compat)
-    floatersPM1: [], floatersPM2: [],
-    prepPeriodPM1: [], prepPeriodPM2: [],
-    boardDutiesPM1: [], boardDutiesPM2: [],
-    supplyCloset: []
-  };
-
-  // Label-column helpers. Hour section label column is hour{1,2}StartCol;
-  // secondary labels like "Floaters" / "Board Duties" live one column to
-  // the right. Fall back to historical col 6/19 if discovery failed.
-  var h1LabelCol = hour1StartCol >= 0 ? hour1StartCol + 1 : 6;
-  var h2LabelCol = hour2StartCol > 0 ? hour2StartCol + 1 : 19;
-
-  // Floaters are in the column next to "Student Names" label. Collect each
-  // hour's floaters into its own array, and mirror into the combined
-  // `floaters` list for backward compat.
-  var h1StudCol = hour1StartCol >= 0 ? hour1StartCol : 5;
-  var h2StudCol = hour2StartCol > 0 ? hour2StartCol : 18;
-  for (var r = 0; r < rows.length; r++) {
-    if (cell(rows[r], h1StudCol) === 'Student Names' || cell(rows[r], h2StudCol) === 'Student Names') {
-      var floaterColMap = [[h1LabelCol, 'floatersPM1'], [h2LabelCol, 'floatersPM2']];
-      for (var fi = 0; fi < floaterColMap.length; fi++) {
-        var flCol = floaterColMap[fi][0], flKey = floaterColMap[fi][1];
-        if (cell(rows[r], flCol) === 'Floaters') {
-          for (var fr = r + 1; fr < Math.min(r + 15, rows.length); fr++) {
-            var fv = cell(rows[fr], flCol);
-            if (!fv || fv === '|') continue;
-            if (fv.match(/^(Prep Period|Board|Class|Supply|Student)/i)) break;
-            if (supportRoles[flKey].indexOf(fv) === -1) supportRoles[flKey].push(fv);
-            if (supportRoles.floaters.indexOf(fv) === -1) supportRoles.floaters.push(fv);
-          }
-        }
-      }
-    }
-  }
-
-  // Prep Period — same label-column layout as Floaters / Board Duties.
-  for (var r = 0; r < rows.length; r++) {
-    var ppColMap = [[h1LabelCol, 'prepPeriodPM1'], [h2LabelCol, 'prepPeriodPM2']];
-    for (var pi = 0; pi < ppColMap.length; pi++) {
-      var ppCol = ppColMap[pi][0], ppKey = ppColMap[pi][1];
-      if (cell(rows[r], ppCol) === 'Prep Period') {
-        for (var pr = r + 1; pr < Math.min(r + 8, rows.length); pr++) {
-          var pv = cell(rows[pr], ppCol);
-          if (!pv || pv === '|') continue;
-          if (pv.match(/^(Board|Class|Supply|Student|Floaters)/i)) break;
-          if (supportRoles[ppKey].indexOf(pv) === -1) supportRoles[ppKey].push(pv);
-        }
-      }
-    }
-  }
-
-  // Board duties share the same label column as Floaters (one to the right
-  // of each HOUR's label column).
-  for (var r = 0; r < rows.length; r++) {
-    var bdColMap2 = [[h1LabelCol, 'boardDutiesPM1'], [h2LabelCol, 'boardDutiesPM2']];
-    for (var bi = 0; bi < bdColMap2.length; bi++) {
-      var bdCol = bdColMap2[bi][0], bdKey = bdColMap2[bi][1];
-      if (cell(rows[r], bdCol) === 'Board Duties') {
-        for (var br = r + 1; br < Math.min(r + 5, rows.length); br++) {
-          var bv = cell(rows[br], bdCol);
-          if (!bv || bv === '|') continue;
-          if (bv.match(/^(Student|Class)/i)) break;
-          if (supportRoles[bdKey].indexOf(bv) === -1) supportRoles[bdKey].push(bv);
-        }
-      }
-    }
-  }
-
-  // Supply closet
-  for (var r = 0; r < rows.length; r++) {
-    for (var c = 0; c < (rows[r] ? rows[r].length : 0); c++) {
-      if (cell(rows[r], c) === 'Supply Closet') {
-        for (var sr = r + 1; sr < Math.min(r + 3, rows.length); sr++) {
-          var sv = cell(rows[sr], c);
-          if (sv) supportRoles.supplyCloset.push(sv);
-        }
-      }
-    }
-  }
-
-  return { electives: electives, supportRoles: supportRoles };
-}
-
-// ══════════════════════════════════════════════
-// CLEANING CREW
-// ══════════════════════════════════════════════
-// Row 0: "Cleaning Crew Liaison: Name", Session 1..5
-// Rows: area name, names per session
-// Floor headers: MAIN FLOOR, UPSTAIRS, OUTSIDE
-// Floater row at end
-
-function parseCleaningCrew(rows) {
-  if (!rows || rows.length < 2) return { liaison: '', sessions: {} };
-
-  var header = rows[0];
-  var liaisonStr = cell(header, 0);
-  var liaison = liaisonStr.replace(/^Cleaning Crew Liaison:\s*/i, '').trim();
-
-  // Count sessions from header
-  var sessionCount = 0;
-  for (var c = 1; c < header.length; c++) {
-    if (cell(header, c).match(/Session\s+\d/i)) sessionCount++;
-  }
-  if (sessionCount === 0) sessionCount = 5;
-
-  var sessions = {};
-  for (var s = 1; s <= sessionCount; s++) {
-    sessions[s] = { mainFloor: {}, upstairs: {}, outside: {} };
-  }
-
-  var currentFloor = 'mainFloor';
-
-  for (var r = 1; r < rows.length; r++) {
-    var area = cell(rows[r], 0);
-    if (!area) continue;
-    if (area.match(/^(MPR|FH|Cleaning Crew Tasks|\*|https)/i)) continue;
-
-    if (area === 'MAIN FLOOR') { currentFloor = 'mainFloor'; continue; }
-    if (area === 'UPSTAIRS') { currentFloor = 'upstairs'; continue; }
-    if (area === 'OUTSIDE') { currentFloor = 'outside'; continue; }
-
-    if (area.toLowerCase() === 'floater') {
-      for (var s = 1; s <= sessionCount; s++) {
-        var name = cell(rows[r], s);
-        if (name) {
-          if (!sessions[s].floater) sessions[s].floater = [];
-          sessions[s].floater.push(name);
-        }
-      }
-      continue;
-    }
-
-    // Regular area — may have multiple rows for same area
-    for (var s = 1; s <= sessionCount; s++) {
-      var name = cell(rows[r], s);
-      if (name) {
-        if (!sessions[s][currentFloor][area]) sessions[s][currentFloor][area] = [];
-        sessions[s][currentFloor][area].push(name);
-      }
-    }
-  }
-
-  return { liaison: liaison, sessions: sessions };
-}
-
-// ══════════════════════════════════════════════
-// VOLUNTEER COMMITTEES
-// ══════════════════════════════════════════════
-// Col 1: committee names and role titles
-// Col 2: person names
-// Chair lines: "Chair: Title-Name"
-// Liaisons in cols 5-6
-
-function parseVolunteerCommittees(rows) {
-  if (!rows || rows.length < 2) return { committees: [], liaisons: [] };
-
-  var committees = [];
-  var liaisons = [];
-  var current = null;
-
-  // Parse liaisons from cols 5-6
-  for (var r = 0; r < rows.length; r++) {
-    var groupName = cell(rows[r], 5);
-    var liaisonName = cell(rows[r], 6);
-    if (groupName && liaisonName && !groupName.match(/AM Class|Liaison|Morning/i)) {
-      liaisons.push({ group: groupName, person: liaisonName });
-    }
-  }
-
-  // Parse committees from cols 1-2
-  for (var r = 0; r < rows.length; r++) {
-    var label = cell(rows[r], 1);
-    var value = cell(rows[r], 2);
-    if (!label) continue;
-
-    if (label.match(/Committee\s*$/i)) {
-      if (current) committees.push(current);
-      current = { name: label.trim(), chair: null, roles: [] };
-      continue;
-    }
-
-    if (label.match(/^Chair:/i) && current) {
-      var parts = label.replace(/^Chair:\s*/i, '');
-      var dashIdx = parts.lastIndexOf('-');
-      if (dashIdx > -1) {
-        current.chair = {
-          title: parts.substring(0, dashIdx).trim(),
-          person: parts.substring(dashIdx + 1).trim()
-        };
-      } else {
-        current.chair = { title: parts.trim(), person: value };
-      }
-      continue;
-    }
-
-    if (current && !label.match(/^(Morning Class|See chart|>)/i)) {
-      if (label.match(/^Afternoon Class Lia/i)) {
-        current.roles.push({ title: 'Afternoon Class Liaison', person: value || '' });
-      } else {
-        current.roles.push({ title: label, person: value || '' });
-      }
-    }
-  }
-  if (current) committees.push(current);
-
-  return { committees: committees, liaisons: liaisons };
-}
-
-// ══════════════════════════════════════════════
-// SPECIAL EVENTS
-// ══════════════════════════════════════════════
-// Events in 3-column groups at cols 1, 4, 7
-// Pattern: name, date, coordinator, support 1-5
-
-function parseSpecialEvents(rows) {
-  if (!rows || rows.length < 3) return [];
-
-  var events = [];
-  var eventCols = [1, 4, 7]; // Known column positions
-
-  for (var r = 0; r < rows.length; r++) {
-    for (var ci = 0; ci < eventCols.length; ci++) {
-      var c = eventCols[ci];
-      var name = cell(rows[r], c);
-      if (!name) continue;
-
-      // Check if next row has a date (contains a year like 2025 or 2026)
-      if (r + 1 >= rows.length) continue;
-      var dateStr = cell(rows[r + 1], c);
-      if (!dateStr || !dateStr.match(/\d{4}/)) continue;
-
-      // Coordinator row
-      var coordStr = r + 2 < rows.length ? cell(rows[r + 2], c) : '';
-      var coordinator = coordStr.replace(/^Coordinator:\s*/i, '').trim();
-
-      // Support rows
-      var support = [];
-      for (var sr = r + 3; sr < Math.min(r + 10, rows.length); sr++) {
-        var sv = cell(rows[sr], c);
-        if (!sv || !sv.match(/^\d+\)/)) break;
-        var person = sv.replace(/^\d+\)\s*/, '').trim();
-        support.push(person);
-      }
-
-      // Auto-derive status from date
-      var status = 'Planning';
-      try {
-        // Extract year and try multiple parsing strategies
-        var yearMatch = dateStr.match(/(\d{4})/);
-        if (yearMatch) {
-          var year = yearMatch[1];
-          // Fix common typos
-          var fixedDate = dateStr.replace(/Debember/i, 'December').replace(/Sevice/i, 'Service');
-          // For "October 17 OR 18, 2025" → use last number before year
-          fixedDate = fixedDate.replace(/\s+OR\s+\d+/i, '');
-          // For "March 30-April 1, 2026" → use the part after the dash
-          var lastPart = fixedDate.replace(/.*[-–]\s*/, '').trim();
-          if (!lastPart.match(/\d{4}/)) lastPart = lastPart + ', ' + year;
-          var testDate = new Date(lastPart);
-          if (isNaN(testDate.getTime())) testDate = new Date(fixedDate);
-          if (!isNaN(testDate.getTime()) && testDate < new Date()) status = 'Complete';
-        }
-      } catch(e) {}
-      // If no coordinator and not complete, mark as needs volunteers
-      if (status !== 'Complete' && !coordinator) status = 'Needs Volunteers';
-
-      events.push({
-        name: name,
-        date: dateStr,
-        coordinator: coordinator,
-        planningSupport: support,
-        maxSupport: support.length || 3,
-        status: status
-      });
-    }
-  }
-
-  return events;
-}
-
-// ══════════════════════════════════════════════
-// CLASS IDEAS
-// ══════════════════════════════════════════════
-// Age group headers in specific columns, ideas listed below
-
-function parseClassIdeas(rows) {
-  if (!rows || rows.length < 3) return {};
-
-  var ideas = {};
-  var groupCols = [];
-
-  // Find header row with age group names
-  for (var r = 0; r < Math.min(5, rows.length); r++) {
-    for (var c = 0; c < (rows[r] ? rows[r].length : 0); c++) {
-      var v = cell(rows[r], c);
-      if (v.match(/Early Years|Young Years|Middle.*Teen/i)) {
-        var name = v.replace(/\s+/g, ' ').trim();
-        groupCols.push({ col: c, name: name });
-        ideas[name] = [];
-      }
-    }
-    if (groupCols.length > 0) break;
-  }
-
-  for (var r = 2; r < rows.length; r++) {
-    for (var g = 0; g < groupCols.length; g++) {
-      var v = cell(rows[r], groupCols[g].col);
-      if (v && !v.match(/^BOLD|^\*Popular|Submission Form/i)) {
-        ideas[groupCols[g].name].push(v);
-      }
-    }
-  }
-
-  return ideas;
-}
-
-// ══════════════════════════════════════════════
 // BILLING
 // ══════════════════════════════════════════════
 // Billing spreadsheet layout (the Treasurer links a NEW workbook each
@@ -1617,12 +1015,6 @@ function participationYearBounds(season) {
   };
 }
 
-// The Master planning sheet represents a single pre-migration school year. For
-// any season AFTER this, participation is DB-only (no sheet fallback) so last
-// year's sheet data can't bleed into a freshly-reset new year. Phase C removes
-// the sheet entirely. See rw-participation-db-migration.
-var PARTICIPATION_LAST_SHEET_SEASON = '2025-2026';
-
 // UTC-safe date helpers for the Field-Day season math (mirror api/tour.js's
 // calAddDays / calSnapWed so participation and the Board Calendar agree).
 function participationAddDays(dateStr, n) {
@@ -2088,73 +1480,18 @@ async function loadFamiliesFromProfiles(sql) {
   });
 }
 
-// Participation only touches Google Sheets on PROD (the Master read below
-// is env-gated) — so off-prod, don't even parse the service-account key.
-// A missing/malformed key in a preview env would otherwise 500 every
-// participation call before the DB was ever consulted (2026-07-07).
-function participationSheetsClient() {
-  if (process.env.VERCEL_ENV !== 'production') return null;
-  return google.sheets({ version: 'v4', auth: getAuth() });
-}
-
-async function participationFetchSheetData(sheetsClient) {
-  var masterSheetId = process.env.MASTER_SHEET_ID;
-
-  // Phase 5: families come from member_profiles (DB), not the Directory
-  // sheet. Saves a sheet fetch on the 10s Hobby budget and removes the
-  // Directory parse from the participation hot path. The Master sheet
-  // still owns AM/PM/cleaning/events/volunteer assignments — that data
-  // hasn't migrated yet.
+// Participation input data — DB-only as of the Sheets retirement (issue
+// #25). Families come from member_profiles; every activity source
+// (AM/PM/cleaning/events/roles) is queried straight from Postgres in
+// buildParticipationReport. The Master-sheet fetch + parse that used to
+// live here only fed pre-2026-2027 fallback seasons and was discarded on
+// every current-season call.
+async function participationFetchData() {
   var sql = getDb();
-  var familiesPromise = loadFamiliesFromProfiles(sql).catch(function (e) {
+  var families = await loadFamiliesFromProfiles(sql).catch(function (e) {
     console.error('Profiles fetch failed:', e.message); return [];
   });
-  // Dev/Preview environments skip the master-sheet read so participation tests
-  // run against DB-only data (mirrors the dev gate in the main /api/sheets
-  // handler). In prod we still pull AM/PM/cleaning/events from the master sheet.
-  var isProdEnv = process.env.VERCEL_ENV === 'production';
-  var masterPromise = isProdEnv
-    ? fetchSheet(sheetsClient, masterSheetId).catch(function (e) {
-        console.error('Master fetch failed:', e.message); return {};
-      })
-    : Promise.resolve({});
-  var resultsP = await Promise.all([familiesPromise, masterPromise]);
-  var families = resultsP[0];
-  var masterTabs = resultsP[1] || {};
-
-  var amTab = null;
-  for (var k1 in masterTabs) if (k1.match(/AM.*Volunteer/i)) { amTab = masterTabs[k1]; break; }
-  var amClasses = amTab ? (parseAMClasses(amTab).classes || {}) : {};
-
-  var pmElectives = {};
-  for (var k2 in masterTabs) {
-    var pmMatch = k2.match(/PM.*Session\s*(\d+)/i);
-    if (pmMatch) {
-      pmElectives[parseInt(pmMatch[1], 10)] = (parsePMElectives(masterTabs[k2]).electives || []);
-    }
-  }
-
-  var cleanTab = null;
-  for (var k3 in masterTabs) if (k3.match(/Cleaning/i)) { cleanTab = masterTabs[k3]; break; }
-  var cleaningCrew = cleanTab ? parseCleaningCrew(cleanTab) : { liaison: '', sessions: {} };
-
-  var volTab = null;
-  for (var k4 in masterTabs) if (k4.match(/Year.*Volunteer/i)) { volTab = masterTabs[k4]; break; }
-  var volParsed = volTab ? parseVolunteerCommittees(volTab) : { committees: [], liaisons: [] };
-
-  var eventTab = null;
-  for (var k5 in masterTabs) if (k5.match(/Special.*Event/i)) { eventTab = masterTabs[k5]; break; }
-  var specialEvents = eventTab ? parseSpecialEvents(eventTab) : [];
-
-  return {
-    families: families,
-    amClasses: amClasses,
-    pmElectives: pmElectives,
-    cleaningCrew: cleaningCrew,
-    volunteerCommittees: volParsed.committees || [],
-    classLiaisons: volParsed.liaisons || [],
-    specialEvents: specialEvents
-  };
+  return { families: families };
 }
 
 async function buildParticipationReport(sql, data) {
@@ -2170,9 +1507,6 @@ async function buildParticipationReport(sql, data) {
   var season = seasonInfo.seasonShort;
   var seasonLabel = seasonInfo.seasonLabel;
   var seasonStart = seasonInfo.seasonStart;
-  // The Master sheet only speaks for pre-migration years; never let it bleed
-  // last year's AM/PM/event data into a newer, reset season.
-  var allowSheetFallback = seasonLabel <= PARTICIPATION_LAST_SHEET_SEASON;
   var nameIndex = participationBuildNameIndex(families);
   var members = {};
 
@@ -2324,35 +1658,12 @@ async function buildParticipationReport(sql, data) {
         addTimeline(key, r.session_number, { category: 'am_assist', label: 'Assisting AM — ' + (r.group_name || '') });
       }
     });
-  } else if (!amSubCredited && allowSheetFallback) {
-    var amClasses = data.amClasses || {};
-    Object.keys(amClasses).forEach(function (groupName) {
-      var cls = amClasses[groupName];
-      var sessions = cls.sessions || {};
-      Object.keys(sessions).forEach(function (sKey) {
-        var sNum = parseInt(sKey, 10);
-        var s = sessions[sKey] || {};
-        var teacherKey = participationResolveName(s.teacher, nameIndex);
-        if (teacherKey && members[teacherKey]) {
-          members[teacherKey].counts.am_lead += 1;
-          addTimeline(teacherKey, sNum, { category: 'am_lead', label: 'Leading AM — ' + groupName });
-        }
-        (s.assistants || []).forEach(function (a) {
-          var aKey = participationResolveName(a, nameIndex);
-          if (aKey && members[aKey]) {
-            members[aKey].counts.am_assist += 1;
-            addTimeline(aKey, sNum, { category: 'am_assist', label: 'Assisting AM — ' + groupName });
-          }
-        });
-      });
-    });
   }
 
   // PM electives — "both hour" electives count twice
   // PM elective LEADERS come from the DB (scheduled class_submissions) as of
   // the sheet→DB migration; the leader is the submitter. 'both'-hour classes
-  // count double. Assistants still come from the master sheet below until the
-  // Schedule Builder records helpers (Phase B).
+  // count double.
   try {
     var pmLeadRows = await sql`
       SELECT submitted_by_email, submitted_by_name, scheduled_session,
@@ -2372,9 +1683,8 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation PM-lead query failed:', e.message);
   }
 
-  // PM ASSISTANTS — prefer the DB (class_assignment_helpers, Phase B2; set in
-  // the Schedule Builder). Fall back to the master sheet's PM assistants only
-  // when no DB helper rows exist for the season's scheduled classes.
+  // PM ASSISTANTS — class_assignment_helpers (Phase B2; set in the
+  // Schedule Builder).
   var pmAssistDbRows = [];
   try {
     pmAssistDbRows = await sql`
@@ -2394,23 +1704,6 @@ async function buildParticipationReport(sql, data) {
       var mult = r.scheduled_hour === 'both' ? 2 : 1;
       members[key].counts.pm_assist += mult;
       addTimeline(key, r.scheduled_session, { category: 'pm_assist', label: 'Assisting PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
-    });
-  } else if (allowSheetFallback) {
-    var pmElectives = data.pmElectives || {};
-    Object.keys(pmElectives).forEach(function (sKey) {
-      var sNum = parseInt(sKey, 10);
-      (pmElectives[sKey] || []).forEach(function (el) {
-        var mult = el.hour === 'both' ? 2 : 1;
-        // Leaders are credited from the DB above — the sheet contributes
-        // assistants only here when no DB helpers exist yet.
-        (el.assistants || []).forEach(function (a) {
-          var aKey = participationResolveName(a, nameIndex);
-          if (aKey && members[aKey]) {
-            members[aKey].counts.pm_assist += mult;
-            addTimeline(aKey, sNum, { category: 'pm_assist', label: 'Assisting PM — ' + (el.name || '') + (mult === 2 ? ' (2-hr)' : '') });
-          }
-        });
-      });
     });
   }
 
@@ -2479,9 +1772,8 @@ async function buildParticipationReport(sql, data) {
     console.error('Participation roles query failed:', e.message);
   }
 
-  // Special events — prefer the DB (special_events + special_event_people,
-  // Phase B3; managed by the Special Events Liaison). Fall back to the master
-  // sheet only when no DB event-people rows exist for the season.
+  // Special events — special_events + special_event_people (Phase B3;
+  // managed by the Special Events Liaison).
   var evDbRows = [];
   try {
     evDbRows = await sql`
@@ -2503,20 +1795,6 @@ async function buildParticipationReport(sql, data) {
       } else {
         members[key].counts.event_assist += 1;
       }
-    });
-  } else if (allowSheetFallback) {
-    (data.specialEvents || []).forEach(function (ev) {
-      if (ev.coordinator) {
-        var ck = participationResolveName(ev.coordinator, nameIndex);
-        if (ck && members[ck]) {
-          members[ck].counts.event_lead += 1;
-          members[ck].roles.push('Event coordinator — ' + (ev.name || ''));
-        }
-      }
-      (ev.support || []).forEach(function (n) {
-        var k = participationResolveName(n, nameIndex);
-        if (k && members[k]) members[k].counts.event_assist += 1;
-      });
     });
   }
 
@@ -2716,8 +1994,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
       ? String(familyRow.family_email || '').toLowerCase()
       : targetEmail;
 
-    var sheetsClient = participationSheetsClient();
-    var data = await participationFetchSheetData(sheetsClient);
+    var data = await participationFetchData();
     var report = await buildParticipationReport(sql, data);
     var familyMembers = (report.members || []).filter(function (m) {
       return String(m.email || '').toLowerCase() === canonicalFamilyEmail;
@@ -2777,8 +2054,7 @@ async function handleParticipationAction(req, res, action, userEmail, authGivenN
   if (!canRead) return res.status(403).json({ error: 'Not authorized' });
 
   if (action === 'participation-report' && req.method === 'GET') {
-    var sheetsClient = participationSheetsClient();
-    var data = await participationFetchSheetData(sheetsClient);
+    var data = await participationFetchData();
     var report = await buildParticipationReport(sql, data);
     return res.status(200).json(report);
   }
@@ -2924,19 +2200,11 @@ module.exports = async function handler(req, res) {
       return id ? ('https://docs.google.com/spreadsheets/d/' + id + '/edit') : '';
     }
     var entries = [
-      // Directory sheet retired 2026-05-15 — family + kid data now
-      // lives in member_profiles / people / kids. The DIRECTORY_SHEET_ID
-      // env var is still consumed by one-shot migration scripts
-      // (seed-profiles-from-sheet, backfill-kids-from-classlist,
-      // seed-role-holders) but is no longer read at runtime.
-      {
-        key: 'master',
-        label: 'Master Coordination',
-        purpose: 'AM/PM class assignments, cleaning crew, year-long volunteer roles, special events.',
-        envVar: 'MASTER_SHEET_ID',
-        id: process.env.MASTER_SHEET_ID || '',
-        url: urlFor(process.env.MASTER_SHEET_ID)
-      },
+      // Directory sheet retired 2026-05-15 (member_profiles / people /
+      // kids own family data); Master Coordination + Membership Report
+      // sheets retired 2026-07-19 with the full Sheets retirement
+      // (issue #25). The Billing workbook is the ONLY sheet the portal
+      // still reads.
       {
         key: 'billing',
         label: 'Billing — Family Payment Tracking',
@@ -2944,14 +2212,6 @@ module.exports = async function handler(req, res) {
         envVar: 'BILLING_SHEET_ID',
         id: process.env.BILLING_SHEET_ID || '',
         url: urlFor(process.env.BILLING_SHEET_ID)
-      },
-      {
-        key: 'membership',
-        label: 'Membership Report (CSV append)',
-        purpose: 'Flat append-log of every registration submission for the Membership Director’s view.',
-        envVar: 'MEMBERSHIP_SHEET_ID',
-        id: process.env.MEMBERSHIP_SHEET_ID || '',
-        url: urlFor(process.env.MEMBERSHIP_SHEET_ID)
       }
     ];
     return res.status(200).json({ sheets: entries });
@@ -2994,29 +2254,11 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    var auth = getAuth();
-    var sheets = google.sheets({ version: 'v4', auth: auth });
-
-    var masterSheetId = process.env.MASTER_SHEET_ID;
-
-    // The Directory sheet is retired — member_profiles + people + kids
-    // (Postgres) are the canonical family source. The Master Coordination
-    // sheet is still authoritative for AM/PM class assignments, cleaning,
-    // events, and the volunteer overlay, so we still fetch it.
-    var masterTabs = {};
+    // The Master Coordination sheet is retired along with the Directory
+    // sheet (issue #25) — every block below reads Postgres. The only
+    // Google Sheet the portal still touches is the Treasurer's Billing
+    // workbook (handleBillingAction).
     var errors = [];
-    var isProdEnv = process.env.VERCEL_ENV === 'production';
-    if (isProdEnv) {
-      try {
-        masterTabs = await fetchSheet(sheets, masterSheetId);
-      } catch (e) {
-        errors.push({ sheet: 'master', error: 'Failed to fetch' });
-        masterTabs = {};
-      }
-    } else {
-      console.log('[dev-mode] skipping master sheet read in non-prod env (VERCEL_ENV=' + (process.env.VERCEL_ENV || 'unset') + ')');
-    }
-
     var result = { errors: errors };
 
     // ── Families (DB-only as of 2026-05-15) ──
@@ -3052,6 +2294,55 @@ module.exports = async function handler(req, res) {
       console.error('Member profile overlay failed:', overlayErr);
     }
 
+    // ── Roles directory (roles + role_holders_v2, DB) ──
+    // Every active board/committee role for the current roles year, WITH
+    // zero-holder roles included — open (holder-less) committee seats are
+    // exactly what the workspace "Ways to get more involved" list renders.
+    // Holder names resolve via people by email (falling back to the bare
+    // email) so the client never has to name-match. Replaces the retired
+    // Volunteer Committees tab for the role popups, the Supply Coordinator
+    // lookup, and the open-seats list (issue #25).
+    try {
+      var rdYearRows = await sql`SELECT MAX(school_year) AS sy FROM role_holders_v2`;
+      var rdYear = (rdYearRows[0] && rdYearRows[0].sy) || '';
+      var rdRows = await sql`
+        SELECT r.id, r.role_key, r.title, r.category, r.parent_role_id,
+               r.term_length, c.name AS committee,
+               LOWER(rhv.person_email) AS holder_email,
+               p.first_name AS holder_first, p.last_name AS holder_last
+        FROM roles r
+        LEFT JOIN committees c ON c.id = r.committee_id
+        LEFT JOIN role_holders_v2 rhv
+          ON rhv.role_id = r.id
+         AND rhv.school_year = ${rdYear}
+         AND rhv.ended_at IS NULL
+        LEFT JOIN people p ON LOWER(p.email) = LOWER(rhv.person_email)
+        WHERE r.status = 'active' AND r.category IN ('board', 'committee_role')
+        ORDER BY r.display_order, r.title
+      `;
+      var rdById = {};
+      result.rolesDirectory = [];
+      rdRows.forEach(function (row) {
+        var entry = rdById[row.id];
+        if (!entry) {
+          entry = {
+            id: row.id, role_key: row.role_key, title: row.title,
+            category: row.category, parent_role_id: row.parent_role_id,
+            term_length: row.term_length || '', committee: row.committee || '',
+            holders: []
+          };
+          rdById[row.id] = entry;
+          result.rolesDirectory.push(entry);
+        }
+        if (row.holder_email) {
+          var holderName = ((row.holder_first || '') + ' ' + (row.holder_last || '')).trim();
+          entry.holders.push({ name: holderName || row.holder_email, email: row.holder_email });
+        }
+      });
+    } catch (rdErr) {
+      console.error('rolesDirectory query failed (non-fatal):', rdErr);
+    }
+
     // Default loginEmails = [primary] for every family — see buildSheetData
     // sibling for the shape rationale.
     result.families.forEach(function (fam) {
@@ -3061,85 +2352,72 @@ module.exports = async function handler(req, res) {
       }
     });
 
-    // ── AM Classes / PM Electives (legacy Master sheet, season-gated) ──
-    // The Master sheet's class tabs only speak for 2025-2026 — class data
-    // went DB-native (class_submissions → published-schedule) for 26/27.
-    // Once the co-op season flips past the sheet's last year, serving
-    // these would resurface LAST YEAR's teachers/rosters on My Family's
-    // Kids' Schedule and My Responsibilities (Erin's prod report,
-    // 2026-07-14: stale classes appeared the moment the new class list
-    // was approved and the summer empty-state yielded). Same cutoff
-    // constant the participation report uses; on season-resolve failure
-    // participationSeasonInfo falls back to the month heuristic, which
-    // post-August also lands 2026-2027 → gated.
-    var sheetClassesEra = true;
+    // ── Special Events (DB) ──
+    // Approved events for the active season with their lead/assist people
+    // (special_events + special_event_people) — the members' Events grid
+    // and the coordinator duty in My Responsibilities read this instead
+    // of the retired Master-sheet Special Events tab. People are
+    // email-keyed so the client never name-matches (bug log #9). Distinct
+    // key from the old sheet-shaped `specialEvents` so a stale cached
+    // payload can't be mistaken for the DB shape.
     try {
-      var classSeason = await participationSeasonInfo(sql);
-      sheetClassesEra = !classSeason.seasonLabel
-        || classSeason.seasonLabel <= PARTICIPATION_LAST_SHEET_SEASON;
-    } catch (seasonErr) {
-      console.error('Sheet-classes season gate failed (defaulting to gated):', seasonErr);
-      sheetClassesEra = false;
-    }
-    result.pmElectives = {};
-    result.pmSupportRoles = {};
-    if (sheetClassesEra) {
-      var amTab = null;
-      for (var key in masterTabs) {
-        if (key.match(/AM.*Volunteer/i)) { amTab = masterTabs[key]; break; }
+      var seSeason = '';
+      try {
+        var seInfo = await participationSeasonInfo(sql);
+        seSeason = seInfo.seasonLabel || '';
+      } catch (seSeasonErr) {
+        console.error('Special-events season resolve failed:', seSeasonErr);
       }
-      if (amTab) {
-        var amParsed = parseAMClasses(amTab);
-        result.amClasses = amParsed.classes;
-        result.amSupportRoles = amParsed.supportRoles;
+      if (seSeason) {
+        var seDateStr = function (v) {
+          if (!v) return '';
+          return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+        };
+        var seTimeStr = function (v) { return v ? String(v).slice(0, 5) : ''; };
+        var seRows = await sql`
+          SELECT id, name, event_date, end_date, start_time, end_time,
+                 location, notes
+          FROM special_events
+          WHERE school_year = ${seSeason} AND date_status = 'approved'
+          ORDER BY event_date NULLS LAST, sort_order, name
+        `;
+        var sePeople = seRows.length ? await sql`
+          SELECT sep.event_id, sep.role, LOWER(sep.person_email) AS person_email,
+                 sep.person_name
+          FROM special_event_people sep
+          JOIN special_events se ON se.id = sep.event_id
+          WHERE se.school_year = ${seSeason}
+          ORDER BY sep.event_id, sep.role DESC, sep.sort_order
+        ` : [];
+        var sePeopleByEvent = {};
+        sePeople.forEach(function (pr) {
+          (sePeopleByEvent[pr.event_id] = sePeopleByEvent[pr.event_id] || []).push(pr);
+        });
+        result.specialEventsDb = seRows.map(function (ev) {
+          var lead = null;
+          var support = [];
+          (sePeopleByEvent[ev.id] || []).forEach(function (pr) {
+            var person = { name: pr.person_name || pr.person_email, email: pr.person_email };
+            if (pr.role === 'lead' && !lead) lead = person;
+            else support.push(person);
+          });
+          return {
+            id: ev.id,
+            name: ev.name,
+            schoolYear: seSeason,
+            date: seDateStr(ev.event_date),
+            endDate: seDateStr(ev.end_date),
+            startTime: seTimeStr(ev.start_time),
+            endTime: seTimeStr(ev.end_time),
+            location: ev.location || '',
+            notes: ev.notes || '',
+            coordinator: lead,
+            support: support
+          };
+        });
       }
-      for (var key in masterTabs) {
-        var pmMatch = key.match(/PM.*Session\s*(\d+)/i);
-        if (pmMatch) {
-          var sessionNum = parseInt(pmMatch[1]);
-          var pmParsed = parsePMElectives(masterTabs[key]);
-          result.pmElectives[sessionNum] = pmParsed.electives;
-          result.pmSupportRoles[sessionNum] = pmParsed.supportRoles;
-        }
-      }
-    }
-
-    // ── Cleaning Crew ──
-    var cleanTab = null;
-    for (var key in masterTabs) {
-      if (key.match(/Cleaning/i)) { cleanTab = masterTabs[key]; break; }
-    }
-    if (cleanTab) {
-      result.cleaningCrew = parseCleaningCrew(cleanTab);
-    }
-
-    // ── Volunteer Committees ──
-    var volTab = null;
-    for (var key in masterTabs) {
-      if (key.match(/Year.*Volunteer/i)) { volTab = masterTabs[key]; break; }
-    }
-    if (volTab) {
-      var volParsed = parseVolunteerCommittees(volTab);
-      result.volunteerCommittees = volParsed.committees;
-      result.classLiaisons = volParsed.liaisons;
-    }
-
-    // ── Special Events ──
-    var eventTab = null;
-    for (var key in masterTabs) {
-      if (key.match(/Special.*Event/i)) { eventTab = masterTabs[key]; break; }
-    }
-    if (eventTab) {
-      result.specialEvents = parseSpecialEvents(eventTab);
-    }
-
-    // ── Class Ideas ──
-    var ideasTab = null;
-    for (var key in masterTabs) {
-      if (key.match(/Class.*Idea/i)) { ideasTab = masterTabs[key]; break; }
-    }
-    if (ideasTab) {
-      result.classIdeas = parseClassIdeas(ideasTab);
+    } catch (seErr) {
+      console.error('specialEventsDb query failed (non-fatal):', seErr);
     }
 
     res.status(200).json(result);
