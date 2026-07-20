@@ -143,6 +143,21 @@ const landmines = [
     regex: /localStorage\.getItem\s*\(\s*['"]rw_user_email['"]\s*\)/,
     allowedHits: 9,
   },
+  {
+    name: 'no UTF-8 mojibake (PowerShell re-encode damage)',
+    // 2026-07-20: a PowerShell Get-Content/Set-Content cache-bust rewrite
+    // read UTF-8 files as Windows-1252 and re-saved them — every emoji and
+    // curly quote in index/members.html became "ðŸ§ª"-style garbage that
+    // shipped to dev before anyone noticed. Windows PowerShell 5.1 must
+    // never rewrite these files; if this fires, restore the file from git
+    // and redo the edit with a byte-safe tool. The 'ðŸ' pair is
+    // the tell-tale first two chars of any 4-byte emoji read as 1252.
+    files: [SCRIPT_JS, path.join(ROOT, 'index.html'), path.join(ROOT, 'members.html'),
+            path.join(ROOT, 'bugs.html'), path.join(ROOT, 'waiver.html'),
+            path.join(ROOT, 'register.html'), path.join(ROOT, 'support.html'),
+            path.join(ROOT, 'styles.css')],
+    regex: /ðŸ|â€[œ“–—]/,
+  },
 ];
 
 function jsFilesIn(dir) {
