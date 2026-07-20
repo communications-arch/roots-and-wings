@@ -717,6 +717,40 @@ async function sendSubmissionConfirmation(sub) {
   }
 }
 
+// ── Class Inspiration (#33) ──────────────────────────────────────────
+// Fixed starter category list — mirror CI_CATEGORIES in script.js.
+const INSPIRATION_CATEGORIES = ['art', 'science', 'games', 'movement', 'engineering',
+  'outdoor', 'culture', 'kitchen', 'performance art', 'other'];
+// Canonical age-group shelves (#30) — mirror CI_CANONICAL in script.js.
+const INSPIRATION_GROUPS = ['Saplings', 'Sassafras', 'Oaks', 'Maples', 'Birch',
+  'Willows', 'Cedars', 'Pigeons'];
+
+// Pure input normalizer for the member-open add endpoint (#33): whitelists
+// age groups (case-insensitive → canonical casing) and categories, dedupes,
+// and caps lengths. Accepts the legacy single group_name alongside the new
+// group_names array. Exported for unit tests
+// (scripts/test-inspiration-filters.js).
+function normalizeInspirationIdea(body) {
+  body = body || {};
+  const idea = String(body.idea || '').trim().slice(0, 200);
+  if (!idea) return { error: 'idea required' };
+  const note = String(body.note || '').trim().slice(0, 300);
+  const rawGroups = Array.isArray(body.group_names) ? body.group_names
+    : (body.group_name ? [body.group_name] : []);
+  const groups = [];
+  rawGroups.forEach(g => {
+    const hit = INSPIRATION_GROUPS.find(c => c.toLowerCase() === String(g || '').trim().toLowerCase());
+    if (hit && groups.indexOf(hit) === -1) groups.push(hit);
+  });
+  if (!groups.length) return { error: 'Pick at least one age group.' };
+  const categories = [];
+  (Array.isArray(body.categories) ? body.categories : []).forEach(c => {
+    const v = String(c || '').trim().toLowerCase();
+    if (INSPIRATION_CATEGORIES.indexOf(v) !== -1 && categories.indexOf(v) === -1) categories.push(v);
+  });
+  return { groups, idea, note, categories };
+}
+
 // Safe public shape for sending submissions back to the client. No reviewer-only
 // fields are ever stripped here — reviewer notes etc. are fine for the submitter
 // to see as well.
@@ -1819,11 +1853,14 @@ module.exports = async function handler(req, res) {
       // DB-backed idea list; any member reads. Edits live in the POST /
       // DELETE sections below ('class_inspiration_edit' capability).
       if (action === 'class-inspiration') {
-        const rows = await sql`SELECT id, group_name, idea FROM class_inspirations
+        // #33: categories + note ride along (created_by intentionally does
+        // NOT — member submissions are attributed in the DB only).
+        const rows = await sql`SELECT id, group_name, idea, note, categories FROM class_inspirations
           ORDER BY group_name, sort_order, id`;
         const groups = {};
         rows.forEach(r => {
-          (groups[r.group_name] || (groups[r.group_name] = [])).push({ id: r.id, idea: r.idea });
+          (groups[r.group_name] || (groups[r.group_name] = []))
+            .push({ id: r.id, idea: r.idea, note: r.note || '', categories: r.categories || [] });
         });
         return res.status(200).json({ groups });
       }
@@ -2571,22 +2608,23 @@ module.exports = async function handler(req, res) {
       // Opening requires the session's Schedule Builder to be Approved first
       // and a (start, end) date range so the parent My Family widget knows
       // when to show itself.
-      // ── Class Inspiration: add an idea (Erin, 2026-07-15) ──
-      // Gate rides view_as like every other reviewer surface (#29): the
-      // ACL holder row can carry the role inbox (afternoon@) rather than
-      // the person's own login, so checking only user.email 403'd the
-      // real liaison. actingEmailFor only honors view_as for
-      // canImpersonate callers (supers on prod; any member on dev).
+      // ── Class Inspiration: add an idea ──
+      // #33 (2026-07-20, Lyndsey): open to ANY signed-in member — ideas go
+      // live immediately, attributed via created_by (the raw login email,
+      // never rendered publicly). Multi-group + fixed-list categories ride
+      // in via normalizeInspirationIdea (whitelists both; caps lengths).
+      // DELETE below stays editor-gated (VP/ACL) for curation.
       if (action === 'class-inspiration') {
-        const ciEditor = isSuperUser(user.email) || await hasCapability(actingEmailFor(user, req), 'class_inspiration_edit');
-        if (!ciEditor) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can edit the inspiration list.' });
-        const ciGroup = String((req.body || {}).group_name || '').trim().slice(0, 80);
-        const ciIdea = String((req.body || {}).idea || '').trim().slice(0, 200);
-        if (!ciGroup || !ciIdea) return res.status(400).json({ error: 'group_name and idea required' });
-        const ciNext = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM class_inspirations WHERE group_name = ${ciGroup}`;
-        const ciIns = await sql`INSERT INTO class_inspirations (group_name, idea, sort_order, created_by)
-          VALUES (${ciGroup}, ${ciIdea}, ${ciNext[0].n}, ${user.email}) RETURNING id`;
-        return res.status(201).json({ ok: true, id: ciIns[0].id });
+        const ci = normalizeInspirationIdea(req.body);
+        if (ci.error) return res.status(400).json({ error: ci.error });
+        const ciIds = [];
+        for (const ciGroup of ci.groups) {
+          const ciNext = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM class_inspirations WHERE group_name = ${ciGroup}`;
+          const ciIns = await sql`INSERT INTO class_inspirations (group_name, idea, note, categories, sort_order, created_by)
+            VALUES (${ciGroup}, ${ci.idea}, ${ci.note}, ${ci.categories}, ${ciNext[0].n}, ${user.email}) RETURNING id`;
+          ciIds.push(ciIns[0].id);
+        }
+        return res.status(201).json({ ok: true, id: ciIds[0], ids: ciIds });
       }
 
       // ── Over-max resolution (Erin, 2026-07-15): raise the cap, spin up a
@@ -3335,3 +3373,8 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'Server error', detail: err.message });
   }
 };
+
+// Pure helpers exposed for unit tests (scripts/test-inspiration-filters.js).
+module.exports.normalizeInspirationIdea = normalizeInspirationIdea;
+module.exports.INSPIRATION_CATEGORIES = INSPIRATION_CATEGORIES;
+module.exports.INSPIRATION_GROUPS = INSPIRATION_GROUPS;

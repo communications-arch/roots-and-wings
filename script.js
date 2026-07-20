@@ -15276,12 +15276,38 @@
   }
 
   // Class Ideas popup (from Resources card)
-  // DB-backed inspiration list ({group: [{id, idea}]}) from
-  // class_inspirations — the sole source (the sheet-era Class Ideas tab
-  // is retired; prod table confirmed seeded).
+  // DB-backed inspiration list ({group: [{id, idea, note, categories}]})
+  // from class_inspirations — the sole source (the sheet-era Class Ideas
+  // tab is retired; prod table confirmed seeded).
   var _classInspirations = null;
-  function showClassIdeasPopup() {
+  // #33: fixed starter category list — mirror INSPIRATION_CATEGORIES in
+  // api/curriculum.js (the server whitelists against its copy).
+  var CI_CATEGORIES = ['art', 'science', 'games', 'movement', 'engineering',
+    'outdoor', 'culture', 'kitchen', 'performance art', 'other'];
+  var CI_CATEGORY_LABELS = {
+    art: 'Art', science: 'Science', games: 'Games', movement: 'Movement',
+    engineering: 'Engineering', outdoor: 'Outdoor', culture: 'Culture',
+    kitchen: 'Kitchen', 'performance art': 'Performance art', other: 'Other'
+  };
+  // #33 filter state — AND-combined ('all' = no constraint). Reset on a
+  // fresh open; kept across the popup's own re-renders (add / delete).
+  var _ciFilters = { age: 'all', cat: 'all' };
+
+  // Pure category match for one idea row (#33). Untagged legacy rows fold
+  // into the 'other' bucket so they stay findable. Age filtering happens at
+  // the group level (a row lives on exactly one group shelf). Kept pure —
+  // exercised by scripts/test-inspiration-filters.js.
+  function ciIdeaMatchesFilters(row, filters) {
+    var cat = (filters && filters.cat) || 'all';
+    if (cat === 'all') return true;
+    var cats = (row && row.categories) || [];
+    if (cat === 'other') return cats.length === 0 || cats.indexOf('other') !== -1;
+    return cats.indexOf(cat) !== -1;
+  }
+
+  function showClassIdeasPopup(opts) {
     if (!personDetail || !personDetailCard) return;
+    if (!(opts && opts.keepFilters)) _ciFilters = { age: 'all', cat: 'all' };
     var cred = localStorage.getItem('rw_google_credential');
     fetch('/api/curriculum?action=class-inspiration', { headers: { 'Authorization': 'Bearer ' + cred } })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -15302,10 +15328,9 @@
     // #30: organize by the site's canonical age groups — the same names
     // used everywhere else (AGE_GROUP_LABELS supplies each header's age
     // range). Stored group_name is the plain name ('Saplings'). Members
-    // see only groups with ideas; editors always get all eight, each
-    // with its own add box — which retires the free-text new-group row
-    // so group names can't drift again. Legacy/free-text groups still in
-    // the DB render after the canonical ones so nothing ever hides.
+    // see only groups with ideas; editors always get all eight (each has
+    // its own ＋ Add entry point). Legacy/free-text groups still in the
+    // DB render after the canonical ones so nothing ever hides.
     var CI_CANONICAL = ['Saplings', 'Sassafras', 'Oaks', 'Maples', 'Birch', 'Willows', 'Cedars', 'Pigeons'];
     var ciUsed = {};
     var ciOrdered = [];
@@ -15322,34 +15347,118 @@
       if (!ciUsed[g]) ciOrdered.push({ name: g, label: g, rows: dbGroups[g] });
     });
 
+    // ── #33 filters: age group AND category, mirroring the builder's
+    // palette funnel-chip idiom (#28). Age filtering picks shelves;
+    // category filtering picks ideas within them (untagged rows fold
+    // into 'other'). Each option's count respects the OTHER filter.
+    var f = _ciFilters || (_ciFilters = { age: 'all', cat: 'all' });
+    function ciCount(ageV, catV) {
+      var n = 0;
+      ciOrdered.forEach(function (grp) {
+        if (ageV !== 'all' && grp.name.toLowerCase() !== String(ageV).toLowerCase()) return;
+        grp.rows.forEach(function (row) { if (ciIdeaMatchesFilters(row, { cat: catV })) n++; });
+      });
+      return n;
+    }
+    function ciAgeOptions() {
+      var opts = [{ value: 'all', label: 'All age groups', count: ciCount('all', f.cat) }];
+      ciOrdered.forEach(function (grp) {
+        opts.push({ value: grp.name, label: grp.label, count: ciCount(grp.name, f.cat) });
+      });
+      return opts;
+    }
+    function ciCatOptions() {
+      var opts = [{ value: 'all', label: 'All categories', count: ciCount(f.age, 'all') }];
+      CI_CATEGORIES.forEach(function (c) {
+        opts.push({
+          value: c,
+          label: (CI_CATEGORY_LABELS[c] || c) + (c === 'other' ? ' / untagged' : ''),
+          count: ciCount(f.age, c)
+        });
+      });
+      return opts;
+    }
+    var ciActive = f.age !== 'all' || f.cat !== 'all';
+    function ciAgeChipLabel() {
+      if (f.age === 'all') return 'Ages';
+      var hit = null;
+      ciOrdered.forEach(function (grp) { if (!hit && grp.name.toLowerCase() === f.age.toLowerCase()) hit = grp.label; });
+      return hit || f.age;
+    }
+
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
     html += '<h3>Class Inspiration</h3>';
-    html += '<p style="color:var(--color-text-light);margin-bottom:1rem;">Have an idea? Submit it from <strong>My Family &rarr; Class Ideas</strong> — or float it in the Google Chat!</p>';
+    html += '<p style="color:var(--color-text-light);margin-bottom:0.75rem;">Sparks for morning classes and afternoon electives. Got one of your own? Tap <strong>＋ Suggest an idea</strong> — it goes on the board right away.</p>';
 
-    if (ciOrdered.length) {
-      ciOrdered.forEach(function (grp) {
-        var group = grp.name;
-        html += '<div style="margin-bottom:1.25rem;">';
-        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(grp.label) + '</h4>';
-        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-        grp.rows.forEach(function (row) {
-          html += '<span class="idea-chip">' + escapeHtml(row.idea)
-            + (canEditIdeas ? ' <button type="button" class="ci-del" data-ci-id="' + row.id + '" aria-label="Remove idea" title="Remove" style="border:none;background:none;cursor:pointer;padding:0 0 0 2px;color:var(--color-text-light);">✕</button>' : '')
-            + '</span>';
-        });
-        html += '</div>';
-        if (canEditIdeas) {
-          html += '<div style="display:flex;gap:6px;margin-top:6px;">'
-            + '<input type="text" class="cl-input ci-add-input" maxlength="200" placeholder="Add an idea…" data-ci-group="' + escapeHtml(group) + '" style="max-width:260px;">'
-            + '<button type="button" class="sc-btn ci-add-btn" data-ci-group="' + escapeHtml(group) + '">Add</button></div>';
-        }
-        html += '</div>';
+    // Filter bar (reuses the builder's chip styles) + the suggest button.
+    html += '<div class="sb-palette-filters">';
+    html += '<button type="button" class="sc-btn sb-filter-btn' + (f.age !== 'all' ? ' is-active' : '') + '" id="ciAgeFilterBtn" aria-label="Filter ideas by age group" aria-expanded="false">' + FUNNEL_SVG + ' ' + escapeHtml(ciAgeChipLabel()) + '</button>';
+    html += '<button type="button" class="sc-btn sb-filter-btn' + (f.cat !== 'all' ? ' is-active' : '') + '" id="ciCatFilterBtn" aria-label="Filter ideas by category" aria-expanded="false">' + FUNNEL_SVG + ' ' + escapeHtml(f.cat === 'all' ? 'Category' : (CI_CATEGORY_LABELS[f.cat] || f.cat)) + '</button>';
+    if (ciActive) html += '<button type="button" class="sc-btn" id="ciFilterClear" title="Clear filters">✕ Clear</button>';
+    html += '<button type="button" class="sc-btn" id="ciSuggestBtn" style="margin-left:auto;">＋ Suggest an idea</button>';
+    html += '</div>';
+
+    // ── Suggest form (#33) — ANY member; direct add, no approval queue.
+    // Editors reuse it via the per-group ＋ Add buttons (prechecked group),
+    // which is how their add flow gains the same category multi-select.
+    html += '<div id="ciSuggestForm" style="display:none;border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin:0 0 1rem;">';
+    html += '<div class="cls-field"><label class="cls-label">Your idea <span class="cls-req">*</span></label>';
+    html += '<input type="text" class="cl-input" id="ciIdeaInput" maxlength="200" placeholder="e.g. Kitchen chemistry"></div>';
+    html += '<div class="cls-field"><label class="cls-label">Note (optional)</label>';
+    html += '<input type="text" class="cl-input" id="ciNoteInput" maxlength="300" placeholder="A link, a why, anything helpful"></div>';
+    html += '<div class="cls-field"><label class="cls-label">Age group(s) <span class="cls-req">*</span></label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    CI_CANONICAL.forEach(function (name) {
+      html += '<label class="cls-cb-label"><input type="checkbox" class="ci-grp-cb" value="' + escapeHtml(name) + '"> ' + escapeHtml(AGE_GROUP_LABELS[name.toLowerCase()] || name) + '</label>';
+    });
+    html += '</div></div>';
+    html += '<div class="cls-field"><label class="cls-label">Category(ies)</label>';
+    html += '<div class="cls-cb-group cls-cb-inline">';
+    CI_CATEGORIES.forEach(function (c) {
+      html += '<label class="cls-cb-label"><input type="checkbox" class="ci-cat-cb" value="' + escapeHtml(c) + '"> ' + escapeHtml(CI_CATEGORY_LABELS[c] || c) + '</label>';
+    });
+    html += '</div></div>';
+    html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+    html += '<button type="button" class="btn btn-primary btn-sm" id="ciSuggestSubmit">Add idea</button>';
+    html += '<button type="button" class="sc-btn" id="ciSuggestCancel">Cancel</button>';
+    html += '<span class="cls-error" id="ciSuggestError" style="display:none;"></span>';
+    html += '</div></div>';
+
+    var ciTotalAll = 0;
+    var ciTotalShown = 0;
+    ciOrdered.forEach(function (grp) { ciTotalAll += grp.rows.length; });
+    ciOrdered.forEach(function (grp) {
+      if (f.age !== 'all' && grp.name.toLowerCase() !== f.age.toLowerCase()) return;
+      var rows = grp.rows.filter(function (row) { return ciIdeaMatchesFilters(row, f); });
+      // Empty shelves hide while filtering; unfiltered, editors keep all
+      // eight visible as curation entry points.
+      if (!rows.length && (ciActive || !canEditIdeas)) return;
+      ciTotalShown += rows.length;
+      html += '<div style="margin-bottom:1.25rem;">';
+      html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(grp.label)
+        + (canEditIdeas ? ' <button type="button" class="sc-btn ci-add-here" data-ci-group="' + escapeHtml(grp.name) + '" style="font-size:0.75rem;margin-left:6px;">＋ Add</button>' : '')
+        + '</h4>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      rows.forEach(function (row) {
+        // Note + categories ride the chip's tooltip — the chip itself
+        // stays compact.
+        var tipBits = [];
+        if (row.note) tipBits.push(row.note);
+        if (row.categories && row.categories.length) tipBits.push('Categories: ' + row.categories.map(function (c) { return CI_CATEGORY_LABELS[c] || c; }).join(', '));
+        html += '<span class="idea-chip"' + (tipBits.length ? ' title="' + escapeAttr(tipBits.join(' · ')) + '"' : '') + '>' + escapeHtml(row.idea)
+          + (canEditIdeas ? ' <button type="button" class="ci-del" data-ci-id="' + row.id + '" aria-label="Remove idea" title="Remove" style="border:none;background:none;cursor:pointer;padding:0 0 0 2px;color:var(--color-text-light);">✕</button>' : '')
+          + '</span>';
       });
-    } else {
+      html += '</div>';
+      html += '</div>';
+    });
+    if (!ciTotalAll && !canEditIdeas) {
       // DB list empty / not yet loaded (the sheet-era fallback retired
       // with the Class Ideas tab — class_inspirations is the only source).
-      html += '<p style="color:var(--color-text-light);">No ideas listed yet &mdash; check back soon!</p>';
+      html += '<p style="color:var(--color-text-light);">No ideas listed yet &mdash; be the first: tap <strong>＋ Suggest an idea</strong>!</p>';
+    } else if (!ciTotalShown && ciActive) {
+      html += '<p style="color:var(--color-text-light);">No ideas match the filters &mdash; clear one to widen the list.</p>';
     }
     html += '</div>';
     personDetailCard.innerHTML = html;
@@ -15359,31 +15468,91 @@
     personDetail.addEventListener('click', function (e) {
       if (e.target === personDetail) closeDetail();
     });
-    if (!canEditIdeas) return;
 
     var cred = localStorage.getItem('rw_google_credential');
-    // view_as rides along so the server gate matches the roles this
-    // popup rendered the editor for (#29 — the ACL testing via View As
-    // 403'd because only the raw login was checked server-side).
-    function ciPost(group, idea, btn) {
-      if (!group || !idea) return;
-      if (btn) btn.disabled = true;
-      fetch('/api/curriculum?action=class-inspiration' + notifViewAsSuffix(), {
-        method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group_name: group, idea: idea })
-      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
-        .then(function (res) {
-          if (!res.ok) { alert((res.data && res.data.error) || 'Could not add.'); if (btn) btn.disabled = false; return; }
-          showClassIdeasPopup();
-        })
-        .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
-    }
-    personDetailCard.querySelectorAll('.ci-add-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var inp = personDetailCard.querySelector('.ci-add-input[data-ci-group="' + this.getAttribute('data-ci-group').replace(/"/g, '\\"') + '"]');
-        ciPost(this.getAttribute('data-ci-group'), inp ? inp.value.trim() : '', this);
+
+    // Funnel chips → shared popover (#28 idiom); picking re-renders.
+    var ciAgeBtn = document.getElementById('ciAgeFilterBtn');
+    if (ciAgeBtn) ciAgeBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      ciAgeBtn.setAttribute('aria-expanded', 'true');
+      openFilterPopover(ciAgeBtn, ciAgeOptions(), f.age, function (v) {
+        _ciFilters.age = v;
+        renderClassIdeasPopup();
       });
     });
+    var ciCatBtn = document.getElementById('ciCatFilterBtn');
+    if (ciCatBtn) ciCatBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      ciCatBtn.setAttribute('aria-expanded', 'true');
+      openFilterPopover(ciCatBtn, ciCatOptions(), f.cat, function (v) {
+        _ciFilters.cat = v;
+        renderClassIdeasPopup();
+      });
+    });
+    var ciClearBtn = document.getElementById('ciFilterClear');
+    if (ciClearBtn) ciClearBtn.addEventListener('click', function () {
+      _ciFilters = { age: 'all', cat: 'all' };
+      renderClassIdeasPopup();
+    });
+
+    // ＋ Suggest an idea — reveal the shared form; per-group ＋ Add
+    // (editors) prechecks that shelf's box.
+    function ciOpenSuggestForm(preGroup) {
+      var form = document.getElementById('ciSuggestForm');
+      if (!form) return;
+      form.style.display = '';
+      if (preGroup) {
+        form.querySelectorAll('.ci-grp-cb').forEach(function (cb) {
+          if (cb.value.toLowerCase() === String(preGroup).toLowerCase()) cb.checked = true;
+        });
+      }
+      var ciIdeaEl = document.getElementById('ciIdeaInput');
+      if (ciIdeaEl) ciIdeaEl.focus();
+      if (form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    var ciSuggestBtn = document.getElementById('ciSuggestBtn');
+    if (ciSuggestBtn) ciSuggestBtn.addEventListener('click', function () { ciOpenSuggestForm(''); });
+    personDetailCard.querySelectorAll('.ci-add-here').forEach(function (btn) {
+      btn.addEventListener('click', function () { ciOpenSuggestForm(this.getAttribute('data-ci-group')); });
+    });
+    var ciCancelBtn = document.getElementById('ciSuggestCancel');
+    if (ciCancelBtn) ciCancelBtn.addEventListener('click', function () {
+      var form = document.getElementById('ciSuggestForm');
+      if (form) form.style.display = 'none';
+    });
+    var ciSubmitBtn = document.getElementById('ciSuggestSubmit');
+    if (ciSubmitBtn) ciSubmitBtn.addEventListener('click', function () {
+      var errEl = document.getElementById('ciSuggestError');
+      function ciFail(msg) { if (errEl) { errEl.textContent = msg; errEl.style.display = ''; } }
+      var idea = (document.getElementById('ciIdeaInput').value || '').trim();
+      var note = (document.getElementById('ciNoteInput').value || '').trim();
+      var grps = [];
+      personDetailCard.querySelectorAll('.ci-grp-cb:checked').forEach(function (cb) { grps.push(cb.value); });
+      var cats = [];
+      personDetailCard.querySelectorAll('.ci-cat-cb:checked').forEach(function (cb) { cats.push(cb.value); });
+      if (!idea) return ciFail('Give your idea a name.');
+      if (!grps.length) return ciFail('Pick at least one age group.');
+      if (errEl) errEl.style.display = 'none';
+      ciSubmitBtn.disabled = true;
+      // Member-open add (#33) — no view_as suffix needed; the server
+      // attributes the row to the raw login (created_by, DB-only).
+      fetch('/api/curriculum?action=class-inspiration', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idea: idea, note: note, group_names: grps, categories: cats })
+      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { ciSubmitBtn.disabled = false; return ciFail((res.data && res.data.error) || 'Could not add.'); }
+          showClassIdeasPopup({ keepFilters: true });
+        })
+        .catch(function () { ciSubmitBtn.disabled = false; ciFail('Network error — try again.'); });
+    });
+
+    if (!canEditIdeas) return;
+    // ✕ remove — editors only. view_as rides along so the server gate
+    // matches the roles this popup rendered the editor for (#29 — the
+    // ACL testing via View As 403'd because only the raw login was
+    // checked server-side).
     personDetailCard.querySelectorAll('.ci-del').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var self = this;
@@ -15393,7 +15562,7 @@
         }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
           .then(function (res) {
             if (!res.ok) { alert((res.data && res.data.error) || 'Could not remove.'); self.disabled = false; return; }
-            showClassIdeasPopup();
+            showClassIdeasPopup({ keepFilters: true });
           })
           .catch(function () { alert('Network error — try again.'); self.disabled = false; });
       });

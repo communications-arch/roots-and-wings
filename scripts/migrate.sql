@@ -2017,3 +2017,12 @@ ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_by TEXT;
 -- have (Erin) — shown in Edit My Info and the directory, visible to all
 -- co-op members. Registration never collects it; EMI is the only writer.
 ALTER TABLE people ADD COLUMN IF NOT EXISTS allergies TEXT NOT NULL DEFAULT '';
+
+-- #33 (2026-07-20): Class Inspiration categories + member submissions
+-- (Lyndsey). Ideas gain a multi-select category tag set from a fixed
+-- starter list (TEXT[] like class_submissions' array columns) and an
+-- optional note. ANY member may now add an idea (created_by already
+-- records the submitter's login email; it is never rendered publicly).
+-- Legacy rows stay uncategorized and filter under the 'other' bucket.
+ALTER TABLE class_inspirations ADD COLUMN IF NOT EXISTS categories TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE class_inspirations ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
