@@ -1313,8 +1313,12 @@ module.exports = async function handler(req, res) {
           // keyed on canImpersonate = super users only).
           can_place: stReviewer || canImpersonate(user.email),
           kids_unpicked: kidsUnpicked,
-          adults_unplaced: adultsUnplaced,
-          assistant_gaps: assistantGaps,
+          // Adult placement + assistant gaps are post-close work (Erin,
+          // 2026-07-20): while sign-ups are open (or not yet opened) the
+          // picture is still moving, so the VP To Dos stay hidden until
+          // the session's window is closed. Empty arrays hide the rows.
+          adults_unplaced: stWinStatus === 'closed' ? adultsUnplaced : [],
+          assistant_gaps: stWinStatus === 'closed' ? assistantGaps : [],
           overmax: overmax,
           confirm_pending: confirmPending,
           lottery_moves: lotteryMoves
