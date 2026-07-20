@@ -3013,7 +3013,10 @@ function sanitizeParent(p) {
       (Array.isArray(p.nicknames) ? p.nicknames : [])
         .map(n => String(n || '').trim().toLowerCase().slice(0, 40))
         .filter(Boolean)
-    )).slice(0, 8)
+    )).slice(0, 8),
+    // Adult allergies/medical notes (Erin, 2026-07-20) — same cap as the
+    // kid field; member-visible in EMI + the directory.
+    allergies: String(p.allergies || '').trim().slice(0, 500)
   };
 }
 
@@ -3398,7 +3401,7 @@ async function upsertProfileFromRegistration(sql, params) {
   // and merge field-level data when the same person re-registers.
   const exPeopleRows = await sql`
     SELECT email, first_name, last_name, nickname, role, personal_email, phone,
-           pronouns, photo_url, photo_consent, nicknames, sort_order
+           pronouns, photo_url, photo_consent, nicknames, allergies, sort_order
     FROM people WHERE family_email = ${familyEmail}
     ORDER BY sort_order, id
   `;
@@ -3455,11 +3458,12 @@ async function upsertProfileFromRegistration(sql, params) {
       email: (ex.email || np.email || '').toLowerCase(),
       personal_email: np.personal_email || ex.personal_email || '',
       phone: ex.phone || np.phone || '',
-      // Registration form doesn't collect nicknames or the display
-      // nickname, so registration never overwrites existing ones —
-      // they come from Edit My Info.
+      // Registration form doesn't collect nicknames, the display
+      // nickname, or adult allergies, so registration never overwrites
+      // existing ones — they come from Edit My Info.
       nickname: ex.nickname || '',
-      nicknames: Array.isArray(ex.nicknames) ? ex.nicknames : []
+      nicknames: Array.isArray(ex.nicknames) ? ex.nicknames : [],
+      allergies: ex.allergies || ''
     });
   });
   exPeople.forEach(p => { if (!matchedExParents.has(p)) mergedParents.push(p); });
@@ -3597,12 +3601,12 @@ async function upsertProfileFromRegistration(sql, params) {
       INSERT INTO people (
         email, family_email, first_name, last_name, nickname, role,
         personal_email, phone, pronouns, photo_url, photo_consent,
-        nicknames, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
+        nicknames, allergies, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
       ) VALUES (
         ${email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name || ''}, ${pp.nickname || ''}, ${pp.role || 'parent'},
         ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
         ${pp.photo_url || ''}, ${pp.photo_consent !== false},
-        ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i},
+        ${JSON.stringify(pp.nicknames || [])}::jsonb, ${pp.allergies || ''}, ${i},
         ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
         'registration'
       )
@@ -4037,12 +4041,12 @@ async function handleProfileUpdate(body, req, res) {
         INSERT INTO people (
           email, family_email, first_name, last_name, nickname, role,
           personal_email, phone, pronouns, photo_url, photo_consent,
-          nicknames, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
+          nicknames, allergies, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
         ) VALUES (
           ${pp.email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name}, ${pp.nickname || ''}, ${pp.role || 'parent'},
           ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
           ${pp.photo_url || ''}, ${pp.photo_consent !== false},
-          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i},
+          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${pp.allergies || ''}, ${i},
           ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
           ${user.realEmail || user.email}
         )

@@ -740,7 +740,10 @@
                 group: null,
                 age: null,
                 pronouns: pp[pName.trim()] || '',
-                allergies: '',
+                // Adult allergies/medical notes (Erin, 2026-07-20) — the
+                // person-detail popup renders person.allergies generically,
+                // so threading it here lights up the directory view.
+                allergies: normalizeAllergies(piHit.allergies),
                 schedule: 'all-day',
                 photoConsent: piHit.photoConsent !== false,
                 parentNames: fam.parents,
@@ -2634,7 +2637,7 @@
         group: null,
         age: null,
         pronouns: pp[pName.trim()] || '',
-        allergies: '',
+        allergies: normalizeAllergies(piHit2.allergies),
         schedule: 'all-day',
         photoConsent: piHit2.photoConsent !== false,
         parentNames: fam.parents,
@@ -2929,7 +2932,9 @@
           if (person.group !== activeFilter) return;
         }
         if (activeFilter === 'hasAllergies') {
-          if (person.type !== 'kid' || !person.allergies) return;
+          // Adults carry allergies too now (2026-07-20) — the filter
+          // covers everyone with something recorded.
+          if (!person.allergies) return;
         }
         if (activeFilter === 'noPhotos') {
           if (person.photoConsent !== false) return;
@@ -2996,7 +3001,8 @@
           ? '<div class="yb-no-photo" title="Opted out of photos.">⛔ No Photos</div>'
           : '';
 
-        var allergyTag = (person.type === 'kid' && person.allergies)
+        // Adults' allergies show on their directory cards too (2026-07-20).
+        var allergyTag = person.allergies
           ? '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>'
           : '';
 
@@ -30663,6 +30669,7 @@
           phone: p.phone || '',
           nickname: p.nickname || '',
           nicknames: Array.isArray(p.nicknames) ? p.nicknames.slice() : [],
+          allergies: p.allergies || '',
           rw_email_requested: !!p.rw_email_requested,
           _queuedPhoto: null
         };
@@ -30831,6 +30838,13 @@
           ? '<div class="emi-full" style="color:#2f7d3b;font-size:0.9rem;">✓ R&amp;W sign-in requested — the Communications Director will set it up.</div>'
           : '<div class="emi-full"><button type="button" class="sc-btn" data-role="request-rw-signin" data-idx="' + idx + '" title="Ask the Communications Director to create an @rootsandwingsindy.com sign-in for this backup coach">🔑 Request an R&amp;W sign-in</button></div>';
       }
+      // Adult allergies/medical notes (Erin, 2026-07-20) — same field the
+      // kid rows have, with adult-appropriate wording.
+      h += '<label class="emi-inline-label emi-full">' +
+             'Allergies, medical &amp; notes ' +
+             '<span style="font-weight:400;font-size:0.8em;color:var(--color-text-light);">— visible to all co-op members; share what others at co-op should know to keep you safe.</span>' +
+             '<input class="rd-input" placeholder="e.g. bee-sting allergy, epilepsy, hearing aid…" data-field="allergies" value="' + escapeHtml(p.allergies || '') + '">' +
+           '</label>';
       var pOptOut = p.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (pOptOut ? ' checked' : '') + '>' +
@@ -31423,7 +31437,8 @@
             personal_email: p.personal_email || '',
             phone: p.phone || '',
             nickname: String(p.nickname || '').trim(),
-            nicknames: Array.isArray(p.nicknames) ? p.nicknames : []
+            nicknames: Array.isArray(p.nicknames) ? p.nicknames : [],
+            allergies: String(p.allergies || '').trim()
           };
         });
         var payload = {

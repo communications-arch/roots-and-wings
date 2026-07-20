@@ -1994,3 +1994,8 @@ CREATE INDEX IF NOT EXISTS class_lottery_bumps_kid_id_idx
 -- recording the created address self-clears the queue.
 ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_at TIMESTAMPTZ;
 ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_by TEXT;
+
+-- 2026-07-20: adults get the same "Allergies, medical & notes" field kids
+-- have (Erin) — shown in Edit My Info and the directory, visible to all
+-- co-op members. Registration never collects it; EMI is the only writer.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS allergies TEXT NOT NULL DEFAULT '';

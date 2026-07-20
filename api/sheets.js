@@ -594,6 +594,9 @@ function shapePersonRow(r) {
     photo_url:      r.photo_url || '',
     photo_consent:  r.photo_consent !== false,
     nicknames:      Array.isArray(r.nicknames) ? r.nicknames : [],
+    // Adult allergies/medical notes (Erin, 2026-07-20) — same field kids
+    // have, member-visible in EMI + the directory.
+    allergies:      r.allergies || '',
     // BLC portal sign-in request state (Erin, 2026-07-20) — drives the
     // "Request R&W sign-in" button / "requested" chip on the EMI BLC row.
     rw_email_requested: !!r.rw_email_requested_at
@@ -619,7 +622,7 @@ async function applyMemberProfileOverlay(families) {
   var peopleRows = await sql`
     SELECT id, email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
-           nicknames, sort_order, rw_email_requested_at
+           nicknames, allergies, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email
   `;
@@ -720,7 +723,8 @@ async function applyMemberProfileOverlay(families) {
         email: pp.email,
         personalEmail: pp.personal_email,
         phone: pp.phone,
-        nicknames: pp.nicknames
+        nicknames: pp.nicknames,
+        allergies: pp.allergies || ''
       };
     });
 
@@ -1392,7 +1396,7 @@ async function loadFamiliesFromProfiles(sql) {
   var peopleRows = await sql`
     SELECT id, email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
-           nicknames, sort_order, rw_email_requested_at
+           nicknames, allergies, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email
   `;
