@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Roots & Wings Indy member portal — access your calendar, directory, handbook, and more.">
+  <meta name="description" content="Roots & Wings Indy member portal â€” access your calendar, directory, handbook, and more.">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#523A79">
   <!-- PWA / Add to Home Screen -->
@@ -22,7 +22,7 @@
       });
     }
   </script>
-  <title>Members Portal — Roots & Wings Indy</title>
+  <title>Members Portal â€” Roots & Wings Indy</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -58,7 +58,7 @@
       <details class="login-help">
         <summary>Trouble signing in?</summary>
         <ul>
-          <li><strong>Use your phone's real browser</strong> (Chrome on Android, Safari on iPhone) — not the in-app browser inside Gmail, Facebook, or a texted link. Google blocks sign-in there. If you opened this from a link, tap the ⋯ menu and choose "Open in browser," or go to <strong>rootsandwingsindy.com/members</strong> directly.</li>
+          <li><strong>Use your phone's real browser</strong> (Chrome on Android, Safari on iPhone) â€” not the in-app browser inside Gmail, Facebook, or a texted link. Google blocks sign-in there. If you opened this from a link, tap the â‹¯ menu and choose "Open in browser," or go to <strong>rootsandwingsindy.com/members</strong> directly.</li>
           <li><strong>Wrong account, or only asked for a password?</strong> Google is using another Google account you're already signed into. Tap the account name (or "Use another account") and sign in with your <strong>@rootsandwingsindy.com</strong> address.</li>
           <li>Still stuck? Email <a href="mailto:communications@rootsandwingsindy.com">communications@rootsandwingsindy.com</a>.</li>
         </ul>
@@ -71,7 +71,7 @@
   <!-- ====== Dashboard (hidden until authenticated) ====== -->
   <div class="dashboard" id="dashboard">
 
-    <!-- Push notification alert — very top -->
+    <!-- Push notification alert â€” very top -->
     <div class="push-banner" id="pushBanner" style="display:none;">
       <div class="container push-banner-inner">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -151,7 +151,7 @@
       </div>
     </nav>
 
-    <!-- Mobile-only horizontal icon nav — rendered as its own row inside the portal-header
+    <!-- Mobile-only horizontal icon nav â€” rendered as its own row inside the portal-header
          (outside the flex-container inside .navbar) so it never fights for space with
          the logo + hamburger row on narrow viewports. Hidden on desktop via CSS. -->
     <div class="nav-quick-icons-mobile" aria-label="Quick access icons">
@@ -205,20 +205,20 @@
           <span id="dashboardSubtitle">Your hub for co-op resources, schedules, and communication.</span>
         </div>
         <!-- Testing strip (Erin, 2026-07-19): ALL impersonation/testing
-             chrome lives in this ONE row — View As picker, the "Viewing
-             as" status + back button, and the dev-only bug log — so a
+             chrome lives in this ONE row â€” View As picker, the "Viewing
+             as" status + back button, and the dev-only bug log â€” so a
              single container gate controls visibility and dev tools
              can't leak into the member UI one element at a time.
              Managed by renderHeaderViewAs(). -->
         <div class="qsb-testbar" id="qsbTestbar" hidden>
-          <span class="qsb-testbar-label" title="Only super users (and dev-site testers) see this row">🧪 Testing</span>
+          <span class="qsb-testbar-label" title="Only super users (and dev-site testers) see this row">ðŸ§ª Testing</span>
           <div class="qsb-view-as" id="qsbViewAs" hidden>
             <label for="qsbViewAsSelect" class="qsb-view-as-label">View as:</label>
             <select class="view-as-select" id="qsbViewAsSelect"></select>
           </div>
           <span class="qsb-testbar-viewing" id="qsbViewingAs" hidden>Viewing as <strong id="qsbViewingAsName"></strong></span>
           <a href="bugs.html" target="_blank" rel="noopener" class="qsb-pill" id="qsbBugLog" hidden>
-            <span aria-hidden="true">🐞</span>
+            <span aria-hidden="true">ðŸž</span>
             <span>Bug log</span>
           </a>
         </div>
@@ -272,8 +272,8 @@
         <!-- Secondary attribute filters -->
         <div class="directory-filters directory-filters-secondary">
           <button class="filter-pill filter-pill-secondary filter-pill-new" data-filter="newMembers">First Year</button>
-          <button class="filter-pill filter-pill-secondary" data-filter="hasAllergies">⚠ Has Allergies</button>
-          <button class="filter-pill filter-pill-secondary" data-filter="noPhotos">⛔ No Photos</button>
+          <button class="filter-pill filter-pill-secondary" data-filter="hasAllergies">âš  Has Allergies</button>
+          <button class="filter-pill filter-pill-secondary" data-filter="noPhotos">â›” No Photos</button>
         </div>
 
         <!-- Search -->
@@ -287,7 +287,7 @@
       </div>
     </div>
 
-    <!-- Person detail overlay — shared modal target for many features, not just Directory -->
+    <!-- Person detail overlay â€” shared modal target for many features, not just Directory -->
     <div class="person-detail-overlay" id="personDetail" style="display:none;">
       <div class="person-detail-card" id="personDetailCard"></div>
     </div>
@@ -305,13 +305,13 @@
             Wednesday Routine
           </summary>
           <table class="schedule-table" style="width:100%;border-collapse:collapse;font-size:0.95rem;margin:0.75rem 0;">
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:40–9:45 AM</strong></td><td style="padding:3px 0;">Arrive</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:40â€“9:45 AM</strong></td><td style="padding:3px 0;">Arrive</td></tr>
             <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>9:50 AM</strong></td><td style="padding:3px 0;">Announcements in Fellowship Hall</td></tr>
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>10 AM–12 PM</strong></td><td style="padding:3px 0;">Morning Classes</td></tr>
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>12–1 PM</strong></td><td style="padding:3px 0;">Lunch (indoor or outdoor) &amp; parent-supervised outdoor play</td></tr>
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:00–1:55 PM</strong></td><td style="padding:3px 0;">1st set of Afternoon Classes</td></tr>
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:00–2:55 PM</strong></td><td style="padding:3px 0;">2nd set of Afternoon Classes</td></tr>
-            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:55–3:15 PM</strong></td><td style="padding:3px 0;">Clean Up</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>10 AMâ€“12 PM</strong></td><td style="padding:3px 0;">Morning Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>12â€“1 PM</strong></td><td style="padding:3px 0;">Lunch (indoor or outdoor) &amp; parent-supervised outdoor play</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>1:00â€“1:55 PM</strong></td><td style="padding:3px 0;">1st set of Afternoon Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:00â€“2:55 PM</strong></td><td style="padding:3px 0;">2nd set of Afternoon Classes</td></tr>
+            <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;"><strong>2:55â€“3:15 PM</strong></td><td style="padding:3px 0;">Clean Up</td></tr>
           </table>
           <p style="font-size:0.85rem;color:var(--color-text-muted);margin:0;"><em>Delays and cancellations due to weather or calendar changes will be posted to the chat announcements and added to the calendars shown on this page.</em></p>
         </details>
@@ -363,7 +363,7 @@
       </div>
     </div>
 
-    <!-- ====== Co-op Info (default view) — My Family + Coordination + Board + Announcements ====== -->
+    <!-- ====== Co-op Info (default view) â€” My Family + Coordination + Board + Announcements ====== -->
     <div class="page-mode-panel active" id="page-info">
 
     <!-- ====== My Family Dashboard ====== -->
@@ -378,7 +378,7 @@
       <div class="container">
         <h2 class="text-center fade-in">Co-op Coordination</h2>
         <p class="section-subtitle text-center fade-in">
-          Schedules, volunteer assignments, and planning — all in one place.
+          Schedules, volunteer assignments, and planning â€” all in one place.
         </p>
 
         <div class="portal-tabs fade-in">
@@ -424,49 +424,49 @@
           <button class="portal-board-card fade-in" data-board="Molly Bellner" data-board-role="President" data-board-email="president@rootsandwingsindy.com" data-board-family="Bellner">
             <img src="photo-molly.jpg" alt="Molly Bellner" class="portal-board-photo">
             <h4>Molly Bellner</h4>
-            <span class="board-role">🌳 President</span>
+            <span class="board-role">ðŸŒ³ President</span>
             <ul class="board-bullets"><li>Building &amp; grounds oversight</li><li>FMC relationship &amp; facility coordination</li></ul>
             <span class="portal-board-email">president@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Colleen Raymont" data-board-role="Vice President" data-board-email="vp@rootsandwingsindy.com" data-board-family="Raymont">
             <img src="photo-colleen.jpg" alt="Colleen Raymont" class="portal-board-photo">
             <h4>Colleen Raymont</h4>
-            <span class="board-role">🌿 Vice President</span>
+            <span class="board-role">ðŸŒ¿ Vice President</span>
             <ul class="board-bullets"><li>Class planning &amp; session scheduling</li><li>Supporting class leads &amp; assistants</li></ul>
             <span class="portal-board-email">vp@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Tiffany Smith" data-board-role="Membership Director" data-board-email="membership@rootsandwingsindy.com" data-board-family="Smith">
             <img src="photo-tiffany.jpg" alt="Tiffany Smith" class="portal-board-photo">
             <h4>Tiffany Smith</h4>
-            <span class="board-role">🌻 Membership Director</span>
+            <span class="board-role">ðŸŒ» Membership Director</span>
             <ul class="board-bullets"><li>Enrollment &amp; new family onboarding</li><li>Registration &amp; class placement</li></ul>
             <span class="portal-board-email">membership@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Jessica Shewan" data-board-role="Treasurer" data-board-email="treasurer@rootsandwingsindy.com" data-board-family="Shewan">
             <img src="photo-jessica.jpg" alt="Jessica Shewan" class="portal-board-photo">
             <h4>Jessica Shewan</h4>
-            <span class="board-role">🧮 Treasurer</span>
+            <span class="board-role">ðŸ§® Treasurer</span>
             <ul class="board-bullets"><li>Billing, fees &amp; reimbursements</li><li>Financial assistance &amp; fundraising</li></ul>
             <span class="portal-board-email">treasurer@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Anna Billingsley" data-board-role="Sustaining Director" data-board-email="sustaining@rootsandwingsindy.com" data-board-family="Billingsley">
             <div class="board-avatar" aria-hidden="true">AB</div>
             <h4>Anna Billingsley</h4>
-            <span class="board-role">💚 Sustaining Director</span>
+            <span class="board-role">ðŸ’š Sustaining Director</span>
             <ul class="board-bullets"><li>Member retention &amp; satisfaction</li><li>Special event support &amp; burnout monitoring</li></ul>
             <span class="portal-board-email">sustaining@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="LeAnn Newlin" data-board-role="Secretary" data-board-email="secretary@rootsandwingsindy.com" data-board-family="Newlin">
             <img src="photo-leann.jpg" alt="LeAnn Newlin" class="portal-board-photo">
             <h4>LeAnn Newlin</h4>
-            <span class="board-role">✏️ Secretary</span>
+            <span class="board-role">âœï¸ Secretary</span>
             <ul class="board-bullets"><li>Meeting minutes &amp; official records</li><li>Government filings &amp; archives</li></ul>
             <span class="portal-board-email">secretary@rootsandwingsindy.com</span>
           </button>
           <button class="portal-board-card fade-in" data-board="Erin Bogan" data-board-role="Communications Director" data-board-email="communications@rootsandwingsindy.com" data-board-family="Bogan">
             <img src="photo-erin.jpg" alt="Erin Bogan" class="portal-board-photo">
             <h4>Erin Bogan</h4>
-            <span class="board-role">💬 Communications Director</span>
+            <span class="board-role">ðŸ’¬ Communications Director</span>
             <ul class="board-bullets"><li>Google Workspace &amp; member comms</li><li>Surveys, yearbook &amp; newsletter</li></ul>
             <span class="portal-board-email">communications@rootsandwingsindy.com</span>
           </button>
@@ -498,7 +498,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260722a"></script>
+  <script src="script.js?v=20260722b"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
@@ -533,7 +533,7 @@
         // .portal-board-card[data-board]) won't re-run, so we dispatch a
         // custom event the script.js handler listens for to re-bind.
         // If script.js doesn't expose a re-bind hook, the buttons still
-        // render correctly — they just won't open the detail modal. The
+        // render correctly â€” they just won't open the detail modal. The
         // fallback hardcoded grid avoids this issue when API succeeds
         // BEFORE script.js has bound handlers (load order).
         var ev = new CustomEvent('rw:portal-board-rerender');
@@ -593,7 +593,7 @@
       }
       // Public scope works without auth, so we fetch immediately; the
       // sign-in gate doesn't block this endpoint. Same source as
-      // index.html — /api/photos?scope=board returns the rich shape
+      // index.html â€” /api/photos?scope=board returns the rich shape
       // (icon_emoji + card_summary + role_email) for portal cards.
       fetch('/api/photos?scope=board')
         .then(function (r) { return r.ok ? r.json() : null; })

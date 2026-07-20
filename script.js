@@ -8710,10 +8710,22 @@
         'Afternoon Class Liaison'
       ],
       render: function (prefs, roles, role) {
-        var isAclCard = role === 'Afternoon Class Liaison';
-        var h = '<p class="ws-body-hint">' + (isAclCard ? 'Co-op facilities for class scheduling.' : 'Manage role descriptions, terms, and current holders for your committee.') + '</p>';
+        var BOARD_CHAIRS = ['President', 'Vice President', 'Treasurer', 'Secretary',
+          'Membership Director', 'Sustaining Director', 'Communications Director'];
+        var isBoardChair = BOARD_CHAIRS.indexOf(role) !== -1;
+        // Class Builder audiences (Erin, 2026-07-20 — the standalone Class
+        // Scheduling card folded in here): VP + Afternoon Class Liaison by
+        // role, per-group morning liaisons, and granted class_review
+        // holders. The builder itself scopes group liaisons to their group.
+        var showsBuilder = role === 'Vice President' || role === 'Afternoon Class Liaison'
+          || isMorningGroupLiaisonTitle(role)
+          || (typeof clientHasCapability === 'function'
+              && clientHasCapability('class_review', ['Vice President', 'Afternoon Class Liaison']));
+        var h = '<p class="ws-body-hint">' + (isBoardChair
+          ? 'Manage role descriptions, terms, and current holders for your committee.'
+          : 'Review inbound class submissions — morning and afternoon — and draft the upcoming session.') + '</p>';
         h += '<ul class="ws-link-list">';
-        if (!isAclCard) {
+        if (isBoardChair) {
           h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">🧭</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
           // Board Calendar — any board member can view/edit the standalone
           // date-driven events. Server gate (isBoardMember) is the real
@@ -8725,13 +8737,13 @@
             + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
             + '</button></li>';
         }
-        if (role === 'Vice President') {
-          // VP consolidation (2026-07-05 workspace review): the Afternoon
-          // Class Builder folds in here (the Submissions Report merged into
-          // it; the pending pill rides this row). Special-events dates +
-          // helpers live in the Admin Calendar / Roles Assignments rows the
-          // VP already has on this card — no separate special-events row.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder <span class="ws-link-sub">Afternoon Classes</span><span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
+        if (showsBuilder) {
+          // The Submissions Report lives inside the builder; the pending
+          // pill rides this row. VP keeps the "Afternoon Classes" sub-label
+          // to pair with Membership's morning row below.
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder'
+            + (role === 'Vice President' ? ' <span class="ws-link-sub">Afternoon Classes</span>' : '')
+            + '<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
         }
         if (role === 'Membership Director') {
           // Membership owns the morning age-group placement builder (Erin,
@@ -8753,30 +8765,6 @@
         if (typeof loadRolesManagerCount === 'function') loadRolesManagerCount();
         if (typeof updateCoopCalendarBadge === 'function') updateCoopCalendarBadge();
         // VP's folded-in Submissions Report row (self-gates on element).
-        if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
-      }
-    },
-    'pm-scheduling': {
-      // Visible only to the roles that actually run PM scheduling: VP
-      // and the Afternoon Class Liaison (the PM scheduler).
-      // communications@ is a super user server-side but we hide the
-      // widget from her own profile so it surfaces only when she
-      // View-As's into a VP / PM-scheduler row.
-      title: 'Class Scheduling',
-      roleGate: ['Vice President', 'Afternoon Class Liaison'],
-      render: function () {
-        // The Submissions Report merged into the builder (2026-07-05):
-        // details on tap, ✗ decline, declined/withdrawn history, print +
-        // CSV all live there now — and the builder handles BOTH morning
-        // classes and afternoon electives via its period lenses. The
-        // pending-submitted count pill rides on this single row.
-        var h = '<p class="ws-body-hint">Review inbound class submissions — morning and afternoon — and draft the upcoming session.</p>';
-        h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder<span class="ws-link-count pmrep-pending-count" hidden></span></button></li>';
-        h += '</ul>';
-        return h;
-      },
-      afterRender: function () {
         if (typeof loadPmSubmissionsPendingCount === 'function') loadPmSubmissionsPendingCount();
       }
     },
@@ -9339,7 +9327,7 @@
     'Secretary': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Sustaining Director': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Special Events Liaison': ['todos', 'special-events', 'ways-to-help', 'resources'],
-    'Afternoon Class Liaison': ['todos', 'reports', 'pm-scheduling', 'roles', 'ways-to-help', 'resources'],
+    'Afternoon Class Liaison': ['todos', 'reports', 'roles', 'ways-to-help', 'resources'],
     'Merchandise Manager': ['todos', 'reports', 'ways-to-help', 'resources'],
     'Supply Coordinator': ['todos', 'supply-closet-mgmt', 'ways-to-help', 'resources'],
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
@@ -9358,8 +9346,7 @@
     // Workspace widget cards
     'todos': 'Your personal to-do list. Items appear here automatically when something needs your attention — pending payments, waivers, cleaning gaps, class reviews, restocks, and more. The number is a live count; click an item to jump straight to it. “All caught up” means nothing’s pending for your roles.',
     'reports': 'Reports and forms for the roles you hold. Each opens a table you can filter, print, and export. What shows here depends on your role and the permissions the Communications Director has granted.',
-    'pm-scheduling': 'Review inbound class submissions and build the upcoming session. Scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.” Use “Mark reviewed” to clear a class from the count while keeping it to place later.',
-    'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles Assignments, Facilities, and more.',
+    'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles Assignments, Facilities, and more. In the Class Builder, scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.”',
     'admin-consoles': 'Admin tools and data sources for the roles you hold — permissions, calendars, and other back-office consoles.',
     'roles': 'Who holds each board and committee role this year. Depending on your role you can assign or update holders here.',
     'members-summary': 'A friendly snapshot of this season’s registered families — returning vs. new, and kids by track. Click a count to see the roster (names, members, track). No sensitive info.',
@@ -9485,7 +9472,7 @@
   }
   // Friendly labels for the Help editor (falls back to the key).
   var HELP_CARD_LABELS = {
-    'todos': 'To Do', 'reports': 'Reports & Forms', 'pm-scheduling': 'Class Scheduling',
+    'todos': 'To Do', 'reports': 'Reports & Forms',
     'coop-management': 'Co-op Management', 'admin-consoles': 'Admin Consoles & Sources',
     'roles': 'Roles Assignments', 'members-summary': 'Members Snapshot', 'board-notes': 'Board Notes',
     'special-events': 'Special Events', 'supply-closet-mgmt': 'Supply Closet', 'upcoming-events': 'Upcoming Events',
@@ -9636,6 +9623,15 @@
     return false;
   }
 
+  // Group-named morning liaison titles ("Pigeons Morning Class Liaison",
+  // "Oaks Liaison", …). Shared by widgetListFor (which workspace cards the
+  // role gets) and the Co-op Management card render (whether the Class
+  // Builder row shows). The legacy generic "Morning Class Liaison" title
+  // deliberately does NOT match.
+  function isMorningGroupLiaisonTitle(role) {
+    return /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+((morning\s+)?class\s+)?liaison$/i.test(String(role || ''));
+  }
+
   // Which workspace surface each grant controls. Reports/forms are rows in
   // the Reports & Forms card (per-role lists); widgets are whole cards.
   // Capabilities without a client surface (e.g. registration_decline —
@@ -9651,7 +9647,7 @@
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
     'special_events_manage': { widgets: ['special-events'] },
     'supply_closet_edit':    { widgets: ['supply-closet-mgmt'] },
-    'class_review':          { widgets: ['pm-scheduling'] },
+    'class_review':          { widgets: ['roles'] },
     'welcome_manage':        { widgets: ['upcoming-events'] }
   };
 
@@ -9826,13 +9822,14 @@
     // failure mode that hid Merchandise Manager from Lime Narwhal.
     function widgetListFor(role) {
       // Age-group liaisons ("Pigeons Morning Class Liaison", …) build
-      // their group's morning schedule — give them the Class Scheduling
-      // card (the builder itself scopes them to their group). Matches
-      // group-named titles only: the legacy generic "Morning Class
-      // Liaison" role and exact titles like Afternoon Class Liaison
-      // (explicit defaults below) stay out.
-      if (!WORKSPACE_DEFAULTS[role] && /(greenhouse|saplings?|sassafras|oaks?|maples?|birch|willows?|cedars?|pigeons?)\s+((morning\s+)?class\s+)?liaison$/i.test(role)) {
-        return ['todos', 'pm-scheduling'];
+      // their group's morning schedule — give them the Co-op Management
+      // card, whose render shows them just the Class Builder row (the
+      // builder itself scopes them to their group). Matches group-named
+      // titles only: the legacy generic "Morning Class Liaison" role and
+      // exact titles like Afternoon Class Liaison (explicit defaults
+      // below) stay out.
+      if (!WORKSPACE_DEFAULTS[role] && isMorningGroupLiaisonTitle(role)) {
+        return ['todos', 'roles'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
@@ -9982,7 +9979,7 @@
           var w = WORKSPACE_WIDGETS[type];
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
-          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'pm-scheduling': 'accent-18', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-notes': 'accent-8' };
+          var WS_ACCENTS = { 'todos': 'accent-12', 'reports': 'accent-36', 'roles': 'accent-15', 'ways-to-help': 'accent-25', 'resources': 'accent-44', 'admin-consoles': 'accent-22', 'special-events': 'accent-28', 'supply-closet-mgmt': 'accent-33', 'members-summary': 'accent-5', 'upcoming-events': 'accent-40', 'board-notes': 'accent-8' };
           // Per-role board cards share one accent.
           var wsAccentKey = WS_ACCENTS[type] || (type.indexOf('bg-') === 0 ? 'accent-8' : '');
           var wsAccent = wsAccentKey ? '<img class="brand-accent" src="brand/secondary/' + wsAccentKey + '.png" alt=""> ' : '';

@@ -450,12 +450,13 @@ const ROLE_REPORTS_FIXTURE = {
   'Vice President': []
 };
 // 2026-07-05 workspace consolidation: 'forms' merged into 'reports';
-// VP's pm-scheduling folded into the 'roles' (Co-op Management) card as
-// link rows, so only the Afternoon Class Liaison keeps the standalone
-// pm-scheduling card.
+// 2026-07-20 (Erin): the standalone pm-scheduling card is GONE — the
+// Class Builder row lives on the 'roles' (Co-op Management) card for
+// every builder audience (VP, ACL, group morning liaisons, class_review
+// grantees).
 const WORKSPACE_DEFAULTS_FIXTURE = {
   'Vice President': ['todos', 'reports', 'roles', 'my-links', 'ways-to-help', 'resources'],
-  'Afternoon Class Liaison': ['reports', 'pm-scheduling', 'my-links', 'ways-to-help', 'resources']
+  'Afternoon Class Liaison': ['reports', 'roles', 'my-links', 'ways-to-help', 'resources']
 };
 
 t('Tour Pipeline is listed for Membership Director only (not Comms)', () => {
@@ -474,22 +475,25 @@ t('Tour Pipeline is listed for Membership Director only (not Comms)', () => {
   assert.ok(commSection && !/tour-pipeline/.test(commSection[0]), 'Comms Director must NOT have tour-pipeline');
 });
 
-t('PM scheduling card: standalone for ACL; VP reaches it via Co-op Management', () => {
+t('Class Builder lives on Co-op Management only — no standalone pm-scheduling card', () => {
   const vp = WORKSPACE_DEFAULTS_FIXTURE['Vice President'] || [];
   const acl = WORKSPACE_DEFAULTS_FIXTURE['Afternoon Class Liaison'] || [];
-  assert.ok(acl.indexOf('pm-scheduling') !== -1, 'Afternoon Class Liaison should have pm-scheduling');
-  // VP's PM tools folded into the roles card (2026-07-05) — the standalone
-  // card must NOT come back on VP's defaults.
-  assert.strictEqual(vp.indexOf('pm-scheduling'), -1, 'VP should NOT have the standalone pm-scheduling card');
-  assert.ok(vp.indexOf('roles') !== -1, 'VP must keep the roles (Co-op Management) card that hosts the folded rows');
-  // And the real script.js roles card must actually render the VP row:
-  // the Afternoon Class Builder (which absorbed the Submissions Report,
-  // so the pending-count pill rides on it too).
+  assert.strictEqual(vp.indexOf('pm-scheduling'), -1, 'VP must not list pm-scheduling');
+  assert.strictEqual(acl.indexOf('pm-scheduling'), -1, 'ACL must not list pm-scheduling (folded 2026-07-20)');
+  assert.ok(vp.indexOf('roles') !== -1 && acl.indexOf('roles') !== -1, 'both must keep the roles (Co-op Management) card');
   const fs2 = require('fs');
   const src2 = fs2.readFileSync(require('path').join(__dirname, '..', 'script.js'), 'utf8');
-  assert.ok(/data-resource-action="schedule-builder"/.test(src2), 'roles card should link the Afternoon Class Builder');
-  const vpFold = src2.match(/if \(role === 'Vice President'\) \{[\s\S]*?schedule-builder[\s\S]*?pmrep-pending-count[\s\S]*?\}/);
-  assert.ok(vpFold, "roles card should fold the Afternoon Class Builder (with its pending pill) into the VP's rows");
+  // The card definition itself must be gone…
+  assert.ok(!/'pm-scheduling':\s*\{/.test(src2), 'the pm-scheduling widget definition must be deleted');
+  // …and the roles card must render the builder row (pending pill riding
+  // it) for the builder audiences.
+  const showsBuilder = src2.match(/var showsBuilder =[\s\S]*?class_review[\s\S]*?;/);
+  assert.ok(showsBuilder, 'roles card must compute showsBuilder incl. class_review grantees');
+  assert.ok(/isMorningGroupLiaisonTitle\(role\)/.test(showsBuilder[0]), 'group morning liaisons must be a builder audience');
+  const builderRow = src2.match(/if \(showsBuilder\) \{[\s\S]*?schedule-builder[\s\S]*?pmrep-pending-count[\s\S]*?\}/);
+  assert.ok(builderRow, 'roles card must render the Class Builder row with its pending pill');
+  // Group liaisons' fallback widget list points at the roles card now.
+  assert.ok(/return \['todos', 'roles'\];/.test(src2), "group-liaison fallback must return ['todos', 'roles']");
 });
 
 t('Committee roles resolve by holder EMAIL even with no family/people row', () => {
