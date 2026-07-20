@@ -15339,10 +15339,13 @@
     if (!canEditIdeas) return;
 
     var cred = localStorage.getItem('rw_google_credential');
+    // view_as rides along so the server gate matches the roles this
+    // popup rendered the editor for (#29 — the ACL testing via View As
+    // 403'd because only the raw login was checked server-side).
     function ciPost(group, idea, btn) {
       if (!group || !idea) return;
       if (btn) btn.disabled = true;
-      fetch('/api/curriculum?action=class-inspiration', {
+      fetch('/api/curriculum?action=class-inspiration' + notifViewAsSuffix(), {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
         body: JSON.stringify({ group_name: group, idea: idea })
       }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
@@ -15366,7 +15369,7 @@
       btn.addEventListener('click', function () {
         var self = this;
         self.disabled = true;
-        fetch('/api/curriculum?action=class-inspiration&id=' + this.getAttribute('data-ci-id'), {
+        fetch('/api/curriculum?action=class-inspiration&id=' + this.getAttribute('data-ci-id') + notifViewAsSuffix(), {
           method: 'DELETE', headers: { 'Authorization': 'Bearer ' + cred }
         }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
           .then(function (res) {

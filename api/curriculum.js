@@ -2509,8 +2509,13 @@ module.exports = async function handler(req, res) {
       // and a (start, end) date range so the parent My Family widget knows
       // when to show itself.
       // ── Class Inspiration: add an idea (Erin, 2026-07-15) ──
+      // Gate rides view_as like every other reviewer surface (#29): the
+      // ACL holder row can carry the role inbox (afternoon@) rather than
+      // the person's own login, so checking only user.email 403'd the
+      // real liaison. actingEmailFor only honors view_as for
+      // canImpersonate callers (supers on prod; any member on dev).
       if (action === 'class-inspiration') {
-        const ciEditor = isSuperUser(user.email) || await hasCapability(user.email, 'class_inspiration_edit');
+        const ciEditor = isSuperUser(user.email) || await hasCapability(actingEmailFor(user, req), 'class_inspiration_edit');
         if (!ciEditor) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can edit the inspiration list.' });
         const ciGroup = String((req.body || {}).group_name || '').trim().slice(0, 80);
         const ciIdea = String((req.body || {}).idea || '').trim().slice(0, 200);
@@ -3141,9 +3146,10 @@ module.exports = async function handler(req, res) {
 
     // ── DELETE ──
     if (req.method === 'DELETE') {
-      // Class Inspiration: remove an idea (Erin, 2026-07-15).
+      // Class Inspiration: remove an idea (Erin, 2026-07-15). Same
+      // view_as-aware gate as the POST above (#29).
       if (action === 'class-inspiration') {
-        const ciDelOk = isSuperUser(user.email) || await hasCapability(user.email, 'class_inspiration_edit');
+        const ciDelOk = isSuperUser(user.email) || await hasCapability(actingEmailFor(user, req), 'class_inspiration_edit');
         if (!ciDelOk) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can edit the inspiration list.' });
         const ciDelId = parseInt(req.query.id, 10);
         if (!Number.isFinite(ciDelId)) return res.status(400).json({ error: 'id required' });
