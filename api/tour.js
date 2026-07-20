@@ -5373,15 +5373,16 @@ async function handleMorningBuilderGet(req, res) {
         AND declined_at IS NULL
     `;
     const draftRows = await sql`
-      SELECT family_email, kid_first_name, class_group, finalized, kid_id
+      SELECT family_email, kid_first_name, class_group, finalized, kid_id, sort_position
       FROM morning_class_assignments
       WHERE school_year = ${schoolYear}
     `;
     const draftMap = {};
     const draftByKidId = {};
     draftRows.forEach(r => {
-      draftMap[r.family_email + '|' + r.kid_first_name] = { group: r.class_group, finalized: !!r.finalized };
-      if (r.kid_id) draftByKidId[r.kid_id] = { group: r.class_group, finalized: !!r.finalized };
+      const rec = { group: r.class_group, finalized: !!r.finalized, position: r.sort_position == null ? null : r.sort_position };
+      draftMap[r.family_email + '|' + r.kid_first_name] = rec;
+      if (r.kid_id) draftByKidId[r.kid_id] = rec;
     });
     const planRows = await sql`
       SELECT status, finalized_at, finalized_by, seeded_at FROM morning_class_plans
@@ -5453,6 +5454,7 @@ async function handleMorningBuilderGet(req, res) {
         // Pending (unpaid) kids place like paid ones; it's a visual flag.
         pending: !!meta.pending,
         group: entry ? entry.group : '',
+        position: entry && entry.position != null ? entry.position : null,
         locked: false
       });
       familyEmails.add(familyEmail);
@@ -5489,6 +5491,7 @@ async function handleMorningBuilderGet(req, res) {
         allergies: String(kidRow.allergies || '').trim(),
         pending: !!meta.pending,
         group: dr.class_group,
+        position: dr.sort_position == null ? null : dr.sort_position,
         locked: false
       });
       familyEmails.add(fe);
@@ -5568,13 +5571,40 @@ async function handleMorningBuilderGet(req, res) {
       console.warn('morning-builder new-member lookup failed (non-fatal):', nmErr.message);
     }
 
-    // Youngest → oldest, then by name (unknown ages last).
+    // Base order: youngest → oldest, then by name (unknown ages last). This is
+    // the fallback for any kid that's never been hand-ordered.
     roster.sort((a, b) => {
       const aa = (a.age == null) ? 999 : a.age;
       const bb = (b.age == null) ? 999 : b.age;
       if (aa !== bb) return aa - bb;
       return a.display_name.localeCompare(b.display_name);
     });
+
+    // Manual within-class order overlay (drag-to-sort). Group the roster into
+    // its class blocks (pool first, then the canonical morning order) and,
+    // inside each block, honor sort_position ascending. Kids without a manual
+    // position keep the base (age/name) order and sit after any positioned
+    // ones. The client filters per group, so only the within-group order is
+    // observable — but a fully deterministic total order keeps the sort stable.
+    const groupRank = {};
+    MORNING_GROUP_NAMES.forEach((g, i) => { groupRank[g] = i + 1; });
+    const unposSeqByGroup = {};
+    roster.forEach(item => {
+      const g = item.group || '';
+      if (item.position == null) {
+        unposSeqByGroup[g] = (unposSeqByGroup[g] || 0) + 1;
+        item._rank = 1e6 + unposSeqByGroup[g];   // after every real position, in base order
+      } else {
+        item._rank = item.position;
+      }
+    });
+    roster.sort((a, b) => {
+      const ga = a.group ? (groupRank[a.group] || 99) : 0;
+      const gb = b.group ? (groupRank[b.group] || 99) : 0;
+      if (ga !== gb) return ga - gb;
+      return a._rank - b._rank;
+    });
+    roster.forEach(item => { delete item._rank; });
 
     // AM teaching assignments for this year + a member picker list (Phase B1).
     // Non-fatal: a failure just yields an empty teaching grid.
@@ -5684,6 +5714,45 @@ async function handleMorningAssign(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('morning-assign error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='morning-reorder' — persist the manual within-class order for one
+// group. `order` is the kids of that class, in the desired top-to-bottom order;
+// each row's sort_position is rewritten to its index. Placement (class_group)
+// and the finalized lock are untouched — this is purely the "class vibe"
+// display order — so it's safe to run even on a finalized plan (only unlocked,
+// still-draggable kids ever reach here from the UI). Rows are matched with an
+// explicit class_group guard so a stale/racing order can't move a kid that has
+// since left the class.
+async function handleMorningReorder(body, req, res) {
+  const auth = await requireMembershipDirector(req, res);
+  if (!auth) return;
+  const schoolYear = String(body.school_year || DEFAULT_SEASON);
+  const group = String(body.class_group || '').trim();
+  const order = Array.isArray(body.order) ? body.order : [];
+  if (!group || MORNING_GROUP_NAMES.indexOf(group) === -1) {
+    return res.status(400).json({ error: 'A valid class_group is required to reorder.' });
+  }
+  try {
+    const sql = getSql();
+    for (let i = 0; i < order.length; i++) {
+      const fe = String((order[i] && order[i].family_email) || '').trim().toLowerCase();
+      const fn = String((order[i] && order[i].kid_first_name) || '').trim().toLowerCase();
+      if (!fe || !fn) continue;
+      await sql`
+        UPDATE morning_class_assignments
+        SET sort_position = ${i}, updated_by = ${auth.realEmail}, updated_at = NOW()
+        WHERE school_year = ${schoolYear}
+          AND family_email = ${fe}
+          AND kid_first_name = ${fn}
+          AND class_group = ${group}
+      `;
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('morning-reorder error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -8264,6 +8333,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
+    if (kind === 'morning-reorder') return handleMorningReorder(body, req, res);
     if (kind === 'morning-finalize') return handleMorningFinalize(body, req, res);
     if (kind === 'am-teacher-assign') return handleAmTeacherAssign(body, req, res);
     if (kind === 'special-event-people') return handleSpecialEventSave(body, req, res);

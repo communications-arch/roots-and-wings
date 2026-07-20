@@ -1110,6 +1110,13 @@ ALTER TABLE morning_class_plans ADD COLUMN IF NOT EXISTS seeded_at TIMESTAMPTZ;
 -- next finalize — so finalized kids stay locked while late additions can be
 -- placed and confirmed without disturbing them.
 ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS finalized BOOLEAN NOT NULL DEFAULT FALSE;
+-- Manual within-class ordering. The Membership Director can drag kids into a
+-- deliberate order INSIDE each morning group ("seeing the class vibe"), on top
+-- of the drag-between-classes placement. Written 0..n-1 per group when a class
+-- is reordered; NULL means "never hand-ordered" and falls back to the default
+-- youngest→oldest-by-name sort. Purely a builder-side display order — it does
+-- NOT flow into the finalized live roster.
+ALTER TABLE morning_class_assignments ADD COLUMN IF NOT EXISTS sort_position INTEGER;
 
 -- ──────────────────────────────────────────────
 -- Merchandise (public order form + portal report)

@@ -27852,7 +27852,7 @@
       html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize new placements</button>';
       html += '<button type="button" class="sc-btn" id="mcbReopenBtn">Reopen all</button>';
     } else {
-      html += '<span class="mcb-workflow-note">Drag kids into a class. ' + total + ' kid' + (total === 1 ? '' : 's') + ' · <strong>' + unassigned.length + '</strong> unplaced.</span>';
+      html += '<span class="mcb-workflow-note">Drag kids into a class — and drag within a class to reorder them. ' + total + ' kid' + (total === 1 ? '' : 's') + ' · <strong>' + unassigned.length + '</strong> unplaced.</span>';
       html += '<button type="button" class="sc-btn mcb-primary" id="mcbFinalizeBtn">Finalize groups</button>';
     }
     html += '</div>';
@@ -28125,41 +28125,116 @@
         zone.classList.remove('mcb-dropover');
         var key = dragKey || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
         if (!key) return;
-        assignMorningKid(key, zone.getAttribute('data-drop-group') || '');
+        var group = zone.getAttribute('data-drop-group') || '';
+        moveMorningKid(key, group, mcbDropBeforeKey(zone, e.clientY, key));
       });
     });
   }
 
-  // Optimistic assign: update local roster + re-render, POST in the
-  // background, revert + alert on failure.
-  function assignMorningKid(key, group) {
-    var item = morningBuilderState.roster.find(function (k) { return k.key === key; });
-    if (!item || item.group === group) return;
-    var prev = item.group;
+  // Which chip should the dragged kid land in front of? Walk the drop zone's
+  // chips top-to-bottom (skipping the one being dragged) and return the key of
+  // the first chip whose vertical midpoint is below the pointer. null means
+  // "drop at the end of this class".
+  function mcbDropBeforeKey(zone, y, draggedKey) {
+    var chips = zone.querySelectorAll('.mcb-kid');
+    for (var i = 0; i < chips.length; i++) {
+      var c = chips[i];
+      if (c.getAttribute('data-key') === draggedKey) continue;
+      var r = c.getBoundingClientRect();
+      if (y < r.top + r.height / 2) return c.getAttribute('data-key');
+    }
+    return null;
+  }
+
+  // Optimistic move: reorder the local roster (placing the kid into `group`
+  // right before `beforeKey`, or at the class's end when null), re-render, then
+  // persist in the background. A group change POSTs morning-assign; the new
+  // within-class order POSTs morning-reorder. Reverts + alerts on failure.
+  function moveMorningKid(key, group, beforeKey) {
+    var roster = morningBuilderState.roster;
+    var item = roster.find(function (k) { return k.key === key; });
+    if (!item) return;
+
+    var prevOrder = roster.slice();       // snapshot for revert (array + groups)
+    var prevGroup = item.group;
+
+    roster.splice(roster.indexOf(item), 1);
     item.group = group;
+    var insertAt;
+    if (beforeKey) {
+      insertAt = roster.findIndex(function (k) { return k.key === beforeKey; });
+      if (insertAt < 0) insertAt = roster.length;
+    } else {
+      // After the last kid already in this class; if the class is empty,
+      // append at the very end (position is what matters, not array slot).
+      insertAt = -1;
+      for (var i = 0; i < roster.length; i++) { if (roster[i].group === group) insertAt = i; }
+      insertAt = insertAt < 0 ? roster.length : insertAt + 1;
+    }
+    roster.splice(insertAt, 0, item);
+
+    // No-op: dropped exactly where it already was.
+    var groupChanged = prevGroup !== group;
+    if (!groupChanged && mcbSameOrder(prevOrder, roster)) return;
+
     renderMorningClassBuilder();
-    fetch('/api/tour', {
-      method: 'POST',
-      headers: rwAuthHeaders(true),
-      body: JSON.stringify({
-        kind: 'morning-assign',
-        school_year: morningBuilderState.schoolYear,
-        family_email: item.family_email,
-        kid_first_name: item.first_name,
-        class_group: group
-      })
-    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+
+    var revert = function (msg) {
+      morningBuilderState.roster.splice(0, morningBuilderState.roster.length);
+      Array.prototype.push.apply(morningBuilderState.roster, prevOrder);
+      item.group = prevGroup;
+      renderMorningClassBuilder();
+      alert(msg);
+    };
+    var reorderGroup = function () {
+      if (!group) return Promise.resolve({ ok: true });   // pool isn't ordered
+      var order = morningBuilderState.roster
+        .filter(function (k) { return k.group === group; })
+        .map(function (k) { return { family_email: k.family_email, kid_first_name: k.first_name }; });
+      return fetch('/api/tour', {
+        method: 'POST',
+        headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          kind: 'morning-reorder',
+          school_year: morningBuilderState.schoolYear,
+          class_group: group,
+          order: order
+        })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); });
+    };
+
+    var assign = groupChanged
+      ? fetch('/api/tour', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({
+            kind: 'morning-assign',
+            school_year: morningBuilderState.schoolYear,
+            family_email: item.family_email,
+            kid_first_name: item.first_name,
+            class_group: group
+          })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      : Promise.resolve({ ok: true });
+
+    assign
       .then(function (res) {
-        if (!res.ok) {
-          item.group = prev;
-          renderMorningClassBuilder();
-          alert('Could not move ' + item.display_name + ': ' + ((res.data && res.data.error) || 'unknown'));
-        }
-      }).catch(function (err) {
-        item.group = prev;
-        renderMorningClassBuilder();
-        alert('Network error moving ' + item.display_name + ': ' + ((err && err.message) || 'unknown'));
+        if (!res.ok) { revert('Could not move ' + item.display_name + ': ' + ((res.data && res.data.error) || 'unknown')); return null; }
+        return reorderGroup();
+      })
+      .then(function (res) {
+        if (res && !res.ok) { revert('Could not save the order for ' + item.display_name + ': ' + ((res.data && res.data.error) || 'unknown')); }
+      })
+      .catch(function (err) {
+        revert('Network error moving ' + item.display_name + ': ' + ((err && err.message) || 'unknown'));
       });
+  }
+
+  // Same keys in the same order? Used to skip no-op drops.
+  function mcbSameOrder(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) { if (a[i].key !== b[i].key) return false; }
+    return true;
   }
 
   function postMorningFinalize(finalize) {
