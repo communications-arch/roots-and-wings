@@ -606,6 +606,41 @@ function ageFromBirthDate(birthDate) {
   return age >= 0 ? age : 0;
 }
 
+// ── Unplaced-kid predicate + counter (#32) ──
+// Shared by signup-todos (the kids_unpicked To Do) and the
+// class-confirm-send gate so the two can never disagree about who
+// still needs afternoon placements. Greenhouse / under-3 kids never
+// pick afternoon classes; morning-only / pending / not-returning kids
+// are excluded by the enrollment-scoped kid query itself. "Picked"
+// matches by kid_id when the pick row carries one (rename-proof),
+// name key as the legacy fallback.
+// k: { kid_id, first_name, class_group, birth_date, fam }
+function kidLacksAfternoonPick(k, pickedIds, pickedKeys) {
+  if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
+  const age = ageFromBirthDate(k.birth_date);
+  if (age != null && age < 3) return false;
+  if (pickedIds.has(k.kid_id)) return false;
+  return !pickedKeys.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
+}
+// How many enrolled, afternoon-eligible kids still lack picks for the
+// session — the same read signup-todos does, condensed to a count for
+// the class-confirm-send gate.
+async function countKidsUnpicked(sql, year, sess) {
+  const [kids, picked] = await Promise.all([
+    sql`SELECT k.id AS kid_id, k.first_name, k.class_group, k.birth_date,
+               LOWER(e.family_email) AS fam
+        FROM kid_enrollments e
+        JOIN kids k ON k.id = e.kid_id
+        WHERE e.season = ${year} AND e.status = 'enrolled'
+          AND e.schedule IN ('all-day', 'afternoon')`,
+    sql`SELECT DISTINCT kid_id, LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
+        FROM class_signup_picks WHERE school_year = ${year} AND session_number = ${sess}`
+  ]);
+  const ids = new Set(picked.map(r => r.kid_id).filter(Boolean));
+  const keys = new Set(picked.map(r => r.fam + '|' + r.kid));
+  return kids.filter(k => kidLacksAfternoonPick(k, ids, keys)).length;
+}
+
 function prettyAges(a, other) {
   const map = {
     saplings: 'Saplings (3–5)', sassafras: 'Sassafras (5–6)',
@@ -1142,13 +1177,7 @@ module.exports = async function handler(req, res) {
         // the legacy fallback.
         const stPickedSet = new Set(stPicked.map(r => r.fam + '|' + r.kid));
         const stPickedIds = new Set(stPicked.map(r => r.kid_id).filter(Boolean));
-        const kidsUnpicked = stKids.filter(k => {
-          if (String(k.class_group || '').trim().toLowerCase() === 'greenhouse') return false;
-          const age = ageFromBirthDate(k.birth_date);
-          if (age != null && age < 3) return false;
-          if (stPickedIds.has(k.kid_id)) return false;
-          return !stPickedSet.has(k.fam + '|' + String(k.first_name || '').toLowerCase());
-        }).map(k => ({
+        const kidsUnpicked = stKids.filter(k => kidLacksAfternoonPick(k, stPickedIds, stPickedSet)).map(k => ({
           name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),
           first_name: k.first_name,
           family_email: k.fam,
@@ -1320,7 +1349,12 @@ module.exports = async function handler(req, res) {
           adults_unplaced: stWinStatus === 'closed' ? adultsUnplaced : [],
           assistant_gaps: stWinStatus === 'closed' ? assistantGaps : [],
           overmax: overmax,
-          confirm_pending: confirmPending,
+          // Confirmations wait until EVERY kid is placed (#32, Erin's
+          // rule): while kids_unpicked is non-empty the confirm To Do
+          // stays hidden (empty list) — the send endpoint enforces the
+          // same gate with a 409. The client explains the lock from
+          // kids_unpicked, so no extra flag is needed.
+          confirm_pending: kidsUnpicked.length > 0 ? [] : confirmPending,
           lottery_moves: lotteryMoves
         });
       }
@@ -2691,9 +2725,24 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'id, subject, and body required' });
         }
         const csScope = await reviewerScopeReq(user, req);
-        const csRows = await sql`SELECT id, class_name, class_period, age_groups, submitted_by_email FROM class_submissions WHERE id = ${csId}`;
+        const csRows = await sql`SELECT id, class_name, class_period, age_groups, submitted_by_email,
+                                        school_year, scheduled_session
+                                 FROM class_submissions WHERE id = ${csId}`;
         if (!csRows.length) return res.status(404).json({ error: 'Class not found.' });
         if (!csScope || !scopeAllowsSub(csScope, csRows[0])) return res.status(403).json({ error: 'Reviewers only.' });
+        // #32 — confirmations wait until EVERY kid is placed for the
+        // class's session: the email tells a lead their final list +
+        // budget, and unplaced kids can still change both. Mirrors the
+        // signup-todos suppression (same countKidsUnpicked read).
+        if (csRows[0].scheduled_session) {
+          const csUnplaced = await countKidsUnpicked(sql, csRows[0].school_year, csRows[0].scheduled_session);
+          if (csUnplaced > 0) {
+            return res.status(409).json({
+              error: csUnplaced + ' kid' + (csUnplaced === 1 ? ' still needs' : 's still need')
+                + ' afternoon placements — finish “Place kids in afternoon classes” before sending confirmations.'
+            });
+          }
+        }
         if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'Email service is not configured in this environment.' });
         const escBody = csBody
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

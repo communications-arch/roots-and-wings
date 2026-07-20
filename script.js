@@ -24655,8 +24655,15 @@
     var d = _signupTodoState;
     if (!body || !d) return;
     var list = d.confirm_pending || [];
+    // #32 — the server suppresses confirm_pending while any kid still
+    // lacks afternoon picks; explain the lock instead of reading as
+    // "no sign-ups".
+    var ccBlockedN = (d.kids_unpicked || []).length;
     if (!list.length) {
-      body.innerHTML = '<p class="ws-empty">No classes with sign-ups yet.</p>';
+      body.innerHTML = ccBlockedN > 0
+        ? '<p class="ws-empty">Confirmations are locked — ' + ccBlockedN + ' kid' + (ccBlockedN === 1 ? ' still needs' : 's still need')
+          + ' afternoon placements. Finish “Place kids in afternoon classes” first.</p>'
+        : '<p class="ws-empty">No classes with sign-ups yet.</p>';
       return;
     }
     body.innerHTML = list.map(function (c) {
@@ -24682,14 +24689,22 @@
       .then(function (res) {
         if (!res.ok) { body.innerHTML = '<p class="ws-empty">' + escapeHtml((res.data && res.data.error) || 'Could not build the draft.') + '</p>'; return; }
         var dft = res.data;
+        // #32 — mirror the server's send gate in the UI: while any kid
+        // still lacks afternoon picks the Send button is disabled with
+        // the reason (the POST would 409 with the same message anyway).
+        var ccDraftBlockedN = (_signupTodoState && (_signupTodoState.kids_unpicked || []).length) || 0;
         var h = '<div class="cc-editor">';
         h += '<p class="ws-wv-context" style="margin:6px 0 2px;">To: <strong>' + escapeHtml(dft.to) + '</strong>' + (dft.sent_at ? ' · <span class="mf-pending-badge">✓ already sent</span>' : '') + '</p>';
         h += '<input type="text" class="rd-input" id="cc-subject" maxlength="200" value="' + escapeHtml(dft.subject) + '">';
         h += '<textarea class="rd-input" id="cc-body" rows="14" style="margin-top:6px;font-family:inherit;">' + escapeHtml(dft.body) + '</textarea>';
+        if (ccDraftBlockedN > 0) {
+          h += '<p class="ws-wv-context" style="margin:8px 0 0;">Sending is locked — ' + ccDraftBlockedN + ' kid' + (ccDraftBlockedN === 1 ? ' still needs' : 's still need')
+            + ' afternoon placements. You can keep editing and copy the text meanwhile.</p>';
+        }
         h += '<div class="rd-btn-row rd-btn-row-end" style="margin-top:8px;">';
         h += '<button type="button" class="sc-btn" id="cc-back">← Back</button>';
         h += '<button type="button" class="sc-btn" id="cc-copy">Copy text</button>';
-        h += '<button type="button" class="btn btn-primary btn-sm" id="cc-send">' + (dft.sent_at ? 'Resend email' : 'Send email') + '</button>';
+        h += '<button type="button" class="btn btn-primary btn-sm" id="cc-send"' + (ccDraftBlockedN > 0 ? ' disabled title="Every kid must be placed in afternoon classes first"' : '') + '>' + (dft.sent_at ? 'Resend email' : 'Send email') + '</button>';
         h += '</div></div>';
         body.innerHTML = h;
         document.getElementById('cc-back').addEventListener('click', renderClassConfirmList);
