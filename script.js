@@ -652,11 +652,15 @@
     if (!data || data.error) return false;
 
         // Committee role-holder map (email → titles[]) from the server
-        // overlay. Replaces the legacy VOLUNTEER_COMMITTEES sheet lookup
-        // for new committee_role assignments (Merchandise Manager etc.)
-        // that aren't in the Volunteer Committees tab. Empty {} if the
-        // server didn't return one (older deploys).
+        // overlay (role_holders_v2) — the only committee-role source now
+        // that the Volunteer Committees sheet tab is retired. Empty {} if
+        // the server didn't return one (older deploys).
         COMMITTEE_ROLE_HOLDERS = (data && data.committeeRoleHolders) || {};
+
+        // Roles directory (roles + role_holders_v2, DB) — powers the role
+        // popups, the open-seats list, and the Supply Coordinator lookup.
+        // [] on cached payloads that predate the Sheets retirement.
+        ROLES_DIRECTORY = (data && data.rolesDirectory) || [];
 
         // ── Families ──
         // Board tagging (fam.boardRole / fam.boardEmail) comes from the
@@ -823,30 +827,15 @@
           }
         }
 
-        // ── Cleaning Crew ──
-        if (data.cleaningCrew) {
-          // DB liaison is authoritative if loaded; otherwise use sheets
-          if (!cleaningDB.loaded) {
-            CLEANING_CREW.liaison = data.cleaningCrew.liaison;
-          }
-          // (2026-07-06) Sheet fallback for per-session crews removed —
-          // cleaning_assignments (DB) is the only source now; the sheet
-          // only held last year's rota anyway.
-        }
-
-        // ── Volunteer Committees ──
-        if (data.volunteerCommittees) {
-          VOLUNTEER_COMMITTEES = data.volunteerCommittees;
-        }
-
-        // ── Special Events ──
-        if (data.specialEvents) {
-          SPECIAL_EVENTS = data.specialEvents;
-        }
-
-        // ── Class Ideas ──
-        if (data.classIdeas) {
-          CLASS_IDEAS = data.classIdeas;
+        // ── Special Events (DB) ──
+        // Approved events for the active season straight from
+        // special_events/special_event_people via /api/sheets. The old
+        // sheet-shaped data.specialEvents / volunteerCommittees /
+        // cleaningCrew / classIdeas keys are ignored — those tabs retired
+        // with the Sheets retirement (issue #25); cleaning comes from
+        // applyCleaningData (DB) and class ideas from class-inspiration.
+        if (Array.isArray(data.specialEventsDb)) {
+          SPECIAL_EVENTS_DB = data.specialEventsDb;
         }
 
     liveDataReady = true;
@@ -990,6 +979,54 @@
       if (roleDescriptions[i].role_key === key) return roleDescriptions[i];
     }
     return null;
+  }
+
+  // Build a {type:'role'} popup payload for a role title straight from the
+  // DB roles directory, falling back to roleDescriptions when the
+  // directory hasn't loaded yet. Replaces the retired {type:'committee'}
+  // popup that walked the Volunteer Committees sheet (issue #25).
+  function rolePopupForTitle(title) {
+    var want = String(title || '').trim().toLowerCase();
+    for (var i = 0; i < (ROLES_DIRECTORY || []).length; i++) {
+      var r = ROLES_DIRECTORY[i];
+      if (String(r.title || '').trim().toLowerCase() === want) {
+        return { type: 'role', title: r.title, committee: r.committee || '', term: r.term_length || '' };
+      }
+    }
+    for (var j = 0; j < roleDescriptions.length; j++) {
+      var rd = roleDescriptions[j];
+      if (String(rd.title || '').trim().toLowerCase() === want) {
+        return { type: 'role', title: rd.title, committee: rd.committee || '', term: rd.job_length || '' };
+      }
+    }
+    return { type: 'role', title: title, committee: '', term: '' };
+  }
+
+  // ── DB special-event display helpers ──
+  // "Wed, Nov 11 · 10:30 AM–1:30 PM" (plus an end date for multi-day
+  // events); "Date TBD" while the board hasn't approved one.
+  function specialEventTimeLabel(ev) {
+    function fmt(hhmm) {
+      if (!hhmm) return '';
+      var parts = String(hhmm).split(':');
+      var h = parseInt(parts[0], 10);
+      if (!isFinite(h)) return '';
+      var m = parts[1] || '00';
+      var ampm = h >= 12 ? 'PM' : 'AM';
+      var h12 = h % 12 || 12;
+      return h12 + (m === '00' ? '' : ':' + m) + ' ' + ampm;
+    }
+    var a = fmt(ev && ev.startTime), b = fmt(ev && ev.endTime);
+    if (a && b) return a + '–' + b;
+    return a || '';
+  }
+  function specialEventDateLabel(ev) {
+    if (!ev || !ev.date) return 'Date TBD';
+    var label = formatDateLabel(ev.date);
+    if (ev.endDate && ev.endDate !== ev.date) label += ' – ' + formatDateLabel(ev.endDate);
+    var t = specialEventTimeLabel(ev);
+    if (t) label += ' · ' + t;
+    return label;
   }
 
   function applyRoleDescriptions(data) {
@@ -2551,19 +2588,12 @@
     sessions: {}
   };
 
-  // ── Volunteer committees (year-long) ──
-  var VOLUNTEER_COMMITTEES = [
-  ];
+  // ── Special events (DB: approved special_events + email-keyed
+  //     lead/support people for the active season, via /api/sheets
+  //     specialEventsDb) ──
+  var SPECIAL_EVENTS_DB = [];
 
-  // ── Special events ──
-  var SPECIAL_EVENTS = [
-  ];
-
-  // ── Class Ideas Board ──
-  var CLASS_IDEAS = {
-  };
-
-  // Family data — populated from Google Sheets API
+  // Family data — populated from /api/sheets (DB-backed)
   var FAMILIES = [
   ];
 
@@ -2572,6 +2602,13 @@
   // to surface committee_role assignments the legacy Volunteer
   // Committees Sheet doesn't list (Merchandise Manager etc.).
   var COMMITTEE_ROLE_HOLDERS = {};
+
+  // Roles directory from /api/sheets rolesDirectory: [{ id, role_key,
+  // title, category ('board'|'committee_role'), parent_role_id,
+  // term_length, committee, holders: [{name, email}] }] for the current
+  // roles year. Zero-holder committee roles are the open seats. Replaces
+  // the retired Volunteer Committees sheet tab (issue #25).
+  var ROLES_DIRECTORY = [];
 
   // Build flat list of all people (parents + kids) for the yearbook
   var allPeople = [];
@@ -3586,28 +3623,6 @@
       return;
     }
 
-    else if (p.type === 'committee') {
-      var committee = null;
-      VOLUNTEER_COMMITTEES.forEach(function(c) { if (c.name === p.name) committee = c; });
-      if (!committee) return;
-      html += '<h3>' + committee.name + '</h3>';
-      html += '<div class="elective-staff-list">';
-      if (committee.chair && committee.chair.person) {
-        html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(committee.chair.person) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + committee.chair.person.charAt(0) + '</span></div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + committee.chair.person + '</strong><small style="color:var(--color-text-light);">' + committee.chair.title + ' (Chair)</small></div>';
-        html += '</div>';
-      }
-      committee.roles.forEach(function(r) {
-        var person = r.person || 'Open';
-        html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + (r.person ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">' + r.title + '</small></div>';
-        html += '</div>';
-      });
-      html += '</div>';
-    }
-
     else if (p.type === 'cleaning') {
       // Cleaning task descriptions by area
       var CLEANING_TASKS = {
@@ -3736,29 +3751,27 @@
     }
 
     else if (p.type === 'event') {
+      // DB special event (SPECIAL_EVENTS_DB) — coordinator + planning
+      // support come from special_event_people.
       var ev = null;
-      SPECIAL_EVENTS.forEach(function(e) { if (e.name === p.name) ev = e; });
+      SPECIAL_EVENTS_DB.forEach(function(e) { if (e.name === p.name) ev = e; });
       if (!ev) return;
-      html += '<h3>' + ev.name + '</h3>';
+      html += '<h3>' + escapeHtml(ev.name) + '</h3>';
       html += '<div class="elective-meta">';
-      html += '<span>' + ev.date + '</span>';
+      html += '<span>' + escapeHtml(specialEventDateLabel(ev)) + '</span>';
+      if (ev.location) html += '<span>' + escapeHtml(ev.location) + '</span>';
       html += '</div>';
       html += '<div class="elective-staff-list">';
-      if (ev.coordinator) {
+      var evPeople = [];
+      if (ev.coordinator) evPeople.push({ name: ev.coordinator.name, label: 'Coordinator' });
+      (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Planning Support' }); });
+      evPeople.forEach(function (person) {
+        var pName = String(person.name || '');
         html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(ev.coordinator) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + ev.coordinator.charAt(0) + '</span></div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + ev.coordinator + '</strong><small style="color:var(--color-text-light);">Coordinator</small></div>';
+        html += '<div class="staff-dot" style="background:' + faceColor(pName) + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + escapeHtml(pName.charAt(0)) + '</span></div>';
+        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + escapeHtml(pName) + '</strong><small style="color:var(--color-text-light);">' + person.label + '</small></div>';
         html += '</div>';
-      }
-      if (ev.planningSupport) {
-        ev.planningSupport.forEach(function(s, i) {
-          var person = s || 'Open';
-          html += '<div class="elective-teacher">';
-          html += '<div class="staff-dot" style="background:' + (s ? faceColor(person) : '#ccc') + ';width:36px;height:36px;"><span style="font-size:0.85rem;">' + person.charAt(0) + '</span></div>';
-          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + person + '</strong><small style="color:var(--color-text-light);">Planning Support</small></div>';
-          html += '</div>';
-        });
-      }
+      });
       html += '</div>';
     }
 
@@ -3821,10 +3834,11 @@
     }
 
     else if (p.type === 'role') {
-      // Generic role popup for committee roles assigned via the Roles UI
-      // that have no VOLUNTEER_COMMITTEES sheet entry. Renders a simple
-      // header; the Role Description section is appended below via
-      // getRoleKeyForDuty(duty.text), which now resolves DB roles by title.
+      // Generic role popup for board/committee roles (Roles UI /
+      // rolesDirectory — the Volunteer Committees sheet is retired).
+      // Renders a simple header; the Role Description section is appended
+      // below via getRoleKeyForDuty(duty.text), which resolves DB roles
+      // by title.
       html += '<h3>' + escapeHtml(p.title || duty.text) + '</h3>';
       var roleSub = [];
       if (p.committee) roleSub.push(p.committee);
@@ -6230,27 +6244,10 @@
       // (Erin, 2026-07-11), and the shorter detail keeps the title whole.
       duties.push({block: 'twoyear', icon: 'board', text: fam.boardRole, detail: 'Board', popup: {type: 'board', role: fam.boardRole}});
     }
-    VOLUNTEER_COMMITTEES.forEach(function (committee) {
-      if (committee.chair && committee.chair.person) {
-        var chairTitle = committee.chair.title.replace(/\bDir\.\s*$/, 'Director');
-        if (!fam.boardRole || !titleEq(chairTitle, fam.boardRole)) {
-          parentFullNames.forEach(function (full) {
-            if (nameMatch(committee.chair.person, full))
-              duties.push({block: 'annual', icon: 'volunteer', text: committee.chair.title + ' (' + committee.name + ')', detail: 'Board', popup: {type: 'committee', name: committee.name}});
-          });
-        }
-      }
-      committee.roles.forEach(function (r) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatch(r.person, full)) {
-            var duty = {block: 'annual', icon: 'volunteer', text: r.title, detail: committee.name, popup: {type: 'committee', name: committee.name}};
-            if (r.title === 'Cleaning Crew Liaison') duty.manage = 'cleaningCrew';
-            if (r.title === 'Supply Coordinator') duty.manage = 'supplyCloset';
-            duties.push(duty);
-          }
-        });
-      });
-    });
+    // (The Volunteer-Committees sheet loop that used to run here is gone —
+    // committee-role duties come from the email-keyed COMMITTEE_ROLE_HOLDERS
+    // block below, which also carries the Cleaning Crew Liaison /
+    // Supply Coordinator manage buttons the sheet loop used to set.)
     // ── Dynamic Cleaning Crew Liaison (from DB or cache) ──
     var dbLiaison = CLEANING_CREW.liaison;
     // Also check localStorage cache directly in case DB fetch hasn't completed
@@ -6265,7 +6262,7 @@
       if (!liaisonAlreadyShown) {
         parentFullNames.forEach(function (full) {
           if (nameMatch(dbLiaison, full)) {
-            duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
+            duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: rolePopupForTitle('Cleaning Crew Liaison'), manage: 'cleaningCrew'});
           }
         });
       }
@@ -6278,7 +6275,7 @@
     if (!duties.some(function (d) { return d.text === 'Cleaning Crew Liaison'; })) {
       var wsRolesForDuties = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
       if (wsRolesForDuties.indexOf('Cleaning Crew Liaison') !== -1) {
-        duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: {type: 'committee', name: 'Facility Committee'}, manage: 'cleaningCrew'});
+        duties.push({block: 'annual', icon: 'volunteer', text: 'Cleaning Crew Liaison', detail: 'Facility Committee', popup: rolePopupForTitle('Cleaning Crew Liaison'), manage: 'cleaningCrew'});
       }
     }
 
@@ -6302,62 +6299,56 @@
         });
       });
     }
-    SPECIAL_EVENTS.forEach(function (ev) {
-      // Coordinator strings come from the master sheet and are free-form:
-      // "Erin Bogan", "Erin Bogan & Joey Smith". Split on the usual
-      // separators and require a full first+last nameMatch against the
-      // active person (bug log #9: substring-matching any first name
-      // handed a fresh "Erin Testing Account" login the real Erin's
-      // coordinator duties). Bare-first-name cells ("Erin") no longer
-      // match anyone — first-name-only identity is inherently ambiguous.
-      var isCoord = ev.coordinator && String(ev.coordinator)
-        .split(/\s*(?:&|,|\/|\+|\band\b)\s*/i)
-        .some(function (seg) {
-          return parentFullNames.some(function (full) { return nameMatch(seg, full); });
-        });
-      // Only UPCOMING events are responsibilities — the master-sheet tab
-      // still lists last season's events (2026-07-06, Erin saw "Field Day
-      // Coordinator · May 20, 2026" on prod in July). A parseable date in
-      // the past (with a 1-day grace so the event shows on its own day)
-      // skips the duty; unparseable dates stay visible as the safe
-      // default. This block retires with the Master sheet — the DB's
-      // special_event_people is the go-forward home for event helpers.
-      if (isCoord && ev.date) {
-        var evTs = Date.parse(ev.date);
-        if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
-      }
-      if (isCoord) {
-        var statusClass = ev.status === 'Complete' ? 'mf-status-done' : ev.status === 'Needs Volunteers' ? 'mf-status-open' : 'mf-status-upcoming';
-        duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: ev.date + ' &middot; <span class="' + statusClass + '">' + ev.status + '</span>', popup: {type: 'event', name: ev.name}});
-      }
-    });
+    // ── Special-event coordinator duties (DB) ──
+    // special_event_people rows are email-keyed, so the duty matches
+    // strictly on the active person's email — never on names (bug log
+    // #9 retired name-matching here along with the master-sheet tab).
+    (function () {
+      var seEmailLc = String(email || '').toLowerCase();
+      if (!seEmailLc) return;
+      SPECIAL_EVENTS_DB.forEach(function (ev) {
+        var isCoord = ev.coordinator && String(ev.coordinator.email || '').toLowerCase() === seEmailLc;
+        if (!isCoord) return;
+        // Only UPCOMING events are responsibilities (1-day grace so the
+        // event still shows on its own day); undated approved events stay
+        // visible as the safe default.
+        if (ev.date) {
+          var evTs = Date.parse(ev.date + 'T12:00:00');
+          if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
+        }
+        duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: specialEventDateLabel(ev), popup: {type: 'event', name: ev.name}});
+      });
+    })();
 
     // ── Committee roles from role_holders (DB) ──
     // Committee_role assignments made through the Roles UI (Merchandise
     // Manager, coordinators, etc.) arrive as a flat email→titles[] map from
-    // the api/sheets overlay — the same source getWorkspaceRoles uses. The
-    // legacy VOLUNTEER_COMMITTEES block above only covers roles listed on
-    // the Google Sheet, so without this a role assigned in the Roles UI
-    // shows up in My Workspace but never in My Family. Key strictly on the
-    // active person's email (the map is keyed by holder person_email),
-    // mirroring getWorkspaceRoles so co-parents don't inherit each other's
-    // person-scoped roles.
+    // the api/sheets overlay — the same source getWorkspaceRoles uses.
+    // This is THE committee-duty source now that the Volunteer Committees
+    // sheet is retired. Key strictly on the active person's email (the map
+    // is keyed by holder person_email), mirroring getWorkspaceRoles so
+    // co-parents don't inherit each other's person-scoped roles.
     (function () {
       var emailLc = String(email || '').toLowerCase();
       var titles = (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[emailLc]) || [];
       titles.forEach(function (title) {
-        // Skip anything the legacy sheet block (or board role) already listed.
+        // Skip anything already listed (board role, cleaning-liaison blocks).
         if (duties.some(function (d) { return titleEq(d.text, title); })) return;
         var rd = null;
         for (var ri = 0; ri < roleDescriptions.length; ri++) {
           if (titleEq(roleDescriptions[ri].title, title)) { rd = roleDescriptions[ri]; break; }
         }
         var committeeName = (rd && rd.committee) || 'Committee';
-        duties.push({
+        var duty = {
           block: 'annual', icon: 'volunteer', text: title,
           detail: committeeName,
           popup: { type: 'role', title: title, committee: (rd && rd.committee) || '', term: (rd && rd.job_length) || '' }
-        });
+        };
+        // Ported from the retired sheet loop: these two roles manage a
+        // live surface straight from My Responsibilities.
+        if (titleEq(title, 'Cleaning Crew Liaison')) duty.manage = 'cleaningCrew';
+        if (titleEq(title, 'Supply Coordinator')) duty.manage = 'supplyCloset';
+        duties.push(duty);
       });
     })();
 
@@ -8284,73 +8275,73 @@
   function renderEventsTab() {
     var container = document.getElementById('eventsTabContent');
     if (!container) return;
-    var myNames = getMyNames();
 
-    // Person-name matching per bug log #9 (issue #11 cousin sweep): first
-    // AND last name must correspond. The old bare-first-name fallback let a
-    // coordinator cell reading just "Erin" flag ANY member named Erin —
-    // including a fresh "Erin Testing Account" login — as the event's
-    // owner. Bare-first-name cells are inherently ambiguous and now match
-    // no one, same trade-off the My Responsibilities matcher made.
-    function isMyEvent(name) {
-      if (!name || !myNames.fullNames.length) return false;
-      return myNames.fullNames.some(function (fn) {
-        return personNamesMatch(name, fn);
-      });
+    // "Mine" highlighting keys strictly on the active person's email —
+    // special_event_people rows are email-keyed, so no name matching
+    // (bug log #9 retired it here along with the master-sheet tab).
+    var myEmailLc = String(getActiveEmail() || '').toLowerCase();
+    function isMyPerson(person) {
+      return !!(person && myEmailLc && String(person.email || '').toLowerCase() === myEmailLc);
     }
 
-    // Header follows the active season; the sheet-era SPECIAL_EVENTS rows
-    // are the 2025\u20132026 slate, so once the portal has flipped to a newer
-    // year they'd be stale \u2014 show a friendly pointer instead (the DB
-    // events surface via the Co-op Calendar + Roles Assignments until the
-    // full DB events view lands here).
-    var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '2025-2026';
-    var html = '<h3>Special Events &mdash; ' + escapeHtml(String(seYear).replace('-', '\u2013')) + '</h3>';
-    if (seYear !== '2025-2026') {
-      html += '<p style="color:var(--color-text-light);">The board is lining up this year\u2019s special events now. Dates appear on the <strong>Co-op Calendar</strong> as they\u2019re approved, and volunteer roles for each event show up here and in My Responsibilities once assigned.</p>';
+    var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '';
+    var html = '<h3>Special Events' + (seYear ? ' &mdash; ' + escapeHtml(String(seYear).replace('-', '–')) : '') + '</h3>';
+    if (!SPECIAL_EVENTS_DB.length) {
+      html += '<p style="color:var(--color-text-light);">The board is lining up this year’s special events now. Approved dates appear here and on the <strong>Co-op Calendar</strong>, and volunteer roles for each event show up in My Responsibilities once assigned.</p>';
       container.innerHTML = html;
       return;
     }
     html += '<div class="events-grid">';
 
-    SPECIAL_EVENTS.forEach(function (ev) {
-      var statusClass = ev.status === 'Complete' ? 'status-done' : ev.status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
-      var coordText = ev.coordinator || '<em class="event-open-slot">Needs volunteer</em>';
-      var filled = ev.planningSupport.filter(function (s) { return s !== ''; }).length;
-
-      var isMyCard = isMyEvent(ev.coordinator) || ev.planningSupport.some(function (p) { return isMyEvent(p); });
+    SPECIAL_EVENTS_DB.forEach(function (ev) {
+      // Status derives from the DB row: past date → Complete; no
+      // coordinator yet → Needs Volunteers; otherwise Planning (the same
+      // labels the sheet-era grid showed).
+      var isPast = false;
+      if (ev.date) {
+        var ts = Date.parse((ev.endDate || ev.date) + 'T23:59:00');
+        isPast = isFinite(ts) && ts < Date.now();
+      }
+      var status = isPast ? 'Complete' : (ev.coordinator ? 'Planning' : 'Needs Volunteers');
+      var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
+      var support = ev.support || [];
+      var maxSupport = Math.max(support.length, 3);
+      var isMyCard = isMyPerson(ev.coordinator) || support.some(isMyPerson);
 
       html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
       html += '<div class="event-card-header">';
       html += '<div>';
-      html += '<strong class="event-card-name">' + ev.name + '</strong>';
-      html += '<div class="event-card-date">' + ev.date + '</div>';
+      html += '<strong class="event-card-name">' + escapeHtml(ev.name) + '</strong>';
+      html += '<div class="event-card-date">' + escapeHtml(specialEventDateLabel(ev)) + '</div>';
+      if (ev.location) html += '<div class="event-card-date">' + escapeHtml(ev.location) + '</div>';
       html += '</div>';
-      html += '<span class="status-badge ' + statusClass + '">' + ev.status + '</span>';
+      html += '<span class="status-badge ' + statusClass + '">' + status + '</span>';
       html += '</div>';
 
       // Coordinator
       html += '<div class="event-roles">';
-      html += '<div class="event-role' + (isMyEvent(ev.coordinator) ? ' coord-my-row' : '') + '">';
+      var coordText = ev.coordinator ? escapeHtml(ev.coordinator.name) : '<em class="event-open-slot">Needs volunteer</em>';
+      html += '<div class="event-role' + (isMyPerson(ev.coordinator) ? ' coord-my-row' : '') + '">';
       html += '<span class="event-role-label">Coordinator</span>';
-      html += '<span class="event-role-person">' + (isMyEvent(ev.coordinator) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
+      html += '<span class="event-role-person">' + (isMyPerson(ev.coordinator) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
       html += '</div>';
 
-      // Planning support slots
-      ev.planningSupport.forEach(function (person, idx) {
-        var isMe = isMyEvent(person);
+      // Planning support slots (padded to 3 so open seats stay visible)
+      for (var si = 0; si < maxSupport; si++) {
+        var sp = support[si] || null;
+        var isMe = isMyPerson(sp);
         html += '<div class="event-role' + (isMe ? ' coord-my-row' : '') + '">';
-        html += '<span class="event-role-label">Support ' + (idx + 1) + '</span>';
-        if (person) {
-          html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + person + '</span>' : person) + '</span>';
+        html += '<span class="event-role-label">Support ' + (si + 1) + '</span>';
+        if (sp) {
+          html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + escapeHtml(sp.name) + '</span>' : escapeHtml(sp.name)) + '</span>';
         } else {
           html += '<span class="event-role-person"><em class="event-open-slot">Open</em></span>';
         }
         html += '</div>';
-      });
+      }
 
       // Summary line
-      html += '<div class="event-fill-summary">' + filled + ' of ' + ev.maxSupport + ' support spots filled</div>';
+      html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
 
       html += '</div></div>';
     });
@@ -8492,49 +8483,9 @@
       COMMITTEE_ROLE_HOLDERS[lower].forEach(function (t) { addRole(t); });
     }
 
-    if (fam) {
-      // Build the set of person full names this email represents. When the
-      // active user maps to a specific person row in fam.people, only that
-      // person's name participates in committee-role matching (so a BLC
-      // doesn't inherit the MLC's volunteer roles or vice versa). When we
-      // can't pin them to a row (super-user impersonating, sheet-only
-      // family with no people row), fall back to every person in the family
-      // so coordinator-style logins still surface the family's roles.
-      var activePersonRow = null;
-      if (Array.isArray(fam.people)) {
-        for (var pi = 0; pi < fam.people.length; pi++) {
-          var pp = fam.people[pi];
-          if (pp && String(pp.email || '').toLowerCase() === lower) { activePersonRow = pp; break; }
-        }
-      }
-      var matchTargets;
-      if (activePersonRow) {
-        matchTargets = [personFullName(activePersonRow, fam)];
-      } else if (Array.isArray(fam.people) && fam.people.length > 0) {
-        matchTargets = fam.people.map(function (p) { return personFullName(p, fam); });
-      } else {
-        // Legacy fallback: parse fam.parents string.
-        matchTargets = (fam.parents || '').split(/\s*&\s*/).map(function (first) {
-          return (first.trim() + ' ' + fam.name).trim();
-        });
-      }
-      matchTargets = matchTargets.filter(Boolean);
-
-      function wsMatch(a, b) {
-        if (!a || !b) return false;
-        return a.trim().toLowerCase() === b.trim().toLowerCase();
-      }
-      (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
-        if (c.chair && c.chair.person && matchTargets.some(function (n) { return wsMatch(c.chair.person, n); })) {
-          addRole(c.chair.title);
-        }
-        (c.roles || []).forEach(function (r) {
-          if (r.person && matchTargets.some(function (n) { return wsMatch(r.person, n); })) {
-            addRole(r.title);
-          }
-        });
-      });
-    }
+    // (The Volunteer-Committees sheet name-matching that used to follow is
+    // retired — role_holders_v2 via COMMITTEE_ROLE_HOLDERS is the only
+    // committee-role source, keyed by the holder's email.)
     return out;
   }
 
@@ -8680,10 +8631,17 @@
         }
 
         // ── Ways to get more involved (open seats) ─────────────────────
+        // Open seats = active committee roles with NO current holder,
+        // straight from the DB roles directory. Committee-less pseudo
+        // roles (Guest, the VP-picked Morning Class Liaisons) and the
+        // per-session classroom roles aren't volunteer-claimable seats,
+        // so they're skipped.
         var open = [];
-        (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
-          if (c.chair && !c.chair.person) open.push({ committee: c.name, title: c.chair.title });
-          (c.roles || []).forEach(function (r) { if (!r.person) open.push({ committee: c.name, title: r.title }); });
+        (ROLES_DIRECTORY || []).forEach(function (r) {
+          if (r.category !== 'committee_role' || !r.committee) return;
+          if (String(r.term_length || '').toLowerCase() === '1 session') return;
+          if (r.holders && r.holders.length) return;
+          open.push({ committee: r.committee, title: r.title });
         });
         h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
         // A PM class proposal is always a welcome way to contribute, whether
@@ -15203,8 +15161,9 @@
   }
 
   // Class Ideas popup (from Resources card)
-  // DB-backed inspiration list ({group: [{id, idea}]}); falls back to the
-  // sheet-era CLASS_IDEAS while the table is empty (prod pre-seed).
+  // DB-backed inspiration list ({group: [{id, idea}]}) from
+  // class_inspirations — the sole source (the sheet-era Class Ideas tab
+  // is retired; prod table confirmed seeded).
   var _classInspirations = null;
   function showClassIdeasPopup() {
     if (!personDetail || !personDetailCard) return;
@@ -15249,16 +15208,9 @@
         html += '</div>';
       });
     } else {
-      // Sheet-era fallback (read-only).
-      Object.keys(CLASS_IDEAS).forEach(function (group) {
-        html += '<div style="margin-bottom:1.25rem;">';
-        html += '<h4 style="margin-bottom:0.5rem;font-size:0.95rem;">' + escapeHtml(group) + '</h4>';
-        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-        CLASS_IDEAS[group].forEach(function (idea) {
-          html += '<span class="idea-chip">' + escapeHtml(idea) + '</span>';
-        });
-        html += '</div></div>';
-      });
+      // DB list empty / not yet loaded (the sheet-era fallback retired
+      // with the Class Ideas tab — class_inspirations is the only source).
+      html += '<p style="color:var(--color-text-light);">No ideas listed yet &mdash; check back soon!</p>';
     }
     if (canEditIdeas) {
       html += '<div style="border-top:1px solid var(--color-border);padding-top:10px;margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">'
@@ -15391,16 +15343,15 @@
   };
 
   function getSupplyCoordinatorName() {
-    if (!VOLUNTEER_COMMITTEES) return null;
-    for (var i = 0; i < VOLUNTEER_COMMITTEES.length; i++) {
-      var roles = VOLUNTEER_COMMITTEES[i].roles || [];
-      for (var j = 0; j < roles.length; j++) {
-        if (roles[j].title && roles[j].title.toLowerCase().indexOf('supply coordinator') !== -1) {
-          return roles[j].person || null;
-        }
-      }
-    }
-    return null;
+    // Holder names come from the DB roles directory (role_holders_v2,
+    // resolved server-side via people) — the Volunteer Committees sheet
+    // is retired. Multiple holders join with ' & '.
+    var names = [];
+    (ROLES_DIRECTORY || []).forEach(function (r) {
+      if (String(r.title || '').toLowerCase().indexOf('supply coordinator') === -1) return;
+      (r.holders || []).forEach(function (h) { if (h && h.name) names.push(h.name); });
+    });
+    return names.length ? names.join(' & ') : null;
   }
 
   function computeSupplyClosetCanEdit() {
@@ -15415,19 +15366,17 @@
     // coordinator assigned in the Roles UI (no legacy sheet row) would see
     // the card but open the closet read-only.
     if (clientHasCapability('supply_closet_edit', ['Supply Coordinator'])) return true;
-    // Legacy fallback: last-name match against the Volunteer Committees
-    // sheet data (pre-Roles-UI assignments).
-    var email = getActiveEmail();
+    // Fallback: the coordinator's holder EMAIL from the DB roles
+    // directory (covers a stale capability cache). The old last-name
+    // match against the Volunteer Committees sheet is retired.
+    var email = String(getActiveEmail() || '').toLowerCase();
     if (!email) return false;
-    var me = null;
-    for (var i = 0; i < FAMILIES.length; i++) {
-      if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; }
+    for (var i = 0; i < (ROLES_DIRECTORY || []).length; i++) {
+      var r = ROLES_DIRECTORY[i];
+      if (String(r.title || '').toLowerCase().indexOf('supply coordinator') === -1) continue;
+      if ((r.holders || []).some(function (h) { return String((h && h.email) || '').toLowerCase() === email; })) return true;
     }
-    if (!me) return false;
-    var coordName = getSupplyCoordinatorName();
-    if (!coordName) return false;
-    var lastName = coordName.trim().split(/\s+/).pop().toLowerCase();
-    return me.name && me.name.toLowerCase() === lastName;
+    return false;
   }
 
   function fetchSupplyCloset() {
@@ -18647,9 +18596,12 @@
     return personNamesMatch(a, b);
   }
 
-  // Committee titles held by ONE named person — the same two sources
-  // getWorkspaceRoles consults: the role_holders_v2 overlay (by the
-  // person's email) and the legacy volunteer sheet (by full name).
+  // Committee titles held by ONE named person — resolved through the
+  // person's people-row email into the role_holders_v2 overlay (the same
+  // source getWorkspaceRoles consults; the legacy volunteer-sheet name
+  // matching is retired). Building Opener/Closer flow through here too —
+  // they're committee roles in role_holders_v2, so the opener/closer
+  // coverage-slot derivation keeps working.
   function committeeTitlesForPerson(fam, fullName) {
     var titles = [];
     var target = String(fullName || '').trim().toLowerCase();
@@ -18659,12 +18611,6 @@
       var full = String((typeof personFullName === 'function' ? personFullName(pp, fam) : pp.name) || '').trim().toLowerCase();
       if (full !== target) return;
       ((COMMITTEE_ROLE_HOLDERS || {})[String(pp.email).toLowerCase()] || []).forEach(function (t) { titles.push(String(t)); });
-    });
-    (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
-      if (c.chair && c.chair.person && String(c.chair.person).trim().toLowerCase() === target) titles.push(String(c.chair.title || ''));
-      (c.roles || []).forEach(function (r) {
-        if (r.person && String(r.person).trim().toLowerCase() === target) titles.push(String(r.title || ''));
-      });
     });
     return titles;
   }

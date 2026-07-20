@@ -325,8 +325,11 @@ function normalizeWorkspaceTitle(t) {
 }
 
 // Mirrors getWorkspaceRoles in script.js. Keep in sync — same caveat as
-// collectDutiesForPerson above.
-function getWorkspaceRoles(activeEmail, FAMILIES, VOLUNTEER_COMMITTEES) {
+// collectDutiesForPerson above. Post-Sheets-retirement (issue #25):
+// committee roles come ONLY from the email-keyed COMMITTEE_ROLE_HOLDERS
+// map (role_holders_v2 via the api/sheets overlay) — the Volunteer
+// Committees sheet name-matching block is gone.
+function getWorkspaceRoles(activeEmail, FAMILIES, COMMITTEE_ROLE_HOLDERS) {
   if (!activeEmail) return [];
   var lower = String(activeEmail).toLowerCase();
   var out = [];
@@ -350,36 +353,10 @@ function getWorkspaceRoles(activeEmail, FAMILIES, VOLUNTEER_COMMITTEES) {
 
   if (lower === 'communications@rootsandwingsindy.com') addRole('Communications Director');
 
-  if (fam) {
-    var activePersonRow = null;
-    if (Array.isArray(fam.people)) {
-      for (var pi = 0; pi < fam.people.length; pi++) {
-        var pp = fam.people[pi];
-        if (pp && String(pp.email || '').toLowerCase() === lower) { activePersonRow = pp; break; }
-      }
-    }
-    var matchTargets;
-    if (activePersonRow) {
-      matchTargets = [personFullName(activePersonRow, fam)];
-    } else if (Array.isArray(fam.people) && fam.people.length > 0) {
-      matchTargets = fam.people.map(function (p) { return personFullName(p, fam); });
-    } else {
-      matchTargets = (fam.parents || '').split(/\s*&\s*/).map(function (first) {
-        return (first.trim() + ' ' + fam.name).trim();
-      });
-    }
-    matchTargets = matchTargets.filter(Boolean);
-
-    function wsMatch(a, b) { return a && b && a.trim().toLowerCase() === b.trim().toLowerCase(); }
-    (VOLUNTEER_COMMITTEES || []).forEach(function (c) {
-      if (c.chair && c.chair.person && matchTargets.some(function (n) { return wsMatch(c.chair.person, n); })) {
-        addRole(c.chair.title);
-      }
-      (c.roles || []).forEach(function (r) {
-        if (r.person && matchTargets.some(function (n) { return wsMatch(r.person, n); })) addRole(r.title);
-      });
-    });
+  if (COMMITTEE_ROLE_HOLDERS && COMMITTEE_ROLE_HOLDERS[lower]) {
+    COMMITTEE_ROLE_HOLDERS[lower].forEach(function (t) { addRole(t); });
   }
+
   return out;
 }
 
@@ -398,23 +375,22 @@ const wsFamilies = [
     ]
   }
 ];
-const wsCommittees = [
-  { name: 'Facility', chair: { title: 'Facility Director', person: 'Erin Bogan' },
-    roles: [
-      { title: 'Cleaning Crew Liaison', person: 'Jay Bogan' }
-    ]
-  }
-];
+// Email-keyed committee-role map (role_holders_v2 overlay shape) — the
+// only committee-role source since the Sheets retirement.
+const wsRoleHolders = {
+  'erin@rootsandwingsindy.com': ['Facility Director'],
+  'jay@rootsandwingsindy.com': ['Cleaning Crew Liaison']
+};
 
 t('Primary parent gets the family\'s board role + their own committee role', () => {
-  const roles = getWorkspaceRoles('erin@rootsandwingsindy.com', wsFamilies, wsCommittees);
+  const roles = getWorkspaceRoles('erin@rootsandwingsindy.com', wsFamilies, wsRoleHolders);
   assert.ok(roles.indexOf('Treasurer') !== -1, 'Erin should have Treasurer');
   assert.ok(roles.indexOf('Facility Director') !== -1, 'Erin should chair Facility');
   assert.strictEqual(roles.indexOf('Cleaning Crew Liaison'), -1, 'Erin should NOT inherit Jay\'s role');
 });
 
 t('Co-parent (BLC) does NOT inherit the board role, only their own committee role', () => {
-  const roles = getWorkspaceRoles('jay@rootsandwingsindy.com', wsFamilies, wsCommittees);
+  const roles = getWorkspaceRoles('jay@rootsandwingsindy.com', wsFamilies, wsRoleHolders);
   assert.strictEqual(roles.indexOf('Treasurer'), -1, 'Jay should NOT inherit Treasurer');
   assert.strictEqual(roles.indexOf('Facility Director'), -1, 'Jay should NOT inherit Facility chair');
   assert.ok(roles.indexOf('Cleaning Crew Liaison') !== -1, 'Jay should have his own role');
@@ -425,12 +401,12 @@ t('Co-parent\'s login email is recognized via fam.loginEmails (not just primary)
   // fam.email + fam.boardEmail and ignored people-row emails entirely.
   const fam = wsFamilies[0];
   assert.ok(familyMatchesEmail(fam, 'jay@rootsandwingsindy.com'), 'helper finds Jay');
-  const roles = getWorkspaceRoles('jay@rootsandwingsindy.com', wsFamilies, wsCommittees);
+  const roles = getWorkspaceRoles('jay@rootsandwingsindy.com', wsFamilies, wsRoleHolders);
   assert.ok(roles.length > 0, 'Jay\'s login should yield at least one role');
 });
 
 t('Board-email login (treasurer@) gets the board role', () => {
-  const roles = getWorkspaceRoles('treasurer@rootsandwingsindy.com', wsFamilies, wsCommittees);
+  const roles = getWorkspaceRoles('treasurer@rootsandwingsindy.com', wsFamilies, wsRoleHolders);
   assert.ok(roles.indexOf('Treasurer') !== -1, 'role inbox login surfaces Treasurer');
 });
 
@@ -440,7 +416,7 @@ t('communications@ super-user shortcut surfaces Communications Director', () => 
 });
 
 t('Unknown email returns no roles', () => {
-  const roles = getWorkspaceRoles('stranger@example.com', wsFamilies, wsCommittees);
+  const roles = getWorkspaceRoles('stranger@example.com', wsFamilies, wsRoleHolders);
   assert.deepStrictEqual(roles, []);
 });
 
@@ -516,18 +492,84 @@ t('PM scheduling card: standalone for ACL; VP reaches it via Co-op Management', 
   assert.ok(vpFold, "roles card should fold the Afternoon Class Builder (with its pending pill) into the VP's rows");
 });
 
-t('Sheet-only family with no people row falls back to fam.parents matching', () => {
-  // Pre-people-table compatibility: a family that hasn't been backfilled
-  // should still surface its committee roles via the legacy parents string.
-  const sheetOnlyFams = [{
-    name: 'Smith',
-    email: 'smith@rootsandwingsindy.com',
-    parents: 'Sam',  // first-names-only string (post-fix shape)
-    loginEmails: ['smith@rootsandwingsindy.com']
-  }];
-  const committees = [{ name: 'Events', chair: null, roles: [{ title: 'Field Day Coordinator', person: 'Sam Smith' }] }];
-  const roles = getWorkspaceRoles('smith@rootsandwingsindy.com', sheetOnlyFams, committees);
+t('Committee roles resolve by holder EMAIL even with no family/people row', () => {
+  // Post-Sheets-retirement: the email-keyed role_holders_v2 map is the
+  // only committee-role source — a holder gets their role even when no
+  // FAMILIES row matches their login (no name matching anywhere).
+  const roles = getWorkspaceRoles('smith@rootsandwingsindy.com', [], {
+    'smith@rootsandwingsindy.com': ['Field Day Coordinator']
+  });
   assert.ok(roles.indexOf('Field Day Coordinator') !== -1);
+});
+
+t('Retired sheet shape (array of committees) yields no roles', () => {
+  // A stale cached payload could still hand the old VOLUNTEER_COMMITTEES
+  // array shape to the map parameter — it must not crash or match.
+  const roles = getWorkspaceRoles('smith@rootsandwingsindy.com', [],
+    [{ name: 'Events', roles: [{ title: 'Field Day Coordinator', person: 'Sam Smith' }] }]);
+  assert.deepStrictEqual(roles, []);
+});
+
+// ── Open seats (Ways to get more involved) — mirrors the workspace
+// derivation from ROLES_DIRECTORY: active committee roles with no
+// holders, skipping committee-less pseudo roles and 1-session roles.
+function openSeatsFrom(rolesDirectory) {
+  var open = [];
+  (rolesDirectory || []).forEach(function (r) {
+    if (r.category !== 'committee_role' || !r.committee) return;
+    if (String(r.term_length || '').toLowerCase() === '1 session') return;
+    if (r.holders && r.holders.length) return;
+    open.push({ committee: r.committee, title: r.title });
+  });
+  return open;
+}
+
+t('Open seats = zero-holder committee roles only (board/Guest/1-session skipped)', () => {
+  const dir = [
+    { title: 'Treasurer', category: 'board', committee: 'Finance Committee', term_length: '2 year', holders: [] },
+    { title: 'Supply Coordinator', category: 'committee_role', committee: 'Finance Committee', term_length: '1 year', holders: [{ name: 'Poppy Sun', email: 'member@rootsandwingsindy.com' }] },
+    { title: 'Yearbook Coordinator', category: 'committee_role', committee: 'Communications Committee', term_length: '1 year', holders: [] },
+    { title: 'Guest', category: 'committee_role', committee: '', term_length: '', holders: [] },
+    { title: 'Floater', category: 'committee_role', committee: 'Facility Committee', term_length: '1 session', holders: [] }
+  ];
+  const open = openSeatsFrom(dir);
+  assert.strictEqual(open.length, 1, 'exactly one open seat expected');
+  assert.strictEqual(open[0].title, 'Yearbook Coordinator');
+  assert.strictEqual(open[0].committee, 'Communications Committee');
+});
+
+// ── Special-event coordinator duty (DB) — email-keyed, mirrors the
+// SPECIAL_EVENTS_DB block in renderMyFamily.
+function seCoordinatorDuties(events, activeEmail, nowTs) {
+  var duties = [];
+  var seEmailLc = String(activeEmail || '').toLowerCase();
+  if (!seEmailLc) return duties;
+  (events || []).forEach(function (ev) {
+    var isCoord = ev.coordinator && String(ev.coordinator.email || '').toLowerCase() === seEmailLc;
+    if (!isCoord) return;
+    if (ev.date) {
+      var evTs = Date.parse(ev.date + 'T12:00:00');
+      if (isFinite(evTs) && evTs < (nowTs - 86400000)) return;
+    }
+    duties.push(ev.name + ' Coordinator');
+  });
+  return duties;
+}
+
+t('SE coordinator duty matches by email only; past events drop off', () => {
+  const now = Date.parse('2026-09-01T12:00:00');
+  const events = [
+    { name: 'Ice Cream Social', date: '2026-09-10', coordinator: { name: 'Erin Bogan', email: 'erinb@rootsandwingsindy.com' } },
+    { name: 'Field Day', date: '2026-06-10', coordinator: { name: 'Erin Bogan', email: 'erinb@rootsandwingsindy.com' } },
+    { name: 'PJ Party', date: '', coordinator: { name: 'Erin Bogan', email: 'erinb@rootsandwingsindy.com' } },
+    { name: 'Dance', date: '2026-10-01', coordinator: { name: 'Erin Testing Account', email: 'erint@rootsandwingsindy.com' } },
+    { name: 'Camp', date: '2026-10-15', coordinator: null }
+  ];
+  const mine = seCoordinatorDuties(events, 'erinb@rootsandwingsindy.com', now);
+  assert.deepStrictEqual(mine, ['Ice Cream Social Coordinator', 'PJ Party Coordinator'],
+    'upcoming + undated events only, matched by email');
+  const tester = seCoordinatorDuties(events, 'erint@rootsandwingsindy.com', now);
+  assert.deepStrictEqual(tester, ['Dance Coordinator'], 'same-name stranger only gets their own email\'s event');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
