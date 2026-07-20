@@ -155,6 +155,13 @@ const CAPABILITIES = [
     defaultRoles: ['Communications Director']
   },
   {
+    key: 'blc_signin_manage',
+    area: 'Waivers & Onboarding',
+    label: 'BLC sign-ins — set up requested accounts',
+    desc: 'See families’ requests for backup-Learning-Coach @rootsandwingsindy.com sign-ins and record the created address (which emails the BLC their setup guide).',
+    defaultRoles: ['Communications Director']
+  },
+  {
     key: 'member_onboarding',
     area: 'Waivers & Onboarding',
     label: 'Member Onboarding checklist',

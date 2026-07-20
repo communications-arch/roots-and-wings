@@ -8842,6 +8842,11 @@
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">🌱</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
           h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
           h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
+          // Families requesting an @rootsandwingsindy.com sign-in for a
+          // backup Learning Coach (Erin, 2026-07-20). Painted by
+          // loadBlcEmailRequestCount; the modal records the created
+          // address, which grants login + emails the setup guide.
+          h += '<li id="ws-todo-blc-signin-item" hidden><button type="button" class="ws-link-btn" data-resource-action="blc-signin-requests"><span class="ws-link-count" id="ws-blc-signin-count">0</span><span class="ws-link-icon">🔑</span><span id="ws-blc-signin-label">Set up R&amp;W sign-ins</span></button></li>';
           // Confirm role holders for the new school year. Fires after
           // Field Day until the active year is marked confirmed in
           // role_holder_confirmations. Click opens the Confirm Role
@@ -8934,6 +8939,7 @@
         if (typeof loadTreasurerPendingCount === 'function') loadTreasurerPendingCount();
         if (typeof loadMemberOnboardingCount === 'function') loadMemberOnboardingCount();
         if (typeof loadPendingWaiversCount === 'function') loadPendingWaiversCount();
+        if (typeof loadBlcEmailRequestCount === 'function') loadBlcEmailRequestCount();
         if (typeof loadMembershipTourRequestsCount === 'function') loadMembershipTourRequestsCount();
         if (typeof loadRegInviteTodoCounts === 'function') loadRegInviteTodoCounts();
         if (typeof loadCleaningTodoCount === 'function') loadCleaningTodoCount();
@@ -13538,6 +13544,107 @@
       .catch(function (err) {
         console.warn('[loadPendingWaiversCount] network error:', err);
       });
+  }
+
+  // ── BLC sign-in requests (Comms To Do) ───────────────────────────────
+  // Families ask for an @rootsandwingsindy.com sign-in for a backup
+  // Learning Coach; the queue lists BLC rows stamped with a request that
+  // still lack a workspace email. Recording the created address grants
+  // portal access and emails the BLC their getting-started guide, so
+  // saving a row clears it from the queue automatically.
+  function loadBlcEmailRequestCount() {
+    var item = document.getElementById('ws-todo-blc-signin-item');
+    var pill = document.getElementById('ws-blc-signin-count');
+    var label = document.getElementById('ws-blc-signin-label');
+    if (!item) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/tour?list=blc_email_requests' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var reqs = (d && Array.isArray(d.requests)) ? d.requests : [];
+        if (reqs.length > 0) {
+          if (label) label.textContent = 'Set up R&W sign-in' + (reqs.length === 1 ? '' : 's');
+          if (pill) pill.textContent = String(reqs.length);
+          item.hidden = false;
+        } else {
+          item.hidden = true;
+        }
+        recomputeTodoEmptyState();
+      })
+      .catch(function (err) { console.warn('[loadBlcEmailRequestCount] network error:', err); });
+  }
+
+  function showBlcSigninRequestsModal() {
+    if (!personDetail || !personDetailCard) return;
+    var shell = '<button class="detail-close" aria-label="Close">&times;</button>';
+    shell += '<div class="elective-detail rd-modal mo-modal">';
+    shell += '<h3 class="rd-title">🔑 R&amp;W sign-in requests</h3>';
+    shell += '<div id="blc-signin-modal-body"><p class="ws-empty">Loading requests…</p></div>';
+    shell += '</div>';
+    personDetailCard.innerHTML = shell;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.addEventListener('click', function (e) { if (e.target === personDetail) closeDetail(); });
+    fetch('/api/tour?list=blc_email_requests' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        var wrapEl = document.getElementById('blc-signin-modal-body');
+        if (!wrapEl) return;
+        if (!res.ok) { wrapEl.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtml((res.data && res.data.error) || 'error') + '</p>'; return; }
+        var reqs = Array.isArray(res.data.requests) ? res.data.requests : [];
+        var h = '<p class="ws-body-hint">Create each account in Google Admin first, then enter the new address here — saving it turns on their portal sign-in and emails them a getting-started guide (Google account activation, signing in, installing the app).</p>';
+        if (reqs.length === 0) {
+          h += '<p style="color:#666;">No sign-in requests waiting. 🎉</p>';
+        }
+        reqs.forEach(function (q) {
+          var full = ((q.first_name || '') + ' ' + (q.last_name || '')).trim();
+          var famLabel = q.family_name || q.family_email || '';
+          var suggested = (typeof deriveWorkspaceEmail === 'function')
+            ? deriveWorkspaceEmail(full, q.family_name || '') : '';
+          h += '<div class="enroll-req-card" data-blc-req="' + q.id + '" style="margin-bottom:10px;">';
+          h += '<div><strong>' + escapeHtml(full) + '</strong> — ' + escapeHtml(famLabel) + ' family';
+          h += (q.personal_email ? '<div style="color:#666;font-size:0.9rem;">Personal email: ' + escapeHtml(q.personal_email) + ' (guide goes here)</div>' : '<div style="color:#b93a33;font-size:0.9rem;">No personal email on file — the guide will go to the new address instead.</div>');
+          h += '</div>';
+          h += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">';
+          h += '<input type="email" class="cl-input" id="blc-ws-email-' + q.id + '" style="min-width:260px;flex:1;" placeholder="new @rootsandwingsindy.com address" value="' + escapeAttr(suggested) + '">';
+          h += '<button type="button" class="btn btn-primary btn-sm" data-blc-save="' + q.id + '">Save &amp; send guide</button>';
+          h += '</div><div class="blc-req-msg" style="color:#b93a33;font-size:0.9rem;margin-top:4px;"></div></div>';
+        });
+        wrapEl.innerHTML = h;
+        var wrap = wrapEl;
+        wrap.addEventListener('click', function (e) {
+          var btn = e.target.closest('[data-blc-save]');
+          if (!btn) return;
+          var id = btn.getAttribute('data-blc-save');
+          var input = document.getElementById('blc-ws-email-' + id);
+          var card = wrap.querySelector('[data-blc-req="' + id + '"]');
+          var msg = card ? card.querySelector('.blc-req-msg') : null;
+          var addr = (input && input.value || '').trim();
+          btn.disabled = true; btn.textContent = 'Saving…';
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'blc-email-complete', person_id: parseInt(id, 10), workspace_email: addr })
+          })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res2) {
+              if (!res2.ok) {
+                if (msg) msg.textContent = (res2.data && res2.data.error) || 'Save failed.';
+                btn.disabled = false; btn.textContent = 'Save & send guide';
+                return;
+              }
+              if (card) card.innerHTML = '<div>✅ <strong>Saved.</strong> Sign-in active; guide emailed to ' + escapeHtml(res2.data.emailed || addr) + '.</div>';
+              loadBlcEmailRequestCount();
+            })
+            .catch(function () {
+              if (msg) msg.textContent = 'Network error — try again.';
+              btn.disabled = false; btn.textContent = 'Save & send guide';
+            });
+        });
+      })
+      .catch(function () { alert('Could not reach the server.'); });
   }
 
   function loadMemberOnboardingCount() {
@@ -18166,6 +18273,7 @@
       showBoardCalendarModal({ view: btn.getAttribute('data-cal-view') || undefined });
     }
     else if (action === 'member-onboarding' && typeof showMemberOnboardingModal === 'function') showMemberOnboardingModal();
+    else if (action === 'blc-signin-requests' && typeof showBlcSigninRequestsModal === 'function') showBlcSigninRequestsModal();
     else if (action === 'enrollment-requests' && typeof showEnrollmentRequestsModal === 'function') showEnrollmentRequestsModal();
     else if (action === 'welcome-new-members' && typeof showWelcomeListModal === 'function') {
       var wf = btn.getAttribute('data-welcome-filter');
@@ -30542,6 +30650,7 @@
       // fields the EMI form binds to + the canonical email identity.
       parentSeed = fam.people.map(function (p) {
         return {
+          id: p.id || null, // people row id — BLC sign-in request keys on it
           name: ((p.first_name || '') + ' ' + (p.last_name || '')).trim(),
           first_name: p.first_name || '',
           last_name: p.last_name || '',
@@ -30554,6 +30663,7 @@
           phone: p.phone || '',
           nickname: p.nickname || '',
           nicknames: Array.isArray(p.nicknames) ? p.nicknames.slice() : [],
+          rw_email_requested: !!p.rw_email_requested,
           _queuedPhoto: null
         };
       });
@@ -30712,6 +30822,15 @@
       h += '<input class="rd-input' + (emailIsPrimary ? ' emi-readonly' : '') + '" style="flex:1;min-width:0;" type="email" data-field="email" value="' + escapeHtml(p.email) + '" ' + emailAttrs + '>';
       h += '<input class="rd-input" style="flex:1;min-width:0;" type="email" placeholder="' + escapeHtml(personalEmailPlaceholder) + '" data-field="personal_email" value="' + escapeHtml(p.personal_email || '') + '">';
       h += '</div>';
+      // BLC portal sign-in request (Erin, 2026-07-20): a saved BLC without
+      // an @rootsandwingsindy.com login can ask Comms to create one. The
+      // request goes to the Comms To Do; when the address is recorded the
+      // BLC gets a getting-started email automatically.
+      if (p.role === 'blc' && p.id && !/@rootsandwingsindy\.com$/i.test(String(p.email || ''))) {
+        h += p.rw_email_requested
+          ? '<div class="emi-full" style="color:#2f7d3b;font-size:0.9rem;">✓ R&amp;W sign-in requested — the Communications Director will set it up.</div>'
+          : '<div class="emi-full"><button type="button" class="sc-btn" data-role="request-rw-signin" data-idx="' + idx + '" title="Ask the Communications Director to create an @rootsandwingsindy.com sign-in for this backup coach">🔑 Request an R&amp;W sign-in</button></div>';
+      }
       var pOptOut = p.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (pOptOut ? ' checked' : '') + '>' +
@@ -31103,6 +31222,34 @@
           state.kids.splice(rmIdx, 1);
         }
         render();
+        return;
+      }
+      var signinBtn = e.target.closest('[data-role="request-rw-signin"]');
+      if (signinBtn) {
+        var sIdx = parseInt(signinBtn.getAttribute('data-idx'), 10);
+        var sp = state.parents[sIdx];
+        if (!sp || !sp.id) return;
+        signinBtn.disabled = true; signinBtn.textContent = 'Requesting…';
+        fetch('/api/tour', {
+          method: 'POST',
+          headers: rwAuthHeaders(true),
+          body: JSON.stringify({ kind: 'blc-email-request', person_id: sp.id })
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              showError((res.data && res.data.error) || 'Could not send the request.');
+              signinBtn.disabled = false; signinBtn.textContent = '🔑 Request an R&W sign-in';
+              return;
+            }
+            sp.rw_email_requested = true;
+            syncStateFromDom();
+            render();
+          })
+          .catch(function () {
+            showError('Could not reach the server — try again.');
+            signinBtn.disabled = false; signinBtn.textContent = '🔑 Request an R&W sign-in';
+          });
         return;
       }
     }

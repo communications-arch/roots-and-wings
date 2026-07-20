@@ -1987,3 +1987,10 @@ CREATE INDEX IF NOT EXISTS class_signup_picks_kid_id_idx
   ON class_signup_picks (school_year, session_number, kid_id);
 CREATE INDEX IF NOT EXISTS class_lottery_bumps_kid_id_idx
   ON class_lottery_bumps (school_year, kid_id);
+
+-- 2026-07-20: families can REQUEST an @rootsandwingsindy.com sign-in for a
+-- backup Learning Coach (Erin). The request stamps the BLC's people row;
+-- the Comms To Do lists stamped rows that still lack a workspace email, so
+-- recording the created address self-clears the queue.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_at TIMESTAMPTZ;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_by TEXT;

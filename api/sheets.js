@@ -581,6 +581,7 @@ function isoDay(v) {
 
 function shapePersonRow(r) {
   return {
+    id:             r.id || null,
     email:          String(r.email || '').toLowerCase(),
     family_email:   String(r.family_email || '').toLowerCase(),
     first_name:     r.first_name || '',
@@ -592,7 +593,10 @@ function shapePersonRow(r) {
     pronouns:       r.pronouns || '',
     photo_url:      r.photo_url || '',
     photo_consent:  r.photo_consent !== false,
-    nicknames:      Array.isArray(r.nicknames) ? r.nicknames : []
+    nicknames:      Array.isArray(r.nicknames) ? r.nicknames : [],
+    // BLC portal sign-in request state (Erin, 2026-07-20) — drives the
+    // "Request R&W sign-in" button / "requested" chip on the EMI BLC row.
+    rw_email_requested: !!r.rw_email_requested_at
   };
 }
 
@@ -613,9 +617,9 @@ async function applyMemberProfileOverlay(families) {
 
   // Single round-trip per table; group in JS rather than N queries.
   var peopleRows = await sql`
-    SELECT email, family_email, first_name, last_name, nickname, role,
+    SELECT id, email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
-           nicknames, sort_order
+           nicknames, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email
   `;
@@ -1386,9 +1390,9 @@ async function loadFamiliesFromProfiles(sql) {
     ORDER BY LOWER(family_name)
   `;
   var peopleRows = await sql`
-    SELECT email, family_email, first_name, last_name, nickname, role,
+    SELECT id, email, family_email, first_name, last_name, nickname, role,
            personal_email, phone, pronouns, photo_url, photo_consent,
-           nicknames, sort_order
+           nicknames, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email
   `;

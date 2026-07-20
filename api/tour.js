@@ -1124,6 +1124,141 @@ async function handleRegistration(body, req, res) {
   }
 }
 
+// ── BLC "getting started" email ──
+// Rides along with every backup-Learning-Coach waiver email (Erin,
+// 2026-07-20): BLCs are brand-new to the portal, so the waiver email alone
+// left them without the how-do-I-even-log-in part — the Google-account
+// prerequisite, the sign-in flow, and the install-the-app steps.
+function blcGettingStartedEmailHtml(name) {
+  return `
+    <h2>Getting set up on the members portal</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>Along with your waiver, here's how to get onto the Roots &amp; Wings members portal — where you'll see your family's page, the co-op calendar, and your own responsibilities.</p>
+    <h3 style="margin-bottom:4px;">1. Activate your Roots &amp; Wings Google account first</h3>
+    <p style="margin-top:0;">You'll sign in with an <strong>@rootsandwingsindy.com</strong> Google account — not your personal email. Yours has been created; the co-op sends its sign-in details separately (if you don't have them yet, reply to this email). Once you do, go to <a href="https://accounts.google.com">accounts.google.com</a>, sign in with that address, and set your password. This step has to come first.</p>
+    <h3 style="margin-bottom:4px;">2. Sign in to the portal</h3>
+    <p style="margin-top:0;">Go to <a href="https://www.rootsandwingsindy.com/members.html">rootsandwingsindy.com</a> &rarr; <strong>Members</strong> &rarr; <strong>Sign in with Google</strong>, and pick your @rootsandwingsindy.com account. If your device auto-picks your personal Gmail, tap &ldquo;Use another account.&rdquo;</p>
+    <h3 style="margin-bottom:4px;">3. Install the app (optional, but handy)</h3>
+    <p style="margin-top:0;">
+      <strong>iPhone / iPad (Safari):</strong> tap the Share button, then &ldquo;Add to Home Screen.&rdquo;<br>
+      <strong>Android (Chrome):</strong> tap the &#8942; menu, then &ldquo;Install app&rdquo; (or &ldquo;Add to Home screen&rdquo;).<br>
+      Or once you're signed in, open <strong>Resources &rarr; &#128242; Install the App</strong> for step-by-step help for your device.
+    </p>
+    <p style="color:#666;font-size:0.9rem;margin-top:20px;">Questions? Reply to this email and it'll reach the Membership team.</p>
+  `;
+}
+
+// ── BLC portal sign-in requests (Erin, 2026-07-20) ──
+// A family asks Comms to create their backup Learning Coach's
+// @rootsandwingsindy.com sign-in. The request stamps the BLC's people row;
+// the Comms To Do lists stamped rows that still lack a workspace email;
+// recording the created address grants portal access on the spot
+// (resolveFamily matches people.email directly) and emails the BLC their
+// getting-started guide — so the queue self-clears with no status field.
+
+async function handleBlcEmailRequest(body, req, res) {
+  const user = await verifyWorkspaceAuthWithViewAs(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const personId = parseInt(body.person_id, 10);
+  if (!Number.isInteger(personId) || personId <= 0) return res.status(400).json({ error: 'person_id required' });
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, role, email, personal_email, first_name, last_name, family_email, rw_email_requested_at
+    FROM people WHERE id = ${personId}`;
+  if (!rows.length) return res.status(404).json({ error: 'Person not found' });
+  const p = rows[0];
+  if (p.role !== 'blc') return res.status(400).json({ error: 'Sign-in requests are for backup Learning Coaches.' });
+  if (!(await canEditFamily(sql, user.email, p.family_email))) {
+    return res.status(403).json({ error: 'You can only request sign-ins for your own family.' });
+  }
+  if (String(p.email || '').toLowerCase().endsWith('@rootsandwingsindy.com')) {
+    return res.status(400).json({ error: (p.first_name || 'This coach') + ' already has a Roots & Wings sign-in.' });
+  }
+  if (p.rw_email_requested_at) return res.status(200).json({ success: true, already: true });
+  await sql`
+    UPDATE people SET rw_email_requested_at = NOW(), rw_email_requested_by = ${user.realEmail || user.email}
+    WHERE id = ${personId}`;
+  const blcName = ((p.first_name || '') + ' ' + (p.last_name || '')).trim() || 'a backup Learning Coach';
+  const fam = await sql`SELECT family_name FROM member_profiles WHERE LOWER(family_email) = LOWER(${p.family_email})`;
+  const famName = (fam[0] && fam[0].family_name) || p.family_email;
+  let commsTo = '';
+  try { commsTo = await getRoleHolderEmail('Communications Director'); } catch (e) { /* mailbox fallback */ }
+  try {
+    await sql`
+      INSERT INTO notifications (recipient_email, type, title, body, link_url)
+      VALUES (${(commsTo || 'communications@rootsandwingsindy.com').toLowerCase()}, 'blc_signin_request',
+              ${'R&W sign-in requested — ' + blcName},
+              ${'The ' + famName + ' family asked for a portal sign-in for their backup Learning Coach ' + blcName + '. Set it up from your To Do list.'}, '')`;
+  } catch (e) { console.error('blc sign-in notification failed (non-fatal):', e.message); }
+  return res.status(200).json({ success: true });
+}
+
+async function requireBlcSigninManager(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) { res.status(401).json({ error: 'Unauthorized' }); return null; }
+  const ok = isSuperUser(auth.email) || await hasCapability(auth.email, 'blc_signin_manage');
+  if (!ok) { res.status(403).json({ error: 'Only the Communications Director can manage sign-in requests.' }); return null; }
+  return auth;
+}
+
+// GET ?list=blc_email_requests — Comms' queue for the To Do modal.
+async function handleBlcEmailRequestList(req, res) {
+  const auth = await requireBlcSigninManager(req, res);
+  if (!auth) return;
+  const sql = getSql();
+  const rows = await sql`
+    SELECT p.id, p.first_name, p.last_name, p.personal_email, p.family_email,
+           p.rw_email_requested_at, mp.family_name
+    FROM people p
+    LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+    WHERE p.role = 'blc' AND p.rw_email_requested_at IS NOT NULL
+      AND LOWER(COALESCE(p.email, '')) NOT LIKE '%@rootsandwingsindy.com'
+    ORDER BY p.rw_email_requested_at`;
+  return res.status(200).json({ requests: rows });
+}
+
+// POST kind='blc-email-complete' — Comms records the created address.
+async function handleBlcEmailComplete(body, req, res) {
+  const auth = await requireBlcSigninManager(req, res);
+  if (!auth) return;
+  const personId = parseInt(body.person_id, 10);
+  const wsEmail = String(body.workspace_email || '').trim().toLowerCase();
+  if (!Number.isInteger(personId) || personId <= 0) return res.status(400).json({ error: 'person_id required' });
+  if (!/^[a-z0-9._+-]+@rootsandwingsindy\.com$/.test(wsEmail)) {
+    return res.status(400).json({ error: 'Enter the new @rootsandwingsindy.com address.' });
+  }
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, role, first_name, last_name, personal_email, family_email
+    FROM people WHERE id = ${personId}`;
+  if (!rows.length) return res.status(404).json({ error: 'Person not found' });
+  const p = rows[0];
+  if (p.role !== 'blc') return res.status(400).json({ error: 'Not a backup Learning Coach row.' });
+  const dupe = await sql`SELECT id FROM people WHERE LOWER(email) = ${wsEmail} AND id <> ${personId}`;
+  if (dupe.length) return res.status(409).json({ error: 'That address is already on another person.' });
+  await sql`UPDATE people SET email = ${wsEmail} WHERE id = ${personId}`;
+  const blcName = ((p.first_name || '') + ' ' + (p.last_name || '')).trim();
+  try {
+    await notifyEnrollment(sql, p.family_email,
+      'Portal sign-in ready — ' + (p.first_name || 'your backup coach'),
+      blcName + ' now has a Roots & Wings sign-in (' + wsEmail + "). They've been emailed setup steps.");
+  } catch (e) { /* non-fatal */ }
+  // Getting-started guide goes to the PERSONAL email — the new inbox isn't
+  // readable until they've activated the account it explains how to set up.
+  const guideTo = p.personal_email || wsEmail;
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+      to: guideTo,
+      replyTo: 'membership@rootsandwingsindy.com',
+      subject: emailSubject('Roots & Wings Co-op: your portal sign-in is ready — getting started'),
+      html: blcGettingStartedEmailHtml(p.first_name || blcName || 'there')
+    });
+  } catch (mailErr) { console.error('BLC getting-started email failed (non-fatal):', mailErr); }
+  return res.status(200).json({ success: true, emailed: guideTo });
+}
+
 // ── PayPal client-side error reporter ──
 // Receives errors that fire in the buyer's browser (SDK render failure,
 // capture failure, post-capture network/API failures) and emails treasurer@
@@ -3438,6 +3573,13 @@ async function upsertProfileFromRegistration(sql, params) {
   // (class_group untouched → preserved), unmatched insert, and rows that
   // matched nothing are deleted (mergedKids already carries every
   // existing row, so that only fires on duplicate-name leftovers).
+  // Pending BLC sign-in requests must survive the wholesale replace (same
+  // guard as the EMI save path) — match by personal/workspace email, then
+  // first+last name.
+  const regSigninStamps = await sql`
+    SELECT first_name, last_name, personal_email, email,
+           rw_email_requested_at, rw_email_requested_by
+    FROM people WHERE family_email = ${familyEmail} AND rw_email_requested_at IS NOT NULL`;
   await sql`DELETE FROM people WHERE family_email = ${familyEmail}`;
 
   for (let i = 0; i < mergedParents.length; i++) {
@@ -3445,16 +3587,24 @@ async function upsertProfileFromRegistration(sql, params) {
     if (!pp.first_name) continue;
     let email = String(pp.email || '').trim().toLowerCase();
     if (!email && pp.role === 'mlc') email = familyEmail;
+    const stamp = regSigninStamps.find(s =>
+      (pp.personal_email && String(s.personal_email || '').toLowerCase() === String(pp.personal_email).toLowerCase()) ||
+      (email && String(s.email || '').toLowerCase() === email) ||
+      (String(s.first_name || '').toLowerCase() === String(pp.first_name || '').toLowerCase()
+        && String(s.last_name || '').toLowerCase() === String(pp.last_name || '').toLowerCase())
+    ) || null;
     await sql`
       INSERT INTO people (
         email, family_email, first_name, last_name, nickname, role,
         personal_email, phone, pronouns, photo_url, photo_consent,
-        nicknames, sort_order, updated_by
+        nicknames, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
       ) VALUES (
         ${email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name || ''}, ${pp.nickname || ''}, ${pp.role || 'parent'},
         ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
         ${pp.photo_url || ''}, ${pp.photo_consent !== false},
-        ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i}, 'registration'
+        ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i},
+        ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
+        'registration'
       )
     `;
   }
@@ -3858,21 +4008,43 @@ async function handleProfileUpdate(body, req, res) {
     // (threaded through EMI since the enrollment build), else the prior
     // row with the same first name. Everything still rides ONE
     // transaction — a failing statement changes nothing.
+    // BLC sign-in request stamps must survive the delete+reinsert below —
+    // otherwise any later family save silently drops the request out of the
+    // Comms queue. Snapshot them keyed by identity, re-applied per row.
+    const priorSigninStamps = await sql`
+      SELECT first_name, last_name, personal_email, email,
+             rw_email_requested_at, rw_email_requested_by
+      FROM people WHERE family_email = ${familyEmail} AND rw_email_requested_at IS NOT NULL`;
+    const signinStampFor = (pp) => {
+      const pe = String(pp.personal_email || '').toLowerCase();
+      const we = String(pp.email || '').toLowerCase();
+      const fn = String(pp.first_name || '').toLowerCase();
+      const ln = String(pp.last_name || '').toLowerCase();
+      return priorSigninStamps.find(s =>
+        (pe && String(s.personal_email || '').toLowerCase() === pe) ||
+        (we && String(s.email || '').toLowerCase() === we) ||
+        (fn && String(s.first_name || '').toLowerCase() === fn
+            && String(s.last_name || '').toLowerCase() === ln)
+      ) || null;
+    };
     const profileStmts = [
       sql`DELETE FROM people WHERE family_email = ${familyEmail}`
     ];
     for (let i = 0; i < people.length; i++) {
       const pp = people[i];
+      const stamp = signinStampFor(pp);
       profileStmts.push(sql`
         INSERT INTO people (
           email, family_email, first_name, last_name, nickname, role,
           personal_email, phone, pronouns, photo_url, photo_consent,
-          nicknames, sort_order, updated_by
+          nicknames, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
         ) VALUES (
           ${pp.email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name}, ${pp.nickname || ''}, ${pp.role || 'parent'},
           ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
           ${pp.photo_url || ''}, ${pp.photo_consent !== false},
-          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i}, ${user.realEmail || user.email}
+          ${JSON.stringify(pp.nicknames || [])}::jsonb, ${i},
+          ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
+          ${user.realEmail || user.email}
         )
       `);
     }
@@ -8036,6 +8208,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
     if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
+    if (req.query.list === 'blc_email_requests') return handleBlcEmailRequestList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
@@ -8091,6 +8264,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'special-event-date') return handleSpecialEventDate(body, req, res);
     if (kind === 'special-event-details') return handleSpecialEventDetails(body, req, res);
     if (kind === 'special-event-create') return handleSpecialEventCreate(body, req, res);
+    if (kind === 'blc-email-request') return handleBlcEmailRequest(body, req, res);
+    if (kind === 'blc-email-complete') return handleBlcEmailComplete(body, req, res);
     if (kind === 'special-event-delete') return handleSpecialEventDelete(body, req, res);
     if (kind === 'event-task-save') return handleEventTaskSave(body, req, res);
     if (kind === 'event-task-toggle') return handleEventTaskToggle(body, req, res);
