@@ -1380,7 +1380,8 @@ module.exports = async function handler(req, res) {
           sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid, class_group, finalized
               FROM morning_class_assignments WHERE school_year = ${srYear}`,
           sql`SELECT LOWER(p.family_email) AS fam, LOWER(p.kid_first_name) AS kid, p.hour,
-                     c.id AS class_id, c.class_name, c.scheduled_hour
+                     c.id AS class_id, c.class_name, c.scheduled_hour,
+                     c.age_groups, c.scheduled_age_range
               FROM class_signup_picks p
               JOIN class_submissions c ON c.id = p.class_submission_id
               WHERE p.school_year = ${srYear} AND p.session_number = ${srSess} AND p.rank = 1`,
@@ -1469,7 +1470,14 @@ module.exports = async function handler(req, res) {
             : (k.class_group ? { group: k.class_group, finalized: false } : null);
           const mkPick = h => {
             const p = srPickBy[kidKey + '|' + h];
-            return p ? { class_id: p.class_id, class_name: p.class_name, both: p.scheduled_hour === 'both' } : null;
+            // ageRange/ageGroups ride along (camelCase, matching the
+            // class-signup payload) so the grid can show a placed class's
+            // age range via signupAgeText, same as the pickers (#31).
+            return p ? {
+              class_id: p.class_id, class_name: p.class_name, both: p.scheduled_hour === 'both',
+              ageRange: p.scheduled_age_range || '',
+              ageGroups: Array.isArray(p.age_groups) ? p.age_groups : []
+            } : null;
           };
           return {
             name: ((k.display_first || '') + ' ' + (k.display_last || '')).trim(),

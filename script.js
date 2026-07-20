@@ -24159,14 +24159,21 @@
     // grid flags the gap but doesn't offer a picker here.
     return '<span class="st-flag-coral" title="Place them in the Morning Class Builder">not placed</span>';
   }
+  // A placed class shows its age range next to the name (#31 — before,
+  // only the picker options listed ages), reusing the same reviewer-
+  // override-else-buckets string the sign-up card builds (signupAgeText).
+  function schedKidPmAgesHtml(pick) {
+    var ages = (typeof signupAgeText === 'function' && pick) ? signupAgeText(pick) : '';
+    return ages ? ' <span class="ws-wv-context">' + escapeHtml(ages) + '</span>' : '';
+  }
   function schedKidPmCellHtml(row, hour) {
     if (!row.pm_eligible) return '<span class="sb-subdetail-dim" title="Not in afternoon programming (Greenhouse, under 3, or morning-only)">—</span>';
     var pick = hour === 'PM1' ? row.pm1 : row.pm2;
     if (!pick && hour === 'PM2' && row.pm1 && row.pm1.both) {
-      return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>';
+      return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>' + schedKidPmAgesHtml(row.pm1);
     }
     if (pick) {
-      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '');
+      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick);
     }
     if (_schedRep.can_place) return schedCellFillBtn(row);
     return '<span class="st-flag-coral">open</span>';
