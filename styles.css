@@ -9045,6 +9045,14 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 .sb-side .sb-palette-cards { flex-direction: column; overflow-x: visible; gap: 8px; }
 .sb-side .sb-palette-card { flex: 0 0 auto; width: auto; }
 .sb-palette-hint { font-size: 0.72rem; color: var(--color-text-light); margin-bottom: 8px; }
+/* Palette filter chips (#28) — .sc-btn base + the shared funnel
+   popover (openFilterPopover). Active (non-All) chips flip to the
+   primary-filled state, mirroring .ws-th-filter-btn.is-active. */
+.sb-palette-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.sb-filter-btn { display: inline-flex; align-items: center; gap: 5px; }
+.sb-filter-btn svg { pointer-events: none; }
+.sb-filter-btn.is-active { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-white); }
+.sb-filter-btn.is-active:hover { background: var(--color-primary-dark); border-color: var(--color-primary-dark); color: var(--color-white); }
 .sb-palette-card-sessions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .sb-sess-chip {
   font-size: 0.68rem;

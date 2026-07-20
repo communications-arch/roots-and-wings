@@ -20851,6 +20851,10 @@
     approvals: {},     // { "YYYY-YYYY|N": { approved_at, approved_by } }
     signupWindows: {}, // { "YYYY-YYYY|N": { status, signup_start_date, signup_end_date } }
     members: [],       // [{name,email}] for the PM helper picker (Phase B2)
+    // Available-classes palette filters (#28) — AND-combined; 'all' =
+    // no constraint. Persist across lens/session switches while the
+    // builder is open; a fresh open resets them (showScheduleBuilder).
+    paletteFilters: { session: 'all', hour: 'all', age: 'all', room: 'all' },
     loaded: false
   };
   // Session approvals gate the AFTERNOON side only (approve → lock →
@@ -27646,6 +27650,9 @@
     if (typeof closeNotifDropdown === 'function') { try { closeNotifDropdown(); } catch (e) { /* ignore */ } }
     var _sbStale = document.getElementById('sbOverlay');
     if (_sbStale) { _sbStale.remove(); }
+    // Fresh open = fresh palette filters (#28); they persist across
+    // lens/session switches only while the builder stays open.
+    scheduleBuilderState.paletteFilters = { session: 'all', hour: 'all', age: 'all', room: 'all' };
     var html = '<div class="sb-overlay" id="sbOverlay">';
     html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Class Builder">';
     html += '<button class="detail-close" id="sbCloseBtn" aria-label="Close">&times;</button>';
@@ -28420,6 +28427,43 @@
     });
   }
 
+  // ── Available-classes palette filters (#28) ──────────────────
+  // Pure AND-combined match for one submission against the builder's
+  // palette filters { session, hour, age, room } ('all' = no
+  // constraint). Session + hour use FIT semantics — a class with no
+  // preference, a "flexible" one, or (for an hour filter) a 2-hour
+  // request still matches, because the question the builder is
+  // answering is "what could I place in this slot". Ages: an
+  // "all-ages" class serves every group, so it matches any group
+  // filter. Kept pure — exercised directly by the unit tests
+  // (scripts/test-builder-filters.js).
+  function sbPaletteFilterMatch(s, f) {
+    f = f || {};
+    if (f.session && f.session !== 'all') {
+      var sp = s.session_preferences || [];
+      if (sp.length && sp.indexOf('flexible') === -1 && sp.indexOf(String(f.session)) === -1) return false;
+    }
+    if (f.hour && f.hour !== 'all') {
+      var hp = s.hour_preference || [];
+      var twoHr = hp.indexOf('2hr-required') !== -1 || hp.indexOf('2hr-optional') !== -1;
+      if (f.hour === 'both') {
+        if (!twoHr) return false;
+      } else if (hp.length && !twoHr && hp.indexOf('flexible') === -1
+          && hp.indexOf(f.hour === 'PM1' ? 'first' : 'last') === -1) return false;
+    }
+    if (f.age && f.age !== 'all') {
+      var ag = s.age_groups || [];
+      if (ag.indexOf(f.age) === -1 && !(f.age !== 'all-ages' && ag.indexOf('all-ages') !== -1)) return false;
+    }
+    if (f.room && f.room !== 'all') {
+      var rq = s.space_request || [];
+      if (f.room === 'other') {
+        if (!String(s.space_request_other || '').trim()) return false;
+      } else if (rq.indexOf(f.room) === -1) return false;
+    }
+    return true;
+  }
+
   function renderScheduleBuilder() {
     var body = document.getElementById('sbBody');
     if (!body) return;
@@ -28724,16 +28768,93 @@
       if (am !== bm) return am - bm;
       return String(a.class_name || '').localeCompare(String(b.class_name || ''));
     });
+
+    // ── Palette filters (#28): session / hour / ages / room, AND-
+    // combined. The AM lens keeps only session + ages (morning classes
+    // have no PM hour or space request) — a PM-lens hour/room filter is
+    // neutralized there so it can't invisibly empty the morning inbox.
+    var pf = scheduleBuilderState.paletteFilters
+      || (scheduleBuilderState.paletteFilters = { session: 'all', hour: 'all', age: 'all', room: 'all' });
+    var pfEff = period === 'AM'
+      ? { session: pf.session, hour: 'all', age: pf.age, room: 'all' }
+      : { session: pf.session, hour: pf.hour, age: pf.age, room: pf.room };
+    var paletteAll = palette;
+    palette = paletteAll.filter(function (s) { return sbPaletteFilterMatch(s, pfEff); });
+    var pfActive = pfEff.session !== 'all' || pfEff.hour !== 'all' || pfEff.age !== 'all' || pfEff.room !== 'all';
+    // Option counts answer "what would this choice show" — each count
+    // applies the OTHER active filters too (funnel-popover pattern).
+    function pfCount(dim, v) {
+      var t = { session: pfEff.session, hour: pfEff.hour, age: pfEff.age, room: pfEff.room };
+      t[dim] = v;
+      return paletteAll.filter(function (s) { return sbPaletteFilterMatch(s, t); }).length;
+    }
+    function pfOptions(dim) {
+      var opts = [];
+      if (dim === 'session') {
+        opts.push({ value: 'all', label: 'All sessions', count: pfCount(dim, 'all') });
+        for (var si = 1; si <= 5; si++) opts.push({ value: String(si), label: 'Fits Session ' + si, count: pfCount(dim, String(si)) });
+      } else if (dim === 'hour') {
+        opts.push({ value: 'all', label: 'Any hour', count: pfCount(dim, 'all') });
+        opts.push({ value: 'PM1', label: 'Fits PM1 (first hour)', count: pfCount(dim, 'PM1') });
+        opts.push({ value: 'PM2', label: 'Fits PM2 (last hour)', count: pfCount(dim, 'PM2') });
+        opts.push({ value: 'both', label: '2-hour classes', count: pfCount(dim, 'both') });
+      } else if (dim === 'age') {
+        opts.push({ value: 'all', label: 'All age groups', count: pfCount(dim, 'all') });
+        AGE_GROUP_VALUES.forEach(function (v) {
+          // Only offer buckets this lens's inbox actually uses.
+          if (!paletteAll.some(function (s) { return (s.age_groups || []).indexOf(v) !== -1; })) return;
+          opts.push({ value: v, label: AGE_GROUP_LABELS[v] || v, count: pfCount(dim, v) });
+        });
+      } else if (dim === 'room') {
+        opts.push({ value: 'all', label: 'Any room request', count: pfCount(dim, 'all') });
+        SPACE_REQ_VALUES.forEach(function (v) {
+          if (!paletteAll.some(function (s) { return (s.space_request || []).indexOf(v) !== -1; })) return;
+          opts.push({ value: v, label: SPACE_REQ_LABELS[v] || v, count: pfCount(dim, v) });
+        });
+        if (paletteAll.some(function (s) { return String(s.space_request_other || '').trim(); })) {
+          opts.push({ value: 'other', label: 'Other (write-in)', count: pfCount(dim, 'other') });
+        }
+      }
+      return opts;
+    }
+    // Chip label shows the live selection so an active filter reads
+    // without opening the popover.
+    function pfChipLabel(dim, baseLabel) {
+      var v = pfEff[dim];
+      if (v === 'all') return baseLabel;
+      if (dim === 'session') return 'Session ' + v;
+      if (dim === 'hour') return v === 'both' ? '2-hour' : v;
+      if (dim === 'age') return AGE_GROUP_LABELS[v] || v;
+      if (dim === 'room') return v === 'other' ? 'Other room' : (SPACE_REQ_LABELS[v] || v);
+      return baseLabel;
+    }
+    function pfChip(dim, baseLabel) {
+      var active = pfEff[dim] !== 'all';
+      return '<button type="button" class="sc-btn sb-filter-btn' + (active ? ' is-active' : '') + '" data-pf-dim="' + dim + '"'
+        + ' aria-label="Filter available classes by ' + escClsAttr(baseLabel.toLowerCase()) + '" aria-expanded="false">'
+        + FUNNEL_SVG + ' ' + escClsHtml(pfChipLabel(dim, baseLabel)) + '</button>';
+    }
+    var pfBar = '<div class="sb-palette-filters" id="sbPaletteFilters">';
+    pfBar += pfChip('session', 'Session');
+    if (period === 'PM') pfBar += pfChip('hour', 'Hour');
+    pfBar += pfChip('age', 'Ages');
+    if (period === 'PM') pfBar += pfChip('room', 'Room');
+    if (pfActive) pfBar += '<button type="button" class="sc-btn" id="sbPfClear" title="Clear all palette filters">✕ Clear</button>';
+    pfBar += '</div>';
+
     var paletteHtml = '<div class="sb-palette" id="sbPalette">';
     paletteHtml += '<div class="sb-palette-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
-      + '<span>Available classes (' + palette.length + ')</span>'
+      + '<span>Available classes (' + palette.length + (pfActive ? ' of ' + paletteAll.length : '') + ')</span>'
       // Liaisons often recruit teachers in conversation — let them enter a
       // class here (topic can stay TBD until right before the session).
       + ((period === 'AM' || sbScopeAll()) ? '<button type="button" class="sc-btn" id="sbNewClassBtn" style="font-size:0.8rem;">+ New Class</button>' : '')
       + '</div>';
     paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
-    if (palette.length === 0) {
+    paletteHtml += pfBar;
+    if (paletteAll.length === 0) {
       paletteHtml += '<p class="sb-palette-empty"><img class="brand-accent" src="brand/secondary/accent-40.png" alt=""> No submissions waiting — they’ll appear here as members submit classes.</p>';
+    } else if (palette.length === 0) {
+      paletteHtml += '<p class="sb-palette-empty">No submissions match the filters — clear one to widen the list.</p>';
     } else {
       paletteHtml += '<div class="sb-palette-cards">';
       palette.forEach(function (s) {
@@ -28961,6 +29082,26 @@
         if (id) unscheduleDroppedSub(id);
       });
     }
+
+    // Palette filter chips (#28) → shared funnel popover; picking an
+    // option stores it on scheduleBuilderState and re-renders, so the
+    // choice survives lens/session switches while the builder is open.
+    body.querySelectorAll('[data-pf-dim]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var dim = btn.getAttribute('data-pf-dim');
+        btn.setAttribute('aria-expanded', 'true');
+        openFilterPopover(btn, pfOptions(dim), pfEff[dim], function (v) {
+          scheduleBuilderState.paletteFilters[dim] = v;
+          renderScheduleBuilder();
+        });
+      });
+    });
+    var pfClearBtn = document.getElementById('sbPfClear');
+    if (pfClearBtn) pfClearBtn.addEventListener('click', function () {
+      scheduleBuilderState.paletteFilters = { session: 'all', hour: 'all', age: 'all', room: 'all' };
+      renderScheduleBuilder();
+    });
 
     // ✗ Decline on palette cards — in place, no separate report needed.
     // stopPropagation keeps the click from reading as a card tap/drag.

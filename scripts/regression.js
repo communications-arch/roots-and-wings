@@ -247,6 +247,7 @@ const unitTests = [
   'scripts/test-reconcile-names.js',
   'scripts/test-volunteer-assignments.js',
   'scripts/test-capabilities.js',
+  'scripts/test-builder-filters.js',
 ];
 
 for (const rel of unitTests) {
