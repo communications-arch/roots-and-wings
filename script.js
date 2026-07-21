@@ -20522,6 +20522,14 @@
         if (pa !== pb) return pa - pb;
         return String(a.class_name || '').localeCompare(String(b.class_name || ''));
       });
+      // #55: the re-approval warning applies to every drafted/scheduled
+      // row, so it's shown once above the list instead of once per row.
+      var anyEditWarns = activeSubs.some(function (s) { return s.status === 'drafted' || s.status === 'scheduled'; });
+      if (anyEditWarns) {
+        html += '<p style="margin:0 0 0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
+        html += 'Editing an approved or scheduled class sends it back to the VP / Afternoon Class Liaison for re-approval — it comes off the schedule until it’s re-placed.';
+        html += '</p>';
+      }
       var lastSessKey = null;
       html += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
       activeSubs.forEach(function (s) {
@@ -20557,11 +20565,6 @@
         // opens the Curriculum Library editor prefilled with this class.
         html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">📖 Lesson Plan</button>';
         html += '</div>';
-        if (s.status === 'drafted' || s.status === 'scheduled') {
-          html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
-          html += 'Editing sends this class back to the VP / Afternoon Class Liaison for re-approval — it comes off the schedule until it’s re-placed.';
-          html += '</div>';
-        }
         html += '</li>';
       });
       html += '</ul>';
