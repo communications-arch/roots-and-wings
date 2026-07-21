@@ -2451,3 +2451,7 @@ module.exports.loadFamiliesFromProfiles = loadFamiliesFromProfiles;
 module.exports.seasonToYearLabel = seasonToYearLabel;
 module.exports.firstSeasonByEmail = firstSeasonByEmail;
 module.exports.firstSeasonFromRows = firstSeasonFromRows;
+// #48: the Directory's "has this family registered for the upcoming
+// season" map — reused by the offboarding (non-returning) list so both
+// surfaces derive "not returning" identically.
+module.exports.registeredSeasonByEmail = registeredSeasonByEmail;

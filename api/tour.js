@@ -17,7 +17,7 @@ const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
-const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
+const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -8576,6 +8576,186 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   return res.status(400).json({ error: 'Unknown adjust action.' });
 }
 
+// ── #48: Comms offboarding — notify non-returning members ───────────
+// A To Do that appears ~7 days before the Ice Cream Social (the derived
+// "Remove non-returning members" calendar trigger sits at ICS−3, so the
+// To Do leads it by a few days). Clicking it lists every family with NO
+// registration for the upcoming season (same registeredSeasonByEmail
+// map the Directory's "hasn't re-enrolled" dimming uses — plus #44
+// withdrawn families, whose accounts also go), with an editable email
+// drafted from Erin's past text. Send = one bcc batch through the
+// dev-safe _resend wrapper + a portal notification per login. The
+// actual Google-account deletion stays 100% manual.
+
+function offboardingLoginsFor(famEmail, peopleRows) {
+  const logins = [String(famEmail || '').toLowerCase()];
+  (peopleRows || []).forEach(p => {
+    if (String(p.family_email || '').toLowerCase() !== logins[0]) return;
+    const e = String(p.email || '').toLowerCase().trim();
+    if (e && logins.indexOf(e) === -1) logins.push(e);
+  });
+  return logins.filter(Boolean);
+}
+
+async function offboardingMayAct(email) {
+  if (isSuperUser(email)) return true;
+  // Same Comms capability that gates the onboarding surface — this is
+  // its bookend (welcome in, farewell out).
+  return await hasCapability(email, 'member_onboarding');
+}
+
+// Shared by GET + POST: sessions (calendar shape) + the non-returning
+// family list for the upcoming season.
+async function offboardingSnapshot(sql) {
+  const sessRows = await sql`
+    SELECT school_year, session_number, name, start_date, end_date
+    FROM co_op_sessions
+  `;
+  const sessions = sessRows.map(s => ({
+    school_year: s.school_year,
+    session_number: s.session_number,
+    name: s.name,
+    start_date: calDateStr(s.start_date),
+    end_date: calDateStr(s.end_date)
+  }));
+  const icsDate = iceCreamSocialForYear(sessions, DEFAULT_SEASON);
+  const regMap = await registeredSeasonByEmail(sql);
+  const fams = await sql`
+    SELECT family_email, family_name, withdrawn_at, offboard_notified_at, offboard_notified_by
+    FROM member_profiles
+    ORDER BY LOWER(family_name)
+  `;
+  const peopleRows = await sql`SELECT email, family_email FROM people WHERE email IS NOT NULL`;
+  const nonReturning = fams
+    .filter(f => {
+      const key = String(f.family_email || '').toLowerCase();
+      // Withdrawn families (#44) lose their accounts too, even though
+      // they hold a (withdrawn) registration for the season.
+      return f.withdrawn_at || regMap[key] !== true;
+    })
+    .map(f => ({
+      family_email: String(f.family_email || '').toLowerCase(),
+      family_name: f.family_name || '',
+      withdrawn: !!f.withdrawn_at,
+      logins: offboardingLoginsFor(f.family_email, peopleRows),
+      notified_at: f.offboard_notified_at,
+      notified_by: f.offboard_notified_by || ''
+    }));
+  return { icsDate, nonReturning };
+}
+
+// GET ?offboarding=1 — timing + the non-returning list for the modal.
+async function handleOffboardingGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await offboardingMayAct(auth.email))) {
+    return res.status(403).json({ error: 'Only the Communications Director can run member offboarding.' });
+  }
+  try {
+    const sql = getSql();
+    const snap = await offboardingSnapshot(sql);
+    return res.status(200).json({
+      school_year: DEFAULT_SEASON,
+      ics_date: snap.icsDate,
+      remove_date: snap.icsDate ? calAddDays(snap.icsDate, -3) : '',
+      show_from: snap.icsDate ? calAddDays(snap.icsDate, -7) : '',
+      today: indySignDate(),
+      families: snap.nonReturning
+    });
+  } catch (err) {
+    console.error('offboarding GET error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='offboarding-notify' { subject, body_text, family_emails[] }
+async function handleOffboardingNotify(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await offboardingMayAct(auth.email))) {
+    return res.status(403).json({ error: 'Only the Communications Director can run member offboarding.' });
+  }
+  const actor = auth.realEmail || auth.email;
+  const subject = String(body.subject || '').trim().slice(0, 200);
+  const bodyText = String(body.body_text || '').trim().slice(0, 6000);
+  const requested = Array.isArray(body.family_emails)
+    ? body.family_emails.map(e => String(e || '').toLowerCase().trim()).filter(Boolean).slice(0, 200)
+    : [];
+  if (!subject || !bodyText) return res.status(400).json({ error: 'Subject and message are both required.' });
+  if (!requested.length) return res.status(400).json({ error: 'Pick at least one family.' });
+  if (!process.env.RESEND_API_KEY) return res.status(503).json({ error: 'Email is not configured on this environment.' });
+
+  try {
+    const sql = getSql();
+    const snap = await offboardingSnapshot(sql);
+    // Only genuinely non-returning families can be emailed — a stale or
+    // hand-crafted selection never reaches a returning member.
+    const eligible = {};
+    snap.nonReturning.forEach(f => { eligible[f.family_email] = f; });
+    const targets = requested.filter(e => eligible[e]).map(e => eligible[e]);
+    if (!targets.length) return res.status(409).json({ error: 'None of the selected families are in the non-returning list anymore — refresh and retry.' });
+
+    const allLogins = [];
+    targets.forEach(f => f.logins.forEach(l => { if (allLogins.indexOf(l) === -1) allLogins.push(l); }));
+
+    const htmlBody = escapeHtml(bodyText)
+      .split(/\n{2,}/).map(p => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    // One bcc batch per 40 logins (Resend caps recipients per message;
+    // the template opens "Hi everyone", so no per-family personalization
+    // is needed). _resend reroutes the whole thing on dev.
+    const chunks = [];
+    for (let i = 0; i < allLogins.length; i += 40) chunks.push(allLogins.slice(i, i + 40));
+    const emailFailures = [];
+    for (let ci = 0; ci < chunks.length; ci++) {
+      try {
+        const sent = await resend.emails.send({
+          from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+          to: 'communications@rootsandwingsindy.com',
+          bcc: chunks[ci],
+          replyTo: 'communications@rootsandwingsindy.com',
+          subject: emailSubject(subject),
+          html: htmlBody + '<p style="color:#666;font-size:0.9rem;margin-top:20px;">— Roots &amp; Wings Communications<br>communications@rootsandwingsindy.com</p>'
+        });
+        if (sent && sent.error) throw new Error(sent.error.message || 'send failed');
+      } catch (e) {
+        console.error('offboarding email chunk failed:', e.message);
+        emailFailures.push(chunks[ci]);
+      }
+      if (ci < chunks.length - 1) await new Promise(r => setTimeout(r, 600));
+    }
+    const failedLogins = [].concat(...emailFailures);
+
+    // Portal notification per login + per-family sent stamp (only for
+    // families whose logins all made it into a successful chunk).
+    const sent = [];
+    const failed = [];
+    for (const f of targets) {
+      const famFailed = f.logins.some(l => failedLogins.indexOf(l) !== -1);
+      if (famFailed) { failed.push(f.family_email); continue; }
+      for (const l of f.logins) {
+        try {
+          await sql`
+            INSERT INTO notifications (recipient_email, type, title, body, link_url)
+            VALUES (${l}, 'account_notice', ${subject},
+                    ${bodyText.slice(0, 800) + '\n\n(Account deletion is handled manually by the Communications Director — check your email for the full notice.)'}, '')
+          `;
+        } catch (e) { console.error('offboarding portal notification failed (non-fatal):', e.message); }
+      }
+      await sql`
+        UPDATE member_profiles SET offboard_notified_at = NOW(), offboard_notified_by = ${actor}
+        WHERE LOWER(family_email) = ${f.family_email}
+      `;
+      sent.push(f.family_email);
+    }
+    return res.status(200).json({ ok: true, sent, failed, logins_emailed: allLogins.length - failedLogins.length });
+  } catch (err) {
+    console.error('offboarding notify error:', err);
+    return res.status(500).json({ error: 'Could not send the notices.' });
+  }
+}
+
 // ── Dev-only bug reports (bugs.html) ─────────────────────────────────
 // Helper testers on the dev site report bugs and watch fix status
 // without ever seeing GitHub. Backed by GitHub Issues on this repo so
@@ -8824,6 +9004,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
     if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
     if (req.query.adjust_enroll === '1') return handleAdjustEnrollmentGet(req, res);
+    if (req.query.offboarding === '1') return handleOffboardingGet(req, res);
     if (req.query.list === 'blc_email_requests') return handleBlcEmailRequestList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
@@ -8855,6 +9036,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'bug-verify') return handleBugVerify(body, req, res);
     if (kind === 'enrollment-request-decide') return handleEnrollmentRequestDecide(body, req, res);
     if (kind === 'membership-adjust-enrollment') return handleMembershipAdjustEnrollment(body, req, res);
+    if (kind === 'offboarding-notify') return handleOffboardingNotify(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);

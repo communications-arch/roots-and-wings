@@ -1209,7 +1209,12 @@ module.exports = async function handler(req, res) {
     // Any signed-in member can read; writes are gated per kind to the
     // role that owns the to-do (super users pass via canEditAsRole).
     if (action === 'todo-confirm') {
-      const TODO_CONFIRM_OWNERS = { handbook: 'Communications Director' };
+      const TODO_CONFIRM_OWNERS = {
+        handbook: 'Communications Director',
+        // #48: "notify non-returning members before account deletion"
+        // To Do (shows ~7 days before the Ice Cream Social).
+        removemembers: 'Communications Director'
+      };
       if (req.method === 'GET') {
         const rows = await sql`
           SELECT kind, school_year, confirmed_at, confirmed_by_email

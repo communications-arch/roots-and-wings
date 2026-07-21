@@ -8990,6 +8990,16 @@
           // ✓ Done chip stamps todo_confirmations via loadHandbookReviewTodo.
           h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">📘</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button>'
             + '<button type="button" class="sc-btn" id="ws-todo-handbook-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
+          // #48: notify non-returning members before account deletion.
+          // Appears ~7 days before the Ice Cream Social (the Admin
+          // Calendar's derived "Remove non-returning members" trigger is
+          // ICS−3, so this leads it) and STAYS until ✓ Done for the year
+          // (todo_confirmations kind='removemembers'). Click opens the
+          // offboarding modal — list + editable email + Send. The actual
+          // Google-account deletion stays manual. Painted by
+          // loadRemoveMembersTodo.
+          h += '<li id="ws-todo-removemembers-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-removemembers-btn"><span class="ws-link-count" id="ws-removemembers-count">0</span><span class="ws-link-icon">👋</span><span id="ws-removemembers-label">Notify non-returning members</span></button>'
+            + '<button type="button" class="sc-btn" id="ws-todo-removemembers-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
           // Enrollment approval queue (Erin, 2026-07-19 Option B): schedule
@@ -9083,6 +9093,7 @@
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
         if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
+        if (typeof loadRemoveMembersTodo === 'function') loadRemoveMembersTodo();
         if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
         // Personal event-planning tasks (Collaboration spaces): repaint
         // from cache instantly, then refresh from the server.
@@ -23893,6 +23904,172 @@
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
       })
       .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
+  }
+
+  // ══ #48: Comms offboarding To Do — notify non-returning members ═══
+  // Shows from ICS−7 (the Admin Calendar's derived "Remove non-returning
+  // members" trigger sits at ICS−3) and stays until ✓ Done for the year
+  // via todo_confirmations (kind='removemembers', handbook pattern).
+  // The modal lists families with NO upcoming-season registration (same
+  // derivation as the Directory's "hasn't re-enrolled" dimming, plus #44
+  // withdrawn families), an editable email from Erin's past text, and a
+  // Send that emails their workspace logins (dev-safe _resend) + drops a
+  // portal notification per login. Account DELETION stays manual.
+  var _offboardingCache = null; // payload of GET ?offboarding=1
+
+  var OFFBOARD_EMAIL_SUBJECT = 'Roots & Wings: your co-op account will be deleted soon';
+  var OFFBOARD_EMAIL_TEMPLATE = 'Hi everyone,\n\n'
+    + 'As the summer is coming to an end and the new semester is about to begin, I want to thank you for being part of our community. Whether it was less than a semester or several years as a part of co-op, your contributions and presence have made a positive impact on all of us.\n\n'
+    + 'Just a heads-up, your accounts will be deleted in the next few days.\n\n'
+    + 'Please:\n'
+    + '1. Forward any emails you want to keep to your personal email.\n'
+    + '2. Download any files or documents you need.\n\n'
+    + 'If you have any questions or need help, let me know.\n\n'
+    + 'Thanks again, and best of luck!';
+
+  function loadRemoveMembersTodo() {
+    var item = document.getElementById('ws-todo-removemembers-item');
+    if (!item) return; // not the Comms Director's tab
+    fetch('/api/tour?offboarding=1', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.show_from) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+        _offboardingCache = d;
+        var today = d.today || ((typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10));
+        // Dev unlock: the real window opens at ICS−7 (late summer), so
+        // the dev site shows the To Do year-round for click-testing.
+        var inWindow = today >= d.show_from || (typeof isDevHost === 'function' && isDevHost());
+        if (!inWindow) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+        var unnotified = (d.families || []).filter(function (f) { return !f.notified_at; }).length;
+        var pill = document.getElementById('ws-removemembers-count');
+        if (pill) pill.textContent = String(unnotified);
+        var btn = document.getElementById('ws-todo-removemembers-btn');
+        if (btn && !btn._rwWired) {
+          btn._rwWired = true;
+          btn.addEventListener('click', function () { showRemoveMembersModal(); });
+        }
+        var doneBtn = document.getElementById('ws-todo-removemembers-done');
+        if (doneBtn && !doneBtn._rwWired) {
+          doneBtn._rwWired = true;
+          doneBtn.addEventListener('click', function () {
+            doneBtn.disabled = true;
+            fetch('/api/cleaning?action=todo-confirm', {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({ kind: 'removemembers', school_year: (_offboardingCache && _offboardingCache.school_year) || '' })
+            }).then(function (r) { return r.json().then(function (dd) { return { ok: r.ok, data: dd }; }); })
+              .then(function (res) {
+                if (!res.ok) { alert((res.data && res.data.error) || 'Could not mark it done.'); doneBtn.disabled = false; return; }
+                item.hidden = true;
+                if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+              })
+              .catch(function () { alert('Network error — try again.'); doneBtn.disabled = false; });
+          });
+        }
+        // Visible in the window unless already ticked done for the year.
+        fetch('/api/cleaning?action=todo-confirm', { headers: rwAuthHeaders() })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (c) {
+            var done = !!(c && (c.confirmations || []).some(function (row) {
+              return row.kind === 'removemembers' && row.school_year === d.school_year;
+            }));
+            item.hidden = done;
+            if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+          })
+          .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
+      })
+      .catch(function () { /* not Comms / offline — leave hidden */ });
+  }
+
+  function showRemoveMembersModal() {
+    var body = renderReportModal({
+      title: 'Notify non-returning members',
+      subtitle: 'Families with no registration for the upcoming season (plus withdrawn families). Send emails their workspace logins the heads-up below and drops the same notice in their portal bell. Deleting the Google accounts stays a MANUAL step in Google Admin afterwards.',
+      bodyId: 'ws-offboard-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    var render = function (d) {
+      var fams = (d && d.families) || [];
+      var h = '';
+      h += '<p class="ws-body-hint">Ice Cream Social: <strong>' + escapeHtmlWs(formatReportDate(d.ics_date) || '?') + '</strong>'
+        + ' · Admin Calendar “Remove non-returning members” trigger: <strong>' + escapeHtmlWs(formatReportDate(d.remove_date) || '?') + '</strong>'
+        + ' · Season: <strong>' + escapeHtmlWs(d.school_year || '') + '</strong></p>';
+      if (fams.length === 0) {
+        h += '<p class="ws-empty">Every family has registered for ' + escapeHtmlWs(d.school_year || 'the upcoming season') + ' — nobody to notify. 🎉</p>';
+        body.innerHTML = h;
+        return;
+      }
+      h += '<h5 class="ws-part-exempt-existing">Non-returning families (' + fams.length + ')</h5>';
+      fams.forEach(function (f) {
+        var stamp = f.notified_at
+          ? '<span class="ws-wv-ok" title="Notified by ' + escapeHtmlWs(f.notified_by || '') + '">✓ notified ' + escapeHtmlWs(formatReportDate(f.notified_at)) + '</span>'
+          : '<span class="ws-wv-pending">not notified yet</span>';
+        h += '<label class="st-place-row" style="cursor:pointer;">'
+          + '<input type="checkbox" class="offboard-fam-check" value="' + escapeHtmlWs(f.family_email) + '"' + (f.notified_at ? '' : ' checked') + '> '
+          + '<strong>' + escapeHtmlWs(f.family_name || f.family_email) + '</strong>'
+          + (f.withdrawn ? ' <span class="ws-wv-declined">withdrawn</span>' : '')
+          + ' <span class="ws-wv-context">' + escapeHtmlWs((f.logins || []).join(', ')) + '</span> '
+          + stamp
+          + '</label>';
+      });
+      h += '<h5 class="ws-part-exempt-existing">The email (edit before sending)</h5>'
+        + '<input id="offboard-subject" class="rd-input" type="text" maxlength="200" value="' + escapeHtmlWs(OFFBOARD_EMAIL_SUBJECT) + '">'
+        + '<textarea id="offboard-text" class="rd-textarea" rows="14"></textarea>'
+        + '<div class="ws-srt-actions">'
+        + '<button type="button" id="offboard-send" class="sc-btn mcb-primary">Send email + portal notice</button>'
+        + '</div>'
+        + '<p id="offboard-status" class="ws-wv-context" aria-live="polite">Sends one bcc email to every checked family’s workspace logins, plus a portal notification each. Then delete the accounts manually in Google Admin and tick ✓ Done on the To Do.</p>';
+      body.innerHTML = h;
+      var textEl = body.querySelector('#offboard-text');
+      if (textEl) textEl.value = OFFBOARD_EMAIL_TEMPLATE;
+      var sendBtn = body.querySelector('#offboard-send');
+      var statusEl = body.querySelector('#offboard-status');
+      sendBtn.addEventListener('click', function () {
+        var checked = Array.prototype.slice.call(body.querySelectorAll('.offboard-fam-check:checked')).map(function (c) { return c.value; });
+        var subj = (body.querySelector('#offboard-subject') || {}).value || '';
+        var text = (textEl || {}).value || '';
+        if (!checked.length) { statusEl.classList.add('ws-wv-err'); statusEl.textContent = 'Check at least one family.'; return; }
+        if (!subj.trim() || !text.trim()) { statusEl.classList.add('ws-wv-err'); statusEl.textContent = 'Subject and message are both required.'; return; }
+        rwArmTwoStep(sendBtn, 'send to ' + checked.length + ' famil' + (checked.length === 1 ? 'y' : 'ies'), function () {
+          sendBtn.disabled = true;
+          statusEl.classList.remove('ws-wv-err');
+          statusEl.textContent = 'Sending…';
+          fetch('/api/tour', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'offboarding-notify', subject: subj, body_text: text, family_emails: checked })
+          }).then(function (r) { return r.json().then(function (dd) { return { ok: r.ok, data: dd }; }); })
+            .then(function (res) {
+              sendBtn.disabled = false;
+              if (!res.ok) { statusEl.classList.add('ws-wv-err'); statusEl.textContent = (res.data && res.data.error) || 'Send failed.'; return; }
+              var dd = res.data || {};
+              statusEl.textContent = 'Sent to ' + (dd.sent || []).length + ' famil' + ((dd.sent || []).length === 1 ? 'y' : 'ies')
+                + ' (' + (dd.logins_emailed || 0) + ' logins)'
+                + ((dd.failed || []).length ? ' — FAILED for: ' + dd.failed.join(', ') : '')
+                + '. Now delete the accounts manually in Google Admin, then tick ✓ Done on the To Do.';
+              // Refresh stamps + the To Do pill.
+              fetch('/api/tour?offboarding=1', { headers: rwAuthHeaders() })
+                .then(function (r2) { return r2.ok ? r2.json() : null; })
+                .then(function (d2) { if (d2) { _offboardingCache = d2; if (typeof loadRemoveMembersTodo === 'function') loadRemoveMembersTodo(); } });
+            })
+            .catch(function () { sendBtn.disabled = false; statusEl.classList.add('ws-wv-err'); statusEl.textContent = 'Network error — try again.'; });
+        });
+      });
+    };
+    // No stale-while-revalidate here: a background re-render would wipe
+    // an email the director is mid-editing. Cache from the To Do loader
+    // is seconds old; a fresh open without cache fetches once.
+    if (_offboardingCache) { render(_offboardingCache); return; }
+    fetch('/api/tour?offboarding=1', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>';
+          return;
+        }
+        _offboardingCache = res.data;
+        render(res.data);
+      })
+      .catch(function () { body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
   }
 
   // ══ Enrollment Requests queue (Membership Director) ══════════════

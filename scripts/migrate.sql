@@ -2068,3 +2068,11 @@ CREATE TABLE IF NOT EXISTS public_form_hits (
 );
 CREATE INDEX IF NOT EXISTS public_form_hits_ip_idx ON public_form_hits (ip, created_at);
 CREATE INDEX IF NOT EXISTS public_form_hits_ts_idx ON public_form_hits (form_ts);
+
+-- #48 (2026-07-20): Comms To Do before the Ice Cream Social — notify
+-- non-returning members their accounts will be deleted (deletion itself
+-- stays manual in Google Admin). Per-family sent stamp so the modal
+-- shows who was already notified; the To Do's per-year ✓ Done rides the
+-- existing todo_confirmations pattern (kind='removemembers').
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_at TIMESTAMPTZ;
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_by TEXT NOT NULL DEFAULT '';
