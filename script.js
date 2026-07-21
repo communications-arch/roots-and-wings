@@ -8767,7 +8767,8 @@
       // renderClassSubsCardBody() keeps painting it wherever it lives;
       // the submit modal + edit/withdraw/lesson-plan wiring all ride
       // along unchanged.
-      title: 'Class Ideas',
+      // #54: renamed from "Class Ideas" to "Class Development".
+      title: 'Class Development',
       roleGate: null,
       render: function () {
         var h = '<p class="ws-body-hint">Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>. Once approved, it also helps (but isn’t required) to put together a lesson plan.</p>';
@@ -9644,7 +9645,7 @@
     'bg-sustaining': 'Board — Sustaining Director', 'bg-communications': 'Board — Communications Director',
     'bg-cleaning': 'Board — Cleaning Crew Liaison', 'bg-events-liaison': 'Board — Special Events Liaison',
     'mf-responsibilities': 'My Family — My Responsibilities', 'mf-kids-schedule': 'My Family — Kids’ Schedule',
-    'mf-billing': 'My Family — Billing & Fees', 'class-ideas': 'Class Ideas (Workspace)',
+    'mf-billing': 'My Family — Billing & Fees', 'class-ideas': 'Class Development (Workspace)',
     'mf-my-classes': 'My Family — My Classes',
     'mf-signup': 'My Family — Afternoon Sign-ups', 'mf-coverage': 'My Family — Coverage Board'
   };
@@ -20491,6 +20492,11 @@
     var html = '';
     var activeSubs = myClassSubmissions.filter(function (s) { return s.status !== 'withdrawn'; });
 
+    // #54: the submit button leads the card instead of trailing the list.
+    html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;margin-bottom:0.75rem;">';
+    html += (activeSubs.length === 0 ? '+ Submit a Class' : '+ Submit Another Class');
+    html += '</button>';
+
     if (activeSubs.length === 0) {
       html += '<p style="margin:0 0 0.75rem;color:var(--color-text-light);font-size:0.9rem;">';
       html += 'You haven\'t proposed a class yet.';
@@ -20560,10 +20566,6 @@
       });
       html += '</ul>';
     }
-
-    html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;">';
-    html += (activeSubs.length === 0 ? '+ Submit a Class' : '+ Submit Another Class');
-    html += '</button>';
 
     body.innerHTML = html;
 
@@ -20672,7 +20674,7 @@
 
     if (mine.length === 0) {
       html += '<p style="margin:0;color:var(--color-text-light);font-size:0.9rem;">No approved classes for Session ' + sess + ' yet. ';
-      html += 'Have an idea? Propose it from the <strong>Class Ideas</strong> card in <strong>My Workspace</strong> — or ';
+      html += 'Have an idea? Propose it from the <strong>Class Development</strong> card in <strong>My Workspace</strong> — or ';
       html += '<button type="button" class="ws-inline-link" id="mfMyClassesSubmit">✨ submit a class now</button>.</p>';
     } else {
       html += '<ul style="list-style:none;padding:0;margin:0;">';
