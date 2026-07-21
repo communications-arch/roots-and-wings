@@ -232,7 +232,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'role-interest' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -547,6 +547,56 @@ module.exports = async function handler(req, res) {
     // the Phase 4 frontend cutover. Internally:
     //   - term_length is exposed as job_length
     //   - committees.name is exposed as committee (via JOIN)
+    // ── Role interest (#39) ──
+    // Members raise a hand for an open committee seat from the workspace
+    // "Ways to get more involved" list. NOT an assignment — the Roles
+    // Assignments admin shows who's interested next to each role so the
+    // assigners know who to talk to. Any authed member may read (the
+    // member's own ✓ state rides the same list) and toggle THEIR OWN row;
+    // the effective (View-As) identity is the interested person.
+    if (action === 'role-interest') {
+      if (req.method === 'GET') {
+        const rows = await sql`
+          SELECT ri.id, ri.role_id, ri.person_email AS email,
+                 TRIM(CONCAT_WS(' ', p.first_name, p.last_name)) AS person_name,
+                 ri.family_email, ri.created_at
+          FROM role_interest ri
+          LEFT JOIN people p ON LOWER(p.email) = LOWER(ri.person_email)
+          ORDER BY ri.role_id, ri.created_at
+        `;
+        return res.status(200).json({ interest: rows });
+      }
+      if (req.method === 'POST') {
+        const roleId = parseInt((req.body && req.body.role_id), 10);
+        if (!roleId) return res.status(400).json({ error: 'role_id required' });
+        const role = await sql`SELECT id, status FROM roles WHERE id = ${roleId}`;
+        if (role.length === 0) return res.status(404).json({ error: 'Role not found' });
+        if (role[0].status !== 'active') return res.status(400).json({ error: 'Role is not active' });
+        const personEmail = String(user.email || '').toLowerCase();
+        // family_email from the people row when we have one (email-keyed —
+        // family_name is never an identity key).
+        const person = await sql`SELECT family_email FROM people WHERE LOWER(email) = ${personEmail} LIMIT 1`;
+        const familyEmail = (person[0] && person[0].family_email) || null;
+        const inserted = await sql`
+          INSERT INTO role_interest (role_id, person_email, family_email)
+          VALUES (${roleId}, ${personEmail}, ${familyEmail})
+          ON CONFLICT (role_id, LOWER(person_email)) DO NOTHING
+          RETURNING id
+        `;
+        return res.status(200).json({ ok: true, already: inserted.length === 0 });
+      }
+      if (req.method === 'DELETE') {
+        const roleId = parseInt(req.query.role_id, 10);
+        if (!roleId) return res.status(400).json({ error: 'role_id required' });
+        await sql`
+          DELETE FROM role_interest
+          WHERE role_id = ${roleId} AND LOWER(person_email) = ${String(user.email || '').toLowerCase()}
+        `;
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     if (action === 'roles') {
       if (req.method === 'GET') {
         const includeArchived = req.query.includeArchived === '1';

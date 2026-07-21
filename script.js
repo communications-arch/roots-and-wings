@@ -1005,6 +1005,101 @@
     return { type: 'role', title: title, committee: '', term: '' };
   }
 
+  // ── Open committee seats (#39/#40) ─────────────────────────────────
+  // Open seats = active committee roles with NO current holder, straight
+  // from the DB roles directory (rolesDirectory / ROLES_DIRECTORY).
+  // Committee-less pseudo roles and per-session classroom roles aren't
+  // volunteer-claimable seats, so they're skipped.
+  function collectOpenSeats() {
+    var open = [];
+    (ROLES_DIRECTORY || []).forEach(function (r) {
+      if (r.category !== 'committee_role' || !r.committee) return;
+      if (String(r.term_length || '').toLowerCase() === '1 session') return;
+      if (r.holders && r.holders.length) return;
+      open.push({ id: r.id, committee: r.committee, title: r.title });
+    });
+    return open;
+  }
+
+  // role_interest cache: mine = { role_id: true } for the ACTING member.
+  // null until the first fetch; toggles patch it in place.
+  var _roleInterest = null;
+  function loadRoleInterest(cb) {
+    fetch('/api/cleaning?action=role-interest', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var mine = {};
+        var me = String(getActiveEmail() || '').toLowerCase();
+        (data.interest || []).forEach(function (row) {
+          if (String(row.email || '').toLowerCase() === me) mine[row.role_id] = true;
+        });
+        _roleInterest = { mine: mine };
+        if (cb) cb();
+      })
+      .catch(function () { if (cb) cb(); });
+  }
+
+  // Seats list body — shared by the Ways to Help card's modal. Each seat
+  // opens the role's full description (the DB-role popup); "I'm
+  // interested" stores a hand-raise the Roles Assignments admin shows.
+  function openSeatsListHtml(open) {
+    var mine = (_roleInterest && _roleInterest.mine) || {};
+    var h = '<p class="ws-body-hint">Tap a seat for the full role description, or email '
+      + '<a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one. '
+      + '<strong>I’m interested</strong> quietly lets the assigners know — it isn’t a commitment.</p>';
+    h += '<ul class="ws-opportunities">';
+    open.forEach(function (o) {
+      h += '<li class="ws-opp-seat">';
+      h += '<span class="ws-opp-main"><button type="button" class="ws-inline-link" data-resource-action="open-seat-detail" data-role-title="' + escapeAttr(o.title) + '"><strong>' + escapeHtml(o.title) + '</strong></button>';
+      h += '<span class="ws-opp-committee">' + escapeHtml(o.committee) + '</span></span>';
+      h += '<button type="button" class="sc-btn ws-opp-interest' + (mine[o.id] ? ' ws-opp-interested' : '') + '" data-resource-action="role-interest-toggle" data-role-id="' + o.id + '">'
+        + (mine[o.id] ? '✓ Interested' : '🙋 I’m interested') + '</button>';
+      h += '</li>';
+    });
+    h += '</ul>';
+    return h;
+  }
+
+  // #40: the Ways to Help card shows a one-line summary; the full list
+  // lives here, in the house report modal.
+  function showOpenSeatsModal() {
+    var open = collectOpenSeats();
+    var body = renderReportModal({
+      title: 'Open Committee Seats',
+      subtitle: 'Ways to get more involved — seats with no current holder.',
+      bodyId: 'open-seats-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    var paint = function () {
+      var el = document.getElementById('open-seats-body');
+      if (!el) return;
+      el.innerHTML = open.length ? openSeatsListHtml(open) : '<p class="ws-empty">No open seats right now — check back after the next board meeting.</p>';
+    };
+    if (_roleInterest) paint(); else loadRoleInterest(paint);
+  }
+
+  function toggleRoleInterest(btn) {
+    var roleId = parseInt(btn.getAttribute('data-role-id'), 10);
+    if (!roleId || btn.disabled) return;
+    var isOn = !!(_roleInterest && _roleInterest.mine && _roleInterest.mine[roleId]);
+    btn.disabled = true;
+    var req = isOn
+      ? fetch('/api/cleaning?action=role-interest&role_id=' + roleId, { method: 'DELETE', headers: rwAuthHeaders() })
+      : fetch('/api/cleaning?action=role-interest', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ role_id: roleId }) });
+    req.then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { alert('Error: ' + (res.data.error || 'could not save')); return; }
+        if (!_roleInterest) _roleInterest = { mine: {} };
+        if (isOn) delete _roleInterest.mine[roleId];
+        else _roleInterest.mine[roleId] = true;
+        btn.classList.toggle('ws-opp-interested', !isOn);
+        btn.textContent = !isOn ? '✓ Interested' : '🙋 I’m interested';
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+
   // ── DB special-event display helpers ──
   // "Wed, Nov 11 · 10:30 AM–1:30 PM" (plus an end date for multi-day
   // events); "Date TBD" while the board hasn't approved one.
@@ -8646,18 +8741,11 @@
         }
 
         // ── Ways to get more involved (open seats) ─────────────────────
-        // Open seats = active committee roles with NO current holder,
-        // straight from the DB roles directory. Committee-less pseudo
-        // roles (Guest, the VP-picked Morning Class Liaisons) and the
-        // per-session classroom roles aren't volunteer-claimable seats,
-        // so they're skipped.
-        var open = [];
-        (ROLES_DIRECTORY || []).forEach(function (r) {
-          if (r.category !== 'committee_role' || !r.committee) return;
-          if (String(r.term_length || '').toLowerCase() === '1 session') return;
-          if (r.holders && r.holders.length) return;
-          open.push({ committee: r.committee, title: r.title });
-        });
+        // Open seats come from collectOpenSeats() (DB roles directory).
+        // #40: the card shows a one-line summary; the full list — with
+        // #39's description-click + "I'm interested" affordances — lives
+        // in the Open Committee Seats modal (showOpenSeatsModal).
+        var open = collectOpenSeats();
         h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
@@ -8666,12 +8754,9 @@
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
-          h += '<p class="ws-body-hint">Open committee seats — email <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a> to claim one.</p>';
-          h += '<ul class="ws-opportunities">';
-          open.forEach(function (o) {
-            h += '<li><strong>' + escapeHtml(o.title) + '</strong> <span class="ws-opp-committee">' + escapeHtml(o.committee) + '</span></li>';
-          });
-          h += '</ul>';
+          h += '<p class="ws-body-hint"><strong>' + open.length + '</strong> open committee seat' + (open.length === 1 ? '' : 's') + ' — '
+            + '<button type="button" class="ws-inline-link" data-resource-action="open-seats-modal">see them all</button>, '
+            + 'or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</p>';
         }
         return h;
       }
@@ -18574,6 +18659,15 @@
     else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
     else if (action === 'acl-lottery-moves' && typeof showLotteryMovesModal === 'function') showLotteryMovesModal();
     else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
+    // Open committee seats (#39/#40): the Ways to Help summary opens the
+    // modal; inside it, a seat title opens the role's description popup
+    // and "I'm interested" toggles the member's hand-raise.
+    else if (action === 'open-seats-modal' && typeof showOpenSeatsModal === 'function') showOpenSeatsModal();
+    else if (action === 'open-seat-detail' && typeof showDutyDetail === 'function') {
+      var seatTitle = btn.getAttribute('data-role-title') || '';
+      showDutyDetail({ text: seatTitle, popup: rolePopupForTitle(seatTitle) });
+    }
+    else if (action === 'role-interest-toggle' && typeof toggleRoleInterest === 'function') toggleRoleInterest(btn);
   });
 
   // Render all coordination tabs
@@ -21312,6 +21406,7 @@
   var _rolesMgrState = {
     roles: [],
     holdersByRoleId: {}, // { role_id: [ {id, email, person_name, family_name}, ... ] }
+    interestByRoleId: {}, // #39: { role_id: [ {id, email, person_name}, ... ] } — "I'm interested" hands
     showArchived: false,
     // Defaults to the active school year (April flip), same logic as
     // BILLING_CONFIG. Past years stay accessible via the picker.
@@ -26900,7 +26995,12 @@
     var holdersReq = fetch('/api/cleaning?action=role-holders&school_year=' + encodeURIComponent(_rolesMgrState.schoolYear), {
       headers: rwAuthHeaders()
     });
-    Promise.all([rolesReq, holdersReq])
+    // #39: who raised a hand for each seat ("I'm interested" on the open
+    // seats list) — shown next to each role so assigners see the volunteers.
+    var interestReq = fetch('/api/cleaning?action=role-interest', {
+      headers: rwAuthHeaders()
+    });
+    Promise.all([rolesReq, holdersReq, interestReq])
       .then(function (responses) {
         return Promise.all(responses.map(function (r) {
           return r.json().then(function (d) { return { ok: r.ok, data: d }; });
@@ -26909,6 +27009,7 @@
       .then(function (results) {
         var rolesRes = results[0];
         var holdersRes = results[1];
+        var interestRes = results[2];
         if (!rolesRes.ok) {
           body.innerHTML = '<p class="ws-empty">' + escapeHtml((rolesRes.data && rolesRes.data.error) || 'Could not load roles.') + '</p>';
           return;
@@ -26920,6 +27021,13 @@
           var k = h.role_id;
           if (!_rolesMgrState.holdersByRoleId[k]) _rolesMgrState.holdersByRoleId[k] = [];
           _rolesMgrState.holdersByRoleId[k].push(h);
+        });
+        _rolesMgrState.interestByRoleId = {};
+        var interestArr = (interestRes.ok && interestRes.data && Array.isArray(interestRes.data.interest)) ? interestRes.data.interest : [];
+        interestArr.forEach(function (iRow) {
+          var ik = iRow.role_id;
+          if (!_rolesMgrState.interestByRoleId[ik]) _rolesMgrState.interestByRoleId[ik] = [];
+          _rolesMgrState.interestByRoleId[ik].push(iRow);
         });
         renderRolesManagerTree();
       })
@@ -27099,6 +27207,14 @@
           h2 += ' <span class="roles-row-board-note" title="Board roles are tied to Google Workspace accounts and can only be changed by the Communications Director.">🔒 Comms-managed</span>';
         }
         h2 += '</div>';
+        // #39: members who tapped "I'm interested" on the open-seats list.
+        // A signal for the assigners, not an assignment.
+        var interested = (_rolesMgrState.interestByRoleId && _rolesMgrState.interestByRoleId[r.id]) || [];
+        if (interested.length) {
+          h2 += '<div class="roles-row-holder-line roles-row-interest-line">🙋 <span class="roles-row-holder-label">Interested:</span> ';
+          h2 += escapeHtml(interested.map(function (iRow) { return iRow.person_name || iRow.email; }).join(', '));
+          h2 += '</div>';
+        }
       }
       h2 += '<div class="roles-row-meta">';
       if (r.overview) h2 += '<span class="roles-row-overview">' + escapeHtml(String(r.overview).slice(0, 120)) + (String(r.overview).length > 120 ? '…' : '') + '</span>';

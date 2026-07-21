@@ -11429,6 +11429,33 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 0.8rem;
   margin-left: 6px;
 }
+/* Open Committee Seats modal rows (#39/#40): title+committee on the left,
+   "I'm interested" pinned right; wraps politely on narrow screens. */
+.ws-opportunities li.ws-opp-seat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ws-opp-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ws-opp-interest {
+  flex-shrink: 0;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.ws-opp-interest.ws-opp-interested {
+  background: #DEF3DE;
+  border-color: #2E6B2E;
+  color: #2E6B2E;
+}
+/* Roles Assignments (#39): members who raised a hand for a seat. */
+.roles-row-interest-line {
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+}
 .ws-waiver-form {
   display: flex;
   flex-direction: column;

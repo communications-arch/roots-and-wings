@@ -2026,3 +2026,18 @@ ALTER TABLE people ADD COLUMN IF NOT EXISTS allergies TEXT NOT NULL DEFAULT '';
 -- Legacy rows stay uncategorized and filter under the 'other' bucket.
 ALTER TABLE class_inspirations ADD COLUMN IF NOT EXISTS categories TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE class_inspirations ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+
+-- #39 (2026-07-20): "I'm interested" on open committee seats. Members
+-- raise a hand from the workspace "Ways to get more involved" list; the
+-- Roles Assignments admin shows who's interested next to each role.
+-- NOT an assignment — purely a signal for the assigners. Unique per
+-- (role, person) so the button toggles idempotently.
+CREATE TABLE IF NOT EXISTS role_interest (
+  id           SERIAL PRIMARY KEY,
+  role_id      INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  person_email TEXT NOT NULL,
+  family_email TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS role_interest_role_person_idx
+  ON role_interest (role_id, LOWER(person_email));
