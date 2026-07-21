@@ -8824,6 +8824,7 @@ async function handleBugReportsList(req, res) {
         created_at: it.created_at || '',
         state: it.state === 'closed' ? 'closed' : 'open',
         comments: it.comments || 0,
+        url: String(it.html_url || ''),
         labels: Array.isArray(it.labels)
           ? it.labels.map(l => String((l && l.name) || '')).filter(Boolean)
           : []
@@ -8847,9 +8848,12 @@ async function handleBugReportsList(req, res) {
         const comments = await cm.json();
         const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
         if (last && last.body) {
+          // No practical cap (2026-07-21, Erin's #49 comment was 4276
+          // chars and still clipped at 4000) — 20k is only a runaway
+          // guard; GitHub itself caps comments at 64k.
           it.latest_note = String(last.body)
             .replace(/!\[[^\]]*\]\([^)]*\)/g, '(screenshot)')
-            .slice(0, 4000);
+            .slice(0, 20000);
           it.latest_note_at = last.created_at || '';
         }
       } catch (cmErr) { /* card just renders without a note */ }

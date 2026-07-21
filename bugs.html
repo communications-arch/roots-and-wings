@@ -317,6 +317,7 @@
           var isLong = bug.latest_note.length > 350;
           noteHtml = '<div class="bug-card-note' + (isLong ? ' bug-note-collapsed' : '') + '">💬 <span class="bug-note-body">' + noteBody + '</span>'
             + (isLong ? ' <button type="button" class="bug-note-toggle">Show more</button>' : '')
+            + (bug.url ? ' <a class="bug-note-toggle" href="' + escapeHtml(bug.url) + '" target="_blank" rel="noopener">View on GitHub ↗</a>' : '')
             + '</div>';
         }
         html += '<div class="bug-card">'
