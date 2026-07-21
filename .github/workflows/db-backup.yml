@@ -1,0 +1,216 @@
+# Nightly encrypted DB backup → Google Drive, plus an on-demand restore test.
+# Issue #49 (disaster recovery). Photo/Blob backup is intentionally out of scope.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL     Neon PROD connection string — use the DIRECT
+#                           (unpooled) URL, not the -pooler one; pg_dump and
+#                           CREATE/DROP DATABASE need a real session.
+#   BACKUP_PASSPHRASE       symmetric encryption passphrase (also goes in the
+#                           sealed envelope in the DR binder)
+#   BACKUP_GDRIVE_SA_KEY    Google service-account key JSON; the backup Drive
+#                           folder must be shared with its client_email
+#   BACKUP_GDRIVE_FOLDER_ID id of the Drive "Backups" folder
+#   BACKUP_RESEND_KEY       Resend API key used only for failure alerts
+#
+# Nightly cron runs the backup job. workflow_dispatch runs either job by
+# choice — pick "restore-test" to prove the newest backup actually restores.
+
+name: DB backup
+
+on:
+  schedule:
+    - cron: '10 8 * * *'   # 08:10 UTC = 4:10am ET (3:10am in winter)
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        type: choice
+        options: [backup, restore-test]
+        default: backup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.event_name == 'schedule' || inputs.job == 'backup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 17 client
+        # Neon runs Postgres 17; pg_dump must be >= the server version, and
+        # ubuntu-latest ships an older client, so pull 17 from PGDG.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Dump the database (custom format)
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          STAMP="$(date -u +%F)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          pg_dump --format=custom --no-owner --no-privileges \
+            --file "rw-backup-$STAMP.dump" "$BACKUP_DATABASE_URL"
+          ls -l "rw-backup-$STAMP.dump"
+
+      - name: Write row-count manifest
+        # Spot-check counts recorded at backup time; the restore test compares
+        # the restored scratch DB against these. Table list mirrors
+        # MANIFEST_TABLES in scripts/backup/drive-backup.js.
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          psql "$BACKUP_DATABASE_URL" -X -A -t -c "SELECT json_build_object(
+              'backup_date', '$STAMP',
+              'registrations',     (SELECT count(*) FROM registrations),
+              'people',            (SELECT count(*) FROM people),
+              'kids',              (SELECT count(*) FROM kids),
+              'kid_enrollments',   (SELECT count(*) FROM kid_enrollments),
+              'waiver_signatures', (SELECT count(*) FROM waiver_signatures)
+            )" > "rw-backup-$STAMP.manifest.json"
+          cat "rw-backup-$STAMP.manifest.json"
+
+      - name: Encrypt (gpg AES256, symmetric)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+            --output "rw-backup-$STAMP.dump.gpg" "rw-backup-$STAMP.dump"
+          shred -u "rw-backup-$STAMP.dump"
+          ls -l "rw-backup-$STAMP.dump.gpg"
+
+      - name: Upload to Google Drive
+        env:
+          BACKUP_GDRIVE_SA_KEY: ${{ secrets.BACKUP_GDRIVE_SA_KEY }}
+          BACKUP_GDRIVE_FOLDER_ID: ${{ secrets.BACKUP_GDRIVE_FOLDER_ID }}
+        run: |
+          node scripts/backup/drive-backup.js upload "rw-backup-$STAMP.dump.gpg"
+          node scripts/backup/drive-backup.js upload "rw-backup-$STAMP.manifest.json"
+
+      - name: Retention — keep 30 dailies + 12 monthly keepers
+        env:
+          BACKUP_GDRIVE_SA_KEY: ${{ secrets.BACKUP_GDRIVE_SA_KEY }}
+          BACKUP_GDRIVE_FOLDER_ID: ${{ secrets.BACKUP_GDRIVE_FOLDER_ID }}
+        run: node scripts/backup/drive-backup.js prune
+
+      - name: Alert communications@ on failure
+        if: failure()
+        env:
+          BACKUP_RESEND_KEY: ${{ secrets.BACKUP_RESEND_KEY }}
+        run: |
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          curl -sf https://api.resend.com/emails \
+            -H "Authorization: Bearer $BACKUP_RESEND_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"from\":\"Roots & Wings Website <noreply@rootsandwingsindy.com>\",
+                 \"to\":[\"communications@rootsandwingsindy.com\"],
+                 \"subject\":\"⚠ Nightly DB backup FAILED\",
+                 \"html\":\"<p>The nightly database backup failed. A backup that silently stops is worse than none — please check the run:</p><p><a href=\\\"$RUN_URL\\\">$RUN_URL</a></p><p>See RESTORE.md in the repo for how the pipeline works.</p>\"}"
+
+  # ── On-demand restore test ───────────────────────────────────────────────
+  # Downloads the newest backup, decrypts it, checks its table of contents,
+  # then does a FULL restore into a scratch database (rw_restore_test) on the
+  # same Neon server and compares row counts against the backup manifest.
+  # Trigger: Actions → DB backup → Run workflow → job: restore-test.
+  restore-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'restore-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Download newest backup from Drive
+        env:
+          BACKUP_GDRIVE_SA_KEY: ${{ secrets.BACKUP_GDRIVE_SA_KEY }}
+          BACKUP_GDRIVE_FOLDER_ID: ${{ secrets.BACKUP_GDRIVE_FOLDER_ID }}
+        run: |
+          LATEST="$(node scripts/backup/drive-backup.js latest)"
+          echo "newest backup: $LATEST"
+          DUMP_ID="$(echo "$LATEST" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).id)')"
+          MANI_ID="$(echo "$LATEST" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(j.manifestId||"")')"
+          node scripts/backup/drive-backup.js download "$DUMP_ID" rw-restore.dump.gpg
+          if [ -n "$MANI_ID" ]; then
+            node scripts/backup/drive-backup.js download "$MANI_ID" rw-restore.manifest.json
+          else
+            echo "WARNING: no manifest sidecar found — row-count check will fail"
+          fi
+
+      - name: Decrypt
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          gpg --batch --yes --decrypt --pinentry-mode loopback \
+            --passphrase "$BACKUP_PASSPHRASE" \
+            --output rw-restore.dump rw-restore.dump.gpg
+          ls -l rw-restore.dump
+
+      - name: Integrity check (pg_restore --list)
+        run: |
+          pg_restore --list rw-restore.dump > toc.txt
+          echo "archive lists $(wc -l < toc.txt) entries"
+
+      - name: Create scratch database rw_restore_test
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          psql "$BACKUP_DATABASE_URL" -X -c "DROP DATABASE IF EXISTS rw_restore_test WITH (FORCE)"
+          psql "$BACKUP_DATABASE_URL" -X -c "CREATE DATABASE rw_restore_test"
+
+      - name: Full restore into the scratch database
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          RESTORE_URL="$(node scripts/backup/drive-backup.js swap-db rw_restore_test)"
+          pg_restore --no-owner --no-privileges --exit-on-error \
+            --dbname "$RESTORE_URL" rw-restore.dump
+
+      - name: Row-count spot checks vs manifest
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          RESTORE_URL="$(node scripts/backup/drive-backup.js swap-db rw_restore_test)"
+          psql "$RESTORE_URL" -X -A -t -c "SELECT json_build_object(
+              'registrations',     (SELECT count(*) FROM registrations),
+              'people',            (SELECT count(*) FROM people),
+              'kids',              (SELECT count(*) FROM kids),
+              'kid_enrollments',   (SELECT count(*) FROM kid_enrollments),
+              'waiver_signatures', (SELECT count(*) FROM waiver_signatures)
+            )" > restored-counts.json
+          node scripts/backup/drive-backup.js compare rw-restore.manifest.json restored-counts.json
+
+      - name: Drop scratch database
+        if: always()
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: psql "$BACKUP_DATABASE_URL" -X -c "DROP DATABASE IF EXISTS rw_restore_test WITH (FORCE)" || true
+
+      - name: Alert communications@ on failure
+        if: failure()
+        env:
+          BACKUP_RESEND_KEY: ${{ secrets.BACKUP_RESEND_KEY }}
+        run: |
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          curl -sf https://api.resend.com/emails \
+            -H "Authorization: Bearer $BACKUP_RESEND_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"from\":\"Roots & Wings Website <noreply@rootsandwingsindy.com>\",
+                 \"to\":[\"communications@rootsandwingsindy.com\"],
+                 \"subject\":\"⚠ DB restore test FAILED\",
+                 \"html\":\"<p>The on-demand restore test failed — the newest backup may not be restorable. Please check the run:</p><p><a href=\\\"$RUN_URL\\\">$RUN_URL</a></p>\"}"

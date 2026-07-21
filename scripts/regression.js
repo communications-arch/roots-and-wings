@@ -50,6 +50,13 @@ for (const f of fs.readdirSync(API_DIR)) {
 for (const f of fs.readdirSync(path.join(ROOT, 'scripts'))) {
   if (f.endsWith('.js')) jsFiles.push(path.join(ROOT, 'scripts', f));
 }
+// scripts/backup/ holds the CI backup helper (#49) — syntax-gate it too.
+const backupDir = path.join(ROOT, 'scripts', 'backup');
+if (fs.existsSync(backupDir)) {
+  for (const f of fs.readdirSync(backupDir)) {
+    if (f.endsWith('.js')) jsFiles.push(path.join(backupDir, f));
+  }
+}
 
 for (const file of jsFiles) {
   const rel = path.relative(ROOT, file);
@@ -253,6 +260,7 @@ const unitTests = [
   'scripts/test-schedules-byclass.js',
   'scripts/test-open-seats.js',
   'scripts/test-inquiry-screen.js',
+  'scripts/test-dr-backup.js',
 ];
 
 for (const rel of unitTests) {
