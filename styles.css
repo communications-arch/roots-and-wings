@@ -15143,3 +15143,22 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   margin-bottom: 10px;
   font-size: 0.9rem;
 }
+
+/* ── Bug log: collapsible fixer notes (2026-07-21) ──
+   Full re-test instructions live on the card; long ones clamp to 4 lines
+   until the Show-more toggle opens them. */
+.bug-card-note.bug-note-collapsed .bug-note-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bug-note-toggle {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+}

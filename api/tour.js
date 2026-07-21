@@ -8830,27 +8830,30 @@ async function handleBugReportsList(req, res) {
       }));
     // Latest note per OPEN issue with comments (Erin, 2026-07-19: fix
     // explanations + re-test instructions should read right on the bug
-    // page, not in GitHub). Bounded: open issues only, first 15, one
-    // comments call each, all inside the same 60s cache. The note is
-    // plain text — image markdown is stripped to keep cards tidy.
-    const wantNotes = items.filter(it => it.state === 'open' && it.comments > 0).slice(0, 15);
-    for (const it of wantNotes) {
+    // page, not in GitHub). Bounded: open issues only, first 30, fetched
+    // in PARALLEL, all inside the same 60s cache. 2026-07-21 (Erin: "the
+    // bug list truncates your comments so I can't read what I need to
+    // do"): cap raised 600 → 4000 chars (client collapses long notes
+    // behind a Show-more toggle) and the issue cap 15 → 30 so every open
+    // card gets its note.
+    const wantNotes = items.filter(it => it.state === 'open' && it.comments > 0).slice(0, 30);
+    await Promise.all(wantNotes.map(async (it) => {
       try {
         const cm = await fetch(
           'https://api.github.com/repos/' + BUGLOG_REPO + '/issues/' + it.number + '/comments?per_page=100',
           { headers: bugLogGithubHeaders(token) }
         );
-        if (!cm.ok) continue;
+        if (!cm.ok) return;
         const comments = await cm.json();
         const last = Array.isArray(comments) && comments.length ? comments[comments.length - 1] : null;
         if (last && last.body) {
           it.latest_note = String(last.body)
             .replace(/!\[[^\]]*\]\([^)]*\)/g, '(screenshot)')
-            .slice(0, 600);
+            .slice(0, 4000);
           it.latest_note_at = last.created_at || '';
         }
       } catch (cmErr) { /* card just renders without a note */ }
-    }
+    }));
     items.forEach(it => { delete it.comments; });
     bugListCache = { at: Date.now(), items };
     return res.status(200).json({ bugs: items });

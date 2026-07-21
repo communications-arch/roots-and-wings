@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260515c">
+  <link rel="stylesheet" href="styles.css?v=20260722h">
   <style>
     /* Page-scoped chrome for the bug log — the card/pill shapes below
        don't exist as standalone-page classes in styles.css, so they're
@@ -309,7 +309,15 @@
         // explanations) renders right on the card — no GitHub needed.
         var noteHtml = '';
         if (bug.latest_note) {
-          noteHtml = '<div class="bug-card-note">💬 ' + escapeHtml(bug.latest_note).replace(/\n/g, '<br>') + '</div>';
+          // Long notes (full re-test instructions) collapse behind a
+          // Show-more toggle so the list stays scannable — but the FULL
+          // text is always available on the card (Erin, 2026-07-21:
+          // truncation was hiding what she needed to do).
+          var noteBody = escapeHtml(bug.latest_note).replace(/\n/g, '<br>');
+          var isLong = bug.latest_note.length > 350;
+          noteHtml = '<div class="bug-card-note' + (isLong ? ' bug-note-collapsed' : '') + '">💬 <span class="bug-note-body">' + noteBody + '</span>'
+            + (isLong ? ' <button type="button" class="bug-note-toggle">Show more</button>' : '')
+            + '</div>';
         }
         html += '<div class="bug-card">'
           + '<div class="bug-card-main">'
@@ -324,6 +332,14 @@
           + '</div>';
       });
       listEl.innerHTML = html;
+      listEl.querySelectorAll('.bug-note-toggle').forEach(function (tg) {
+        tg.addEventListener('click', function () {
+          var note = tg.closest('.bug-card-note');
+          if (!note) return;
+          var collapsed = note.classList.toggle('bug-note-collapsed');
+          tg.textContent = collapsed ? 'Show more' : 'Show less';
+        });
+      });
       listEl.querySelectorAll('.bug-verify-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
           btn.disabled = true;
