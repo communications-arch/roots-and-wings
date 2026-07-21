@@ -7833,12 +7833,14 @@ button.staff-role:hover {
    inside the duties summary each block label is small-caps TEXT ONLY in a
    fixed 92px left gutter — no box, no border — with the start time in a
    light second line, so the card reads as one aligned list separated by
-   hairline dividers. Under 481px it stacks, label inline above its rows. */
+   hairline dividers. Under 601px it stacks, label inline above its rows
+   (bug log #58: 481px still left the gutter+rows grid cramped on many
+   phone widths). */
 .mf-duties-summary .mf-block-section {
   margin-bottom: 0;
   padding: 3px 0;
 }
-@media (min-width: 481px) {
+@media (min-width: 601px) {
   .mf-duties-summary .mf-block-section {
     display: grid;
     grid-template-columns: 40px 1fr;
@@ -7885,7 +7887,7 @@ button.staff-role:hover {
   padding: 2px 0 6px;
   margin-bottom: 0;
 }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .mf-duties-summary .mf-block-section {
     display: block;
     padding: 6px 0;
