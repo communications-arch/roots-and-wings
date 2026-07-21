@@ -8798,6 +8798,10 @@
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
         // Help content editor (2026-07-17) — edit the "?" card help text.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="help-editor"><span class="ws-link-icon">❓</span>Card Help Text</button></li>';
+        // Disaster Recovery Plan (#49) — printable systems map, scenario
+        // first-steps, and the hard-copy binder checklist. Pairs with the
+        // nightly encrypted DB backup workflow + RESTORE.md in the repo.
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="dr-plan"><span class="ws-link-icon">🛟</span>Disaster Recovery Plan</button></li>';
         // Facilities (2026-07-10): rooms + the notes the Class Builder's
         // room picker shows. Also reachable from the builder's class
         // editor via "Manage rooms…" for Facilities managers.
@@ -9000,6 +9004,13 @@
           // loadRemoveMembersTodo.
           h += '<li id="ws-todo-removemembers-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-removemembers-btn"><span class="ws-link-count" id="ws-removemembers-count">0</span><span class="ws-link-icon">👋</span><span id="ws-removemembers-label">Notify non-returning members</span></button>'
             + '<button type="button" class="sc-btn" id="ws-todo-removemembers-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
+          // #49: refresh the printed DR binder. Windowed to each session
+          // start (opens start−7, stays until ✓ Done for THAT session —
+          // todo_confirmations kind='drbinder-sN'). Click opens the DR
+          // Plan modal, whose hard-copy list says what to print. Painted
+          // by loadDrBinderTodo; dev unlock keeps it visible year-round.
+          h += '<li id="ws-todo-drbinder-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-drbinder-btn"><span class="ws-link-icon">🛟</span><span id="ws-drbinder-label">Refresh the printed DR binder</span></button>'
+            + '<button type="button" class="sc-btn" id="ws-todo-drbinder-done" title="Mark done for this session — the reminder returns a week before the next session starts">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
           // Enrollment approval queue (Erin, 2026-07-19 Option B): schedule
@@ -9094,6 +9105,7 @@
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
         if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
         if (typeof loadRemoveMembersTodo === 'function') loadRemoveMembersTodo();
+        if (typeof loadDrBinderTodo === 'function') loadDrBinderTodo();
         if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
         // Personal event-planning tasks (Collaboration spaces): repaint
         // from cache instantly, then refresh from the server.
@@ -18682,6 +18694,7 @@
     }
     else if (action === 'permissions-admin' && typeof showPermissionsAdminModal === 'function') showPermissionsAdminModal();
     else if (action === 'help-editor' && typeof showHelpEditorModal === 'function') showHelpEditorModal();
+    else if (action === 'dr-plan' && typeof showDrPlanModal === 'function') showDrPlanModal();
     else if (action === 'facilities-admin' && typeof showFacilitiesAdminModal === 'function') showFacilitiesAdminModal();
     else if (action === 'confirm-role-holders' && typeof showConfirmRoleHoldersModal === 'function') showConfirmRoleHoldersModal();
     else if (action === 'coop-calendar' && typeof showBoardCalendarModal === 'function') {
@@ -24070,6 +24083,201 @@
         render(res.data);
       })
       .catch(function () { body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
+  }
+
+  // ══ #49: Disaster Recovery Plan (Comms — Admin Consoles card) ═════
+  // Printable plan for the physical binder: systems map with account
+  // owners, what the nightly backup covers, scenario first-steps, where
+  // recovery codes LIVE (locations only — never the codes themselves),
+  // passphrase custody, and the hard-copy print list. Content is a
+  // client-side template (no server round-trip — the plan must be
+  // reachable even when the DB is the thing that's on fire). Pairs with
+  // .github/workflows/db-backup.yml + RESTORE.md in the repo.
+  // Square-bracket [placeholders] are Erin's to fill in, then reprint.
+
+  function buildDrPlanContentHtml() {
+    function ph(text) { return '<em class="ws-wv-context">[' + text + ']</em>'; }
+    var h = '';
+    h += '<p class="ws-body-hint">If something breaks badly — the site, the database, an account — start here. '
+      + 'Print this page (🖨 above) and keep it in the physical DR binder with a printed copy of '
+      + '<strong>RESTORE.md</strong> (in the GitHub repo root) and the sealed passphrase envelope. '
+      + 'Anything in <em>[brackets]</em> still needs to be filled in — write on the printout, then update this page’s source.</p>';
+
+    // ── 1. Systems map ──
+    h += '<h5 class="ws-part-subhead">1 · Systems map — what runs where, under which account</h5>';
+    h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>System</th><th>What it does</th><th>Account / owner</th><th>Console</th></tr></thead><tbody>';
+    h += '<tr><td><strong>Vercel</strong></td><td>Hosts the website + API (project <code>roots-and-wings</code>) and Blob file storage (member photos, bug screenshots)</td><td>communications@rootsandwingsindy.com (Communications Director)</td><td>vercel.com/dashboard</td></tr>';
+    h += '<tr><td><strong>GitHub</strong></td><td>All site code + this backup workflow (repo <code>communications-arch/roots-and-wings</code>; the <code>master</code> branch is what’s live)</td><td>communications@ (GitHub user communications-arch)</td><td>github.com</td></tr>';
+    h += '<tr><td><strong>Neon</strong></td><td>The Postgres database — registrations, people, kids, enrollments, waivers, everything (Launch plan)</td><td>communications@</td><td>console.neon.tech</td></tr>';
+    h += '<tr><td><strong>Google Workspace</strong></td><td>All @rootsandwingsindy.com email + member sign-in accounts, Drive (incl. the backup folder), Calendar</td><td>communications@ is the Workspace admin</td><td>admin.google.com</td></tr>';
+    h += '<tr><td><strong>Resend</strong></td><td>Outbound email the site sends (notifications, waivers, backup-failure alerts)</td><td>communications@</td><td>resend.com</td></tr>';
+    h += '<tr><td><strong>GoDaddy</strong></td><td>The rootsandwingsindy.com domain + DNS</td><td>' + ph('confirm which login owns GoDaddy') + '</td><td>sso.godaddy.com</td></tr>';
+    h += '</tbody></table></div>';
+
+    // ── 2. Backups ──
+    h += '<h5 class="ws-part-subhead">2 · What’s backed up, where, how often</h5>';
+    h += '<ul class="dr-plan-list">';
+    h += '<li><strong>Database:</strong> a full dump of the production Neon database is taken <strong>every night ~4:10am</strong> (Indianapolis time) by a GitHub Action, encrypted (gpg AES256), and uploaded to the Google Drive <strong>Backups folder</strong> ' + ph('note the folder’s Drive location here') + ' as <code>rw-backup-YYYY-MM-DD.dump.gpg</code>.</li>';
+    h += '<li><strong>Retention:</strong> the last 30 nightly backups, plus the first backup of each month for 12 months. Older ones are pruned automatically.</li>';
+    h += '<li><strong>If a backup fails:</strong> communications@ gets an alert email from the workflow (plus GitHub’s own failure email). A backup that silently stops is worse than none — investigate the same week.</li>';
+    h += '<li><strong>Restore drill:</strong> GitHub → Actions → “DB backup” → Run workflow → job <code>restore-test</code> restores the newest backup into a scratch database and checks row counts. Run it a couple of times a year and log the date in RESTORE.md.</li>';
+    h += '<li><strong>NOT backed up by this pipeline:</strong> photos / Vercel Blob files (decided — issue #49), and Google Drive documents (those live under the co-op’s Workspace and Google’s own retention).</li>';
+    h += '</ul>';
+
+    // ── 3. Scenarios ──
+    h += '<h5 class="ws-part-subhead">3 · If X happens, do Y first</h5>';
+    h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>Scenario</th><th>First steps</th></tr></thead><tbody>';
+    h += '<tr><td><strong>Site is down</strong> (database probably fine)</td><td>1. Check vercel-status.com and neonstatus.com — it may be them, not us.<br>2. Vercel → project → Deployments: if the newest deploy failed or broke things, open the last good one → ⋯ → “Instant Rollback” / Redeploy.<br>3. Nothing obvious? Check Runtime Logs on the current deployment.</td></tr>';
+    h += '<tr><td><strong>Database lost or corrupted</strong></td><td>1. Stop — don’t click anything destructive, backups in Drive are the safety net.<br>2. Follow <strong>RESTORE.md</strong> step by step (binder copy or repo root): download newest backup → decrypt with the envelope passphrase → restore to a fresh Neon database → repoint Vercel’s DATABASE_URL env vars → redeploy.<br>3. Also consider Neon’s own point-in-time restore first (console.neon.tech → branch → Restore) — faster if the Neon account itself is fine.</td></tr>';
+    h += '<tr><td><strong>Locked out of an account</strong></td><td>1. Find its recovery-code location in section 4 and use the account’s recovery flow.<br>2. Google Workspace admin lockout: use the recovery phone/email on file; worst case Google’s domain-verification recovery (slow — days).<br>3. GitHub/Vercel/Neon sign in via Google where configured — fixing the Google account usually fixes them too.</td></tr>';
+    h += '<tr><td><strong>Key person unavailable</strong> (the person who runs all this)</td><td>1. The binder is self-sufficient: this plan + RESTORE.md + the sealed envelope.<br>2. Any board member plus a technically comfortable helper can follow RESTORE.md — it assumes no prior context.<br>3. Who to call: ' + ph('name + phone of the backup technical contact') + '.</td></tr>';
+    h += '</tbody></table></div>';
+
+    // ── 4. Key accounts — recovery-code LOCATIONS ──
+    h += '<h5 class="ws-part-subhead">4 · Key accounts — where recovery codes live</h5>';
+    h += '<p class="ws-body-hint">Locations only — codes and passwords themselves must never be written here or anywhere digital that isn’t the password manager.</p>';
+    h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>Account</th><th>Sign-in</th><th>Recovery codes / info live at</th></tr></thead><tbody>';
+    h += '<tr><td>Google Workspace admin (communications@)</td><td>password + 2FA</td><td>' + ph('e.g. sealed page in the binder / password manager name') + '</td></tr>';
+    h += '<tr><td>GitHub (communications-arch)</td><td>password + 2FA</td><td>' + ph('where the 2FA recovery codes are stored') + '</td></tr>';
+    h += '<tr><td>Vercel</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
+    h += '<tr><td>Neon</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
+    h += '<tr><td>GoDaddy (domain)</td><td>' + ph('login email') + '</td><td>' + ph('location') + '</td></tr>';
+    h += '<tr><td>Resend</td><td>' + ph('login email') + '</td><td>' + ph('location') + '</td></tr>';
+    h += '</tbody></table></div>';
+
+    // ── 5. Passphrase custody ──
+    h += '<h5 class="ws-part-subhead">5 · Backup passphrase custody</h5>';
+    h += '<p class="ws-body-hint">The backups are useless without the encryption passphrase. It exists in exactly two places: '
+      + 'the GitHub Actions secret <code>BACKUP_PASSPHRASE</code> (which <strong>cannot be read back</strong> once saved — write-only) and '
+      + 'a <strong>sealed envelope</strong> kept ' + ph('envelope location — e.g. with the binder / a board member’s home') + '. '
+      + 'If the envelope is opened or lost, generate a new passphrase, update the GitHub secret, seal a new envelope, and note the date the cipher changed (older backups keep the old passphrase!).</p>';
+
+    // ── 6. Hard-copy binder list ──
+    h += '<h5 class="ws-part-subhead">6 · Hard-copy binder — what to print, and when</h5>';
+    h += '<p class="ws-body-hint"><strong>Cadence:</strong> refresh the printed set at the <strong>start of each session</strong> and once more <strong>after registration closes</strong> for the new year. The “Refresh the printed DR binder” To Do on the Workspace nudges at each session start.</p>';
+    h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>Document</th><th>Why it’s in the binder</th><th>Print from</th></tr></thead><tbody>';
+    h += '<tr><td>Member directory (contact info)</td><td>Reach every family with the site down</td><td>Membership Report (🖨) — full contact detail; the Directory tab works too via the browser’s Print</td></tr>';
+    h += '<tr><td>Current-season enrollment roster (kids + schedules)</td><td>Who’s enrolled, morning/afternoon, per kid</td><td>Membership Report (🖨); Our Families roster (🖨) for the one-page version</td></tr>';
+    h += '<tr><td>Waivers report (signature records)</td><td>Legal record of who signed what</td><td>Waivers Report (🖨)</td></tr>';
+    h += '<tr><td>Allergies &amp; medical + emergency list</td><td>Safety-critical on co-op days, no screens needed</td><td>Directory tab → ⚠ Allergies &amp; Medical filter (browser Print); Class Packs carry per-class alerts</td></tr>';
+    h += '<tr><td>Current class schedules</td><td>Run a co-op day from paper</td><td>Schedules Report (🖨 — by-class and by-person views)</td></tr>';
+    h += '<tr><td>Role holders (board + committees)</td><td>Who owns what, with the site down</td><td>Roles Assignments (Co-op Management card; browser Print)</td></tr>';
+    h += '<tr><td>Dues / payments status snapshot</td><td>Treasurer continuity</td><td>Membership Report (🖨 — payment status rides the rows)</td></tr>';
+    h += '<tr><td>This DR plan + RESTORE.md</td><td>The recovery instructions themselves</td><td>This page’s 🖨; RESTORE.md from the GitHub repo root</td></tr>';
+    h += '<tr><td>Sealed passphrase envelope</td><td>Decrypts the database backups</td><td>Verify it’s present and sealed — reprint/reseal only if compromised</td></tr>';
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  function showDrPlanModal() {
+    var body = renderReportModal({
+      title: 'Disaster Recovery Plan',
+      subtitle: 'Systems map, backups, first steps per scenario, and the hard-copy binder checklist. Print it — this page is also the binder’s table of contents.',
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the Disaster Recovery Plan', action: function () { printDrPlan(); } }
+      ],
+      bodyId: 'ws-dr-plan-body',
+      bodyPlaceholder: ''
+    });
+    if (!body) return;
+    body.innerHTML = buildDrPlanContentHtml();
+  }
+
+  function printDrPlan() {
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Roots &amp; Wings — Disaster Recovery Plan</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;max-width:820px;margin:0 auto;}'
+      + 'h1{font-size:19px;margin:0 0 2px;}p.meta{color:#666;margin:0 0 14px;font-size:12px;}'
+      + '.ws-part-subhead{font-size:14px;margin:18px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px;}'
+      + '.ws-body-hint{color:#444;margin:4px 0 8px;}'
+      + 'table{border-collapse:collapse;width:100%;font-size:11.5px;margin:4px 0 10px;}'
+      + 'th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;vertical-align:top;}'
+      + 'th{background:#f5f0e8;font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;}'
+      + 'ul{margin:4px 0 10px 18px;padding:0;}li{margin:3px 0;}'
+      + 'code{font:11px monospace;background:#f2efe8;padding:0 3px;}'
+      + 'em{color:#8a5a00;font-style:italic;}'
+      + '@media print{.ws-waivers-table-wrap{overflow:visible;}}</style>';
+    doc += '</head><body>';
+    doc += '<h1>Roots &amp; Wings — Disaster Recovery Plan</h1>';
+    doc += '<p class="meta">Printed ' + new Date().toLocaleDateString() + ' · lives on the members site → Workspace → Admin Consoles &amp; Sources → 🛟 Disaster Recovery Plan · keep with RESTORE.md + the sealed passphrase envelope</p>';
+    doc += buildDrPlanContentHtml();
+    doc += '</body></html>';
+    openPrintIframe(doc);
+  }
+
+  // ── #49: "Refresh the printed DR binder" To Do (Comms) ────────────
+  // Cadence = each session start: the window for session N opens at
+  // start−7 and the item stays until ✓ Done for THAT session
+  // (todo_confirmations kind='drbinder-sN' + school_year). The latest
+  // opened session wins, so a skipped tick is superseded by the next
+  // session's nudge rather than nagging forever about an old one.
+
+  // Pure helper (unit-tested in scripts/test-dr-backup.js): pick the
+  // current cadence point from the sessions list, or null when no
+  // session's window has opened yet.
+  function drBinderCurrentWindow(sessions, todayStr) {
+    var best = null;
+    (Array.isArray(sessions) ? sessions : []).forEach(function (s) {
+      if (!s || !s.start_date || !s.session_number) return;
+      var start = String(s.start_date).slice(0, 10);
+      var from = welcomeDaysBefore(start, 7);
+      if (!from || from > todayStr) return;
+      if (!best || from > best.from) {
+        best = { from: from, kind: 'drbinder-s' + Number(s.session_number), school_year: s.school_year || '' };
+      }
+    });
+    return best;
+  }
+
+  var _drBinderWin = null; // current cadence point, for the ✓ Done handler
+
+  function loadDrBinderTodo() {
+    var item = document.getElementById('ws-todo-drbinder-item');
+    if (!item) return; // not the Comms Director's tab
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var win = drBinderCurrentWindow(_allCoopSessions, today);
+    if (!win && typeof isDevHost === 'function' && isDevHost()) {
+      // Dev unlock: real windows only open around session starts, so the
+      // dev site pins the nudge to session 1 year-round for click-testing.
+      var devYr = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '';
+      if (devYr) win = { from: today, kind: 'drbinder-s1', school_year: devYr };
+    }
+    if (!win || !win.school_year) { item.hidden = true; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); return; }
+    _drBinderWin = win;
+    var btn = document.getElementById('ws-todo-drbinder-btn');
+    if (btn && !btn._rwWired) {
+      btn._rwWired = true;
+      btn.addEventListener('click', function () { showDrPlanModal(); });
+    }
+    var doneBtn = document.getElementById('ws-todo-drbinder-done');
+    if (doneBtn && !doneBtn._rwWired) {
+      doneBtn._rwWired = true;
+      doneBtn.addEventListener('click', function () {
+        if (!_drBinderWin) return;
+        doneBtn.disabled = true;
+        fetch('/api/cleaning?action=todo-confirm', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ kind: _drBinderWin.kind, school_year: _drBinderWin.school_year })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not mark it done.'); doneBtn.disabled = false; return; }
+            item.hidden = true;
+            doneBtn.disabled = false;
+            if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+          })
+          .catch(function () { alert('Network error — try again.'); doneBtn.disabled = false; });
+      });
+    }
+    // In the window: visible unless this session is already ticked done.
+    fetch('/api/cleaning?action=todo-confirm', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var done = !!(d && (d.confirmations || []).some(function (c) {
+          return c.kind === win.kind && c.school_year === win.school_year;
+        }));
+        item.hidden = done;
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { item.hidden = false; if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState(); });
   }
 
   // ══ Enrollment Requests queue (Membership Director) ══════════════

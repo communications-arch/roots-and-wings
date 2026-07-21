@@ -1225,10 +1225,15 @@ module.exports = async function handler(req, res) {
       const tcBody = req.body || {};
       const tcKind = String((req.method === 'DELETE' ? req.query.kind : tcBody.kind) || '').trim();
       const tcYear = String((req.method === 'DELETE' ? req.query.school_year : tcBody.school_year) || '').trim();
-      if (!TODO_CONFIRM_OWNERS[tcKind]) return res.status(400).json({ error: 'Unknown to-do kind.' });
+      // #49: 'drbinder-sN' — "Refresh the printed DR binder", one tick per
+      // session start rather than per year, so the kind carries the session
+      // number and the (kind, school_year) PK still keys each cadence point.
+      const tcOwner = TODO_CONFIRM_OWNERS[tcKind]
+        || (/^drbinder-s[1-5]$/.test(tcKind) ? 'Communications Director' : null);
+      if (!tcOwner) return res.status(400).json({ error: 'Unknown to-do kind.' });
       if (!/^\d{4}-\d{4}$/.test(tcYear)) return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
-      if (!(await canEditAsRole(user.email, TODO_CONFIRM_OWNERS[tcKind]))) {
-        return res.status(403).json({ error: 'Only the ' + TODO_CONFIRM_OWNERS[tcKind] + ' can mark this done.' });
+      if (!(await canEditAsRole(user.email, tcOwner))) {
+        return res.status(403).json({ error: 'Only the ' + tcOwner + ' can mark this done.' });
       }
       if (req.method === 'POST') {
         const inserted = await sql`
