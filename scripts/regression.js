@@ -251,6 +251,7 @@ const unitTests = [
   'scripts/test-inspiration-filters.js',
   'scripts/test-myclasses.js',
   'scripts/test-schedules-byclass.js',
+  'scripts/test-open-seats.js',
 ];
 
 for (const rel of unitTests) {
