@@ -8777,15 +8777,18 @@
           // pill rides this row. VP keeps the "Afternoon Classes" sub-label
           // to pair with Membership's morning row below. The ACL's pill
           // counts afternoon submissions only, matching her To Do (#36).
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span>Class Builder'
+          // Label + qualifier live in ONE flex child (.ws-link-label) so the
+          // trailing count pill can't squeeze them into separate per-word
+          // columns (#41 — "Class / Builder | Afternoon / Classes").
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder'
             + (role === 'Vice President' ? ' <span class="ws-link-sub">Afternoon Classes</span>' : '')
-            + '<span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
+            + '</span><span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
         }
         if (role === 'Membership Director') {
           // Membership owns the morning age-group placement builder (Erin,
           // 2026-07-18). Membership Director passes the morning_builder
           // capability by default; server re-checks (morningBuilderAccess).
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">📋</span>Class Builder <span class="ws-link-sub">Morning Classes</span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder <span class="ws-link-sub">Morning Classes</span></span></button></li>';
         }
         // Facilities — rooms admin lives HERE, not inside the Class
         // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).

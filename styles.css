@@ -11372,6 +11372,13 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 0.82em;
   font-weight: 600;
 }
+/* Row label wrapper: title + qualifier flow as ONE text block inside the
+   flex row, so a trailing count pill can't squeeze them into separate
+   per-word columns (#41 — "Class / Builder | Afternoon / Classes"). */
+.ws-link-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .ws-mylink-del {
   flex-shrink: 0;
 }
