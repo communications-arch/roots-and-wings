@@ -16,7 +16,7 @@
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, canImpersonate } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { sendToUser } = require('./_push');
 
@@ -50,6 +50,21 @@ function getSql() {
   return neon(process.env.DATABASE_URL);
 }
 
+// The email whose permissions apply to this request — the View-As target
+// when impersonating, else the real login. Same pattern as
+// api/curriculum.js actingEmailFor (and the class-inspiration fix,
+// 5fa4fac): view_as comes from the query or body and is honored only for
+// canImpersonate callers (super users on prod; any signed-in member on
+// dev/preview). Fixes #43/#34 — the write gate checked the RAW login, so
+// a tester acting as the Supply Coordinator via View As saw the editor UI
+// (client checks the acting identity) but every write 403'd.
+function actingEmailFor(user, req) {
+  const realEmail = (user && user.email) || '';
+  const va = String((req.query && req.query.view_as) || (req.body && req.body.view_as) || '').trim().toLowerCase();
+  if (va && (va.split('@')[1] || '') === ALLOWED_DOMAIN && canImpersonate(realEmail)) return va;
+  return realEmail;
+}
+
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
@@ -67,10 +82,13 @@ module.exports = async function handler(req, res) {
   // Everything else that isn't GET is restricted to the Supply Coordinator
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
+  // Gate writes on the ACTING identity (View-As target when a
+  // canImpersonate caller sends view_as, else the real login) — #43.
+  const actingEmail = actingEmailFor(user, req);
   if (req.method !== 'GET' && req.method !== 'OPTIONS' && !isMemberFlag) {
     // 'supply_closet_edit' — defaults to the Supply Coordinator; editable
     // in the Permissions admin table.
-    const allowed = await hasCapability(user.email, 'supply_closet_edit');
+    const allowed = await hasCapability(actingEmail, 'supply_closet_edit');
     if (!allowed) {
       return res.status(403).json({ error: 'Only the Supply Coordinator can modify the supply closet.' });
     }
@@ -246,7 +264,7 @@ module.exports = async function handler(req, res) {
         UPDATE supply_closet
         SET quantity_level = ${level},
             quantity_updated_at = NOW(),
-            quantity_updated_by = ${user.email}
+            quantity_updated_by = ${actingEmail}
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                   needs_restock, restock_flagged_at, restock_flagged_by,
@@ -275,7 +293,7 @@ module.exports = async function handler(req, res) {
 
       const inserted = await sql`
         INSERT INTO supply_closet (item_name, location, category, notes, held_by, held_by_email, updated_by)
-        VALUES (${item_name}, ${location}, ${category}, ${notes}, ${held_by}, ${held_by_email}, ${user.email})
+        VALUES (${item_name}, ${location}, ${category}, ${notes}, ${held_by}, ${held_by_email}, ${actingEmail})
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                   held_by, held_by_email,
                   needs_restock, restock_flagged_at, restock_flagged_by,
@@ -312,7 +330,7 @@ module.exports = async function handler(req, res) {
             held_by = ${held_by},
             held_by_email = ${held_by_email},
             updated_at = NOW(),
-            updated_by = ${user.email}
+            updated_by = ${actingEmail}
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                   held_by, held_by_email,

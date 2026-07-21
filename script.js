@@ -15715,6 +15715,19 @@
     return false;
   }
 
+  // #43: editor-gated supply-closet WRITES must carry the View-As target
+  // so the server gates on the acting identity (the client already shows
+  // the editor UI for the acting identity — computeSupplyClosetCanEdit —
+  // so without this a tester acting as the Supply Coordinator 403'd on
+  // every write). Same sessionStorage slot + super-user/dev-host condition
+  // as notifViewAsSuffix; this variant returns the bare email for JSON
+  // bodies (bare-URL POSTs), while query-string URLs append
+  // notifViewAsSuffix() directly.
+  function supplyViewAsEmail() {
+    var s = notifViewAsSuffix();
+    return s ? decodeURIComponent(s.replace('&view_as=', '')) : '';
+  }
+
   function fetchSupplyCloset() {
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return Promise.reject(new Error('Not authenticated'));
@@ -16145,7 +16158,7 @@
         if (!name) return;
         addBtn.disabled = true;
         addBtn.textContent = 'Adding…';
-        fetch('/api/supply-closet?action=locations', {
+        fetch('/api/supply-closet?action=locations' + notifViewAsSuffix(), {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({ name: name })
@@ -16169,7 +16182,7 @@
         if (!name) { alert('Name cannot be empty.'); return; }
         btn.disabled = true;
         btn.textContent = 'Saving…';
-        fetch('/api/supply-closet?action=locations&id=' + encodeURIComponent(id), {
+        fetch('/api/supply-closet?action=locations&id=' + encodeURIComponent(id) + notifViewAsSuffix(), {
           method: 'PATCH',
           headers: headers,
           body: JSON.stringify({ name: name })
@@ -16243,6 +16256,7 @@
     var headers = { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' };
     var url = '/api/supply-closet?action=locations&id=' + encodeURIComponent(id);
     if (moveTo) url += '&moveTo=' + encodeURIComponent(moveTo);
+    url += notifViewAsSuffix(); // #43: gate on the acting identity
     fetch(url, { method: 'DELETE', headers: headers })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -16384,6 +16398,10 @@
           held_by_email: heldEmail
         };
         if (!payload.item_name.trim()) { alert('Item name is required.'); return; }
+        // #43: carry the View-As target in the body (bare-URL POST for new
+        // items; the server reads view_as from query OR body).
+        var vaEmail = supplyViewAsEmail();
+        if (vaEmail) payload.view_as = vaEmail;
         btn.disabled = true;
         btn.textContent = 'Saving...';
 
@@ -16417,7 +16435,7 @@
         rwArmTwoStep(self, 'delete', function () {
           var id = self.getAttribute('data-id');
           var cred = localStorage.getItem('rw_google_credential');
-          fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
+          fetch('/api/supply-closet?id=' + encodeURIComponent(id) + notifViewAsSuffix(), {
             method: 'DELETE',
             headers: { 'Authorization': 'Bearer ' + cred }
           }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -16453,7 +16471,7 @@
     supplyClosetState.qtyBusyId = id;
     var cred = localStorage.getItem('rw_google_credential');
     updateSupplyClosetListOnly();
-    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=quantity', {
+    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=quantity' + notifViewAsSuffix(), {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
       body: JSON.stringify({ quantity_level: nextLevel })
@@ -16516,7 +16534,9 @@
     supplyClosetState.flaggingId = id;
     var cred = localStorage.getItem('rw_google_credential');
     renderSupplyClosetModal();
-    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=unflag', {
+    // #43: unflag is a coordinator-gated write on the server (only
+    // action=flag is member-open), so it carries view_as too.
+    fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=unflag' + notifViewAsSuffix(), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -16618,6 +16638,10 @@
       category: catEl ? catEl.value : 'permanent'
     };
     if (!payload.item_name.trim()) { alert('Item name is required.'); return; }
+    // #43: carry the View-As target in the body (bare-URL POST for new
+    // items; the server reads view_as from query OR body).
+    var vaEmail = supplyViewAsEmail();
+    if (vaEmail) payload.view_as = vaEmail;
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
@@ -16648,7 +16672,7 @@
     rwArmTwoStep(self, 'delete', function () {
       var id = self.getAttribute('data-id');
       var cred = localStorage.getItem('rw_google_credential');
-      fetch('/api/supply-closet?id=' + encodeURIComponent(id), {
+      fetch('/api/supply-closet?id=' + encodeURIComponent(id) + notifViewAsSuffix(), {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + cred }
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
