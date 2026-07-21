@@ -13825,16 +13825,17 @@
     return [
       '<h2>Welcome to Roots &amp; Wings!</h2>',
       '<p>Hi ' + escapeHtmlWs(greetingName) + '!</p>',
-      '<p>I\'m ' + dirEsc + ', the Communications Director. I just added you to our Google Spaces. You should have received an email from Google with a <strong>Sign in</strong> button — click it to set your password and finish activating your Roots &amp; Wings account. <strong>The Sign in link expires after 48 hours</strong>; if it does, just reach out and I\'ll send you a fresh one.</p>',
-      '<h3>Google Chat</h3>',
-      '<p>You can access Google Chat on the web or via the app on your phone. Our Spaces are where we handle all co-op-related communications. <a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=share_link">A description of each Space can be found here.</a></p>',
+      '<p>I\'m ' + dirEsc + ', the Communications Director. Here\'s how to get set up — <strong>step 1 has to happen first</strong>: everything else (the members website, our chat spaces, shared files) uses your new Roots &amp; Wings Google account.</p>',
+      '<h3>1. Activate your Roots &amp; Wings Google account — do this first</h3>',
+      '<p>I just created your <strong>@rootsandwingsindy.com</strong> account. You should have an email from Google with a <strong>Sign in</strong> button — click it to set your password and activate the account. <strong>That link expires after 48 hours</strong>; if it does, just reach out and I\'ll send a fresh one. Until this step is done, the members website won\'t let you in.</p>',
+      '<h3>2. Sign in to the Members Portal</h3>',
+      '<p><a href="https://www.rootsandwingsindy.com/members.html" style="display:inline-block;background:#523A79;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Open the Members Portal</a></p>',
+      '<p>Tap <strong>Sign in with Google</strong> and choose your <strong>@rootsandwingsindy.com</strong> account — if your device picks your personal Gmail instead, tap &ldquo;Use another account.&rdquo; Inside you\'ll find the directory, schedule, calendar, member agreement &amp; waivers, financials, and ways to get involved. (Tip: once signed in, Resources &rarr; &ldquo;&#128242; Install the App&rdquo; puts the portal on your phone\'s home screen.)</p>',
+      '<h3>3. Google Chat</h3>',
+      '<p>You can access Google Chat on the web or via the app on your phone — sign in with your Roots &amp; Wings account. Our Spaces are where we handle all co-op-related communications. <a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=share_link">A description of each Space can be found here.</a></p>',
       '<p>It\'s also helpful for other members if you add a photo of yourself to your profile.</p>',
-      '<h3>Google Drive</h3>',
-      '<p>You also have access to our Google Drive, which includes shared co-op files. Make sure to sign in with your Roots &amp; Wings email to access them. The most important files live in the <strong>Essential Documents</strong> folder.</p>',
-      '<h3>The Members Portal</h3>',
-      '<p>Sign in to the members portal with your Roots &amp; Wings email here:</p>',
-      '<p><a href="https://roots-and-wings-topaz.vercel.app/members.html" style="display:inline-block;background:#523A79;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">Open the Members Portal</a></p>',
-      '<p>Inside you\'ll find the directory, schedule, calendar, member agreement &amp; waivers, financials, and ways to get involved.</p>',
+      '<h3>4. Google Drive</h3>',
+      '<p>You also have access to our Google Drive, which includes shared co-op files. Make sure you\'re signed in with your Roots &amp; Wings email to see them. The most important files live in the <strong>Essential Documents</strong> folder.</p>',
       '<h3>Questions?</h3>',
       '<p>Feel free to reach out to me or our <a href="mailto:membership@rootsandwingsindy.com">Membership Director</a>. Welcome aboard!</p>',
       '<p style="margin-top:24px;">— ' + dirEsc + '<br>Communications Director<br>Roots &amp; Wings Homeschool, Inc.</p>'
@@ -14199,7 +14200,16 @@
       kidsHtml = '<ul class="ws-reg-detail-kidlist">';
       r.kids.forEach(function (k) {
         var row = '<strong>' + escapeHtmlWs(k.name || '') + '</strong>';
-        if (k.birth_date || k.birthdate) row += ' \u00b7 born ' + escapeHtmlWs(k.birth_date || k.birthdate);
+        if (k.birth_date || k.birthdate) {
+          // US format + current age (#47). Parse the date-only string as a
+          // LOCAL day \u2014 new Date('YYYY-MM-DD') alone back-shifts a day UTC.
+          var bdRaw = String(k.birth_date || k.birthdate).slice(0, 10);
+          var bdD = new Date(bdRaw + 'T00:00:00');
+          var bdTxt = isNaN(bdD.getTime()) ? escapeHtmlWs(bdRaw)
+            : (bdD.getMonth() + 1) + '/' + bdD.getDate() + '/' + bdD.getFullYear();
+          var kidAge = (typeof computeAge === 'function') ? computeAge(bdRaw) : null;
+          row += ' \u00b7 born ' + bdTxt + (kidAge != null ? ' (' + kidAge + ')' : '');
+        }
         if (k.group) row += ' \u00b7 ' + escapeHtmlWs(k.group);
         if (k.notes) row += '<br><em>' + escapeHtmlWs(k.notes) + '</em>';
         kidsHtml += '<li>' + row + '</li>';
