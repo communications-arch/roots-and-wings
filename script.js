@@ -10628,6 +10628,10 @@
   // Received / Actions), and no tour-stage counts strip or status filter.
   // Set by showTourPipelineModal({ mode: 'inquiry' }) from the To Do.
   var _inquiryMode = false;
+  // #45: the Inquiries view's hidden Junk bucket (spam-screened Contact
+  // submissions, status='junk'). Toggled by the small Junk chip; junk
+  // rows never mix into the normal lists or counts.
+  var _inquiryJunkView = false;
   // Bumped on every optimistic mutation. Background fetches stash the
   // version they started at and discard their response if it has since
   // advanced — fixes the "schedule a tour, pill flickers" race where a
@@ -10729,7 +10733,7 @@
     },
     { key: 'status', label: 'Status', type: 'string',
       sortValue: function (t) {
-        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, link_sent: 3.6, reg_expired: 3.8, joined: 4, declined: 5, ghosted: 6 };
+        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, link_sent: 3.6, reg_expired: 3.8, joined: 4, declined: 5, ghosted: 6, junk: 7 };
         var ds = tourDisplayStatus(t);
         return String(order[ds] != null ? order[ds] : 9);
       },
@@ -10805,6 +10809,9 @@
           btns += '<option value="declined">Declined&hellip;</option>';
           btns += '<option value="ghosted">Ghosted</option>';
           btns += '</select>';
+        } else if (t.status === 'junk') {
+          // #45: rescue a real inquiry out of the junk bucket.
+          btns += '<button type="button" class="sc-btn ws-tour-rescue-btn" data-tour-id="' + t.id + '">Not spam</button>';
         } else {
           return invStamp || '<span class="ws-srt-actions-empty">&mdash;</span>';
         }
@@ -10846,8 +10853,13 @@
       render: function (t) {
         if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
         var btns = '';
-        btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
-        btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Close out</button>';
+        if (t.status === 'junk') {
+          // #45 junk view: the only action is rescuing a real inquiry.
+          btns += '<button type="button" class="sc-btn ws-tour-rescue-btn" data-tour-id="' + t.id + '">Not spam</button>';
+        } else {
+          btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Schedule&hellip;</button>';
+          btns += '<button type="button" class="sc-btn ws-tour-ghost-btn" data-tour-id="' + t.id + '">Close out</button>';
+        }
         return '<div class="ws-srt-actions">' + btns + '</div>';
       }
     }
@@ -10858,6 +10870,7 @@
     // only). initialFilter lets a caller open the full pipeline pre-scoped
     // to a status bucket. Otherwise _toursFilter persists across reopens.
     _inquiryMode = !!(opts && opts.mode === 'inquiry');
+    _inquiryJunkView = false; // always land on the real inquiries first
     // In inquiry mode rowsForFilter/toursFilteredRows short-circuit on
     // _inquiryMode, so we leave _toursFilter untouched — that keeps the
     // 'inquiry' scope from leaking into the next full-pipeline open.
@@ -10932,6 +10945,9 @@
       var p = e.target.closest('[data-strip-filter]');
       if (!p) return;
       var v = p.getAttribute('data-strip-filter');
+      // #45: the Inquiries view's Junk chip toggles the hidden bucket —
+      // it must not leak into the full pipeline's status filter.
+      if (v === '__junk-toggle') { _inquiryJunkView = !_inquiryJunkView; refreshAll(); return; }
       _toursFilter = (_toursFilter === v) ? 'all' : v;
       refreshAll();
     });
@@ -10939,14 +10955,19 @@
       function computeCounts() {
         // Counted on DISPLAY status so the Link Sent / Reg Expired
         // workflow stages (derived from the invites cache) get pills.
-        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, link_sent: 0, reg_expired: 0, joined: 0, declined: 0, ghosted: 0 };
+        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, link_sent: 0, reg_expired: 0, joined: 0, declined: 0, ghosted: 0, junk: 0 };
         (_toursCache || []).forEach(function (t) { var ds = tourDisplayStatus(t); if (counts[ds] != null) counts[ds] += 1; });
         return counts;
       }
       function rowsForFilter() {
         if (!_toursCache) return [];
-        if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
-        if (_toursFilter === 'all') return _toursCache;
+        if (_inquiryMode) {
+          return _toursCache.filter(function (t) { return t.status === (_inquiryJunkView ? 'junk' : 'inquiry'); });
+        }
+        // Junk (#45) is a hidden bucket: it only ever shows under its own
+        // explicit filter, never inside All/Open.
+        if (_toursFilter === 'junk') return _toursCache.filter(function (t) { return t.status === 'junk'; });
+        if (_toursFilter === 'all') return _toursCache.filter(function (t) { return t.status !== 'junk'; });
         if (_toursFilter === 'open') return _toursCache.filter(function (t) {
           return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
         });
@@ -10957,21 +10978,39 @@
         var total = (_toursCache || []).length;
 
         // Inquiries view: lean header (just a count), no tour-stage strip.
+        // The Junk chip (#45) is the only strip content — a hidden,
+        // rescuable bucket of spam-screened submissions.
         if (_inquiryMode) {
           var metaElInq = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-          if (metaElInq) metaElInq.textContent = counts.inquiry + ' open inquir' + (counts.inquiry === 1 ? 'y' : 'ies');
-          if (stripEl) stripEl.innerHTML = '';
-          if (counts.inquiry === 0) {
+          if (metaElInq) {
+            metaElInq.textContent = _inquiryJunkView
+              ? counts.junk + ' junked submission' + (counts.junk === 1 ? '' : 's')
+              : counts.inquiry + ' open inquir' + (counts.inquiry === 1 ? 'y' : 'ies');
+          }
+          if (stripEl) {
+            var junkChip = '';
+            if (counts.junk > 0 || _inquiryJunkView) {
+              junkChip = '<button type="button" class="ws-tour-status ws-tour-status-junk' + (_inquiryJunkView ? ' is-active' : '') + '" data-strip-filter="__junk-toggle" aria-pressed="' + (_inquiryJunkView ? 'true' : 'false') + '" title="Submissions the spam screen caught — nothing here emailed anyone. Rescue real ones with Not spam.">'
+                + (_inquiryJunkView ? '← Back to inquiries' : '🚫 Junk (' + counts.junk + ')') + '</button>';
+            }
+            stripEl.innerHTML = junkChip;
+          }
+          if (!_inquiryJunkView && counts.inquiry === 0) {
             if (tableTarget) tableTarget.innerHTML = '<p class="ws-empty">No new inquiries right now. Questions from the website Contact form will land here.</p>';
+            return;
+          }
+          if (_inquiryJunkView && counts.junk === 0) {
+            if (tableTarget) tableTarget.innerHTML = '<p class="ws-empty">Junk bucket is empty. Submissions the spam screen catches will wait here — rescuable, never emailed.</p>';
             return;
           }
           renderTable(counts, total);
           return;
         }
 
-        // Modal meta line — total tours.
+        // Modal meta line — total tours (junk stays out of the headline).
+        var totalNonJunk = total - counts.junk;
         var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-        if (metaEl) metaEl.textContent = total + ' tour' + (total === 1 ? '' : 's');
+        if (metaEl) metaEl.textContent = totalNonJunk + ' tour' + (totalNonJunk === 1 ? '' : 's');
 
         // Counts strip — CLICKABLE filter pills (Erin, 2026-07-15): tap a
         // stage to scope the table to it, tap it again to go back to All.
@@ -10993,6 +11032,8 @@
           s += pill('joined', 'joined', counts.joined + ' Joined');
           s += pill('declined', 'declined', counts.declined + ' Declined');
           s += pill('ghosted', 'ghosted', counts.ghosted + ' Ghosted');
+          // Hidden junk bucket (#45) — only pitched when it has rows.
+          if (counts.junk) s += pill('junk', 'junk', counts.junk + ' Junk');
           stripEl.innerHTML = s;
         }
 
@@ -11017,6 +11058,7 @@
           return;
         }
         var openCount = counts.inquiry + counts.requested + counts.scheduled + counts.toured + counts.followed_up + counts.link_sent + counts.reg_expired;
+        var totalNonJunkF = total - counts.junk;
         var cols = TOURS_TABLE_COLS.slice();
         cols.forEach(function (col) {
           if (col.key === 'status') {
@@ -11026,7 +11068,7 @@
             // that something is being hidden.
             col.filter = {
               options: [
-                { value: 'all',       label: 'Any',       count: total },
+                { value: 'all',       label: 'Any',       count: totalNonJunkF },
                 { value: 'open',      label: 'Open (needs action)', count: openCount },
                 { value: 'inquiry',   label: 'Inquiry',   count: counts.inquiry },
                 { value: 'requested', label: 'Requested', count: counts.requested },
@@ -11038,7 +11080,7 @@
                 { value: 'joined',    label: 'Joined',    count: counts.joined },
                 { value: 'declined',  label: 'Declined',  count: counts.declined },
                 { value: 'ghosted',   label: 'Ghosted',   count: counts.ghosted }
-              ],
+              ].concat(counts.junk ? [{ value: 'junk', label: 'Junk (spam-screened)', count: counts.junk }] : []),
               current: _toursFilter,
               onChange: function (v) { _toursFilter = v; refreshAll(); }
             };
@@ -11235,6 +11277,14 @@
         if (fupBtn) { tourQuickAction(parseInt(fupBtn.getAttribute('data-tour-id'), 10), 'followed_up', 'Mark as followed up — contact made, but not via a tour?'); return; }
         var joinedBtn = e.target.closest('.ws-tour-joined-btn');
         if (joinedBtn) { tourQuickAction(parseInt(joinedBtn.getAttribute('data-tour-id'), 10), 'joined', 'Mark this family as joined? They should now appear in the Membership Report once they register.'); return; }
+        var rescueBtn = e.target.closest('.ws-tour-rescue-btn');
+        if (rescueBtn) {
+          // #45: junk → inquiry. No email fires — Membership replies by
+          // hand once it's back in the open list.
+          tourQuickAction(parseInt(rescueBtn.getAttribute('data-tour-id'), 10), 'inquiry',
+            'Move this out of Junk and back into open Inquiries?');
+          return;
+        }
         var ghostBtn = e.target.closest('.ws-tour-ghost-btn');
         if (ghostBtn) {
           var gId = parseInt(ghostBtn.getAttribute('data-tour-id'), 10);
@@ -11450,6 +11500,10 @@
       h += '</div></div>';
     }
 
+    // #45: why the spam screen junked this submission (junk rows only).
+    if (t.status === 'junk' && t.screen_reason) {
+      h += '<div class="ws-reg-detail-section"><h5>Screened as junk</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(t.screen_reason) + ' — no emails were sent for this submission. Use “Not spam” to move it back into open Inquiries.</div></div>';
+    }
     // The visitor's free-text message from the Contact Us form.
     if (t.message) {
       h += '<div class="ws-reg-detail-section"><h5>Their message</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(t.message) + '</div></div>';
@@ -11480,8 +11534,9 @@
 
   function toursFilteredRows() {
     if (!_toursCache) return [];
-    if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === 'inquiry'; });
-    if (_toursFilter === 'all') return _toursCache;
+    if (_inquiryMode) return _toursCache.filter(function (t) { return t.status === (_inquiryJunkView ? 'junk' : 'inquiry'); });
+    if (_toursFilter === 'junk') return _toursCache.filter(function (t) { return t.status === 'junk'; });
+    if (_toursFilter === 'all') return _toursCache.filter(function (t) { return t.status !== 'junk'; });
     if (_toursFilter === 'open') return _toursCache.filter(function (t) {
       return t.status === 'inquiry' || t.status === 'requested' || t.status === 'scheduled' || t.status === 'toured' || t.status === 'followed_up';
     });

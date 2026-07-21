@@ -252,6 +252,7 @@ const unitTests = [
   'scripts/test-myclasses.js',
   'scripts/test-schedules-byclass.js',
   'scripts/test-open-seats.js',
+  'scripts/test-inquiry-screen.js',
 ];
 
 for (const rel of unitTests) {

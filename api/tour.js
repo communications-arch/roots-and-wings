@@ -195,7 +195,10 @@ const TOUR_TIME_VALUES = TOUR_TIME_SLOTS.map(s => s.value);
 // 'contact-form'). It's a separate bucket from 'requested' (a tour ask) so
 // general questions don't inflate the Tour Requests to-do; Membership can
 // move an inquiry into 'scheduled' if it turns into a tour, or close it out.
-const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'joined', 'declined', 'ghosted'];
+// 'junk' (#45) is the hidden bucket for screened Contact-Us spam —
+// only ever set by the spam screen, and valid in tour-update so
+// Membership can rescue a real inquiry back out ('junk' → 'inquiry').
+const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'joined', 'declined', 'ghosted', 'junk'];
 
 // Compute every future Wednesday that falls inside an active session
 // range (inclusive). Returns chronological order. Today is excluded —
@@ -427,6 +430,83 @@ function botScreen(body) {
   return null;
 }
 
+// ── #45: layered inquiry screening (Contact Us form only) ────────────
+// The Contact form is where the spam lands (Erin: tour requests are
+// clean), so the inquiry endpoint gets the hardened stack: honeypot +
+// tightened timing + content heuristics here (pure, unit-tested), plus
+// DB-backed stamp-reuse + per-IP rate limits in handleContact. Screened
+// submissions are NOT dropped — they're inserted as status='junk'
+// (hidden, rescuable in the Member Pipeline Inquiries view) and the bot
+// still sees a plain 200 so it gets no signal to adapt around.
+
+// Plausible human fill-time: a name + email + real message in under 8s
+// is a bot; a page stamp older than 3h is a replayed/stale token.
+const INQUIRY_MIN_FILL_MS = 8000;
+const INQUIRY_MAX_AGE_MS = 3 * 3600 * 1000;
+function inquiryTimingScreen(formTs, now) {
+  const ts = parseInt(formTs, 10);
+  if (!Number.isFinite(ts) || ts <= 0) return 'missing form_ts (direct API post)';
+  const age = (now || Date.now()) - ts;
+  if (age < 0) return 'future form_ts';
+  if (age < INQUIRY_MIN_FILL_MS) return 'submitted ' + age + 'ms after page render';
+  if (age > INQUIRY_MAX_AGE_MS) return 'stale form_ts (' + Math.round(age / 60000) + ' min old)';
+  return null;
+}
+
+// Throwaway-inbox domains that show up on form spam. Deliberately short
+// and conservative — a miss just means the content/rate layers have to
+// catch it, while a false positive would junk a real family.
+const DISPOSABLE_EMAIL_DOMAINS = [
+  'mailinator.com', 'guerrillamail.com', 'sharklasers.com', 'yopmail.com',
+  'trashmail.com', 'getnada.com', 'dispostable.com', 'maildrop.cc',
+  '10minutemail.com', 'tempmail.com', 'temp-mail.org', 'throwawaymail.com',
+  'fakeinbox.com', 'mailnesia.com', 'mintemail.com', 'discard.email'
+];
+
+function inquiryContentScreen(fields) {
+  const name = String((fields && fields.name) || '');
+  const email = String((fields && fields.email) || '').toLowerCase().trim();
+  const message = String((fields && fields.message) || '');
+
+  // URLs never belong in a name.
+  if (/https?:\/\/|www\./i.test(name)) return 'URL in name field';
+  // Gibberish name: a long run with no vowels (y counts as a vowel so
+  // real names like Krzysztof/Schmidt pass), or a 7+ consonant run.
+  const tokens = name.split(/[^A-Za-z]+/).filter(Boolean);
+  for (const t of tokens) {
+    if (t.length >= 8 && !/[aeiouyAEIOUY]/.test(t)) return 'gibberish name (no vowels)';
+    if (/[bcdfghjklmnpqrstvwxz]{7,}/i.test(t)) return 'gibberish name (consonant run)';
+  }
+  // Disposable-inbox domains.
+  const domain = (email.split('@')[1] || '');
+  if (DISPOSABLE_EMAIL_DOMAINS.some(d => domain === d || domain.endsWith('.' + d))) {
+    return 'disposable email domain (' + domain + ')';
+  }
+  // Link-stuffed or all-link bodies.
+  const urls = message.match(/(?:https?:\/\/|www\.)\S+/gi) || [];
+  if (urls.length >= 3) return 'link-stuffed message';
+  if (urls.length >= 1) {
+    const leftover = message.replace(/(?:https?:\/\/|www\.)\S+/gi, '').replace(/\s+/g, ' ').trim();
+    if (leftover.length < 15) return 'message is only links';
+  }
+  return null;
+}
+
+// First hop of x-forwarded-for = the real client on Vercel.
+function clientIp(req) {
+  const xf = String((req && req.headers && req.headers['x-forwarded-for']) || '');
+  const first = xf.split(',')[0].trim();
+  return first || String((req && req.socket && req.socket.remoteAddress) || '');
+}
+
+// Per-IP limits for the public inquiry POST. Over the soft limits the
+// submission is junked (rescuable); over the hard cap we stop writing
+// tours rows entirely so a flood can't balloon the table.
+const INQUIRY_RATE = {
+  shortWindowMin: 10, shortMax: 3,
+  dayMax: 10, dayHardCap: 25
+};
+
 async function handleTour(body, res) {
   const botReason = botScreen(body);
   if (botReason) {
@@ -598,12 +678,7 @@ async function handleTour(body, res) {
 // and carrying the visitor's free-text message. No kids/ages/slot — those
 // stay null/empty. Mirrors handleTour's best-effort email pattern: persist
 // the row first, then fire the two Resend emails in the background.
-async function handleContact(body, res) {
-  const botReason = botScreen(body);
-  if (botReason) {
-    console.warn('contact-form bot screen tripped:', botReason);
-    return res.status(200).json({ success: true });
-  }
+async function handleContact(body, req, res) {
   const name = body.name ? String(body.name).trim() : '';
   const email = body.email ? String(body.email).trim() : '';
   const phone = body.phone ? String(body.phone).trim() : '';
@@ -617,6 +692,68 @@ async function handleContact(body, res) {
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Invalid email format.' });
+  }
+
+  // ── #45 layered screening (this endpoint is where the spam comes in).
+  // A tripped layer does NOT drop the submission: it lands as a hidden
+  // status='junk' pipeline row Membership can rescue, no emails fire,
+  // and the caller still sees a plain 200.
+  let junkReason = String(body.website || '').trim() ? 'honeypot filled' : null;
+  if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
+  if (!junkReason) junkReason = inquiryContentScreen({ name, email, message });
+
+  const ip = clientIp(req);
+  const formTs = parseInt(body.form_ts, 10) || 0;
+  let hardDrop = false;
+  try {
+    const sql = getSql();
+    // Page stamps are single-use: the same form_ts posting twice means a
+    // replay (the form re-stamps itself after a successful send).
+    if (!junkReason && formTs > 0) {
+      const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'contact' AND form_ts = ${formTs} LIMIT 1`;
+      if (reused.length) junkReason = 'form_ts reused';
+    }
+    // Per-IP rate limits. Soft limits junk (rescuable); the hard cap
+    // stops writing pipeline rows so a flood can't balloon the table.
+    const cnt = await sql`
+      SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '10 minutes') AS short_n,
+             COUNT(*) AS day_n
+      FROM public_form_hits
+      WHERE form = 'contact' AND ip = ${ip} AND created_at > NOW() - INTERVAL '24 hours'
+    `;
+    const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
+    const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
+    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    // Record this hit + sweep expired counters (runtime DELETE — the
+    // additive-only migration never deletes).
+    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'contact', ${formTs})`;
+    await sql`DELETE FROM public_form_hits WHERE created_at < NOW() - INTERVAL '2 days'`;
+  } catch (rlErr) {
+    // Rate plumbing must never block a real family's message.
+    console.error('inquiry rate/reuse check error (non-fatal):', rlErr);
+  }
+
+  if (hardDrop) {
+    console.warn('contact-form hard-dropped (IP over daily cap):', ip);
+    return res.status(200).json({ success: true });
+  }
+  if (junkReason) {
+    try {
+      const sql = getSql();
+      await sql`
+        INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                           status, source, message, screen_reason, status_history)
+        VALUES (${name}, ${email.toLowerCase()}, ${phone}, NULL, '',
+                'junk', 'contact-form', ${message}, ${junkReason},
+                ${JSON.stringify([{ at: new Date().toISOString(), by: 'spam-screen', from: null, to: 'junk', note: junkReason }])}::jsonb)
+      `;
+    } catch (junkErr) {
+      console.error('contact junk-bucket insert error (non-fatal):', junkErr);
+    }
+    console.warn('contact-form screened to junk:', junkReason);
+    return res.status(200).json({ success: true });
   }
 
   const safeName = escapeHtml(name);
@@ -4565,7 +4702,7 @@ async function handleTourList(req, res) {
       SELECT id, family_name, family_email, phone, num_kids, ages,
              preferred_date, preferred_time, scheduled_date, scheduled_time,
              status, internal_notes, decline_reason, status_history,
-             source, message, created_at, updated_at, updated_by
+             source, message, screen_reason, created_at, updated_at, updated_by
       FROM tours
       ORDER BY
         CASE status
@@ -8705,7 +8842,7 @@ module.exports = async function handler(req, res) {
     const body = req.body || {};
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
-    if (kind === 'contact') return handleContact(body, res);
+    if (kind === 'contact') return handleContact(body, req, res);
     if (kind === 'merch-order') return handleMerchOrder(body, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
@@ -8783,3 +8920,7 @@ module.exports.syncEventToGoogleCalendar = syncEventToGoogleCalendar;
 module.exports.gcalBodyFromEvent = gcalBodyFromEvent;
 module.exports.syncSessionToGoogleCalendar = syncSessionToGoogleCalendar;
 module.exports.deleteGoogleCalendarEvent = deleteGoogleCalendarEvent;
+// #45 anti-spam screens — pure helpers exported for the unit suite.
+module.exports.botScreen = botScreen;
+module.exports.inquiryTimingScreen = inquiryTimingScreen;
+module.exports.inquiryContentScreen = inquiryContentScreen;

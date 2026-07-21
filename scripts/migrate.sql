@@ -2049,3 +2049,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS role_interest_role_person_idx
 -- CHECK to widen). withdrawn_by records which director applied it.
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_by TEXT NOT NULL DEFAULT '';
+
+-- #45 (2026-07-20): inquiry-form anti-spam. Screened Contact-Us
+-- submissions land in a hidden, rescuable 'junk' bucket (tours.status =
+-- 'junk' — free-text column, no CHECK) instead of vanishing;
+-- screen_reason records which layer tripped. public_form_hits backs the
+-- per-IP rate limit + the form_ts single-use rule (serverless functions
+-- are stateless, so the counters live in this tiny table; rows older
+-- than 2 days are swept by the endpoint at runtime — DELETEs live in
+-- api code, never in this file).
+ALTER TABLE tours ADD COLUMN IF NOT EXISTS screen_reason TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS public_form_hits (
+  id         SERIAL PRIMARY KEY,
+  ip         TEXT NOT NULL DEFAULT '',
+  form       TEXT NOT NULL DEFAULT '',
+  form_ts    BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS public_form_hits_ip_idx ON public_form_hits (ip, created_at);
+CREATE INDEX IF NOT EXISTS public_form_hits_ts_idx ON public_form_hits (form_ts);

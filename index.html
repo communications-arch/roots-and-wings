@@ -25,7 +25,7 @@
        neither was on-brand and they were costing bytes. -->
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260722f">
+  <link rel="stylesheet" href="styles.css?v=20260722g">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <link rel="manifest" href="manifest-public.json?v=20260430g">
@@ -927,6 +927,10 @@
               try { data = await res.json(); } catch (e2) {}
               throw new Error((data && data.error) || 'request failed');
             }
+            // Page stamps are single-use server-side (#45): re-stamp so a
+            // second genuine message from this page load isn't screened
+            // as a replay.
+            window.__rwPageTs = Date.now();
             var modal = document.querySelector('#contact-modal .tour-modal');
             modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'contact-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
               + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
@@ -1122,7 +1126,7 @@
     </div>
   </div>
 
-  <script src="script.js?v=20260722u"></script>
+  <script src="script.js?v=20260722v"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.

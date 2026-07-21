@@ -11819,6 +11819,8 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-tour-status-joined    { background: rgba(90, 107, 57, 0.16);            color: var(--color-leaf); }
 .ws-tour-status-declined  { background: rgba(var(--color-coral-rgb), 0.18); color: #8A2222; }
 .ws-tour-status-ghosted   { background: rgba(0, 0, 0, 0.08);                color: var(--color-text-light); }
+/* #45: hidden spam bucket — muted, slightly "hazard" striped-free grey */
+.ws-tour-status-junk      { background: rgba(0, 0, 0, 0.06);                color: var(--color-text-light); border: 1px dashed rgba(0, 0, 0, 0.25); }
 /* Derived registration-link workflow stages (2026-07-14): teal =
    link out, waiting on the family; red = the 2-week window lapsed. */
 .ws-tour-status-link_sent   { background: rgba(38, 132, 132, 0.14);  color: #1d5c5c; }
