@@ -18,6 +18,7 @@ const { ALLOWED_ORIGINS, emailSubject } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImpersonate, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { resolveFamily, canActAs } = require('./_family');
+const { sendToUser } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -3141,8 +3142,12 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ submission: serializeSubmission(updated[0], helpersOut) });
       }
 
-      // Edit own PM class submission (only while still 'submitted' — once the
-      // reviewers draft it, further edits have to go through them).
+      // Edit own PM class submission. Owners may edit at any pre-decision
+      // status — including AFTER the reviewers draft/schedule it (#42,
+      // Colleen): saving an edit to a drafted/scheduled class knocks it
+      // back to 'submitted' (clearing the placement) so the VP/ACL must
+      // re-approve. Declined/withdrawn stay locked for owners — propose a
+      // new class instead.
       if (action === 'class-submission') {
         if (!id) return res.status(400).json({ error: 'id query param required' });
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
@@ -3154,12 +3159,21 @@ module.exports = async function handler(req, res) {
         const edScope = await reviewerScopeReq(user, req);
         const isReviewer = !!(edScope && (isOwner || scopeAllowsSub(edScope, row)));
         if (!isOwner && !isReviewer) return res.status(403).json({ error: 'Only the submitter or a reviewer for this class can edit this submission.' });
-        // Owners can edit only before the VP/PMA approves (keeps the inbox
-        // stable). Reviewers can edit at any status so they can correct
-        // details on already-placed classes from the Schedule Builder.
-        if (isOwner && !isReviewer && row.status !== 'submitted') {
-          return res.status(409).json({ error: 'This submission has already been drafted by the VP/PM Assistant. Contact them to request changes.' });
+        // Reviewers can still edit at any status (correcting details on
+        // placed classes from the Schedule Builder) WITHOUT triggering the
+        // re-approval revert below.
+        if (isOwner && !isReviewer && ['submitted', 'drafted', 'scheduled'].indexOf(row.status) === -1) {
+          return res.status(409).json({ error: 'This submission was ' + row.status + ' — submit it as a new class instead.' });
         }
+        // #42: an owner editing a drafted/scheduled class sends it back for
+        // re-approval — unless they hold reviewer authority over THIS row
+        // (scopeAllowsSub), in which case it's a reviewer touch-up and the
+        // placement stands. isReviewer alone is too loose here: an owner
+        // with ANY scope (e.g. an Oaks Liaison editing her own PM class)
+        // passes isReviewer, but she can't approve a PM class, so her edit
+        // must still go back through the VP/ACL.
+        const isRowReviewer = !!(edScope && scopeAllowsSub(edScope, row));
+        const ownerRevert = isOwner && !isRowReviewer && (row.status === 'drafted' || row.status === 'scheduled');
         let clean;
         try { clean = normalizeSubmission(req.body || {}); }
         catch (validationErr) {
@@ -3205,7 +3219,62 @@ module.exports = async function handler(req, res) {
           }
           editHelpers = ehs;
         }
-        return res.status(200).json({ submission: serializeSubmission(updated[0], editHelpers) });
+        let finalRow = updated[0];
+        if (ownerRevert) {
+          // Back to the reviewers' inbox: status returns to 'submitted' and
+          // the LIVE placement columns are cleared so the class drops out of
+          // every approved-only surface (My Classes, builder placed grid,
+          // published schedule) until it's re-placed. The prior placement is
+          // preserved in the notification below; reviewer_notes and any kid
+          // sign-up picks / helper roster stay attached, so re-approving
+          // into the same session keeps everyone enrolled.
+          const reverted = await sql`
+            UPDATE class_submissions SET
+              status = 'submitted',
+              scheduled_session = NULL,
+              scheduled_hour = NULL,
+              scheduled_age_range = NULL,
+              scheduled_room = NULL,
+              scheduled_backup_room = '',
+              reviewed_by_email = NULL,
+              reviewed_at = NULL,
+              updated_at = NOW()
+            WHERE id = ${id}
+            RETURNING *
+          `;
+          finalRow = reverted[0];
+          // Tell the VP + Afternoon Class Liaison (best-effort — the edit
+          // itself never fails on a notification hiccup).
+          try {
+            const priorPlace = row.status === 'scheduled'
+              ? 'was scheduled: Session ' + row.scheduled_session
+                + (row.scheduled_hour ? ' · ' + row.scheduled_hour : '')
+                + (row.scheduled_room ? ' · ' + row.scheduled_room : '')
+              : 'was drafted';
+            const editorLabel = row.submitted_by_name || row.submitted_by_email;
+            const notifTitle = 'Class re-submitted after edit: ' + clean.class_name;
+            const notifBody = editorLabel + ' edited "' + clean.class_name + '" (' + priorPlace
+              + ') — it needs re-approval and is off the schedule until re-placed.';
+            const recipients = ['vicepresident@rootsandwingsindy.com'];
+            const pmEmail = await getPmAssistantEmail();
+            if (pmEmail && recipients.indexOf(pmEmail.toLowerCase()) === -1) recipients.push(pmEmail.toLowerCase());
+            for (const rcpt of recipients) {
+              await sql`
+                INSERT INTO notifications (recipient_email, type, title, body, link_url)
+                VALUES (${rcpt}, 'class_resubmitted', ${notifTitle}, ${notifBody}, '/members.html')
+              `;
+              try {
+                await sendToUser(sql, rcpt, {
+                  title: notifTitle, body: notifBody,
+                  tag: 'class-resubmit-' + id, url: '/members.html'
+                });
+              } catch (pushErr) { console.error('class resubmit push error:', pushErr); }
+            }
+          } catch (notifyErr) {
+            console.error('class resubmit notification failed:', notifyErr);
+          }
+        }
+        return res.status(200).json({ submission: serializeSubmission(finalRow, editHelpers) });
       }
 
       // Reviewer-only: toggle the ⭐ favorite flag on a curriculum. Dedicated

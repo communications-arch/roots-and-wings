@@ -20343,7 +20343,11 @@
             + (sk === 99 ? 'Flexible — any session' : 'Session ' + sk) + '</li>';
         }
         var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
-        var canEdit = s.status === 'submitted';
+        // #42 (Colleen): owners can edit drafted/scheduled classes too —
+        // saving sends the class back to 'submitted' for re-approval
+        // (server clears the placement). Withdraw stays pre-approval only.
+        var canEdit = s.status === 'submitted' || s.status === 'drafted' || s.status === 'scheduled';
+        var canWithdraw = s.status === 'submitted';
         var periodTag = s.class_period === 'AM' ? '🌅 Morning' : '🌇 Afternoon';
         html += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
         html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
@@ -20356,15 +20360,17 @@
         html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
         if (canEdit) {
           html += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
+        }
+        if (canWithdraw) {
           html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">Withdraw</button>';
         }
         // Build a lesson plan straight from the idea (2026-07-11, Erin) —
         // opens the Curriculum Library editor prefilled with this class.
         html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">📖 Lesson Plan</button>';
         html += '</div>';
-        if (!canEdit && (s.status === 'drafted' || s.status === 'scheduled')) {
+        if (s.status === 'drafted' || s.status === 'scheduled') {
           html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
-          html += 'The VP / PM Assistant is planning this one. Contact them for changes.';
+          html += 'Editing sends this class back to the VP / Afternoon Class Liaison for re-approval — it comes off the schedule until it’s re-placed.';
           html += '</div>';
         }
         html += '</li>';
@@ -20497,6 +20503,9 @@
         html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
         html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">🧺 Supply list</button>';
         html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">📖 Lesson plan</button>';
+        // #42: owners can edit an approved class — the modal warns that
+        // saving sends it back for re-approval.
+        html += '<button type="button" class="sc-btn mf-myclasses-edit" data-idx="' + idx + '">✏️ Edit</button>';
         html += '</div>';
         html += '</li>';
       });
@@ -20568,6 +20577,14 @@
     }
     mcWire('.mf-myclasses-supply', true);
     mcWire('.mf-myclasses-plan', false);
+    // #42: edit an approved class straight from My Classes — same form
+    // the Class Ideas card uses; the server reverts it to 'submitted'.
+    body.querySelectorAll('.mf-myclasses-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var s = mine[parseInt(this.getAttribute('data-idx'), 10)];
+        if (s && typeof showClassSubmissionModal === 'function') showClassSubmissionModal(s);
+      });
+    });
   }
 
   function withdrawClassSubmission(id) {
@@ -20623,6 +20640,13 @@
     html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
     html += '</p>';
+    // #42: editing an already drafted/scheduled class sends it back for
+    // re-approval — say so up front, before the member commits the edit.
+    if (isEdit && (cur.status === 'drafted' || cur.status === 'scheduled')) {
+      html += '<p style="background:#FFF3E0;color:#7A4E00;font-size:0.85rem;border-radius:8px;padding:8px 12px;margin:0 0 1rem;">';
+      html += '⚠️ This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + '. Saving an edit sends it back to the VP / Afternoon Class Liaison for re-approval, and it comes off the schedule until it\'s re-placed.';
+      html += '</p>';
+    }
     // Placeholder for the "Need inspiration?" strip — filled asynchronously
     // by loadInspirationStrip() so the modal opens instantly even if the
     // curriculum fetch is slow.
