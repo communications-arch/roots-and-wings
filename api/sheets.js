@@ -1388,9 +1388,12 @@ async function loadFamiliesFromProfiles(sql) {
   // The kids join is what lets us retire the Directory + Classlist
   // tabs: parseDirectory used to be the only source of kid age-group
   // assignments + AM/PM schedule, both now live on the kids table.
+  // Withdrawn families (#44) vanish from the directory + every surface
+  // this feeds, immediately. Data is retained — only the listing hides.
   var famRows = await sql`
     SELECT family_email, family_name, phone
     FROM member_profiles
+    WHERE withdrawn_at IS NULL
     ORDER BY LOWER(family_name)
   `;
   var peopleRows = await sql`

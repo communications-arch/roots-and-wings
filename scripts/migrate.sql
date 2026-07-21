@@ -2041,3 +2041,11 @@ CREATE TABLE IF NOT EXISTS role_interest (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS role_interest_role_person_idx
   ON role_interest (role_id, LOWER(person_email));
+
+-- #44 (2026-07-20): Membership "Adjust Enrollment" — family withdrawal.
+-- A withdrawn family keeps every row (nothing deleted); the stamp hides
+-- them from the directory + member surfaces and marks the season's
+-- kid_enrollments 'withdrawn' (kid_enrollments.status is free-text — no
+-- CHECK to widen). withdrawn_by records which director applied it.
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_by TEXT NOT NULL DEFAULT '';

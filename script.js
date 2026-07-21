@@ -23850,6 +23850,7 @@
     };
     if (r.kind === 'add_kid') return 'Add ' + r.kid_first_name + ' (' + schedName(r.requested_schedule) + ')';
     if (r.kind === 'remove_kid') return 'Remove ' + r.kid_first_name;
+    if (r.kind === 'family_withdrawal') return 'Family withdrawal';
     return r.kid_first_name + ': ' + schedName(r.prior_schedule) + ' → ' + schedName(r.requested_schedule);
   }
 
@@ -23875,7 +23876,13 @@
         var rows = (res.data && res.data.requests) || [];
         var pending = rows.filter(function (r) { return r.status === 'pending'; });
         var decided = rows.filter(function (r) { return r.status !== 'pending'; }).slice(0, 15);
-        var h = '';
+        // "Adjust enrollment…" tool (#44) — standard toolbar placement
+        // above the list. Direct Membership-authority changes (schedule
+        // switches, family withdrawal) that skip the pending step.
+        var h = '<div class="coop-cal-toolbar">'
+          + '<button id="ws-adjust-enroll-btn" class="btn btn-outline-dark btn-sm" type="button">Adjust enrollment…</button>'
+          + '</div>'
+          + '<div id="ws-adjust-enroll-panel" class="st-place-row enroll-req-card"' + (_adjustEnrollOpen ? '' : ' hidden') + '></div>';
         if (pending.length === 0) h += '<p class="ws-empty">Nothing waiting — all caught up. 🎉</p>';
         else h += '<h5 class="ws-part-exempt-existing">Waiting for your decision (' + pending.length + ')</h5>';
         pending.forEach(function (r) {
@@ -23931,8 +23938,182 @@
             rwArmTwoStep(self, 'deny', function () { decide(parseInt(self.getAttribute('data-req-id'), 10), false, self); });
           });
         });
+        wireAdjustEnrollTool(body);
       })
       .catch(function () { body.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
+  }
+
+  // ── #44: Adjust Enrollment tool (Membership-direct changes) ───────
+  // Lives on the Enrollment Requests card. Two actions, both applied
+  // immediately with Membership authority (audited as already-approved
+  // rows in the same queue history): a kid's schedule switch, and a
+  // whole-family withdrawal. Billing is NEVER automated — the server
+  // only notifies the Treasurer.
+  var _adjustEnrollOpen = false;
+  var _adjustEnrollCache = null; // { season, families: [...] } from ?adjust_enroll=1
+
+  function adjustSchedName(s) {
+    return s === 'morning' ? 'Morning only' : s === 'afternoon' ? 'Afternoon only' : s === 'all-day' ? 'All day' : (s || '?');
+  }
+
+  function wireAdjustEnrollTool(body) {
+    var btn = body.querySelector('#ws-adjust-enroll-btn');
+    var panel = body.querySelector('#ws-adjust-enroll-panel');
+    if (!btn || !panel) return;
+    if (_adjustEnrollOpen) renderAdjustEnrollPanel(body, panel);
+    btn.addEventListener('click', function () {
+      _adjustEnrollOpen = !_adjustEnrollOpen;
+      panel.hidden = !_adjustEnrollOpen;
+      if (_adjustEnrollOpen) renderAdjustEnrollPanel(body, panel);
+    });
+  }
+
+  function renderAdjustEnrollPanel(body, panel) {
+    if (!_adjustEnrollCache) {
+      panel.innerHTML = '<p class="ws-empty">Loading families…</p>';
+      fetch('/api/tour?adjust_enroll=1', { headers: rwAuthHeaders() })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { panel.innerHTML = '<p class="ws-empty ws-wv-err">' + escapeHtmlWs((res.data && res.data.error) || 'error') + '</p>'; return; }
+          _adjustEnrollCache = res.data;
+          renderAdjustEnrollPanel(body, panel);
+        })
+        .catch(function () { panel.innerHTML = '<p class="ws-empty ws-wv-err">Network error — try again.</p>'; });
+      return;
+    }
+    var data = _adjustEnrollCache;
+    var fams = (data.families || []).filter(function (f) { return !f.withdrawn; });
+    var h = '<strong>Adjust enrollment (' + escapeHtmlWs(data.season || '') + ')</strong>'
+      + '<p class="ws-body-hint">Applies immediately with your Membership authority — no approval step. Every change lands in the decision history below, and the affected board roles are notified. Billing is never automated.</p>'
+      + '<label class="ws-wv-context" for="adj-family">Family</label> '
+      + '<select id="adj-family" class="sc-btn"><option value="">Pick a family…</option>'
+      + fams.map(function (f) {
+          return '<option value="' + escapeHtmlWs(f.family_email) + '">' + escapeHtmlWs(f.family_name || f.family_email) + '</option>';
+        }).join('')
+      + '</select> '
+      + '<select id="adj-mode" class="sc-btn">'
+      + '<option value="switch">Switch a kid’s schedule</option>'
+      + '<option value="withdraw">Withdraw the whole family</option>'
+      + '</select>'
+      + '<div id="adj-switch-fields">'
+      + '<select id="adj-kid" class="sc-btn"><option value="">Pick a kid…</option></select> '
+      + '<select id="adj-sched" class="sc-btn">'
+      + '<option value="">New schedule…</option>'
+      + '<option value="all-day">All day</option>'
+      + '<option value="morning">Morning only</option>'
+      + '<option value="afternoon">Afternoon only</option>'
+      + '</select>'
+      + '</div>'
+      + '<div id="adj-withdraw-fields" hidden>'
+      + '<p class="ws-wv-err">Withdraws every kid for the season, hides the family from the directory and member surfaces, frees their Morning Builder spots and afternoon picks, and notifies the board (Comms: disable logins · Treasurer: manual billing check · VP: freed coverage). Nothing is deleted — data is retained.</p>'
+      + '</div>'
+      + '<input id="adj-note" class="rd-input" type="text" maxlength="500" placeholder="Optional note (shared with the family / board notices)">'
+      + '<div class="ws-srt-actions">'
+      + '<button type="button" id="adj-apply-switch" class="sc-btn mcb-primary">Apply switch</button>'
+      + '<button type="button" id="adj-apply-withdraw" class="sc-btn sc-btn-del" hidden>Withdraw family</button>'
+      + '</div>'
+      + '<p id="adj-status" class="ws-wv-context" aria-live="polite"></p>';
+    panel.innerHTML = h;
+
+    var famSel = panel.querySelector('#adj-family');
+    var modeSel = panel.querySelector('#adj-mode');
+    var kidSel = panel.querySelector('#adj-kid');
+    var schedSel = panel.querySelector('#adj-sched');
+    var noteEl = panel.querySelector('#adj-note');
+    var statusEl = panel.querySelector('#adj-status');
+    var switchFields = panel.querySelector('#adj-switch-fields');
+    var withdrawFields = panel.querySelector('#adj-withdraw-fields');
+    var applySwitchBtn = panel.querySelector('#adj-apply-switch');
+    var applyWithdrawBtn = panel.querySelector('#adj-apply-withdraw');
+
+    function currentFamily() {
+      var em = famSel.value;
+      return fams.filter(function (f) { return f.family_email === em; })[0] || null;
+    }
+    function rebuildKids() {
+      var f = currentFamily();
+      var opts = '<option value="">Pick a kid…</option>';
+      ((f && f.kids) || []).forEach(function (k) {
+        var withdrawnBit = k.enroll_status === 'withdrawn' ? ' — withdrawn' : k.enroll_status === 'not_returning' ? ' — not returning' : '';
+        opts += '<option value="' + k.id + '" data-sched="' + escapeHtmlWs(k.schedule) + '">'
+          + escapeHtmlWs(k.first_name + (k.last_name ? ' ' + k.last_name : '') + ' (' + adjustSchedName(k.schedule) + withdrawnBit + ')') + '</option>';
+      });
+      kidSel.innerHTML = opts;
+    }
+    function syncMode() {
+      var withdraw = modeSel.value === 'withdraw';
+      switchFields.hidden = withdraw;
+      withdrawFields.hidden = !withdraw;
+      applySwitchBtn.hidden = withdraw;
+      applyWithdrawBtn.hidden = !withdraw;
+    }
+    famSel.addEventListener('change', rebuildKids);
+    modeSel.addEventListener('change', syncMode);
+    syncMode();
+
+    function afterApplied(msg) {
+      statusEl.classList.remove('ws-wv-err');
+      statusEl.textContent = msg;
+      _adjustEnrollCache = null; // schedules changed — refetch on next open
+      loadEnrollmentRequestsInto(body); // history refresh (panel stays open)
+      if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
+    }
+    function failStatus(msg) {
+      statusEl.classList.add('ws-wv-err');
+      statusEl.textContent = msg;
+    }
+
+    applySwitchBtn.addEventListener('click', function () {
+      var f = currentFamily();
+      var kidId = parseInt(kidSel.value, 10);
+      var sched = schedSel.value;
+      if (!f) { failStatus('Pick a family first.'); return; }
+      if (!Number.isFinite(kidId)) { failStatus('Pick a kid.'); return; }
+      if (!sched) { failStatus('Pick the new schedule.'); return; }
+      var kidOpt = kidSel.options[kidSel.selectedIndex];
+      if (kidOpt && kidOpt.getAttribute('data-sched') === sched) { failStatus('That’s already their schedule.'); return; }
+      applySwitchBtn.disabled = true;
+      statusEl.textContent = 'Applying…';
+      fetch('/api/tour', {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          kind: 'membership-adjust-enrollment', action: 'schedule_switch',
+          family_email: f.family_email, kid_id: kidId, new_schedule: sched, note: noteEl.value || ''
+        })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          applySwitchBtn.disabled = false;
+          if (!res.ok) { failStatus((res.data && res.data.error) || 'Could not apply the switch.'); return; }
+          afterApplied('Applied — ' + ((res.data && res.data.applied) || 'schedule updated') + '. Treasurer, VP, and the Afternoon Class Liaison were notified.');
+        })
+        .catch(function () { applySwitchBtn.disabled = false; failStatus('Network error — try again.'); });
+    });
+
+    applyWithdrawBtn.addEventListener('click', function () {
+      var self = applyWithdrawBtn;
+      var f = currentFamily();
+      if (!f) { failStatus('Pick a family first.'); return; }
+      rwArmTwoStep(self, 'withdraw ' + (f.family_name || 'this family'), function () {
+        self.disabled = true;
+        statusEl.textContent = 'Withdrawing…';
+        fetch('/api/tour', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({
+            kind: 'membership-adjust-enrollment', action: 'family_withdrawal',
+            family_email: f.family_email, note: noteEl.value || ''
+          })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            self.disabled = false;
+            if (!res.ok) { failStatus((res.data && res.data.error) || 'Could not withdraw the family.'); return; }
+            var d = res.data || {};
+            afterApplied('Withdrawn: ' + (d.withdrawn || f.family_name)
+              + (d.kids && d.kids.length ? ' (kids: ' + d.kids.join(', ') + ')' : '')
+              + '. Board notified — Comms has the disable-logins step, billing stays manual.');
+          })
+          .catch(function () { self.disabled = false; failStatus('Network error — try again.'); });
+      });
+    });
   }
 
   function loadEnrollmentRequestCount() {
@@ -23945,7 +24126,11 @@
         var n = (d.requests || []).filter(function (r) { return r.status === 'pending'; }).length;
         var pill = document.getElementById('ws-enroll-req-count');
         if (pill) pill.textContent = n;
-        item.hidden = n <= 0;
+        // #44: the card stays reachable at zero pending — it now hosts
+        // the Adjust Enrollment tool, not just the approval queue.
+        var lbl = document.getElementById('ws-enroll-req-label');
+        if (lbl) lbl.textContent = n > 0 ? 'Approve enrollment changes' : 'Enrollment requests & adjustments';
+        item.hidden = false;
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
       })
       .catch(function () {});

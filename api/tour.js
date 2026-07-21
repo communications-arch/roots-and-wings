@@ -14,7 +14,7 @@ const { google } = require('googleapis');
 const { put } = require('@vercel/blob');
 const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
-const { getRoleHolderEmail, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
+const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
@@ -3757,7 +3757,8 @@ async function handleProfileGet(req, res) {
   try {
     const famRows = await sql`
       SELECT family_email, family_name, phone, address,
-             placement_notes, additional_emails, alt_logins, updated_at, updated_by
+             placement_notes, additional_emails, alt_logins, updated_at, updated_by,
+             withdrawn_at
       FROM member_profiles
       WHERE family_email = ${familyEmail}
       LIMIT 1
@@ -8036,6 +8037,408 @@ async function handleEnrollmentRequestDecide(body, req, res) {
   }
 }
 
+// ── Membership "Adjust Enrollment" tool (#44, Erin-approved design) ──
+// Two direct actions on the Enrollment Requests card, applied with
+// Membership authority (no pending step — same trust as her EMI direct
+// edits): a kid's schedule switch, and a whole-family withdrawal.
+// Everything writes an already-approved audit row into
+// enrollment_change_requests so the queue's "Recent decisions" history
+// shows who did what, when. Billing stays 100% manual — the Treasurer
+// only ever gets a heads-up, never an automated charge or refund.
+
+const ADJUST_SCHEDULES = ['all-day', 'morning', 'afternoon'];
+function adjSchedLabel(s) {
+  return s === 'morning' ? 'Morning only'
+    : s === 'afternoon' ? 'Afternoon only'
+    : s === 'all-day' ? 'All day' : (s || '?');
+}
+
+// GET ?adjust_enroll=1 — the tool's picker data: every family (withdrawn
+// ones marked, so the dropdown can show them disabled) with their kids +
+// current-season schedules.
+async function handleAdjustEnrollmentGet(req, res) {
+  const user = await verifyWorkspaceAuthWithViewAs(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await membershipMayDecide(user.realEmail || user.email))) {
+    return res.status(403).json({ error: 'Only the Membership Director can adjust enrollments.' });
+  }
+  try {
+    const sql = getSql();
+    const fams = await sql`
+      SELECT family_email, family_name, withdrawn_at FROM member_profiles
+      ORDER BY LOWER(family_name)
+    `;
+    const kids = await sql`
+      SELECT k.id, k.family_email, k.first_name, k.last_name,
+             COALESCE(e.schedule, k.schedule, 'all-day') AS schedule,
+             e.status AS enroll_status
+      FROM kids k
+      LEFT JOIN kid_enrollments e ON e.kid_id = k.id AND e.season = ${DEFAULT_SEASON}
+      ORDER BY k.family_email, k.sort_order, k.id
+    `;
+    const kidsByFam = {};
+    kids.forEach(k => {
+      const key = String(k.family_email || '').toLowerCase();
+      if (!kidsByFam[key]) kidsByFam[key] = [];
+      kidsByFam[key].push({
+        id: k.id,
+        first_name: k.first_name,
+        last_name: k.last_name || '',
+        schedule: String(k.schedule || 'all-day').toLowerCase(),
+        enroll_status: k.enroll_status || ''
+      });
+    });
+    return res.status(200).json({
+      season: DEFAULT_SEASON,
+      families: fams.map(f => ({
+        family_email: String(f.family_email || '').toLowerCase(),
+        family_name: f.family_name || '',
+        withdrawn: !!f.withdrawn_at,
+        kids: kidsByFam[String(f.family_email || '').toLowerCase()] || []
+      }))
+    });
+  } catch (err) {
+    console.error('adjust-enroll GET error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='membership-adjust-enrollment'
+//   { action:'schedule_switch', family_email, kid_id, new_schedule, note }
+//   { action:'family_withdrawal', family_email, note }
+async function handleMembershipAdjustEnrollment(body, req, res) {
+  const user = await verifyWorkspaceAuthWithViewAs(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const real = user.realEmail || user.email;
+  if (!(await membershipMayDecide(real))) {
+    return res.status(403).json({ error: 'Only the Membership Director can adjust enrollments.' });
+  }
+  const action = String(body.action || '').trim();
+  const fam = normalizeEmail(body.family_email || '');
+  const note = String(body.note || '').trim().slice(0, 500);
+  if (!fam) return res.status(400).json({ error: 'family_email required' });
+  const sql = getSql();
+  const profRows = await sql`
+    SELECT family_email, family_name, withdrawn_at FROM member_profiles
+    WHERE LOWER(family_email) = ${fam} LIMIT 1
+  `;
+  if (!profRows.length) return res.status(404).json({ error: 'Family not found.' });
+  const prof = profRows[0];
+  const famName = prof.family_name || fam;
+
+  if (action === 'schedule_switch') {
+    const kidId = parseInt(body.kid_id, 10);
+    const newSched = String(body.new_schedule || '').trim().toLowerCase();
+    if (!Number.isFinite(kidId)) return res.status(400).json({ error: 'kid_id required' });
+    if (ADJUST_SCHEDULES.indexOf(newSched) === -1) {
+      return res.status(400).json({ error: 'Schedule must be all-day, morning, or afternoon.' });
+    }
+    const kidRows = await sql`
+      SELECT k.id, k.first_name, e.schedule AS enr_schedule, k.schedule AS kid_schedule
+      FROM kids k
+      LEFT JOIN kid_enrollments e ON e.kid_id = k.id AND e.season = ${DEFAULT_SEASON}
+      WHERE k.id = ${kidId} AND LOWER(k.family_email) = ${fam} LIMIT 1
+    `;
+    if (!kidRows.length) return res.status(404).json({ error: 'That kid isn’t in this family.' });
+    const kid = kidRows[0];
+    const prior = String(kid.enr_schedule || kid.kid_schedule || 'all-day').toLowerCase();
+    if (prior === newSched) return res.status(409).json({ error: kid.first_name + ' is already ' + adjSchedLabel(newSched) + '.' });
+
+    try {
+      await sql`UPDATE kids SET schedule = ${newSched}, updated_at = NOW() WHERE id = ${kidId}`;
+      await sql`
+        INSERT INTO kid_enrollments (kid_id, family_email, kid_first_name, season, schedule, status, source, updated_by)
+        VALUES (${kidId}, ${fam}, ${kid.first_name}, ${DEFAULT_SEASON}, ${newSched}, 'enrolled', 'emi', ${real})
+        ON CONFLICT (kid_id, season)
+        DO UPDATE SET schedule = ${newSched}, updated_at = NOW(), updated_by = ${real}
+      `;
+      // Parity with the approval path: a switch to morning-only drops the
+      // kid's current-season afternoon picks, and the family's
+      // registration track re-syncs from the live kid schedules.
+      if (newSched === 'morning') {
+        try {
+          await sql`
+            DELETE FROM class_signup_picks
+            WHERE school_year = ${DEFAULT_SEASON}
+              AND (kid_id = ${kidId}
+                   OR (kid_id IS NULL AND LOWER(family_email) = ${fam}
+                       AND LOWER(kid_first_name) = LOWER(${kid.first_name})))
+          `;
+        } catch (e) { console.error('adjust morning-switch pick cleanup (non-fatal):', e); }
+      }
+      try {
+        const famKids = await sql`SELECT schedule FROM kids WHERE LOWER(family_email) = ${fam}`;
+        const s = k => String(k.schedule || '').toLowerCase();
+        const hasAM = famKids.some(k => s(k) === 'all-day' || s(k) === 'morning');
+        const hasPM = famKids.some(k => s(k) === 'all-day' || s(k) === 'afternoon');
+        const newTrack = (hasAM && hasPM) ? 'Both' : hasAM ? 'Morning Only' : hasPM ? 'Afternoon Only' : '';
+        if (newTrack) {
+          await sql`
+            UPDATE registrations SET track = ${newTrack}, updated_at = NOW()
+            WHERE LOWER(family_email) = ${fam} AND declined_at IS NULL
+          `;
+        }
+      } catch (e) { console.error('adjust track re-sync (non-fatal):', e); }
+
+      // Audit: an already-approved history row so the queue's "Recent
+      // decisions" shows the adjustment (who/what/when).
+      await sql`
+        INSERT INTO enrollment_change_requests
+          (kind, kid_id, family_email, kid_first_name, season, requested_schedule, prior_schedule,
+           status, requested_by, decided_by, decided_at, decision_note)
+        VALUES ('schedule_change', ${kidId}, ${fam}, ${kid.first_name}, ${DEFAULT_SEASON}, ${newSched}, ${prior},
+                'approved', ${real}, ${real}, NOW(), ${'Applied directly by Membership' + (note ? ' — ' + note : '')})
+      `;
+
+      const changeLabel = kid.first_name + ': ' + adjSchedLabel(prior) + ' → ' + adjSchedLabel(newSched);
+      // Family sees it in-portal; board ripples get role-specific notes.
+      await notifyEnrollment(sql, fam,
+        'Schedule updated: ' + changeLabel,
+        'The Membership Director updated this schedule for the ' + DEFAULT_SEASON + ' season.'
+        + (note ? ' Note: ' + note : ''));
+      // Existing Morning-Builder placement prompt on morning moves.
+      try {
+        const wasAM = ['all-day', 'morning'].indexOf(prior) !== -1;
+        const nowAM = ['all-day', 'morning'].indexOf(newSched) !== -1;
+        if (wasAM !== nowAM) {
+          let placedGroup = '';
+          try {
+            const pa = await sql`
+              SELECT class_group FROM morning_class_assignments
+              WHERE school_year = ${DEFAULT_SEASON} AND class_group <> ''
+                AND (kid_id = ${kidId}
+                     OR (kid_id IS NULL AND LOWER(family_email) = ${fam}
+                         AND LOWER(kid_first_name) = LOWER(${kid.first_name})))
+              LIMIT 1`;
+            placedGroup = (pa[0] && pa[0].class_group) || '';
+          } catch (e) { /* group name is a nicety */ }
+          await notifyMembershipDirector(sql,
+            'Morning Class Builder: ' + kid.first_name + (nowAM ? ' joined mornings' : ' left mornings'),
+            nowAM
+              ? kid.first_name + '’s schedule now includes mornings — place them in the Morning Class Builder.'
+              : kid.first_name + ' switched to afternoon-only' + (placedGroup ? ' but is still placed in ' + placedGroup : '') + ' — update the Morning Class Builder.');
+        }
+      } catch (e) { console.error('adjust builder-prompt (non-fatal):', e); }
+      // Role ripples: Treasurer (dues), VP + Afternoon Class Liaison
+      // (placement). Portal notifications via the house helper.
+      try {
+        const holders = await getRoleHolderEmails(['Treasurer', 'Vice President', 'Afternoon Class Liaison']);
+        await notifyEnrollment(sql, holders['Treasurer'] || 'treasurer@rootsandwingsindy.com',
+          'Dues check: ' + famName + ' schedule change',
+          changeLabel + ' — adjusted directly by Membership for ' + DEFAULT_SEASON + '. Review the dues impact; billing stays manual (no automated charges or refunds).'
+          + (note ? ' Note: ' + note : ''));
+        const placementBody = changeLabel + ' (' + famName + ') — adjusted directly by Membership. Check placements: morning groups and afternoon sign-ups may need updating.'
+          + (newSched === 'morning' ? ' Their current-season afternoon picks were removed automatically.' : '')
+          + (note ? ' Note: ' + note : '');
+        await notifyEnrollment(sql, holders['Vice President'] || 'vicepresident@rootsandwingsindy.com',
+          'Placement check: ' + famName + ' schedule change', placementBody);
+        await notifyEnrollment(sql, holders['Afternoon Class Liaison'] || 'afternoon@rootsandwingsindy.com',
+          'Placement check: ' + famName + ' schedule change', placementBody);
+      } catch (e) { console.error('adjust ripple notifications (non-fatal):', e); }
+
+      return res.status(200).json({ ok: true, applied: changeLabel });
+    } catch (err) {
+      console.error('adjust schedule_switch error:', err);
+      return res.status(500).json({ error: 'Could not apply the schedule switch.' });
+    }
+  }
+
+  if (action === 'family_withdrawal') {
+    if (prof.withdrawn_at) return res.status(409).json({ error: 'This family is already marked withdrawn.' });
+    try {
+      // Gather what the family holds BEFORE any cleanup, so the VP note
+      // lists the freed coverage accurately.
+      const kids = await sql`
+        SELECT id, first_name FROM kids WHERE LOWER(family_email) = ${fam} ORDER BY sort_order, id
+      `;
+      const kidIds = kids.map(k => k.id);
+      const kidNames = kids.map(k => k.first_name).filter(Boolean);
+      const people = await sql`
+        SELECT email, personal_email, first_name, last_name FROM people
+        WHERE LOWER(family_email) = ${fam}
+      `;
+      const adultEmails = [fam];
+      people.forEach(p => {
+        [p.email, p.personal_email].forEach(e => {
+          const le = String(e || '').toLowerCase().trim();
+          if (le && adultEmails.indexOf(le) === -1) adultEmails.push(le);
+        });
+      });
+      const morningPlacements = kidIds.length ? await sql`
+        SELECT kid_first_name, class_group FROM morning_class_assignments
+        WHERE school_year = ${DEFAULT_SEASON}
+          AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+      ` : await sql`
+        SELECT kid_first_name, class_group FROM morning_class_assignments
+        WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+      const pickRows = kidIds.length ? await sql`
+        SELECT kid_first_name FROM class_signup_picks
+        WHERE school_year = ${DEFAULT_SEASON}
+          AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+      ` : await sql`
+        SELECT kid_first_name FROM class_signup_picks
+        WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+      // Adult duty/class signups — FLAGGED for the VP, not deleted
+      // (approved design: adult signups get flagged; the VP re-covers
+      // them with the existing assignment tools).
+      const dutyLines = [];
+      try {
+        const vols = await sql`
+          SELECT session_number, block, role, person_name FROM volunteer_signups
+          WHERE school_year = ${DEFAULT_SEASON} AND LOWER(person_email) = ANY(${adultEmails})
+          ORDER BY session_number, block
+        `;
+        vols.forEach(v => dutyLines.push('Session ' + v.session_number + ' ' + v.block + ' ' + v.role + (v.person_name ? ' (' + v.person_name + ')' : '')));
+        const ams = await sql`
+          SELECT session_number, group_name, role, person_name FROM am_class_assignments
+          WHERE school_year = ${DEFAULT_SEASON} AND LOWER(person_email) = ANY(${adultEmails})
+          ORDER BY session_number
+        `;
+        ams.forEach(a => dutyLines.push('AM session ' + a.session_number + ' ' + (a.group_name || '') + ' ' + a.role + (a.person_name ? ' (' + a.person_name + ')' : '')));
+        const helpers = await sql`
+          SELECT h.person_name, h.block, cs.class_name FROM class_assignment_helpers h
+          LEFT JOIN class_submissions cs ON cs.id = h.class_submission_id
+          WHERE LOWER(h.person_email) = ANY(${adultEmails})
+        `;
+        helpers.forEach(h => dutyLines.push('Class helper: ' + (h.class_name || 'class') + (h.block ? ' (' + h.block + ')' : '') + (h.person_name ? ' — ' + h.person_name : '')));
+        const cleans = await sql`
+          SELECT ca.session_number, ar.area_name AS area FROM cleaning_assignments ca
+          LEFT JOIN cleaning_areas ar ON ar.id = ca.cleaning_area_id
+          WHERE ca.school_year = ${DEFAULT_SEASON} AND LOWER(ca.family_name) = LOWER(${famName})
+        `;
+        cleans.forEach(c => dutyLines.push('Cleaning session ' + c.session_number + (c.area ? ': ' + c.area : '')));
+        const roles = await sql`
+          SELECT r.title FROM role_holders_v2 rhv
+          JOIN roles r ON r.id = rhv.role_id
+          WHERE rhv.ended_at IS NULL AND LOWER(rhv.person_email) = ANY(${adultEmails})
+        `;
+        roles.forEach(r => dutyLines.push('Role: ' + r.title));
+      } catch (e) { console.error('withdrawal duty scan (non-fatal):', e); }
+
+      // ── Apply ──
+      await sql`
+        UPDATE kid_enrollments SET status = 'withdrawn', updated_at = NOW(), updated_by = ${real}
+        WHERE season = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+      await sql`
+        UPDATE member_profiles SET withdrawn_at = NOW(), withdrawn_by = ${real}, updated_at = NOW(), updated_by = ${real}
+        WHERE LOWER(family_email) = ${fam}
+      `;
+      // Kid placements go now (seats freed) — data-bearing tables above
+      // are only marked, never deleted.
+      if (kidIds.length) {
+        await sql`
+          DELETE FROM morning_class_assignments
+          WHERE school_year = ${DEFAULT_SEASON}
+            AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+        `;
+        await sql`
+          DELETE FROM class_signup_picks
+          WHERE school_year = ${DEFAULT_SEASON}
+            AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+        `;
+      } else {
+        await sql`DELETE FROM morning_class_assignments WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}`;
+        await sql`DELETE FROM class_signup_picks WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}`;
+      }
+
+      // Audit row (single family-level entry).
+      await sql`
+        INSERT INTO enrollment_change_requests
+          (kind, family_email, kid_first_name, season, status, requested_by, decided_by, decided_at, decision_note)
+        VALUES ('family_withdrawal', ${fam}, '', ${DEFAULT_SEASON},
+                'approved', ${real}, ${real}, NOW(),
+                ${'Family withdrawal applied by Membership' + (kidNames.length ? ' — kids: ' + kidNames.join(', ') : '') + (note ? ' — ' + note : '')})
+      `;
+
+      // ── Notifications ──
+      const boardTitles = ['President', 'Vice President', 'Treasurer', 'Secretary', 'Membership Director', 'Communications Director', 'Sustaining Director'];
+      const fallbackByTitle = {
+        'President': 'president@rootsandwingsindy.com',
+        'Vice President': 'vicepresident@rootsandwingsindy.com',
+        'Treasurer': 'treasurer@rootsandwingsindy.com',
+        'Secretary': 'secretary@rootsandwingsindy.com',
+        'Membership Director': 'membership@rootsandwingsindy.com',
+        'Communications Director': 'communications@rootsandwingsindy.com',
+        'Sustaining Director': 'sustaining@rootsandwingsindy.com'
+      };
+      let holders = {};
+      try { holders = await getRoleHolderEmails(boardTitles); } catch (e) { /* fallbacks below */ }
+      const holderOf = t => (holders[t] || fallbackByTitle[t]);
+      const freedList = []
+        .concat(morningPlacements.map(m => 'Morning group ' + (m.class_group || '?') + ': ' + m.kid_first_name + ' (removed)'))
+        .concat(pickRows.length ? ['Afternoon picks removed: ' + pickRows.length] : []);
+      const boardBody = 'The ' + famName + ' family withdrew from the ' + DEFAULT_SEASON + ' season (applied by Membership'
+        + (real ? ': ' + real : '') + ').'
+        + (kidNames.length ? ' Kids: ' + kidNames.join(', ') + '.' : '')
+        + ' Their data is retained; they no longer appear in the directory or member surfaces.'
+        + (note ? ' Note: ' + note : '');
+      const notified = [];
+      for (const t of boardTitles) {
+        const to = holderOf(t);
+        if (!to || notified.indexOf(String(to).toLowerCase()) !== -1) continue;
+        notified.push(String(to).toLowerCase());
+        await notifyEnrollment(sql, to, 'Family withdrawal: ' + famName, boardBody);
+      }
+      // Role-specific follow-ups.
+      const loginList = adultEmails.filter(e => /@rootsandwingsindy\.com$/i.test(e));
+      await notifyEnrollment(sql, holderOf('Communications Director'),
+        'To Do — disable logins: ' + famName,
+        'Manual step in Google Admin: disable/suspend these workspace accounts for the withdrawn ' + famName + ' family: '
+        + (loginList.length ? loginList.join(', ') : '(no workspace logins found)') + '. Account deletion/suspension is NOT automated.');
+      await notifyEnrollment(sql, holderOf('Treasurer'),
+        'Billing heads-up: ' + famName + ' withdrew',
+        'Review dues/deposits for the ' + famName + ' family. Nothing was billed or refunded automatically — deposits are non-refundable and every billing adjustment stays manual.');
+      await notifyEnrollment(sql, holderOf('Vice President'),
+        'Freed coverage: ' + famName + ' withdrew',
+        (freedList.length ? 'Freed now — ' + freedList.join('; ') + '. ' : 'No kid placements were on the books. ')
+        + (dutyLines.length
+          ? 'Adult duties/classes still on the books (flagged, not removed — reassign as needed): ' + dutyLines.join('; ')
+          : 'No adult duty or class signups were on the books.'));
+
+      // One board email (dev-safe via _resend) so the money/logins steps
+      // don't rely on someone opening the portal bell.
+      if (process.env.RESEND_API_KEY) {
+        try {
+          const resend = new Resend(process.env.RESEND_API_KEY);
+          await resend.emails.send({
+            from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+            to: ['treasurer@rootsandwingsindy.com', 'vicepresident@rootsandwingsindy.com', 'communications@rootsandwingsindy.com'],
+            cc: ['president@rootsandwingsindy.com', 'membership@rootsandwingsindy.com'],
+            replyTo: 'membership@rootsandwingsindy.com',
+            subject: emailSubject('Family withdrawal: ' + famName),
+            html: `
+              <h2>Family withdrawal: ${escapeHtml(famName)}</h2>
+              <p>${escapeHtml(boardBody)}</p>
+              <ul>
+                <li><strong>Communications:</strong> disable these Workspace logins (manual, Google Admin): ${escapeHtml(loginList.join(', ') || '(none found)')}</li>
+                <li><strong>Treasurer:</strong> billing/refunds stay manual — deposits are non-refundable, nothing was charged or refunded automatically.</li>
+                <li><strong>VP:</strong> ${escapeHtml(freedList.length ? 'freed now — ' + freedList.join('; ') : 'no kid placements were on the books')}${dutyLines.length ? '. Adult signups flagged (not removed): ' + escapeHtml(dutyLines.join('; ')) : ''}</li>
+              </ul>
+              <p style="color:#666;font-size:0.9rem;">Full detail is in each director&rsquo;s portal notifications.</p>
+            `
+          });
+        } catch (e) { console.error('withdrawal board email failed (non-fatal):', e.message); }
+      }
+
+      return res.status(200).json({
+        ok: true,
+        withdrawn: famName,
+        kids: kidNames,
+        freed: freedList,
+        flagged_duties: dutyLines
+      });
+    } catch (err) {
+      console.error('adjust family_withdrawal error:', err);
+      return res.status(500).json({ error: 'Could not apply the withdrawal.' });
+    }
+  }
+
+  return res.status(400).json({ error: 'Unknown adjust action.' });
+}
+
 // ── Dev-only bug reports (bugs.html) ─────────────────────────────────
 // Helper testers on the dev site report bugs and watch fix status
 // without ever seeing GitHub. Backed by GitHub Issues on this repo so
@@ -8283,6 +8686,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
     if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
     if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
+    if (req.query.adjust_enroll === '1') return handleAdjustEnrollmentGet(req, res);
     if (req.query.list === 'blc_email_requests') return handleBlcEmailRequestList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
@@ -8313,6 +8717,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'bug-report') return handleBugReport(body, req, res);
     if (kind === 'bug-verify') return handleBugVerify(body, req, res);
     if (kind === 'enrollment-request-decide') return handleEnrollmentRequestDecide(body, req, res);
+    if (kind === 'membership-adjust-enrollment') return handleMembershipAdjustEnrollment(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);
