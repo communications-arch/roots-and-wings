@@ -8770,7 +8770,7 @@
       title: 'Class Ideas',
       roleGate: null,
       render: function () {
-        var h = '<p class="ws-body-hint">Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session.</p>';
+        var h = '<p class="ws-body-hint">Have an idea for a morning class or an afternoon elective? Propose it here and the VP + Afternoon Class Liaison will reach out when planning the next session. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>.</p>';
         h += '<div class="mf-classsubs-body" id="mfClassSubsBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
         return h;
       },
