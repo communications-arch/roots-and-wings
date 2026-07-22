@@ -25180,7 +25180,8 @@
       + 'ul{margin:4px 0 10px 18px;padding:0;}li{margin:3px 0;}'
       + 'code{font:11px monospace;background:#f2efe8;padding:0 3px;}'
       + 'em{color:#8a5a00;font-style:italic;}'
-      + '@media print{.ws-waivers-table-wrap{overflow:visible;}}</style>';
+      + '.ws-waivers-table-wrap{max-height:none;overflow:visible;}'
+      + '@media print{.ws-waivers-table-wrap{max-height:none;overflow:visible;}}</style>';
     doc += '</head><body>';
     doc += '<h1>Roots &amp; Wings — Disaster Recovery Plan</h1>';
     doc += '<p class="meta">Printed ' + new Date().toLocaleDateString() + ' · lives on the members site → Workspace → Admin Consoles &amp; Sources → 🛟 Disaster Recovery Plan · keep with RESTORE.md + the sealed passphrase envelope</p>';

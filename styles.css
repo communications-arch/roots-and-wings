@@ -11938,6 +11938,23 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   -webkit-overflow-scrolling: touch;
 }
 
+/* DR plan (Erin, 2026-07-22): a printable page must read top-to-bottom —
+   no scroll-capped table boxes inside the modal... */
+#ws-dr-plan-body .ws-waivers-table-wrap {
+  max-height: none;
+  overflow-y: visible;
+}
+/* ...and when ANY page is browser-printed, every scroll wrapper opens up
+   so tables print in full instead of clipping at one screenful. */
+@media print {
+  .ws-waivers-table-wrap,
+  .mcb-teach-wrap,
+  .directory-table-wrap {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
 /* #59: on phones the Schedules report's Kid/Member name column got
    crushed to one character per line. Keep names on a single line — the
    table wrap already scrolls sideways when columns need more room. */
