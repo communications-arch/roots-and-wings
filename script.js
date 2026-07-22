@@ -7634,10 +7634,38 @@
     // from the published Class Builder schedule; otherwise fall back to
     // the legacy Master-sheet AM_CLASSES rows.
     var myNames = getMyNames();
+    // Erin (2026-07-22): groups-assigned-but-nothing-posted renders the
+    // group line-up with TBDs (built below, used by both empty branches).
+    function buildAmTbdTable() {
+      var counts = {};
+      (FAMILIES || []).forEach(function (f) {
+        (f.kids || []).forEach(function (k) {
+          if (k.group) counts[String(k.group).toLowerCase()] = (counts[String(k.group).toLowerCase()] || 0) + 1;
+        });
+      });
+      var gs = MORNING_GROUP_ORDER.filter(function (g) {
+        return g.name !== 'Greenhouse' && counts[g.name.toLowerCase()];
+      });
+      if (!gs.length) return '';
+      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th>Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      var tbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
+      gs.forEach(function (g) {
+        t += '<tr class="session-class-row" data-group="' + g.name + '">';
+        t += '<td>' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
+        t += '<td>' + escapeHtml(g.range || '') + '</td>';
+        t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
+        t += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
+        t += '</tr>';
+      });
+      t += '</tbody></table></div>';
+      t += '<p style="color:var(--color-text-light);font-size:0.9rem;"><em>Groups are set \u2014 tap one to see its kids. Teachers and topics fill in once the morning schedule is posted.</em></p>';
+      return t;
+    }
     html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
     if (dbSess && dbSess.am) {
       if (dbSess.am.length === 0) {
-        html += '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
+        html += buildAmTbdTable()
+          || '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
       } else {
         var amHourWord = { AM: 'Both', AM1: 'Hour 1', AM2: 'Hour 2' };
         var groupIdx = {};
@@ -7693,7 +7721,8 @@
       });
       html += '</tbody></table></div>';
     } else {
-      html += '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
+      html += buildAmTbdTable()
+        || '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
     }
 
     // Afternoon electives by hour \u2014 DB-first when the afternoon side is
