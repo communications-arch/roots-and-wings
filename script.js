@@ -1026,22 +1026,53 @@
     return open;
   }
 
-  // role_interest cache: mine = { role_id: true } for the ACTING member.
-  // null until the first fetch; toggles patch it in place.
+  // role_interest cache: mine = { role_id: true } for the ACTING member;
+  // byRole = { role_id: [names] } for everyone (#79 — the seats modal
+  // shows who else has raised a hand). null until the first fetch;
+  // toggles patch `mine` in place.
   var _roleInterest = null;
   function loadRoleInterest(cb) {
     fetch('/api/cleaning?action=role-interest', { headers: rwAuthHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        var mine = {};
+        var mine = {}, byRole = {};
         var me = String(getActiveEmail() || '').toLowerCase();
         (data.interest || []).forEach(function (row) {
           if (String(row.email || '').toLowerCase() === me) mine[row.role_id] = true;
+          var nm = String(row.person_name || '').trim();
+          if (nm) (byRole[row.role_id] = byRole[row.role_id] || []).push(nm);
         });
-        _roleInterest = { mine: mine };
+        _roleInterest = { mine: mine, byRole: byRole };
         if (cb) cb();
       })
       .catch(function () { if (cb) cb(); });
+  }
+
+  // #79 helpers for the seats modal — who a seat reports up through,
+  // and the rest of its committee. All from ROLES_DIRECTORY (id,
+  // title, category, parent_role_id, committee, holders).
+  function roleDirById(id) {
+    for (var i = 0; i < (ROLES_DIRECTORY || []).length; i++) {
+      if (ROLES_DIRECTORY[i].id === id) return ROLES_DIRECTORY[i];
+    }
+    return null;
+  }
+  // Walk parent_role_id upward: "Communications Committee → Communications
+  // Director (Cam Communications Director)". Cycle-guarded; holder names
+  // ride along wherever the ancestor seat is filled.
+  function seatReportingChain(roleId) {
+    var chain = [];
+    var cur = roleDirById(roleId);
+    var seen = {};
+    seen[roleId] = true;
+    while (cur && cur.parent_role_id && !seen[cur.parent_role_id] && chain.length < 5) {
+      seen[cur.parent_role_id] = true;
+      cur = roleDirById(cur.parent_role_id);
+      if (!cur) break;
+      var names = (cur.holders || []).map(function (h) { return h.name; }).filter(Boolean);
+      chain.push(escapeHtml(cur.title) + (names.length ? ' (' + escapeHtml(names.join(', ')) + ')' : ''));
+    }
+    return chain;
   }
 
   // Seats list body — shared by the Ways to Help card's modal. Each seat
@@ -1060,13 +1091,23 @@
       h += '<p class="ws-body-hint">✅ You already hold: <strong>' + myRolesNow.map(escapeHtml).join(', ')
         + '</strong> — these open seats are for members who don’t have one yet. (Up for more anyway? Talk to the VP first.)</p>';
     }
+    var byRole = (_roleInterest && _roleInterest.byRole) || {};
     h += '<ul class="ws-opportunities">';
     open.forEach(function (o) {
       h += '<li class="ws-opp-seat" style="flex-wrap:wrap;">';
       // #74: the title expands the description INLINE — the old detail
       // popup replaced this modal and stranded the viewer.
-      h += '<span class="ws-opp-main"><button type="button" class="ws-inline-link" data-resource-action="open-seat-desc" data-role-title="' + escapeAttr(o.title) + '"><strong>' + escapeHtml(o.title) + '</strong> <span aria-hidden="true">▾</span></button>';
-      h += '<span class="ws-opp-committee">' + escapeHtml(o.committee) + '</span></span>';
+      h += '<span class="ws-opp-main"><button type="button" class="ws-inline-link" data-resource-action="open-seat-desc" data-role-title="' + escapeAttr(o.title) + '" data-role-id="' + o.id + '"><strong>' + escapeHtml(o.title) + '</strong> <span aria-hidden="true">▾</span></button>';
+      // #79: the reporting chain rides the committee line — who this
+      // seat works under, with the holder's name where the seat is
+      // filled (chain text is pre-escaped in seatReportingChain).
+      var chain = seatReportingChain(o.id);
+      h += '<span class="ws-opp-committee">' + escapeHtml(o.committee)
+        + (chain.length ? ' · under ' + chain.join(' → ') : '') + '</span>';
+      // #79: who else has raised a hand — no more silent parallel hands.
+      var hands = byRole[o.id] || [];
+      if (hands.length) h += '<span class="ws-opp-committee">🙋 Interested so far: ' + escapeHtml(hands.join(', ')) + '</span>';
+      h += '</span>';
       h += '<button type="button" class="sc-btn ws-opp-interest' + (mine[o.id] ? ' ws-opp-interested' : '') + '" data-resource-action="role-interest-toggle" data-role-id="' + o.id + '">'
         + (mine[o.id] ? '✓ Interested' : '🙋 I’m interested') + '</button>';
       h += '<div class="ws-opp-desc" hidden style="flex-basis:100%;width:100%;font-size:0.88rem;color:var(--color-text);"></div>';
@@ -1098,6 +1139,29 @@
       if (meta.length) h += '<p class="ws-opp-committee" style="display:block;">' + escapeHtml(meta.join(' · ')) + '</p>';
     }
     if (!h) h = '<p style="margin:6px 0;">Full description lives in <strong>Organization &amp; Roles</strong> on the Resources card.</p>';
+    // #79: the rest of this seat's committee — the would-be rostermates
+    // (holders where filled, "open" where not, plus raised hands), so a
+    // member can see who they'd be working alongside.
+    var rid = parseInt(btn.getAttribute('data-role-id'), 10);
+    var seatRole = rid ? roleDirById(rid) : null;
+    if (seatRole && seatRole.committee) {
+      var mates = (ROLES_DIRECTORY || []).filter(function (r) {
+        return r.category === 'committee_role' && r.committee === seatRole.committee && r.id !== seatRole.id;
+      });
+      if (mates.length) {
+        var byRole = (_roleInterest && _roleInterest.byRole) || {};
+        h += '<p style="margin:8px 0 2px;"><strong>Also on the ' + escapeHtml(seatRole.committee) + ':</strong></p><ul style="margin:0 0 4px 18px;padding:0;">';
+        mates.forEach(function (m) {
+          var names = (m.holders || []).map(function (x) { return x.name; }).filter(Boolean);
+          var hands = byRole[m.id] || [];
+          h += '<li>' + escapeHtml(m.title) + ' — '
+            + (names.length ? escapeHtml(names.join(', ')) : '<em>open</em>'
+              + (hands.length ? ' · 🙋 ' + escapeHtml(hands.join(', ')) + ' interested' : ''))
+            + '</li>';
+        });
+        h += '</ul>';
+      }
+    }
     box.innerHTML = h;
     box.hidden = false;
   }
@@ -8874,9 +8938,11 @@
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
-          h += '<p class="ws-body-hint"><strong>' + open.length + '</strong> open committee seat' + (open.length === 1 ? '' : 's') + ' — '
-            + '<button type="button" class="ws-inline-link" data-resource-action="open-seats-modal">see them all</button>, '
-            + 'or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</p>';
+          // #79: promoted to the same prominent treatment as Submit a
+          // Class — the inline text link was easy to scroll past.
+          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">🧩 Committee Seats</button>'
+            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open year-long seat' + (open.length === 1 ? '' : 's')
+            + ' — tap to see what each involves and who it reports to, or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</span></p>';
         }
         // Special events (#53/#73/#75): one summary line — the seats and
         // sign-up lists live in the Jump In modal, mirroring the
@@ -23000,8 +23066,10 @@
     var bits = [];
     if (c.spots) bits.push('<strong>' + c.spots + '</strong> open event seat' + (c.spots === 1 ? '' : 's'));
     if (c.lists) bits.push('<strong>' + c.lists + '</strong> sign-up list' + (c.lists === 1 ? '' : 's') + ' open');
-    return '<p class="ws-body-hint">🎪 Special events: ' + bits.join(' · ')
-      + ' — <button type="button" class="ws-inline-link" data-resource-action="event-jump-in">jump in</button>.</p>';
+    // #79: same prominent treatment as Submit a Class (was a one-line
+    // text link members scrolled past).
+    return '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-jump-in">🎪 Special Events</button>'
+      + '<span class="ws-part-submit-hint">' + bits.join(' · ') + ' — jump in and grab one.</span></p>';
   }
 
   // The Jump In modal — every event's open seats (direct sign-up, #75)
@@ -23030,15 +23098,23 @@
     if (!evs.length) { el.innerHTML = '<p class="ws-empty">No open event spots or sign-ups right now — check back soon.</p>'; return; }
     var h = '';
     evs.forEach(function (ev) {
-      h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtml(ev.name) + ' <span class="ws-wv-context">' + escapeHtml(wthEventDateLabel(ev)) + '</span></h5>';
+      h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtml(ev.name) + '</h5>';
+      // #79: the date is key data — its own bold line instead of the
+      // small context span that hid next to the name.
+      var timeBit = specialEventTimeLabel({ startTime: ev.start_time, endTime: ev.end_time });
+      h += '<p class="ws-body-hint" style="margin:0 0 6px;">📅 <strong>' + escapeHtml(wthEventDateLabel(ev))
+        + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
       // Seats: open ones plus any the viewer holds (their undo must stay
       // visible even once their sign-up "fills" the seat).
       var seatRows = '';
       ['lead', 'assist'].forEach(function (seat) {
         var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[seat]);
         if ((ev.open_seats || []).indexOf(seat) === -1 && !isOn) return;
+        // #79: show who's already in the seat(s) — teammates matter.
+        var names = (ev.seat_names && ev.seat_names[seat]) || [];
         seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + (seat === 'lead' ? '👑 Event Lead' : '🤝 Assistant') + '</strong>'
           + (seat === 'assist' ? '<span class="ws-opp-committee">' + (ev.assist_count || 0) + ' of 2 spots filled</span>' : '')
+          + (names.length ? '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(names.join(', ')) + '</span>' : '')
           + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS[seat] + '</span></span>'
           + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="' + seat + '">'
           + (isOn ? '✓ Signed up — undo' : '🙋 Sign up') + '</button></li>';

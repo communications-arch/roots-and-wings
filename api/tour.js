@@ -6803,7 +6803,8 @@ async function handleEventOpeningsGet(req, res) {
     `;
     const ids = events.map(e => e.id);
     const people = ids.length ? await sql`
-      SELECT event_id, role FROM special_event_people WHERE event_id = ANY(${ids})
+      SELECT event_id, role, person_name FROM special_event_people WHERE event_id = ANY(${ids})
+      ORDER BY sort_order, id
     ` : [];
     // #75: seats are direct-add now, so "mine" reads the REAL grid rows.
     const myInterest = await sql`
@@ -6854,6 +6855,12 @@ async function handleEventOpeningsGet(req, res) {
         lead_filled: leadFilled,
         assist_count: assistCount,
         my_seat_interest: mine,
+        // #79: who already holds each seat — the Jump In modal shows
+        // the names so members see who they'd be teaming up with.
+        seat_names: {
+          lead: evPeople.filter(p => p.role === 'lead').map(p => p.person_name).filter(Boolean),
+          assist: evPeople.filter(p => p.role === 'assist').map(p => p.person_name).filter(Boolean)
+        },
         signup_sections: evSections
       });
     });
