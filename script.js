@@ -1049,15 +1049,44 @@
       + '<strong>I’m interested</strong> quietly lets the assigners know — it isn’t a commitment.</p>';
     h += '<ul class="ws-opportunities">';
     open.forEach(function (o) {
-      h += '<li class="ws-opp-seat">';
-      h += '<span class="ws-opp-main"><button type="button" class="ws-inline-link" data-resource-action="open-seat-detail" data-role-title="' + escapeAttr(o.title) + '"><strong>' + escapeHtml(o.title) + '</strong></button>';
+      h += '<li class="ws-opp-seat" style="flex-wrap:wrap;">';
+      // #74: the title expands the description INLINE — the old detail
+      // popup replaced this modal and stranded the viewer.
+      h += '<span class="ws-opp-main"><button type="button" class="ws-inline-link" data-resource-action="open-seat-desc" data-role-title="' + escapeAttr(o.title) + '"><strong>' + escapeHtml(o.title) + '</strong> <span aria-hidden="true">▾</span></button>';
       h += '<span class="ws-opp-committee">' + escapeHtml(o.committee) + '</span></span>';
       h += '<button type="button" class="sc-btn ws-opp-interest' + (mine[o.id] ? ' ws-opp-interested' : '') + '" data-resource-action="role-interest-toggle" data-role-id="' + o.id + '">'
         + (mine[o.id] ? '✓ Interested' : '🙋 I’m interested') + '</button>';
+      h += '<div class="ws-opp-desc" hidden style="flex-basis:100%;width:100%;font-size:0.88rem;color:var(--color-text);"></div>';
       h += '</li>';
     });
     h += '</ul>';
     return h;
+  }
+
+  // #74: inline role description inside the Open Seats modal list.
+  function toggleSeatDescInline(btn) {
+    var li = btn.closest('.ws-opp-seat');
+    if (!li) return;
+    var box = li.querySelector('.ws-opp-desc');
+    if (!box) return;
+    if (!box.hidden) { box.hidden = true; return; }
+    var want = String(btn.getAttribute('data-role-title') || '').trim().toLowerCase();
+    var rd = null;
+    for (var j = 0; j < (roleDescriptions || []).length; j++) {
+      if (String(roleDescriptions[j].title || '').trim().toLowerCase() === want) { rd = roleDescriptions[j]; break; }
+    }
+    var h = '';
+    if (rd) {
+      if (rd.overview) h += '<p style="margin:6px 0 4px;white-space:pre-wrap;">' + escapeHtml(rd.overview) + '</p>';
+      if (rd.duties) h += '<p style="margin:4px 0;white-space:pre-wrap;">' + escapeHtml(rd.duties) + '</p>';
+      var meta = [];
+      if (rd.committee) meta.push(rd.committee);
+      if (rd.job_length) meta.push('Term: ' + rd.job_length);
+      if (meta.length) h += '<p class="ws-opp-committee" style="display:block;">' + escapeHtml(meta.join(' · ')) + '</p>';
+    }
+    if (!h) h = '<p style="margin:6px 0;">Full description lives in <strong>Organization &amp; Roles</strong> on the Resources card.</p>';
+    box.innerHTML = h;
+    box.hidden = false;
   }
 
   // #40: the Ways to Help card shows a one-line summary; the full list
@@ -8758,9 +8787,11 @@
             + '<button type="button" class="ws-inline-link" data-resource-action="open-seats-modal">see them all</button>, '
             + 'or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</p>';
         }
-        // Special events (#53 + sign-up lists, 2026-07-21): open event
-        // seats + any sign-ups a lead has opened, claimable right here.
-        h += renderWthEventsBlock();
+        // Special events (#53/#73/#75): one summary line — the seats and
+        // sign-up lists live in the Jump In modal, mirroring the
+        // committee-seats line above (the inline list made the card long
+        // again; Erin 2026-07-21 evening).
+        h += renderWthEventsSummary();
         return h;
       },
       afterRender: function () {
@@ -18795,6 +18826,11 @@
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
     else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
+    else if (action === 'event-jump-in' && typeof showEventJumpInModal === 'function') showEventJumpInModal();
+    else if (action === 'goto-special-events' && typeof navigateToSpecialEventsGrid === 'function') navigateToSpecialEventsGrid();
+    // #74: seat descriptions expand inline inside the Open Seats modal —
+    // the old detail popup replaced the modal and stranded the viewer.
+    else if (action === 'open-seat-desc' && typeof toggleSeatDescInline === 'function') toggleSeatDescInline(btn);
   });
 
   // Render all coordination tabs
@@ -22507,6 +22543,7 @@
         _eventOpenings = data;
         if (typeof refreshWorkspaceWidget === 'function') refreshWorkspaceWidget('ways-to-help');
         updateEventSeatTodoItem();
+        paintEventJumpIn();
         if (cb) cb();
       })
       .catch(function () { if (_eventOpenings === 'loading') _eventOpenings = null; if (cb) cb(); });
@@ -22517,39 +22554,81 @@
     return ev.event_date ? boardCalFmtDate(ev.event_date) : 'Date TBD';
   }
 
-  // The "Special events — jump in" block on the Ways to Help card:
-  // open lead/assistant seats (I'm-interested hand-raises, #53) plus
-  // any sign-up lists the event's lead has opened.
-  function renderWthEventsBlock() {
+  // #73 (Colleen) + Erin 2026-07-21: the card shows ONE summary line
+  // (same idiom as the open-committee-seats line above it); the full
+  // seats + sign-up lists live in the Jump In modal.
+  function wthEventOpenCounts() {
     var eo = _eventOpenings;
-    if (!eo || eo === 'loading' || !Array.isArray(eo.events) || !eo.events.length) return '';
-    var h = '<h5 class="ws-part-subhead">Special events — jump in</h5>';
-    var seatRows = '';
+    if (!eo || eo === 'loading' || !Array.isArray(eo.events)) return null;
+    var spots = 0, lists = 0;
     eo.events.forEach(function (ev) {
-      (ev.open_seats || []).forEach(function (seat) {
-        var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[seat]);
-        var label = seat === 'lead' ? 'Event Lead' : 'Assistant';
-        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(ev.name) + '</strong> — ' + label
-          + '<span class="ws-opp-committee">' + escapeHtml(wthEventDateLabel(ev)) + '</span></span>'
-          + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="' + seat + '">'
-          + (isOn ? '✓ Interested' : '🙋 I’m interested') + '</button></li>';
-      });
+      spots += (ev.open_seats || []).length;
+      lists += (ev.signup_sections || []).length;
     });
-    if (seatRows) {
-      h += '<p class="ws-body-hint">Open event seats — <strong>I’m interested</strong> quietly tells the Special Events Liaison; it isn’t a commitment.</p>';
-      h += '<ul class="ws-opportunities">' + seatRows + '</ul>';
-    }
-    eo.events.forEach(function (ev) {
-      (ev.signup_sections || []).forEach(function (s) {
-        h += '<p class="ws-body-hint" style="margin-bottom:4px;"><strong>' + escapeHtml(ev.name) + ' — ' + escapeHtml(evsSectionTitle(s)) + '</strong> · ' + escapeHtml(wthEventDateLabel(ev)) + '</p>';
-        h += renderSignupSectionBody(s, eo.viewer_email, false);
-      });
-    });
-    if (!seatRows && !eo.events.some(function (ev) { return (ev.signup_sections || []).length; })) return '';
-    return h;
+    return { spots: spots, lists: lists, any: spots + lists > 0 };
+  }
+  function renderWthEventsSummary() {
+    var c = wthEventOpenCounts();
+    if (!c || !c.any) return '';
+    var bits = [];
+    if (c.spots) bits.push('<strong>' + c.spots + '</strong> open event seat' + (c.spots === 1 ? '' : 's'));
+    if (c.lists) bits.push('<strong>' + c.lists + '</strong> sign-up list' + (c.lists === 1 ? '' : 's') + ' open');
+    return '<p class="ws-body-hint">🎪 Special events: ' + bits.join(' · ')
+      + ' — <button type="button" class="ws-inline-link" data-resource-action="event-jump-in">jump in</button>.</p>';
   }
 
-  // One-click hand-raise for an open event seat (#53).
+  // The Jump In modal — every event's open seats (direct sign-up, #75)
+  // and open sign-up lists in one place, with what each role means.
+  var EVENT_SEAT_BLURBS = {
+    lead: 'Runs the event — plans it with the checklist, requests volunteers, and is the day-of point person.',
+    assist: 'Right hand to the lead — shares the planning list and helps run the day.'
+  };
+  function showEventJumpInModal() {
+    var body = renderReportModal({
+      title: '🎪 Special Events — Jump In',
+      subtitle: 'Sign up to lead or assist an event, claim a helper spot, or add what you’ll bring. Signing up puts your name straight on the event — you can undo your own any time.',
+      bodyId: 'event-jumpin-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    paintEventJumpIn();
+    if (!_eventOpenings || _eventOpenings === 'loading') loadEventOpenings();
+  }
+  function paintEventJumpIn() {
+    var el = document.getElementById('event-jumpin-body');
+    if (!el) return;
+    var eo = _eventOpenings;
+    if (!eo || eo === 'loading') { el.innerHTML = '<p class="ws-empty">Loading…</p>'; return; }
+    var evs = Array.isArray(eo.events) ? eo.events : [];
+    if (!evs.length) { el.innerHTML = '<p class="ws-empty">No open event spots or sign-ups right now — check back soon.</p>'; return; }
+    var h = '';
+    evs.forEach(function (ev) {
+      h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtml(ev.name) + ' <span class="ws-wv-context">' + escapeHtml(wthEventDateLabel(ev)) + '</span></h5>';
+      // Seats: open ones plus any the viewer holds (their undo must stay
+      // visible even once their sign-up "fills" the seat).
+      var seatRows = '';
+      ['lead', 'assist'].forEach(function (seat) {
+        var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[seat]);
+        if ((ev.open_seats || []).indexOf(seat) === -1 && !isOn) return;
+        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + (seat === 'lead' ? '👑 Event Lead' : '🤝 Assistant') + '</strong>'
+          + (seat === 'assist' ? '<span class="ws-opp-committee">' + (ev.assist_count || 0) + ' of 2 spots filled</span>' : '')
+          + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS[seat] + '</span></span>'
+          + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="' + seat + '">'
+          + (isOn ? '✓ Signed up — undo' : '🙋 Sign up') + '</button></li>';
+      });
+      if (seatRows) h += '<ul class="ws-opportunities">' + seatRows + '</ul>';
+      (ev.signup_sections || []).forEach(function (s) {
+        h += '<p class="ws-body-hint" style="margin-bottom:4px;"><strong>' + escapeHtml(evsSectionTitle(s)) + '</strong></p>';
+        h += renderSignupSectionBody(s, eo.viewer_email, false);
+      });
+      if (!seatRows && !(ev.signup_sections || []).length) h += '<p class="ws-empty">Fully staffed — thank you!</p>';
+    });
+    h += '<p class="ws-body-hint">Leads and assistants appear on the event card under <button type="button" class="ws-inline-link" data-resource-action="goto-special-events">Special Events</button> (My Family → Co-op Coordination).</p>';
+    el.innerHTML = h;
+  }
+
+  // One-click DIRECT sign-up for an open event seat (#75) — the server
+  // puts the name straight onto the event; undo removes only your own.
   function toggleEventSeatInterest(btn) {
     var eid = parseInt(btn.getAttribute('data-event-id'), 10);
     var seat = btn.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
@@ -22562,11 +22641,15 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         btn.disabled = false;
-        if (!res.ok) { alert('Error: ' + ((res.data && res.data.error) || 'could not save')); return; }
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not save that — try again.'); loadEventOpenings(); return; }
         if (ev && ev.my_seat_interest) ev.my_seat_interest[seat] = !isOn;
         btn.classList.toggle('ws-opp-interested', !isOn);
-        btn.textContent = !isOn ? '✓ Interested' : '🙋 I’m interested';
+        btn.textContent = !isOn ? '✓ Signed up — undo' : '🙋 Sign up';
+        // Refresh the grid view + card summary (the name is live data now).
         loadEventOpenings();
+        if (typeof SPECIAL_EVENTS_DB !== 'undefined' && typeof loadLiveData === 'function' && typeof renderEventsTab === 'function') {
+          try { renderEventsTab(); } catch (e) { /* grid repaints on next data load */ }
+        }
       })
       .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
   }
@@ -22652,17 +22735,24 @@
 
   function navigateToSpecialEventsGrid() {
     if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* modal already gone */ } }
+    // #76: the coordination tabs live on the My Family view — from the
+    // Workspace the events tab is hidden, so clicking it "did nothing".
+    // Switch the top-level view first, then the tab, then scroll.
+    var famPill = document.querySelector('.qsb-pill[data-view="info"]');
+    if (famPill && !famPill.classList.contains('active')) famPill.click();
     var tabBtn = document.querySelector('.portal-tab[data-tab="events"]');
     if (tabBtn) tabBtn.click();
-    var panel = document.getElementById('tab-events');
-    var host = (panel && panel.closest('.portal-tabs')) || panel;
-    if (host) setTimeout(function () { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+    setTimeout(function () {
+      var panel = document.getElementById('tab-events');
+      var host = (panel && panel.closest('.portal-tabs')) || panel;
+      if (host) host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
   }
 
   function showEventSeatReviewModal() {
     var body = renderReportModal({
       title: '🙋 Special-Event Sign-ups',
-      subtitle: 'Members who raised a hand for an open event seat. These are hand-raises, not assignments — assign the lead and assistants on the event card in the Special Events grid.',
+      subtitle: 'Recent event sign-ups (last 14 days). Signing up adds the member straight onto the event — review here and adjust on the event card if needed.',
       bodyId: 'evseat-review-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -22672,9 +22762,9 @@
       if (!el) return;
       var eo = _eventOpenings;
       var rows = (eo && eo !== 'loading' && Array.isArray(eo.seat_interest)) ? eo.seat_interest : [];
-      var h = '<div class="coop-cal-toolbar"><span></span><button type="button" class="btn btn-primary btn-sm" id="evseat-take-me">Take me there → Special Events grid</button></div>';
+      var h = '<div class="coop-cal-toolbar"><span></span><button type="button" class="btn btn-primary btn-sm" id="evseat-take-me">Take me there</button></div>';
       if (!rows.length) {
-        h += '<p class="ws-empty">No special-event sign-ups waiting right now.</p>';
+        h += '<p class="ws-empty">No special-event sign-ups in the last two weeks.</p>';
       } else {
         var byEvent = {};
         rows.forEach(function (r) {
@@ -22692,7 +22782,7 @@
           });
           h += '</ul>';
         });
-        h += '<p class="ws-body-hint">Assigning them (Special Events grid → the event card) fills the seat and clears it from Ways to Help.</p>';
+        h += '<p class="ws-body-hint">These members are already on their event card (Special Events, under Co-op Coordination) — swap or remove them there if plans change.</p>';
       }
       el.innerHTML = h;
       var tk = document.getElementById('evseat-take-me');

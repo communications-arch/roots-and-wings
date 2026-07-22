@@ -6784,8 +6784,9 @@ async function handleEventOpeningsGet(req, res) {
     const people = ids.length ? await sql`
       SELECT event_id, role FROM special_event_people WHERE event_id = ANY(${ids})
     ` : [];
+    // #75: seats are direct-add now, so "mine" reads the REAL grid rows.
     const myInterest = await sql`
-      SELECT event_id, seat FROM event_seat_interest WHERE LOWER(person_email) = ${email}
+      SELECT event_id, role AS seat FROM special_event_people WHERE LOWER(person_email) = ${email}
     `;
     const sections = ids.length ? await sql`
       SELECT id, special_event_id, type, title, config, content, is_open, sort_order
@@ -6817,7 +6818,9 @@ async function handleEventOpeningsGet(req, res) {
       myInterest.forEach(r => { if (r.event_id === ev.id) mine[r.seat] = true; });
       const evSections = sections.filter(s => s.special_event_id === ev.id)
         .map(s => eventSectionShape(s, signups));
-      if (openSeats.length === 0 && evSections.length === 0) return;
+      // Keep the event listed while the viewer holds a seat even if it's
+      // now "filled" — they need their undo button (#75).
+      if (openSeats.length === 0 && evSections.length === 0 && !mine.lead && !mine.assist) return;
       out.push({
         id: ev.id,
         name: ev.name,
@@ -6827,6 +6830,8 @@ async function handleEventOpeningsGet(req, res) {
         start_time: ev.start_time || '',
         end_time: ev.end_time || '',
         open_seats: openSeats,
+        lead_filled: leadFilled,
+        assist_count: assistCount,
         my_seat_interest: mine,
         signup_sections: evSections
       });
@@ -6837,12 +6842,15 @@ async function handleEventOpeningsGet(req, res) {
       || isSuperUser(auth.email) || await isBoardMember(auth.email);
     payload.can_review = canReview;
     if (canReview) {
+      // Direct-add era (#75): the log's last 14 days = "recent sign-ups"
+      // for the SEL / Sustaining Director To Do; older rows age out.
       const interest = await sql`
         SELECT esi.id, esi.event_id, esi.seat, esi.person_email, esi.person_name, esi.created_at,
                se.name AS event_name, se.school_year, se.event_date
         FROM event_seat_interest esi
         JOIN special_events se ON se.id = esi.event_id
         WHERE se.school_year = ${schoolYear}
+          AND esi.created_at >= NOW() - INTERVAL '14 days'
         ORDER BY esi.created_at DESC
       `;
       payload.seat_interest = interest.map(r => ({
@@ -6863,10 +6871,12 @@ async function handleEventOpeningsGet(req, res) {
   }
 }
 
-// kind=event-seat-interest — raise/withdraw a hand for an open event
-// seat (#53). A signal, not an assignment: SEL + Sustaining Director
-// get a bell notification and review from their To Do, then assign in
-// the Special Events grid.
+// kind=event-seat-interest — sign up for (or step out of) an open event
+// seat. #75 (Colleen): signing up is a DIRECT add — the name goes
+// straight onto the event's lead/assistant slot in the Special Events
+// grid. SEL + Sustaining Director still get a bell + their To Do lists
+// recent sign-ups (event_seat_interest doubles as the log). Members can
+// only remove THEMSELVES here.
 async function handleEventSeatInterest(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -6882,44 +6892,62 @@ async function handleEventSeatInterest(body, req, res) {
     const email = String(auth.email || '').toLowerCase();
     if (!on) {
       await sql`
+        DELETE FROM special_event_people
+        WHERE event_id = ${eventId} AND role = ${seat} AND LOWER(person_email) = ${email}
+      `;
+      await sql`
         DELETE FROM event_seat_interest
         WHERE event_id = ${eventId} AND seat = ${seat} AND LOWER(person_email) = ${email}
       `;
       return res.status(200).json({ ok: true });
     }
     const who = await eventPersonName(sql, email);
-    const ins = await sql`
+    const existing = await sql`
+      SELECT role, LOWER(person_email) AS em, sort_order
+      FROM special_event_people WHERE event_id = ${eventId}
+    `;
+    if (existing.some(r => r.role === seat && r.em === email)) {
+      return res.status(200).json({ ok: true, already: true });
+    }
+    if (seat === 'lead' && existing.some(r => r.role === 'lead')) {
+      return res.status(409).json({ error: 'This event just got a lead — thank you anyway! Grab an assistant spot instead.' });
+    }
+    if (seat === 'assist' && existing.filter(r => r.role === 'assist').length >= 4) {
+      return res.status(409).json({ error: 'The assistant spots just filled up — thank you anyway!' });
+    }
+    const nextSort = seat === 'lead' ? 0
+      : existing.filter(r => r.role === 'assist').reduce((m, r) => Math.max(m, (r.sort_order || 0) + 1), 0);
+    await sql`
+      INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
+      VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${nextSort}, ${auth.realEmail})
+    `;
+    // Log row feeds the SEL / Sustaining Director "recent sign-ups" To Do.
+    await sql`
       INSERT INTO event_seat_interest (event_id, seat, person_email, person_name, family_email)
       VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${who.family_email})
       ON CONFLICT (event_id, seat, LOWER(person_email)) DO NOTHING
-      RETURNING id
     `;
-    if (ins.length > 0) {
-      // Alert the reviewers (#53): SEL + head of the Support Committee
-      // (Sustaining Director). Role-holder lookup with a VP fallback so
-      // the signal never silently vanishes.
-      const recipients = new Set();
-      for (const roleTitle of ['Special Events Liaison', 'Sustaining Director']) {
-        try {
-          const em = await getRoleHolderEmail(roleTitle);
-          if (em) recipients.add(String(em).toLowerCase());
-        } catch (e) { /* role unresolved — fallback below */ }
-      }
-      if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
-      const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
-      for (const rcpt of recipients) {
-        try {
-          await sql`
-            INSERT INTO notifications (recipient_email, type, title, body, link_url)
-            VALUES (${rcpt}, 'event_seat_interest',
-                    ${'🙋 ' + who.name + ' — ' + ev.name + ' ' + seatLabel},
-                    ${who.name + ' signed up to help with the ' + ev.name + ' (' + seatLabel + '). Review event sign-ups on your To Do card, then assign them in the Special Events grid.'},
-                    '')
-          `;
-        } catch (e) { console.error('event-seat-interest notification failed (non-fatal):', e.message); }
-      }
+    const recipients = new Set();
+    for (const roleTitle of ['Special Events Liaison', 'Sustaining Director']) {
+      try {
+        const em = await getRoleHolderEmail(roleTitle);
+        if (em) recipients.add(String(em).toLowerCase());
+      } catch (e) { /* role unresolved — fallback below */ }
     }
-    return res.status(200).json({ ok: true, already: ins.length === 0 });
+    if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
+    const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
+    for (const rcpt of recipients) {
+      try {
+        await sql`
+          INSERT INTO notifications (recipient_email, type, title, body, link_url)
+          VALUES (${rcpt}, 'event_seat_interest',
+                  ${'🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel},
+                  ${who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name + '. Their name is already on the event in the Special Events grid — adjust there if needed.'},
+                  '')
+        `;
+      } catch (e) { console.error('event-seat-interest notification failed (non-fatal):', e.message); }
+    }
+    return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-seat-interest error:', err);
     return res.status(500).json({ error: 'Server error' });

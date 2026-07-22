@@ -78,11 +78,16 @@ t('openSeatsListHtml claims via vp@ (not membership@) — #39 pt 1', () => {
   assert(html.indexOf('membership@rootsandwingsindy.com') === -1, 'membership@ still present');
 });
 
-t('openSeatsListHtml: every seat opens the role description popup — #39 pt 2', () => {
+t('openSeatsListHtml: every seat expands its description inline — #39 pt 2 / #74', () => {
   const h = harness(DIR, null);
   const html = h.openSeatsListHtml(h.collectOpenSeats());
-  const count = (html.match(/data-resource-action="open-seat-detail"/g) || []).length;
+  // #74: the title toggles an INLINE description (data-resource-action=
+  // "open-seat-desc" + a hidden .ws-opp-desc box per seat) — the old
+  // popup replaced the modal and stranded the viewer.
+  const count = (html.match(/data-resource-action="open-seat-desc"/g) || []).length;
   assertEq(count, 2);
+  const boxes = (html.match(/class="ws-opp-desc"/g) || []).length;
+  assertEq(boxes, 2);
   assert(html.indexOf('data-role-title="Open Seat A"') !== -1, 'seat A title attr missing');
 });
 
