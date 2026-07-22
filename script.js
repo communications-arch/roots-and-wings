@@ -25672,11 +25672,13 @@
         var n = (d.requests || []).filter(function (r) { return r.status === 'pending'; }).length;
         var pill = document.getElementById('ws-enroll-req-count');
         if (pill) pill.textContent = n;
-        // #44: the card stays reachable at zero pending — it now hosts
-        // the Adjust Enrollment tool, not just the approval queue.
-        var lbl = document.getElementById('ws-enroll-req-label');
-        if (lbl) lbl.textContent = n > 0 ? 'Approve enrollment changes' : 'Enrollment requests & adjustments';
-        item.hidden = false;
+        // Hide at zero (Erin, 2026-07-22): #44 kept the card visible as
+        // the Adjust Enrollment doorway, but #71 moved that tool into
+        // the Membership Report — so this is a pure approval queue
+        // again and only appears when a family request is waiting.
+        // (The decision history rides along in the same modal, so at
+        // zero it's reachable the next time a request comes in.)
+        item.hidden = n === 0;
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
       })
       .catch(function () {});
