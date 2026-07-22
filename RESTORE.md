@@ -127,6 +127,7 @@ schema change, and record the date + result here:
 | Date | Result | Notes |
 |------|--------|-------|
 | 2026-07-20 | PASS | Full pipeline proven locally against the DEV database (postgres:17 + gpg): dump → encrypt → decrypt (byte-identical) → `pg_restore --list` → full restore into scratch DB `rw_restore_test` on the Neon dev branch → all 5 row counts matched the manifest → scratch dropped. First CI run against prod still pending secrets. |
+| 2026-07-22 | PASS | **First live CI run against PROD** (Erin + Claude, run 29962164270): nightly backup `rw-backup-2026-07-22.dump.gpg` uploaded to the Shared Drive Backups folder, then restore-test downloaded it, decrypted with the binder passphrase, listed 574 archive entries, fully restored into `rw_restore_test`, all 5 row counts matched, scratch dropped. Failure alerts verified reaching communications@ (Resend). Nightly cron live from tonight. |
 | _(record restore-test runs here)_ | | |
 
 ## 8. Who to call
