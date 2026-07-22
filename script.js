@@ -13889,7 +13889,9 @@
             ? deriveWorkspaceEmail(full, q.family_name || '') : '';
           h += '<div class="enroll-req-card" data-blc-req="' + q.id + '" style="margin-bottom:10px;">';
           h += '<div><strong>' + escapeHtml(full) + '</strong> — ' + escapeHtml(famLabel) + ' family';
-          h += (q.personal_email ? '<div style="color:#666;font-size:0.9rem;">Personal email: ' + escapeHtml(q.personal_email) + ' (guide goes here)</div>' : '<div style="color:#b93a33;font-size:0.9rem;">No personal email on file — the guide will go to the new address instead.</div>');
+          // #82: "(guide goes here)" read like a missing feature — say
+          // plainly where the getting-started guide email is delivered.
+          h += (q.personal_email ? '<div style="color:#666;font-size:0.9rem;">Personal email: ' + escapeHtml(q.personal_email) + ' — the getting-started guide is emailed here when you save.</div>' : '<div style="color:#b93a33;font-size:0.9rem;">No personal email on file — the getting-started guide will go to the new address instead.</div>');
           h += '</div>';
           h += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">';
           h += '<input type="email" class="cl-input" id="blc-ws-email-' + q.id + '" style="min-width:260px;flex:1;" placeholder="new @rootsandwingsindy.com address" value="' + escapeAttr(suggested) + '">';
@@ -14547,6 +14549,12 @@
     btn.hidden = false;
     btn.classList.remove('plant-sprout', 'plant-sapling', 'plant-tree');
     btn.classList.add('plant-' + tier);
+    // #84: inline the tier tint. The PWA can serve a stale cached
+    // styles.css where the badge inherits the band's white text — the
+    // currentColor plant then vanishes into an empty circle (same bug
+    // as 2026-07-17, resurfacing on phones). Inline color survives any
+    // stylesheet vintage.
+    btn.style.color = { sprout: '#D95F3B', sapling: '#E0B52C', tree: '#9BC431' }[tier] || '#F0D66B';
     iconEl.innerHTML = PLANT_SVGS[tier] || PLANT_SVGS.sprout;
     var tip = PLANT_TOOLTIPS[tier] || '';
     btn.title = tip;
@@ -20300,9 +20308,13 @@
     if (!bell) return;
     var html = '<div class="notif-dropdown" id="notifDropdown"><div class="notif-dropdown-header"><strong>Notifications</strong>';
     if (notifState.unreadCount > 0) html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
+    // #83: clear the already-read ones in one tap.
+    if (notifState.notifications.some(function (n) { return n.is_read; })) {
+      html += '<button class="notif-mark-all" id="notifClearReadBtn" title="Remove every notification you’ve already read">Clear read</button>';
+    }
     html += '</div>';
     if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
-    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '"><div class="notif-item-title">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
+    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '" style="position:relative;"><button type="button" class="notif-item-del" data-notif-del="' + escapeHtmlWs(String(n.id)) + '" aria-label="Remove this notification" title="Remove" style="position:absolute;top:6px;right:8px;border:none;background:none;color:var(--color-text-light);cursor:pointer;font-size:14px;line-height:1;padding:2px;">×</button><div class="notif-item-title" style="padding-right:18px;">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
     html += '</div>';
     bell.insertAdjacentHTML('afterend', html);
     var dropdown = document.getElementById('notifDropdown');
@@ -20321,7 +20333,20 @@
     } catch (e) { /* keep default position */ }
     var markAllBtn = document.getElementById('notifMarkAllBtn');
     if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true' + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
-    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function () { var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
+    // #83: Clear read (header) + per-item × — both DELETE, then refresh.
+    var clearReadBtn = document.getElementById('notifClearReadBtn');
+    if (clearReadBtn) { clearReadBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?clear_read=true' + notifViewAsSuffix(), { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + cred } }).then(function () { loadNotifications(); }); }); }
+    dropdown.querySelectorAll('.notif-item-del').forEach(function (del) {
+      del.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var cred = localStorage.getItem('rw_google_credential');
+        fetch('/api/notifications?id=' + del.getAttribute('data-notif-del') + notifViewAsSuffix(), { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + cred } })
+          .then(function () { loadNotifications(); });
+        var row = del.closest('.notif-item');
+        if (row) row.remove();
+      });
+    });
+    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function (e) { if (e.target.closest('.notif-item-del')) return; var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
     setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
   }
 
@@ -29933,6 +29958,8 @@
     document.getElementById('sbCsvBtn').addEventListener('click', sbExportSubmissionsCSV);
     overlay.querySelectorAll('.sb-period-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        // #81: group liaisons are AM-only (pill also hidden post-load).
+        if (this.getAttribute('data-period') === 'PM' && Array.isArray(scheduleBuilderState.reviewerScope)) return;
         scheduleBuilderState.period = this.getAttribute('data-period') === 'AM' ? 'AM' : 'PM';
         overlay.querySelectorAll('.sb-period-pill').forEach(function (b) {
           b.classList.toggle('is-active', b.getAttribute('data-period') === scheduleBuilderState.period);
@@ -30650,13 +30677,19 @@
       scheduleBuilderState.signupWindows = (data && data.signup_windows) || {};
       scheduleBuilderState.members = (data && data.members) || [];
       scheduleBuilderState.reviewerScope = (data && data.reviewer_scope) || 'all';
-      // Scoped liaisons live in the Morning lens — land them there.
-      if (Array.isArray(scheduleBuilderState.reviewerScope) && !scheduleBuilderState._scopeLensSet) {
-        scheduleBuilderState._scopeLensSet = true;
-        scheduleBuilderState.period = 'AM';
-        document.querySelectorAll('.sb-period-pill').forEach(function (b) {
-          b.classList.toggle('is-active', b.getAttribute('data-period') === 'AM');
-        });
+      // Scoped (morning group) liaisons live in the Morning lens. #81
+      // (Colleen): they never see the Afternoon lens at all — PM is the
+      // VP / Afternoon Class Liaison's lane. The server already refuses
+      // their PM writes; hiding the pill stops the read-only tease too.
+      if (Array.isArray(scheduleBuilderState.reviewerScope)) {
+        document.querySelectorAll('.sb-period-pill[data-period="PM"]').forEach(function (b) { b.hidden = true; });
+        if (!scheduleBuilderState._scopeLensSet) {
+          scheduleBuilderState._scopeLensSet = true;
+          scheduleBuilderState.period = 'AM';
+          document.querySelectorAll('.sb-period-pill').forEach(function (b) {
+            b.classList.toggle('is-active', b.getAttribute('data-period') === 'AM');
+          });
+        }
       }
       scheduleBuilderState.loaded = true;
       renderScheduleBuilder();

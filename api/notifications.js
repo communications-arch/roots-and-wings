@@ -3,6 +3,8 @@
 // GET   /api/notifications                    → list notifications for current user
 // PATCH /api/notifications?id=N               → mark one as read
 // PATCH /api/notifications?mark_all_read=true → mark all as read
+// DELETE /api/notifications?id=N               → remove one (own only) — #83
+// DELETE /api/notifications?clear_read=true    → remove all READ ones — #83
 
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
@@ -48,7 +50,7 @@ function getSql() {
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -100,6 +102,25 @@ module.exports = async function handler(req, res) {
       await sql`
         UPDATE notifications SET is_read = TRUE
         WHERE id = ${id} AND recipient_email = ${recipient}
+      `;
+      return res.status(200).json({ ok: true });
+    }
+
+    // #83 (Erin): clear notifications after reading them. Scoped to the
+    // recipient's own rows; clear_read sweeps everything already read.
+    if (req.method === 'DELETE') {
+      if (req.query.clear_read === 'true') {
+        await sql`
+          DELETE FROM notifications
+          WHERE recipient_email = ${recipient} AND is_read = TRUE
+        `;
+        return res.status(200).json({ ok: true });
+      }
+      const delId = parseInt(req.query.id, 10);
+      if (!delId || Number.isNaN(delId)) return res.status(400).json({ error: 'id required' });
+      await sql`
+        DELETE FROM notifications
+        WHERE id = ${delId} AND recipient_email = ${recipient}
       `;
       return res.status(200).json({ ok: true });
     }
