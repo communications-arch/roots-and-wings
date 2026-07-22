@@ -21856,28 +21856,49 @@
     var h = raLensHead(pills, canEditSE ? { label: 'Manage Special Events', action: 'special-events' } : null);
     h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar'
       + (canEditSE ? '; tap Manage to assign people right here.' : '. Open a planning space to see any event’s checklist.') + '</p>';
-    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th><th>Planning</th></tr></thead><tbody>';
-    events.forEach(function (ev) {
-      var assists = (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
-      h += '<tr>';
-      h += '<th class="mcb-teach-grp">' + escapeHtmlWs(ev.name) + '</th>';
-      h += '<td class="mcb-teach-cell">'
-        + (ev.event_date ? escapeHtmlWs(boardCalFmtDate(ev.event_date)) : '<span class="ws-srt-actions-empty">&mdash;</span>')
-        + ' <span class="se-status se-status-' + escapeHtmlWs(ev.date_status || 'proposed') + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></td>';
-      h += '<td class="mcb-teach-cell">' + (ev.lead && (ev.lead.name || ev.lead.email)
-        ? '<span class="mcb-teach-lead">' + escapeHtmlWs(ev.lead.name || ev.lead.email) + '</span>'
-        : '<span class="ra-open-note">OPEN ⚠</span>') + '</td>';
-      h += '<td class="mcb-teach-cell">' + (assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>') + '</td>';
-      h += '<td class="mcb-teach-cell"><button type="button" class="sc-btn se-space-btn" data-eid="' + ev.id + '">Open space</button></td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table></div>';
+    // Global table pattern (Erin, 2026-07-21: "streamline the Roles &
+    // Committees tables to match our global table styles") — the shared
+    // sortable table replaces the bespoke mcb-teach grid here; the AM /
+    // cleaning lenses stay matrices (groups × sessions isn't a list).
+    h += '<div id="roles-mgr-se-table"></div>';
     wrap.innerHTML = h;
     raWireManage(wrap);
-    wrap.querySelectorAll('.se-space-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
-      });
+    var seCols = [
+      { key: 'name', label: 'Event', type: 'string',
+        render: function (r) { return '<strong>' + escapeHtmlWs(r.name) + '</strong>'; } },
+      { key: 'date', label: 'Date', type: 'string',
+        sortValue: function (r) { return r.event_date || '9999'; },
+        render: function (r) {
+          return (r.event_date ? escapeHtmlWs(boardCalFmtDate(r.event_date)) : '<span class="ws-srt-actions-empty">&mdash;</span>')
+            + ' <span class="se-status se-status-' + escapeHtmlWs(r.date_status || 'proposed') + '">' + (r.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
+        } },
+      { key: 'lead', label: 'Lead', type: 'string',
+        sortValue: function (r) { return (r.lead && (r.lead.name || r.lead.email)) || ''; },
+        render: function (r) {
+          return (r.lead && (r.lead.name || r.lead.email))
+            ? escapeHtmlWs(r.lead.name || r.lead.email)
+            : '<span class="ra-open-note">OPEN ⚠</span>';
+        } },
+      { key: 'assists', label: 'Assistants', type: 'string',
+        sortValue: function (r) { return (r.assists || []).length; },
+        render: function (r) {
+          var assists = (r.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
+          return assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>';
+        } },
+      { key: 'space', label: 'Planning', type: 'string',
+        sortValue: function () { return ''; },
+        render: function (r) { return '<button type="button" class="sc-btn se-space-btn" data-eid="' + r.id + '">Open space</button>'; } }
+    ];
+    renderSortableTable(document.getElementById('roles-mgr-se-table'), seCols, events, {
+      initialSort: { key: 'date', dir: 'asc' },
+      rowKey: function (r) { return 'se-' + r.id; },
+      onRender: function () {
+        wrap.querySelectorAll('.se-space-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
+          });
+        });
+      }
     });
   }
 
