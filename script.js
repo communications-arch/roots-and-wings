@@ -24629,7 +24629,10 @@
         + '<div class="ws-srt-actions">'
         + '<button type="button" id="offboard-send" class="sc-btn mcb-primary">Send email + portal notice</button>'
         + '</div>'
-        + '<p id="offboard-status" class="ws-wv-context" aria-live="polite">Sends one bcc email to every checked family’s workspace logins, plus a portal notification each. Then delete the accounts manually in Google Admin and tick ✓ Done on the To Do.</p>';
+        // #77 (rides #66): name the actual deletion date here too.
+        + '<p id="offboard-status" class="ws-wv-context" aria-live="polite">Sends one bcc email to every checked family’s workspace logins, plus a portal notification each. Delete the accounts manually in Google Admin on '
+        + (d.remove_date ? '<strong>' + escapeHtmlWs(formatReportDate(d.remove_date)) + '</strong> (3 days before the Ice Cream Social)' : 'the removal date (3 days before the Ice Cream Social)')
+        + ', then tick ✓ Done on the To Do.</p>';
       body.innerHTML = h;
       var textEl = body.querySelector('#offboard-text');
       if (textEl) textEl.value = OFFBOARD_EMAIL_TEMPLATE;
@@ -33170,7 +33173,10 @@
       // currently have in the directory instead of a blank initial. If they
       // don't upload a new photo, we DON'T save the Workspace URL to the DB
       // (those rotate) — the directory keeps reading Workspace via getPhotoUrl.
-      if (!src && opts && opts.wsFallback) {
+      // #78: after the × the row must drop to initials IMMEDIATELY — the
+      // fallback otherwise repaints their Workspace avatar and the removal
+      // looks like it didn't take.
+      if (!src && opts && opts.wsFallback && !p._photoRemoved) {
         var wsUrl = getPhotoUrl(p.name || '', state.family_email, state.family_name);
         if (wsUrl) src = wsUrl.replace(/=s\d+-c/, '=s256-c');
       }
@@ -33626,7 +33632,7 @@
         syncStateFromDom();
         var dpTarget = delPhotoBtn.getAttribute('data-role') === 'remove-photo-parent'
           ? state.parents[dpIdx] : state.kids[dpIdx];
-        if (dpTarget) { dpTarget.photo_url = ''; dpTarget._queuedPhoto = null; }
+        if (dpTarget) { dpTarget.photo_url = ''; dpTarget._queuedPhoto = null; dpTarget._photoRemoved = true; }
         render();
         return;
       }
@@ -33647,8 +33653,8 @@
             // re-render after confirming doesn't drop them.
             syncStateFromDom();
             openPhotoCropper(srcDataUrl, function (cropped) {
-              if (role === 'upload-parent' && state.parents[idx]) state.parents[idx]._queuedPhoto = cropped;
-              if (role === 'upload-kid' && state.kids[idx]) state.kids[idx]._queuedPhoto = cropped;
+              if (role === 'upload-parent' && state.parents[idx]) { state.parents[idx]._queuedPhoto = cropped; state.parents[idx]._photoRemoved = false; }
+              if (role === 'upload-kid' && state.kids[idx]) { state.kids[idx]._queuedPhoto = cropped; state.kids[idx]._photoRemoved = false; }
               render();
             });
           });
