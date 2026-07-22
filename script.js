@@ -6575,33 +6575,54 @@
         : /—\s*Assisting$/.test(String(d.text || '')) ? 'assist'
         : /co-?lead/i.test(String(d.text || '')) ? 'colead' : '';
       h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (roleKind ? volRoleIconImg(roleKind) : (DUTY_ICONS[d.icon] || ''))) + '</div>';
-      // One-line row (Erin, 2026-07-11): title · room/detail, role as a
-      // soft tag, ellipsis when tight; group names wear their group color.
       var roleSplit = String(d.text || '').match(/^(.*?)\s*—\s*(Leading|Co-leading|Assisting)$/);
       var titleCore = roleSplit ? roleSplit[1] : d.text;
       if (dutyGroup) titleCore = '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + titleCore + '</span>';
-      // Stacked pair (Erin, 2026-07-11): class name · room on the first
-      // line, role tag + group name on the second — the room never gets
-      // squeezed out by the tags.
-      var line2 = (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
-        + (d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>' : '');
-      h += '<div class="mf-duty-info"><span class="mf-duty-line"><strong>' + titleCore + '</strong>'
-        + (d.detail ? '<span class="mf-duty-sub">· ' + d.detail + '</span>' : '')
-        + '</span>'
-        + (line2 ? '<span class="mf-duty-line mf-duty-line2">' + line2 + '</span>' : '');
-      if (classKey && (isTeacher || d.icon === 'assist')) {
-        h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
-      }
-      h += '</div>';
-      // Right-aligned actions area
-      h += '<div class="mf-duty-actions">';
-      // Leading a class → build its lesson plan (2026-07-11, Erin). The
-      // duty text is "<Class> — Leading"; the button opens the Curriculum
-      // Library editor prefilled with that class.
+      var isClassRow = !!roleSplit && (isTeacher || d.icon === 'assist');
+      var isAmRow = String(d.block).indexOf('AM') === 0;
+      var planBtnHtml = '';
       if (isTeacher && /—\s*Leading$/.test(String(d.text || ''))) {
         var planName = String(d.text).replace(/\s*—\s*Leading$/, '');
-        h += '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (String(d.block).indexOf('AM') === 0 ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
+        planBtnHtml = '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (isAmRow ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
       }
+      if (isClassRow) {
+        // #92 (Lyndsey): class rows stack so nothing truncates on phones.
+        // AM: Leading/Assisting <age level> → class name → room → Plan.
+        // PM: Leading/Assisting <class name> → room → Plan (no age chips).
+        h += '<div class="mf-duty-info">';
+        if (isAmRow) {
+          var ageBit = d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>'
+            : (dutyGroup ? '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + dutyGroup[1] + '</span>' : '');
+          h += '<span class="mf-duty-line"><span class="mf-role-tag">' + roleSplit[2] + '</span>' + ageBit + '</span>';
+          // Legacy group rows ARE the age level — no separate class line.
+          if (!dutyGroup) h += '<span class="mf-duty-line"><strong>' + titleCore + '</strong></span>';
+        } else {
+          h += '<span class="mf-duty-line"><span class="mf-role-tag">' + roleSplit[2] + '</span><strong>' + titleCore + '</strong></span>';
+        }
+        if (d.detail) h += '<span class="mf-duty-line mf-duty-sub" style="margin:0;">' + d.detail + '</span>';
+        if (planBtnHtml) h += '<span class="mf-duty-line">' + planBtnHtml + '</span>';
+        planBtnHtml = ''; // consumed — keep it out of the actions column
+        if (classKey) {
+          h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
+        }
+        h += '</div>';
+      } else {
+        // Non-class duties (cleaning, annual roles, coverage, pledges)
+        // keep the compact pair: title · detail, tags on line 2.
+        var line2 = (roleSplit ? '<span class="mf-role-tag">' + roleSplit[2] + '</span>' : '')
+          + (d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>' : '');
+        h += '<div class="mf-duty-info"><span class="mf-duty-line"><strong>' + titleCore + '</strong>'
+          + (d.detail ? '<span class="mf-duty-sub">· ' + d.detail + '</span>' : '')
+          + '</span>'
+          + (line2 ? '<span class="mf-duty-line mf-duty-line2">' + line2 + '</span>' : '');
+        if (classKey && (isTeacher || d.icon === 'assist')) {
+          h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
+        }
+        h += '</div>';
+      }
+      // Right-aligned actions area
+      h += '<div class="mf-duty-actions">';
+      if (planBtnHtml) h += planBtnHtml;
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
         h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -6672,7 +6693,9 @@
       // Each kid's CURRENT group is shown as reference; placements for
       // the next school year happen later in summer and will appear
       // automatically once SESSION_DATES rolls forward.
-      html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule</h3>';
+      // #91: number-agnostic title — "Kids' Schedule" read wrong for
+      // one-child families.
+      html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kid Schedule</h3>';
       html += '<p class="mf-empty" style="margin-bottom:12px;">Co-op resumes in the fall — class assignments for the next school year will be posted closer to the start.</p>';
       fam.kids.forEach(function (kid) {
         html += '<div class="mf-kid">';
@@ -6693,7 +6716,7 @@
       });
       html += '</div>';
     } else {
-    html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kids\' Schedule &mdash; Session ' + currentSession + '</h3>';
+    html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule"><img class="brand-accent" src="brand/secondary/accent-18.png" alt=""> Kid Schedule &mdash; Session ' + currentSession + '</h3>';
     fam.kids.forEach(function (kid) {
       // Finalized morning placement wins over the directory's stale group.
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
@@ -20317,6 +20340,7 @@
     }
     if (!bell) bell = document.getElementById('notifBellBtn');
     if (!bell) return;
+    var bellRect = bell.getBoundingClientRect();
     var html = '<div class="notif-dropdown" id="notifDropdown"><div class="notif-dropdown-header"><strong>Notifications</strong>';
     if (notifState.unreadCount > 0) html += '<button class="notif-mark-all" id="notifMarkAllBtn">Mark all read</button>';
     // #83: clear the already-read ones in one tap.
@@ -20327,21 +20351,20 @@
     if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
     else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '" style="position:relative;"><button type="button" class="notif-item-del" data-notif-del="' + escapeHtmlWs(String(n.id)) + '" aria-label="Remove this notification" title="Remove" style="position:absolute;top:6px;right:8px;border:none;background:none;color:var(--color-text-light);cursor:pointer;font-size:14px;line-height:1;padding:2px;">×</button><div class="notif-item-title" style="padding-right:18px;">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
     html += '</div>';
-    bell.insertAdjacentHTML('afterend', html);
+    // #94 (Lyndsey, live mobile): the dropdown used to be inserted NEXT
+    // TO the bell inside the fixed portal header — the header's stacking
+    // context / layout clipped it to a sliver on phones. Body-level +
+    // position:fixed under the bell escapes the header entirely and
+    // caps the height to what actually fits on screen.
+    document.body.insertAdjacentHTML('beforeend', html);
     var dropdown = document.getElementById('notifDropdown');
-    // Clamp on-screen (Erin, 2026-07-19: on mobile the bell can sit close
-    // enough to the viewport edge that the dropdown — and its "Mark all
-    // read" button — rendered off screen). Nudge via the `right` offset
-    // in whichever direction overflows.
-    try {
-      var ddRect = dropdown.getBoundingClientRect();
-      var ddRight = parseFloat(getComputedStyle(dropdown).right) || 0;
-      if (ddRect.right > window.innerWidth - 4) {
-        dropdown.style.right = (ddRight + (ddRect.right - window.innerWidth) + 8) + 'px';
-      } else if (ddRect.left < 4) {
-        dropdown.style.right = (ddRight - (4 - ddRect.left)) + 'px';
-      }
-    } catch (e) { /* keep default position */ }
+    var ddTop = Math.round(bellRect.bottom + 8);
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = ddTop + 'px';
+    dropdown.style.right = Math.max(8, Math.round(window.innerWidth - bellRect.right)) + 'px';
+    dropdown.style.left = 'auto';
+    dropdown.style.maxHeight = Math.max(160, window.innerHeight - ddTop - 12) + 'px';
+    dropdown.style.zIndex = '10001';
     var markAllBtn = document.getElementById('notifMarkAllBtn');
     if (markAllBtn) { markAllBtn.addEventListener('click', function (e) { e.stopPropagation(); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?mark_all_read=true' + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); }); }
     // #83: Clear read (header) + per-item × — both DELETE, then refresh.
@@ -25893,6 +25916,7 @@
   var _schedMatrix = null;     // { session, data } — volunteer-matrix for adult pickers
   var _schedPools = null;      // { session, classes } — class-signup pools for kid pickers
   var _schedEditKey = null;    // row key with the picker panel open
+  var _schedEditHour = null;   // #90: only the CLICKED hour renders in the panel (null = all)
   var _schedFilter = 'all';    // 'all' | 'unplaced' | 'placed'
   var SCHED_BLOCK_LABELS = { AM1: 'AM Hour 1', AM2: 'AM Hour 2', PM1: 'PM Hour 1', PM2: 'PM Hour 2' };
 
@@ -26338,8 +26362,8 @@
     return rows;
   }
 
-  function schedCellFillBtn(row) {
-    return '<button type="button" class="sc-btn sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '">+ Fill</button>';
+  function schedCellFillBtn(row, block) {
+    return '<button type="button" class="sc-btn sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '"' + (block ? ' data-block="' + block + '"' : '') + '>+ Fill</button>';
   }
   var SCHED_KIND_TAG = { lead: 'Leads', assist: 'Assists', floater: 'Floater', board: 'Board Duties', prep: 'Prep Period' };
   // #57: the Leads/Assists tag was italic ws-wv-context — Lyndsey found
@@ -26351,9 +26375,10 @@
   }
   // #57: a quiet ▾ caret opens the row's edit panel — the chip-sized ✎
   // read as a big Edit button and pulled the eye on every filled cell.
-  function schedCaretBtn(row, title) {
+  // #90: the caret carries its hour so the panel opens ONLY that hour.
+  function schedCaretBtn(row, title, block) {
     var t = escapeHtml(title || 'Change or remove this placement');
-    return '<button type="button" class="sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '" title="' + t + '" aria-label="' + t + '"'
+    return '<button type="button" class="sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '"' + (block ? ' data-block="' + block + '"' : '') + ' title="' + t + '" aria-label="' + t + '"'
       + ' style="border:none;background:none;padding:0 3px;cursor:pointer;color:var(--color-text-light);font-size:0.95em;vertical-align:baseline;">▾</button>';
   }
   function schedAdultCellHtml(row, b) {
@@ -26366,12 +26391,12 @@
       // place — the caret opens the same panel + Fill uses. Leads change
       // in the Class Builder, so they stay read-only here.
       if (_schedRep.can_place && row.email && c.kind !== 'lead') {
-        lbl += ' ' + schedCaretBtn(row);
+        lbl += ' ' + schedCaretBtn(row, null, b);
       }
       return lbl;
     }
     if ((_schedRep.blocks_expected || []).indexOf(b) === -1) return '<span class="sb-subdetail-dim">—</span>';
-    if (_schedRep.can_place && row.email) return schedCellFillBtn(row);
+    if (_schedRep.can_place && row.email) return schedCellFillBtn(row, b);
     return '<span class="st-flag-coral">open</span>';
   }
   function schedKidAmCellHtml(row) {
@@ -26400,9 +26425,9 @@
       // #57: placed kid cells are editable too — same quiet caret as the
       // adults tab, opening the row's placement panel.
       return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick)
-        + (_schedRep.can_place ? ' ' + schedCaretBtn(row, 'Change or remove this class') : '');
+        + (_schedRep.can_place ? ' ' + schedCaretBtn(row, 'Change or remove this class', hour) : '');
     }
-    if (_schedRep.can_place) return schedCellFillBtn(row);
+    if (_schedRep.can_place) return schedCellFillBtn(row, hour);
     return '<span class="st-flag-coral">open</span>';
   }
 
@@ -26431,7 +26456,11 @@
       // picker, filled assists/pledges get a reassign picker (current
       // role + Remove + every other role), leads stay read-only.
       var h = '<div class="st-place-row">';
-      (_schedRep.blocks_expected || []).forEach(function (b) {
+      // #90: only the clicked hour renders (Lyndsey: "opens all four").
+      var adultBlocks = (_schedRep.blocks_expected || []).filter(function (b) {
+        return !_schedEditHour || b === _schedEditHour;
+      });
+      adultBlocks.forEach(function (b) {
         var c = row.cells[b];
         if (!c) {
           h += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[b]
@@ -26463,7 +26492,10 @@
     // (mirroring the adults panel). Morning stays read-only here: groups
     // are placed in the Morning Class Builder.
     var hk = '<div class="st-place-row">';
-    ['PM1', 'PM2'].forEach(function (hour) {
+    // #90: only the clicked hour renders (null = both, e.g. legacy links).
+    ['PM1', 'PM2'].filter(function (hour) {
+      return !_schedEditHour || hour === _schedEditHour;
+    }).forEach(function (hour) {
       var pick = hour === 'PM1' ? row.pm1 : row.pm2;
       if (!pick && hour === 'PM2' && row.pm1 && row.pm1.both) {
         hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
@@ -26610,7 +26642,10 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var key = btn.getAttribute('data-skey');
+        // #90: remember WHICH hour was clicked — the panel shows just it.
+        _schedEditHour = btn.getAttribute('data-block') || null;
         _schedEditKey = (_schedEditKey === key) ? null : key;
+        if (!_schedEditKey) _schedEditHour = null;
         schedPreserveScroll(renderSchedTable);
         if (_schedEditKey) {
           // Keep the freshly opened picker on screen (it renders below

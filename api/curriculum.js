@@ -2929,8 +2929,16 @@ module.exports = async function handler(req, res) {
         // reviewerScopeReq resolves the scope of the view_as target when
         // canImpersonate allows (everyone on dev) — demoting the reviewer
         // to member gating and 409ing placements after the window closed.
+        // #89: a TESTER impersonating the VP/ACL is a third identity — the
+        // impersonated reviewer rides the X-View-As HEADER while the body
+        // view_as targets the kid's family and the real login is nobody.
+        // Honor the header identity's scope too (canImpersonate-gated:
+        // supers on prod, everyone on dev).
+        const hdrVa = String(req.headers['x-view-as'] || '').trim().toLowerCase();
         const isReviewer = (await isReviewerReq(user, req))
-          || !!(await reviewerScope((user && user.email) || ''));
+          || !!(await reviewerScope((user && user.email) || ''))
+          || !!(hdrVa && (hdrVa.split('@')[1] || '') === ALLOWED_DOMAIN
+                && canImpersonate(user.email) && await reviewerScope(hdrVa));
 
         const winRows = await sql`
           SELECT status FROM class_signup_windows

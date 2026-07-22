@@ -4696,6 +4696,15 @@ button.staff-role:hover {
   background: rgba(var(--color-primary-rgb), 0.16);
 }
 
+/* #91 (Lyndsey): on phones the View Classmates pill squeezed kid names
+   into a one-letter-wide column. Stack it on its own row under the
+   name, aligned past the avatar. */
+@media (max-width: 640px) {
+  .mf-kid-bar { flex-wrap: wrap; }
+  .mf-kid-bar .mf-kid-name { flex: 1 1 auto; min-width: 0; }
+  .mf-kid-bar .mf-class-link { flex-basis: 100%; align-self: flex-start; width: fit-content; margin-left: 42px; }
+}
+
 /* Schedule table */
 .mf-schedule {
   padding: 4px 0;
@@ -8913,8 +8922,12 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 .sb-palette-empty { font-size: 0.85rem; color: var(--color-text-light); font-style: italic; }
 .sb-palette-cards {
   display: flex;
+  /* #93 (Lyndsey): the sideways card shelf put a jittery horizontal
+     scrollbar under the queue — wrap the cards into rows instead so
+     everything scrolls with the page. */
+  flex-wrap: wrap;
   gap: 10px;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding-bottom: 6px;
 }
 .sb-palette-card {
