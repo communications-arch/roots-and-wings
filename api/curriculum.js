@@ -1714,7 +1714,7 @@ module.exports = async function handler(req, res) {
                        LIMIT 1) AS person_name
               FROM class_submissions c
               WHERE c.school_year = ${vmYear} AND c.scheduled_session = ${vmSess}
-                AND c.status IN ('scheduled', 'drafted')`,
+                AND c.status = 'scheduled'`,
           sql`SELECT h.class_submission_id, h.person_email, h.person_name, h.block
               FROM class_assignment_helpers h
               JOIN class_submissions c ON c.id = h.class_submission_id
@@ -1736,7 +1736,11 @@ module.exports = async function handler(req, res) {
         ]);
         // Afternoon classes stay out of the matrix until the session's PM
         // side is APPROVED (Erin, 2026-07-11) — same rule as the published
-        // schedule, so drafted placements never leak into sign-ups.
+        // schedule. Bug #63 hardening: the query above now takes ONLY
+        // status='scheduled' rows — real placements always write
+        // 'scheduled'; 'drafted' is a palette/penciled state, and a
+        // drafted row still carrying an old scheduled_session was leaking
+        // into members' sign-up views as if placed (Viral Games).
         const pmApproved = !!(apprRows.length && apprRows[0].approved_at);
         const helpersBySub = {};
         helperRows.forEach(h => {
