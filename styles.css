@@ -11925,6 +11925,12 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   -webkit-overflow-scrolling: touch;
 }
 
+/* #59: on phones the Schedules report's Kid/Member name column got
+   crushed to one character per line. Keep names on a single line — the
+   table wrap already scrolls sideways when columns need more room. */
+#ws-sched-table-target .ws-waivers-table th:first-child,
+#ws-sched-table-target .ws-waivers-table td:first-child { white-space: nowrap; }
+
 /* Mobile: hide columns flagged mobileHide (still shown in the expanded
    row detail), and tighten cell padding/size so more fits without a wide
    horizontal scroll. */

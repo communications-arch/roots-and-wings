@@ -2912,7 +2912,13 @@ module.exports = async function handler(req, res) {
         }
         if (ranked.length > 8) return res.status(400).json({ error: 'Too many picks (max 8).' });
         const sy = activeSchoolYear(new Date());
-        const isReviewer = await isReviewerReq(user, req);
+        // #50: the window bypass must also honor the REAL login's reviewer
+        // scope. A VP/ACL placing a kid sends view_as=<family>, and
+        // reviewerScopeReq resolves the scope of the view_as target when
+        // canImpersonate allows (everyone on dev) — demoting the reviewer
+        // to member gating and 409ing placements after the window closed.
+        const isReviewer = (await isReviewerReq(user, req))
+          || !!(await reviewerScope((user && user.email) || ''));
 
         const winRows = await sql`
           SELECT status FROM class_signup_windows

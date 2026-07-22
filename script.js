@@ -8950,7 +8950,10 @@
           // morning ones are the VP / group liaisons' lane); the
           // data-pm-only mark drives loadPmSubmissionsPendingCount.
           var crPmOnly = role === 'Afternoon Class Liaison';
-          h += '<li id="ws-todo-classreview-item"' + (crPmOnly ? ' data-pm-only="1"' : '') + ' hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">📋</span><span>Review ' + (crPmOnly ? 'afternoon ' : '') + 'class submissions — schedule, mark reviewed, or decline</span></button></li>';
+          // #62: say "NEW" — the bubble counts unreviewed submissions
+          // only, not the whole builder queue (approved-but-unplaced
+          // classes also sit in the palette but aren't waiting on review).
+          h += '<li id="ws-todo-classreview-item"' + (crPmOnly ? ' data-pm-only="1"' : '') + ' hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">📋</span><span>Review new ' + (crPmOnly ? 'afternoon ' : '') + 'class submissions — schedule, mark reviewed, or decline</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
@@ -9824,7 +9827,13 @@
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
     'special_events_manage': { widgets: ['special-events'] },
     'supply_closet_edit':    { widgets: ['supply-closet-mgmt'] },
-    'class_review':          { widgets: ['roles'] },
+    // #64: 'roles' is the consolidated Co-op Management card — since the
+    // 2026-07-20 fold-in it hosts Roles Assignments + Admin Calendar for
+    // EVERY board chair, not just class reviewers. class_review grants
+    // therefore ADD roles to its gate (group liaisons etc.) instead of
+    // replacing it — otherwise a chair without class_review (Comms) loses
+    // the whole card.
+    'class_review':          { widgets: ['roles'], additive: true },
     'welcome_manage':        { widgets: ['upcoming-events'] }
   };
 
@@ -9870,17 +9879,24 @@
       (surface.widgets || []).forEach(function (type) {
         var w = WORKSPACE_WIDGETS[type];
         if (!w || !Array.isArray(w.roleGate) || w.roleGate.indexOf('*') !== -1) return;
-        w.roleGate = granted.slice();
+        // additive surfaces (#64): grants EXTEND the pristine gate — the
+        // card serves audiences beyond this capability, so revoking it
+        // never strips the card from a role the pristine gate includes.
+        var keep = surface.additive ? (_pristineWidgetGates[type] || []) : [];
+        var effective = keep.slice();
+        granted.forEach(function (r) { if (effective.indexOf(r) === -1) effective.push(r); });
+        w.roleGate = effective;
         // Keep WORKSPACE_DEFAULTS in step: granted roles gain the card
         // (right after To Do, where role tools sit); revoked roles lose
-        // it. Roles with NO explicit defaults (new committee roles) are
-        // covered by widgetListFor's role-scan fallback via the updated
-        // roleGate — no defaults entry needed.
+        // it (unless the pristine gate keeps them). Roles with NO explicit
+        // defaults (new committee roles) are covered by widgetListFor's
+        // role-scan fallback via the updated roleGate — no defaults entry
+        // needed.
         Object.keys(WORKSPACE_DEFAULTS).forEach(function (role) {
           if (role === '*') return;
           var list = WORKSPACE_DEFAULTS[role];
           var at = list.indexOf(type);
-          if (granted.indexOf(role) === -1) {
+          if (effective.indexOf(role) === -1) {
             if (at !== -1) list.splice(at, 1);
           } else if (at === -1) {
             var todoAt = list.indexOf('todos');
@@ -20853,7 +20869,9 @@
     // re-approval — say so up front, before the member commits the edit.
     if (isEdit && (cur.status === 'drafted' || cur.status === 'scheduled')) {
       html += '<p style="background:#FFF3E0;color:#7A4E00;font-size:0.85rem;border-radius:8px;padding:8px 12px;margin:0 0 1rem;">';
-      html += '⚠️ This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + '. Saving an edit sends it back to the VP / Afternoon Class Liaison for re-approval, and it comes off the schedule until it\'s re-placed.';
+      // #61: shortened per Colleen — the "comes off the schedule" clause
+      // read as alarming; re-approval already implies it.
+      html += '⚠️ This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + '. Saving an edit sends it back to the VP / Afternoon Class Liaison for re-approval.';
       html += '</p>';
     }
     // Placeholder for the "Need inspiration?" strip — filled asynchronously
@@ -24638,7 +24656,13 @@
               statusEl.textContent = 'Sent to ' + (dd.sent || []).length + ' famil' + ((dd.sent || []).length === 1 ? 'y' : 'ies')
                 + ' (' + (dd.logins_emailed || 0) + ' logins)'
                 + ((dd.failed || []).length ? ' — FAILED for: ' + dd.failed.join(', ') : '')
-                + '. Now delete the accounts manually in Google Admin, then tick ✓ Done on the To Do.';
+                // #66: name the actual deletion date (ICS−3, same as the
+                // Admin Calendar's derived trigger) instead of "now".
+                + '. Delete the accounts manually in Google Admin on '
+                + (_offboardingCache && _offboardingCache.remove_date
+                    ? boardCalFmtDate(_offboardingCache.remove_date) + ' (3 days before the Ice Cream Social)'
+                    : 'the removal date (3 days before the Ice Cream Social)')
+                + ', then tick ✓ Done on the To Do.';
               // Refresh stamps + the To Do pill.
               fetch('/api/tour?offboarding=1', { headers: rwAuthHeaders() })
                 .then(function (r2) { return r2.ok ? r2.json() : null; })
@@ -26137,17 +26161,31 @@
     return '<button type="button" class="sc-btn sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '">+ Fill</button>';
   }
   var SCHED_KIND_TAG = { lead: 'Leads', assist: 'Assists', floater: 'Floater', board: 'Board Duties', prep: 'Prep Period' };
+  // #57: the Leads/Assists tag was italic ws-wv-context — Lyndsey found
+  // the lighter italic hard to read next to the class name. Small caps
+  // instead: same quiet color, upright and evenly weighted.
+  function schedKindTagHtml(kind) {
+    return '<span style="font-style:normal;font-size:0.72em;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--color-text-light);">'
+      + escapeHtml(SCHED_KIND_TAG[kind] || kind) + '</span>';
+  }
+  // #57: a quiet ▾ caret opens the row's edit panel — the chip-sized ✎
+  // read as a big Edit button and pulled the eye on every filled cell.
+  function schedCaretBtn(row, title) {
+    var t = escapeHtml(title || 'Change or remove this placement');
+    return '<button type="button" class="sched-fill-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '" title="' + t + '" aria-label="' + t + '"'
+      + ' style="border:none;background:none;padding:0 3px;cursor:pointer;color:var(--color-text-light);font-size:0.95em;vertical-align:baseline;">▾</button>';
+  }
   function schedAdultCellHtml(row, b) {
     var c = row.cells[b];
     if (c) {
       var lbl = c.class_name
-        ? '<span class="ws-wv-context">' + (SCHED_KIND_TAG[c.kind] || c.kind) + '</span> ' + escapeHtml(c.class_name)
-        : escapeHtml(SCHED_KIND_TAG[c.kind] || c.kind);
+        ? schedKindTagHtml(c.kind) + ' ' + escapeHtml(c.class_name)
+        : schedKindTagHtml(c.kind);
       // VP reassign (bug #20): assists + support pledges are editable in
-      // place — ✎ opens the same panel + Fill uses. Leads change in the
-      // Class Builder, so they stay read-only here.
+      // place — the caret opens the same panel + Fill uses. Leads change
+      // in the Class Builder, so they stay read-only here.
       if (_schedRep.can_place && row.email && c.kind !== 'lead') {
-        lbl += ' <button type="button" class="sc-btn sched-fill-btn sched-reassign-btn" data-skey="' + escapeHtml(schedRowKey(row)) + '" title="Change or remove this assignment">✎</button>';
+        lbl += ' ' + schedCaretBtn(row);
       }
       return lbl;
     }
@@ -26178,17 +26216,20 @@
       return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>' + schedKidPmAgesHtml(row.pm1);
     }
     if (pick) {
-      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick);
+      // #57: placed kid cells are editable too — same quiet caret as the
+      // adults tab, opening the row's placement panel.
+      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick)
+        + (_schedRep.can_place ? ' ' + schedCaretBtn(row, 'Change or remove this class') : '');
     }
     if (_schedRep.can_place) return schedCellFillBtn(row);
     return '<span class="st-flag-coral">open</span>';
   }
 
   // Same "open to" + fullness annotations as the Place kids To Do picker.
-  function schedClassOpts(hour) {
+  function schedClassOpts(hour, opts) {
     var pools = (_schedPools && _schedPools.classes) || {};
     var list = pools[hour] || [];
-    return '<option value="">— pick… —</option>' + list.map(function (c) {
+    return ((opts && opts.noPlaceholder) ? '' : '<option value="">— pick… —</option>') + list.map(function (c) {
       var groups = Array.isArray(c.ageGroups) ? c.ageGroups : [];
       var names = groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean);
       var openTo = names.length ? 'open to ' + names.join(', ')
@@ -26236,10 +26277,29 @@
       return h + '</div>';
     }
     if (!_schedPools || _schedPools.session !== _schedSession) return '<p class="ws-empty">Loading open classes…</p>';
+    // Kids (#57): every eligible PM hour renders — open hours get the
+    // fill picker, placed hours get current + Remove + alternatives
+    // (mirroring the adults panel). Morning stays read-only here: groups
+    // are placed in the Morning Class Builder.
     var hk = '<div class="st-place-row">';
-    missing.forEach(function (hour) {
-      hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
-        + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">' + schedClassOpts(hour) + '</select></label>';
+    ['PM1', 'PM2'].forEach(function (hour) {
+      var pick = hour === 'PM1' ? row.pm1 : row.pm2;
+      if (!pick && hour === 'PM2' && row.pm1 && row.pm1.both) {
+        hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
+          + '<span class="ws-wv-context">Covered by 2-hour “' + escapeHtml(row.pm1.class_name) + '” — change it under ' + SCHED_BLOCK_LABELS.PM1 + '</span></label>';
+        return;
+      }
+      if (!pick) {
+        hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
+          + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">' + schedClassOpts(hour) + '</select></label>';
+      } else {
+        hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
+          + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">'
+          + '<option value="">' + escapeHtml(pick.class_name) + ' (current)</option>'
+          + '<option value="remove">✕ Remove from this hour</option>'
+          + schedClassOpts(hour, { noPlaceholder: true })
+          + '</select></label>';
+      }
     });
     hk += '<button type="button" class="btn btn-primary btn-sm sched-kid-save" data-fam="' + escapeHtml(row.family_email) + '" data-kid="' + escapeHtml(row.first_name) + '">Save</button>';
     hk += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
@@ -26449,16 +26509,18 @@
         panel.querySelectorAll('.sched-kid-pick').forEach(function (sel) {
           picks[sel.getAttribute('data-hour')] = sel.value;
         });
-        if (!picks.PM1 && !picks.PM2) { alert('Pick at least one class first.'); return; }
+        if (!picks.PM1 && !picks.PM2) { alert('Pick a class (or ✕ Remove) first.'); return; }
         var fam = btn.getAttribute('data-fam');
         var kid = btn.getAttribute('data-kid');
         btn.disabled = true;
         btn.textContent = 'Saving…';
         function postHour(hour, cid) {
           if (!cid) return Promise.resolve();
+          // #57: 'remove' clears the hour — empty ranked list unplaces.
+          var ranked = cid === 'remove' ? [] : [parseInt(cid, 10)];
           return fetch('/api/curriculum?action=class-signup-picks', {
             method: 'POST', headers: rwAuthHeaders(true),
-            body: JSON.stringify({ session: _schedRep.session, hour: hour, kid_first_name: kid, ranked_class_ids: [parseInt(cid, 10)], view_as: fam })
+            body: JSON.stringify({ session: _schedRep.session, hour: hour, kid_first_name: kid, ranked_class_ids: ranked, view_as: fam })
           }).then(function (r) { return r.json().then(function (x) { if (!r.ok) throw new Error((x && x.error) || 'Save failed'); }); });
         }
         postHour('PM1', picks.PM1).then(function () { return postHour('PM2', picks.PM2); })
@@ -33125,10 +33187,15 @@
       var roleLabel = roleLabels[p.role] || 'Parent';
       var emailIsPrimary = (p.role === 'mlc');
       var h = '<div class="emi-row" data-parent-idx="' + idx + '">';
+      // #65: an × on the avatar clears the photo (queued or saved) — the
+      // save writes photo_url:'' so the person drops back to initials.
+      var pHasPhoto = !!(p._queuedPhoto || p.photo_url);
       h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-parent" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this adult">' + thumbHtml(p, p.name, { wsFallback: true }) +
            '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-           '</span></div>';
+           '</span>' +
+           (pHasPhoto ? '<button type="button" data-role="remove-photo-parent" data-idx="' + idx + '" title="Remove photo" aria-label="Remove photo for this adult" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:#b93a33;color:#fff;font-size:13px;line-height:1;cursor:pointer;padding:0;">×</button>' : '') +
+           '</div>';
       h += '<div class="emi-fields">';
       // Full-width header so the inputs below line up cleanly in the
        // 2-col grid, instead of the role label sharing a row with first-name.
@@ -33208,10 +33275,13 @@
 
     function kidRowHtml(k, idx) {
       var h = '<div class="emi-row emi-kid-row" data-kid-idx="' + idx + '">';
+      var kHasPhoto = !!(k._queuedPhoto || k.photo_url);
       h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-kid" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this child">' + thumbHtml(k, k.name, { wsFallback: true }) +
            '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-           '</span></div>';
+           '</span>' +
+           (kHasPhoto ? '<button type="button" data-role="remove-photo-kid" data-idx="' + idx + '" title="Remove photo" aria-label="Remove photo for this child" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:none;background:#b93a33;color:#fff;font-size:13px;line-height:1;cursor:pointer;padding:0;">×</button>' : '') +
+           '</div>';
       // 2-col emi-fields grid matching the adult layout. Row 1 packs
       // first + last + pronouns into a flex group (pronouns is short
       // enough to share the line). Row 2 pairs Birthday + Schedule.
@@ -33548,6 +33618,18 @@
     // on the card element so subsequent render() calls don't stack multiple
     // listeners — the previous bug where the file picker opened N times).
     function cardClickHandler(e) {
+      // #65: the remove-photo × sits INSIDE the avatar button, so it must
+      // win before the upload branch (closest() would match both).
+      var delPhotoBtn = e.target.closest('[data-role="remove-photo-parent"], [data-role="remove-photo-kid"]');
+      if (delPhotoBtn) {
+        var dpIdx = parseInt(delPhotoBtn.getAttribute('data-idx'), 10);
+        syncStateFromDom();
+        var dpTarget = delPhotoBtn.getAttribute('data-role') === 'remove-photo-parent'
+          ? state.parents[dpIdx] : state.kids[dpIdx];
+        if (dpTarget) { dpTarget.photo_url = ''; dpTarget._queuedPhoto = null; }
+        render();
+        return;
+      }
       var upBtn = e.target.closest('[data-role="upload-parent"], [data-role="upload-kid"]');
       if (upBtn) {
         var role = upBtn.getAttribute('data-role');

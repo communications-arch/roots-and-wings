@@ -9341,17 +9341,34 @@ async function handleBugReportsList(req, res) {
     // The issues endpoint also returns pull requests — skip those.
     const items = (Array.isArray(raw) ? raw : [])
       .filter(it => it && !it.pull_request)
-      .map(it => ({
-        number: it.number,
-        title: String(it.title || ''),
-        created_at: it.created_at || '',
-        state: it.state === 'closed' ? 'closed' : 'open',
-        comments: it.comments || 0,
-        url: String(it.html_url || ''),
-        labels: Array.isArray(it.labels)
-          ? it.labels.map(l => String((l && l.name) || '')).filter(Boolean)
-          : []
-      }));
+      .map(it => {
+        // #68/#69: the card needs the FULL original report (titles clip at
+        // 80 chars) and who filed it. Both live in the issue body — the
+        // "Reported by:" footer splits off as its own field, screenshots
+        // collapse to a plain marker (the client never renders raw MD).
+        const rawBody = String(it.body || '');
+        let reporter = '';
+        const repM = rawBody.match(/Reported by:\s*([^(\n]+?)\s*(?:\([^)]*\))?\s*via dev portal/);
+        if (repM) reporter = repM[1].trim();
+        const details = rawBody
+          .replace(/\n*Reported by:[^\n]*via dev portal[^\n]*/g, '')
+          .replace(/!\[[^\]]*\]\([^)]*\)/g, '(screenshot — open on GitHub to view)')
+          .trim()
+          .slice(0, 20000);
+        return {
+          number: it.number,
+          title: String(it.title || ''),
+          created_at: it.created_at || '',
+          state: it.state === 'closed' ? 'closed' : 'open',
+          comments: it.comments || 0,
+          url: String(it.html_url || ''),
+          reporter: reporter,
+          details: details,
+          labels: Array.isArray(it.labels)
+            ? it.labels.map(l => String((l && l.name) || '')).filter(Boolean)
+            : []
+        };
+      });
     // Latest note per OPEN issue with comments (Erin, 2026-07-19: fix
     // explanations + re-test instructions should read right on the bug
     // page, not in GitHub). Bounded: open issues only, first 30, fetched
