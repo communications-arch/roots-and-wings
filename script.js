@@ -1049,9 +1049,17 @@
   // interested" stores a hand-raise the Roles Assignments admin shows.
   function openSeatsListHtml(open) {
     var mine = (_roleInterest && _roleInterest.mine) || {};
-    var h = '<p class="ws-body-hint">Tap a seat for the full role description, or email '
+    // #95 (Lyndsey): say the quiet part — one seat per member, and show
+    // what you already hold so eager helpers don't scoop every empty
+    // spot before others open the site.
+    var h = '<p class="ws-body-hint">These are year-long volunteer committee seats. <strong>Please take just one</strong> — spreading the seats around lets every family plug in. Tap a seat for the full role description, or email '
       + '<a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one. '
       + '<strong>I’m interested</strong> quietly lets the assigners know — it isn’t a commitment.</p>';
+    var myRolesNow = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    if (myRolesNow.length) {
+      h += '<p class="ws-body-hint">✅ You already hold: <strong>' + myRolesNow.map(escapeHtml).join(', ')
+        + '</strong> — these open seats are for members who don’t have one yet. (Up for more anyway? Talk to the VP first.)</p>';
+    }
     h += '<ul class="ws-opportunities">';
     open.forEach(function (o) {
       h += '<li class="ws-opp-seat" style="flex-wrap:wrap;">';
@@ -6034,8 +6042,13 @@
     if ((d.cleaning || []).length === 0) {
       h += '<p class="ws-empty">No cleaning assignments for this session yet.</p>';
     } else {
-      // #85: name the floor/category with each area (Main Floor · Bathrooms).
-      h += '<div class="ws-body-hint">' + d.cleaning.map(function (c) { return escapeHtmlWs((c.floor ? c.floor + ' · ' : '') + c.area) + ' — <strong>' + escapeHtmlWs(c.family) + '</strong>'; }).join(' · ') + '</div>';
+      // #100 (was #85): same table treatment as the hours above — the
+      // run-on "Floor · Area — Family" sentence was hard to scan.
+      h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Floor</th><th>Area</th><th>Family</th></tr></thead><tbody>';
+      d.cleaning.forEach(function (c) {
+        h += '<tr><td>' + escapeHtmlWs(c.floor || '—') + '</td><td>' + escapeHtmlWs(c.area) + '</td><td>' + escapeHtmlWs(c.family) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
     }
     h += '</div>';
     body.innerHTML = h;
@@ -6248,12 +6261,17 @@
         var amBlk = s.scheduled_hour === 'AM1' ? 'AM1' : s.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
         var amGrp = String((s.age_groups || [])[0] || '');
         var amRoom = s.scheduled_room || (amGrp ? (AM_GROUP_ROOMS[amGrp.charAt(0).toUpperCase() + amGrp.slice(1)] || '') : '');
-        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: amRoom, popup: { type: 'dbClass', id: s.id } });
+        // #96: planKey/planSess ride the duty so the 📖 Plan button links
+        // the created plan back to THIS class (same key convention as
+        // class_curriculum_links: AM = capitalised group, PM = 'PM:'+name).
+        var amPlanKey = amGrp ? amGrp.charAt(0).toUpperCase() + amGrp.slice(1) : '';
+        duties.push({ block: amBlk, icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: amRoom, popup: { type: 'dbClass', id: s.id }, planKey: amPlanKey, planSess: dutySession });
       } else {
         var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
         var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
-        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id } });
-        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id } });
+        var pmPlanKey = 'PM:' + s.class_name;
+        if (subPM1) duties.push({ block: 'PM1', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id }, planKey: pmPlanKey, planSess: dutySession });
+        if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id }, planKey: pmPlanKey, planSess: dutySession });
       }
     });
 
@@ -6583,7 +6601,9 @@
       var planBtnHtml = '';
       if (isTeacher && /—\s*Leading$/.test(String(d.text || ''))) {
         var planName = String(d.text).replace(/\s*—\s*Leading$/, '');
-        planBtnHtml = '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (isAmRow ? 'AM' : 'PM') + '" title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
+        planBtnHtml = '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (isAmRow ? 'AM' : 'PM') + '"'
+          + (d.planKey ? ' data-plan-key="' + escapeAttr(d.planKey) + '" data-plan-sess="' + (d.planSess || '') + '"' : '')
+          + ' title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
       }
       if (isClassRow) {
         // #92 (Lyndsey): class rows stack so nothing truncates on phones.
@@ -7070,11 +7090,14 @@
     });
 
     // 📖 Plan on Leading duties → Curriculum editor prefilled (2026-07-11).
+    // #96: thread the class link key + session through so the saved plan
+    // auto-attaches to the class instead of landing orphaned.
     grid.querySelectorAll('.mf-duty-plan').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         if (typeof startLessonPlanForClass !== 'function') return;
-        startLessonPlanForClass(this.getAttribute('data-plan-name') || '', '', this.getAttribute('data-plan-block') || '');
+        startLessonPlanForClass(this.getAttribute('data-plan-name') || '', '', this.getAttribute('data-plan-block') || '',
+          this.getAttribute('data-plan-key') || '', parseInt(this.getAttribute('data-plan-sess'), 10) || 0);
       });
     });
 
@@ -17464,7 +17487,18 @@
   // "Build a lesson plan" from a scheduled class or Class Idea
   // (2026-07-11, Erin) — opens the curriculum editor prefilled with the
   // class's name/ages/block, skipping the library hop.
-  function startLessonPlanForClass(className, ageRange, block) {
+  // #96: when the caller knows WHICH class (link key + session), stash
+  // it so the editor preselects "For which class?" and the save
+  // auto-links — plans created from the Plan buttons used to save
+  // UNLINKED, so the class's Lesson-plan button kept opening blank.
+  function startLessonPlanForClass(className, ageRange, block, linkKey, linkSession) {
+    try {
+      if (linkKey && linkSession) {
+        sessionStorage.setItem('rw_pending_class_link', JSON.stringify({ key: linkKey, sess: linkSession, name: String(className || '') }));
+      } else {
+        sessionStorage.removeItem('rw_pending_class_link');
+      }
+    } catch (e) { /* private mode — the picker just starts unselected */ }
     loadClosetItemsForEditor().then(function () {
       var d = blankDraft();
       d.title = String(className || '');
@@ -17582,16 +17616,35 @@
 
     // "For which class?" picker
     var assignments = (typeof getMyTeachingAssignments === 'function') ? getMyTeachingAssignments() : [];
-    var pendingLink = sessionStorage.getItem('rw_pending_class_link') || '';
+    // #96: rw_pending_class_link is now JSON {key, sess, name} (legacy
+    // bare-key strings tolerated) and the originating class is
+    // PRESELECTED — with an appended option when it isn't among
+    // getMyTeachingAssignments — so a plan started from a class always
+    // saves linked unless deliberately unlinked.
+    var pendingRaw = sessionStorage.getItem('rw_pending_class_link') || '';
+    var pendingLink = null;
+    if (pendingRaw) {
+      try { pendingLink = JSON.parse(pendingRaw); }
+      catch (e) { pendingLink = { key: pendingRaw, sess: 0, name: '' }; }
+    }
+    var pendingMatched = false;
     if (assignments.length > 0 || pendingLink) {
       html += '<label class="cl-label">For which class? (optional)<select class="cl-input" id="cl-f-class-key">';
       html += '<option value="">— Not linked to a class —</option>';
       assignments.forEach(function (a) {
         var key = a.kind === 'AM' ? a.name : 'PM:' + a.name;
         var label = a.name + (a.kind === 'PM' ? ' (PM)' : '') + ' \u2014 Session ' + a.sessionNum;
-        var sel = (pendingLink && pendingLink === key) ? ' selected' : '';
+        var sel = '';
+        if (pendingLink && pendingLink.key === key && (!pendingLink.sess || pendingLink.sess === a.sessionNum)) {
+          sel = ' selected';
+          pendingMatched = true;
+        }
         html += '<option value="' + key + ':' + a.sessionNum + '"' + sel + '>' + label + '</option>';
       });
+      if (pendingLink && pendingLink.key && pendingLink.sess && !pendingMatched) {
+        html += '<option value="' + escapeAttr(pendingLink.key + ':' + pendingLink.sess) + '" selected>'
+          + escapeHtml(pendingLink.name || pendingLink.key) + ' — Session ' + pendingLink.sess + '</option>';
+      }
       html += '</select></label>';
     }
 
@@ -19214,11 +19267,33 @@
       '</div>';
   }
 
+  // Install banner frequency cap (Erin, 2026-07-22: a member who already
+  // added the app kept seeing the banner on every open — iOS gives the
+  // site no way to detect a home-screen install, so the banner now shows
+  // at most 3 times, at least 3 days apart. The × still ends it forever,
+  // and the Resources card's "Install the App" stays available anytime.)
+  function rwInstallBannerAllowed() {
+    try {
+      if (localStorage.getItem('rw_install_dismissed')) return false;
+      var nag = JSON.parse(localStorage.getItem('rw_install_nags') || '{}');
+      if ((nag.count || 0) >= 3) return false;
+      if (nag.last && Date.now() - nag.last < 3 * 24 * 60 * 60 * 1000) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+  function rwInstallBannerShown() {
+    try {
+      var nag = JSON.parse(localStorage.getItem('rw_install_nags') || '{}');
+      localStorage.setItem('rw_install_nags', JSON.stringify({ count: (nag.count || 0) + 1, last: Date.now() }));
+    } catch (e) { /* ignore */ }
+  }
+
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     deferredPrompt = e;
-    if (installSection && !localStorage.getItem('rw_install_dismissed')) {
+    if (installSection && rwInstallBannerAllowed()) {
       installSection.style.display = '';
+      rwInstallBannerShown();
     }
     // If the install helper is already open (e.g. opened via the QR deep-link
     // before Chrome armed the prompt), re-render it so the one-tap "Install
@@ -19243,9 +19318,9 @@
   // never show for iPhone users. Surface it ourselves when they could install.
   (function surfaceIOSInstallBanner() {
     var env = rwInstallEnv();
-    if (env.isIOSSafari && !env.isStandalone && installSection &&
-        !localStorage.getItem('rw_install_dismissed')) {
+    if (env.isIOSSafari && !env.isStandalone && installSection && rwInstallBannerAllowed()) {
       installSection.style.display = '';
+      rwInstallBannerShown();
     }
   })();
 
@@ -20938,14 +21013,42 @@
           var go = function () {
             var link = mcLinkFor(s);
             if (link) { mcOpenPlan(link.curriculum_id, wantSupplies); return; }
-            // No plan attached yet — it's their own class, so open the
-            // Curriculum editor prefilled (supplies live inside the
-            // lesson plan), matching the duty rows' 📖 Plan flow.
-            if (typeof startLessonPlanForClass === 'function') {
-              startLessonPlanForClass(s.class_name,
-                (typeof prettyAgesClient === 'function' ? prettyAgesClient(s.age_groups, s.age_groups_other) : ''),
-                s.class_period === 'AM' ? 'AM' : 'PM');
-            }
+            var openBlank = function () {
+              // No plan anywhere — open the editor prefilled AND carrying
+              // the class context so the save auto-links (#96).
+              if (typeof startLessonPlanForClass === 'function') {
+                startLessonPlanForClass(s.class_name,
+                  (typeof prettyAgesClient === 'function' ? prettyAgesClient(s.age_groups, s.age_groups_other) : ''),
+                  s.class_period === 'AM' ? 'AM' : 'PM',
+                  myClassLinkKey(s), sess);
+              }
+            };
+            // #96 heal: a plan may already exist UNLINKED (created via a
+            // Plan button before auto-linking, like Lyndsey's) — find the
+            // member's own plan by exact title, link it, open it. Never
+            // silently grabs someone else's plan.
+            var cred2 = localStorage.getItem('rw_google_credential');
+            var meLc = String((typeof getActiveEmail === 'function' && getActiveEmail()) || '').toLowerCase();
+            if (!cred2 || !meLc) { openBlank(); return; }
+            fetch('/api/curriculum', { headers: { 'Authorization': 'Bearer ' + cred2 } })
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (data) {
+                var hit = ((data && data.curricula) || []).filter(function (c) {
+                  return String(c.title || '').trim().toLowerCase() === String(s.class_name || '').trim().toLowerCase()
+                    && String(c.author_email || '').toLowerCase() === meLc;
+                })[0];
+                if (!hit) { openBlank(); return; }
+                fetch('/api/curriculum?action=link', {
+                  method: 'POST',
+                  headers: { 'Authorization': 'Bearer ' + cred2, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ session_number: sess, class_key: myClassLinkKey(s), curriculum_id: hit.id })
+                }).then(function () {
+                  delete _classLinksBySession[sess];
+                  if (typeof loadClassLinks === 'function') loadClassLinks();
+                  mcOpenPlan(hit.id, wantSupplies);
+                }).catch(openBlank);
+              })
+              .catch(openBlank);
           };
           if (_classLinksBySession[sess]) go(); else ensureClassLinksForSession(sess, go);
         });

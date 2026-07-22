@@ -371,6 +371,11 @@
             + (bug.url ? ' <a class="bug-note-toggle" href="' + escapeHtml(bug.url) + '" target="_blank" rel="noopener">View on GitHub ↗</a>' : '')
             + '</div>';
         }
+        // "Still broken" (Erin, 2026-07-22): available on ANY card marked
+        // fixed (including verified ones that regressed, like #84) —
+        // comments the tester's note on the SAME issue and returns the
+        // card to "Reported", instead of closing + refiling.
+        var canReopen = st.cls === 'bug-status-fixed' || st.cls === 'bug-status-verified';
         html += '<div class="bug-card">'
           + '<div class="bug-card-main">'
           + '<div class="bug-card-title"><span class="bug-card-num">#' + parseInt(bug.number, 10) + '</span> ' + escapeHtml(bug.title) + '</div>'
@@ -380,6 +385,9 @@
           + '<span class="bug-status ' + st.cls + '">' + escapeHtml(st.text) + '</span>'
           + (canVerify
             ? '<button type="button" class="btn btn-primary btn-sm bug-verify-btn" data-bug-number="' + parseInt(bug.number, 10) + '">✓ Works now</button>'
+            : '')
+          + (canReopen
+            ? '<button type="button" class="btn btn-outline-dark btn-sm bug-reopen-btn" data-bug-number="' + parseInt(bug.number, 10) + '">✗ Still broken</button>'
             : '')
           + detHtml
           + noteHtml
@@ -392,6 +400,30 @@
           if (!note) return;
           var collapsed = note.classList.toggle('bug-note-collapsed');
           tg.textContent = collapsed ? 'Show more' : 'Show less';
+        });
+      });
+      listEl.querySelectorAll('.bug-reopen-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var note = prompt('What are you still seeing? (A sentence helps — it lands right on the bug.)') || '';
+          btn.disabled = true;
+          btn.textContent = 'Saving…';
+          fetch('/api/tour', {
+            method: 'POST',
+            headers: authHeaders(true),
+            body: JSON.stringify({ kind: 'bug-reopen', number: parseInt(btn.getAttribute('data-bug-number'), 10), note: note })
+          })
+            .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+            .then(function (out) {
+              if (out.status === 200 && out.data && out.data.ok) { loadBugs(); return; }
+              btn.disabled = false;
+              btn.textContent = '✗ Still broken';
+              alert((out.data && out.data.error) || 'Could not save that — please try again.');
+            })
+            .catch(function () {
+              btn.disabled = false;
+              btn.textContent = '✗ Still broken';
+              alert('Could not save that — please try again.');
+            });
         });
       });
       listEl.querySelectorAll('.bug-verify-btn').forEach(function (btn) {

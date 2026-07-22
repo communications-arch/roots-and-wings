@@ -13598,6 +13598,17 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
     grid-template-columns: 1fr;
   }
 }
+/* #98 (Lyndsey): most members edit their profile on a phone — the
+   JS-built flex triplets (first + last + pronouns, goes-by + nicknames
+   + phone, the email pair) crushed three inputs onto one 375px line.
+   Stack them full-width, and use 16px inputs so iOS stops zooming the
+   whole page on focus. */
+@media (max-width: 640px) {
+  .emi-fields > .emi-full { flex-wrap: wrap; }
+  .emi-fields > .emi-full > .rd-input { flex: 1 1 100% !important; }
+  .emi-fields .rd-input,
+  .emi-fields select { font-size: 16px; }
+}
 
 /* ---------- Participation Tracker (VP / Afternoon Class Liaison) ---------- */
 .ws-part-filter {
