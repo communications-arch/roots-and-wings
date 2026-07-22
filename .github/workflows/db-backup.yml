@@ -51,6 +51,11 @@ jobs:
           sudo apt-get install -y -qq postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -qq postgresql-client-17
+          # ubuntu-latest preinstalls client 16 and its pg_wrapper kept
+          # winning the PATH race (first run failed: "server version 17.10,
+          # pg_dump version 16.14") — put 17's real binaries first.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump the database (custom format)
         env:
@@ -135,6 +140,11 @@ jobs:
           sudo apt-get install -y -qq postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -qq postgresql-client-17
+          # ubuntu-latest preinstalls client 16 and its pg_wrapper kept
+          # winning the PATH race (first run failed: "server version 17.10,
+          # pg_dump version 16.14") — put 17's real binaries first.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Download newest backup from Drive
         env:
