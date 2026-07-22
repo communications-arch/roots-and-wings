@@ -18962,6 +18962,51 @@
     window.__initGSI = initGoogleSignIn;
   }
 
+  // #88: redirect-mode fallback (Safari's ITP kills the popup hand-back
+  // after a full Google login inside the popup). Switching re-inits GIS
+  // with ux_mode:'redirect' + our /api/session receiver and re-renders
+  // the button — the next tap does a full-page round trip, no popup.
+  var redirectSignInBtn = document.getElementById('redirectSignInBtn');
+  if (redirectSignInBtn) redirectSignInBtn.addEventListener('click', function () {
+    if (typeof google === 'undefined' || !google.accounts) {
+      alert('The Google sign-in library hasn’t loaded — check your connection and refresh, then try again.');
+      return;
+    }
+    try { google.accounts.id.cancel(); } catch (e) { /* no prompt open */ }
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      ux_mode: 'redirect',
+      login_uri: window.location.origin + '/api/session',
+      auto_select: false,
+      callback: handleGoogleSignIn
+    });
+    var googleBtn = document.getElementById('googleSignInBtn');
+    if (googleBtn) {
+      googleBtn.innerHTML = '';
+      google.accounts.id.renderButton(googleBtn, {
+        theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', width: 280
+      });
+    }
+    this.textContent = '✓ Redirect mode on — now tap the Google button above';
+    this.disabled = true;
+    if (googleBtn && googleBtn.scrollIntoView) googleBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  // Landing back from a failed redirect attempt (#88 receiver bounces
+  // here with a hash) — say what happened instead of a silent loop.
+  (function () {
+    var hash = String(window.location.hash || '');
+    if (hash !== '#signin-failed' && hash !== '#signin-wrong-account') return;
+    var googleError = document.getElementById('googleError');
+    if (googleError) {
+      googleError.textContent = hash === '#signin-wrong-account'
+        ? 'That Google account isn’t a Roots & Wings account. Try again and pick your @rootsandwingsindy.com address on Google’s page.'
+        : 'That sign-in attempt didn’t complete — please try again (the “Trouble signing in?” tips below can help).';
+      googleError.style.display = 'block';
+    }
+    if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+  })();
+
   function handleGoogleSignIn(response) {
     // Decode the JWT token (client-side only — not cryptographically verified)
     try {

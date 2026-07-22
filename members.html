@@ -60,6 +60,9 @@
         <ul>
           <li><strong>Use your phone's real browser</strong> (Chrome on Android, Safari on iPhone) — not the in-app browser inside Gmail, Facebook, or a texted link. Google blocks sign-in there. If you opened this from a link, tap the ⋯ menu and choose "Open in browser," or go to <strong>rootsandwingsindy.com/members</strong> directly.</li>
           <li><strong>Wrong account, or only asked for a password?</strong> Google is using another Google account you're already signed into. Tap the account name (or "Use another account") and sign in with your <strong>@rootsandwingsindy.com</strong> address.</li>
+          <!-- #88: Safari kills the popup hand-back after a full Google
+               login — redirect mode has no popup at all. -->
+          <li><strong>Button does nothing, or bounces you right back here?</strong> (Common in Safari.) <button type="button" id="redirectSignInBtn" class="ws-inline-link" style="font-weight:700;">Switch to the redirect sign-in</button> — then tap the Google button again. You'll go to Google's own page and come straight back, signed in.</li>
           <li>Still stuck? Email <a href="mailto:communications@rootsandwingsindy.com">communications@rootsandwingsindy.com</a>.</li>
         </ul>
       </details>
@@ -498,7 +501,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260722ak"></script>
+  <script src="script.js?v=20260722al"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
