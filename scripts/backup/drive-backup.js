@@ -137,9 +137,12 @@ async function accessToken() {
 }
 
 function folderId() {
-  const id = process.env.BACKUP_GDRIVE_FOLDER_ID;
-  if (!id) throw new Error('BACKUP_GDRIVE_FOLDER_ID is not set');
-  return id;
+  const raw = String(process.env.BACKUP_GDRIVE_FOLDER_ID || '').trim();
+  if (!raw) throw new Error('BACKUP_GDRIVE_FOLDER_ID is not set');
+  // Humans paste the whole Drive URL (first live setup, 2026-07-22) —
+  // accept either the bare id or any .../folders/<id> URL.
+  const m = raw.match(/folders\/([A-Za-z0-9_-]+)/);
+  return m ? m[1] : raw;
 }
 
 async function driveList(token) {
