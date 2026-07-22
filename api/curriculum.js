@@ -1724,11 +1724,11 @@ module.exports = async function handler(req, res) {
               FROM volunteer_signups
               WHERE school_year = ${vmYear} AND session_number = ${vmSess}
               ORDER BY role, created_at`,
-          sql`SELECT ca.id, ca.family_name, a.area_name
+          sql`SELECT ca.id, ca.family_name, a.area_name, a.floor_key
               FROM cleaning_assignments ca
               JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
               WHERE ca.session_number = ${vmSess} AND ca.school_year = ${vmYear}
-              ORDER BY a.sort_order, ca.sort_order`,
+              ORDER BY a.floor_key, a.sort_order, ca.sort_order`,
           sql`SELECT first_name, last_name FROM people
               WHERE LOWER(email) = ${actingEmail} OR LOWER(personal_email) = ${actingEmail} LIMIT 1`,
           sql`SELECT approved_at FROM co_op_sessions
@@ -1823,7 +1823,15 @@ module.exports = async function handler(req, res) {
           bk.support_taken = bk.floaters.length + bk.board.length + bk.prep.length;
         });
 
-        const cleaning = cleanRows.map(c => ({ id: c.id, area: c.area_name, family: c.family_name }));
+        // #85: carry the floor/category so "Bathrooms" reads as
+        // "Main Floor · Bathrooms" on Everyone's sign-ups.
+        const FLOOR_LABELS = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
+        const cleaning = cleanRows.map(c => ({
+          id: c.id,
+          area: c.area_name,
+          floor: FLOOR_LABELS[c.floor_key] || '',
+          family: c.family_name
+        }));
         // Open cleaning spots for self-serve sign-up (2026-07-11): every
         // non-floater area takes ONE family per session; the Floater area
         // always accepts more hands.

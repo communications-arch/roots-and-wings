@@ -2405,6 +2405,12 @@
         sessionExpiredHandled = false;
         showLogin();
         window.scrollTo(0, 0);
+        // #87 (Erin, on prod): storage keys are cleared above, but every
+        // in-memory cache (submissions, event openings, workspace state,
+        // View-As leftovers) survives a same-tab logout → next login
+        // painted the PREVIOUS identity's Workspace. A hard reload is the
+        // only reset that provably clears all of it.
+        location.reload();
       });
     }
   }
@@ -5736,7 +5742,7 @@
       myClean.forEach(function (c) {
         injectRow('Cleaning',
           '<div class="mf-duty-icon">🧹</div>'
-          + '<div class="mf-duty-info"><strong>' + escapeHtml(c.area) + '</strong><span>Optional</span></div>'
+          + '<div class="mf-duty-info"><strong>' + escapeHtml((c.floor ? c.floor + ' · ' : '') + c.area) + '</strong><span>Optional</span></div>'
           + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + c.id + '" title="Release this spot">✕</button></div>');
       });
       if ((d.cleaning_open || []).length) {
@@ -5951,7 +5957,7 @@
     });
     doc += '<h2>Cleaning (after co-op)</h2>';
     doc += '<p class="pledges">' + ((d.cleaning || []).length
-      ? escapeHtml(d.cleaning.map(function (c) { return c.area + ' — ' + c.family; }).join(' · '))
+      ? escapeHtml(d.cleaning.map(function (c) { return (c.floor ? c.floor + ' · ' : '') + c.area + ' — ' + c.family; }).join(' · '))
       : '<em>No cleaning assignments yet.</em>') + '</p>';
     doc += '</body></html>';
     openPrintIframe(doc);
@@ -6028,7 +6034,8 @@
     if ((d.cleaning || []).length === 0) {
       h += '<p class="ws-empty">No cleaning assignments for this session yet.</p>';
     } else {
-      h += '<div class="ws-body-hint">' + d.cleaning.map(function (c) { return escapeHtmlWs(c.area) + ' — <strong>' + escapeHtmlWs(c.family) + '</strong>'; }).join(' · ') + '</div>';
+      // #85: name the floor/category with each area (Main Floor · Bathrooms).
+      h += '<div class="ws-body-hint">' + d.cleaning.map(function (c) { return escapeHtmlWs((c.floor ? c.floor + ' · ' : '') + c.area) + ' — <strong>' + escapeHtmlWs(c.family) + '</strong>'; }).join(' · ') + '</div>';
     }
     h += '</div>';
     body.innerHTML = h;
@@ -8391,6 +8398,10 @@
         return;
       }
       var roles = Array.isArray(results[0].data.roles) ? results[0].data.roles : [];
+      // #86 (Erin): "Guest" is account plumbing for visitor sign-ins, not
+      // a volunteer job — keep it out of the member-facing org tree.
+      // (Roles Assignments, the admin surface, still shows it.)
+      roles = roles.filter(function (r) { return String(r.title || '').trim().toLowerCase() !== 'guest'; });
       var holders = (results[1].ok && Array.isArray(results[1].data.holders)) ? results[1].data.holders : [];
       // Early-summer gap: fall back once to the prior year's holders so
       // the tab shows the real slate instead of everything Open.
