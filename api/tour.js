@@ -1495,7 +1495,7 @@ async function handleList(req, res) {
   const sql = getSql();
   try {
     const rows = await sql`
-      SELECT r.id, r.season, r.email, r.existing_family_name, r.main_learning_coach,
+      SELECT r.id, r.season, r.email, r.family_email, r.existing_family_name, r.main_learning_coach,
              r.address, r.phone, r.track, r.track_other, r.kids, r.placement_notes,
              r.waiver_member_agreement, r.waiver_photo_consent, r.waiver_liability,
              r.signature_name, r.signature_date, r.student_signature,
@@ -9094,9 +9094,10 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
       // Role-specific follow-ups.
       const loginList = adultEmails.filter(e => /@rootsandwingsindy\.com$/i.test(e));
       await notifyEnrollment(sql, holderOf('Communications Director'),
-        'To Do — disable logins: ' + famName,
+        'To Do — remove Google accounts: ' + famName,
         'Manual step in Google Admin: disable/suspend these workspace accounts for the withdrawn ' + famName + ' family: '
-        + (loginList.length ? loginList.join(', ') : '(no workspace logins found)') + '. Account deletion/suspension is NOT automated.');
+        + (loginList.length ? loginList.join(', ') : '(no workspace logins found)') + '. Account deletion/suspension is NOT automated.'
+        + ' This family now also sits on your Workspace To Do card ("Remove Google accounts") until you mark it ✓ Removed there.');
       await notifyEnrollment(sql, holderOf('Treasurer'),
         'Billing heads-up: ' + famName + ' withdrew',
         'Review dues/deposits for the ' + famName + ' family. Nothing was billed or refunded automatically — deposits are non-refundable and every billing adjustment stays manual.');
@@ -9325,6 +9326,84 @@ async function handleOffboardingNotify(body, req, res) {
   } catch (err) {
     console.error('offboarding notify error:', err);
     return res.status(500).json({ error: 'Could not send the notices.' });
+  }
+}
+
+// ── #71: Comms To Do — remove Google accounts for withdrawn families ─
+// A family withdrawal (#44) already notifies Comms; this makes it a
+// PROPER To Do with a per-family done-stamp (member_profiles.
+// account_removed_at/_by) instead of a one-shot bell notice. GET lists
+// withdrawn families split pending/removed; POST stamps one family
+// (undo:true clears the stamp). Same Comms capability gate as
+// onboarding/offboarding. The Google Admin work itself stays manual.
+async function handleWithdrawnAccountsGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await offboardingMayAct(auth.email))) {
+    return res.status(403).json({ error: 'Only the Communications Director can manage account removals.' });
+  }
+  try {
+    const sql = getSql();
+    const fams = await sql`
+      SELECT family_email, family_name, withdrawn_at, withdrawn_by,
+             account_removed_at, account_removed_by
+      FROM member_profiles
+      WHERE withdrawn_at IS NOT NULL
+      ORDER BY withdrawn_at DESC
+    `;
+    const peopleRows = await sql`SELECT email, family_email FROM people WHERE email IS NOT NULL`;
+    return res.status(200).json({
+      families: fams.map(f => ({
+        family_email: String(f.family_email || '').toLowerCase(),
+        family_name: f.family_name || '',
+        withdrawn_at: f.withdrawn_at,
+        withdrawn_by: f.withdrawn_by || '',
+        logins: offboardingLoginsFor(f.family_email, peopleRows),
+        removed_at: f.account_removed_at,
+        removed_by: f.account_removed_by || ''
+      }))
+    });
+  } catch (err) {
+    console.error('withdrawn-accounts GET error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// POST kind='withdrawn-account-removed' { family_email, undo? }
+async function handleWithdrawnAccountRemoved(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const real = auth.realEmail || auth.email;
+  if (!(await offboardingMayAct(auth.email))) {
+    return res.status(403).json({ error: 'Only the Communications Director can manage account removals.' });
+  }
+  const fam = String(body.family_email || '').toLowerCase().trim();
+  if (!fam) return res.status(400).json({ error: 'family_email required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT family_email, withdrawn_at FROM member_profiles
+      WHERE LOWER(family_email) = ${fam} LIMIT 1
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'Family not found.' });
+    if (!rows[0].withdrawn_at) return res.status(409).json({ error: 'That family isn’t marked withdrawn.' });
+    if (body.undo) {
+      await sql`
+        UPDATE member_profiles SET account_removed_at = NULL, account_removed_by = '',
+               updated_at = NOW(), updated_by = ${real}
+        WHERE LOWER(family_email) = ${fam}
+      `;
+    } else {
+      await sql`
+        UPDATE member_profiles SET account_removed_at = NOW(), account_removed_by = ${real},
+               updated_at = NOW(), updated_by = ${real}
+        WHERE LOWER(family_email) = ${fam}
+      `;
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('withdrawn-account-removed error:', err);
+    return res.status(500).json({ error: 'Could not save the stamp.' });
   }
 }
 
@@ -9652,6 +9731,7 @@ module.exports = async function handler(req, res) {
     if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
     if (req.query.adjust_enroll === '1') return handleAdjustEnrollmentGet(req, res);
     if (req.query.offboarding === '1') return handleOffboardingGet(req, res);
+    if (req.query.withdrawn_accounts === '1') return handleWithdrawnAccountsGet(req, res);
     if (req.query.list === 'blc_email_requests') return handleBlcEmailRequestList(req, res);
     if (req.query.list === 'merch_inventory') return handleMerchInventoryList(req, res);
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
@@ -9686,6 +9766,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'enrollment-request-decide') return handleEnrollmentRequestDecide(body, req, res);
     if (kind === 'membership-adjust-enrollment') return handleMembershipAdjustEnrollment(body, req, res);
     if (kind === 'offboarding-notify') return handleOffboardingNotify(body, req, res);
+    if (kind === 'withdrawn-account-removed') return handleWithdrawnAccountRemoved(body, req, res);
     if (kind === 'registration') return handleRegistration(body, req, res);
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);

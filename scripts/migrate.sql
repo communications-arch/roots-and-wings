@@ -2148,3 +2148,11 @@ CREATE TABLE IF NOT EXISTS event_seat_interest (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS event_seat_interest_uniq
   ON event_seat_interest (event_id, seat, LOWER(person_email));
+
+-- #71 (2026-07-22): a family withdrawal creates a stamped Comms To Do —
+-- "remove their Google accounts". The stamp lives on the family profile
+-- so the To Do lists withdrawn-but-not-yet-removed families and clears
+-- per family when Comms ticks ✓ Removed (undo supported: stamp back to
+-- NULL). The removal itself stays 100% manual in Google Admin.
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_at TIMESTAMPTZ;
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_by TEXT NOT NULL DEFAULT '';
