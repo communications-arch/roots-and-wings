@@ -606,10 +606,15 @@
         // classes as Leading rows). Clear before the synchronous render;
         // loadMyClassSubmissions below refetches for the new identity.
         myClassSubmissions = [];
+        // #79: the event-openings feed (Jump In modal / Ways to Help /
+        // seat sign-ups) is identity-keyed too — a stale cache showed the
+        // PREVIOUS identity's "✓ Signed up" state after a View-As switch.
+        if (typeof _eventOpenings !== 'undefined') _eventOpenings = null;
         if (typeof renderMyFamily === 'function') renderMyFamily();
         if (typeof renderCoordinationTabs === 'function') renderCoordinationTabs();
         if (typeof loadNotifications === 'function') loadNotifications();
         if (typeof loadMyClassSubmissions === 'function') loadMyClassSubmissions();
+        if (typeof loadEventOpenings === 'function') loadEventOpenings();
         if (typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
         renderHeaderViewAs(); // refresh the strip's "Viewing as" chunk
         requestAnimationFrame(syncPortalHeaderHeight);
@@ -9226,12 +9231,14 @@
       }
     },
     'special-events': {
-      // Special Events Liaison (+ VP): the standalone manager was retired
+      // Special Events Liaison ONLY (Erin, 2026-07-21: VP dropped — she
+      // already reaches the Admin Calendar + Roles Assignments from her
+      // Co-op Management card). The standalone manager was retired
       // (2026-07-05) — dates live on the Admin Calendar, lead + assistants
       // in Roles Assignments. This card is the liaison's doorway to both
       // (a committee role holds neither tool elsewhere).
       title: 'Special Events',
-      roleGate: ['Special Events Liaison', 'Vice President'],
+      roleGate: ['Special Events Liaison'],
       render: function () {
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
@@ -9856,7 +9863,11 @@
                                          { key: 'guest-setup', title: 'Set Up a Guest' }] },
     'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise Orders' }] },
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
-    'special_events_manage': { widgets: ['special-events'] },
+    // 'special_events_manage' no longer drives the special-events card
+    // (Erin, 2026-07-21): the grant list defaults to SEL + VP, and the VP
+    // shouldn't get the card — her Co-op Management card already links
+    // the Admin Calendar + Roles Assignments. The card is statically
+    // SEL-only now; the capability keeps its SERVER meaning untouched.
     'supply_closet_edit':    { widgets: ['supply-closet-mgmt'] },
     // #64: 'roles' is the consolidated Co-op Management card — since the
     // 2026-07-20 fold-in it hosts Roles Assignments + Admin Calendar for
