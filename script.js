@@ -22810,6 +22810,9 @@
             h += '<li><strong>' + escapeHtmlWs(r.name) + '</strong> — ' + (r.seat === 'lead' ? 'Event Lead' : 'Assistant')
               + ' · <a href="mailto:' + escapeAttr(r.email) + '">' + escapeHtmlWs(r.email) + '</a>'
               + (r.created_at && typeof timeAgo === 'function' ? ' · ' + escapeHtmlWs(timeAgo(r.created_at)) : '')
+              // #80: reviewing clears the row from this card (the person
+              // stays on the event) — the count drops with it.
+              + ' <button type="button" class="sc-btn evseat-ack" data-ack-id="' + r.id + '" title="Mark reviewed — removes it from this list; they stay on the event">✓ Seen</button>'
               + '</li>';
           });
           h += '</ul>';
@@ -22819,6 +22822,23 @@
       el.innerHTML = h;
       var tk = document.getElementById('evseat-take-me');
       if (tk) tk.addEventListener('click', navigateToSpecialEventsGrid);
+      el.querySelectorAll('.evseat-ack').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var ackId = parseInt(btn.getAttribute('data-ack-id'), 10);
+          btn.disabled = true;
+          fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest-ack', id: ackId }) })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not mark it reviewed.'); return; }
+              if (_eventOpenings && Array.isArray(_eventOpenings.seat_interest)) {
+                _eventOpenings.seat_interest = _eventOpenings.seat_interest.filter(function (x) { return x.id !== ackId; });
+              }
+              paint();
+              updateEventSeatTodoItem();
+            })
+            .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+        });
+      });
     }
     if (_eventOpenings && _eventOpenings !== 'loading') paint(); else loadEventOpenings(paint);
   }

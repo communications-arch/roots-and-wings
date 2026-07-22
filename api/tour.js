@@ -6764,6 +6764,27 @@ async function handleEventTemplateSectionsSave(body, req, res) {
   }
 }
 
+// kind=event-seat-interest-ack — SEL/board marks a sign-up as reviewed
+// (#80): removes the LOG row so it leaves the To Do card. The person
+// themselves stays on the event (special_event_people untouched).
+async function handleEventSeatInterestAck(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const ok = await hasCapability(auth.email, 'special_events_manage')
+      || isSuperUser(auth.email) || await isBoardMember(auth.email);
+    if (!ok) return res.status(403).json({ error: 'Only the Special Events Liaison (or board) can review sign-ups.' });
+    await sql`DELETE FROM event_seat_interest WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-seat-interest-ack error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // GET ?event_openings=1 — the Ways to Help feed: this season's events
 // with open lead/assistant seats (#53), open sign-up sections + claims,
 // the viewer's own hand-raises, and (for special-events editors) the
@@ -9655,6 +9676,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
     if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
     if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);
+    if (kind === 'event-seat-interest-ack') return handleEventSeatInterestAck(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||
