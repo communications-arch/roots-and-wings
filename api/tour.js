@@ -6145,6 +6145,42 @@ function eventTaskShape(t) {
   };
 }
 
+// ── Generic event sections (Erin, 2026-07-21) ──
+// Reusable Event Space components — timeline / signup / info / notes —
+// so any event (Ice Cream Social, PJ Party, Field Day…) assembles its
+// own stack. Content/config shapes are documented in migrate.sql.
+const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes'];
+
+function eventSectionShape(s, signups) {
+  return {
+    id: s.id,
+    type: s.type,
+    title: s.title || '',
+    config: s.config || {},
+    content: s.content == null ? [] : s.content,
+    is_open: !!s.is_open,
+    sort_order: s.sort_order,
+    signups: (signups || []).filter(x => x.section_id === s.id).map(x => ({
+      id: x.id,
+      slot_index: x.slot_index,
+      email: (x.person_email || '').toLowerCase(),
+      name: x.person_name || x.person_email || '',
+      item_text: x.item_text || '',
+      note: x.note || ''
+    }))
+  };
+}
+
+// Display name for the signed-in member (sign-ups, seat interest).
+async function eventPersonName(sql, email) {
+  const rows = await sql`
+    SELECT first_name, last_name, family_email FROM people
+    WHERE LOWER(email) = ${String(email || '').toLowerCase()} LIMIT 1
+  `;
+  const nm = rows[0] ? ((rows[0].first_name || '') + ' ' + (rows[0].last_name || '')).trim() : '';
+  return { name: nm || String(email || ''), family_email: (rows[0] && rows[0].family_email) || null };
+}
+
 // GET ?event_space=<special_event_id> — the space payload: event info,
 // checklist, people, template size, and (for editors) the member picker.
 async function handleEventSpaceGet(req, res) {
@@ -6173,6 +6209,21 @@ async function handleEventSpaceGet(req, res) {
     const tplCount = await sql`
       SELECT COUNT(*)::int AS n FROM event_task_templates WHERE event_name = ${ev.name}
     `;
+    const tplSecCount = await sql`
+      SELECT COUNT(*)::int AS n FROM event_template_sections WHERE event_name = ${ev.name}
+    `;
+    // Generic sections (Erin, 2026-07-21) + their member sign-ups.
+    const sections = await sql`
+      SELECT id, type, title, config, content, is_open, sort_order
+      FROM event_sections WHERE special_event_id = ${eventId}
+      ORDER BY sort_order, id
+    `;
+    const sectionIds = sections.map(s => s.id);
+    const sectionSignups = sectionIds.length ? await sql`
+      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      FROM event_section_signups WHERE section_id = ANY(${sectionIds})
+      ORDER BY created_at, id
+    ` : [];
     const canEdit = await canEditEventSpace(sql, auth, eventId);
     const payload = {
       event: {
@@ -6184,8 +6235,10 @@ async function handleEventSpaceGet(req, res) {
         notes: ev.notes || ''
       },
       tasks: tasks.map(eventTaskShape),
+      sections: sections.map(s => eventSectionShape(s, sectionSignups)),
       people: people.map(p => ({ role: p.role, email: p.person_email || '', name: p.person_name || '' })),
       template_count: tplCount[0].n,
+      template_section_count: tplSecCount[0].n,
       can_edit: canEdit,
       viewer_email: String(auth.email || '').toLowerCase()
     };
@@ -6235,6 +6288,20 @@ async function handleMyEventTasksGet(req, res) {
         AND t.done_at IS NULL
       ORDER BY t.due_date NULLS LAST, se.event_date NULLS LAST, t.id
     `;
+    // Planning window (Erin, 2026-07-21): the event's lead + assistants
+    // get a "Plan the <event>" To Do from a month out through the day
+    // after, linking straight into the Event Space.
+    const today = indySignDate();
+    const planning = await sql`
+      SELECT se.id, se.name, se.school_year, se.event_date, p.role
+      FROM special_event_people p
+      JOIN special_events se ON se.id = p.event_id
+      WHERE LOWER(p.person_email) = ${String(auth.email || '').toLowerCase()}
+        AND se.event_date IS NOT NULL
+        AND se.event_date >= (${today}::date - INTERVAL '1 day')
+        AND se.event_date <= (${today}::date + INTERVAL '30 days')
+      ORDER BY se.event_date, se.id
+    `;
     return res.status(200).json({
       tasks: rows.map(r => ({
         id: r.id,
@@ -6244,6 +6311,13 @@ async function handleMyEventTasksGet(req, res) {
         event_name: r.event_name,
         school_year: r.school_year,
         event_date: specialEventDateStr(r.event_date)
+      })),
+      planning: planning.map(r => ({
+        event_id: r.id,
+        event_name: r.name,
+        school_year: r.school_year,
+        event_date: specialEventDateStr(r.event_date),
+        role: r.role
       }))
     });
   } catch (err) {
@@ -6358,18 +6432,65 @@ async function handleEventSpaceTemplateStart(body, req, res) {
     if (!(await canEditEventSpace(sql, auth, eventId))) {
       return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can start the planning list.', youAre: auth.realEmail });
     }
-    const evRows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    const evRows = await sql`SELECT name, school_year FROM special_events WHERE id = ${eventId}`;
     if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
-    const existing = await sql`SELECT COUNT(*)::int AS n FROM event_tasks WHERE special_event_id = ${eventId}`;
-    if (existing[0].n > 0) return res.status(409).json({ error: 'This event already has tasks — add from the template by hand instead.' });
-    const inserted = await sql`
-      INSERT INTO event_tasks (special_event_id, title, sort_order, updated_by)
-      SELECT ${eventId}, title, sort_order, ${auth.realEmail}
-      FROM event_task_templates WHERE event_name = ${evRows[0].name}
-      ORDER BY sort_order, id
-      RETURNING id
-    `;
-    return res.status(200).json({ ok: true, added: inserted.length });
+    const evName = evRows[0].name;
+    const evYear = evRows[0].school_year;
+    const existingTasks = await sql`SELECT COUNT(*)::int AS n FROM event_tasks WHERE special_event_id = ${eventId}`;
+    const existingSections = await sql`SELECT COUNT(*)::int AS n FROM event_sections WHERE special_event_id = ${eventId}`;
+    if (existingTasks[0].n > 0 && existingSections[0].n > 0) {
+      return res.status(409).json({ error: 'This event already has tasks and sections — add from the template by hand instead.' });
+    }
+    let added = 0;
+    if (existingTasks[0].n === 0) {
+      const inserted = await sql`
+        INSERT INTO event_tasks (special_event_id, title, sort_order, updated_by)
+        SELECT ${eventId}, title, sort_order, ${auth.realEmail}
+        FROM event_task_templates WHERE event_name = ${evName}
+        ORDER BY sort_order, id
+        RETURNING id
+      `;
+      added += inserted.length;
+    }
+    // Generic sections ride the same start (Erin, 2026-07-21). Notes
+    // sections carry the PREVIOUS year's "notes for next year" forward
+    // as read-only wisdom ("buy more spoons than you think").
+    if (existingSections[0].n === 0) {
+      const tplSections = await sql`
+        SELECT type, title, config, content, sort_order
+        FROM event_template_sections WHERE event_name = ${evName}
+        ORDER BY sort_order, id
+      `;
+      let prevNotes = null;
+      if (tplSections.some(s => s.type === 'notes')) {
+        const prev = await sql`
+          SELECT es.content, se.school_year
+          FROM event_sections es
+          JOIN special_events se ON se.id = es.special_event_id
+          WHERE se.name = ${evName} AND se.id <> ${eventId}
+            AND es.type = 'notes' AND se.school_year < ${evYear}
+          ORDER BY se.school_year DESC
+          LIMIT 1
+        `;
+        if (prev.length && prev[0].content && String(prev[0].content.text || '').trim()) {
+          prevNotes = { text: prev[0].content.text, year: prev[0].school_year };
+        }
+      }
+      for (const s of tplSections) {
+        let content = s.content == null ? [] : s.content;
+        if (s.type === 'notes') {
+          content = { text: '' };
+          if (prevNotes) { content.prev_text = prevNotes.text; content.prev_year = prevNotes.year; }
+        }
+        await sql`
+          INSERT INTO event_sections (special_event_id, type, title, config, content, sort_order, updated_by)
+          VALUES (${eventId}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
+                  ${JSON.stringify(content)}::jsonb, ${s.sort_order}, ${auth.realEmail})
+        `;
+        added++;
+      }
+    }
+    return res.status(200).json({ ok: true, added });
   } catch (err) {
     console.error('event-space-template-start error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -6399,6 +6520,408 @@ async function handleEventTemplateSave(body, req, res) {
     return res.status(200).json({ ok: true, count: titles.length });
   } catch (err) {
     console.error('event-template-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-section-save — add or edit a generic section (editors).
+// Type is fixed after creation (claims reference the shape); config and
+// content arrive as JSON and are size-capped, never trusted for HTML.
+async function handleEventSectionSave(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  const title = String(body.title || '').trim().slice(0, 200);
+  const config = (body.config && typeof body.config === 'object' && !Array.isArray(body.config)) ? body.config : {};
+  const content = (body.content !== undefined && body.content !== null) ? body.content : [];
+  let cfgStr, cntStr;
+  try {
+    cfgStr = JSON.stringify(config);
+    cntStr = JSON.stringify(content);
+  } catch (e) { return res.status(400).json({ error: 'Bad section data.' }); }
+  if (cfgStr.length > 20000 || cntStr.length > 20000) return res.status(400).json({ error: 'Section content is too large.' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this space.', youAre: auth.realEmail });
+    }
+    const id = body.id != null ? parseInt(body.id, 10) : null;
+    if (Number.isInteger(id) && id > 0) {
+      const upd = await sql`
+        UPDATE event_sections
+        SET title = ${title}, config = ${cfgStr}::jsonb, content = ${cntStr}::jsonb,
+            updated_by = ${auth.realEmail}, updated_at = NOW()
+        WHERE id = ${id} AND special_event_id = ${eventId}
+        RETURNING id
+      `;
+      if (upd.length === 0) return res.status(404).json({ error: 'Section not found.' });
+      return res.status(200).json({ ok: true, id: upd[0].id });
+    }
+    const type = String(body.type || '').trim();
+    if (EVENT_SECTION_TYPES.indexOf(type) === -1) return res.status(400).json({ error: 'Unknown section type.' });
+    const ins = await sql`
+      INSERT INTO event_sections (special_event_id, type, title, config, content, sort_order, updated_by)
+      VALUES (${eventId}, ${type}, ${title}, ${cfgStr}::jsonb, ${cntStr}::jsonb,
+              (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM event_sections WHERE special_event_id = ${eventId}),
+              ${auth.realEmail})
+      RETURNING id
+    `;
+    return res.status(200).json({ ok: true, id: ins[0].id });
+  } catch (err) {
+    console.error('event-section-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-section-delete — editors only; claims cascade away.
+async function handleEventSectionDelete(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT special_event_id FROM event_sections WHERE id = ${id}`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Section not found.' });
+    if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this space.', youAre: auth.realEmail });
+    }
+    await sql`DELETE FROM event_sections WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-section-delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-signups-open — the lead's "Request volunteers" (open=true)
+// or "Close sign-ups". Opening notifies every member (bell) that the
+// event needs helpers — the Ways to Help card grows the claim chips.
+async function handleEventSignupsOpen(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  const open = !!body.open;
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can open sign-ups.', youAre: auth.realEmail });
+    }
+    const secs = await sql`
+      UPDATE event_sections SET is_open = ${open}, updated_by = ${auth.realEmail}, updated_at = NOW()
+      WHERE special_event_id = ${eventId} AND type = 'signup'
+      RETURNING id
+    `;
+    if (secs.length === 0) return res.status(400).json({ error: 'This event has no sign-up sections yet — add one first.' });
+    let notified = 0;
+    if (open && body.notify !== false) {
+      const evRows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+      const evName = (evRows[0] && evRows[0].name) || 'Special event';
+      const ins = await sql`
+        INSERT INTO notifications (recipient_email, type, title, body, link_url)
+        SELECT DISTINCT LOWER(COALESCE(NULLIF(email, ''), personal_email)),
+               'event_signups_open',
+               ${'🎉 ' + evName + ' — sign-ups are open!'},
+               ${'Helpers and contributions are needed for the ' + evName + '. See “Ways to Help” in your Workspace to claim a spot.'},
+               ''
+        FROM people
+        WHERE COALESCE(role, '') <> 'blc'
+          AND COALESCE(NULLIF(email, ''), personal_email, '') <> ''
+        RETURNING id
+      `;
+      notified = ins.length;
+    }
+    return res.status(200).json({ ok: true, sections: secs.length, notified });
+  } catch (err) {
+    console.error('event-signups-open error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-signup-claim — a member claims a slot (slots mode) or adds
+// what they'll bring (bring mode). Editors can claim even while closed.
+async function handleEventSignupClaim(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const sectionId = parseInt(body.section_id, 10);
+  if (!Number.isInteger(sectionId) || sectionId < 1) return res.status(400).json({ error: 'section_id required' });
+  try {
+    const sql = getSql();
+    const secRows = await sql`
+      SELECT id, special_event_id, type, config, content, is_open
+      FROM event_sections WHERE id = ${sectionId}
+    `;
+    if (secRows.length === 0 || secRows[0].type !== 'signup') return res.status(404).json({ error: 'Sign-up list not found.' });
+    const sec = secRows[0];
+    if (!sec.is_open && !(await canEditEventSpace(sql, auth, sec.special_event_id))) {
+      return res.status(403).json({ error: 'Sign-ups aren’t open for this event yet.' });
+    }
+    const email = String(auth.email || '').toLowerCase();
+    const who = await eventPersonName(sql, email);
+    const cfg = sec.config || {};
+    const mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+    if (mode === 'slots') {
+      const slotIndex = parseInt(body.slot_index, 10);
+      const slots = Array.isArray(sec.content) ? sec.content : [];
+      if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= slots.length) {
+        return res.status(400).json({ error: 'That spot no longer exists.' });
+      }
+      const mine = await sql`
+        SELECT id FROM event_section_signups
+        WHERE section_id = ${sectionId} AND slot_index = ${slotIndex} AND LOWER(person_email) = ${email}
+      `;
+      if (mine.length > 0) return res.status(200).json({ ok: true, already: true });
+      const cap = parseInt(slots[slotIndex] && slots[slotIndex].capacity, 10) || 0;
+      if (cap > 0) {
+        const n = await sql`
+          SELECT COUNT(*)::int AS n FROM event_section_signups
+          WHERE section_id = ${sectionId} AND slot_index = ${slotIndex}
+        `;
+        if (n[0].n >= cap) return res.status(409).json({ error: 'That spot just filled up — thank you anyway!' });
+      }
+      await sql`
+        INSERT INTO event_section_signups (section_id, slot_index, person_email, person_name)
+        VALUES (${sectionId}, ${slotIndex}, ${email}, ${who.name})
+      `;
+      return res.status(200).json({ ok: true });
+    }
+    const itemText = String(body.item_text || '').trim().slice(0, 200);
+    if (!itemText) return res.status(400).json({ error: 'Say what you’ll bring.' });
+    const note = String(body.note || '').trim().slice(0, 300);
+    await sql`
+      INSERT INTO event_section_signups (section_id, person_email, person_name, item_text, note)
+      VALUES (${sectionId}, ${email}, ${who.name}, ${itemText}, ${note})
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-signup-claim error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-signup-unclaim — remove a claim: your own, or any if you
+// can edit the event's space.
+async function handleEventSignupUnclaim(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT su.id, su.person_email, s.special_event_id
+      FROM event_section_signups su JOIN event_sections s ON s.id = su.section_id
+      WHERE su.id = ${id}
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Sign-up not found.' });
+    const isMine = String(rows[0].person_email || '').toLowerCase() === String(auth.email || '').toLowerCase();
+    if (!isMine && !(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'You can only remove your own sign-up.' });
+    }
+    await sql`DELETE FROM event_section_signups WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-signup-unclaim error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-template-sections-save — snapshot the event's live section
+// stack as the per-event-NAME template (SEL/VP/board, like the task
+// template). Sign-ups are never part of a template; this year's notes
+// text is blanked (templates carry structure, not history — the
+// carry-forward happens at template-start).
+async function handleEventTemplateSectionsSave(body, req, res) {
+  const auth = await requireSpecialEventsEditor(req, res);
+  if (!auth) return;
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    const evRows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const eventName = evRows[0].name;
+    const sections = await sql`
+      SELECT type, title, config, content, sort_order
+      FROM event_sections WHERE special_event_id = ${eventId}
+      ORDER BY sort_order, id
+    `;
+    await sql`DELETE FROM event_template_sections WHERE event_name = ${eventName}`;
+    for (const s of sections) {
+      const content = s.type === 'notes' ? { text: '' } : (s.content == null ? [] : s.content);
+      await sql`
+        INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
+        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
+                ${JSON.stringify(content)}::jsonb, ${s.sort_order}, ${auth.realEmail})
+      `;
+    }
+    return res.status(200).json({ ok: true, count: sections.length });
+  } catch (err) {
+    console.error('event-template-sections-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// GET ?event_openings=1 — the Ways to Help feed: this season's events
+// with open lead/assistant seats (#53), open sign-up sections + claims,
+// the viewer's own hand-raises, and (for special-events editors) the
+// full seat-interest list their To Do reviews.
+async function handleEventOpeningsGet(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const schoolYear = String(req.query.school_year || DEFAULT_SEASON);
+  const email = String(auth.email || '').toLowerCase();
+  try {
+    const sql = getSql();
+    const events = await sql`
+      SELECT id, name, school_year, event_date, end_date, date_status, start_time, end_time
+      FROM special_events WHERE school_year = ${schoolYear}
+      ORDER BY event_date NULLS LAST, sort_order, id
+    `;
+    const ids = events.map(e => e.id);
+    const people = ids.length ? await sql`
+      SELECT event_id, role FROM special_event_people WHERE event_id = ANY(${ids})
+    ` : [];
+    const myInterest = await sql`
+      SELECT event_id, seat FROM event_seat_interest WHERE LOWER(person_email) = ${email}
+    `;
+    const sections = ids.length ? await sql`
+      SELECT id, special_event_id, type, title, config, content, is_open, sort_order
+      FROM event_sections
+      WHERE special_event_id = ANY(${ids}) AND type = 'signup' AND is_open = TRUE
+      ORDER BY sort_order, id
+    ` : [];
+    const sectionIds = sections.map(s => s.id);
+    const signups = sectionIds.length ? await sql`
+      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      FROM event_section_signups WHERE section_id = ANY(${sectionIds})
+      ORDER BY created_at, id
+    ` : [];
+    const today = indySignDate();
+    const out = [];
+    events.forEach(ev => {
+      const dateStr = specialEventDateStr(ev.event_date);
+      // Past events drop off (1-day grace); undated ones stay listed.
+      if (dateStr && dateStr < today) return;
+      const evPeople = people.filter(p => p.event_id === ev.id);
+      const leadFilled = evPeople.some(p => p.role === 'lead');
+      const assistCount = evPeople.filter(p => p.role === 'assist').length;
+      const openSeats = [];
+      // Assistant seats: show while fewer than 2 helpers are assigned
+      // (spreadsheet-era events ran with 1–2; the grid itself caps at 4).
+      if (!leadFilled) openSeats.push('lead');
+      if (assistCount < 2) openSeats.push('assist');
+      const mine = { lead: false, assist: false };
+      myInterest.forEach(r => { if (r.event_id === ev.id) mine[r.seat] = true; });
+      const evSections = sections.filter(s => s.special_event_id === ev.id)
+        .map(s => eventSectionShape(s, signups));
+      if (openSeats.length === 0 && evSections.length === 0) return;
+      out.push({
+        id: ev.id,
+        name: ev.name,
+        school_year: ev.school_year,
+        event_date: dateStr,
+        date_status: ev.date_status,
+        start_time: ev.start_time || '',
+        end_time: ev.end_time || '',
+        open_seats: openSeats,
+        my_seat_interest: mine,
+        signup_sections: evSections
+      });
+    });
+    const payload = { school_year: schoolYear, events: out, viewer_email: email };
+    // Seat-interest review list for the SEL / Sustaining Director To Do.
+    const canReview = await hasCapability(auth.email, 'special_events_manage')
+      || isSuperUser(auth.email) || await isBoardMember(auth.email);
+    payload.can_review = canReview;
+    if (canReview) {
+      const interest = await sql`
+        SELECT esi.id, esi.event_id, esi.seat, esi.person_email, esi.person_name, esi.created_at,
+               se.name AS event_name, se.school_year, se.event_date
+        FROM event_seat_interest esi
+        JOIN special_events se ON se.id = esi.event_id
+        WHERE se.school_year = ${schoolYear}
+        ORDER BY esi.created_at DESC
+      `;
+      payload.seat_interest = interest.map(r => ({
+        id: r.id,
+        event_id: r.event_id,
+        event_name: r.event_name,
+        event_date: specialEventDateStr(r.event_date),
+        seat: r.seat,
+        email: (r.person_email || '').toLowerCase(),
+        name: r.person_name || r.person_email || '',
+        created_at: r.created_at
+      }));
+    }
+    return res.status(200).json(payload);
+  } catch (err) {
+    console.error('event-openings get error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-seat-interest — raise/withdraw a hand for an open event
+// seat (#53). A signal, not an assignment: SEL + Sustaining Director
+// get a bell notification and review from their To Do, then assign in
+// the Special Events grid.
+async function handleEventSeatInterest(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  const seat = body.seat === 'lead' ? 'lead' : 'assist';
+  const on = !!body.on;
+  try {
+    const sql = getSql();
+    const evRows = await sql`SELECT id, name, school_year FROM special_events WHERE id = ${eventId}`;
+    if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const ev = evRows[0];
+    const email = String(auth.email || '').toLowerCase();
+    if (!on) {
+      await sql`
+        DELETE FROM event_seat_interest
+        WHERE event_id = ${eventId} AND seat = ${seat} AND LOWER(person_email) = ${email}
+      `;
+      return res.status(200).json({ ok: true });
+    }
+    const who = await eventPersonName(sql, email);
+    const ins = await sql`
+      INSERT INTO event_seat_interest (event_id, seat, person_email, person_name, family_email)
+      VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${who.family_email})
+      ON CONFLICT (event_id, seat, LOWER(person_email)) DO NOTHING
+      RETURNING id
+    `;
+    if (ins.length > 0) {
+      // Alert the reviewers (#53): SEL + head of the Support Committee
+      // (Sustaining Director). Role-holder lookup with a VP fallback so
+      // the signal never silently vanishes.
+      const recipients = new Set();
+      for (const roleTitle of ['Special Events Liaison', 'Sustaining Director']) {
+        try {
+          const em = await getRoleHolderEmail(roleTitle);
+          if (em) recipients.add(String(em).toLowerCase());
+        } catch (e) { /* role unresolved — fallback below */ }
+      }
+      if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
+      const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
+      for (const rcpt of recipients) {
+        try {
+          await sql`
+            INSERT INTO notifications (recipient_email, type, title, body, link_url)
+            VALUES (${rcpt}, 'event_seat_interest',
+                    ${'🙋 ' + who.name + ' — ' + ev.name + ' ' + seatLabel},
+                    ${who.name + ' signed up to help with the ' + ev.name + ' (' + seatLabel + '). Review event sign-ups on your To Do card, then assign them in the Special Events grid.'},
+                    '')
+          `;
+        } catch (e) { console.error('event-seat-interest notification failed (non-fatal):', e.message); }
+      }
+    }
+    return res.status(200).json({ ok: true, already: ins.length === 0 });
+  } catch (err) {
+    console.error('event-seat-interest error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -9017,6 +9540,7 @@ module.exports = async function handler(req, res) {
     if (req.query.morning_builder === '1' || req.query.morning_builder === 'true') return handleMorningBuilderGet(req, res);
     if (req.query.special_events === '1' || req.query.special_events === 'true') return handleSpecialEventsGet(req, res);
     if (req.query.event_space) return handleEventSpaceGet(req, res);
+    if (req.query.event_openings === '1') return handleEventOpeningsGet(req, res);
     if (req.query.my_event_tasks === '1') return handleMyEventTasksGet(req, res);
     if (req.query.calendar === '1' || req.query.calendar === 'true') return handleBoardCalendarGet(req, res);
     if (req.query.welcome === '1' || req.query.welcome === 'true') return handleWelcomeListGet(req, res);
@@ -9079,6 +9603,13 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-task-delete') return handleEventTaskDelete(body, req, res);
     if (kind === 'event-space-template-start') return handleEventSpaceTemplateStart(body, req, res);
     if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
+    if (kind === 'event-section-save') return handleEventSectionSave(body, req, res);
+    if (kind === 'event-section-delete') return handleEventSectionDelete(body, req, res);
+    if (kind === 'event-signups-open') return handleEventSignupsOpen(body, req, res);
+    if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);
+    if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
+    if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
+    if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||

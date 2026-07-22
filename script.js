@@ -8758,7 +8758,13 @@
             + '<button type="button" class="ws-inline-link" data-resource-action="open-seats-modal">see them all</button>, '
             + 'or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</p>';
         }
+        // Special events (#53 + sign-up lists, 2026-07-21): open event
+        // seats + any sign-ups a lead has opened, claimable right here.
+        h += renderWthEventsBlock();
         return h;
+      },
+      afterRender: function () {
+        if (_eventOpenings === null && typeof loadEventOpenings === 'function') loadEventOpenings();
       }
     },
     'class-ideas': {
@@ -8958,6 +8964,13 @@
           // shows which lottery and where they landed (Erin, 2026-07-16).
           h += '<li id="ws-todo-acl-lotmoves-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-lottery-moves"><span class="ws-link-count" id="ws-acl-lotmoves-count">0</span><span class="ws-link-icon">📣</span><span id="ws-acl-lotmoves-label">Tell families about lottery moves</span></button></li>';
           h += '<li id="ws-todo-acl-confirm-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-confirm"><span class="ws-link-count" id="ws-acl-confirm-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-acl-confirm-label">Send class confirmations</span></button></li>';
+        }
+        if (role === 'Special Events Liaison' || role === 'Sustaining Director') {
+          // #53: members raising a hand for open event seats land here.
+          // Painted by updateEventSeatTodoItem (rides the event-openings
+          // feed); the modal lists who wants what + a take-me-there link
+          // to the Special Events grid.
+          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">Review special-event sign-ups</span></button></li>';
         }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
@@ -18758,6 +18771,14 @@
       showDutyDetail({ text: seatTitle, popup: rolePopupForTitle(seatTitle) });
     }
     else if (action === 'role-interest-toggle' && typeof toggleRoleInterest === 'function') toggleRoleInterest(btn);
+    // Special-event openings (#53 + sign-up lists, 2026-07-21) — the
+    // same buttons render on Ways to Help AND inside the Event Space,
+    // so they ride this document-level delegation.
+    else if (action === 'event-seat-toggle' && typeof toggleEventSeatInterest === 'function') toggleEventSeatInterest(btn);
+    else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
+    else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
+    else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
+    else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
   });
 
   // Render all coordination tabs
@@ -21951,11 +21972,24 @@
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
 
     if (d.can_edit) {
+      var secsAll = d.sections || [];
+      var tplTotal = (d.template_count || 0) + (d.template_section_count || 0);
       h += '<div class="coop-cal-toolbar"><span></span><span style="display:flex;gap:8px;flex-wrap:wrap;">';
-      if (tasks.length === 0 && d.template_count > 0) {
-        h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + d.template_count + ' task' + (d.template_count === 1 ? '' : 's') + ')</button>';
+      if (tplTotal > 0 && (tasks.length === 0 || secsAll.length === 0)) {
+        h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplTotal + ' item' + (tplTotal === 1 ? '' : 's') + ')</button>';
       }
       h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button>';
+      // Generic sections (Erin, 2026-07-21): timeline / sign-ups / info /
+      // notes join the checklist so the space replaces the old planning
+      // spreadsheet end to end.
+      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-section">+ Add section</button>';
+      var signupSecsTb = secsAll.filter(function (s) { return s.type === 'signup'; });
+      if (signupSecsTb.length) {
+        var anyOpenTb = signupSecsTb.some(function (s) { return s.is_open; });
+        h += anyOpenTb
+          ? '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-close-signups">Close sign-ups</button>'
+          : '<button type="button" class="btn btn-primary btn-sm" id="evs-open-signups">📣 Request volunteers</button>';
+      }
       if (d.template_titles !== undefined) {
         h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-edit-template">Edit template</button>';
       }
@@ -21987,6 +22021,7 @@
       });
       h += '</ul>';
     }
+    h += renderEventSections(d);
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -22052,6 +22087,64 @@
     });
     var tplBtn = body.querySelector('#evs-edit-template');
     if (tplBtn) tplBtn.addEventListener('click', openEventTemplateDrawer);
+
+    // ── Generic sections wiring (Erin, 2026-07-21) ──
+    var addSecBtn = body.querySelector('#evs-add-section');
+    if (addSecBtn) addSecBtn.addEventListener('click', function () { openEventSectionDrawer(null); });
+    body.querySelectorAll('.evs-sec-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+        var s = ((d && d.sections) || []).filter(function (x) { return x.id === sid; })[0];
+        if (s) openEventSectionDrawer(s);
+      });
+    });
+    body.querySelectorAll('.evs-sec-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'delete', function () {
+          var sid = parseInt(self.getAttribute('data-section-id'), 10);
+          self.disabled = true;
+          fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-section-delete', id: sid }) })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { self.disabled = false; alert((res.data && res.data.error) || 'Delete failed.'); return; }
+              loadEventSpace(); loadEventOpenings();
+            })
+            .catch(function () { self.disabled = false; alert('Network error.'); });
+        });
+      });
+    });
+    // Request volunteers / Close sign-ups — the open flips is_open on
+    // every sign-up section and (open only) bell-notifies all members.
+    var openSuBtn = body.querySelector('#evs-open-signups');
+    if (openSuBtn) openSuBtn.addEventListener('click', function () {
+      var self = this;
+      rwArmTwoStep(self, 'notify members', function () {
+        self.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signups-open', event_id: _eventSpaceState.id, open: true }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) alert((res.data && res.data.error) || 'Could not open sign-ups.');
+            else alert('Sign-ups are open! ' + (res.data.notified || 0) + ' members were notified — the lists now show on everyone’s Ways to Help card.');
+            loadEventSpace(); loadEventOpenings();
+          })
+          .catch(function () { alert('Network error.'); loadEventSpace(); });
+      });
+    });
+    var closeSuBtn = body.querySelector('#evs-close-signups');
+    if (closeSuBtn) closeSuBtn.addEventListener('click', function () {
+      var self = this;
+      rwArmTwoStep(self, 'close', function () {
+        self.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signups-open', event_id: _eventSpaceState.id, open: false }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) alert((res.data && res.data.error) || 'Could not close sign-ups.');
+            loadEventSpace(); loadEventOpenings();
+          })
+          .catch(function () { alert('Network error.'); loadEventSpace(); });
+      });
+    });
   }
 
   // Add/Edit task — standard settings drawer over the space.
@@ -22114,7 +22207,31 @@
     var h = '<p class="ws-body-hint">One task per line. The template seeds this event’s planning list when a year starts from it — the current checklist isn’t changed by edits here.</p>';
     h += '<textarea class="cl-input cls-textarea evs-tpl-text" rows="12" placeholder="Order ice cream\nGet napkins & bowls\nLine up serving volunteers\nRequest topping donations">' + escapeHtmlWs((d.template_titles || []).join('\n')) + '</textarea>';
     h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-tpl-save">Save template</button><span class="perm-status evs-tpl-status" aria-live="polite"></span></div>';
+    // Sections template (Erin, 2026-07-21): snapshot the live section
+    // stack — future years start from it (sign-ups reset; the notes
+    // section carries last year's wisdom forward at template-start).
+    h += '<h5 class="ws-part-subhead">Sections template</h5>';
+    h += '<p class="ws-body-hint">Saved for “' + escapeHtmlWs(d.event.name) + '”: <strong class="evs-tpls-count">' + (d.template_section_count || 0) + '</strong> section' + ((d.template_section_count || 0) === 1 ? '' : 's') + '. Snapshot this event’s current sections (timeline, sign-up lists, info, notes) to replace it.</p>';
+    h += '<div class="perm-chips"><button type="button" class="btn btn-outline-dark btn-sm evs-tpl-sections">Save current sections as template</button><span class="perm-status evs-tpls-status" aria-live="polite"></span></div>';
     el.innerHTML = h;
+    var tplSecBtn = el.querySelector('.evs-tpl-sections');
+    if (tplSecBtn) tplSecBtn.addEventListener('click', function () {
+      var st2 = el.querySelector('.evs-tpls-status');
+      var btn2 = this;
+      btn2.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-template-sections-save', event_id: _eventSpaceState.id }) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          btn2.disabled = false;
+          if (!res.ok) { st2.className = 'perm-status evs-tpls-status ws-wv-err'; st2.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          st2.className = 'perm-status evs-tpls-status ws-wv-ok';
+          st2.textContent = '✓ Saved (' + res.data.count + ' section' + (res.data.count === 1 ? '' : 's') + ')';
+          if (_eventSpaceState.data) _eventSpaceState.data.template_section_count = res.data.count;
+          var cnt = el.querySelector('.evs-tpls-count');
+          if (cnt) cnt.textContent = res.data.count;
+        })
+        .catch(function () { btn2.disabled = false; st2.className = 'perm-status evs-tpls-status ws-wv-err'; st2.textContent = 'Network error'; });
+    });
     el.querySelector('.evs-tpl-save').addEventListener('click', function () {
       var st = el.querySelector('.evs-tpl-status');
       var titles = el.querySelector('.evs-tpl-text').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
@@ -22132,8 +22249,443 @@
     });
   }
 
+  // ── Generic event sections (Erin, 2026-07-21) ─────────────────────
+  // Reusable Event Space components — timeline / signup / info / notes —
+  // that any special event assembles and the per-event-name template
+  // carries into future years. Sign-up sections surface on every
+  // member's Ways to Help card once the lead hits "Request volunteers".
+  function evsSectionTitle(s) {
+    if (s.title) return s.title;
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year' }[s.type] || 'Section';
+  }
+
+  // Shared signup-section body — same markup in the Event Space and on
+  // Ways to Help (the global data-resource-action dispatcher wires both).
+  function renderSignupSectionBody(s, viewerEmail, canEdit) {
+    var cfg = s.config || {};
+    var h = '';
+    if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
+    var canAct = s.is_open || canEdit;
+    if (cfg.mode === 'slots') {
+      h += '<ul class="ws-opportunities">';
+      (Array.isArray(s.content) ? s.content : []).forEach(function (slot, idx) {
+        var claims = (s.signups || []).filter(function (x) { return x.slot_index === idx; });
+        var cap = parseInt(slot.capacity, 10) || 0;
+        var mineClaim = claims.filter(function (x) { return x.email === viewerEmail; })[0];
+        var full = cap > 0 && claims.length >= cap;
+        h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
+        var meta = cap > 0 ? (claims.length + ' of ' + cap + ' filled') : (claims.length + ' signed up');
+        if (claims.length) {
+          meta += ' · ' + claims.map(function (c) {
+            var nm = escapeHtmlWs(c.name);
+            if (canEdit || c.email === viewerEmail) nm += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove sign-up" title="Remove">×</button>';
+            return nm;
+          }).join(', ');
+        }
+        h += '<span class="ws-opp-committee">' + meta + '</span></span>';
+        if (mineClaim) h += '<span class="ws-opp-committee">✓ You’re signed up</span>';
+        else if (canAct && !full) h += '<button type="button" class="sc-btn ws-opp-interest" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">🙋 Sign up</button>';
+        else if (full) h += '<span class="ws-opp-committee">Full — thank you!</span>';
+        h += '</li>';
+      });
+      h += '</ul>';
+    } else {
+      if ((s.signups || []).length) {
+        h += '<ul class="ws-part-recap">';
+        s.signups.forEach(function (c) {
+          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + escapeHtmlWs(c.item_text)
+            + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
+          if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
+          h += '</li>';
+        });
+        h += '</ul>';
+      } else {
+        h += '<p class="ws-empty">Nothing claimed yet' + (canAct ? ' — be the first!' : '.') + '</p>';
+      }
+      if (canAct) {
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">➕ Sign up to bring something</button></p>';
+        h += '<div class="evs-bring-form" data-bring-form="' + s.id + '" hidden></div>';
+      }
+    }
+    return h;
+  }
+
+  function renderEventSections(d) {
+    var secs = d.sections || [];
+    if (!secs.length) return '';
+    var h = '';
+    secs.forEach(function (s) {
+      h += '<div class="evs-section">';
+      h += '<div class="rd-counts" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
+      h += '<h5 class="ws-part-subhead" style="margin:0;">' + ({ timeline: '🕐', signup: '🙋', info: 'ℹ️', notes: '📔' }[s.type] || '📄') + ' ' + escapeHtmlWs(evsSectionTitle(s));
+      h += '</h5>';
+      if (s.type === 'signup') h += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      if (d.can_edit) {
+        h += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
+          + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
+      }
+      h += '</div>';
+      if (s.type === 'info') {
+        var items = Array.isArray(s.content) ? s.content : [];
+        h += items.length
+          ? '<ul class="ws-part-recap">' + items.map(function (t) { return '<li>' + escapeHtmlWs(String(t)) + '</li>'; }).join('') + '</ul>'
+          : '<p class="ws-empty">Nothing here yet.</p>';
+      } else if (s.type === 'timeline') {
+        var rows = Array.isArray(s.content) ? s.content : [];
+        h += rows.length ? '<ul class="evs-task-list">' + rows.map(function (r) {
+          var main = (r.time ? '<strong>' + escapeHtmlWs(r.time) + '</strong> — ' : '') + escapeHtmlWs(r.activity || '');
+          var meta = [];
+          if (r.place) meta.push('📍 ' + escapeHtmlWs(r.place));
+          if (r.who) meta.push('👤 ' + escapeHtmlWs(r.who));
+          return '<li class="evs-task"><span class="evs-body"><span class="evs-title">' + main + '</span>'
+            + (meta.length ? '<span class="evs-meta">' + meta.join(' · ') + '</span>' : '') + '</span></li>';
+        }).join('') + '</ul>' : '<p class="ws-empty">No schedule rows yet.</p>';
+      } else if (s.type === 'notes') {
+        var c = s.content || {};
+        if (c.prev_text) {
+          h += '<p class="ws-body-hint"><strong>📔 Notes from ' + escapeHtmlWs(String(c.prev_year || 'last year')) + ':</strong></p>';
+          h += '<p class="ws-body-hint" style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.prev_text)) + '</p>';
+        }
+        h += String(c.text || '').trim()
+          ? '<p style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.text)) + '</p>'
+          : '<p class="ws-empty">Jot lessons for next year here' + (d.can_edit ? ' — Edit this section' : '') + '.</p>';
+      } else if (s.type === 'signup') {
+        h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
+      }
+      h += '</div>';
+    });
+    return h;
+  }
+
+  // Add/Edit a section — textarea-first drawer (same spirit as the task
+  // template drawer): plain lines with " | " separators, no heavy grid UI.
+  function openEventSectionDrawer(section) {
+    var d = _eventSpaceState.data;
+    if (!d) return;
+    var isEdit = !!section;
+    var type = isEdit ? section.type : 'info';
+    openReportDrawer({ title: isEdit ? 'Edit section — ' + evsSectionTitle(section) : 'Add a section', bodyId: 'evs-section-drawer', bodyPlaceholder: '' });
+    var el = document.getElementById('evs-section-drawer');
+    if (!el) return;
+    function fieldsFor(t, s) {
+      var cfg = (s && s.config) || {};
+      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year' }[t] || '') + '"></div>';
+      if (t === 'info') {
+        var lines = Array.isArray(s && s.content) ? s.content.join('\n') : '';
+        fh += '<div class="cls-field"><label class="cls-label">Items — one per line</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Dairy ice cream — chocolate and vanilla\nNon-dairy vegan ice cream\nAll paper goods">' + escapeHtmlWs(lines) + '</textarea></div>';
+      } else if (t === 'timeline') {
+        var tl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) {
+          var parts = [r.time || '', r.activity || '', r.place || '', r.who || ''];
+          while (parts.length && !parts[parts.length - 1]) parts.pop();
+          return parts.join(' | ');
+        }).join('\n');
+        fh += '<div class="cls-field"><label class="cls-label">Rows — time | activity | where | who (one per line)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="12:30–2:30 | Outdoor open play | Playground\n1:30 | Ice cream served | Outdoor pavilion | Serving crew">' + escapeHtmlWs(tl) + '</textarea></div>';
+      } else if (t === 'notes') {
+        fh += '<div class="cls-field"><label class="cls-label">Notes for next year</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="What ran out? What worked? What should next year’s crew know?">' + escapeHtmlWs(String(((s && s.content) || {}).text || '')) + '</textarea></div>';
+      } else if (t === 'signup') {
+        var mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+        fh += '<div class="cls-field"><label class="cls-label">Sign-up style</label><select class="cl-input evs-sd-mode">'
+          + '<option value="bring"' + (mode === 'bring' ? ' selected' : '') + '>Bring something — members add what they’ll bring</option>'
+          + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Volunteer spots — fixed slots with a capacity</option>'
+          + '</select></div>';
+        fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input evs-sd-notelabel" type="text" maxlength="120" value="' + escapeAttr(cfg.note_label || '') + '" placeholder="Allergy info — nut-free facility!"></div>';
+        fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
+        var sl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) { return (r.label || '') + (r.capacity ? ' | ' + r.capacity : ''); }).join('\n');
+        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label | how many people (one per line)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Set Up — 11:30 am | 4\nServing — 12:30 pm | 3\nClean Up — 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+      }
+      return fh;
+    }
+    var h = '';
+    if (!isEdit) {
+      h += '<div class="cls-field"><label class="cls-label">Section type</label><select class="cl-input evs-sd-type">'
+        + '<option value="info">Info list — what the co-op provides, what to know</option>'
+        + '<option value="signup">Sign-up list — toppings, supplies, volunteer spots</option>'
+        + '<option value="timeline">Timeline — the day-of schedule</option>'
+        + '<option value="notes">Notes for next year</option>'
+        + '</select></div>';
+    }
+    h += '<div id="evs-sd-fields">' + fieldsFor(type, section) + '</div>';
+    h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-sd-save">' + (isEdit ? 'Save changes' : 'Add section') + '</button><span class="perm-status evs-sd-status" aria-live="polite"></span></div>';
+    el.innerHTML = h;
+    function syncModeVis() {
+      var modeSel = el.querySelector('.evs-sd-mode');
+      var isSlots = modeSel && modeSel.value === 'slots';
+      el.querySelectorAll('.evs-sd-slots-only').forEach(function (x) { x.style.display = isSlots ? '' : 'none'; });
+      el.querySelectorAll('.evs-sd-bring-only').forEach(function (x) { x.style.display = isSlots ? 'none' : ''; });
+    }
+    function wireModeSel() {
+      var ms = el.querySelector('.evs-sd-mode');
+      if (ms) ms.addEventListener('change', syncModeVis);
+      syncModeVis();
+    }
+    var typeSel = el.querySelector('.evs-sd-type');
+    if (typeSel) typeSel.addEventListener('change', function () {
+      type = this.value;
+      document.getElementById('evs-sd-fields').innerHTML = fieldsFor(type, null);
+      wireModeSel();
+    });
+    wireModeSel();
+    el.querySelector('.evs-sd-save').addEventListener('click', function () {
+      var st = el.querySelector('.evs-sd-status');
+      var title = el.querySelector('.evs-sd-title').value.trim();
+      var linesEl = el.querySelector('.evs-sd-lines');
+      var lines = linesEl ? linesEl.value : '';
+      var config = {};
+      var content = [];
+      if (type === 'info') {
+        content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      } else if (type === 'timeline') {
+        content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
+          var p = ln.split('|').map(function (x) { return x.trim(); });
+          return { time: p[0] || '', activity: p[1] || '', place: p[2] || '', who: p[3] || '' };
+        });
+      } else if (type === 'notes') {
+        var prevC = (isEdit && section.content) || {};
+        content = { text: lines };
+        if (prevC.prev_text) { content.prev_text = prevC.prev_text; content.prev_year = prevC.prev_year; }
+      } else if (type === 'signup') {
+        var modeSel2 = el.querySelector('.evs-sd-mode');
+        config.mode = (modeSel2 && modeSel2.value === 'slots') ? 'slots' : 'bring';
+        var nl = el.querySelector('.evs-sd-notelabel');
+        if (nl && nl.value.trim()) config.note_label = nl.value.trim();
+        var hintEl = el.querySelector('.evs-sd-hint');
+        if (hintEl && hintEl.value.trim()) config.hint = hintEl.value.trim();
+        if (config.mode === 'slots') {
+          content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
+            var p = ln.split('|');
+            return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0 };
+          });
+          if (!content.length) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Add at least one spot'; return; }
+        }
+      }
+      var payload = { kind: 'event-section-save', event_id: _eventSpaceState.id, title: title, config: config, content: content };
+      if (isEdit) payload.id = section.id; else payload.type = type;
+      var btn = this;
+      btn.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          closeReportDrawer(true);
+          loadEventSpace();
+          loadEventOpenings();
+        })
+        .catch(function () { btn.disabled = false; st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // ── Ways to Help: event openings feed (#53 + sign-up lists) ────────
+  var _eventOpenings = null;
+  function loadEventOpenings(cb) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { if (cb) cb(); return; }
+    var wasLoading = _eventOpenings === 'loading';
+    if (_eventOpenings === null) _eventOpenings = 'loading';
+    fetch('/api/tour?event_openings=1', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) { if (_eventOpenings === 'loading') _eventOpenings = null; if (cb) cb(); return; }
+        _eventOpenings = data;
+        if (typeof refreshWorkspaceWidget === 'function') refreshWorkspaceWidget('ways-to-help');
+        updateEventSeatTodoItem();
+        if (cb) cb();
+      })
+      .catch(function () { if (_eventOpenings === 'loading') _eventOpenings = null; if (cb) cb(); });
+    return wasLoading;
+  }
+
+  function wthEventDateLabel(ev) {
+    return ev.event_date ? boardCalFmtDate(ev.event_date) : 'Date TBD';
+  }
+
+  // The "Special events — jump in" block on the Ways to Help card:
+  // open lead/assistant seats (I'm-interested hand-raises, #53) plus
+  // any sign-up lists the event's lead has opened.
+  function renderWthEventsBlock() {
+    var eo = _eventOpenings;
+    if (!eo || eo === 'loading' || !Array.isArray(eo.events) || !eo.events.length) return '';
+    var h = '<h5 class="ws-part-subhead">Special events — jump in</h5>';
+    var seatRows = '';
+    eo.events.forEach(function (ev) {
+      (ev.open_seats || []).forEach(function (seat) {
+        var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[seat]);
+        var label = seat === 'lead' ? 'Event Lead' : 'Assistant';
+        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(ev.name) + '</strong> — ' + label
+          + '<span class="ws-opp-committee">' + escapeHtml(wthEventDateLabel(ev)) + '</span></span>'
+          + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="' + seat + '">'
+          + (isOn ? '✓ Interested' : '🙋 I’m interested') + '</button></li>';
+      });
+    });
+    if (seatRows) {
+      h += '<p class="ws-body-hint">Open event seats — <strong>I’m interested</strong> quietly tells the Special Events Liaison; it isn’t a commitment.</p>';
+      h += '<ul class="ws-opportunities">' + seatRows + '</ul>';
+    }
+    eo.events.forEach(function (ev) {
+      (ev.signup_sections || []).forEach(function (s) {
+        h += '<p class="ws-body-hint" style="margin-bottom:4px;"><strong>' + escapeHtml(ev.name) + ' — ' + escapeHtml(evsSectionTitle(s)) + '</strong> · ' + escapeHtml(wthEventDateLabel(ev)) + '</p>';
+        h += renderSignupSectionBody(s, eo.viewer_email, false);
+      });
+    });
+    if (!seatRows && !eo.events.some(function (ev) { return (ev.signup_sections || []).length; })) return '';
+    return h;
+  }
+
+  // One-click hand-raise for an open event seat (#53).
+  function toggleEventSeatInterest(btn) {
+    var eid = parseInt(btn.getAttribute('data-event-id'), 10);
+    var seat = btn.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
+    if (!eid || btn.disabled) return;
+    var eo = _eventOpenings || {};
+    var ev = (Array.isArray(eo.events) ? eo.events : []).filter(function (e) { return e.id === eid; })[0];
+    var isOn = !!(ev && ev.my_seat_interest && ev.my_seat_interest[seat]);
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: eid, seat: seat, on: !isOn }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { alert('Error: ' + ((res.data && res.data.error) || 'could not save')); return; }
+        if (ev && ev.my_seat_interest) ev.my_seat_interest[seat] = !isOn;
+        btn.classList.toggle('ws-opp-interested', !isOn);
+        btn.textContent = !isOn ? '✓ Interested' : '🙋 I’m interested';
+        loadEventOpenings();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+
+  function evsMaybeRefreshSpace() {
+    if (_eventSpaceState && _eventSpaceState.id && document.getElementById('event-space-body')) loadEventSpace();
+  }
+
+  function claimEventSlot(btn) {
+    if (btn.disabled) return;
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var idx = parseInt(btn.getAttribute('data-slot-index'), 10);
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, slot_index: idx }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not sign you up.'); }
+        loadEventOpenings();
+        evsMaybeRefreshSpace();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+
+  function removeEventSignup(btn) {
+    if (btn.disabled) return;
+    if (!confirm('Remove this sign-up?')) return;
+    var id = parseInt(btn.getAttribute('data-signup-id'), 10);
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-unclaim', id: id }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not remove it.'); }
+        loadEventOpenings();
+        evsMaybeRefreshSpace();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+
+  // Inline "what I'll bring" mini-form (bring-mode sign-ups). Lives in a
+  // hidden div next to the button — no drawer, works in the card and in
+  // the Event Space alike.
+  function toggleEventBringForm(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var form = document.querySelector('[data-bring-form="' + sid + '"]');
+    if (!form) return;
+    if (!form.hidden) { form.hidden = true; form.innerHTML = ''; return; }
+    var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
+    form.hidden = false;
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">What will you bring?</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="e.g. rainbow sprinkles"></div>'
+      + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>'
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Sign up</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
+    var itemInp = form.querySelector('.evs-bring-item');
+    if (itemInp) itemInp.focus();
+    form.querySelector('.evs-bring-save').addEventListener('click', function () {
+      var st = form.querySelector('.evs-bring-status');
+      var item = form.querySelector('.evs-bring-item').value.trim();
+      if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Say what you’ll bring'; return; }
+      var note = form.querySelector('.evs-bring-note').value.trim();
+      var saveBtn = this;
+      saveBtn.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, item_text: item, note: note }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          loadEventOpenings();
+          evsMaybeRefreshSpace();
+        })
+        .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // ── SEL / Sustaining Director To Do: seat sign-ups to review (#53) ──
+  function updateEventSeatTodoItem() {
+    var eo = _eventOpenings;
+    var n = (eo && eo !== 'loading' && Array.isArray(eo.seat_interest)) ? eo.seat_interest.length : 0;
+    document.querySelectorAll('li[id="ws-todo-evseats-item"]').forEach(function (li) {
+      li.hidden = n === 0;
+      var c = li.querySelector('.ws-link-count');
+      if (c) c.textContent = n;
+    });
+    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+  }
+
+  function navigateToSpecialEventsGrid() {
+    if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* modal already gone */ } }
+    var tabBtn = document.querySelector('.portal-tab[data-tab="events"]');
+    if (tabBtn) tabBtn.click();
+    var panel = document.getElementById('tab-events');
+    var host = (panel && panel.closest('.portal-tabs')) || panel;
+    if (host) setTimeout(function () { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+  }
+
+  function showEventSeatReviewModal() {
+    var body = renderReportModal({
+      title: '🙋 Special-Event Sign-ups',
+      subtitle: 'Members who raised a hand for an open event seat. These are hand-raises, not assignments — assign the lead and assistants on the event card in the Special Events grid.',
+      bodyId: 'evseat-review-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    function paint() {
+      var el = document.getElementById('evseat-review-body');
+      if (!el) return;
+      var eo = _eventOpenings;
+      var rows = (eo && eo !== 'loading' && Array.isArray(eo.seat_interest)) ? eo.seat_interest : [];
+      var h = '<div class="coop-cal-toolbar"><span></span><button type="button" class="btn btn-primary btn-sm" id="evseat-take-me">Take me there → Special Events grid</button></div>';
+      if (!rows.length) {
+        h += '<p class="ws-empty">No special-event sign-ups waiting right now.</p>';
+      } else {
+        var byEvent = {};
+        rows.forEach(function (r) {
+          (byEvent[r.event_id] = byEvent[r.event_id] || { name: r.event_name, date: r.event_date, rows: [] }).rows.push(r);
+        });
+        Object.keys(byEvent).forEach(function (eid) {
+          var g = byEvent[eid];
+          h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtmlWs(g.name) + (g.date ? ' — ' + boardCalFmtDate(g.date) : '') + '</h5>';
+          h += '<ul class="ws-part-recap">';
+          g.rows.forEach(function (r) {
+            h += '<li><strong>' + escapeHtmlWs(r.name) + '</strong> — ' + (r.seat === 'lead' ? 'Event Lead' : 'Assistant')
+              + ' · <a href="mailto:' + escapeAttr(r.email) + '">' + escapeHtmlWs(r.email) + '</a>'
+              + (r.created_at && typeof timeAgo === 'function' ? ' · ' + escapeHtmlWs(timeAgo(r.created_at)) : '')
+              + '</li>';
+          });
+          h += '</ul>';
+        });
+        h += '<p class="ws-body-hint">Assigning them (Special Events grid → the event card) fills the seat and clears it from Ways to Help.</p>';
+      }
+      el.innerHTML = h;
+      var tk = document.getElementById('evseat-take-me');
+      if (tk) tk.addEventListener('click', navigateToSpecialEventsGrid);
+    }
+    if (_eventOpenings && _eventOpenings !== 'loading') paint(); else loadEventOpenings(paint);
+  }
+
   // My open event tasks — feeds My Responsibilities (one duty per event).
   var _myEventTasks = null;
+  var _myEventPlanning = null;
   var _myEventTasksSig = '';
   function loadMyEventTasks() {
     var cred = localStorage.getItem('rw_google_credential');
@@ -22143,10 +22695,12 @@
       .then(function (data) {
         if (!data) return;
         var tasks = Array.isArray(data.tasks) ? data.tasks : [];
-        var sig = JSON.stringify(tasks);
+        var planning = Array.isArray(data.planning) ? data.planning : [];
+        var sig = JSON.stringify([tasks, planning]);
         var changed = sig !== _myEventTasksSig;
         _myEventTasksSig = sig;
         _myEventTasks = tasks;
+        _myEventPlanning = planning;
         // Re-render once when the set changes so the duty rows appear
         // without looping (renderMyFamily calls this loader).
         if (changed && typeof renderMyFamily === 'function') renderMyFamily();
@@ -22172,6 +22726,13 @@
       g.n++;
       if (t.due_date && (!g.due || t.due_date < g.due)) g.due = t.due_date;
     });
+    // "Plan the <event>" for the lead + assistants inside the planning
+    // window (event−30d … event+1d; Erin 2026-07-21). The assigned-task
+    // row above is already that event's doorway, so skip duplicates.
+    var planByEvent = {};
+    (Array.isArray(_myEventPlanning) ? _myEventPlanning : []).forEach(function (p) {
+      if (!byEvent[p.event_id]) planByEvent[p.event_id] = p;
+    });
     lists.forEach(function (list) {
       list.querySelectorAll('li.ws-todo-evt').forEach(function (li) { li.remove(); });
       var anchor = list.querySelector('li[id="ws-todo-empty"]');
@@ -22189,7 +22750,21 @@
         });
         list.insertBefore(li, anchor);
       });
+      Object.keys(planByEvent).forEach(function (eid) {
+        var p = planByEvent[eid];
+        var li = document.createElement('li');
+        li.className = 'ws-todo-evt';
+        li.id = 'ws-todo-evtplan-' + eid + '-item';
+        li.innerHTML = '<button type="button" class="ws-link-btn"><span class="ws-link-icon">🎪</span>'
+          + '<span>Plan the ' + escapeHtml(p.event_name)
+          + (p.event_date ? ' — ' + boardCalFmtDate(p.event_date) : '') + '</span></button>';
+        li.querySelector('button').addEventListener('click', function () {
+          if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
+        });
+        list.insertBefore(li, anchor);
+      });
     });
+    updateEventSeatTodoItem();
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 

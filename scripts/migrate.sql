@@ -2076,3 +2076,75 @@ CREATE INDEX IF NOT EXISTS public_form_hits_ts_idx ON public_form_hits (form_ts)
 -- existing todo_confirmations pattern (kind='removemembers').
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_at TIMESTAMPTZ;
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_by TEXT NOT NULL DEFAULT '';
+
+-- Special-event generic sections (Erin, 2026-07-21): the Event Space
+-- grows from a lone checklist into a stack of reusable components any
+-- event assembles — timeline / signup / info / notes. Content shapes
+-- (JSONB) per type:
+--   timeline: [{time, activity, place, who}]
+--   signup:   config {mode:'bring'|'slots', note_label, hint};
+--             content (slots mode) [{label, capacity}]
+--   info:     ["bullet", ...]
+--   notes:    {text, prev_text, prev_year} — prev_* carried from the
+--             previous year's event by template-start
+-- is_open gates member sign-ups (the lead's "Request volunteers").
+CREATE TABLE IF NOT EXISTS event_sections (
+  id               SERIAL PRIMARY KEY,
+  special_event_id INTEGER NOT NULL REFERENCES special_events(id) ON DELETE CASCADE,
+  type             TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes')),
+  title            TEXT NOT NULL DEFAULT '',
+  config           JSONB NOT NULL DEFAULT '{}',
+  content          JSONB NOT NULL DEFAULT '[]',
+  is_open          BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  updated_by       TEXT NOT NULL DEFAULT '',
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS event_sections_event_idx ON event_sections (special_event_id);
+
+-- Member claims on signup sections. slot_index points into the section's
+-- content array (slots mode); bring mode uses item_text (+ optional
+-- note, e.g. allergy info). One row per claim; members remove their own.
+CREATE TABLE IF NOT EXISTS event_section_signups (
+  id           SERIAL PRIMARY KEY,
+  section_id   INTEGER NOT NULL REFERENCES event_sections(id) ON DELETE CASCADE,
+  slot_index   INTEGER,
+  person_email TEXT NOT NULL,
+  person_name  TEXT NOT NULL DEFAULT '',
+  item_text    TEXT NOT NULL DEFAULT '',
+  note         TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS event_section_signups_section_idx ON event_section_signups (section_id);
+
+-- Per-event-NAME section templates (parallel to event_task_templates):
+-- "Save sections as template" snapshots an event's live section stack;
+-- template-start copies it into a fresh year (sign-ups never copied).
+CREATE TABLE IF NOT EXISTS event_template_sections (
+  id         SERIAL PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  type       TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes')),
+  title      TEXT NOT NULL DEFAULT '',
+  config     JSONB NOT NULL DEFAULT '{}',
+  content    JSONB NOT NULL DEFAULT '[]',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS event_template_sections_name_idx ON event_template_sections (event_name);
+
+-- Bug log #53: members raise a hand for an OPEN special-event seat
+-- (lead / assistant) from Ways to Help. An interest signal, not an
+-- assignment — SEL + Sustaining Director review from their To Do and
+-- assign in the Special Events grid. Mirrors role_interest (#39).
+CREATE TABLE IF NOT EXISTS event_seat_interest (
+  id           SERIAL PRIMARY KEY,
+  event_id     INTEGER NOT NULL REFERENCES special_events(id) ON DELETE CASCADE,
+  seat         TEXT NOT NULL DEFAULT 'assist' CHECK (seat IN ('lead','assist')),
+  person_email TEXT NOT NULL,
+  person_name  TEXT NOT NULL DEFAULT '',
+  family_email TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_seat_interest_uniq
+  ON event_seat_interest (event_id, seat, LOWER(person_email));

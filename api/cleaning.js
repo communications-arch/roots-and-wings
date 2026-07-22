@@ -583,6 +583,60 @@ module.exports = async function handler(req, res) {
           ON CONFLICT (role_id, LOWER(person_email)) DO NOTHING
           RETURNING id
         `;
+        // Bug log #51: a NEW hand-raise alerts the board member in
+        // charge of that committee — walk parent_role_id up to the
+        // nearest 'board' ancestor, notify its active holders (VP
+        // fallback so the signal never vanishes). Non-fatal by design.
+        if (inserted.length > 0) {
+          try {
+            const nameRows = await sql`
+              SELECT TRIM(CONCAT_WS(' ', first_name, last_name)) AS nm
+              FROM people WHERE LOWER(email) = ${personEmail} LIMIT 1
+            `;
+            const whoName = (nameRows[0] && nameRows[0].nm) || personEmail;
+            const seat = await sql`
+              SELECT r.title, c.name AS committee
+              FROM roles r LEFT JOIN committees c ON c.id = r.committee_id
+              WHERE r.id = ${roleId}
+            `;
+            const seatTitle = (seat[0] && seat[0].title) || 'a committee seat';
+            const seatCommittee = (seat[0] && seat[0].committee) || '';
+            const boardAncestor = await sql`
+              WITH RECURSIVE chain AS (
+                SELECT id, parent_role_id, category, role_email, 0 AS depth
+                FROM roles WHERE id = ${roleId}
+                UNION ALL
+                SELECT r.id, r.parent_role_id, r.category, r.role_email, chain.depth + 1
+                FROM roles r JOIN chain ON r.id = chain.parent_role_id
+                WHERE chain.depth < 10
+              )
+              SELECT id, role_email FROM chain WHERE category = 'board' ORDER BY depth LIMIT 1
+            `;
+            const recipients = new Set();
+            if (boardAncestor.length > 0) {
+              const holders = await sql`
+                SELECT LOWER(person_email) AS em FROM role_holders_v2
+                WHERE role_id = ${boardAncestor[0].id} AND ended_at IS NULL
+                  AND school_year = ${activeSchoolYear()}
+              `;
+              holders.forEach(hr => { if (hr.em) recipients.add(hr.em); });
+              const re = String(boardAncestor[0].role_email || '').trim().toLowerCase();
+              if (recipients.size === 0 && re) recipients.add(re);
+            }
+            if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
+            for (const rcpt of recipients) {
+              await sql`
+                INSERT INTO notifications (recipient_email, type, title, body, link_url)
+                VALUES (${rcpt}, 'role_interest',
+                        ${'🙋 ' + whoName + ' is interested — ' + seatTitle},
+                        ${whoName + ' raised a hand for ' + seatTitle + (seatCommittee ? ' (' + seatCommittee + ')' : '') + '. See who’s interested in Roles Assignments.'},
+                        '')
+              `;
+            }
+          } catch (e) {
+            console.error('role-interest notification failed (non-fatal):', e.message);
+          }
+        }
         return res.status(200).json({ ok: true, already: inserted.length === 0 });
       }
       if (req.method === 'DELETE') {
