@@ -9788,7 +9788,9 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 }
 
 @media (max-width: 640px) {
-  .notif-dropdown { width: min(280px, calc(100vw - 16px)); right: -20px; }
+  /* right offset removed (#104): the dropdown is body-level fixed now —
+     JS positions and clamps it; the old -20px nudge predates #94. */
+  .notif-dropdown { width: min(280px, calc(100vw - 16px)); }
   .absence-modal { padding: 1rem; }
   .coverage-slot { flex-wrap: wrap; }
   .coverage-slot-actions { width: 100%; justify-content: flex-end; margin-top: 0.35rem; }

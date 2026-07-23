@@ -20811,7 +20811,14 @@
     var ddTop = Math.round(bellRect.bottom + 8);
     dropdown.style.position = 'fixed';
     dropdown.style.top = ddTop + 'px';
-    dropdown.style.right = Math.max(8, Math.round(window.innerWidth - bellRect.right)) + 'px';
+    // #104 (Lyndsey, mobile): the bell sits MID-toolbar (edit/bug/logout
+    // live to its right), so anchoring the panel's right edge to the
+    // bell pushed its left edge off-screen on phones. Clamp the anchor
+    // so the whole panel stays inside the viewport.
+    var ddRight = Math.max(8, Math.round(window.innerWidth - bellRect.right));
+    var ddWidth = dropdown.getBoundingClientRect().width || 320;
+    ddRight = Math.min(ddRight, Math.max(8, Math.round(window.innerWidth - ddWidth - 8)));
+    dropdown.style.right = ddRight + 'px';
     dropdown.style.left = 'auto';
     dropdown.style.maxHeight = Math.max(160, window.innerHeight - ddTop - 12) + 'px';
     dropdown.style.zIndex = '10001';
