@@ -22343,6 +22343,7 @@
   // super user can change meta fields or create/archive roles.
   var _rolesMgrState = {
     roles: [],
+    loaded: false,       // roles fetch resolved? (print distinguishes this from "no roles")
     holdersByRoleId: {}, // { role_id: [ {id, email, person_name, family_name}, ... ] }
     interestByRoleId: {}, // #39: { role_id: [ {id, email, person_name}, ... ] } — "I'm interested" hands
     showArchived: false,
@@ -22407,6 +22408,9 @@
     // Add Role now lives in the body toolbar above the tree — the standard
     // add placement (Erin, 2026-07-19) — not in the header chrome.
     icons.push({ label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download role holders for this year as CSV', action: function () { exportRoleHoldersCSV(); } });
+    // Prints EVERY lens this viewer can see, not just the one on screen
+    // (Erin, 2026-07-23) — the binder wants the whole year in one go.
+    icons.push({ label: 'Print', icon: ICON_SVG.print, aria: 'Print every view — roles, special events, morning classes, afternoon helpers, cleaning', action: function () { printRolesReport(); } });
     var body = renderReportModal({
       title: 'Roles & Committees',
       subtitle: 'Every job description, term, and hierarchy in one place. Edits are stamped with who and when.',
@@ -24066,6 +24070,424 @@
     }
     wrap.innerHTML = h;
     raWireManage(wrap);
+  }
+
+  // ── Print the whole Roles & Committees report ────────────────────
+  // Erin (2026-07-23): one 🖨 that prints EVERY lens, not just the one
+  // on screen. The lenses are permission-gated and lazy-loaded, so the
+  // doc carries exactly the pills this viewer can actually see — the
+  // pill's own hidden flag is the single source of truth, since the
+  // loaders already resolved every gate before the pills appeared.
+  //
+  // Built fresh from state rather than cloned from the DOM: the tree's
+  // detail rows sit collapsed behind [hidden], and every lens is laced
+  // with Assign / Edit / Archive / Manage / Open-space buttons that
+  // have no business on paper. Building fresh also lets the print show
+  // the FULL overview text where the screen truncates at 120 chars.
+
+  // Shape the live state into the plain object buildRolesPrintHtml wants.
+  // This is the glue — it reads globals and the DOM; the builder it feeds
+  // is pure so the document itself stays testable.
+  function rolesPrintData() {
+    function pillOn(id) {
+      var el = document.getElementById(id);
+      return !!(el && !el.hidden);
+    }
+    var st = _rolesMgrState;
+    var allRoles = st.roles || [];
+    var visible = allRoles.filter(function (r) { return st.showArchived || r.status !== 'archived'; });
+    var byId = {};
+    visible.forEach(function (r) { byId[r.id] = r; });
+    var childrenOf = {};
+    visible.forEach(function (r) {
+      if (r.parent_role_id) (childrenOf[r.parent_role_id] = childrenOf[r.parent_role_id] || []).push(r);
+    });
+    Object.keys(childrenOf).forEach(function (k) {
+      childrenOf[k].sort(function (a, b) {
+        if ((a.status === 'archived') !== (b.status === 'archived')) return a.status === 'archived' ? 1 : -1;
+        return a.display_order - b.display_order || a.title.localeCompare(b.title);
+      });
+    });
+    function rowOf(r, depth) {
+      var held = (st.holdersByRoleId && st.holdersByRoleId[r.id]) || [];
+      var interested = (st.interestByRoleId && st.interestByRoleId[r.id]) || [];
+      return {
+        title: r.title,
+        depth: depth,
+        archived: r.status === 'archived',
+        descOnly: r.category === 'cleaning_area' || isDescriptionOnlyRole(r.title),
+        holders: held.map(function (hh) { return hh.person_name || hh.email; }).filter(Boolean),
+        interested: interested.map(function (i) { return i.person_name || i.email; }).filter(Boolean),
+        term: r.job_length || '',
+        overview: r.overview || ''
+      };
+    }
+    function walk(r, depth, out) {
+      out.push(rowOf(r, depth));
+      (childrenOf[r.id] || []).forEach(function (k) { walk(k, depth + 1, out); });
+      return out;
+    }
+    var branches = visible.filter(function (r) { return r.category === 'board'; })
+      .sort(function (a, b) { return a.display_order - b.display_order || a.title.localeCompare(b.title); })
+      .map(function (b) {
+        return { title: b.title, emoji: b.icon_emoji || '\u{1F333}', rows: walk(b, 0, []) };
+      });
+    var orphans = visible.filter(function (r) { return r.category !== 'board' && !byId[r.parent_role_id]; })
+      .sort(function (a, b) { return a.title.localeCompare(b.title); })
+      .map(function (r) { return rowOf(r, 0); });
+
+    // Morning: same group × session grid the AM lens paints.
+    var amByKey = {};
+    raPlacedSubs('AM').forEach(function (s) {
+      var k = sbAmGroupOf(s) + '|' + s.scheduled_session;
+      (amByKey[k] || (amByKey[k] = [])).push(s);
+    });
+    var amRows = BRAND_AGE_GROUPS.filter(function (g) { return g !== 'Greenhouse'; }).map(function (grp) {
+      var cells = [];
+      for (var sess = 1; sess <= 5; sess++) {
+        cells.push((amByKey[grp + '|' + sess] || []).slice().sort(function (a, b) {
+          return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
+        }).map(function (s) {
+          return {
+            scheduled_hour: s.scheduled_hour || 'AM',
+            teacher: s.submitted_by_name || s.submitted_by_email || 'TBD',
+            className: s.class_name || '',
+            draft: s.status === 'drafted',
+            helpers: (s.helpers || []).map(function (hh) { return hh.name || hh.email; }).filter(Boolean)
+          };
+        }));
+      }
+      return { group: grp, cells: cells };
+    });
+
+    var pmSubs = raPlacedSubs('PM');
+    var pmSessions = [];
+    for (var ps = 1; ps <= 5; ps++) {
+      (function (sess) {
+        var inSess = pmSubs.filter(function (s) { return s.scheduled_session === sess; })
+          .sort(function (a, b) {
+            var ord = { PM1: 0, both: 1, PM2: 2 };
+            var d = (ord[a.scheduled_hour] || 0) - (ord[b.scheduled_hour] || 0);
+            return d !== 0 ? d : String(a.class_name || '').localeCompare(String(b.class_name || ''));
+          });
+        if (!inSess.length) return;
+        pmSessions.push({
+          session: sess,
+          rows: inSess.map(function (s) {
+            return {
+              className: s.class_name || '',
+              draft: s.status === 'drafted',
+              hour: s.scheduled_hour,
+              teacher: s.submitted_by_name || s.submitted_by_email || '',
+              helpers: (s.helpers || []).map(function (hh) { return hh.name || hh.email; }).filter(Boolean),
+              wants: (s.assistant_count || []).join(' or ') || '1',
+              needs: raPmHelpersNeeded(s)
+            };
+          })
+        });
+      })(ps);
+    }
+
+    var cl = _rolesMgrAsgState.cleaning;
+    var cleaningFloors = [];
+    if (cl) {
+      var famByKey = {};
+      (cl.assignments || []).forEach(function (a) {
+        var k = a.cleaning_area_id + '|' + a.session_number;
+        (famByKey[k] || (famByKey[k] = [])).push(a.family_name);
+      });
+      [{ key: 'mainFloor', label: 'Main Floor' }, { key: 'upstairs', label: 'Upstairs' },
+       { key: 'outside', label: 'Outside' }, { key: 'floater', label: 'Floaters' }].forEach(function (fl) {
+        var areas = (cl.areas || []).filter(function (a) { return a.floor_key === fl.key; });
+        if (!areas.length) return;
+        cleaningFloors.push({
+          label: fl.label,
+          areas: areas.map(function (a) {
+            var cells = [];
+            for (var cs = 1; cs <= 5; cs++) cells.push(famByKey[a.id + '|' + cs] || []);
+            return { name: a.area_name, cells: cells };
+          })
+        });
+      });
+    }
+
+    return {
+      schoolYear: st.schoolYear,
+      showArchived: !!st.showArchived,
+      printedOn: new Date().toLocaleDateString(),
+      sections: {
+        roles: true,
+        se: pillOn('roles-mgr-se-pill'),
+        am: pillOn('roles-mgr-am-pill'),
+        pm: pillOn('roles-mgr-pm-pill'),
+        cleaning: pillOn('roles-mgr-cl-pill')
+      },
+      // A lens can be visible but still in flight if Print is hit the
+      // instant the modal opens — say so rather than printing a blank.
+      loading: {
+        roles: !st.loaded,
+        se: false,
+        am: !_rolesMgrAsgState.loaded,
+        pm: !_rolesMgrAsgState.loaded,
+        cleaning: !cl
+      },
+      branches: branches,
+      orphans: orphans,
+      events: (_rolesMgrEventsState.events || []).slice().sort(function (a, b) {
+        return String(a.event_date || '9999').localeCompare(String(b.event_date || '9999'));
+      }).map(function (ev) {
+        return {
+          name: ev.name || '',
+          date: ev.event_date ? boardCalFmtDate(ev.event_date) : '',
+          approved: ev.date_status === 'approved',
+          lead: (ev.lead && (ev.lead.name || ev.lead.email)) || '',
+          assists: (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean)
+        };
+      }),
+      amRows: amRows,
+      pmSessions: pmSessions,
+      cleaningFloors: cleaningFloors,
+      cleaningYear: cl ? cl.year : ''
+    };
+  }
+
+  // PURE — builds the whole print document. Depends only on escapeHtml,
+  // raHourLabel and raAmSlotState (all pure), so scripts/test-roles-print.js
+  // can extract and exercise it. Keep the `^  function … ^  }` shape.
+  function buildRolesPrintHtml(d) {
+    var esc = escapeHtml;
+    var S = d.sections || {};
+    var loading = d.loading || {};
+    function sectionHead(title, counts) {
+      return '<h2 class="rp-head">' + esc(title) + '</h2>'
+        + (counts ? '<p class="rp-counts">' + esc(counts) + '</p>' : '');
+    }
+    function stillLoading(what) {
+      return '<p class="rp-note">Still loading when this was printed — reopen Roles &amp; Committees, let '
+        + esc(what) + ' finish, then print again.</p>';
+    }
+    function dash(v) { return v ? esc(v) : '—'; }
+    function roleTable(rows) {
+      var t = '<table><thead><tr><th>Role</th><th>Held by</th><th>Term</th><th>Description</th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        var indent = r.depth > 0 ? ' class="rp-indent-' + Math.min(r.depth, 3) + '"' : '';
+        t += '<tr>';
+        t += '<td' + indent + '>' + esc(r.title)
+          + (r.archived ? ' <span class="rp-tag">(archived)</span>' : '') + '</td>';
+        var who;
+        if (r.descOnly) who = '<span class="rp-tag">per schedule</span>';
+        else if (!r.holders.length) who = '<span class="rp-open">Unassigned</span>';
+        else who = esc(r.holders.join(', '));
+        if (r.interested && r.interested.length) {
+          who += '<span class="rp-sub">🙋 Interested: ' + esc(r.interested.join(', ')) + '</span>';
+        }
+        t += '<td>' + who + '</td>';
+        t += '<td>' + dash(r.term) + '</td>';
+        // Full text here — the on-screen row truncates at 120 chars, but
+        // the printed binder is where people actually read these.
+        t += '<td class="rp-desc">' + dash(r.overview) + '</td>';
+        t += '</tr>';
+      });
+      return t + '</tbody></table>';
+    }
+
+    var doc = '<!doctype html><html><head><meta charset="utf-8">';
+    doc += '<title>Roles &amp; Committees — ' + esc(d.schoolYear || '') + '</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;max-width:900px;margin:0 auto;}'
+      + 'h1{font-size:19px;margin:0 0 2px;}'
+      + 'p.meta{color:#666;margin:0 0 14px;font-size:12px;}'
+      + '.rp-head{font-size:14px;margin:20px 0 4px;border-bottom:1px solid #ccc;padding-bottom:3px;}'
+      + '.rp-counts{color:#444;margin:0 0 8px;font-size:11.5px;}'
+      + '.rp-note{color:#8a5a00;font-style:italic;margin:4px 0 10px;}'
+      + '.rp-branch{margin:0 0 12px;break-inside:avoid;page-break-inside:avoid;}'
+      + '.rp-branch h3{font-size:12.5px;margin:10px 0 3px;}'
+      + 'table{border-collapse:collapse;width:100%;font-size:11.5px;margin:4px 0 10px;}'
+      + 'th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;vertical-align:top;}'
+      + 'th{background:#f5f0e8;font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;}'
+      + 'td.rp-grid-cell{font-size:10.5px;}'
+      + 'th.rp-floor{background:#ece5d8;font-size:11px;text-transform:none;letter-spacing:0;}'
+      + '.rp-open{color:#b3261e;font-weight:700;}'
+      + '.rp-sub{display:block;color:#555;font-size:10px;}'
+      + '.rp-tag{color:#8a5a00;font-style:italic;}'
+      + '.rp-desc{color:#444;}'
+      + '.rp-indent-1{padding-left:14px;}.rp-indent-2{padding-left:28px;}.rp-indent-3{padding-left:42px;}'
+      + '@media print{h2{break-after:avoid;page-break-after:avoid;}}'
+      + '</style></head><body>';
+    doc += '<h1>Roles &amp; Committees</h1>';
+    var scope = [];
+    scope.push(d.schoolYear || '');
+    scope.push(d.showArchived ? 'including archived roles' : 'active roles only');
+    scope.push('printed ' + (d.printedOn || ''));
+    doc += '<p class="meta">' + esc(scope.filter(Boolean).join(' · ')) + '</p>';
+
+    // ── Board & Committees ──
+    if (S.roles) {
+      var totalRows = 0, filled = 0;
+      (d.branches || []).forEach(function (b) {
+        (b.rows || []).forEach(function (r) {
+          if (r.archived || r.descOnly) return;
+          totalRows++; if (r.holders.length) filled++;
+        });
+      });
+      (d.orphans || []).forEach(function (r) {
+        if (r.archived || r.descOnly) return;
+        totalRows++; if (r.holders.length) filled++;
+      });
+      doc += sectionHead('Board & Committees',
+        filled + ' of ' + totalRows + ' roles filled · ' + (totalRows - filled) + ' open');
+      if (loading.roles) {
+        doc += stillLoading('the role tree');
+      } else {
+        (d.branches || []).forEach(function (b) {
+          doc += '<div class="rp-branch"><h3>' + esc(b.emoji || '') + ' ' + esc(b.title) + '</h3>';
+          doc += roleTable(b.rows || []);
+          doc += '</div>';
+        });
+        if ((d.orphans || []).length) {
+          doc += '<div class="rp-branch"><h3>Other volunteer roles</h3>' + roleTable(d.orphans) + '</div>';
+        }
+        if (!(d.branches || []).length && !(d.orphans || []).length) {
+          doc += '<p class="rp-note">No roles to show for this year.</p>';
+        }
+      }
+    }
+
+    // ── Special Events ──
+    if (S.se) {
+      var evs = d.events || [];
+      var withLead = evs.filter(function (e) { return !!e.lead; }).length;
+      doc += sectionHead('🎉 Special Events',
+        withLead + ' with a lead · ' + (evs.length - withLead) + ' need a lead');
+      if (!evs.length) {
+        doc += '<p class="rp-note">No special events for this year yet.</p>';
+      } else {
+        doc += '<table><thead><tr><th>Event</th><th>Date</th><th>Lead</th><th>Assistants</th></tr></thead><tbody>';
+        evs.forEach(function (e) {
+          doc += '<tr><td>' + esc(e.name) + '</td>';
+          doc += '<td>' + (e.date ? esc(e.date) : '—')
+            + '<span class="rp-sub">' + (e.approved ? '✓ Approved' : 'Proposed') + '</span></td>';
+          doc += '<td>' + (e.lead ? esc(e.lead) : '<span class="rp-open">OPEN</span>') + '</td>';
+          doc += '<td>' + (e.assists.length ? esc(e.assists.join(', ')) : '—') + '</td></tr>';
+        });
+        doc += '</tbody></table>';
+      }
+    }
+
+    // ── Morning Classes (group × session matrix) ──
+    if (S.am) {
+      var full = 0, partial = 0, openAm = 0;
+      (d.amRows || []).forEach(function (row) {
+        row.cells.forEach(function (entries) {
+          var cov = raAmSlotState(entries);
+          if (cov.state === 'full') full++;
+          else if (cov.state === 'partial') partial++;
+          else openAm++;
+        });
+      });
+      doc += sectionHead('🌅 Morning Classes',
+        full + ' covered · ' + partial + ' hour open · ' + openAm + ' open');
+      if (loading.am) {
+        doc += stillLoading('the class submissions');
+      } else {
+        doc += '<table><thead><tr><th>Group</th>';
+        for (var ai = 1; ai <= 5; ai++) doc += '<th>S' + ai + '</th>';
+        doc += '</tr></thead><tbody>';
+        (d.amRows || []).forEach(function (row) {
+          doc += '<tr><th>' + esc(row.group) + '</th>';
+          row.cells.forEach(function (entries) {
+            var cov = raAmSlotState(entries);
+            var cell = '';
+            entries.forEach(function (s) {
+              cell += '<div>' + esc(s.teacher) + (s.draft ? ' <span class="rp-tag">(draft)</span>' : '');
+              cell += '<span class="rp-sub">' + esc(raHourLabel(s.scheduled_hour)) + ' · ' + esc(s.className) + '</span>';
+              if (s.helpers.length) cell += '<span class="rp-sub">w/ ' + esc(s.helpers.join(', ')) + '</span>';
+              cell += '</div>';
+            });
+            if (cov.state === 'open') {
+              cell += '<span class="rp-open">OPEN</span>';
+            } else {
+              cov.openHours.forEach(function (hh) {
+                cell += '<span class="rp-open">' + esc(raHourLabel(hh)) + ' open</span>';
+              });
+            }
+            doc += '<td class="rp-grid-cell">' + cell + '</td>';
+          });
+          doc += '</tr>';
+        });
+        doc += '</tbody></table>';
+      }
+    }
+
+    // ── Afternoon Helpers (one table per session) ──
+    if (S.pm) {
+      var scheduled = 0, spots = 0;
+      (d.pmSessions || []).forEach(function (s) {
+        s.rows.forEach(function (r) { scheduled++; spots += r.needs; });
+      });
+      doc += sectionHead('🌇 Afternoon Helpers',
+        scheduled + ' scheduled · ' + (spots > 0 ? spots + ' helper spot' + (spots === 1 ? '' : 's') + ' to fill' : 'all helped'));
+      if (loading.pm) {
+        doc += stillLoading('the class submissions');
+      } else if (!(d.pmSessions || []).length) {
+        doc += '<p class="rp-note">No afternoon classes scheduled for ' + esc(d.schoolYear || '') + ' yet.</p>';
+      } else {
+        (d.pmSessions || []).forEach(function (sess) {
+          doc += '<div class="rp-branch"><h3>Session ' + sess.session + '</h3>';
+          doc += '<table><thead><tr><th>Class</th><th>Hour</th><th>Teacher</th><th>Helpers</th></tr></thead><tbody>';
+          sess.rows.forEach(function (r) {
+            doc += '<tr><td>' + esc(r.className) + (r.draft ? ' <span class="rp-tag">(draft)</span>' : '') + '</td>';
+            doc += '<td>' + esc(raHourLabel(r.hour)) + '</td>';
+            doc += '<td>' + dash(r.teacher) + '</td>';
+            var hc = r.helpers.length ? esc(r.helpers.join(', ')) : 'none yet';
+            hc += '<span class="rp-sub">wants ' + esc(r.wants) + '</span>';
+            if (r.needs > 0) hc += '<span class="rp-open">needs ' + r.needs + ' more</span>';
+            doc += '<td>' + hc + '</td></tr>';
+          });
+          doc += '</tbody></table></div>';
+        });
+      }
+    }
+
+    // ── Cleaning (area × session matrix, grouped by floor) ──
+    if (S.cleaning) {
+      var clFilled = 0, clOpen = 0;
+      (d.cleaningFloors || []).forEach(function (fl) {
+        fl.areas.forEach(function (a) {
+          a.cells.forEach(function (fams) { if (fams.length) clFilled++; else clOpen++; });
+        });
+      });
+      doc += sectionHead('🧹 Cleaning' + (d.cleaningYear && d.cleaningYear !== d.schoolYear ? ' (' + d.cleaningYear + ')' : ''),
+        clFilled + ' filled · ' + clOpen + ' open');
+      if (loading.cleaning) {
+        doc += stillLoading('the cleaning rota');
+      } else if (!(d.cleaningFloors || []).length) {
+        doc += '<p class="rp-note">No cleaning areas defined for this year.</p>';
+      } else {
+        doc += '<table><thead><tr><th>Area</th>';
+        for (var ci = 1; ci <= 5; ci++) doc += '<th>S' + ci + '</th>';
+        doc += '</tr></thead><tbody>';
+        (d.cleaningFloors || []).forEach(function (fl) {
+          doc += '<tr><th class="rp-floor" colspan="6">' + esc(fl.label) + '</th></tr>';
+          fl.areas.forEach(function (a) {
+            doc += '<tr><th>' + esc(a.name) + '</th>';
+            a.cells.forEach(function (fams) {
+              doc += '<td class="rp-grid-cell">'
+                + (fams.length ? esc(fams.join(', ')) : '<span class="rp-open">OPEN</span>')
+                + '</td>';
+            });
+            doc += '</tr>';
+          });
+        });
+        doc += '</tbody></table>';
+      }
+    }
+
+    doc += '</body></html>';
+    return doc;
+  }
+
+  function printRolesReport() {
+    openPrintIframe(buildRolesPrintHtml(rolesPrintData()));
   }
 
   // Doorways to the owning tools. The Class Builder is its own overlay,
@@ -29219,6 +29641,9 @@
           return;
         }
         _rolesMgrState.roles = Array.isArray(rolesRes.data.roles) ? rolesRes.data.roles : [];
+        // Explicit flag so the print can tell "still fetching" apart from
+        // "genuinely no roles" — an empty array means both otherwise.
+        _rolesMgrState.loaded = true;
         _rolesMgrState.holdersByRoleId = {};
         var holdersArr = (holdersRes.ok && holdersRes.data && Array.isArray(holdersRes.data.holders)) ? holdersRes.data.holders : [];
         holdersArr.forEach(function (h) {
