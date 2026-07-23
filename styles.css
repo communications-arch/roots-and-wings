@@ -11380,12 +11380,16 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 1rem;
   flex-shrink: 0;
 }
-/* Muted qualifier after a workspace link label (e.g. "Class Builder
-   Morning Classes") so one tool can distinguish its scope. */
+/* Muted qualifier under a workspace link label (e.g. "Class Builder /
+   Afternoon Classes") so one tool can distinguish its scope. Block, so
+   it sits on its own line under the title — inline it wrapped into a
+   two-line jumble beside the count pill (#41/#72). */
 .ws-link-sub {
+  display: block;
   color: var(--color-text-light);
   font-size: 0.82em;
   font-weight: 600;
+  line-height: 1.3;
 }
 /* Row label wrapper: title + qualifier flow as ONE text block inside the
    flex row, so a trailing count pill can't squeeze them into separate
