@@ -19,7 +19,7 @@ to this file.
 - Encrypted with **gpg (symmetric AES256)**. The passphrase is in the sealed
   envelope in the DR binder (and in the GitHub secret `BACKUP_PASSPHRASE`).
 - Stored in the co-op's **Google Drive** in the Backups folder
-  (folder location: **[fill in: My Drive path or Shared Drive name]**),
+  (**Shared Drives → Communications → Backups**),
   named `rw-backup-YYYY-MM-DD.dump.gpg` with a sidecar
   `rw-backup-YYYY-MM-DD.manifest.json` recording row counts at backup time.
 - Retention: the job keeps the **last 30 dailies** plus the **first backup of

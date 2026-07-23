@@ -25562,13 +25562,13 @@
     h += '<tr><td><strong>Neon</strong></td><td>The Postgres database — registrations, people, kids, enrollments, waivers, everything (Launch plan)</td><td>communications@</td><td>console.neon.tech</td></tr>';
     h += '<tr><td><strong>Google Workspace</strong></td><td>All @rootsandwingsindy.com email + member sign-in accounts, Drive (incl. the backup folder), Calendar</td><td>communications@ is the Workspace admin</td><td>admin.google.com</td></tr>';
     h += '<tr><td><strong>Resend</strong></td><td>Outbound email the site sends (notifications, waivers, backup-failure alerts)</td><td>communications@</td><td>resend.com</td></tr>';
-    h += '<tr><td><strong>GoDaddy</strong></td><td>The rootsandwingsindy.com domain + DNS</td><td>' + ph('confirm which login owns GoDaddy') + '</td><td>sso.godaddy.com</td></tr>';
+    h += '<tr><td><strong>GoDaddy</strong></td><td>The rootsandwingsindy.com domain + DNS</td><td>communications@ — “Sign in with Google” (no separate GoDaddy password)</td><td>sso.godaddy.com</td></tr>';
     h += '</tbody></table></div>';
 
     // ── 2. Backups ──
     h += '<h5 class="ws-part-subhead">2 · What’s backed up, where, how often</h5>';
     h += '<ul class="dr-plan-list">';
-    h += '<li><strong>Database:</strong> a full dump of the production Neon database is taken <strong>every night ~4:10am</strong> (Indianapolis time) by a GitHub Action, encrypted (gpg AES256), and uploaded to the Google Drive <strong>Backups folder</strong> ' + ph('note the folder’s Drive location here') + ' as <code>rw-backup-YYYY-MM-DD.dump.gpg</code>.</li>';
+    h += '<li><strong>Database:</strong> a full dump of the production Neon database is taken <strong>every night ~4:10am</strong> (Indianapolis time) by a GitHub Action, encrypted (gpg AES256), and uploaded to the Google Drive Backups folder — <a href="https://drive.google.com/drive/folders/1xRy5c-a8D2Fywtx02q_yHp9Z1bSHm_5J" target="_blank" rel="noopener"><strong>Shared Drives → Communications → Backups</strong></a> — as <code>rw-backup-YYYY-MM-DD.dump.gpg</code>.</li>';
     h += '<li><strong>Retention:</strong> the last 30 nightly backups, plus the first backup of each month for 12 months. Older ones are pruned automatically.</li>';
     h += '<li><strong>If a backup fails:</strong> communications@ gets an alert email from the workflow (plus GitHub’s own failure email). A backup that silently stops is worse than none — investigate the same week.</li>';
     h += '<li><strong>Restore drill:</strong> GitHub → Actions → “DB backup” → Run workflow → job <code>restore-test</code> restores the newest backup into a scratch database and checks row counts. Run it a couple of times a year and log the date in RESTORE.md.</li>';
@@ -25592,7 +25592,7 @@
     h += '<tr><td>GitHub (communications-arch)</td><td>password + 2FA</td><td>' + ph('where the 2FA recovery codes are stored') + '</td></tr>';
     h += '<tr><td>Vercel</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
     h += '<tr><td>Neon</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
-    h += '<tr><td>GoDaddy (domain)</td><td>' + ph('login email') + '</td><td>' + ph('location') + '</td></tr>';
+    h += '<tr><td>GoDaddy (domain)</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then GoDaddy follows</td></tr>';
     h += '<tr><td>Resend</td><td>' + ph('login email') + '</td><td>' + ph('location') + '</td></tr>';
     h += '</tbody></table></div>';
 
