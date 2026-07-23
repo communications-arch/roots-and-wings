@@ -13851,7 +13851,8 @@
             body: JSON.stringify({
               kind: 'membership-adjust-enrollment', action: 'schedule_switch',
               family_email: swFamEmail, kid_id: swKidId, new_schedule: swSched,
-              note: (swNoteEl && swNoteEl.value) || ''
+              note: (swNoteEl && swNoteEl.value) || '',
+              reg_id: parseInt(swWrap.getAttribute('data-reg-id'), 10) || undefined
             })
           }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
             .then(function (rres) {
@@ -13882,7 +13883,8 @@
               method: 'POST', headers: rwAuthHeaders(true),
               body: JSON.stringify({
                 kind: 'membership-adjust-enrollment', action: 'family_withdrawal',
-                family_email: wdFamEmail, note: (wdNoteEl && wdNoteEl.value) || ''
+                family_email: wdFamEmail, note: (wdNoteEl && wdNoteEl.value) || '',
+                reg_id: parseInt(wdWrap.getAttribute('data-reg-id'), 10) || undefined
               })
             }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
               .then(function (rres) {
@@ -14695,7 +14697,7 @@
     if (_membershipPendingAction && _membershipPendingAction.regId === r.id && _membershipPendingAction.type === 'switch') {
       var swFam = _adjustFamilyForReg(r);
       var swFamEmail = (swFam && swFam.family_email) || String(r.family_email || r.email || '').toLowerCase();
-      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(swFamEmail) + '">';
+      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(swFamEmail) + '" data-reg-id="' + escapeHtmlWs(String(r.id)) + '">';
       if (!swFam) {
         h += '<p class="ws-reg-decline-hint ws-wv-err">Couldn’t match this registration to a family profile' + (_adjustEnrollCache ? '' : ' (kid schedules didn’t load — close this and pick the action again)') + '. Schedule switches need the family profile the registration created.</p>'
           + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';
@@ -14725,13 +14727,21 @@
       var wdFam = _adjustFamilyForReg(r);
       var wdFamEmail = (wdFam && wdFam.family_email) || String(r.family_email || r.email || '').toLowerCase();
       var wdFamName = (wdFam && wdFam.family_name) || r.main_learning_coach || '';
-      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(wdFamEmail) + '">';
+      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(wdFamEmail) + '" data-reg-id="' + escapeHtmlWs(String(r.id)) + '">';
       if (!wdFam) {
-        // No family-profile match — don't offer a doomed Withdraw
-        // button (prod 2026-07-23: it 404'd server-side with "Family
-        // not found"). Same guard the switch panel has.
-        h += '<p class="ws-reg-decline-hint ws-wv-err">Couldn’t match this registration to a family profile' + (_adjustEnrollCache ? '' : ' (family list didn’t load — close this and pick the action again)') + '. Withdrawal needs the family profile the registration created.</p>'
-          + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';
+        // No client-side profile match — the server can still resolve
+        // the family from the registration itself (reg_id →
+        // family_email / email / mlc_person_id chain), so offer the
+        // withdrawal with a heads-up rather than a dead end (prod
+        // 2026-07-23 round 2). A genuinely unresolvable family gets
+        // the server's specific error in the status line.
+        h += '<p class="ws-reg-decline-hint"><strong>Withdraw the ' + escapeHtmlWs(wdFamName) + ' family?</strong> Heads-up: this registration didn’t match a family profile by email, so the match will be made from the registration record itself when you confirm. '
+          + 'Withdraws every kid for the season, hides the family from the directory and member surfaces, frees their Morning Builder spots and afternoon picks, and notifies the board. Nothing is deleted — data is retained.</p>'
+          + '<input class="rd-input ws-adjwithdraw-note" type="text" maxlength="500" placeholder="Optional note (shared with the family / board notices)">'
+          + '<div class="rd-btn-row ws-decline-btn-row">'
+          + '<button type="button" class="sc-btn sc-btn-del ws-adjwithdraw-apply-btn" data-family-name="' + escapeHtmlWs(wdFamName) + '">Withdraw family</button>'
+          + '<button type="button" class="sc-btn ws-memact-cancel-btn">Cancel</button>'
+          + '</div>';
       } else if (wdFam.withdrawn) {
         h += '<p class="ws-reg-decline-hint">The ' + escapeHtmlWs(wdFamName) + ' family is already marked withdrawn.</p>'
           + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';

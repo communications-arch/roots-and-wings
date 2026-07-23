@@ -8896,9 +8896,46 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
       LIMIT 1
     `;
   }
+  // Still nothing and the client sent the registration id: resolve
+  // through the registration row itself. Its mlc_person_id snapshot
+  // (stamped by the profile upsert) is the strongest link — it works
+  // even when the registration email appears nowhere in people
+  // (prod 2026-07-23 round 2: email matched neither key nor adults).
+  const regId = parseInt(body.reg_id, 10);
+  if (!profRows.length && Number.isFinite(regId)) {
+    const regRows = await sql`
+      SELECT id, email, family_email, mlc_person_id FROM registrations WHERE id = ${regId} LIMIT 1
+    `;
+    if (regRows.length) {
+      const cands = [];
+      const push = e => { const le = String(e || '').toLowerCase().trim(); if (le && cands.indexOf(le) === -1) cands.push(le); };
+      push(regRows[0].family_email);
+      push(regRows[0].email);
+      if (regRows[0].mlc_person_id) {
+        const pr = await sql`SELECT family_email FROM people WHERE id = ${regRows[0].mlc_person_id} LIMIT 1`;
+        if (pr.length) push(pr[0].family_email);
+      }
+      for (const c of cands) {
+        profRows = await sql`
+          SELECT family_email, family_name, withdrawn_at FROM member_profiles
+          WHERE LOWER(family_email) = ${c} LIMIT 1
+        `;
+        if (!profRows.length) {
+          profRows = await sql`
+            SELECT mp.family_email, mp.family_name, mp.withdrawn_at
+            FROM people p
+            JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+            WHERE LOWER(p.email) = ${c} OR LOWER(p.personal_email) = ${c}
+            LIMIT 1
+          `;
+        }
+        if (profRows.length) break;
+      }
+    }
+  }
   if (!profRows.length) {
     return res.status(404).json({
-      error: 'No family profile matches ' + fam + '. If this family registered under a different email, find them in the report by that email — or let Erin know so we can link the profile.'
+      error: 'No family profile matches ' + fam + (Number.isFinite(regId) ? ' (registration #' + regId + ')' : '') + '. If this family registered under a different email, find them in the report by that email — or let Erin know so we can link the profile.'
     });
   }
   const prof = profRows[0];
