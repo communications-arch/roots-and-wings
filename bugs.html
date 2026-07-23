@@ -199,6 +199,10 @@
           <h2 class="bug-list-title">What's been reported</h2>
           <!-- #67: default view shows only items still needing work
                (to fix / to re-test); the pills widen it. -->
+          <div class="tour-form-field" style="max-width:320px;margin:0 0 12px;">
+            <label for="bugSearch">Search the bug list</label>
+            <input type="text" id="bugSearch" placeholder="Search by title, details, or reporter&hellip;">
+          </div>
           <div id="bugFilters" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;"></div>
           <div id="bugList">
             <p class="bug-note">Loading the bug list&hellip;</p>
@@ -252,6 +256,11 @@
     var form = document.getElementById('bugForm');
     var formMsg = document.getElementById('bugFormMsg');
     var submitBtn = document.getElementById('bugSubmitBtn');
+    var searchInput = document.getElementById('bugSearch');
+    if (searchInput) searchInput.addEventListener('input', function () {
+      bugSearchTerm = searchInput.value;
+      renderBugs(allBugs);
+    });
 
     function showGate(title, msg) {
       gateTitle.textContent = title;
@@ -296,6 +305,8 @@
     // #67: 'attention' (default) = still needs fixing OR a re-test;
     // 'all' shows everything including verified + live.
     var bugFilter = 'attention';
+    // #103: free-text search across title, details, and reporter.
+    var bugSearchTerm = '';
     var allBugs = [];
     function needsAttention(bug) {
       var st = bugStatus(bug);
@@ -329,8 +340,17 @@
         return;
       }
       var shown = bugFilter === 'attention' ? allBugs.filter(needsAttention) : allBugs;
+      var term = bugSearchTerm.trim().toLowerCase();
+      if (term) {
+        shown = shown.filter(function (bug) {
+          var haystack = [bug.title, bug.details, bug.reporter].join(' ').toLowerCase();
+          return haystack.indexOf(term) !== -1;
+        });
+      }
       if (shown.length === 0) {
-        listEl.innerHTML = '<p class="bug-note">Nothing needs fixing or re-testing right now — 🎉 (switch to “Everything” to see the finished ones).</p>';
+        listEl.innerHTML = '<p class="bug-note">'
+          + (term ? 'No bugs match your search.' : 'Nothing needs fixing or re-testing right now — 🎉 (switch to “Everything” to see the finished ones).')
+          + '</p>';
         return;
       }
       var sorted = shown.slice().sort(function (a, b) {
