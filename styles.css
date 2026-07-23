@@ -1294,6 +1294,13 @@ p + p { margin-top: 1rem; }
   border-bottom: 1px dotted var(--color-border);
   cursor: help;
 }
+/* Inside a Directory filter pill the chip is already tinted, so the neutral
+   border colour disappears — track the pill's own text instead, and let the
+   button keep its click affordance. */
+.filter-pill .ag-range-wide {
+  border-bottom-color: currentColor;
+  cursor: inherit;
+}
 
 /* Small color dot for inline group labels (schedules, person cards). */
 .ag-dot {

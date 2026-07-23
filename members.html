@@ -27,7 +27,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260723b">
+  <link rel="stylesheet" href="styles.css?v=20260723c">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <script src="https://accounts.google.com/gsi/client" async defer onload="if(window.__initGSI)window.__initGSI()"></script>
@@ -256,17 +256,21 @@
         <h2 id="directoryModalTitle" class="directory-modal-title">Member Directory</h2>
         <p class="directory-modal-sub">Tap any face to see contact details.</p>
 
-        <!-- Group filter pills -->
+        <!-- Group filter pills. The "(range)" text here is only what shows
+             before script.js runs — refreshDirectoryGroupPills() rewrites each
+             label from MORNING_GROUP_ORDER on every directory render, and
+             widens it to cover the kids actually placed in the group. Keep
+             these in sync anyway so the pre-JS paint isn't wrong. -->
         <div class="directory-filters" id="directoryFilters">
           <button class="filter-pill active" data-filter="all">Everyone</button>
-          <button class="filter-pill ag-grouped ag-Greenhouse" data-filter="Greenhouse"><img class="ag-icon" src="brand/group-greenhouse.png" alt=""> Greenhouse (0-2)</button>
-          <button class="filter-pill ag-grouped ag-Saplings" data-filter="Saplings"><img class="ag-icon" src="brand/group-saplings.png" alt=""> Saplings (3-5)</button>
-          <button class="filter-pill ag-grouped ag-Sassafras" data-filter="Sassafras"><img class="ag-icon" src="brand/group-sassafras.png" alt=""> Sassafras (3-6)</button>
-          <button class="filter-pill ag-grouped ag-Oaks" data-filter="Oaks"><img class="ag-icon" src="brand/group-oaks.png" alt=""> Oaks (7-8)</button>
-          <button class="filter-pill ag-grouped ag-Maples" data-filter="Maples"><img class="ag-icon" src="brand/group-maples.png" alt=""> Maples (8-9)</button>
-          <button class="filter-pill ag-grouped ag-Birch" data-filter="Birch"><img class="ag-icon" src="brand/group-birch.png" alt=""> Birch (9-10)</button>
-          <button class="filter-pill ag-grouped ag-Willows" data-filter="Willows"><img class="ag-icon" src="brand/group-willows.png" alt=""> Willows (10-12)</button>
-          <button class="filter-pill ag-grouped ag-Cedars" data-filter="Cedars"><img class="ag-icon" src="brand/group-cedars.png" alt=""> Cedars (12-13)</button>
+          <button class="filter-pill ag-grouped ag-Greenhouse" data-filter="Greenhouse"><img class="ag-icon" src="brand/group-greenhouse.png" alt=""> Greenhouse (0&ndash;2)</button>
+          <button class="filter-pill ag-grouped ag-Saplings" data-filter="Saplings"><img class="ag-icon" src="brand/group-saplings.png" alt=""> Saplings (3&ndash;5)</button>
+          <button class="filter-pill ag-grouped ag-Sassafras" data-filter="Sassafras"><img class="ag-icon" src="brand/group-sassafras.png" alt=""> Sassafras (5&ndash;6)</button>
+          <button class="filter-pill ag-grouped ag-Oaks" data-filter="Oaks"><img class="ag-icon" src="brand/group-oaks.png" alt=""> Oaks (7&ndash;8)</button>
+          <button class="filter-pill ag-grouped ag-Maples" data-filter="Maples"><img class="ag-icon" src="brand/group-maples.png" alt=""> Maples (8&ndash;9)</button>
+          <button class="filter-pill ag-grouped ag-Birch" data-filter="Birch"><img class="ag-icon" src="brand/group-birch.png" alt=""> Birch (9&ndash;10)</button>
+          <button class="filter-pill ag-grouped ag-Willows" data-filter="Willows"><img class="ag-icon" src="brand/group-willows.png" alt=""> Willows (10&ndash;11)</button>
+          <button class="filter-pill ag-grouped ag-Cedars" data-filter="Cedars"><img class="ag-icon" src="brand/group-cedars.png" alt=""> Cedars (12&ndash;13)</button>
           <button class="filter-pill ag-grouped ag-Pigeons" data-filter="Pigeons"><img class="ag-icon" src="brand/group-pigeons.png" alt=""> Pigeons (14+)</button>
           <button class="filter-pill" data-filter="parents">Main Learning Coach</button>
           <button class="filter-pill" data-filter="allKids">All Kids</button>
@@ -501,7 +505,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260723j"></script>
+  <script src="script.js?v=20260723k"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board

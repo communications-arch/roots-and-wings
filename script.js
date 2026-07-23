@@ -3039,8 +3039,43 @@
     openPrintIframe(doc);
   }
 
+  // The Directory's group filter pills are static markup in members.html, so
+  // their ranges quietly drifted — they still read "Sassafras (3-6)" and
+  // "Willows (10-12)" long after both bands were corrected in every JS table
+  // and on the public age cards. Rewriting each label from
+  // MORNING_GROUP_ORDER on render kills that drift for good AND lets the
+  // pills widen to their roster like every other portal surface
+  // (Erin, 2026-07-23). The icon <img> is preserved; only the text changes.
+  function refreshDirectoryGroupPills() {
+    var wrap = document.getElementById('directoryFilters');
+    if (!wrap) return;
+    MORNING_GROUP_ORDER.forEach(function (g) {
+      var pill = wrap.querySelector('.filter-pill[data-filter="' + g.name + '"]');
+      if (!pill) return;
+      var wide = widenRangeForGroup(g.range, g.name);
+      var icon = pill.querySelector('img.ag-icon');
+      pill.innerHTML = '';
+      if (icon) pill.appendChild(icon); // same node, so no image re-fetch
+      pill.appendChild(document.createTextNode(' ' + g.name + ' '));
+      if (wide === g.range) {
+        pill.appendChild(document.createTextNode('(' + wide + ')'));
+        pill.removeAttribute('title');
+      } else {
+        var span = document.createElement('span');
+        span.className = 'ag-range-wide';
+        span.textContent = '(' + wide + ')';
+        pill.appendChild(span);
+        pill.title = 'Typical range ' + g.range
+          + ' — shown wider to cover the students placed in ' + g.name;
+      }
+    });
+  }
+
   function renderDirectory() {
     if (!directoryGrid) return;
+    // Cheap and idempotent — recomputed from MORNING_GROUP_ORDER every time,
+    // so the labels track FAMILIES whenever the directory is opened or filtered.
+    refreshDirectoryGroupPills();
     var query = (directorySearch ? directorySearch.value : '').toLowerCase();
     var staff = AM_CLASSES[activeFilter];
     // Class View requires the AM Volunteer sheet payload (staff + sessions).
