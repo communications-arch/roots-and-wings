@@ -141,5 +141,44 @@ console.log('\nwidenRangeToSpan');
   });
 }
 
+// ── refreshDirectoryGroupPills load-order safety ──────────────────────────
+// This one is a REGRESSION GUARD, not a feature test. script.js is one big
+// IIFE: renderDirectory() is invoked at top level around line 4400, but
+// `var MORNING_GROUP_ORDER` isn't assigned until ~line 30750. On that first
+// call the var is declared-but-undefined, so an unguarded .forEach threw a
+// TypeError that killed the entire IIFE — the whole members portal failed to
+// load. Shipped that on 2026-07-23; caught in the browser, not here.
+console.log('\nrefreshDirectoryGroupPills (load-order safety)');
+{
+  const pillFn = extract('refreshDirectoryGroupPills');
+
+  function runWith(groupOrder) {
+    // Minimal shim: a filters wrapper that finds no matching pill, so the
+    // only thing under test is whether the function survives being called.
+    const wrap = { querySelector: () => null };
+    const document = {
+      getElementById: id => (id === 'directoryFilters' ? wrap : null),
+      createElement: () => ({ appendChild() {} }),
+      createTextNode: () => ({})
+    };
+    const fn = new Function('document', 'MORNING_GROUP_ORDER', 'widenRangeForGroup',
+      pillFn + '\nreturn refreshDirectoryGroupPills;');
+    fn(document, groupOrder, () => '3–5')();
+  }
+
+  t('does not throw when MORNING_GROUP_ORDER is not yet assigned', () => {
+    runWith(undefined); // the exact state during IIFE setup
+  });
+  t('does not throw when the group list is assigned', () => {
+    runWith([{ name: 'Saplings', range: '3–5', min: 3, max: 5 }]);
+  });
+  t('guards the group list before iterating it', () => {
+    const guardPos = pillFn.indexOf('Array.isArray(MORNING_GROUP_ORDER)');
+    const usePos = pillFn.indexOf('MORNING_GROUP_ORDER.forEach');
+    assert.ok(guardPos !== -1, 'the Array.isArray guard is gone — see the comment above');
+    assert.ok(guardPos < usePos, 'the guard must come before the forEach');
+  });
+}
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

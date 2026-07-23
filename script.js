@@ -3049,6 +3049,14 @@
   function refreshDirectoryGroupPills() {
     var wrap = document.getElementById('directoryFilters');
     if (!wrap) return;
+    // MORNING_GROUP_ORDER is a var declared ~26k lines below this, so on the
+    // ONE renderDirectory() that fires during IIFE setup it is still
+    // undefined (hoisted declaration, unassigned value) and .forEach would
+    // throw — taking the whole portal script down with it. Bail out quietly;
+    // the pills keep their markup ranges for that first paint and get
+    // rewritten on the next render, which always happens before the user can
+    // see them (opening the Directory modal re-renders).
+    if (!Array.isArray(MORNING_GROUP_ORDER)) return;
     MORNING_GROUP_ORDER.forEach(function (g) {
       var pill = wrap.querySelector('.filter-pill[data-filter="' + g.name + '"]');
       if (!pill) return;
