@@ -8828,14 +8828,35 @@ async function handleAdjustEnrollmentGet(req, res) {
         enroll_status: k.enroll_status || ''
       });
     });
+    // Adult emails per family, so the Membership Report can match a
+    // registration to its family even when the registrant used a
+    // personal/login email that isn't the family key (prod bug
+    // 2026-07-23: "Family not found" on withdraw).
+    const adults = await sql`
+      SELECT family_email, email, personal_email FROM people
+    `;
+    const emailsByFam = {};
+    adults.forEach(p => {
+      const key = String(p.family_email || '').toLowerCase();
+      if (!key) return;
+      if (!emailsByFam[key]) emailsByFam[key] = [];
+      [p.email, p.personal_email].forEach(e => {
+        const le = String(e || '').toLowerCase().trim();
+        if (le && emailsByFam[key].indexOf(le) === -1) emailsByFam[key].push(le);
+      });
+    });
     return res.status(200).json({
       season: DEFAULT_SEASON,
-      families: fams.map(f => ({
-        family_email: String(f.family_email || '').toLowerCase(),
-        family_name: f.family_name || '',
-        withdrawn: !!f.withdrawn_at,
-        kids: kidsByFam[String(f.family_email || '').toLowerCase()] || []
-      }))
+      families: fams.map(f => {
+        const key = String(f.family_email || '').toLowerCase();
+        return {
+          family_email: key,
+          family_name: f.family_name || '',
+          withdrawn: !!f.withdrawn_at,
+          emails: emailsByFam[key] || [],
+          kids: kidsByFam[key] || []
+        };
+      })
     });
   } catch (err) {
     console.error('adjust-enroll GET error:', err);
@@ -8854,16 +8875,36 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
     return res.status(403).json({ error: 'Only the Membership Director can adjust enrollments.' });
   }
   const action = String(body.action || '').trim();
-  const fam = normalizeEmail(body.family_email || '');
+  let fam = normalizeEmail(body.family_email || '');
   const note = String(body.note || '').trim().slice(0, 500);
   if (!fam) return res.status(400).json({ error: 'family_email required' });
   const sql = getSql();
-  const profRows = await sql`
+  let profRows = await sql`
     SELECT family_email, family_name, withdrawn_at FROM member_profiles
     WHERE LOWER(family_email) = ${fam} LIMIT 1
   `;
-  if (!profRows.length) return res.status(404).json({ error: 'Family not found.' });
+  if (!profRows.length) {
+    // Prod bug 2026-07-23 ("Family not found"): the Membership Report
+    // row may carry an adult's login/personal email rather than the
+    // family key (registrations.family_email is newer than many prod
+    // rows). Resolve through people to the real family profile.
+    profRows = await sql`
+      SELECT mp.family_email, mp.family_name, mp.withdrawn_at
+      FROM people p
+      JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+      WHERE LOWER(p.email) = ${fam} OR LOWER(p.personal_email) = ${fam}
+      LIMIT 1
+    `;
+  }
+  if (!profRows.length) {
+    return res.status(404).json({
+      error: 'No family profile matches ' + fam + '. If this family registered under a different email, find them in the report by that email — or let Erin know so we can link the profile.'
+    });
+  }
   const prof = profRows[0];
+  // Every downstream query keys on `fam` — rebind it to the RESOLVED
+  // family key so kids/placements/stamps all hit the right family.
+  fam = String(prof.family_email || '').toLowerCase();
   const famName = prof.family_name || fam;
 
   if (action === 'schedule_switch') {

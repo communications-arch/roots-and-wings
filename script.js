@@ -14589,15 +14589,21 @@
   }
 
   // #71: match a Membership Report registration to its family in the
-  // adjust-enrollment picker payload (kid ids + live schedules). The
-  // registration's family_email is authoritative; older rows without it
-  // fall back to the registrant email.
+  // adjust-enrollment picker payload (kid ids + live schedules). Tries
+  // the registration's family_email, then the registrant email, each
+  // against the family key AND every adult's login/personal email —
+  // older prod rows registered under an adult email that isn't the
+  // family key (prod "Family not found" on withdraw, 2026-07-23).
   function _adjustFamilyForReg(r) {
     if (!_adjustEnrollCache) return null;
-    var em = String(r.family_email || r.email || '').toLowerCase();
     var fams = _adjustEnrollCache.families || [];
-    for (var i = 0; i < fams.length; i++) {
-      if (fams[i].family_email === em) return fams[i];
+    var cands = [String(r.family_email || '').toLowerCase(), String(r.email || '').toLowerCase()]
+      .filter(function (e, i, a) { return e && a.indexOf(e) === i; });
+    for (var c = 0; c < cands.length; c++) {
+      for (var i = 0; i < fams.length; i++) {
+        if (fams[i].family_email === cands[c]) return fams[i];
+        if ((fams[i].emails || []).indexOf(cands[c]) !== -1) return fams[i];
+      }
     }
     return null;
   }
@@ -14720,7 +14726,13 @@
       var wdFamEmail = (wdFam && wdFam.family_email) || String(r.family_email || r.email || '').toLowerCase();
       var wdFamName = (wdFam && wdFam.family_name) || r.main_learning_coach || '';
       h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(wdFamEmail) + '">';
-      if (wdFam && wdFam.withdrawn) {
+      if (!wdFam) {
+        // No family-profile match — don't offer a doomed Withdraw
+        // button (prod 2026-07-23: it 404'd server-side with "Family
+        // not found"). Same guard the switch panel has.
+        h += '<p class="ws-reg-decline-hint ws-wv-err">Couldn’t match this registration to a family profile' + (_adjustEnrollCache ? '' : ' (family list didn’t load — close this and pick the action again)') + '. Withdrawal needs the family profile the registration created.</p>'
+          + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';
+      } else if (wdFam.withdrawn) {
         h += '<p class="ws-reg-decline-hint">The ' + escapeHtmlWs(wdFamName) + ' family is already marked withdrawn.</p>'
           + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';
       } else {
