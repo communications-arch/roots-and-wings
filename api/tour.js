@@ -6810,6 +6810,14 @@ async function handleEventOpeningsGet(req, res) {
     const myInterest = await sql`
       SELECT event_id, role AS seat FROM special_event_people WHERE LOWER(person_email) = ${email}
     `;
+    // #79 follow-up: lead hand-raises live only in event_seat_interest
+    // (no direct add), so the viewer's ✓ state and the "interested so
+    // far" names come from the log itself.
+    const handRows = ids.length ? await sql`
+      SELECT event_id, seat, person_name, LOWER(person_email) AS em
+      FROM event_seat_interest WHERE event_id = ANY(${ids})
+      ORDER BY created_at, id
+    ` : [];
     const sections = ids.length ? await sql`
       SELECT id, special_event_id, type, title, config, content, is_open, sort_order
       FROM event_sections
@@ -6838,6 +6846,8 @@ async function handleEventOpeningsGet(req, res) {
       if (assistCount < 2) openSeats.push('assist');
       const mine = { lead: false, assist: false };
       myInterest.forEach(r => { if (r.event_id === ev.id) mine[r.seat] = true; });
+      const evHands = handRows.filter(r => r.event_id === ev.id);
+      if (evHands.some(r => r.seat === 'lead' && r.em === email)) mine.lead = true;
       const evSections = sections.filter(s => s.special_event_id === ev.id)
         .map(s => eventSectionShape(s, signups));
       // Keep the event listed while the viewer holds a seat even if it's
@@ -6861,6 +6871,9 @@ async function handleEventOpeningsGet(req, res) {
           lead: evPeople.filter(p => p.role === 'lead').map(p => p.person_name).filter(Boolean),
           assist: evPeople.filter(p => p.role === 'assist').map(p => p.person_name).filter(Boolean)
         },
+        // Hands raised for the (unfilled) lead seat — interest, not
+        // assignment. The SEL confirms + assigns from the grid.
+        lead_interest_names: evHands.filter(r => r.seat === 'lead').map(r => r.person_name).filter(Boolean),
         signup_sections: evSections
       });
     });
@@ -6905,6 +6918,12 @@ async function handleEventOpeningsGet(req, res) {
 // grid. SEL + Sustaining Director still get a bell + their To Do lists
 // recent sign-ups (event_seat_interest doubles as the log). Members can
 // only remove THEMSELVES here.
+// #79 follow-up (Erin, 2026-07-22): the LEAD seat is the exception —
+// running an event is a bigger commitment than a helper spot, so a
+// lead tap is a hand-raise (event_seat_interest row only) that the
+// SEL confirms and assigns in the grid; it never direct-adds.
+// Assistants stay direct. The shared !on path still deletes both rows,
+// which doubles as the undo for pre-change direct-added leads.
 async function handleEventSeatInterest(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -6943,13 +6962,15 @@ async function handleEventSeatInterest(body, req, res) {
     if (seat === 'assist' && existing.filter(r => r.role === 'assist').length >= 4) {
       return res.status(409).json({ error: 'The assistant spots just filled up — thank you anyway!' });
     }
-    const nextSort = seat === 'lead' ? 0
-      : existing.filter(r => r.role === 'assist').reduce((m, r) => Math.max(m, (r.sort_order || 0) + 1), 0);
-    await sql`
-      INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
-      VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${nextSort}, ${auth.realEmail})
-    `;
-    // Log row feeds the SEL / Sustaining Director "recent sign-ups" To Do.
+    if (seat === 'assist') {
+      const nextSort = existing.filter(r => r.role === 'assist').reduce((m, r) => Math.max(m, (r.sort_order || 0) + 1), 0);
+      await sql`
+        INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
+        VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${nextSort}, ${auth.realEmail})
+      `;
+    }
+    // Log row: assist = the "recent sign-ups" To Do trail; lead = THE
+    // hand-raise itself (no direct add — the SEL assigns from the grid).
     await sql`
       INSERT INTO event_seat_interest (event_id, seat, person_email, person_name, family_email)
       VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${who.family_email})
@@ -6964,14 +6985,17 @@ async function handleEventSeatInterest(body, req, res) {
     }
     if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
     const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
+    const notifTitle = seat === 'lead'
+      ? '🙋 ' + who.name + ' wants to lead — ' + ev.name
+      : '🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel;
+    const notifBody = seat === 'lead'
+      ? who.name + ' raised a hand to LEAD the ' + ev.name + '. They are NOT on the event yet — if it’s a fit, assign them as lead in the Special Events grid and let them know.'
+      : who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name + '. Their name is already on the event in the Special Events grid — adjust there if needed.';
     for (const rcpt of recipients) {
       try {
         await sql`
           INSERT INTO notifications (recipient_email, type, title, body, link_url)
-          VALUES (${rcpt}, 'event_seat_interest',
-                  ${'🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel},
-                  ${who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name + '. Their name is already on the event in the Special Events grid — adjust there if needed.'},
-                  '')
+          VALUES (${rcpt}, 'event_seat_interest', ${notifTitle}, ${notifBody}, '')
         `;
       } catch (e) { console.error('event-seat-interest notification failed (non-fatal):', e.message); }
     }
