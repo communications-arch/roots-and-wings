@@ -1287,6 +1287,14 @@ p + p { margin-top: 1rem; }
 .ag-name { color: var(--ag); font-weight: 700; }
 .session-group-link.ag-name { color: var(--ag); }
 
+/* An age range stretched past its typical band because the kids placed in
+   the group fall outside it (portal only — the public age cards always
+   show the typical band). Dotted underline hints there's a tooltip. */
+.ag-range-wide {
+  border-bottom: 1px dotted var(--color-border);
+  cursor: help;
+}
+
 /* Small color dot for inline group labels (schedules, person cards). */
 .ag-dot {
   display: inline-block;

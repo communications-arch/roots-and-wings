@@ -44,6 +44,8 @@ const factory = new Function(
   extractVar('MORNING_GROUP_ORDER', '\\];') + '\n' +
   extractVar('SCHED_BLOCK_LABELS', '\\};') + '\n' +
   extractFn('signupAgeText') + '\n' +
+  extractFn('ageSpanOf') + '\n' +
+  extractFn('widenRangeToSpan') + '\n' +
   extractFn('schedByClassSections') + '\n' +
   'return schedByClassSections;'
 );
@@ -97,7 +99,7 @@ t('whole-morning class appears in BOTH AM sections with its group roster', () =>
   if (!am1 || !am2) throw new Error('Saplings Storytime missing from an AM hour');
   assertEq(am1.students, [{ name: 'Sam Small (nick)', age: 4 }]);
   assertEq(am1.leader, 'Amy Lead');
-  assertEq(am1.ages, 'Saplings (3–5)', 'ages via AGE_GROUP_LABELS');
+  assertEq(am1.ages, 'Saplings (3–5)', 'ages via AGE_GROUP_LABELS, roster in band');
 });
 
 t('hour-scoped AM helper only counts in its own hour (and gets a tag)', () => {
@@ -114,7 +116,9 @@ t('group with kids but no placed class still shows (Oaks)', () => {
   if (!oaks1) throw new Error('Oaks entry missing from AM1');
   assertEq(oaks1.no_class, true);
   assertEq(oaks1.name, 'Oaks');
-  assertEq(oaks1.ages, '7–8', 'range from MORNING_GROUP_ORDER');
+  // Oaks is typically 7–8 but Bo is 9, so the printed range stretches to
+  // cover the roster listed right under it (Erin, 2026-07-23).
+  assertEq(oaks1.ages, '7–9', 'MORNING_GROUP_ORDER range widened to the roster');
   assertEq(oaks1.students.map(s => s.name), ['Bo Bothhours', 'Olive Oaks']);
 });
 

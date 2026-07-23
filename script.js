@@ -4853,6 +4853,129 @@
     return result;
   }
 
+  // ── Roster-aware age-group ranges (members portal only) ──────────
+  // Every group has a TYPICAL band (Saplings 3–5), but real placements
+  // don't always land inside it — a kid ages up mid-year, or Membership
+  // places a sibling with their group on purpose. Erin (2026-07-23): in
+  // the portal, show the band the group ACTUALLY spans, so a Saplings
+  // roster holding a 6-year-old reads "3–6". The PUBLIC site keeps the
+  // typical bands (index.html age cards + openAgeGroupModal) — those
+  // describe the program to prospective families, not this year's kids.
+  // Class-level "open to ages" strings are also left alone: the same
+  // text feeds fitsKid, so widening there would change eligibility.
+
+  // Whole-year age today from a date-only string, parsed as a LOCAL day
+  // (the UTC back-shift moves a birthday to the previous evening).
+  // Returns null — NOT 0 — when the birthdate is missing, so a kid with
+  // no birthday on file can't drag a group's floor down to zero the way
+  // computeAge() would.
+  function ageTodayLocal(birthDate) {
+    var s = String(birthDate || '').slice(0, 10);
+    if (!s) return null;
+    var bd = new Date(s + 'T00:00:00');
+    if (isNaN(bd.getTime())) return null;
+    var today = new Date();
+    var age = today.getFullYear() - bd.getFullYear();
+    var m = today.getMonth() - bd.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
+    return (age >= 0 && age < 120) ? age : null;
+  }
+
+  // {lo, hi} over a list of ages, ignoring unknowns. null when nothing known.
+  function ageSpanOf(ages) {
+    var known = (ages || []).filter(function (a) { return a != null && !isNaN(a); });
+    if (!known.length) return null;
+    return { lo: Math.min.apply(null, known), hi: Math.max.apply(null, known) };
+  }
+
+  // {groupLower: {lo, hi}} over every placed kid in FAMILIES. Memoized
+  // against the FAMILIES payload itself so a directory refresh recomputes.
+  var _ageGroupSpanCache = null;
+  function ageGroupSpans() {
+    var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
+    if (_ageGroupSpanCache && _ageGroupSpanCache.src === fams) return _ageGroupSpanCache.map;
+    var map = {};
+    fams.forEach(function (f) {
+      (f.kids || []).forEach(function (k) {
+        var g = String(k.group || '').trim().toLowerCase();
+        if (!g) return;
+        if (g === 'teens') g = 'pigeons';
+        var age = ageTodayLocal(k.birthDate);
+        if (age == null) return;
+        if (!map[g]) map[g] = { lo: age, hi: age };
+        else {
+          if (age < map[g].lo) map[g].lo = age;
+          if (age > map[g].hi) map[g].hi = age;
+        }
+      });
+    });
+    _ageGroupSpanCache = { src: fams, map: map };
+    return map;
+  }
+
+  function ageGroupSpanOf(groupName) {
+    var g = String(groupName || '').trim().toLowerCase();
+    if (g === 'teens') g = 'pigeons';
+    return ageGroupSpans()[g] || null;
+  }
+
+  // Stretch a rendered range so it covers `span`. Understands the three
+  // shapes we print — "3–5", "14+", "8" — either bare or as the single
+  // parenthetical of a label ("Saplings (3–5)"), and preserves whatever
+  // dash and spacing the caller used. Anything else (multi-group lists,
+  // "All ages", free-text overrides) comes back untouched.
+  // PURE — no FAMILIES lookup, so schedByClassSections stays testable.
+  function widenRangeToSpan(rangeText, span) {
+    var raw = String(rangeText == null ? '' : rangeText);
+    if (!span) return raw;
+    if ((raw.match(/\(/g) || []).length > 1) return raw; // "Oaks (7–8), Maples (8–9)"
+    var open = raw.indexOf('(');
+    var head = '', body = raw, tail = '';
+    if (open !== -1) {
+      var close = raw.indexOf(')', open);
+      if (close === -1) return raw;
+      head = raw.slice(0, open + 1);
+      body = raw.slice(open + 1, close);
+      tail = raw.slice(close);
+    }
+    var inner = body.trim();
+    var pad = body.slice(0, body.indexOf(inner));
+    var padEnd = body.slice(body.indexOf(inner) + inner.length);
+    var widened = null;
+    var m;
+    if ((m = inner.match(/^(\d+)\s*\+$/))) {
+      widened = Math.min(parseInt(m[1], 10), span.lo) + '+';
+    } else if ((m = inner.match(/^(\d+)(\s*[–—-]\s*)(\d+)$/))) {
+      var lo = Math.min(parseInt(m[1], 10), span.lo);
+      var hi = Math.max(parseInt(m[3], 10), span.hi);
+      widened = (lo === hi) ? String(lo) : (lo + m[2] + hi);
+    } else if ((m = inner.match(/^(\d+)$/))) {
+      var n = parseInt(m[1], 10);
+      var a = Math.min(n, span.lo), b = Math.max(n, span.hi);
+      widened = (a === b) ? String(a) : (a + '–' + b);
+    }
+    if (widened === null || widened === inner) return raw;
+    return head + pad + widened + padEnd + tail;
+  }
+
+  // Same, resolving the span from the group's placed kids.
+  function widenRangeForGroup(rangeText, groupName) {
+    return widenRangeToSpan(rangeText, ageGroupSpanOf(groupName));
+  }
+
+  // Escaped cell/label HTML. When the range had to stretch, it gets a
+  // dotted underline + a tooltip naming the typical band, so nobody
+  // mistakes the wider number for a change to the program itself.
+  function groupRangeHtml(rangeText, groupName) {
+    var raw = String(rangeText == null ? '' : rangeText);
+    var wide = widenRangeForGroup(raw, groupName);
+    if (!wide) return '';
+    if (wide === raw) return escapeHtml(wide);
+    return '<span class="ag-range-wide" title="Typical range ' + escapeHtml(raw.trim())
+      + ' — shown wider to cover the students placed in ' + escapeHtml(String(groupName || 'this group'))
+      + '">' + escapeHtml(wide) + '</span>';
+  }
+
   // Helper: append age range to group name, e.g., "Sassafras (3-6)"
   // Also handles "Teens" alias for "Pigeons"
   function groupWithAge(groupName) {
@@ -4860,12 +4983,14 @@
     var lookupName = groupName;
     if (groupName === 'Teens') lookupName = 'Pigeons';
     var cls = AM_CLASSES[lookupName];
-    if (cls && cls.ages) return displayName + ' (' + cls.ages + ')';
+    if (cls && cls.ages) return displayName + ' (' + widenRangeForGroup(cls.ages, lookupName) + ')';
     // Sheet-era AM_CLASSES carries per-group ages; DB-first seasons often
     // don't. Fall back to the canonical age-group labels so rosters and
     // the View Classmates modal still show the range (Erin, 2026-07-15).
     var lbl = AGE_GROUP_LABELS[String(lookupName || '').toLowerCase()];
-    if (lbl && lbl.indexOf('(') !== -1) return displayName + ' ' + lbl.slice(lbl.indexOf('('));
+    if (lbl && lbl.indexOf('(') !== -1) {
+      return displayName + ' ' + widenRangeForGroup(lbl.slice(lbl.indexOf('(')), lookupName);
+    }
     return displayName;
   }
 
@@ -7755,7 +7880,7 @@
       gs.forEach(function (g) {
         t += '<tr class="session-class-row" data-group="' + g.name + '">';
         t += '<td>' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
-        t += '<td>' + escapeHtml(g.range || '') + '</td>';
+        t += '<td>' + groupRangeHtml(g.range || '', g.name) + '</td>';
         t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
         t += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
         t += '</tr>';
@@ -7794,7 +7919,9 @@
           html += '<tr class="' + (isMyRow ? 'coord-my-row' : '') + '">';
           // Group mark beside the colored name (Erin, 2026-07-11).
           html += '<td>' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
-          html += '<td>' + escapeHtml(meta ? meta.g.range : (c.scheduled_age_range || '')) + '</td>';
+          html += '<td>' + (meta
+            ? groupRangeHtml(meta.g.range, meta.g.name)
+            : escapeHtml(c.scheduled_age_range || '')) + '</td>';
           html += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
           html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
           html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
@@ -7815,7 +7942,7 @@
         var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
         html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
         html += '<td><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
-        html += '<td>' + cls.ages + '</td>';
+        html += '<td>' + groupRangeHtml(cls.ages, groupName) + '</td>';
         html += '<td>' + s.topic + '</td>';
         html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
         html += '<td>' + assistantsHtml + '</td>';
@@ -26679,7 +26806,12 @@
           id: c.id,
           name: c.class_name,
           group: groupKey,
-          ages: signupAgeText(c),
+          // Morning entries show the band their roster actually spans —
+          // the students are listed right below it, so a "(3–5)" over a
+          // 6-year-old reads as an error. PM classes keep their own
+          // "open to" text untouched (it's a sign-up eligibility string).
+          ages: isAm ? widenRangeToSpan(signupAgeText(c), ageSpanOf(students.map(function (s) { return s.age; })))
+                     : signupAgeText(c),
           room: c.room || '',
           leader: c.teacher || '',
           assistants: helpers,
@@ -26695,15 +26827,16 @@
           for (var gi = 0; gi < MORNING_GROUP_ORDER.length; gi++) {
             if (MORNING_GROUP_ORDER[gi].name.toLowerCase() === g) { meta = MORNING_GROUP_ORDER[gi]; break; }
           }
+          var groupKids = amRoster[g].slice().sort(byName);
           entries.push({
             id: null,
             name: meta ? meta.name : (g.charAt(0).toUpperCase() + g.slice(1)),
             group: g,
-            ages: meta ? meta.range : '',
+            ages: meta ? widenRangeToSpan(meta.range, ageSpanOf(groupKids.map(function (s) { return s.age; }))) : '',
             room: '',
             leader: '',
             assistants: [],
-            students: amRoster[g].slice().sort(byName),
+            students: groupKids,
             needs_assistants: 0,
             open_seats: 0,
             no_class: true
@@ -31599,7 +31732,7 @@
         list.sort(function (a, b) {
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += renderBlock('AM:' + g.name, ageGroupIconHtml(g.name) + ' ' + g.name + ' · ' + g.range, list);
+        html += renderBlock('AM:' + g.name, ageGroupIconHtml(g.name) + ' ' + g.name + ' · ' + widenRangeForGroup(g.range, g.name), list);
       });
       html += '</div>';
     } else {
