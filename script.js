@@ -3011,6 +3011,34 @@
     return y + '-' + m + '-' + day;
   }
 
+  // Printable Allergies & Medical list (DR binder / co-op day paper copy).
+  // One row per person with something recorded: name, kid/adult + group,
+  // family, phone, and the full allergy/medical text. openPrintIframe per
+  // the house print pattern — no browser-print of the scrolling grid.
+  function printAllergiesList() {
+    var people = allPeople.filter(function (p) { return p.allergies; });
+    people = people.slice().sort(function (a, b) { return (a.family + a.name).localeCompare(b.family + b.name); });
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Allergies &amp; Medical List</title>';
+    doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
+    doc += '</head><body>';
+    doc += '<h1>⚠ Allergies &amp; Medical List</h1>';
+    doc += '<p class="meta">' + people.length + ' ' + (people.length === 1 ? 'person' : 'people') + ' with recorded allergies / medical notes · printed ' + new Date().toLocaleDateString() + ' · safety-critical: reprint whenever profiles change</p>';
+    doc += '<table><thead><tr><th>Name</th><th>Who</th><th>Family</th><th>Phone</th><th>Allergies / medical notes</th></tr></thead><tbody>';
+    people.forEach(function (p) {
+      var who = p.type === 'kid' ? ('Kid' + (p.group ? ' · ' + p.group : '')) : 'Adult';
+      var displayName = nickOr(p.nickname, p.name) + ' ' + (p.lastName || p.family || '');
+      doc += '<tr>';
+      doc += '<td><strong>' + escapeHtml(displayName.trim()) + '</strong></td>';
+      doc += '<td>' + escapeHtml(who) + '</td>';
+      doc += '<td>' + escapeHtml((p.familyDisplay || p.family || '') + ' Family') + '</td>';
+      doc += '<td>' + escapeHtml(p.phone || '') + '</td>';
+      doc += '<td>' + escapeHtml(p.allergies) + '</td>';
+      doc += '</tr>';
+    });
+    doc += '</tbody></table></body></html>';
+    openPrintIframe(doc);
+  }
+
   function renderDirectory() {
     if (!directoryGrid) return;
     var query = (directorySearch ? directorySearch.value : '').toLowerCase();
@@ -3265,7 +3293,18 @@
       });
     }
 
+    // Allergies filter gets a proper 🖨 (Erin, 2026-07-23): browser-
+    // printing the face grid clipped to one screenful and carried no
+    // allergy text anyway — the DR binder needs a real list. The button
+    // opens the house print iframe with a purpose-built table.
+    if (activeFilter === 'hasAllergies') {
+      html = '<div class="coop-cal-toolbar" style="flex-basis:100%;">'
+        + '<button type="button" id="dir-allergy-print" class="btn btn-outline-dark btn-sm">🖨 Print allergies &amp; medical list</button>'
+        + '</div>' + html;
+    }
     directoryGrid.innerHTML = html;
+    var allergyPrintBtn = directoryGrid.querySelector('#dir-allergy-print');
+    if (allergyPrintBtn) allergyPrintBtn.addEventListener('click', printAllergiesList);
     if (directoryCount) {
       if (isClassView) {
         directoryCount.textContent = shown + ' students in ' + activeFilter;
@@ -22163,11 +22202,11 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
-        // Pill reflects the user's manageable scope, not the org-wide
-        // total — a Treasurer sees "3 active" for Finance Committee,
-        // not "28 active" for the whole co-op. Doesn't touch
-        // _rolesMgrState since the modal fetches a fresh pass on open.
-        var roles = scopeRolesToUser(Array.isArray(data.roles) ? data.roles : []);
+        // Org-wide count (Erin 2026-07-23: the modal shows the whole
+        // tree now, so the card pill matches it instead of the old
+        // manageable-scope count). Doesn't touch _rolesMgrState since
+        // the modal fetches a fresh pass on open.
+        var roles = Array.isArray(data.roles) ? data.roles : [];
         var active = roles.filter(function (r) { return r.status === 'active'; }).length;
         pill.textContent = active + ' active';
         pill.hidden = false;
@@ -25615,7 +25654,7 @@
     h += '<tr><td>Member directory (contact info)</td><td>Reach every family with the site down</td><td>Membership Report (🖨) — full contact detail; the Directory tab works too via the browser’s Print</td></tr>';
     h += '<tr><td>Current-season enrollment roster (kids + schedules)</td><td>Who’s enrolled, morning/afternoon, per kid</td><td>Membership Report (🖨); Our Families roster (🖨) for the one-page version</td></tr>';
     h += '<tr><td>Waivers report (signature records)</td><td>Legal record of who signed what</td><td>Waivers Report (🖨)</td></tr>';
-    h += '<tr><td>Allergies &amp; medical + emergency list</td><td>Safety-critical on co-op days, no screens needed</td><td>Directory tab → ⚠ Allergies &amp; Medical filter (browser Print); Class Packs carry per-class alerts</td></tr>';
+    h += '<tr><td>Allergies &amp; medical + emergency list</td><td>Safety-critical on co-op days, no screens needed</td><td>Directory tab → ⚠ Allergies &amp; Medical filter → <strong>🖨 Print allergies &amp; medical list</strong>; Class Packs carry per-class alerts</td></tr>';
     h += '<tr><td>Current class schedules</td><td>Run a co-op day from paper</td><td>Schedules Report (🖨 — by-class and by-person views)</td></tr>';
     h += '<tr><td>Role holders (board + committees)</td><td>Who owns what, with the site down</td><td>Roles Assignments (Co-op Management card; browser Print)</td></tr>';
     h += '<tr><td>Dues / payments status snapshot</td><td>Treasurer continuity</td><td>Membership Report (🖨 — payment status rides the rows)</td></tr>';
@@ -29090,12 +29129,19 @@
     var body = document.getElementById('roles-mgr-tree');
     if (!body) return;
     var allRoles = _rolesMgrState.roles || [];
-    var roles = scopeRolesToUser(allRoles);
+    // Erin 2026-07-23: show the WHOLE tree to every viewer — the old
+    // scope-filter hid other board members' subtrees (e.g. the
+    // volunteer roles under other chairs), which read as missing data.
+    // The scope now gates only the EDIT affordances (assign/remove/
+    // edit/archive); out-of-scope rows render read-only, matching the
+    // member-facing Org & Roles chart's visibility.
+    var scopedIds = {};
+    scopeRolesToUser(allRoles).forEach(function (r) { scopedIds[r.id] = true; });
+    var roles = allRoles;
     var show = _rolesMgrState.showArchived;
     var visible = roles.filter(function (r) { return show || r.status !== 'archived'; });
 
-    // Modal meta line — count of visible roles (post scope + archived
-    // filter). Reflects the user's manageable set, not the org-wide total.
+    // Modal meta line — org-wide active count now that the full tree shows.
     var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
     if (metaEl) {
       var activeCount = roles.filter(function (r) { return r.status === 'active'; }).length;
@@ -29132,8 +29178,10 @@
       var descOnly = r.category === 'cleaning_area' || isDescriptionOnlyRole(r.title);
       // Board-role holders are gated to the Comms Director (server
       // enforces); everyone else sees who holds the seat, read-only.
+      // Out-of-scope rows (other chairs' subtrees) are display-only.
       var isBoardRow = r.category === 'board';
-      var canManageThisRow = !isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1);
+      var inScope = !!scopedIds[r.id];
+      var canManageThisRow = inScope && (!isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1));
 
       // Board rows head their column with the same emoji the Org & Roles
       // chart uses - one visual language across both surfaces.
@@ -29214,14 +29262,16 @@
       }
       if (stampBits.length) h2 += '<span class="roles-row-stamp">Updated ' + stampBits.join(' · ') + '</span>';
       h2 += '</div>';
-      h2 += '<div class="roles-row-actions">';
-      h2 += '<button type="button" class="sc-btn roles-row-edit" data-role-id="' + r.id + '" aria-label="Edit ' + escapeHtml(r.title) + '">Edit</button>';
-      if (archived) {
-        h2 += '<button type="button" class="sc-btn roles-row-restore" data-role-id="' + r.id + '" aria-label="Restore ' + escapeHtml(r.title) + '">Restore</button>';
-      } else {
-        h2 += '<button type="button" class="sc-btn sc-btn-del roles-row-archive" data-role-id="' + r.id + '" aria-label="Archive ' + escapeHtml(r.title) + '">Archive</button>';
+      if (inScope) {
+        h2 += '<div class="roles-row-actions">';
+        h2 += '<button type="button" class="sc-btn roles-row-edit" data-role-id="' + r.id + '" aria-label="Edit ' + escapeHtml(r.title) + '">Edit</button>';
+        if (archived) {
+          h2 += '<button type="button" class="sc-btn roles-row-restore" data-role-id="' + r.id + '" aria-label="Restore ' + escapeHtml(r.title) + '">Restore</button>';
+        } else {
+          h2 += '<button type="button" class="sc-btn sc-btn-del roles-row-archive" data-role-id="' + r.id + '" aria-label="Archive ' + escapeHtml(r.title) + '">Archive</button>';
+        }
+        h2 += '</div>';
       }
-      h2 += '</div>';
       h2 += '</div>';
       h2 += '</div>';
       return h2;
