@@ -5507,6 +5507,16 @@ button.staff-role:hover {
   background: rgba(var(--color-primary-rgb), 0.04);
 }
 
+/* Morning Classes "Ages" column. Roster-aware ranges can run two digits on
+   both ends ("10–16"), which wrapped mid-range in the narrow default column
+   (Erin, 2026-07-23). Give it a little more room and keep the range on one
+   line; it's still a min-width, so wide tables don't get pushed around. */
+.portal-table th.am-ages-col,
+.portal-table td.am-ages-col {
+  min-width: 5.5rem;
+  white-space: nowrap;
+}
+
 .portal-table tbody tr:last-child td {
   border-bottom: none;
 }
