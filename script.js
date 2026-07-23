@@ -13729,6 +13729,14 @@
           _membershipPendingAction = { regId: selRegId, type: actType };
           if (tableTarget._expandRow && selIdx >= 0) tableTarget._expandRow(selIdx);
           else renderTable();
+          // Erin 2026-07-23: the action panel renders inside the row's
+          // expansion, BELOW the row — off-screen when the row sits low
+          // in the modal, so picking an action looked like a no-op.
+          // Scroll the freshly rendered panel to center.
+          setTimeout(function () {
+            var panel = body.querySelector('.ws-reg-decline');
+            if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 80);
         }
         if ((actType === 'switch' || actType === 'withdraw') && !_adjustEnrollCache) {
           sel.disabled = true;
@@ -13875,6 +13883,18 @@
           var wdFamName = wdBtn.getAttribute('data-family-name') || 'this family';
           var wdNoteEl = wdWrap.querySelector('.ws-adjwithdraw-note');
           var wdStatus = wdWrap.querySelector('.ws-memact-status');
+          // Unlinked-registration panel: the picked family is the target
+          // (and the server stamps the link onto the registration).
+          var wdPick = wdWrap.querySelector('.ws-adjwithdraw-fam');
+          if (wdPick) {
+            if (!wdPick.value) {
+              wdStatus.classList.add('ws-wv-err');
+              wdStatus.textContent = 'Pick the matching family first.';
+              return;
+            }
+            wdFamEmail = wdPick.value;
+            wdFamName = wdPick.options[wdPick.selectedIndex].textContent || wdFamName;
+          }
           rwArmTwoStep(wdBtn, 'withdraw ' + wdFamName, function () {
             wdBtn.disabled = true;
             wdStatus.classList.remove('ws-wv-err');
@@ -14729,14 +14749,20 @@
       var wdFamName = (wdFam && wdFam.family_name) || r.main_learning_coach || '';
       h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(wdFamEmail) + '" data-reg-id="' + escapeHtmlWs(String(r.id)) + '">';
       if (!wdFam) {
-        // No client-side profile match — the server can still resolve
-        // the family from the registration itself (reg_id →
-        // family_email / email / mlc_person_id chain), so offer the
-        // withdrawal with a heads-up rather than a dead end (prod
-        // 2026-07-23 round 2). A genuinely unresolvable family gets
-        // the server's specific error in the status line.
-        h += '<p class="ws-reg-decline-hint"><strong>Withdraw the ' + escapeHtmlWs(wdFamName) + ' family?</strong> Heads-up: this registration didn’t match a family profile by email, so the match will be made from the registration record itself when you confirm. '
-          + 'Withdraws every kid for the season, hides the family from the directory and member surfaces, frees their Morning Builder spots and afternoon picks, and notifies the board. Nothing is deleted — data is retained.</p>'
+        // No client-side profile match. The server tries the
+        // registration record too (reg_id → family_email / email /
+        // mlc_person_id), but the oldest rows link to NOTHING (prod
+        // reg #30, 2026-07-23) — so let the Membership Director pick
+        // the family from the directory list. Confirming withdraws
+        // them AND stamps the link onto the registration for good.
+        var wdPickOpts = '<option value="">Pick the matching family…</option>';
+        (((_adjustEnrollCache && _adjustEnrollCache.families) || [])).forEach(function (f) {
+          if (f.withdrawn) return;
+          wdPickOpts += '<option value="' + escapeHtmlWs(f.family_email) + '">' + escapeHtmlWs(f.family_name || f.family_email) + '</option>';
+        });
+        h += '<p class="ws-reg-decline-hint"><strong>Withdraw the ' + escapeHtmlWs(wdFamName) + ' family?</strong> This registration isn’t linked to a family profile by email, so pick the matching family from the directory list below — confirming withdraws them and links this registration to that family for next time. '
+          + 'Withdrawal removes every kid for the season, hides the family from the directory and member surfaces, frees their Morning Builder spots and afternoon picks, and notifies the board. Nothing is deleted — data is retained.</p>'
+          + '<select class="sc-btn ws-adjwithdraw-fam">' + wdPickOpts + '</select>'
           + '<input class="rd-input ws-adjwithdraw-note" type="text" maxlength="500" placeholder="Optional note (shared with the family / board notices)">'
           + '<div class="rd-btn-row ws-decline-btn-row">'
           + '<button type="button" class="sc-btn sc-btn-del ws-adjwithdraw-apply-btn" data-family-name="' + escapeHtmlWs(wdFamName) + '">Withdraw family</button>'

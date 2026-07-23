@@ -8877,6 +8877,7 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   const action = String(body.action || '').trim();
   let fam = normalizeEmail(body.family_email || '');
   const note = String(body.note || '').trim().slice(0, 500);
+  const regId = parseInt(body.reg_id, 10);
   if (!fam) return res.status(400).json({ error: 'family_email required' });
   const sql = getSql();
   let profRows = await sql`
@@ -8901,7 +8902,6 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   // (stamped by the profile upsert) is the strongest link — it works
   // even when the registration email appears nowhere in people
   // (prod 2026-07-23 round 2: email matched neither key nor adults).
-  const regId = parseInt(body.reg_id, 10);
   if (!profRows.length && Number.isFinite(regId)) {
     const regRows = await sql`
       SELECT id, email, family_email, mlc_person_id FROM registrations WHERE id = ${regId} LIMIT 1
@@ -8943,6 +8943,17 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   // family key so kids/placements/stamps all hit the right family.
   fam = String(prof.family_email || '').toLowerCase();
   const famName = prof.family_name || fam;
+  // Backfill the link onto the registration (empty-only, non-fatal):
+  // once the Membership Director resolves/picks the family, the report
+  // row matches the profile forever after (prod reg #30, 2026-07-23).
+  if (Number.isFinite(regId)) {
+    try {
+      await sql`
+        UPDATE registrations SET family_email = ${fam}, updated_at = NOW()
+        WHERE id = ${regId} AND (family_email IS NULL OR family_email = '')
+      `;
+    } catch (e) { console.error('adjust reg family_email backfill (non-fatal):', e); }
+  }
 
   if (action === 'schedule_switch') {
     const kidId = parseInt(body.kid_id, 10);
