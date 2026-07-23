@@ -14604,22 +14604,27 @@
     doc += '</head><body>';
     doc += '<h1>Membership Report</h1>';
     doc += '<p class="meta">' + regs.length + ' registration' + (regs.length === 1 ? '' : 's') + ' · printed ' + new Date().toLocaleDateString() + '</p>';
-    doc += '<table><thead><tr><th>Main Learning Coach</th><th>Paid</th><th>Waiver</th><th>New</th><th>Track</th><th>Kids</th><th>Email</th><th>Registered</th></tr></thead><tbody>';
+    // Erin 2026-07-23: this printout doubles as the DR binder's family
+    // contact list, so phone numbers + kid names ride along (the screen
+    // table stays lean — kid detail lives in the row expansion there).
+    doc += '<table><thead><tr><th>Main Learning Coach</th><th>Phone</th><th>Email</th><th>Kids</th><th>Track</th><th>Paid</th><th>Waiver</th><th>New</th><th>Registered</th></tr></thead><tbody>';
     regs.forEach(function (r) {
       var paid = String(r.payment_status || '').toLowerCase() === 'paid' ? 'PAID' : 'PENDING';
       var waiver = (!!r.waiver_member_agreement && !!r.signature_name) ? 'SIGNED' : 'PENDING';
       var track = r.track || '';
       if (r.track === 'Other' && r.track_other) track = 'Other: ' + r.track_other;
+      var kidNames = (r.kids || []).map(function (k) { return k.name || ''; }).filter(Boolean);
       doc += '<tr>';
       doc += '<td><strong>' + escapeHtml(r.main_learning_coach || '') + '</strong>';
       if (r.existing_family_name) doc += ' <span style="color:#666;font-size:11px;">(returning)</span>';
       doc += '</td>';
+      doc += '<td>' + escapeHtml(r.phone || '') + '</td>';
+      doc += '<td>' + escapeHtml(r.email || '') + '</td>';
+      doc += '<td>' + (kidNames.length ? escapeHtml(kidNames.join(', ')) : String((r.kids || []).length)) + '</td>';
+      doc += '<td>' + escapeHtml(track) + '</td>';
       doc += '<td>' + paid + '</td>';
       doc += '<td>' + waiver + '</td>';
       doc += '<td>' + (r.isNewMember ? 'NEW' : '') + '</td>';
-      doc += '<td>' + escapeHtml(track) + '</td>';
-      doc += '<td>' + (r.kids || []).length + '</td>';
-      doc += '<td>' + escapeHtml(r.email || '') + '</td>';
       doc += '<td>' + escapeHtml(formatReportDate(r.created_at)) + '</td>';
       doc += '</tr>';
     });
@@ -25600,12 +25605,12 @@
     h += '<h5 class="ws-part-subhead">5 · Backup passphrase custody</h5>';
     h += '<p class="ws-body-hint">The backups are useless without the encryption passphrase. It exists in exactly two places: '
       + 'the GitHub Actions secret <code>BACKUP_PASSPHRASE</code> (which <strong>cannot be read back</strong> once saved — write-only) and '
-      + 'a <strong>sealed envelope</strong> kept ' + ph('envelope location — e.g. with the binder / a board member’s home') + '. '
+      + 'a <strong>sealed envelope</strong> kept in the DR binder in the <strong>R&amp;W supply cabinet</strong> (a second binder — without the envelope — lives at the Communications Director’s home). '
       + 'If the envelope is opened or lost, generate a new passphrase, update the GitHub secret, seal a new envelope, and note the date the cipher changed (older backups keep the old passphrase!).</p>';
 
     // ── 6. Hard-copy binder list ──
     h += '<h5 class="ws-part-subhead">6 · Hard-copy binder — what to print, and when</h5>';
-    h += '<p class="ws-body-hint"><strong>Cadence:</strong> refresh the printed set at the <strong>start of each session</strong> and once more <strong>after registration closes</strong> for the new year. The “Refresh the printed DR binder” To Do on the Workspace nudges at each session start.</p>';
+    h += '<p class="ws-body-hint"><strong>Two binders:</strong> the primary — with the sealed passphrase envelope — lives in the <strong>R&amp;W supply cabinet</strong>; a second copy (no envelope) at the <strong>Communications Director’s home</strong>. <strong>Cadence:</strong> refresh both printed sets at the <strong>start of each session</strong> and once more <strong>after registration closes</strong> for the new year. The “Refresh the printed DR binder” To Do on the Workspace nudges at each session start.</p>';
     h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>Document</th><th>Why it’s in the binder</th><th>Print from</th></tr></thead><tbody>';
     h += '<tr><td>Member directory (contact info)</td><td>Reach every family with the site down</td><td>Membership Report (🖨) — full contact detail; the Directory tab works too via the browser’s Print</td></tr>';
     h += '<tr><td>Current-season enrollment roster (kids + schedules)</td><td>Who’s enrolled, morning/afternoon, per kid</td><td>Membership Report (🖨); Our Families roster (🖨) for the one-page version</td></tr>';

@@ -18,6 +18,8 @@ to this file.
   `.github/workflows/db-backup.yml`.
 - Encrypted with **gpg (symmetric AES256)**. The passphrase is in the sealed
   envelope in the DR binder (and in the GitHub secret `BACKUP_PASSPHRASE`).
+  The binder with the envelope lives in the **R&W supply cabinet**; a second
+  binder (no envelope) is kept at the **Communications Director's home**.
 - Stored in the co-op's **Google Drive** in the Backups folder
   (**Shared Drives → Communications → Backups**),
   named `rw-backup-YYYY-MM-DD.dump.gpg` with a sidecar
