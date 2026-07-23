@@ -25568,7 +25568,7 @@
     // ── 2. Backups ──
     h += '<h5 class="ws-part-subhead">2 · What’s backed up, where, how often</h5>';
     h += '<ul class="dr-plan-list">';
-    h += '<li><strong>Database:</strong> a full dump of the production Neon database is taken <strong>every night ~4:10am</strong> (Indianapolis time) by a GitHub Action, encrypted (gpg AES256), and uploaded to the Google Drive Backups folder — <a href="https://drive.google.com/drive/folders/1xRy5c-a8D2Fywtx02q_yHp9Z1bSHm_5J" target="_blank" rel="noopener"><strong>Shared Drives → Communications → Backups</strong></a> — as <code>rw-backup-YYYY-MM-DD.dump.gpg</code>.</li>';
+    h += '<li><strong>Database:</strong> a full dump of the production Neon database is taken <strong>every night ~4:10am</strong> (Indianapolis time) by a GitHub Action, encrypted (gpg AES256), and uploaded to the Google Drive Backups folder — <a href="https://drive.google.com/drive/folders/1xRy5c-a8D2Fywtx02q_yHp9Z1bSHm_5J" target="_blank" rel="noopener"><strong>Shared Drives → Communications → Backups</strong></a> — as <code>rw-backup-YYYY-MM-DD.dump.gpg</code>. Every board member has access to the Communications Shared Drive, so any of them can reach the backups.</li>';
     h += '<li><strong>Retention:</strong> the last 30 nightly backups, plus the first backup of each month for 12 months. Older ones are pruned automatically.</li>';
     h += '<li><strong>If a backup fails:</strong> communications@ gets an alert email from the workflow (plus GitHub’s own failure email). A backup that silently stops is worse than none — investigate the same week.</li>';
     h += '<li><strong>Restore drill:</strong> GitHub → Actions → “DB backup” → Run workflow → job <code>restore-test</code> restores the newest backup into a scratch database and checks row counts. Run it a couple of times a year and log the date in RESTORE.md.</li>';
@@ -25581,7 +25581,7 @@
     h += '<tr><td><strong>Site is down</strong> (database probably fine)</td><td>1. Check vercel-status.com and neonstatus.com — it may be them, not us.<br>2. Vercel → project → Deployments: if the newest deploy failed or broke things, open the last good one → ⋯ → “Instant Rollback” / Redeploy.<br>3. Nothing obvious? Check Runtime Logs on the current deployment.</td></tr>';
     h += '<tr><td><strong>Database lost or corrupted</strong></td><td>1. Stop — don’t click anything destructive, backups in Drive are the safety net.<br>2. Follow <strong>RESTORE.md</strong> step by step (binder copy or repo root): download newest backup → decrypt with the envelope passphrase → restore to a fresh Neon database → repoint Vercel’s DATABASE_URL env vars → redeploy.<br>3. Also consider Neon’s own point-in-time restore first (console.neon.tech → branch → Restore) — faster if the Neon account itself is fine.</td></tr>';
     h += '<tr><td><strong>Locked out of an account</strong></td><td>1. Find its recovery-code location in section 4 and use the account’s recovery flow.<br>2. Google Workspace admin lockout: use the recovery phone/email on file; worst case Google’s domain-verification recovery (slow — days).<br>3. GitHub/Vercel/Neon sign in via Google where configured — fixing the Google account usually fixes them too.</td></tr>';
-    h += '<tr><td><strong>Key person unavailable</strong> (the person who runs all this)</td><td>1. The binder is self-sufficient: this plan + RESTORE.md + the sealed envelope.<br>2. Any board member plus a technically comfortable helper can follow RESTORE.md — it assumes no prior context.<br>3. Who to call: ' + ph('name + phone of the backup technical contact') + '.</td></tr>';
+    h += '<tr><td><strong>Key person unavailable</strong> (the person who runs all this)</td><td>1. The binder is self-sufficient: this plan + RESTORE.md + the sealed envelope.<br>2. Any board member plus a technically comfortable helper can follow RESTORE.md — it assumes no prior context.<br>3. Who to call: <strong>Erin Bogan, 317-941-0468</strong>.</td></tr>';
     h += '</tbody></table></div>';
 
     // ── 4. Key accounts — recovery-code LOCATIONS ──
@@ -25590,10 +25590,10 @@
     h += '<div class="ws-waivers-table-wrap"><table class="ws-waivers-table"><thead><tr><th>Account</th><th>Sign-in</th><th>Recovery codes / info live at</th></tr></thead><tbody>';
     h += '<tr><td>Google Workspace admin (communications@)</td><td>password + 2FA</td><td>' + ph('e.g. sealed page in the binder / password manager name') + '</td></tr>';
     h += '<tr><td>GitHub (communications-arch)</td><td>password + 2FA</td><td>' + ph('where the 2FA recovery codes are stored') + '</td></tr>';
-    h += '<tr><td>Vercel</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
-    h += '<tr><td>Neon</td><td>' + ph('Google sign-in as communications@? confirm') + '</td><td>' + ph('location, if separate credentials exist') + '</td></tr>';
-    h += '<tr><td>GoDaddy (domain)</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then GoDaddy follows</td></tr>';
-    h += '<tr><td>Resend</td><td>' + ph('login email') + '</td><td>' + ph('location') + '</td></tr>';
+    h += '<tr><td>Vercel</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then this follows</td></tr>';
+    h += '<tr><td>Neon</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then this follows</td></tr>';
+    h += '<tr><td>GoDaddy (domain)</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then this follows</td></tr>';
+    h += '<tr><td>Resend</td><td>“Sign in with Google” as communications@</td><td>rides the communications@ Google account — recover that account first (row 1), then this follows</td></tr>';
     h += '</tbody></table></div>';
 
     // ── 5. Passphrase custody ──

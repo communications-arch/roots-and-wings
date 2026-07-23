@@ -132,7 +132,7 @@ schema change, and record the date + result here:
 
 ## 8. Who to call
 
-- Communications Director (runs this system): **[name + phone]**
+- Communications Director (runs this system): **Erin Bogan, 317-941-0468**
 - Backup contact who knows where the binder lives: **[name + phone]**
 - Erin's technical contact for the site build: **[name/handle]**
 - Neon support: https://neon.tech/docs/introduction/support (Launch plan)
