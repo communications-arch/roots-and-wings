@@ -1610,6 +1610,46 @@ async function handleList(req, res) {
       console.error('New-member flag computation failed (non-fatal):', nmErr);
     }
 
+    // Withdrawn overlay (Erin, 2026-07-23): withdrawal stamps
+    // member_profiles, never the registration — so the report looked
+    // untouched after a withdrawal. Mark each row whose family is
+    // withdrawn (matched by family key OR any adult email, since old
+    // rows' emails don't always line up) so the client can badge and
+    // filter them like declined rows. Degrades silently.
+    try {
+      const wRows = await sql`
+        SELECT family_email, withdrawn_at, withdrawn_by FROM member_profiles
+        WHERE withdrawn_at IS NOT NULL
+      `;
+      if (wRows.length) {
+        const wKeys = wRows.map(w => String(w.family_email || '').toLowerCase());
+        const wAdults = await sql`
+          SELECT family_email, email, personal_email FROM people
+          WHERE LOWER(family_email) = ANY(${wKeys})
+        `;
+        const withdrawnByEmail = {};
+        wRows.forEach(w => {
+          const key = String(w.family_email || '').toLowerCase();
+          const stamp = { at: w.withdrawn_at, by: w.withdrawn_by || '' };
+          withdrawnByEmail[key] = stamp;
+          wAdults.forEach(p => {
+            if (String(p.family_email || '').toLowerCase() !== key) return;
+            [p.email, p.personal_email].forEach(e => {
+              const le = String(e || '').toLowerCase().trim();
+              if (le) withdrawnByEmail[le] = stamp;
+            });
+          });
+        });
+        rows.forEach(r => {
+          const wd = withdrawnByEmail[String(r.family_email || '').toLowerCase()]
+            || withdrawnByEmail[String(r.email || '').toLowerCase()] || null;
+          if (wd) { r.withdrawn_at = wd.at; r.withdrawn_by = wd.by; }
+        });
+      }
+    } catch (wErr) {
+      console.error('Withdrawn overlay failed (non-fatal):', wErr);
+    }
+
     return res.status(200).json({ registrations: rows, comms_director_name: commsDirectorName, viewerCanAct });
   } catch (err) {
     console.error('Registration list error:', err);

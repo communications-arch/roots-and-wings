@@ -11887,6 +11887,7 @@
     if (state === 'signed') return '<span class="ws-wv-ok">Signed</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'resent') return '<span class="ws-wv-resent">Resent</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'declined') return '<span class="ws-wv-declined">Declined</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
+    if (state === 'withdrawn') return '<span class="ws-wv-declined">Withdrawn</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     return '<span class="ws-wv-pending">Pending</span>';
   }
 
@@ -13435,9 +13436,10 @@
       render: function (r) { return escapeHtmlWs(r.main_learning_coach); }
     },
     { key: 'payment_status', label: 'Paid', type: 'string',
-      sortValue: function (r) { return r.declined_at ? '0' : (String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'); },
+      sortValue: function (r) { return (r.declined_at || r.withdrawn_at) ? '0' : (String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'); },
       render: function (r) {
         if (r.declined_at) return renderStatusPill('declined', r.declined_at);
+        if (r.withdrawn_at) return renderStatusPill('withdrawn', r.withdrawn_at);
         var ok = String(r.payment_status || '').toLowerCase() === 'paid';
         return renderStatusPill(ok ? 'paid' : 'pending', null);
       }
@@ -13485,6 +13487,9 @@
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (r) {
         if (!isMembershipDirector()) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Withdrawn = terminal here (no un-withdraw tool yet) — nothing
+        // sensible to offer on the row.
+        if (r.withdrawn_at && !r.declined_at) return '<span class="ws-srt-actions-empty">&mdash;</span>';
         var opts = r.declined_at
           ? '<option value="undecline">Undo decline&hellip;</option>'
           : '<option value="switch">Switch a kid’s schedule&hellip;</option>'
@@ -13568,11 +13573,15 @@
         return Object.assign({}, r, { kids: kids || [], backup_coaches: backups || [] });
       });
       _membershipRegs = regs;
-      // Declined rows ride along in the payload but stay out of every count
-      // and default view \u2014 they only surface behind the Declined pill/funnel.
+      // Declined + withdrawn rows ride along in the payload but stay out
+      // of every count and default view \u2014 they only surface behind their
+      // pill/funnel (Erin 2026-07-23: a withdrawal looked like a no-op
+      // because the report showed the registration untouched).
       var declinedCount = regs.filter(function (r) { return !!r.declined_at; }).length;
+      var withdrawnCount = regs.filter(function (r) { return !r.declined_at && !!r.withdrawn_at; }).length;
       if (_membershipFilter === 'declined' && declinedCount === 0) _membershipFilter = 'all';
-      var activeRegs = regs.filter(function (r) { return !r.declined_at; });
+      if (_membershipFilter === 'withdrawn' && withdrawnCount === 0) _membershipFilter = 'all';
+      var activeRegs = regs.filter(function (r) { return !r.declined_at && !r.withdrawn_at; });
       var total = activeRegs.length;
       var paidCount = activeRegs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; }).length;
       var pendingCount = total - paidCount;
@@ -13591,6 +13600,7 @@
       // Modal meta line \u2014 total registrations (+ declined, when any).
       var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
       if (metaEl) metaEl.textContent = total + ' registration' + (total === 1 ? '' : 's')
+        + (withdrawnCount > 0 ? ' \u00b7 ' + withdrawnCount + ' withdrawn' : '')
         + (declinedCount > 0 ? ' \u00b7 ' + declinedCount + ' declined' : '');
 
       // Board members (read-only, viewerCanAct=false) see the same
@@ -13619,7 +13629,10 @@
         h += countPill('am',      _membershipTrackFilter === 'am',   'ws-track-count', kidsAm + ' Kids AM only',    'Show only AM-only families');
         h += countPill('pm',      _membershipTrackFilter === 'pm',   'ws-track-count', kidsPm + ' Kids PM only',    'Show only PM-only families');
         h += countPill('both',    _membershipTrackFilter === 'both', 'ws-track-count', kidsBoth + ' Kids Both',     'Show only AM + PM families');
-        // Declined pill only exists when there's something behind it.
+        // Withdrawn / Declined pills only exist when something's behind them.
+        if (withdrawnCount > 0) {
+          h += countPill('withdrawn', _membershipFilter === 'withdrawn', 'ws-wv-declined', withdrawnCount + ' Withdrawn', 'Show only withdrawn families');
+        }
         if (declinedCount > 0) {
           h += countPill('declined', _membershipFilter === 'declined', 'ws-wv-declined', declinedCount + ' Declined', 'Show only declined registrations');
         }
@@ -13641,7 +13654,7 @@
         var btn = e.target.closest('[data-mfilter]');
         if (!btn) return;
         var f = btn.getAttribute('data-mfilter');
-        if (f === 'paid' || f === 'pending' || f === 'declined') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
+        if (f === 'paid' || f === 'pending' || f === 'declined' || f === 'withdrawn') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
         else if (f === 'new')               _membershipNewFilter = (_membershipNewFilter === 'new') ? 'all' : 'new';
         else                                _membershipTrackFilter = (_membershipTrackFilter === f) ? 'all' : f;
         renderCounts();
@@ -13654,13 +13667,16 @@
       }
       function regsForFilter() {
         return regs.filter(function (r) {
-          // Declined rows work like archived/deleted rows elsewhere (Erin,
-          // 2026-07-19): visible in the default view — dimmed, with an Undo
-          // action — but excluded from every scoped filter except their own
-          // Declined pill, and never counted as paid/pending.
+          // Declined + withdrawn rows work like archived/deleted rows
+          // elsewhere (Erin, 2026-07-19 / 2026-07-23): visible in the
+          // default view — dimmed, badged — but excluded from every
+          // scoped filter except their own pill, and never counted as
+          // paid/pending.
           if (_membershipFilter === 'declined') {
             if (!r.declined_at) return false;
-          } else if (r.declined_at) {
+          } else if (_membershipFilter === 'withdrawn') {
+            if (!(r.withdrawn_at && !r.declined_at)) return false;
+          } else if (r.declined_at || r.withdrawn_at) {
             if (_membershipFilter !== 'all') return false;
             if (_membershipNewFilter !== 'all' || _membershipTrackFilter !== 'all') return false;
             return true;
@@ -13686,7 +13702,8 @@
                 { value: 'all',     label: 'Any',     count: total },
                 { value: 'paid',    label: 'Paid',    count: paidCount },
                 { value: 'pending', label: 'Pending', count: pendingCount }
-              ].concat(declinedCount > 0 ? [{ value: 'declined', label: 'Declined', count: declinedCount }] : []),
+              ].concat(withdrawnCount > 0 ? [{ value: 'withdrawn', label: 'Withdrawn', count: withdrawnCount }] : [])
+               .concat(declinedCount > 0 ? [{ value: 'declined', label: 'Declined', count: declinedCount }] : []),
               current: _membershipFilter,
               onChange: function (v) { _membershipFilter = v; renderCounts(); renderTable(); }
             };
@@ -13707,7 +13724,7 @@
           initialSort: { key: 'created_at', dir: 'desc' },
           expandable: true,
           renderDetail: renderMembershipRegDetail,
-          rowClass: function (r) { return r.declined_at ? 'ws-srt-row-declined' : ''; }
+          rowClass: function (r) { return (r.declined_at || r.withdrawn_at) ? 'ws-srt-row-declined' : ''; }
         });
       }
 
@@ -14780,6 +14797,17 @@
           + '</div>';
       }
       h += '<p class="ws-decline-status ws-memact-status" aria-live="polite" style="margin-top:8px;"></p></div>';
+    }
+
+    // Withdrawn banner (Erin, 2026-07-23) — who applied it and when.
+    // The registration row is retained for records; the family is gone
+    // from the directory and member surfaces.
+    if (r.withdrawn_at && !r.declined_at) {
+      h += '<div class="ws-reg-detail-section ws-reg-declined-banner">' +
+        '<strong>Withdrawn</strong> ' + escapeHtmlWs(new Date(r.withdrawn_at).toLocaleString()) +
+        (r.withdrawn_by ? ' by ' + escapeHtmlWs(r.withdrawn_by) : '') +
+        '<br><em>The family left mid-season. This registration stays for the records; they no longer appear in the directory or member surfaces.</em>' +
+        '</div>';
     }
 
     // Declined banner — who declined, when, and the note that went to the
