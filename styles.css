@@ -11436,6 +11436,12 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   flex-direction: column;
   gap: 6px;
 }
+/* Open Committee Seats report: breathing room between the intro hints
+   and the seats list (Erin, 2026-07-22). Scoped to this modal — in the
+   Jump In modal the list hugs its event heading on purpose. */
+#open-seats-body .ws-opportunities {
+  margin-top: 18px;
+}
 .ws-opportunities li {
   padding: 10px 12px;
   background: rgba(var(--color-primary-rgb), 0.06);

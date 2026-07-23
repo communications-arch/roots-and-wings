@@ -9058,15 +9058,14 @@
         }
         if (showsBuilder) {
           // The Submissions Report lives inside the builder; the pending
-          // pill rides this row. VP keeps the "Afternoon Classes" sub-label
-          // to pair with Membership's morning row below. The ACL's pill
-          // counts afternoon submissions only, matching her To Do (#36).
-          // Label + qualifier live in ONE flex child (.ws-link-label) so the
-          // trailing count pill can't squeeze them into separate per-word
-          // columns (#41 — "Class / Builder | Afternoon / Classes").
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder'
-            + (role === 'Vice President' ? ' <span class="ws-link-sub">Afternoon Classes</span>' : '')
-            + '</span><span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
+          // pill rides this row. The ACL's pill counts afternoon
+          // submissions only, matching her To Do (#36). No sub-label
+          // (Erin, 2026-07-22: the old "Afternoon Classes" qualifier —
+          // added only to pair with Membership's morning row — read as
+          // a role statement, and a wrong one: the VP's builder covers
+          // both blocks, and afternoon is the ACL's lane).
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder</span>'
+            + '<span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
         }
         if (role === 'Membership Director') {
           // Membership owns the morning age-group placement builder (Erin,
