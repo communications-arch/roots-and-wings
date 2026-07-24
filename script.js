@@ -35207,7 +35207,18 @@
       btn.textContent = 'Saving…';
 
       var pendingPhotos = [];
-      state.parents.forEach(function (p, i) { if (p._queuedPhoto) pendingPhotos.push({ kind: 'parent', idx: i, name: p.name, data: p._queuedPhoto }); });
+      state.parents.forEach(function (p, i) {
+        if (!p._queuedPhoto) return;
+        // Mirror the compose-then-fallback the name guard + saveProfile use:
+        // a newly-added adult (e.g. a fresh BLC) only has first_name/last_name
+        // from the form fields; the legacy `name` field stays blank until the
+        // next render. Sending that blank as person_name makes the photo
+        // upload fail with "person_name required" (api/tour.js). Compose it.
+        var pFirst = String(p.first_name || '').trim();
+        var pLast = String(p.last_name || '').trim();
+        var pName = [pFirst, pLast].filter(Boolean).join(' ').trim() || String(p.name || '').trim();
+        pendingPhotos.push({ kind: 'parent', idx: i, name: pName, data: p._queuedPhoto });
+      });
       state.kids.forEach(function (k, i) { if (k._queuedPhoto) pendingPhotos.push({ kind: 'kid', idx: i, name: k.name, data: k._queuedPhoto }); });
 
       function restoreBtn() { btn.disabled = false; btn.textContent = originalText; }
