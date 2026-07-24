@@ -3039,13 +3039,18 @@
     openPrintIframe(doc);
   }
 
-  // The Directory's group filter pills are static markup in members.html, so
-  // their ranges quietly drifted — they still read "Sassafras (3-6)" and
-  // "Willows (10-12)" long after both bands were corrected in every JS table
-  // and on the public age cards. Rewriting each label from
-  // MORNING_GROUP_ORDER on render kills that drift for good AND lets the
-  // pills widen to their roster like every other portal surface
-  // (Erin, 2026-07-23). The icon <img> is preserved; only the text changes.
+  // The Directory's group filter pills are static markup in members.html.
+  // Rewriting each label from MORNING_GROUP_ORDER on render keeps them from
+  // drifting out of sync AND lets them widen to their roster like every
+  // other portal surface (Erin, 2026-07-23). Icon <img> preserved; only the
+  // text changes.
+  //
+  // History worth keeping: these pills were the ONLY place that had
+  // Sassafras and Willows right. On 2026-07-23 I "fixed" them to match the
+  // eight places that said 5–6 and 10–11 — Erin confirmed the pills were
+  // correct and the other eight were the drifted ones. Sassafras really is
+  // 3–6 and Willows really is 10–12, so the bands overlap their neighbours
+  // by design. Don't "correct" an overlap back out.
   function refreshDirectoryGroupPills() {
     var wrap = document.getElementById('directoryFilters');
     if (!wrap) return;
@@ -17610,11 +17615,11 @@
   // Mirrors the co-op's age groups, plus broader buckets and "All ages".
   var AGE_RANGE_OPTIONS = [
     'Saplings (3-5)',
-    'Sassafras (5-6)',
+    'Sassafras (3-6)',
     'Oaks (7-8)',
     'Maples (8-9)',
     'Birch (9-10)',
-    'Willows (10-11)',
+    'Willows (10-12)',
     'Cedars (12-13)',
     'Pigeons (14+)',
     'Mixed: Younger (3-8)',
@@ -21224,11 +21229,11 @@
   var AGE_GROUP_LABELS = {
     greenhouse: 'Greenhouse (0–2)',
     saplings: 'Saplings (3–5)',
-    sassafras: 'Sassafras (5–6)',
+    sassafras: 'Sassafras (3–6)',
     oaks: 'Oaks (7–8)',
     maples: 'Maples (8–9)',
     birch: 'Birch (9–10)',
-    willows: 'Willows (10–11)',
+    willows: 'Willows (10–12)',
     cedars: 'Cedars (12–13)',
     pigeons: 'Pigeons (14+)',
     'mixed-younger': 'Mixed: Younger (3–8)',
@@ -31178,14 +31183,26 @@
   // finalize lifecycle; finalizing writes the live kids.class_group.
   // Group list + typical ranges mirror the public-site ageGroupData; the
   // displayed range per group is auto-derived from the kids placed in it.
+  //
+  // `range` and `min`/`max` are two DIFFERENT things and are meant to
+  // disagree (Erin confirmed the real bands, 2026-07-23):
+  //   range   = the ages a group actually spans, for display. Sassafras
+  //             (3–6) and Willows (10–12) deliberately overlap their
+  //             neighbours — real groups aren't a clean partition.
+  //   min/max = the first-match placement heuristic, mirroring the server's
+  //             groupForAge(). Order resolves the overlap: age 5 hits
+  //             Saplings first, age 12 hits Cedars. It's a starting guess
+  //             the Membership Director reviews, NOT a rule.
+  // Widening one to match the other would either break placement or make
+  // the printed ranges lie. Leave them apart.
   var MORNING_GROUP_ORDER = [
     { name: 'Greenhouse', emoji: '🌱', range: '0–2',   min: 0,  max: 2 },
     { name: 'Saplings',   emoji: '🌿', range: '3–5',   min: 3,  max: 5 },
-    { name: 'Sassafras',  emoji: '🍃', range: '5–6',   min: 5,  max: 6 },
+    { name: 'Sassafras',  emoji: '🍃', range: '3–6',   min: 5,  max: 6 },
     { name: 'Oaks',       emoji: '🌳', range: '7–8',   min: 7,  max: 8 },
     { name: 'Maples',     emoji: '🍁', range: '8–9',   min: 8,  max: 9 },
     { name: 'Birch',      emoji: '🌲', range: '9–10',  min: 9,  max: 10 },
-    { name: 'Willows',    emoji: '🌾', range: '10–11', min: 10, max: 11 },
+    { name: 'Willows',    emoji: '🌾', range: '10–12', min: 10, max: 11 },
     { name: 'Cedars',     emoji: '🌲', range: '12–13', min: 12, max: 13 },
     { name: 'Pigeons',    emoji: '🕊️', range: '14+',   min: 14, max: 200 }
   ];
@@ -35444,7 +35461,7 @@ var ageGroupData = {
   sassafras: {
     emoji: '🍃',
     name: 'Sassafras',
-    range: 'Ages 5 – 6',
+    range: 'Ages 3 – 6',
     desc: 'Sassafras bridges the gap between early learners and elementary-aged kids. Hands-on projects and collaborative activities help build confidence and independence.',
     activities: [
       'Hands-on science experiments',
@@ -35496,7 +35513,7 @@ var ageGroupData = {
   willows: {
     emoji: '🌾',
     name: 'Willows',
-    range: 'Ages 10 – 11',
+    range: 'Ages 10 – 12',
     desc: 'Willows are developing independence and a strong sense of self. Classes challenge them academically while fostering creativity, collaboration, and critical thinking.',
     activities: [
       'Advanced science and experiments',

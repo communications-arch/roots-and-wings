@@ -180,5 +180,95 @@ console.log('\nrefreshDirectoryGroupPills (load-order safety)');
   });
 }
 
+// ── The canonical bands agree across every file ───────────────────────────
+// This one exists because the bands drifted TWICE in opposite directions.
+// The displayed range for a group lives in NINE hand-maintained places, and
+// nothing used to cross-check them: for months the Directory pills were the
+// only place with Sassafras and Willows right, and on 2026-07-23 I "fixed"
+// the pills to match the eight wrong ones before Erin corrected me.
+//
+// Real bands, confirmed by Erin 2026-07-23: Sassafras 3–6, Willows 10–12.
+// They overlap their neighbours on purpose — the groups are not a clean
+// partition of ages.
+console.log('\ncanonical age bands (cross-file)');
+{
+  const read = f => fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8');
+  const membersHtml = read('members.html');
+  const indexHtml = read('index.html');
+  const curriculum = read('api/curriculum.js');
+  const tour = read('api/tour.js');
+
+  // en-dash, hyphen and spaced-en-dash spellings all appear in the codebase
+  const BANDS = [
+    { group: 'Sassafras', lo: 3, hi: 6 },
+    { group: 'Willows', lo: 10, hi: 12 }
+  ];
+
+  BANDS.forEach(({ group, lo, hi }) => {
+    const g = group.toLowerCase();
+    const tight = lo + '[–-]' + hi;          // "3–6" / "3-6"
+    const spaced = lo + ' – ' + hi;          // "Ages 3 – 6"
+
+    t(group + ': MORNING_GROUP_ORDER display range', () => {
+      const row = src.match(new RegExp("name: '" + group + "'[^}]*range: '([^']+)'"));
+      assert.ok(row, 'row not found');
+      assert.ok(new RegExp('^' + tight + '$').test(row[1]), group + ' range is "' + row[1] + '"');
+    });
+
+    t(group + ': AGE_GROUP_LABELS (portal labels + sign-up eligibility)', () => {
+      const m = src.match(new RegExp(g + ": '" + group + " \\(([^)]+)\\)'"));
+      assert.ok(m, 'label not found');
+      assert.ok(new RegExp('^' + tight + '$').test(m[1]), group + ' label is "' + m[1] + '"');
+    });
+
+    t(group + ': AGE_RANGE_OPTIONS (curriculum library editor)', () => {
+      const m = src.match(new RegExp("'" + group + " \\(([^)]+)\\)',"));
+      assert.ok(m, 'option not found');
+      assert.ok(new RegExp('^' + tight + '$').test(m[1]), group + ' option is "' + m[1] + '"');
+    });
+
+    t(group + ': ageGroupData (public age-group modal)', () => {
+      const m = src.match(new RegExp("name: '" + group + "',\\s*\\n\\s*range: '([^']+)'"));
+      assert.ok(m, 'modal entry not found');
+      assert.strictEqual(m[1], 'Ages ' + spaced);
+    });
+
+    t(group + ': index.html public age card', () => {
+      const m = indexHtml.match(new RegExp('<h4>' + group + '</h4>\\s*<span class="age-range">([^<]+)</span>'));
+      assert.ok(m, 'age card not found');
+      assert.strictEqual(m[1].trim(), 'Ages ' + spaced);
+    });
+
+    t(group + ': members.html Directory pill (pre-JS paint)', () => {
+      const m = membersHtml.match(new RegExp('data-filter="' + group + '"[^>]*>[^<]*<img[^>]*>\\s*' + group + ' \\(([^)]+)\\)'));
+      assert.ok(m, 'pill not found');
+      const band = m[1].replace(/&ndash;/g, '–');
+      assert.ok(new RegExp('^' + tight + '$').test(band), group + ' pill is "' + band + '"');
+    });
+
+    t(group + ': api/curriculum.js prettyAges (reviewer emails)', () => {
+      const m = curriculum.match(new RegExp(g + ": '" + group + " \\(([^)]+)\\)'"));
+      assert.ok(m, 'prettyAges entry not found');
+      assert.ok(new RegExp('^' + tight + '$').test(m[1]), group + ' prettyAges is "' + m[1] + '"');
+    });
+  });
+
+  // The placement heuristic is SUPPOSED to differ from the display ranges —
+  // it is a first-match guess, so overlapping display bands would break it.
+  // Asserting the difference stops a future reader from "reconciling" them.
+  t('api/tour placement bands stay NARROWER than the display ranges', () => {
+    const sass = tour.match(/name: 'Sassafras',\s*min: (\d+),\s*max: (\d+)/);
+    const will = tour.match(/name: 'Willows',\s*min: (\d+),\s*max: (\d+)/);
+    assert.ok(sass && will, 'placement bands not found');
+    assert.deepStrictEqual([sass[1], sass[2]], ['5', '6'], 'Sassafras placement band moved');
+    assert.deepStrictEqual([will[1], will[2]], ['10', '11'], 'Willows placement band moved');
+  });
+
+  t('the difference is explained in a comment, not left as a mystery', () => {
+    assert.ok(/DISPLAY ranges live in/.test(tour),
+      'api/tour.js lost the comment explaining why its bands are narrower');
+  });
+}
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

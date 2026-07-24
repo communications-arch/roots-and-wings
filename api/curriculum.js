@@ -644,9 +644,9 @@ async function countKidsUnpicked(sql, year, sess) {
 
 function prettyAges(a, other) {
   const map = {
-    saplings: 'Saplings (3–5)', sassafras: 'Sassafras (5–6)',
+    saplings: 'Saplings (3–5)', sassafras: 'Sassafras (3–6)',
     oaks: 'Oaks (7–8)', maples: 'Maples (8–9)', birch: 'Birch (9–10)',
-    willows: 'Willows (10–11)', cedars: 'Cedars (12–13)', pigeons: 'Pigeons (14+)',
+    willows: 'Willows (10–12)', cedars: 'Cedars (12–13)', pigeons: 'Pigeons (14+)',
     'mixed-younger': 'Mixed: Younger (3–8)',
     'mixed-elementary': 'Mixed: Elementary (5–11)',
     'mixed-older': 'Mixed: Older (8–14)',

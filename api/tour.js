@@ -5441,6 +5441,12 @@ function ageAsOfFall(birthDate, schoolYear) {
 // (the Membership Director makes the call at boundaries); auto-seed uses
 // first-match — e.g. age 5 → Saplings, 8 → Oaks. A starting guess she
 // reviews, not a hard rule.
+//
+// These are NOT the ranges shown to people. The DISPLAY ranges live in
+// script.js MORNING_GROUP_ORDER[].range, and Sassafras (3–6) / Willows
+// (10–12) are wider there than here on purpose — that's the real span of
+// each group, while the numbers below are just the placement heuristic.
+// Erin confirmed the real bands 2026-07-23; don't reconcile the two.
 const MORNING_GROUP_RANGES = [
   { name: 'Greenhouse', min: 0,  max: 2 },
   { name: 'Saplings',   min: 3,  max: 5 },
