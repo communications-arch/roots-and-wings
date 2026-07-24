@@ -34561,7 +34561,13 @@
       // #78: after the × the row must drop to initials IMMEDIATELY — the
       // fallback otherwise repaints their Workspace avatar and the removal
       // looks like it didn't take.
-      if (!src && opts && opts.wsFallback && !p._photoRemoved) {
+      // Gate the fallback on a non-empty name. A brand-new adult ("Add an
+      // Adult") has name:'' until the next render, and getPhotoUrl('',
+      // state.family_email, ...) falls through to the un-gated email match
+      // and returns the MLC's Workspace photo — so a fresh row would show the
+      // primary parent's face. A nameless new row has no existing photo to
+      // preview anyway, so just show the initial.
+      if (!src && opts && opts.wsFallback && !p._photoRemoved && String(p.name || '').trim()) {
         var wsUrl = getPhotoUrl(p.name || '', state.family_email, state.family_name);
         if (wsUrl) src = wsUrl.replace(/=s\d+-c/, '=s256-c');
       }
