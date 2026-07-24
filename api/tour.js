@@ -5447,6 +5447,9 @@ function ageAsOfFall(birthDate, schoolYear) {
 // (10–12) are wider there than here on purpose — that's the real span of
 // each group, while the numbers below are just the placement heuristic.
 // Erin confirmed the real bands 2026-07-23; don't reconcile the two.
+// She also confirmed the one case where the difference is visible: a
+// 12-year-old should keep landing in CEDARS, not Willows, so Willows stays
+// capped at 11 here even though the group really does take 12s.
 const MORNING_GROUP_RANGES = [
   { name: 'Greenhouse', min: 0,  max: 2 },
   { name: 'Saplings',   min: 3,  max: 5 },

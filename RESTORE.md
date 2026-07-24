@@ -135,8 +135,14 @@ schema change, and record the date + result here:
 ## 8. Who to call
 
 - Communications Director (runs this system): **Erin Bogan, 317-941-0468**
-- Backup contact who knows where the binder lives: **[name + phone]**
-- Erin's technical contact for the site build: **[name/handle]**
+- Where the binder lives: **the whole board knows** — ask any board member.
+  (Supply cabinet binder has the sealed envelope; the Communications
+  Director's home copy does not.)
+- Technical contact for the site build: **Erin Bogan — same person as above.**
+  There is no second technical contact today, so if Erin is unavailable this
+  runbook has to stand on its own. It is written for any competent developer
+  with no prior context; Neon and Vercel support are below, and the DR plan's
+  key-accounts table has the logins.
 - Neon support: https://neon.tech/docs/introduction/support (Launch plan)
 - Vercel support: https://vercel.com/help
 
