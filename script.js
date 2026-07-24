@@ -2199,6 +2199,11 @@
         for (var pc = 0; pc < pInfo.length; pc++) {
           if (String(pInfo[pc].name || '').trim().split(/\s+/)[0].toLowerCase() === firstNameLower) {
             if (pInfo[pc].photoConsent === false) return null;
+            // Durable photo removal (2026-07-24): the adult deleted their
+            // photo in EMI. Return null so we DON'T fall through to their
+            // Google Workspace photo — the directory shows initials, matching
+            // what EMI shows. (Uploading a new photo clears photo_removed.)
+            if (pInfo[pc].photoRemoved === true) return null;
             break;
           }
         }
@@ -34471,6 +34476,10 @@
           nicknames: Array.isArray(p.nicknames) ? p.nicknames.slice() : [],
           allergies: p.allergies || '',
           rw_email_requested: !!p.rw_email_requested,
+          // Durable photo-removal: seed the in-session flag from the DB so a
+          // reopened EMI keeps showing initials (not the Workspace fallback)
+          // for someone who removed their photo. thumbHtml reads _photoRemoved.
+          _photoRemoved: p.photo_removed === true,
           _queuedPhoto: null
         };
       });
@@ -34586,7 +34595,15 @@
       var h = '<div class="emi-row" data-parent-idx="' + idx + '">';
       // #65: an × on the avatar clears the photo (queued or saved) — the
       // save writes photo_url:'' so the person drops back to initials.
-      var pHasPhoto = !!(p._queuedPhoto || p.photo_url);
+      // 2026-07-24: also show the × when only the Google Workspace fallback
+      // photo is visible, so an adult can remove a photo they never uploaded
+      // (the × sets the durable _photoRemoved flag via cardClickHandler).
+      // Without this the only way to reach "remove" was to upload a throwaway
+      // photo first, then delete it — the exact dance that surfaced this bug.
+      var pHasOwnPhoto = !!(p._queuedPhoto || p.photo_url);
+      var pShowsWsPhoto = !pHasOwnPhoto && !p._photoRemoved && !!String(p.name || '').trim() &&
+        !!getPhotoUrl(p.name || '', state.family_email, state.family_name);
+      var pHasPhoto = pHasOwnPhoto || pShowsWsPhoto;
       h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-parent" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this adult">' + thumbHtml(p, p.name, { wsFallback: true }) +
            '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
@@ -35271,6 +35288,9 @@
             last_name: last,
             pronouns: p.pronouns,
             photo_url: p.photo_url,
+            // Durable removal so the directory drops to initials instead of
+            // silently restoring the Workspace photo (Erin, 2026-07-24).
+            photo_removed: p._photoRemoved === true,
             photo_consent: p.photo_consent !== false,
             role: p.role || 'parent',
             email: String(p.email || '').trim().toLowerCase(),

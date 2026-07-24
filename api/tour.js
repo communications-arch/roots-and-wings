@@ -3176,6 +3176,11 @@ function sanitizeParent(p) {
     nickname: String(p.nickname || '').trim().slice(0, 60),
     pronouns: String(p.pronouns || '').trim().slice(0, 60),
     photo_url: String(p.photo_url || '').trim().slice(0, 500),
+    // Durable "photo removed" state (2026-07-24). Enforce the invariant here
+    // regardless of what the client sent: a present photo_url can never be
+    // "removed". Only an empty photo + the client's removal flag persists as
+    // removed, which suppresses the Workspace-photo fallback in the directory.
+    photo_removed: !String(p.photo_url || '').trim() && p.photo_removed === true,
     // Per-adult photo opt-out. Default consent = true; explicit false opts out.
     photo_consent: p.photo_consent !== false,
     role,
@@ -3578,7 +3583,7 @@ async function upsertProfileFromRegistration(sql, params) {
   // and merge field-level data when the same person re-registers.
   const exPeopleRows = await sql`
     SELECT email, first_name, last_name, nickname, role, personal_email, phone,
-           pronouns, photo_url, photo_consent, nicknames, allergies, sort_order
+           pronouns, photo_url, photo_removed, photo_consent, nicknames, allergies, sort_order
     FROM people WHERE family_email = ${familyEmail}
     ORDER BY sort_order, id
   `;
@@ -3630,6 +3635,9 @@ async function upsertProfileFromRegistration(sql, params) {
       last_name: np.last_name || ex.last_name || '',
       pronouns: ex.pronouns || np.pronouns || '',
       photo_url: ex.photo_url || np.photo_url || '',
+      // Preserve a prior EMI photo removal across a re-registration (which
+      // never uploads a photo). Any actual photo forces removed=false.
+      photo_removed: !(ex.photo_url || np.photo_url) && ex.photo_removed === true,
       photo_consent: typeof np.photo_consent === 'boolean' ? np.photo_consent : (ex.photo_consent !== false),
       role: np.role || ex.role || 'parent',
       email: (ex.email || np.email || '').toLowerCase(),
@@ -3777,12 +3785,12 @@ async function upsertProfileFromRegistration(sql, params) {
     await sql`
       INSERT INTO people (
         email, family_email, first_name, last_name, nickname, role,
-        personal_email, phone, pronouns, photo_url, photo_consent,
+        personal_email, phone, pronouns, photo_url, photo_removed, photo_consent,
         nicknames, allergies, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
       ) VALUES (
         ${email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name || ''}, ${pp.nickname || ''}, ${pp.role || 'parent'},
         ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
-        ${pp.photo_url || ''}, ${pp.photo_consent !== false},
+        ${pp.photo_url || ''}, ${pp.photo_removed === true}, ${pp.photo_consent !== false},
         ${JSON.stringify(pp.nicknames || [])}::jsonb, ${pp.allergies || ''}, ${i},
         ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
         'registration'
@@ -4218,12 +4226,12 @@ async function handleProfileUpdate(body, req, res) {
       profileStmts.push(sql`
         INSERT INTO people (
           email, family_email, first_name, last_name, nickname, role,
-          personal_email, phone, pronouns, photo_url, photo_consent,
+          personal_email, phone, pronouns, photo_url, photo_removed, photo_consent,
           nicknames, allergies, sort_order, rw_email_requested_at, rw_email_requested_by, updated_by
         ) VALUES (
           ${pp.email || null}, ${familyEmail}, ${pp.first_name}, ${pp.last_name}, ${pp.nickname || ''}, ${pp.role || 'parent'},
           ${pp.personal_email || ''}, ${pp.phone || ''}, ${pp.pronouns || ''},
-          ${pp.photo_url || ''}, ${pp.photo_consent !== false},
+          ${pp.photo_url || ''}, ${pp.photo_removed === true}, ${pp.photo_consent !== false},
           ${JSON.stringify(pp.nicknames || [])}::jsonb, ${pp.allergies || ''}, ${i},
           ${stamp ? stamp.rw_email_requested_at : null}, ${stamp ? stamp.rw_email_requested_by : null},
           ${user.realEmail || user.email}

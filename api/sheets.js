@@ -592,6 +592,9 @@ function shapePersonRow(r) {
     phone:          r.phone || '',
     pronouns:       r.pronouns || '',
     photo_url:      r.photo_url || '',
+    // Durable "I removed my photo" flag (2026-07-24) — suppresses the
+    // Workspace-photo fallback in the directory so a delete truly sticks.
+    photo_removed:  r.photo_removed === true,
     photo_consent:  r.photo_consent !== false,
     nicknames:      Array.isArray(r.nicknames) ? r.nicknames : [],
     // Adult allergies/medical notes (Erin, 2026-07-20) — same field kids
@@ -621,7 +624,7 @@ async function applyMemberProfileOverlay(families) {
   // Single round-trip per table; group in JS rather than N queries.
   var peopleRows = await sql`
     SELECT id, email, family_email, first_name, last_name, nickname, role,
-           personal_email, phone, pronouns, photo_url, photo_consent,
+           personal_email, phone, pronouns, photo_url, photo_removed, photo_consent,
            nicknames, allergies, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email
@@ -698,6 +701,7 @@ async function applyMemberProfileOverlay(families) {
           phone: '',
           pronouns: (fam.parentPronouns && fam.parentPronouns[n]) || '',
           photo_url: '',
+          photo_removed: false,
           photo_consent: true,
           nickname: '',
           nicknames: []
@@ -718,6 +722,7 @@ async function applyMemberProfileOverlay(families) {
         nickname: pp.nickname || '',
         pronouns: pp.pronouns,
         photoUrl: pp.photo_url,
+        photoRemoved: pp.photo_removed === true,
         photoConsent: pp.photo_consent !== false,
         role: pp.role,
         email: pp.email,
@@ -1398,7 +1403,7 @@ async function loadFamiliesFromProfiles(sql) {
   `;
   var peopleRows = await sql`
     SELECT id, email, family_email, first_name, last_name, nickname, role,
-           personal_email, phone, pronouns, photo_url, photo_consent,
+           personal_email, phone, pronouns, photo_url, photo_removed, photo_consent,
            nicknames, allergies, sort_order, rw_email_requested_at
     FROM people
     ORDER BY family_email, sort_order, email

@@ -2018,6 +2018,16 @@ ALTER TABLE people ADD COLUMN IF NOT EXISTS rw_email_requested_by TEXT;
 -- co-op members. Registration never collects it; EMI is the only writer.
 ALTER TABLE people ADD COLUMN IF NOT EXISTS allergies TEXT NOT NULL DEFAULT '';
 
+-- (2026-07-24, Erin): a durable "I removed my photo" flag. An adult with a
+-- Google Workspace account auto-shows that photo in the directory when they
+-- have no uploaded (DB) photo. Deleting an uploaded photo just cleared
+-- photo_url, which is indistinguishable from "never uploaded" — so the
+-- Workspace photo silently came back and EMI (which honors an in-session
+-- removal) disagreed with the directory. This flag makes the delete stick:
+-- true => show initials everywhere, never fall back to Workspace; uploading
+-- a new photo clears it back to false.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS photo_removed BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- #33 (2026-07-20): Class Inspiration categories + member submissions
 -- (Lyndsey). Ideas gain a multi-select category tag set from a fixed
 -- starter list (TEXT[] like class_submissions' array columns) and an
