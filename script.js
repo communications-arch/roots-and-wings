@@ -8891,6 +8891,12 @@
       // Summary line
       html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
 
+      // Volunteer doorway right on the card (Erin, 2026-07-25): opens the
+      // per-event modal with responsibilities + dates + confirm step.
+      if (!isPast && ev.id) {
+        html += '<p class="ws-part-submit-line" style="margin:10px 0 0;"><button type="button" class="ws-part-submit-link" data-resource-action="event-volunteer" data-eid="' + ev.id + '">🙋 Volunteer for this event</button></p>';
+      }
+
       html += '</div></div>';
     });
     html += '</div>';
@@ -19517,6 +19523,7 @@
     // same buttons render on Ways to Help AND inside the Event Space,
     // so they ride this document-level delegation.
     else if (action === 'event-seat-toggle' && typeof toggleEventSeatInterest === 'function') toggleEventSeatInterest(btn);
+    else if (action === 'event-volunteer' && typeof showEventVolunteerModal === 'function') showEventVolunteerModal(parseInt(btn.getAttribute('data-eid'), 10));
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
@@ -23589,17 +23596,145 @@
         btn.classList.toggle('ws-opp-interested', !isOn);
         // Both seats are direct adds (Erin, 2026-07-25 — no approvals).
         btn.textContent = !isOn ? '✓ Signed up — undo' : '🙋 Sign up';
-        // Refresh the grid view + card summary (the name is live data now).
+        // Refresh the grid + card summary so the member SEES it landed —
+        // patch the grid's local copy, then refetch live state.
+        if (typeof evVolunteerPatchGrid === 'function') evVolunteerPatchGrid(eid, seat, !isOn);
         loadEventOpenings();
-        if (typeof SPECIAL_EVENTS_DB !== 'undefined' && typeof loadLiveData === 'function' && typeof renderEventsTab === 'function') {
-          try { renderEventsTab(); } catch (e) { /* grid repaints on next data load */ }
-        }
       })
       .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
   }
 
   function evsMaybeRefreshSpace() {
     if (_eventSpaceState && _eventSpaceState.id && document.getElementById('event-space-body')) loadEventSpace();
+  }
+
+  // ── Volunteer straight from the Events grid (Erin, 2026-07-25) ─────
+  // Each upcoming event card carries a "🙋 Volunteer" button → this
+  // per-event modal: responsibilities + dates/location first, then an
+  // explicit tap-again-to-confirm before the sign-up lands. (Jump In
+  // stays one-tap; this doorway is for members browsing the grid who
+  // haven't seen the role blurbs yet.)
+  var _evVolunteerEventId = null;
+  function showEventVolunteerModal(eventId) {
+    _evVolunteerEventId = eventId;
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === eventId) meta = e; });
+    var body = renderReportModal({
+      title: '🙋 Volunteer — ' + (meta ? meta.name : 'Special Event'),
+      subtitle: 'Here’s what each role involves and when you’d be needed. Nothing is saved until you confirm.',
+      bodyId: 'event-volunteer-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    paintEventVolunteerModal();
+    if (!_eventOpenings || _eventOpenings === 'loading') loadEventOpenings(paintEventVolunteerModal);
+  }
+
+  // Instant feedback on the Co-op Coordination grid (Erin, 2026-07-25:
+  // "refresh the Special Events table so they see it worked") — patch
+  // SPECIAL_EVENTS_DB locally and re-render; the next /api/sheets load
+  // brings the server-truth copy.
+  function evVolunteerPatchGrid(eventId, seat, on) {
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === eventId) meta = e; });
+    if (!meta) return;
+    var em = String(getActiveEmail() || '').toLowerCase();
+    var nm = ((typeof getMyNames === 'function' && (getMyNames().fullNames || [])[0]) || em);
+    var arr = seat === 'lead'
+      ? (meta.coordinators = meta.coordinators || (meta.coordinator ? [meta.coordinator] : []))
+      : (meta.support = meta.support || []);
+    var without = arr.filter(function (p) { return String(p && p.email || '').toLowerCase() !== em; });
+    if (on) { without.push({ name: nm, email: em }); }
+    if (seat === 'lead') { meta.coordinators = without; meta.coordinator = without[0] || null; }
+    else meta.support = without;
+    try { renderEventsTab(); } catch (e) { /* grid repaints on next data load */ }
+    if (typeof renderMyFamily === 'function') { try { renderMyFamily(); } catch (e) { /* ditto */ } }
+  }
+
+  function paintEventVolunteerModal() {
+    var el = document.getElementById('event-volunteer-body');
+    if (!el || !_evVolunteerEventId) return;
+    var eo = _eventOpenings;
+    if (!eo || eo === 'loading') { el.innerHTML = '<p class="ws-empty">Loading…</p>'; return; }
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === _evVolunteerEventId) meta = e; });
+    var ev = (Array.isArray(eo.events) ? eo.events : []).filter(function (e) { return e.id === _evVolunteerEventId; })[0];
+    var h = '';
+    if (meta) {
+      var timeBit = specialEventTimeLabel(meta);
+      h += '<p class="ws-body-hint" style="margin:0 0 2px;">📅 <strong>' + escapeHtml(specialEventDateLabel(meta))
+        + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
+      if (meta.location) h += '<p class="ws-body-hint" style="margin:0 0 8px;">📍 ' + escapeHtml(meta.location) + '</p>';
+      if (meta.notes) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + escapeHtml(meta.notes) + '</p>';
+    }
+    if (!ev) {
+      h += '<p class="ws-empty">This event’s volunteer spots are all filled — thank you! 🎉 Check the other events, or the sign-up lists under Ways to Help.</p>';
+      el.innerHTML = h;
+      return;
+    }
+    var seats = [
+      { key: 'lead', icon: '👑', label: 'Event Lead', cap: 2 },
+      { key: 'assist', icon: '🤝', label: 'Assistant', cap: 2 }
+    ];
+    h += '<ul class="ws-opportunities">';
+    seats.forEach(function (s) {
+      var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[s.key]);
+      var names = (ev.seat_names && ev.seat_names[s.key]) || [];
+      var open = (ev.open_seats || []).indexOf(s.key) !== -1;
+      var cap = Math.max(s.cap, names.length);
+      h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + s.icon + ' ' + s.label + '</strong>';
+      h += '<span class="ws-opp-committee">' + names.length + ' of ' + cap + ' spots filled'
+        + (names.length ? ' · ' + escapeHtml(names.join(', ')) : '') + '</span>';
+      h += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS[s.key]
+        + (s.key === 'lead' ? ' Two members can share it as co-leads.' : '') + '</span></span>';
+      if (isOn) {
+        h += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested ev-vol-seat" data-seat="' + s.key + '" data-on="1">✓ Signed up — undo</button>';
+      } else if (open) {
+        h += '<button type="button" class="sc-btn ws-opp-interest ev-vol-seat" data-seat="' + s.key + '" data-label="' + s.label + '">🙋 Volunteer as ' + s.label + '</button>';
+      } else {
+        h += '<span class="ws-opp-committee">Full — thank you!</span>';
+      }
+      h += '</li>';
+    });
+    h += '</ul>';
+    h += '<p class="ws-body-hint">Sign-ups go straight onto the event — no approval needed, and you can undo yours any time. Your event appears under My Responsibilities and on the Special Events grid.</p>';
+    el.innerHTML = h;
+
+    el.querySelectorAll('.ev-vol-seat').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var seat = btn.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
+        var undoing = btn.getAttribute('data-on') === '1';
+        // The confirm step: first tap arms, second tap commits. Undo
+        // stays one tap (it's already an explicit choice).
+        if (!undoing && btn.getAttribute('data-armed') !== '1') {
+          btn.setAttribute('data-armed', '1');
+          btn.textContent = '✓ Tap again to confirm';
+          setTimeout(function () {
+            if (btn.isConnected && btn.getAttribute('data-armed') === '1') {
+              btn.removeAttribute('data-armed');
+              btn.textContent = '🙋 Volunteer as ' + (btn.getAttribute('data-label') || 'Assistant');
+            }
+          }, 6000);
+          return;
+        }
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: _evVolunteerEventId, seat: seat, on: !undoing }) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              btn.disabled = false;
+              btn.removeAttribute('data-armed');
+              alert((res.data && res.data.error) || 'Could not save that — try again.');
+              loadEventOpenings(paintEventVolunteerModal);
+              return;
+            }
+            // Repaint this modal from fresh data + show the grid update.
+            evVolunteerPatchGrid(_evVolunteerEventId, seat, !undoing);
+            loadEventOpenings(paintEventVolunteerModal);
+          })
+          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+      });
+    });
   }
 
   function claimEventSlot(btn) {
