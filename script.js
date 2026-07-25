@@ -8880,14 +8880,28 @@
       html += '<span class="status-badge ' + statusClass + '">' + status + '</span>';
       html += '</div>';
 
+      // Your own name gets a × to step back out (Erin, 2026-07-25) —
+      // same affordance the sign-up lists use, "Confirm remove?" armed.
+      function seatRemoveBtn(seat) {
+        if (isPast || !ev.id) return '';
+        return ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-seat-remove" data-eid="' + ev.id + '" data-seat="' + seat + '" aria-label="Remove me from this event" title="Remove me">×</button>';
+      }
+      // #109 (Colleen): your own NAME is clickable too — tap → "Confirm
+      // remove?" → out.
+      function myNameHtml(nameHtml, seat) {
+        if (isPast || !ev.id) return '<span class="coord-highlight">' + nameHtml + '</span>';
+        return '<button type="button" class="ws-inline-link coord-highlight" data-resource-action="event-seat-remove" data-eid="' + ev.id + '" data-seat="' + seat + '" title="Tap to remove yourself from this event">' + nameHtml + '</button>';
+      }
+
       // Coordinator row(s) — one per (co-)lead
       html += '<div class="event-roles">';
       if (!coords.length) coords = [null];
       coords.forEach(function (co, ci) {
+        var mine = isMyPerson(co);
         var coordText = co ? escapeHtml(co.name) : volunteerSlot;
-        html += '<div class="event-role' + (isMyPerson(co) ? ' coord-my-row' : '') + '">';
+        html += '<div class="event-role' + (mine ? ' coord-my-row' : '') + '">';
         html += '<span class="event-role-label">' + (ci === 0 ? 'Coordinator' : 'Co-lead') + '</span>';
-        html += '<span class="event-role-person">' + (isMyPerson(co) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
+        html += '<span class="event-role-person">' + (mine ? myNameHtml(coordText, 'lead') + seatRemoveBtn('lead') : coordText) + '</span>';
         html += '</div>';
       });
 
@@ -8898,7 +8912,7 @@
         html += '<div class="event-role' + (isMe ? ' coord-my-row' : '') + '">';
         html += '<span class="event-role-label">Support ' + (si + 1) + '</span>';
         if (sp) {
-          html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + escapeHtml(sp.name) + '</span>' : escapeHtml(sp.name)) + '</span>';
+          html += '<span class="event-role-person">' + (isMe ? myNameHtml(escapeHtml(sp.name), 'assist') + seatRemoveBtn('assist') : escapeHtml(sp.name)) + '</span>';
         } else {
           html += '<span class="event-role-person">' + volunteerSlot + '</span>';
         }
@@ -19543,6 +19557,7 @@
     // so they ride this document-level delegation.
     else if (action === 'event-seat-toggle' && typeof toggleEventSeatInterest === 'function') toggleEventSeatInterest(btn);
     else if (action === 'event-volunteer' && typeof showEventVolunteerModal === 'function') showEventVolunteerModal(parseInt(btn.getAttribute('data-eid'), 10));
+    else if (action === 'event-seat-remove' && typeof removeEventSeatSelf === 'function') removeEventSeatSelf(btn);
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
@@ -22960,7 +22975,7 @@
       return;
     }
     if (!evs.length) {
-      h += '<div class="collab-card"><p class="ws-empty">You’re not on any event teams yet. Volunteer from '
+      h += '<div class="mf-card"><p class="ws-empty">You’re not on any event teams yet. Volunteer from '
         + '<button type="button" class="ws-inline-link" data-resource-action="goto-special-events">Special Events</button>'
         + ' (My Family → Co-op Coordination) and that event’s planning space appears here.</p></div>';
       host.innerHTML = h;
@@ -22970,9 +22985,10 @@
       _eventSpaceState.id = evs[0].id;
       _eventSpaceState.data = null;
     }
-    h += '<div class="collab-pills">';
+    // Same pill bar My Workspace wears (board-cal-views + ws-role-pillbar).
+    h += '<div class="board-cal-views ws-role-pillbar" role="group" aria-label="Choose an event">';
     evs.forEach(function (ev) {
-      h += '<button type="button" class="board-cal-view-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">🎪 ' + escapeHtml(ev.name) + '</button>';
+      h += '<button type="button" class="board-cal-view-pill ws-role-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">🎪 ' + escapeHtml(ev.name) + '</button>';
     });
     h += '</div>';
     h += '<div id="event-space-body"><p class="ws-empty">Loading planning space…</p></div>';
@@ -23015,11 +23031,14 @@
     var openCount = tasks.length - doneCount;
     var unassigned = tasks.filter(function (t) { return !t.done_at && !t.assigned_email && !t.assigned_name; }).length;
 
-    // Card layout (Erin, 2026-07-25): header card spans the grid, then
-    // the checklist and each section render as their own card.
-    var h = '<div class="collab-cards">';
-    h += '<div class="evs-section collab-card collab-card-head">';
-    h += '<h4 class="collab-ev-name">🎪 ' + escapeHtmlWs(d.event.name) + '</h4>';
+    // Card layout (Erin, 2026-07-25): global workspace-card pattern —
+    // header card spans the grid, then the checklist and each section
+    // render as their own card. Brand accents follow WS_ACCENTS usage
+    // (special-events / todos marks).
+    var h = '<div class="workspace-grid collab-cards">';
+    h += '<div class="mf-card workspace-card evs-section collab-card-head">';
+    h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-28.png" alt=""> ' + escapeHtmlWs(d.event.name) + '</h4></div>';
+    h += '<div class="workspace-card-body">';
     h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
       + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '') + '</p>';
     h += '<div class="rd-counts">';
@@ -23060,9 +23079,11 @@
       }
       h += '</span></div>';
     }
-    h += '</div>'; // /header card
+    h += '</div></div>'; // /body, /header card
 
-    h += '<div class="evs-section collab-card"><h5 class="ws-part-subhead" style="margin-top:0;">✅ Checklist</h5>';
+    h += '<div class="mf-card workspace-card evs-section">';
+    h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4></div>';
+    h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
     } else {
@@ -23088,9 +23109,9 @@
       });
       h += '</ul>';
     }
-    h += '</div>'; // /checklist card
+    h += '</div></div>'; // /body, /checklist card
     h += renderEventSections(d);
-    h += '</div>'; // /.collab-cards
+    h += '</div>'; // /.workspace-grid
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -23383,17 +23404,22 @@
     var secs = d.sections || [];
     if (!secs.length) return '';
     var h = '';
+    // Brand accents mirror the workspace cards that host the same kind
+    // of content (calendar / ways-to-help / resources / board-notes).
+    var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8' };
     secs.forEach(function (s) {
-      h += '<div class="evs-section collab-card">';
-      h += '<div class="rd-counts" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
-      h += '<h5 class="ws-part-subhead" style="margin:0;">' + ({ timeline: '🕐', signup: '🙋', info: 'ℹ️', notes: '📔' }[s.type] || '📄') + ' ' + escapeHtmlWs(evsSectionTitle(s));
-      h += '</h5>';
-      if (s.type === 'signup') h += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      h += '<div class="mf-card workspace-card evs-section">';
+      h += '<div class="workspace-card-header">';
+      h += '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>';
+      var headBits = '';
+      if (s.type === 'signup') headBits += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
       if (d.can_edit) {
-        h += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
+        headBits += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
           + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
       }
+      if (headBits) h += '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' + headBits + '</span>';
       h += '</div>';
+      h += '<div class="workspace-card-body">';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
         h += items.length
@@ -23421,7 +23447,7 @@
       } else if (s.type === 'signup') {
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
       }
-      h += '</div>';
+      h += '</div></div>'; // /body, /card
     });
     return h;
   }
@@ -23701,6 +23727,25 @@
     if (_eventSpaceState && _eventSpaceState.id && document.getElementById('event-space-body')) loadEventSpace();
   }
 
+  // Self-removal straight from the Events grid (Erin, 2026-07-25): the ×
+  // next to YOUR name, two-step confirmed, same undo the modals offer.
+  function removeEventSeatSelf(btn) {
+    rwArmTwoStep(btn, 'remove', function (b) {
+      var eid = parseInt(b.getAttribute('data-eid'), 10);
+      var seat = b.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
+      if (!eid) return;
+      b.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: eid, seat: seat, on: false }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { b.disabled = false; alert((res.data && res.data.error) || 'Could not remove you — try again.'); return; }
+          if (typeof evVolunteerPatchGrid === 'function') evVolunteerPatchGrid(eid, seat, false);
+          loadEventOpenings();
+        })
+        .catch(function () { b.disabled = false; alert('Network error — try again.'); });
+    });
+  }
+
   // ── Volunteer straight from the Events grid (Erin, 2026-07-25) ─────
   // Each upcoming event card carries a "🙋 Volunteer" button → this
   // per-event modal: responsibilities + dates/location first, then an
@@ -23714,7 +23759,7 @@
     SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === eventId) meta = e; });
     var body = renderReportModal({
       title: '🙋 Volunteer — ' + (meta ? meta.name : 'Special Event'),
-      subtitle: 'Here’s what each role involves and when you’d be needed. Nothing is saved until you confirm.',
+      subtitle: 'Here’s what each role involves and when you’d be needed. Tap a role to sign up — your name goes straight on the event, and you can undo any time.',
       bodyId: 'event-volunteer-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23797,19 +23842,8 @@
       btn.addEventListener('click', function () {
         var seat = btn.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
         var undoing = btn.getAttribute('data-on') === '1';
-        // The confirm step: first tap arms, second tap commits. Undo
-        // stays one tap (it's already an explicit choice).
-        if (!undoing && btn.getAttribute('data-armed') !== '1') {
-          btn.setAttribute('data-armed', '1');
-          btn.innerHTML = '✓ Tap again to confirm';
-          setTimeout(function () {
-            if (btn.isConnected && btn.getAttribute('data-armed') === '1') {
-              btn.removeAttribute('data-armed');
-              btn.innerHTML = DUTY_ICONS.volunteer + ' Volunteer as ' + (btn.getAttribute('data-label') || 'Assistant');
-            }
-          }, 6000);
-          return;
-        }
+        // #109 (Colleen): one click signs you up — the modal itself is
+        // the "here's what you're committing to" step, no double-tap.
         btn.disabled = true;
         fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: _evVolunteerEventId, seat: seat, on: !undoing }) })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
