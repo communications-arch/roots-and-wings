@@ -7915,6 +7915,19 @@
     // from the published Class Builder schedule; otherwise fall back to
     // the legacy Master-sheet AM_CLASSES rows.
     var myNames = getMyNames();
+    // Year-long group liaison ("<Group> Liaison" in the roles directory).
+    // A year-long role, so it renders even in the TBD table before the
+    // schedule posts. Returns highlighted, comma-joined holder names.
+    function amLiaisonHtml(groupName, sheetFallback) {
+      var want = String(groupName || '').toLowerCase();
+      var names = [];
+      (ROLES_DIRECTORY || []).forEach(function (r) {
+        if (liaisonGroupOfRole(r.title || '') !== want) return;
+        (r.holders || []).forEach(function (h) { if (h && h.name) names.push(h.name); });
+      });
+      if (!names.length && sheetFallback) names.push(sheetFallback);
+      return names.map(function (n) { return highlightIfMe(n, myNames); }).join(', ') || '\u2014';
+    }
     // Erin (2026-07-22): groups-assigned-but-nothing-posted renders the
     // group line-up with TBDs (built below, used by both empty branches).
     function buildAmTbdTable() {
@@ -7928,13 +7941,14 @@
         return g.name !== 'Greenhouse' && counts[g.name.toLowerCase()];
       });
       if (!gs.length) return '';
-      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Liaison</th><th>Room</th></tr></thead><tbody>';
       var tbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
       gs.forEach(function (g) {
         t += '<tr class="session-class-row" data-group="' + g.name + '">';
         t += '<td>' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
         t += '<td class="am-ages-col">' + groupRangeHtml(g.range || '', g.name) + '</td>';
         t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
+        t += '<td>' + amLiaisonHtml(g.name) + '</td>';
         t += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
         t += '</tr>';
       });
@@ -7957,7 +7971,7 @@
           if (ai !== bi) return ai - bi;
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Liaison</th><th>Room</th></tr></thead><tbody>';
         amRows.forEach(function (c) {
           var key = String((c.age_groups || [])[0] || '').toLowerCase();
           var meta = groupIdx[key];
@@ -7979,13 +7993,14 @@
           html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
           html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
           html += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
+          html += '<td>' + amLiaisonHtml(groupName) + '</td>';
           html += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
           html += '</tr>';
         });
         html += '</tbody></table></div>';
       }
     } else if (Object.keys(AM_CLASSES).length > 0) {
-      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Liaison</th><th>Room</th></tr></thead><tbody>';
       var groups = Object.keys(AM_CLASSES);
       groups.forEach(function (groupName) {
         var cls = AM_CLASSES[groupName];
@@ -7999,6 +8014,7 @@
         html += '<td>' + s.topic + '</td>';
         html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
         html += '<td>' + assistantsHtml + '</td>';
+        html += '<td>' + amLiaisonHtml(groupName, cls.liaison) + '</td>';
         html += '<td>' + s.room + '</td>';
         html += '</tr>';
       });
