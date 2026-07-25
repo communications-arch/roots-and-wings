@@ -8861,9 +8861,10 @@
       var isMyCard = coords.some(isMyPerson) || support.some(isMyPerson);
       // #108 (Colleen): each open slot IS the volunteer button — clicking
       // opens the per-event responsibilities + confirm modal (Erin's
-      // flow), no separate pill at the bottom.
+      // flow), no separate pill at the bottom. Gold chip + the shared
+      // volunteer heart mark (Erin, 2026-07-25: one consistent asset).
       var volunteerSlot = (!isPast && ev.id)
-        ? '<button type="button" class="ws-inline-link event-open-slot" data-resource-action="event-volunteer" data-eid="' + ev.id + '">🙋 Volunteer</button>'
+        ? '<button type="button" class="volunteer-cta" data-resource-action="event-volunteer" data-eid="' + ev.id + '">' + DUTY_ICONS.volunteer + ' Volunteer</button>'
         : '<em class="event-open-slot">Open</em>';
 
       html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
@@ -23267,7 +23268,7 @@
         }
         h += '<span class="ws-opp-committee">' + meta + '</span></span>';
         if (mineClaim) h += '<span class="ws-opp-committee">✓ You’re signed up</span>';
-        else if (canAct && !full) h += '<button type="button" class="sc-btn ws-opp-interest" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">🙋 Sign up</button>';
+        else if (canAct && !full) h += '<button type="button" class="volunteer-cta" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
         else if (full) h += '<span class="ws-opp-committee">Full — thank you!</span>';
         h += '</li>';
       });
@@ -23554,9 +23555,9 @@
         if (leadNames.length) row += '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(leadNames.join(', ')) + '</span>';
         row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Two members can share it as co-leads.</span></span>';
         if (isOn) {
-          row += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
+          row += '<button type="button" class="volunteer-cta ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
         } else if (!full) {
-          row += '<button type="button" class="sc-btn ws-opp-interest" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">🙋 Sign up</button>';
+          row += '<button type="button" class="volunteer-cta" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">' + DUTY_ICONS.volunteer + ' Sign up</button>';
         }
         seatRows += row + '</li>';
       })();
@@ -23570,8 +23571,8 @@
           + '<span class="ws-opp-committee">' + (ev.assist_count || 0) + ' of 2 spots filled</span>'
           + (names.length ? '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(names.join(', ')) + '</span>' : '')
           + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.assist + '</span></span>'
-          + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="assist">'
-          + (isOn ? '✓ Signed up — undo' : '🙋 Sign up') + '</button></li>';
+          + '<button type="button" class="volunteer-cta' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="assist">'
+          + (isOn ? '✓ Signed up — undo' : DUTY_ICONS.volunteer + ' Sign up') + '</button></li>';
       })();
       if (seatRows) h += '<ul class="ws-opportunities">' + seatRows + '</ul>';
       (ev.signup_sections || []).forEach(function (s) {
@@ -23695,9 +23696,9 @@
       h += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS[s.key]
         + (s.key === 'lead' ? ' Two members can share it as co-leads.' : '') + '</span></span>';
       if (isOn) {
-        h += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested ev-vol-seat" data-seat="' + s.key + '" data-on="1">✓ Signed up — undo</button>';
+        h += '<button type="button" class="volunteer-cta ws-opp-interested ev-vol-seat" data-seat="' + s.key + '" data-on="1">✓ Signed up — undo</button>';
       } else if (open) {
-        h += '<button type="button" class="sc-btn ws-opp-interest ev-vol-seat" data-seat="' + s.key + '" data-label="' + s.label + '">🙋 Volunteer as ' + s.label + '</button>';
+        h += '<button type="button" class="volunteer-cta ev-vol-seat" data-seat="' + s.key + '" data-label="' + s.label + '">' + DUTY_ICONS.volunteer + ' Volunteer as ' + s.label + '</button>';
       } else {
         h += '<span class="ws-opp-committee">Full — thank you!</span>';
       }
@@ -23715,11 +23716,11 @@
         // stays one tap (it's already an explicit choice).
         if (!undoing && btn.getAttribute('data-armed') !== '1') {
           btn.setAttribute('data-armed', '1');
-          btn.textContent = '✓ Tap again to confirm';
+          btn.innerHTML = '✓ Tap again to confirm';
           setTimeout(function () {
             if (btn.isConnected && btn.getAttribute('data-armed') === '1') {
               btn.removeAttribute('data-armed');
-              btn.textContent = '🙋 Volunteer as ' + (btn.getAttribute('data-label') || 'Assistant');
+              btn.innerHTML = DUTY_ICONS.volunteer + ' Volunteer as ' + (btn.getAttribute('data-label') || 'Assistant');
             }
           }, 6000);
           return;

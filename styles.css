@@ -6113,16 +6113,43 @@ button.staff-role:hover {
   color: var(--color-accent);
   font-style: italic;
 }
-/* #108: open slots on the Events grid ARE the volunteer buttons. Gold
-   owns the action (brand rule) — override .ws-inline-link's purple,
-   which wins the cascade otherwise, and read as a button not a note. */
-.event-card .ws-inline-link.event-open-slot {
-  color: var(--color-accent);
-  font-style: normal;
-  font-weight: 600;
+/* One consistent volunteer CTA (Erin, 2026-07-25): the gold action chip
+   (btn-primary colors, gold owns action) + the heart mark that
+   My Responsibilities already uses for volunteer duties (DUTY_ICONS).
+   Used anywhere a member volunteers for a special event: the Events-grid
+   open slots (#108), the per-event volunteer modal, Jump In seat rows,
+   and sign-up-list slot claims. The .ws-opp-interested state keeps the
+   shared green "you're in" look when a button toggles in place. */
+.volunteer-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  background: var(--color-accent);
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-white);
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-fast);
 }
-.event-card .ws-inline-link.event-open-slot:hover {
-  color: var(--color-accent-dark, var(--color-primary-dark));
+.volunteer-cta:hover {
+  background: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
+}
+.volunteer-cta svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* In the modal seat rows the CTA pins right, same slot the old
+   outlined chip (.ws-opp-interest) occupied. */
+.ws-opp-seat .volunteer-cta { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+.volunteer-cta.ws-opp-interested {
+  background: #DEF3DE;
+  border-color: #2E6B2E;
+  color: #2E6B2E;
+  box-shadow: none;
 }
 
 .event-fill-summary {
