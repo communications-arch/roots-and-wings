@@ -23021,6 +23021,16 @@
       });
   }
 
+  // Standard card nav (Erin, 2026-07-25): tap a card's header to
+  // collapse/expand it, same ws-card-toggle idiom as My Workspace.
+  // In-memory per visit, keyed per card.
+  var _collabCollapsed = {};
+  function collabCardHead(key, innerHtml) {
+    var closed = !!_collabCollapsed[key];
+    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="' + (!closed) + '" title="' + (closed ? 'Expand' : 'Minimize') + '">'
+      + innerHtml + '<span class="ws-min-caret" aria-hidden="true">' + (closed ? '▸' : '▾') + '</span></div>';
+  }
+
   function renderEventSpaceBody() {
     var body = document.getElementById('event-space-body');
     var d = _eventSpaceState.data;
@@ -23082,8 +23092,8 @@
     h += '</div></div>'; // /body, /header card
 
     h += '<div class="mf-card workspace-card evs-section">';
-    h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4></div>';
-    h += '<div class="workspace-card-body">';
+    h += collabCardHead('checklist', '<h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4>');
+    h += '<div class="workspace-card-body"' + (_collabCollapsed['checklist'] ? ' hidden' : '') + '>';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
     } else {
@@ -23118,6 +23128,20 @@
 
   function wireEventSpace(body) {
     var d = _eventSpaceState.data;
+    // Standard card nav: header tap (or Enter/Space) collapses the card —
+    // but taps on the header's own buttons (Edit/Delete/pills) pass through.
+    body.querySelectorAll('.collab-toggle').forEach(function (hd) {
+      function flip(e) {
+        if (e.target.closest('button:not(.collab-toggle)') || e.target.closest('.sc-btn')) return;
+        var key = hd.getAttribute('data-collab-card');
+        _collabCollapsed[key] = !_collabCollapsed[key];
+        renderEventSpaceBody();
+      }
+      hd.addEventListener('click', flip);
+      hd.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(e); }
+      });
+    });
     body.querySelectorAll('.evs-toggle').forEach(function (cb) {
       cb.addEventListener('change', function () {
         var li = cb.closest('.evs-task');
@@ -23409,17 +23433,17 @@
     var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8' };
     secs.forEach(function (s) {
       h += '<div class="mf-card workspace-card evs-section">';
-      h += '<div class="workspace-card-header">';
-      h += '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>';
+      var headInner = '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>';
       var headBits = '';
       if (s.type === 'signup') headBits += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
       if (d.can_edit) {
         headBits += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
           + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
       }
-      if (headBits) h += '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' + headBits + '</span>';
-      h += '</div>';
-      h += '<div class="workspace-card-body">';
+      if (headBits) headInner += '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' + headBits + '</span>';
+      var secKey = 'sec-' + s.id;
+      h += collabCardHead(secKey, headInner);
+      h += '<div class="workspace-card-body"' + (_collabCollapsed[secKey] ? ' hidden' : '') + '>';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
         h += items.length
