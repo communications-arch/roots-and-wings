@@ -34690,7 +34690,12 @@
     function kidRowHtml(k, idx) {
       var h = '<div class="emi-row emi-kid-row" data-kid-idx="' + idx + '">';
       var kHasPhoto = !!(k._queuedPhoto || k.photo_url);
-      h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-kid" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this child">' + thumbHtml(k, k.name, { wsFallback: true }) +
+      // NO Workspace fallback for kids: they have no Google account, and
+      // getPhotoUrl (which thumbHtml's wsFallback calls) would fall through
+      // to a PARENT's Workspace photo via the family-lastname match — a kid
+      // showing an adult's Google photo (see the warning at getDbPhotoForPerson).
+      // Kids resolve their own uploaded DB photo or initials only.
+      h += '<div class="emi-photo-thumb emi-photo-thumb-btn" data-role="upload-kid" data-idx="' + idx + '" role="button" tabindex="0" title="Change photo" aria-label="Change photo for this child">' + thumbHtml(k, k.name, { wsFallback: false }) +
            '<span class="emi-photo-btn" aria-hidden="true">' +
            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
            '</span>' +
