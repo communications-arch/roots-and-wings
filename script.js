@@ -9415,7 +9415,7 @@
           // Painted by updateEventSeatTodoItem (rides the event-openings
           // feed); the modal lists who wants what + a take-me-there link
           // to the Special Events grid.
-          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">Review special-event sign-ups</span></button></li>';
+          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">New special-event sign-ups</span></button></li>';
         }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
@@ -22809,7 +22809,7 @@
       h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(evLeads[0] ? (evLeads[0].name || evLeads[0].email) : '') + '" placeholder="Lead name…"></div>';
       h += '<div class="se-row"><label class="se-lbl">Co-lead (optional)</label><input type="text" class="cl-input se-colead" list="seMemberList" value="' + escapeHtmlWs(evLeads[1] ? (evLeads[1].name || evLeads[1].email) : '') + '" placeholder="Co-lead name…"></div>';
       if ((ev.lead_interest || []).length) {
-        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Interested in leading: <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type a name above to confirm them.</p>';
+        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
       }
       h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
@@ -23503,7 +23503,7 @@
   function showEventJumpInModal() {
     var body = renderReportModal({
       title: '🎪 Special Events — Jump In',
-      subtitle: 'Assist an event, claim a helper spot, or add what you’ll bring — those sign-ups put your name straight on the event (undo yours any time). Want to LEAD one? Raise a hand and the Special Events Liaison will confirm with you.',
+      subtitle: 'Lead or co-lead an event, assist one, claim a helper spot, or add what you’ll bring — every sign-up puts your name straight on the event, no approval needed (undo yours any time).',
       bodyId: 'event-jumpin-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23528,27 +23528,21 @@
         + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
       var seatRows = '';
       // 👑 Lead — ALWAYS shown (Erin, 2026-07-22): who's running it is
-      // key context even when the seat is filled, and an unfilled lead
-      // takes a HAND-RAISE the SEL confirms — leading is a bigger
-      // commitment than the assistants' instant sign-up (#75 stays for
-      // assists). A viewer who direct-added as lead pre-change keeps
-      // their undo button.
+      // key context even when the seat is filled. Direct sign-up with no
+      // approval step (Erin, 2026-07-25); up to two members share it as
+      // co-leads.
       (function () {
         var isOn = !!(ev.my_seat_interest && ev.my_seat_interest.lead);
         var leadNames = (ev.seat_names && ev.seat_names.lead) || [];
-        var hands = ev.lead_interest_names || [];
+        var full = !!ev.lead_filled; // both co-lead spots taken
         var row = '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>👑 Event Lead</strong>';
-        if (ev.lead_filled) {
-          row += '<span class="ws-opp-committee">✓ ' + escapeHtml(leadNames.join(', ') || 'Filled') + '</span>'
-            + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + '</span></span>';
-          if (isOn) {
-            row += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
-          }
-        } else {
-          if (hands.length) row += '<span class="ws-opp-committee">🙋 Interested so far: ' + escapeHtml(hands.join(', ')) + '</span>';
-          row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Raising a hand isn’t instant — the Special Events Liaison confirms with you first.</span></span>';
-          row += '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">'
-            + (isOn ? '✓ Interested — undo' : '🙋 I’m interested') + '</button>';
+        row += '<span class="ws-opp-committee">' + leadNames.length + ' of 2 spots filled</span>';
+        if (leadNames.length) row += '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(leadNames.join(', ')) + '</span>';
+        row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Two members can share it as co-leads.</span></span>';
+        if (isOn) {
+          row += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
+        } else if (!full) {
+          row += '<button type="button" class="sc-btn ws-opp-interest" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">🙋 Sign up</button>';
         }
         seatRows += row + '</li>';
       })();
@@ -23593,10 +23587,8 @@
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not save that — try again.'); loadEventOpenings(); return; }
         if (ev && ev.my_seat_interest) ev.my_seat_interest[seat] = !isOn;
         btn.classList.toggle('ws-opp-interested', !isOn);
-        // Lead is a hand-raise (SEL confirms); assist is a direct add.
-        btn.textContent = seat === 'lead'
-          ? (!isOn ? '✓ Interested — undo' : '🙋 I’m interested')
-          : (!isOn ? '✓ Signed up — undo' : '🙋 Sign up');
+        // Both seats are direct adds (Erin, 2026-07-25 — no approvals).
+        btn.textContent = !isOn ? '✓ Signed up — undo' : '🙋 Sign up';
         // Refresh the grid view + card summary (the name is live data now).
         loadEventOpenings();
         if (typeof SPECIAL_EVENTS_DB !== 'undefined' && typeof loadLiveData === 'function' && typeof renderEventsTab === 'function') {
@@ -23704,7 +23696,7 @@
   function showEventSeatReviewModal() {
     var body = renderReportModal({
       title: '🙋 Special-Event Sign-ups',
-      subtitle: 'Recent event sign-ups (last 14 days). Assistants sign themselves straight onto the event; LEAD hand-raises are interest only — assign the lead on the event card if it’s a fit.',
+      subtitle: 'Recent event sign-ups (last 14 days) — a heads-up, not an approval queue: every sign-up goes straight onto the event. Mark rows reviewed to clear them.',
       bodyId: 'evseat-review-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23727,22 +23719,23 @@
           h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtmlWs(g.name) + (g.date ? ' — ' + boardCalFmtDate(g.date) : '') + '</h5>';
           h += '<ul class="ws-part-recap">';
           g.rows.forEach(function (r) {
-            // Lead rows are HAND-RAISES (not assigned yet); assist rows
-            // were direct-added onto the event (#75).
+            // All sign-ups are direct adds now (Erin, 2026-07-25). A
+            // legacy approval-era lead hand-raise that never got placed
+            // still reads as pending so those volunteers aren't lost.
             var seatBit = r.seat === 'lead'
-              ? '<span class="ws-wv-pending">wants to lead</span> — assign on the event card if it’s a fit'
+              ? 'Lead / Co-lead (already on the event — if not, place them on the event card)'
               : 'Assistant (already on the event)';
             h += '<li><strong>' + escapeHtmlWs(r.name) + '</strong> — ' + seatBit
               + ' · <a href="mailto:' + escapeAttr(r.email) + '">' + escapeHtmlWs(r.email) + '</a>'
               + (r.created_at && typeof timeAgo === 'function' ? ' · ' + escapeHtmlWs(timeAgo(r.created_at)) : '')
               // #80: reviewing clears the row from this card — the count
               // drops with it (assists stay on the event either way).
-              + ' <button type="button" class="sc-btn evseat-ack" data-ack-id="' + r.id + '" title="' + (r.seat === 'lead' ? 'Mark reviewed — removes it from this list (assign them on the event card first if you want them as lead)' : 'Mark reviewed — removes it from this list; they stay on the event') + '">✓ Seen</button>'
+              + ' <button type="button" class="sc-btn evseat-ack" data-ack-id="' + r.id + '" title="Mark reviewed — removes it from this list; they stay on the event">✓ Seen</button>'
               + '</li>';
           });
           h += '</ul>';
         });
-        h += '<p class="ws-body-hint">Assistants are already on their event card (Special Events, under Co-op Coordination) — swap or remove them there if plans change. Lead hand-raisers are NOT on the event until you assign them there.</p>';
+        h += '<p class="ws-body-hint">Everyone here is already on their event card (Special Events, under Co-op Coordination) — swap or remove people there if plans change.</p>';
       }
       el.innerHTML = h;
       var tk = document.getElementById('evseat-take-me');
