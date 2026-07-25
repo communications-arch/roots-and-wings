@@ -8847,11 +8847,24 @@
       // Co-leads (Erin, 2026-07-25): coordinators carries every lead row;
       // fall back to the single coordinator for a stale cached payload.
       var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
-      var status = isPast ? 'Complete' : (coords.length ? 'Planning' : 'Needs Volunteers');
-      var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
       var support = ev.support || [];
-      var maxSupport = Math.max(support.length, 3);
+      // Support pads to TWO open rows — the same recruiting threshold the
+      // openings feed and Jump In advertise ("N of 2 spots"), so the card
+      // never dangles a third "Open" slot no other surface counts (#107).
+      var maxSupport = Math.max(support.length, 2);
+      // #107 (Colleen): no "Planning" pill — an upcoming event either
+      // still needs volunteers (no coordinator, or open support rows) or
+      // its spots are filled.
+      var coreFull = coords.length >= 1 && support.length >= maxSupport;
+      var status = isPast ? 'Complete' : (coreFull ? 'Spots Filled' : 'Needs Volunteers');
+      var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
       var isMyCard = coords.some(isMyPerson) || support.some(isMyPerson);
+      // #108 (Colleen): each open slot IS the volunteer button — clicking
+      // opens the per-event responsibilities + confirm modal (Erin's
+      // flow), no separate pill at the bottom.
+      var volunteerSlot = (!isPast && ev.id)
+        ? '<button type="button" class="ws-inline-link event-open-slot" data-resource-action="event-volunteer" data-eid="' + ev.id + '">🙋 Volunteer</button>'
+        : '<em class="event-open-slot">Open</em>';
 
       html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
       html += '<div class="event-card-header">';
@@ -8867,14 +8880,14 @@
       html += '<div class="event-roles">';
       if (!coords.length) coords = [null];
       coords.forEach(function (co, ci) {
-        var coordText = co ? escapeHtml(co.name) : '<em class="event-open-slot">Needs volunteer</em>';
+        var coordText = co ? escapeHtml(co.name) : volunteerSlot;
         html += '<div class="event-role' + (isMyPerson(co) ? ' coord-my-row' : '') + '">';
         html += '<span class="event-role-label">' + (ci === 0 ? 'Coordinator' : 'Co-lead') + '</span>';
         html += '<span class="event-role-person">' + (isMyPerson(co) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
         html += '</div>';
       });
 
-      // Planning support slots (padded to 3 so open seats stay visible)
+      // Planning support slots (open ones are volunteer buttons, #108)
       for (var si = 0; si < maxSupport; si++) {
         var sp = support[si] || null;
         var isMe = isMyPerson(sp);
@@ -8883,19 +8896,13 @@
         if (sp) {
           html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + escapeHtml(sp.name) + '</span>' : escapeHtml(sp.name)) + '</span>';
         } else {
-          html += '<span class="event-role-person"><em class="event-open-slot">Open</em></span>';
+          html += '<span class="event-role-person">' + volunteerSlot + '</span>';
         }
         html += '</div>';
       }
 
       // Summary line
       html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
-
-      // Volunteer doorway right on the card (Erin, 2026-07-25): opens the
-      // per-event modal with responsibilities + dates + confirm step.
-      if (!isPast && ev.id) {
-        html += '<p class="ws-part-submit-line" style="margin:10px 0 0;"><button type="button" class="ws-part-submit-link" data-resource-action="event-volunteer" data-eid="' + ev.id + '">🙋 Volunteer for this event</button></p>';
-      }
 
       html += '</div></div>';
     });

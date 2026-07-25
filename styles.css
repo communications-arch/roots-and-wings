@@ -6113,6 +6113,17 @@ button.staff-role:hover {
   color: var(--color-accent);
   font-style: italic;
 }
+/* #108: open slots on the Events grid ARE the volunteer buttons. Gold
+   owns the action (brand rule) — override .ws-inline-link's purple,
+   which wins the cascade otherwise, and read as a button not a note. */
+.event-card .ws-inline-link.event-open-slot {
+  color: var(--color-accent);
+  font-style: normal;
+  font-weight: 600;
+}
+.event-card .ws-inline-link.event-open-slot:hover {
+  color: var(--color-accent-dark, var(--color-primary-dark));
+}
 
 .event-fill-summary {
   margin-top: 10px;
