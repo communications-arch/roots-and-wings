@@ -50,13 +50,18 @@ async function handleGisRedirectPost(req, res) {
   // a mismatch when both are present is always rejected).
   const cookieCsrf = (String(req.headers.cookie || '').match(/(?:^|;\s*)g_csrf_token=([^;]+)/) || [])[1] || '';
   if (!bodyCsrf || (cookieCsrf && cookieCsrf !== bodyCsrf)) {
-    return gisRedirectPage(res, 'location.replace("/members.html#signin-failed");');
+    // Reason-coded bounce + a server log line so a member's failed attempt
+    // is diagnosable from Vercel runtime logs (#88 — no PII, just which
+    // branch fired).
+    console.error('[session] GIS redirect rejected: csrf', 'bodyCsrf:', !!bodyCsrf, 'cookieCsrf:', !!cookieCsrf);
+    return gisRedirectPage(res, 'location.replace("/members.html#signin-failed-csrf");');
   }
   try {
     const ticket = await verifyBearer(credential);
     const payload = ticket.getPayload();
     const email = String(payload.email || '');
     if ((email.split('@')[1] || '') !== ALLOWED_DOMAIN) {
+      console.error('[session] GIS redirect rejected: wrong domain:', email.split('@')[1] || '(none)');
       return gisRedirectPage(res, 'location.replace("/members.html#signin-wrong-account");');
     }
     // Prefer the 30-day app token; fall back to the Google credential
@@ -79,10 +84,14 @@ async function handleGisRedirectPost(req, res) {
       + 'localStorage.setItem("rw_user_email",' + JSON.stringify(email) + ');'
       + 'localStorage.setItem("rw_google_credential",' + JSON.stringify(storeToken) + ');'
       + '}catch(e){}'
-      + 'location.replace("/members.html");'
+      // '#signed-in' lets the client detect "Google verified fine but this
+      // browser didn't keep the session" instead of silently re-showing
+      // the login page (#88).
+      + 'location.replace("/members.html#signed-in");'
     );
   } catch (e) {
-    return gisRedirectPage(res, 'location.replace("/members.html#signin-failed");');
+    console.error('[session] GIS redirect rejected: token verify failed:', e && e.message);
+    return gisRedirectPage(res, 'location.replace("/members.html#signin-failed-token");');
   }
 }
 

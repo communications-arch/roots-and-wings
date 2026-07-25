@@ -19522,6 +19522,26 @@
   // Optional: restrict to your Google Workspace domain
   var ALLOWED_DOMAIN = 'rootsandwingsindy.com';
 
+  // Decode a JWT payload segment. BOTH token types we store are base64URL
+  // (Google ID tokens and our app session tokens from _auth.js), but
+  // atob() only accepts standard base64 and throws on the '-'/'_' chars
+  // base64url substitutes for '+'/'/'. A pure-ASCII payload never produces
+  // those chars (why plain atob seemed fine), but any non-ASCII byte in a
+  // member's Google profile name can — for that member alone, sign-in
+  // silently bounced back to the login page (#88). Also decodes UTF-8 so
+  // accented names read back correctly.
+  function rwDecodeJwtPayload(token) {
+    var part = String(token || '').split('.')[1] || '';
+    var b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var bin = atob(b64);
+    try {
+      return JSON.parse(decodeURIComponent(escape(bin)));
+    } catch (e) {
+      return JSON.parse(bin);
+    }
+  }
+
   // True when localStorage holds a Google credential whose `exp` claim is
   // still in the future. Used to decide whether to attempt a silent reauth
   // on page load.
@@ -19529,7 +19549,7 @@
     try {
       var cred = localStorage.getItem('rw_google_credential');
       if (!cred) return false;
-      var payload = JSON.parse(atob(cred.split('.')[1]));
+      var payload = rwDecodeJwtPayload(cred);
       if (!payload || !payload.exp) return false;
       return (payload.exp * 1000) > Date.now();
     } catch (e) { return false; }
@@ -19599,25 +19619,46 @@
     if (googleBtn && googleBtn.scrollIntoView) googleBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
-  // Landing back from a failed redirect attempt (#88 receiver bounces
-  // here with a hash) — say what happened instead of a silent loop.
+  // Landing back from a redirect attempt (#88 receiver bounces here with a
+  // hash) — say what happened instead of a silent loop. Failure hashes
+  // carry a reason code ('#signin-failed-csrf', '#signin-failed-token',
+  // '#signin-wrong-account') so a member can read us the code; the success
+  // hash ('#signed-in') lets us detect the receiver verifying Google fine
+  // but THIS browser failing to keep the session — previously the one path
+  // that looped back to the login page with no message at all.
   (function () {
     var hash = String(window.location.hash || '');
-    if (hash !== '#signin-failed' && hash !== '#signin-wrong-account') return;
-    var googleError = document.getElementById('googleError');
-    if (googleError) {
-      googleError.textContent = hash === '#signin-wrong-account'
-        ? 'That Google account isn’t a Roots & Wings account. Try again and pick your @rootsandwingsindy.com address on Google’s page.'
-        : 'That sign-in attempt didn’t complete — please try again (the “Trouble signing in?” tips below can help).';
-      googleError.style.display = 'block';
-    }
+    if (hash !== '#signed-in' && hash.indexOf('#signin-') !== 0) return;
     if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+    var googleError = document.getElementById('googleError');
+    var say = function (msg) {
+      if (!googleError) return;
+      googleError.textContent = msg;
+      googleError.style.display = 'block';
+      if (googleError.scrollIntoView) googleError.scrollIntoView({ block: 'center' });
+    };
+    if (hash === '#signed-in') {
+      // Receiver minted + stored a session and sent us here. If the load
+      // gate opened the dashboard we're done; otherwise diagnose why not.
+      if (localStorage.getItem(SESSION_KEY) === 'true' && hasValidStoredCredential()) return;
+      var code = !localStorage.getItem('rw_google_credential') ? 'storage-blocked' : 'stored-token-unreadable';
+      console.error('#88 redirect sign-in: receiver succeeded but session not usable —', code,
+        'auth flag:', localStorage.getItem(SESSION_KEY),
+        'credential present:', !!localStorage.getItem('rw_google_credential'));
+      say('Google accepted the sign-in, but this browser didn’t keep the session (code: “' + code + '”). '
+        + 'If you’re in a Private/Incognito window, try a regular one — and please tell the Communications team the code.');
+      return;
+    }
+    say(hash === '#signin-wrong-account'
+      ? 'That Google account isn’t a Roots & Wings account. Try again and pick your @rootsandwingsindy.com address on Google’s page.'
+      : 'That sign-in attempt didn’t complete — please try again (the “Trouble signing in?” tips below can help). '
+        + 'If it keeps happening, tell the Communications team the code “' + hash.replace('#signin-', '') + '”.');
   })();
 
   function handleGoogleSignIn(response) {
     // Decode the JWT token (client-side only — not cryptographically verified)
     try {
-      var payload = JSON.parse(atob(response.credential.split('.')[1]));
+      var payload = rwDecodeJwtPayload(response.credential);
       var email = payload.email || '';
       var domain = email.split('@')[1] || '';
 
@@ -19646,7 +19687,15 @@
       // failure we keep the Google token and behave exactly as before.
       rwExchangeSession(response.credential);
     } catch (err) {
+      // Say so on the page — a silent catch here looks like "the button
+      // did nothing" / a bounce back to the login screen (#88).
       console.error('Google Sign-In error:', err);
+      var geErr = document.getElementById('googleError');
+      if (geErr) {
+        geErr.textContent = 'Something went wrong reading Google’s sign-in response — please try again. '
+          + 'If it keeps happening, tell the Communications team the code “credential-decode”.';
+        geErr.style.display = 'block';
+      }
     }
   }
 
