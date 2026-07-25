@@ -2571,13 +2571,16 @@
   function showViewMode(mode) {
     var ws = document.getElementById('page-workspace');
     var info = document.getElementById('page-info');
+    var collab = document.getElementById('page-collab');
     if (ws) ws.style.display = mode === 'workspace' ? '' : 'none';
     if (info) info.style.display = mode === 'info' ? '' : 'none';
+    if (collab) collab.style.display = mode === 'collab' ? '' : 'none';
     document.querySelectorAll('[data-view]').forEach(function (el) {
       var isActive = el.getAttribute('data-view') === mode;
       el.classList.toggle('active', isActive);
     });
     if (mode === 'workspace' && typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+    if (mode === 'collab' && typeof renderCollabView === 'function') renderCollabView();
   }
   document.querySelectorAll('[data-view]').forEach(function (el) {
     el.addEventListener('click', function (e) {
@@ -12637,6 +12640,11 @@
   function openReportDrawer(opts) {
     opts = opts || {};
     if (!personDetail) return null;
+    // Host: normally the open report modal; when a drawer opens from a
+    // PAGE (the Collaboration view, 2026-07-25) the overlay is hidden,
+    // so attach to <body> instead — the drawer is position:fixed either
+    // way, and a body-scoped z-index rule lifts it above the header.
+    var drawerHost = (getComputedStyle(personDetail).display !== 'none') ? personDetail : document.body;
     closeReportDrawer(true); // one at a time; silent — no onClose for the evicted drawer
     var backdrop = document.createElement('div');
     backdrop.className = 'rd-drawer-backdrop';
@@ -12653,8 +12661,8 @@
       + '</div>'
       + '<div class="rd-drawer-body" id="' + escapeHtmlWs(opts.bodyId || 'rd-drawer-body') + '">'
       + (opts.bodyPlaceholder || '') + '</div>';
-    personDetail.appendChild(backdrop);
-    personDetail.appendChild(drawer);
+    drawerHost.appendChild(backdrop);
+    drawerHost.appendChild(drawer);
     function close(silent) {
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
       if (drawer.parentNode) drawer.parentNode.removeChild(drawer);
@@ -12676,9 +12684,12 @@
   }
 
   function closeReportDrawer(silent) {
-    var d = personDetail && personDetail.querySelector('.rd-drawer');
+    // Document-wide: the drawer may live in the modal overlay OR on
+    // <body> (page-context drawers, e.g. Collaboration). One at a time
+    // either way.
+    var d = document.querySelector('.rd-drawer');
     if (d && typeof d._rdClose === 'function') { d._rdClose(silent); return; }
-    var b = personDetail && personDetail.querySelector('.rd-drawer-backdrop');
+    var b = document.querySelector('.rd-drawer-backdrop');
     if (b && b.parentNode) b.parentNode.removeChild(b);
     if (d && d.parentNode) d.parentNode.removeChild(d);
   }
@@ -19549,6 +19560,10 @@
     renderCleaningTab();
     renderVolunteersTab();
     renderEventsTab();
+    // Live data landing while the Collaboration page is open: refresh
+    // its pills/space too (it reads SPECIAL_EVENTS_DB like the tabs do).
+    var collabPage = document.getElementById('page-collab');
+    if (collabPage && collabPage.style.display !== 'none' && typeof renderCollabView === 'function') renderCollabView();
   }
 
   // Render tabs on load
@@ -22894,18 +22909,81 @@
   // member's My Responsibilities.
   var _eventSpaceState = { id: null, data: null };
 
+  // Spaces live on the Collaboration PAGE now (Erin, 2026-07-25 — "on
+  // their own page, not a modal"). Every doorway that used to open the
+  // modal (To Do rows, My Responsibilities Manage, the roles lens "Open
+  // space") lands on the page with that event's pill selected. The old
+  // name stays so all call sites keep working.
   function showEventSpaceModal(eventId) {
     _eventSpaceState.id = eventId;
     _eventSpaceState.data = null;
-    var body = renderReportModal({
-      title: 'Event Planning',
-      subtitle: 'The event’s working checklist — assign tasks, check them off, and keep the plan in one place. Dates live on the Admin Calendar; lead & assistants in Roles Assignments.',
-      meta: '',
-      icons: [],
-      bodyId: 'event-space-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading planning space…</p>'
+    if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* no modal open */ } }
+    showViewMode('collab');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Collaboration page ─────────────────────────────────────────────
+  // A pill per event the member is working on (their event seats +
+  // events where they hold open tasks; SEL/VP/supers see every event),
+  // Workspace-pill-bar style, with the selected space's sections
+  // rendered as cards below.
+  function collabMyEvents() {
+    var em = String(getActiveEmail() || '').toLowerCase();
+    var canAll = isSuperUserEmail(em)
+      || (typeof clientHasCapability === 'function' && clientHasCapability('special_events_manage', ['Special Events Liaison', 'Vice President']));
+    var list = [];
+    (SPECIAL_EVENTS_DB || []).forEach(function (ev) {
+      if (!ev.id) return;
+      var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+      var onIt = coords.concat(ev.support || []).some(function (p) { return p && String(p.email || '').toLowerCase() === em; });
+      var hasTasks = Array.isArray(_myEventTasks) && _myEventTasks.some(function (t) { return t.event_id === ev.id; });
+      if (canAll || onIt || hasTasks) list.push(ev);
     });
-    if (!body) return;
+    return list;
+  }
+
+  function renderCollabView() {
+    var host = document.getElementById('collabContent');
+    if (!host) return;
+    var evs = collabMyEvents();
+    // An explicitly opened space (e.g. SEL from the lens) always gets a
+    // pill even if the viewer isn't on that event.
+    if (_eventSpaceState.id && !evs.some(function (e) { return e.id === _eventSpaceState.id; })) {
+      var extra = (SPECIAL_EVENTS_DB || []).filter(function (e) { return e.id === _eventSpaceState.id; })[0];
+      if (extra) evs.unshift(extra);
+    }
+    var h = '<h3>Collaboration</h3>';
+    h += '<p class="ws-body-hint">Planning spaces for the special events you’re part of — the checklist, sign-ups, day-of schedule, and notes, one card per section.</p>';
+    if (!evs.length && !liveDataReady) {
+      h += '<p class="ws-empty">Loading your events…</p>';
+      host.innerHTML = h;
+      return;
+    }
+    if (!evs.length) {
+      h += '<div class="collab-card"><p class="ws-empty">You’re not on any event teams yet. Volunteer from '
+        + '<button type="button" class="ws-inline-link" data-resource-action="goto-special-events">Special Events</button>'
+        + ' (My Family → Co-op Coordination) and that event’s planning space appears here.</p></div>';
+      host.innerHTML = h;
+      return;
+    }
+    if (!_eventSpaceState.id || !evs.some(function (e) { return e.id === _eventSpaceState.id; })) {
+      _eventSpaceState.id = evs[0].id;
+      _eventSpaceState.data = null;
+    }
+    h += '<div class="collab-pills">';
+    evs.forEach(function (ev) {
+      h += '<button type="button" class="board-cal-view-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">🎪 ' + escapeHtml(ev.name) + '</button>';
+    });
+    h += '</div>';
+    h += '<div id="event-space-body"><p class="ws-empty">Loading planning space…</p></div>';
+    host.innerHTML = h;
+    host.querySelectorAll('[data-collab-eid]').forEach(function (p) {
+      p.addEventListener('click', function () {
+        _eventSpaceState.id = parseInt(p.getAttribute('data-collab-eid'), 10);
+        _eventSpaceState.data = null;
+        renderCollabView();
+      });
+    });
     loadEventSpace();
   }
 
@@ -22931,17 +23009,20 @@
     var body = document.getElementById('event-space-body');
     var d = _eventSpaceState.data;
     if (!body || !d) return;
-    var titleEl = personDetailCard && personDetailCard.querySelector('.rd-title');
-    if (titleEl) titleEl.textContent = '🎉 ' + d.event.name + ' — Planning';
-    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-    if (metaEl) metaEl.textContent = d.event.school_year + (d.event.event_date ? ' · ' + boardCalFmtDate(d.event.event_date) : '');
 
     var tasks = d.tasks || [];
     var doneCount = tasks.filter(function (t) { return t.done_at; }).length;
     var openCount = tasks.length - doneCount;
     var unassigned = tasks.filter(function (t) { return !t.done_at && !t.assigned_email && !t.assigned_name; }).length;
 
-    var h = '<div class="rd-counts">';
+    // Card layout (Erin, 2026-07-25): header card spans the grid, then
+    // the checklist and each section render as their own card.
+    var h = '<div class="collab-cards">';
+    h += '<div class="evs-section collab-card collab-card-head">';
+    h += '<h4 class="collab-ev-name">🎪 ' + escapeHtmlWs(d.event.name) + '</h4>';
+    h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
+      + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '') + '</p>';
+    h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
     h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
     if (unassigned > 0) h += raCountPill('ws-wv-pending', unassigned + ' unassigned');
@@ -22979,7 +23060,9 @@
       }
       h += '</span></div>';
     }
+    h += '</div>'; // /header card
 
+    h += '<div class="evs-section collab-card"><h5 class="ws-part-subhead" style="margin-top:0;">✅ Checklist</h5>';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
     } else {
@@ -23005,7 +23088,9 @@
       });
       h += '</ul>';
     }
+    h += '</div>'; // /checklist card
     h += renderEventSections(d);
+    h += '</div>'; // /.collab-cards
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -23299,7 +23384,7 @@
     if (!secs.length) return '';
     var h = '';
     secs.forEach(function (s) {
-      h += '<div class="evs-section">';
+      h += '<div class="evs-section collab-card">';
       h += '<div class="rd-counts" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
       h += '<h5 class="ws-part-subhead" style="margin:0;">' + ({ timeline: '🕐', signup: '🙋', info: 'ℹ️', notes: '📔' }[s.type] || '📄') + ' ' + escapeHtmlWs(evsSectionTitle(s));
       h += '</h5>';

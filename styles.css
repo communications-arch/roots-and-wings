@@ -6152,6 +6152,44 @@ button.staff-role:hover {
   box-shadow: none;
 }
 
+/* ---------- Collaboration page (Erin, 2026-07-25) ----------
+   Event planning spaces on their own view: workspace-style event pills,
+   then the selected space's sections as cards in a responsive grid. */
+.collab-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+.collab-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.collab-card {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+.collab-card-head { grid-column: 1 / -1; }
+.collab-ev-name {
+  font-family: var(--font-heading);
+  color: var(--color-primary-dark);
+  font-size: 1.35rem;
+  margin: 0 0 4px;
+}
+@media (max-width: 720px) {
+  .collab-cards { grid-template-columns: 1fr; }
+}
+/* Drawers opened from a page (no modal overlay behind them, e.g. the
+   Collaboration view's task/section editors) attach to <body> — lift
+   them above the portal header and modals. */
+body > .rd-drawer-backdrop { z-index: 10001; }
+body > .rd-drawer { z-index: 10002; }
+
 .event-fill-summary {
   margin-top: 10px;
   padding-top: 8px;
