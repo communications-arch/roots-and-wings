@@ -2410,11 +2410,15 @@ module.exports = async function handler(req, res) {
           (sePeopleByEvent[pr.event_id] = sePeopleByEvent[pr.event_id] || []).push(pr);
         });
         result.specialEventsDb = seRows.map(function (ev) {
-          var lead = null;
+          // Co-leads (Erin, 2026-07-25): every 'lead' row is a coordinator.
+          // The old shape demoted a second lead row into `support`, so a
+          // co-lead showed as a phantom third "Support" slot on the Events
+          // tab while every other surface (role === 'assist') showed two.
+          var coordinators = [];
           var support = [];
           (sePeopleByEvent[ev.id] || []).forEach(function (pr) {
             var person = { name: pr.person_name || pr.person_email, email: pr.person_email };
-            if (pr.role === 'lead' && !lead) lead = person;
+            if (pr.role === 'lead') coordinators.push(person);
             else support.push(person);
           });
           return {
@@ -2427,7 +2431,8 @@ module.exports = async function handler(req, res) {
             endTime: seTimeStr(ev.end_time),
             location: ev.location || '',
             notes: ev.notes || '',
-            coordinator: lead,
+            coordinator: coordinators[0] || null,
+            coordinators: coordinators,
             support: support
           };
         });

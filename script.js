@@ -4068,7 +4068,8 @@
       html += '</div>';
       html += '<div class="elective-staff-list">';
       var evPeople = [];
-      if (ev.coordinator) evPeople.push({ name: ev.coordinator.name, label: 'Coordinator' });
+      var evCoords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+      evCoords.forEach(function (co, ci) { evPeople.push({ name: co.name, label: ci === 0 ? 'Coordinator' : 'Co-lead' }); });
       (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Planning Support' }); });
       evPeople.forEach(function (person) {
         var pName = String(person.name || '');
@@ -6748,8 +6749,14 @@
       var seEmailLc = String(email || '').toLowerCase();
       if (!seEmailLc) return;
       SPECIAL_EVENTS_DB.forEach(function (ev) {
-        var isCoord = ev.coordinator && String(ev.coordinator.email || '').toLowerCase() === seEmailLc;
-        if (!isCoord) return;
+        var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+        var matchMe = function (p) { return p && String(p.email || '').toLowerCase() === seEmailLc; };
+        var isCoord = coords.some(matchMe);
+        // Event volunteers (assistants) get a duty too (Erin, 2026-07-25:
+        // "the volunteers don't show a to do card") — with Manage opening
+        // the event's planning space, same doorway the coordinator gets.
+        var isSupport = !isCoord && (ev.support || []).some(matchMe);
+        if (!isCoord && !isSupport) return;
         // Only UPCOMING events are responsibilities (1-day grace so the
         // event still shows on its own day); undated approved events stay
         // visible as the safe default.
@@ -6757,7 +6764,13 @@
           var evTs = Date.parse(ev.date + 'T12:00:00');
           if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
         }
-        duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: specialEventDateLabel(ev), popup: {type: 'event', name: ev.name}});
+        duties.push({
+          block: 'annual', icon: 'event',
+          text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-Coordinator' : ' Coordinator') : ' — Event Volunteer'),
+          detail: specialEventDateLabel(ev),
+          popup: {type: 'event', name: ev.name},
+          manage: ev.id ? 'eventSpace-' + ev.id : undefined
+        });
       });
     })();
 
@@ -8831,11 +8844,14 @@
         var ts = Date.parse((ev.endDate || ev.date) + 'T23:59:00');
         isPast = isFinite(ts) && ts < Date.now();
       }
-      var status = isPast ? 'Complete' : (ev.coordinator ? 'Planning' : 'Needs Volunteers');
+      // Co-leads (Erin, 2026-07-25): coordinators carries every lead row;
+      // fall back to the single coordinator for a stale cached payload.
+      var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+      var status = isPast ? 'Complete' : (coords.length ? 'Planning' : 'Needs Volunteers');
       var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
       var support = ev.support || [];
       var maxSupport = Math.max(support.length, 3);
-      var isMyCard = isMyPerson(ev.coordinator) || support.some(isMyPerson);
+      var isMyCard = coords.some(isMyPerson) || support.some(isMyPerson);
 
       html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
       html += '<div class="event-card-header">';
@@ -8847,13 +8863,16 @@
       html += '<span class="status-badge ' + statusClass + '">' + status + '</span>';
       html += '</div>';
 
-      // Coordinator
+      // Coordinator row(s) — one per (co-)lead
       html += '<div class="event-roles">';
-      var coordText = ev.coordinator ? escapeHtml(ev.coordinator.name) : '<em class="event-open-slot">Needs volunteer</em>';
-      html += '<div class="event-role' + (isMyPerson(ev.coordinator) ? ' coord-my-row' : '') + '">';
-      html += '<span class="event-role-label">Coordinator</span>';
-      html += '<span class="event-role-person">' + (isMyPerson(ev.coordinator) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
-      html += '</div>';
+      if (!coords.length) coords = [null];
+      coords.forEach(function (co, ci) {
+        var coordText = co ? escapeHtml(co.name) : '<em class="event-open-slot">Needs volunteer</em>';
+        html += '<div class="event-role' + (isMyPerson(co) ? ' coord-my-row' : '') + '">';
+        html += '<span class="event-role-label">' + (ci === 0 ? 'Coordinator' : 'Co-lead') + '</span>';
+        html += '<span class="event-role-person">' + (isMyPerson(co) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
+        html += '</div>';
+      });
 
       // Planning support slots (padded to 3 so open seats stay visible)
       for (var si = 0; si < maxSupport; si++) {
@@ -22695,7 +22714,10 @@
     var events = _rolesMgrEventsState.events || [];
     if (events.length === 0) { wrap.innerHTML = ''; return; }
     var staffed = 0, needLead = 0;
-    events.forEach(function (ev) { if (ev.lead && (ev.lead.name || ev.lead.email)) staffed++; else needLead++; });
+    events.forEach(function (ev) {
+      var ls = ev.leads || (ev.lead ? [ev.lead] : []);
+      if (ls.some(function (l) { return l && (l.name || l.email); })) staffed++; else needLead++;
+    });
     var pills = [
       raCountPill('ws-wv-ok', staffed + ' with a lead'),
       raCountPill(needLead > 0 ? 'ws-wv-resent' : 'ws-wv-ok', needLead + ' need a lead')
@@ -22721,11 +22743,15 @@
             + ' <span class="se-status se-status-' + escapeHtmlWs(r.date_status || 'proposed') + '">' + (r.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
         } },
       { key: 'lead', label: 'Lead', type: 'string',
-        sortValue: function (r) { return (r.lead && (r.lead.name || r.lead.email)) || ''; },
+        sortValue: function (r) { var ls = r.leads || (r.lead ? [r.lead] : []); return ls.length ? (ls[0].name || ls[0].email) : ''; },
         render: function (r) {
-          return (r.lead && (r.lead.name || r.lead.email))
-            ? escapeHtmlWs(r.lead.name || r.lead.email)
-            : '<span class="ra-open-note">OPEN ⚠</span>';
+          var ls = (r.leads || (r.lead ? [r.lead] : [])).map(function (l) { return l.name || l.email; }).filter(Boolean);
+          var h2 = ls.length ? escapeHtmlWs(ls.join(' & ')) : '<span class="ra-open-note">OPEN ⚠</span>';
+          // Hands raised for the lead seat — visible where the SEL
+          // assigns, so co-lead volunteers stop vanishing (2026-07-25).
+          var hands = (r.lead_interest || []).map(function (p) { return p.name || p.email; }).filter(Boolean);
+          if (hands.length) h2 += '<br><span class="ws-srt-actions-empty">🙋 Interested: ' + escapeHtmlWs(hands.join(', ')) + '</span>';
+          return h2;
         } },
       { key: 'assists', label: 'Assistants', type: 'string',
         sortValue: function (r) { return (r.assists || []).length; },
@@ -22779,7 +22805,12 @@
       h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
       if (ev.event_date) h += '<span class="se-date-label">' + escapeHtmlWs(boardCalFmtDate(ev.event_date)) + '</span>';
       h += '<span class="se-status se-status-' + escapeHtmlWs(ev.date_status || 'proposed') + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
-      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
+      var evLeads = ev.leads || (ev.lead ? [ev.lead] : []);
+      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(evLeads[0] ? (evLeads[0].name || evLeads[0].email) : '') + '" placeholder="Lead name…"></div>';
+      h += '<div class="se-row"><label class="se-lbl">Co-lead (optional)</label><input type="text" class="cl-input se-colead" list="seMemberList" value="' + escapeHtmlWs(evLeads[1] ? (evLeads[1].name || evLeads[1].email) : '') + '" placeholder="Co-lead name…"></div>';
+      if ((ev.lead_interest || []).length) {
+        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Interested in leading: <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type a name above to confirm them.</p>';
+      }
       h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
         var a = (ev.assists || [])[i];
@@ -22800,14 +22831,19 @@
       var peopleSave = card.querySelector('.se-people-save');
       if (peopleSave) peopleSave.addEventListener('click', function () {
         var statusEl = card.querySelector('.se-save-status');
-        var lead = seNameToPerson(card.querySelector('.se-lead').value);
+        var leads = [];
+        var leadP = seNameToPerson(card.querySelector('.se-lead').value);
+        var coleadEl = card.querySelector('.se-colead');
+        var coleadP = coleadEl ? seNameToPerson(coleadEl.value) : null;
+        if (leadP) leads.push(leadP);
+        if (coleadP) leads.push(coleadP);
         var assists = [];
         card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
         peopleSave.disabled = true;
         fetch('/api/tour', {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
-          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: lead, assists: assists })
+          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: leads[0] || null, leads: leads, assists: assists })
         })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
@@ -22817,7 +22853,16 @@
             // Keep the local state in step so the lens refresh on drawer
             // close shows the new assignments without waiting on refetch.
             var evRow = (_rolesMgrEventsState.events || []).filter(function (x) { return x.id === eid; })[0];
-            if (evRow) { evRow.lead = lead; evRow.assists = assists; }
+            if (evRow) {
+              evRow.lead = leads[0] || null;
+              evRow.leads = leads;
+              evRow.assists = assists;
+              // Anyone just confirmed as (co-)lead is no longer "interested".
+              var leadEmailsNow = leads.map(function (l) { return String(l.email || '').toLowerCase(); });
+              evRow.lead_interest = (evRow.lead_interest || []).filter(function (p) {
+                return leadEmailsNow.indexOf(String(p.email || '').toLowerCase()) === -1;
+              });
+            }
           })
           .catch(function (err) {
             peopleSave.disabled = false;
@@ -22887,10 +22932,11 @@
     if (unassigned > 0) h += raCountPill('ws-wv-pending', unassigned + ' unassigned');
     h += '</div>';
 
-    var lead = (d.people || []).filter(function (p) { return p.role === 'lead'; })[0];
+    var spaceLeads = (d.people || []).filter(function (p) { return p.role === 'lead'; })
+      .map(function (p) { return p.name || p.email; }).filter(Boolean);
     var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
-    h += '<p class="ws-body-hint">👑 Lead: <strong>' + escapeHtmlWs(lead ? (lead.name || lead.email) : 'not set') + '</strong>'
+    h += '<p class="ws-body-hint">👑 Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
       + (assists.length ? ' · Assistants: ' + assists.map(escapeHtmlWs).join(', ') : '')
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
 
@@ -24315,7 +24361,8 @@
           name: ev.name || '',
           date: ev.event_date ? boardCalFmtDate(ev.event_date) : '',
           approved: ev.date_status === 'approved',
-          lead: (ev.lead && (ev.lead.name || ev.lead.email)) || '',
+          lead: (ev.leads || (ev.lead ? [ev.lead] : []))
+            .map(function (l) { return l.name || l.email; }).filter(Boolean).join(' & '),
           assists: (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean)
         };
       }),

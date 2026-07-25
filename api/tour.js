@@ -6131,12 +6131,26 @@ async function handleSpecialEventsGet(req, res) {
       WHERE se.school_year = ${schoolYear}
       ORDER BY sep.event_id, sep.role DESC, sep.sort_order
     `;
+    // Lead hand-raises (event_seat_interest) — surfaced on the lens so
+    // "I want to lead/co-lead" volunteers are visible where the SEL
+    // actually assigns people, not only in the 14-day review To Do.
+    const leadHands = await sql`
+      SELECT esi.event_id, esi.person_name, LOWER(esi.person_email) AS person_email
+      FROM event_seat_interest esi
+      JOIN special_events se ON se.id = esi.event_id
+      WHERE se.school_year = ${schoolYear} AND esi.seat = 'lead'
+      ORDER BY esi.created_at, esi.id
+    `;
     const byEvent = {};
     people.forEach(p => { (byEvent[p.event_id] || (byEvent[p.event_id] = [])).push(p); });
     const out = events.map(e => {
       const ppl = byEvent[e.id] || [];
-      const lead = ppl.find(x => x.role === 'lead');
+      // Co-leads (Erin, 2026-07-25): an event can carry up to TWO lead
+      // rows. `leads` is the full list; `lead` stays the first row so
+      // older cached clients keep working.
+      const leads = ppl.filter(x => x.role === 'lead').map(x => ({ email: (x.person_email || '').toLowerCase(), name: x.person_name || '' }));
       const assists = ppl.filter(x => x.role === 'assist').map(x => ({ email: x.person_email || '', name: x.person_name || '' }));
+      const leadEmails = leads.map(l => l.email).filter(Boolean);
       return {
         id: e.id,
         name: e.name,
@@ -6146,8 +6160,13 @@ async function handleSpecialEventsGet(req, res) {
         // Ice Cream Social + Field Day dates are also driven by the session
         // calendar (board-calendar derived events) — flag so the UI can note it.
         date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
-        lead: lead ? { email: lead.person_email || '', name: lead.person_name || '' } : null,
-        assists
+        lead: leads[0] || null,
+        leads,
+        assists,
+        // Hands raised for the lead seat, minus anyone already assigned.
+        lead_interest: leadHands
+          .filter(h => h.event_id === e.id && leadEmails.indexOf(h.person_email) === -1)
+          .map(h => ({ email: h.person_email, name: h.person_name || h.person_email }))
       };
     });
     const memRows = await sql`
@@ -6940,15 +6959,19 @@ async function handleEventOpeningsGet(req, res) {
       || isSuperUser(auth.email) || await isBoardMember(auth.email);
     payload.can_review = canReview;
     if (canReview) {
-      // Direct-add era (#75): the log's last 14 days = "recent sign-ups"
-      // for the SEL / Sustaining Director To Do; older rows age out.
+      // Direct-add era (#75): assist rows are an FYI log — the last 14
+      // days = "recent sign-ups"; older rows age out. LEAD hand-raises
+      // are the exception (Erin, 2026-07-25): they're the ONLY record of
+      // a would-be (co-)lead and need an SEL decision, so they stay
+      // until acked or assigned — two co-lead volunteers had silently
+      // aged out of this list.
       const interest = await sql`
         SELECT esi.id, esi.event_id, esi.seat, esi.person_email, esi.person_name, esi.created_at,
                se.name AS event_name, se.school_year, se.event_date
         FROM event_seat_interest esi
         JOIN special_events se ON se.id = esi.event_id
         WHERE se.school_year = ${schoolYear}
-          AND esi.created_at >= NOW() - INTERVAL '14 days'
+          AND (esi.seat = 'lead' OR esi.created_at >= NOW() - INTERVAL '14 days')
         ORDER BY esi.created_at DESC
       `;
       payload.seat_interest = interest.map(r => ({
@@ -7013,8 +7036,8 @@ async function handleEventSeatInterest(body, req, res) {
     if (existing.some(r => r.role === seat && r.em === email)) {
       return res.status(200).json({ ok: true, already: true });
     }
-    if (seat === 'lead' && existing.some(r => r.role === 'lead')) {
-      return res.status(409).json({ error: 'This event just got a lead — thank you anyway! Grab an assistant spot instead.' });
+    if (seat === 'lead' && existing.filter(r => r.role === 'lead').length >= 2) {
+      return res.status(409).json({ error: 'This event already has its leads — thank you anyway! Grab an assistant spot instead.' });
     }
     if (seat === 'assist' && existing.filter(r => r.role === 'assist').length >= 4) {
       return res.status(409).json({ error: 'The assistant spots just filled up — thank you anyway!' });
@@ -7063,7 +7086,9 @@ async function handleEventSeatInterest(body, req, res) {
   }
 }
 
-// POST kind='special-event-people' — replace one event's lead + assistants.
+// POST kind='special-event-people' — replace one event's lead(s) + assistants.
+// Co-leads (Erin, 2026-07-25): up to TWO lead rows; body.leads array with
+// body.lead kept as the single-lead fallback for older clients.
 async function handleSpecialEventSave(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
   if (!auth) return;
@@ -7072,17 +7097,17 @@ async function handleSpecialEventSave(body, req, res) {
   const clean = (p) => (p && (p.name || p.email))
     ? { email: String(p.email || '').trim().toLowerCase(), name: String(p.name || '').trim() }
     : null;
-  const lead = clean(body.lead);
+  const leads = (Array.isArray(body.leads) ? body.leads : [body.lead]).map(clean).filter(Boolean).slice(0, 2);
   const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean).slice(0, 4);
   try {
     const sql = getSql();
     const owns = await sql`SELECT id FROM special_events WHERE id = ${eventId}`;
     if (!owns.length) return res.status(404).json({ error: 'Event not found' });
     await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
-    if (lead) {
+    for (let i = 0; i < leads.length; i++) {
       await sql`
         INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
-        VALUES (${eventId}, 'lead', ${lead.email}, ${lead.name}, 0, ${auth.realEmail})
+        VALUES (${eventId}, 'lead', ${leads[i].email}, ${leads[i].name}, ${i}, ${auth.realEmail})
       `;
     }
     for (let i = 0; i < assists.length; i++) {
