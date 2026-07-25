@@ -11503,6 +11503,31 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   border-color: #2E6B2E;
   color: #2E6B2E;
 }
+/* Volunteer-from-the-grid + Jump In modals (Erin, 2026-07-25): these seat
+   rows carry role blurbs, counts, and names — inline spans ran together
+   into a wall of text. Stack each info line inside the purple row, give
+   the row a little more padding, and let the title breathe. Scoped by
+   modal body id, same pattern as #open-seats-body above. */
+#event-volunteer-body .ws-opportunities li.ws-opp-seat,
+#event-jumpin-body .ws-opportunities li.ws-opp-seat {
+  padding: 12px 14px;
+}
+#event-volunteer-body .ws-opp-main strong,
+#event-jumpin-body .ws-opp-main strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 2px;
+}
+#event-volunteer-body .ws-opp-committee,
+#event-jumpin-body .ws-opp-committee {
+  display: block;
+  margin: 3px 0 0;
+  line-height: 1.45;
+}
+/* Air above the closing "how sign-ups work" note under the seats list. */
+#event-volunteer-body .ws-opportunities + .ws-body-hint {
+  margin-top: 16px;
+}
 /* Roles Assignments (#39): members who raised a hand for a seat. */
 .roles-row-interest-line {
   color: var(--color-text-light);
