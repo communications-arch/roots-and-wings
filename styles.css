@@ -11560,21 +11560,36 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
    the row a little more padding, and let the title breathe. Scoped by
    modal body id, same pattern as #open-seats-body above. */
 #event-volunteer-body .ws-opportunities li.ws-opp-seat,
-#event-jumpin-body .ws-opportunities li.ws-opp-seat {
+#event-jumpin-body .ws-opportunities li.ws-opp-seat,
+#event-space-body .ws-opportunities li.ws-opp-seat {
   padding: 12px 14px;
 }
 #event-volunteer-body .ws-opp-main strong,
-#event-jumpin-body .ws-opp-main strong {
+#event-jumpin-body .ws-opp-main strong,
+#event-space-body .ws-opp-main strong {
   display: block;
   font-size: 0.95rem;
   margin-bottom: 2px;
 }
 #event-volunteer-body .ws-opp-committee,
-#event-jumpin-body .ws-opp-committee {
+#event-jumpin-body .ws-opp-committee,
+#event-space-body .ws-opp-committee {
   display: block;
   margin: 3px 0 0;
   line-height: 1.45;
 }
+/* Inside the narrow Collaboration cards the sign-up button drops to its
+   own full-width row instead of squeezing beside the text (Erin,
+   2026-07-25: Maker's Market booth buttons). */
+#event-space-body .ws-opp-seat .volunteer-cta {
+  margin-left: 0;
+  flex-basis: 100%;
+  justify-content: center;
+}
+/* Section-card headers: let the Edit/Delete actions wrap BELOW the
+   title as a row instead of stacking vertically beside it. */
+.evs-section .workspace-card-header { flex-wrap: wrap; }
+.evs-section .workspace-card-header h4 { min-width: 0; }
 /* Air above the closing "how sign-ups work" note under the seats list. */
 #event-volunteer-body .ws-opportunities + .ws-body-hint {
   margin-top: 16px;
