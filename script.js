@@ -23102,7 +23102,7 @@
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
     if (d.can_edit) {
       // Legend for the per-card hearts (Erin, 2026-07-25).
-      h += '<p class="ws-body-hint" style="margin:6px 0 0;"><img src="brand/secondary/accent-30.png" alt="" style="width:16px;height:16px;vertical-align:-3px;"> <strong>Binoculars</strong> on a card mean every member can see it; <strong>greyed-out binoculars</strong> keep it to the event committee, the Special Events Liaison, and the Sustaining Director.</p>';
+      h += '<p class="ws-body-hint" style="margin:6px 0 0;"><img src="brand/secondary/accent-30.png" alt="" style="height:14px;width:auto;vertical-align:-2px;"> <strong>Binoculars</strong> on a card mean every member can see it; <strong>greyed-out binoculars</strong> keep it to the event committee, the Special Events Liaison, and the Sustaining Director.</p>';
     }
 
     if (d.can_edit) {
