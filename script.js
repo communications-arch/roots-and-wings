@@ -6342,7 +6342,33 @@
     });
   }
 
+  // ── renderMyFamily coalescing (#116) ──
+  // The My Family grid is a full innerHTML rebuild, and during initial load
+  // ~8 loaders (live sheets data, billing, roles, co-op sessions, cleaning,
+  // coverage, kid placements, published schedule, event tasks, class subs…)
+  // each call renderMyFamily() as their fetch lands — N back-to-back full
+  // repaints in the first seconds = the "blink" Erin reported. The public
+  // renderMyFamily() below coalesces bursts through one trailing ~80ms
+  // timer so the burst paints ONCE; renderMyFamilyNow() is the real render
+  // for the few call sites that need synchronous semantics (e.g. the
+  // coverage-board try/catch fallback in loadCoverageBoard). Keep both
+  // names: every `typeof renderMyFamily === 'function'` guard still passes.
+  var _renderMyFamilyTimer = null;
   function renderMyFamily() {
+    if (_renderMyFamilyTimer) clearTimeout(_renderMyFamilyTimer);
+    _renderMyFamilyTimer = setTimeout(function () {
+      _renderMyFamilyTimer = null;
+      try {
+        renderMyFamilyNow();
+      } catch (e) {
+        // Deferred: a throw here would otherwise be uncaught. Callers that
+        // need to REACT to a render failure call renderMyFamilyNow directly.
+        console.error('renderMyFamily (coalesced) failed:', e);
+      }
+    }, 80);
+  }
+
+  function renderMyFamilyNow() {
     var email = getActiveEmail();
     var section = document.getElementById('myFamily');
     var grid = document.getElementById('myFamilyGrid');
@@ -20475,8 +20501,11 @@
       // full-page rebuild ever throws, fall back to rendering the board
       // directly so a claim can never make the tracker disappear.
       loadedAbsences = filtered;
+      // renderMyFamilyNow (NOT the coalesced wrapper): this try/catch must
+      // observe a render throw synchronously so the board fallback fires —
+      // the debounced wrapper would defer the throw past the catch (#116).
       try {
-        if (typeof renderMyFamily === 'function') renderMyFamily();
+        if (typeof renderMyFamilyNow === 'function') renderMyFamilyNow();
         else renderCoverageBoard(filtered);
       } catch (rmErr) {
         console.error('renderMyFamily failed after coverage load:', rmErr);
