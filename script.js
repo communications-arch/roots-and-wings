@@ -8934,6 +8934,13 @@
       // Summary line
       html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
 
+      // Any member can open the event's shared details (Erin, 2026-07-25)
+      // — lands on the Collaboration page, where the server already
+      // filters cards to the ones marked visible to all members.
+      if (ev.id) {
+        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '">📋 View event details</button></p>';
+      }
+
       html += '</div></div>';
     });
     html += '</div>';
@@ -19570,6 +19577,7 @@
     else if (action === 'event-seat-toggle' && typeof toggleEventSeatInterest === 'function') toggleEventSeatInterest(btn);
     else if (action === 'event-volunteer' && typeof showEventVolunteerModal === 'function') showEventVolunteerModal(parseInt(btn.getAttribute('data-eid'), 10));
     else if (action === 'event-seat-remove' && typeof removeEventSeatSelf === 'function') removeEventSeatSelf(btn);
+    else if (action === 'event-space-open' && typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
@@ -23089,7 +23097,7 @@
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
     var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
-    h += '<p class="ws-body-hint">👑 Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
+    h += '<p class="ws-body-hint">' + volRoleIconImg('lead') + ' Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
       + (assists.length ? ' · Support: ' + assists.map(escapeHtmlWs).join(', ') : '')
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
     if (d.can_edit) {
@@ -23763,7 +23771,7 @@
         var isOn = !!(ev.my_seat_interest && ev.my_seat_interest.lead);
         var leadNames = (ev.seat_names && ev.seat_names.lead) || [];
         var full = !!ev.lead_filled; // both co-lead spots taken
-        var row = '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>👑 Lead</strong>';
+        var row = '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + volRoleIconImg('lead') + ' Lead</strong>';
         row += '<span class="ws-opp-committee">' + leadNames.length + ' of 2 spots filled</span>';
         if (leadNames.length) row += '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(leadNames.join(', ')) + '</span>';
         row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Two members can share it as co-leads.</span></span>';
@@ -23913,7 +23921,7 @@
       return;
     }
     var seats = [
-      { key: 'lead', icon: '👑', label: 'Lead', cap: 2 },
+      { key: 'lead', icon: volRoleIconImg('lead'), label: 'Lead', cap: 2 },
       { key: 'assist', icon: '🤝', label: 'Support', cap: 2 }
     ];
     h += '<ul class="ws-opportunities">';
