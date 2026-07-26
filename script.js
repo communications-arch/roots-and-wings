@@ -23147,10 +23147,13 @@
 
     if (d.can_edit) {
       var secsAll = d.sections || [];
-      var tplTotal = (d.template_count || 0) + (d.template_section_count || 0);
+      // Honest count (#115): the server only fills the EMPTY side(s), so
+      // the button shows — and counts — only what will actually copy.
+      var tplCopy = (tasks.length === 0 ? (d.template_count || 0) : 0)
+        + (secsAll.length === 0 ? (d.template_section_count || 0) : 0);
       h += '<div class="coop-cal-toolbar"><span></span><span style="display:flex;gap:8px;flex-wrap:wrap;">';
-      if (tplTotal > 0 && (tasks.length === 0 || secsAll.length === 0)) {
-        h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplTotal + ' item' + (tplTotal === 1 ? '' : 's') + ')</button>';
+      if (tplCopy > 0) {
+        h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplCopy + ' item' + (tplCopy === 1 ? '' : 's') + ')</button>';
       }
       // Generic sections (Erin, 2026-07-21): timeline / sign-ups / info /
       // notes join the checklist so the space replaces the old planning
@@ -23163,9 +23166,10 @@
           ? '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-close-signups">Close sign-ups</button>'
           : '<button type="button" class="btn btn-primary btn-sm" id="evs-open-signups">📣 Request volunteers</button>';
       }
-      if (d.template_titles !== undefined) {
-        h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-edit-template">Edit template</button>';
-      }
+      // One-button template save (#115): snapshots the CURRENT space as
+      // next year's starting template for this event name — replaces the
+      // old "Edit template" drawer (whose saves 403'd non-board leads).
+      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-save-template" title="Replaces next year’s starting template for “' + escapeAttr(d.event.name) + '” with this space’s current checklist and sections. Task titles and section layouts carry; sign-ups, assignees, and notes text don’t.">Save as next year’s template</button>';
       h += '</span></div>';
     }
     h += '</div></div>'; // /body, /header card
@@ -23306,8 +23310,22 @@
         })
         .catch(function () { alert('Network error.'); loadEventSpace(); });
     });
-    var tplBtn = body.querySelector('#evs-edit-template');
-    if (tplBtn) tplBtn.addEventListener('click', openEventTemplateDrawer);
+    // Save as next year's template (#115): two-step confirm — it
+    // replaces the previous snapshot for this event name.
+    var snapBtn = body.querySelector('#evs-save-template');
+    if (snapBtn) snapBtn.addEventListener('click', function () {
+      rwArmTwoStep(snapBtn, 'overwrite', function () {
+        snapBtn.disabled = true; snapBtn.textContent = 'Saving…';
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-template-snapshot', event_id: _eventSpaceState.id }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not save the template.'); loadEventSpace(); return; }
+            alert('✓ Template saved for “' + d.event.name + '” — ' + res.data.task_count + ' task' + (res.data.task_count === 1 ? '' : 's') + ', ' + res.data.section_count + ' section' + (res.data.section_count === 1 ? '' : 's') + '. Next year’s space starts from this.');
+            loadEventSpace();
+          })
+          .catch(function () { alert('Network error.'); loadEventSpace(); });
+      });
+    });
 
     // ── Generic sections wiring (Erin, 2026-07-21) ──
     var addSecBtn = body.querySelector('#evs-add-section');
@@ -23419,6 +23437,8 @@
 
   // Edit the event's TEMPLATE (SEL/VP): one task per line; this year's
   // checklist is untouched — templates seed future years.
+  // RETIRED (#115): no longer wired — "Save as next year's template" in
+  // the space toolbar snapshots both halves in one action.
   function openEventTemplateDrawer() {
     var d = _eventSpaceState.data;
     if (!d) return;

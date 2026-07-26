@@ -6356,8 +6356,8 @@ async function handleEventSpaceGet(req, res) {
         seen.add(k);
         payload.members.push({ name: nm, email: em });
       });
-      // Editors can also see (and edit, via kind=event-template-save) the
-      // template titles for this event name.
+      // Editors also get the template titles for this event name (fed
+      // the retired Edit-template drawer; kept for older cached clients).
       const tpl = await sql`
         SELECT title FROM event_task_templates WHERE event_name = ${ev.name} ORDER BY sort_order, id
       `;
@@ -6596,7 +6596,9 @@ async function handleEventSpaceTemplateStart(body, req, res) {
 }
 
 // kind=event-template-save — replace an event name's template task list
-// (SEL/VP/super only; per-year checklists are untouched).
+// (SEL/VP/super only; per-year checklists are untouched). LEGACY (#115):
+// the UI now snapshots via kind=event-template-snapshot; kept for
+// older cached clients.
 async function handleEventTemplateSave(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
   if (!auth) return;
@@ -6852,7 +6854,8 @@ async function handleEventSignupUnclaim(body, req, res) {
 // stack as the per-event-NAME template (SEL/VP/board, like the task
 // template). Sign-ups are never part of a template; this year's notes
 // text is blanked (templates carry structure, not history — the
-// carry-forward happens at template-start).
+// carry-forward happens at template-start). LEGACY (#115): the UI now
+// snapshots via kind=event-template-snapshot; kept for older clients.
 async function handleEventTemplateSectionsSave(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
   if (!auth) return;
@@ -6880,6 +6883,64 @@ async function handleEventTemplateSectionsSave(body, req, res) {
     return res.status(200).json({ ok: true, count: sections.length });
   } catch (err) {
     console.error('event-template-sections-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-template-snapshot — the one-button template save (#115):
+// snapshot the space's CURRENT checklist + section stack as the
+// per-event-NAME template, replacing BOTH template tables for that
+// name in one transaction. Gated on canEditEventSpace (the committee
+// doing the planning saves the template — the old drawer rendered for
+// every space editor but its save handlers 403'd non-board leads).
+// Task titles only (assignees/dates/done state dropped); notes text is
+// blanked (the prev-year carry-forward happens at template-start);
+// sign-ups are never part of a template. Subsumes event-template-save
+// and event-template-sections-save, which stay for older clients.
+async function handleEventTemplateSnapshot(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can save the template.', youAre: auth.realEmail });
+    }
+    const evRows = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+    if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const eventName = evRows[0].name;
+    const tasks = await sql`
+      SELECT title FROM event_tasks WHERE special_event_id = ${eventId}
+      ORDER BY sort_order, id
+    `;
+    const sections = await sql`
+      SELECT type, title, config, content, sort_order
+      FROM event_sections WHERE special_event_id = ${eventId}
+      ORDER BY sort_order, id
+    `;
+    const stmts = [
+      sql`DELETE FROM event_task_templates WHERE event_name = ${eventName}`,
+      sql`DELETE FROM event_template_sections WHERE event_name = ${eventName}`
+    ];
+    tasks.forEach((t, i) => {
+      stmts.push(sql`
+        INSERT INTO event_task_templates (event_name, title, sort_order, updated_by)
+        VALUES (${eventName}, ${t.title}, ${i}, ${auth.realEmail})
+      `);
+    });
+    for (const s of sections) {
+      const content = s.type === 'notes' ? { text: '' } : (s.content == null ? [] : s.content);
+      stmts.push(sql`
+        INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
+        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
+                ${JSON.stringify(content)}::jsonb, ${s.sort_order}, ${auth.realEmail})
+      `);
+    }
+    await sql.transaction(stmts);
+    return res.status(200).json({ ok: true, task_count: tasks.length, section_count: sections.length });
+  } catch (err) {
+    console.error('event-template-snapshot error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -10061,6 +10122,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
     if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
+    if (kind === 'event-template-snapshot') return handleEventTemplateSnapshot(body, req, res);
     if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);
     if (kind === 'event-seat-interest-ack') return handleEventSeatInterestAck(body, req, res);
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
