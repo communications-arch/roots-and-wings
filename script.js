@@ -5851,12 +5851,15 @@
   //   notes         accent-8  → accent-16  (8 stays My Responsibilities)
   //   membersSummary accent-5 → accent-32  (5 stays the Afternoon/PM mark)
   //   supplyCloset  accent-33 → accent-7   (33 stays Coverage Board)
+  // 2026-07-26 (#119): billing accent-46 → accent-11 (green seedling —
+  //   money-green growth mark) so the teal droplets 46 are free for her
+  //   sheet's outdoor/rain meaning later.
+  // 2026-07-26: location wired to accent-37 (her sheet's pick — Erin's
+  //   request; replaces leading-📍 usage as surfaces convert).
   // RESERVED (Erin's icon-ideas sheet, not wired yet — do NOT claim):
   //   13 helper/interested · 29 floater/prep · 35 lesson plan/guide ·
-  //   37 location/room · 38 field trip · 42 celebration · 48 session ·
+  //   38 field trip · 42 celebration · 46 outdoor/rain · 48 session ·
   //   51 person/assignee · 52 cleaning · 56 board task
-  //   (her sheet also lists 46 for outdoor/rain — clashes with billing=46,
-  //   flag before wiring)
   var BRAND_ICONS = {
     lead: 'accent-58',
     colead: 'accent-19',
@@ -5873,7 +5876,8 @@
     newFamily: 'accent-24',
     todo: 'accent-12',
     specialEvents: 'accent-28',
-    billing: 'accent-46',
+    billing: 'accent-11',
+    location: 'accent-37',
     roles: 'accent-15',
     classes: 'accent-2',
     reports: 'accent-36',
@@ -6461,6 +6465,7 @@
     }, 80);
   }
 
+  var _rwLastMyFamilyHtml = null;
   function renderMyFamilyNow() {
     var email = getActiveEmail();
     var section = document.getElementById('myFamily');
@@ -7460,6 +7465,18 @@
     html += '<div id="mfMyClassesBody"><em style="color:var(--color-text-light);">Loading…</em></div>';
     html += '</div>';
 
+    // #116 (prod report: "keeps flickering"): the staggered loaders keep
+    // requesting re-renders after their fetches land, but most rebuilds
+    // produce EXACTLY the same markup. Skip the DOM write (and rewiring —
+    // the existing listeners stay attached to the untouched DOM) when
+    // nothing changed, so an unchanged dashboard can never flicker. The
+    // coverage board still refreshes: its data can change without
+    // changing the family grid markup.
+    if (html === _rwLastMyFamilyHtml && grid.children.length > 0) {
+      if (typeof renderCoverageBoard === 'function') { try { renderCoverageBoard(loadedAbsences); } catch (e) { /* board keeps last paint */ } }
+      return;
+    }
+    _rwLastMyFamilyHtml = html;
     grid.innerHTML = html;
     section.style.display = '';
     if (typeof injectMyFamilyHelp === 'function') injectMyFamilyHelp(grid);
@@ -10797,8 +10814,12 @@
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
           // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
-          var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes };
-          // Per-role board cards share one accent.
+          var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes,
+            // #120: board-role card headers carry the ROLE's own mark where
+            // one exists in BRAND_ICONS (same meaning, same asset)…
+            'bg-treasurer': BRAND_ICONS.billing, 'bg-events-liaison': BRAND_ICONS.specialEvents };
+          // …the other bg- cards share the generic accent until their
+          // roles get marks of their own (#120).
           var wsAccentKey = WS_ACCENTS[type] || (type.indexOf('bg-') === 0 ? BRAND_ICONS.notes : '');
           var wsAccent = wsAccentKey ? '<img class="brand-accent" src="brand/secondary/' + wsAccentKey + '.png" alt=""> ' : '';
           // Tap the header to minimize — the card shrinks to a chip in
@@ -21841,6 +21862,12 @@
           curriculumState.current = data.curriculum;
           curriculumState.view = 'detail';
           renderCurriculumModal();
+          // #118: renderCurriculumModal only swaps innerHTML — the card
+          // (.person-detail-card, overflow-y:auto) KEEPS its scrollTop, so
+          // after a Supply-list jump every later "Lesson plan" open showed
+          // the card still scrolled to the supplies. Always reset to the
+          // top first; only a supplies request then jumps down.
+          if (personDetailCard) personDetailCard.scrollTop = 0;
           if (wantSupplies) {
             // The supply list lives in the plan detail's Master Supply
             // List — jump there. A plan with no supplies yet just opens
@@ -23222,7 +23249,7 @@
     h += '<div class="workspace-card-body">';
     h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
       + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
-      + (d.event.location ? ' · 📍 ' + escapeHtmlWs(d.event.location) : '') + '</p>';
+      + (d.event.location ? ' · ' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(d.event.location) : '') + '</p>';
     h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
     h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
@@ -24071,7 +24098,7 @@
       var timeBit = specialEventTimeLabel(meta);
       h += '<p class="ws-body-hint" style="margin:0 0 2px;">📅 <strong>' + escapeHtml(specialEventDateLabel(meta))
         + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
-      if (meta.location) h += '<p class="ws-body-hint" style="margin:0 0 8px;">📍 ' + escapeHtml(meta.location) + '</p>';
+      if (meta.location) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtml(meta.location) + '</p>';
       if (meta.notes) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + escapeHtml(meta.notes) + '</p>';
     }
     if (!ev) {
