@@ -6238,6 +6238,7 @@ function eventSectionShape(s, signups) {
     config: s.config || {},
     content: s.content == null ? [] : s.content,
     is_open: !!s.is_open,
+    is_public: s.is_public !== false,
     sort_order: s.sort_order,
     signups: (signups || []).filter(x => x.section_id === s.id).map(x => ({
       id: x.id,
@@ -6270,7 +6271,7 @@ async function handleEventSpaceGet(req, res) {
   try {
     const sql = getSql();
     const evRows = await sql`
-      SELECT id, school_year, name, event_date, date_status, notes
+      SELECT id, school_year, name, event_date, date_status, location, notes
       FROM special_events WHERE id = ${eventId}
     `;
     if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
@@ -6292,8 +6293,8 @@ async function handleEventSpaceGet(req, res) {
       SELECT COUNT(*)::int AS n FROM event_template_sections WHERE event_name = ${ev.name}
     `;
     // Generic sections (Erin, 2026-07-21) + their member sign-ups.
-    const sections = await sql`
-      SELECT id, type, title, config, content, is_open, sort_order
+    let sections = await sql`
+      SELECT id, type, title, config, content, is_open, is_public, sort_order
       FROM event_sections WHERE special_event_id = ${eventId}
       ORDER BY sort_order, id
     `;
@@ -6304,6 +6305,17 @@ async function handleEventSpaceGet(req, res) {
       ORDER BY created_at, id
     ` : [];
     const canEdit = await canEditEventSpace(sql, auth, eventId);
+    // Card visibility (Erin, 2026-07-25): is_public=false cards show only
+    // to the event committee (canEditEventSpace covers them + SEL/VP),
+    // plus the Sustaining Director.
+    let priv = canEdit;
+    if (!priv) {
+      try {
+        const sd = await getRoleHolderEmail('Sustaining Director');
+        priv = !!sd && String(sd).toLowerCase() === String(auth.email || '').toLowerCase();
+      } catch (e) { /* role unresolved — stay non-privileged */ }
+    }
+    if (!priv) sections = sections.filter(x => x.is_public !== false);
     const payload = {
       event: {
         id: ev.id,
@@ -6311,6 +6323,7 @@ async function handleEventSpaceGet(req, res) {
         name: ev.name,
         event_date: specialEventDateStr(ev.event_date),
         date_status: ev.date_status,
+        location: ev.location || '',
         notes: ev.notes || ''
       },
       tasks: tasks.map(eventTaskShape),
@@ -6599,6 +6612,28 @@ async function handleEventTemplateSave(body, req, res) {
     return res.status(200).json({ ok: true, count: titles.length });
   } catch (err) {
     console.error('event-template-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-section-public — flip a section card's visibility (Erin,
+// 2026-07-25). Editors only; TRUE = all members, FALSE = committee+SEL+SD.
+async function handleEventSectionPublic(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT special_event_id FROM event_sections WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Section not found.' });
+    if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can change visibility.' });
+    }
+    await sql`UPDATE event_sections SET is_public = ${!!body.public}, updated_by = ${auth.realEmail}, updated_at = NOW() WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-section-public error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -6901,7 +6936,7 @@ async function handleEventOpeningsGet(req, res) {
     const sections = ids.length ? await sql`
       SELECT id, special_event_id, type, title, config, content, is_open, sort_order
       FROM event_sections
-      WHERE special_event_id = ANY(${ids}) AND type = 'signup' AND is_open = TRUE
+      WHERE special_event_id = ANY(${ids}) AND type = 'signup' AND is_open = TRUE AND is_public = TRUE
       ORDER BY sort_order, id
     ` : [];
     const sectionIds = sections.map(s => s.id);
@@ -10014,6 +10049,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-space-template-start') return handleEventSpaceTemplateStart(body, req, res);
     if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
     if (kind === 'event-section-save') return handleEventSectionSave(body, req, res);
+    if (kind === 'event-section-public') return handleEventSectionPublic(body, req, res);
     if (kind === 'event-section-delete') return handleEventSectionDelete(body, req, res);
     if (kind === 'event-signups-open') return handleEventSignupsOpen(body, req, res);
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);

@@ -23036,9 +23036,8 @@
   // In-memory per visit, keyed per card.
   var _collabCollapsed = {};
   function collabCardHead(key, innerHtml) {
-    var closed = !!_collabCollapsed[key];
-    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="' + (!closed) + '" title="' + (closed ? 'Expand' : 'Minimize') + '">'
-      + innerHtml + '<span class="ws-min-caret" aria-hidden="true">' + (closed ? '▸' : '▾') + '</span></div>';
+    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">'
+      + innerHtml + '<span class="ws-min-caret" aria-hidden="true">▾</span></div>';
   }
 
   function renderEventSpaceBody() {
@@ -23060,7 +23059,8 @@
     h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-28.png" alt=""> ' + escapeHtmlWs(d.event.name) + '</h4></div>';
     h += '<div class="workspace-card-body">';
     h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
-      + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '') + '</p>';
+      + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
+      + (d.event.location ? ' · 📍 ' + escapeHtmlWs(d.event.location) : '') + '</p>';
     h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
     h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
@@ -23102,8 +23102,12 @@
     h += '</div></div>'; // /body, /header card
 
     h += '<div class="mf-card workspace-card evs-section">';
+    var collabChips = [];
+    if (_collabCollapsed['checklist']) {
+      collabChips.push({ key: 'checklist', title: 'Checklist' });
+    } else {
     h += collabCardHead('checklist', '<h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4>');
-    h += '<div class="workspace-card-body"' + (_collabCollapsed['checklist'] ? ' hidden' : '') + '>';
+    h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
     } else {
@@ -23130,8 +23134,18 @@
       h += '</ul>';
     }
     h += '</div></div>'; // /body, /checklist card
-    h += renderEventSections(d);
+    }
+    h += renderEventSections(d, collabChips);
     h += '</div>'; // /.workspace-grid
+    // Minimized cards live on as chips below the grid — the same
+    // ws-min-strip idiom My Workspace uses (Erin, 2026-07-25).
+    if (collabChips.length) {
+      h += '<div class="ws-min-strip">';
+      collabChips.forEach(function (c) {
+        h += '<button type="button" class="ws-min-chip" data-collab-chip="' + c.key + '" aria-label="Expand ' + escapeAttr(c.title) + '">▸ ' + escapeHtmlWs(c.title) + '</button>';
+      });
+      h += '</div>';
+    }
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -23143,13 +23157,34 @@
     body.querySelectorAll('.collab-toggle').forEach(function (hd) {
       function flip(e) {
         if (e.target.closest('button:not(.collab-toggle)') || e.target.closest('.sc-btn')) return;
-        var key = hd.getAttribute('data-collab-card');
-        _collabCollapsed[key] = !_collabCollapsed[key];
+        _collabCollapsed[hd.getAttribute('data-collab-card')] = true;
         renderEventSpaceBody();
       }
       hd.addEventListener('click', flip);
       hd.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(e); }
+      });
+    });
+    body.querySelectorAll('.ws-min-chip[data-collab-chip]').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        _collabCollapsed[chip.getAttribute('data-collab-chip')] = false;
+        renderEventSpaceBody();
+      });
+    });
+    body.querySelectorAll('.evs-sec-pub').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-section-id'), 10);
+        var on = btn.getAttribute('data-pub') !== '1';
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-section-public', id: id, public: on }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not change visibility.'); return; }
+            var sec = (_eventSpaceState.data.sections || []).filter(function (x) { return x.id === id; })[0];
+            if (sec) sec.is_public = on;
+            renderEventSpaceBody();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error.'); });
       });
     });
     body.querySelectorAll('.evs-toggle').forEach(function (cb) {
@@ -23437,7 +23472,7 @@
     return h;
   }
 
-  function renderEventSections(d) {
+  function renderEventSections(d, chips) {
     var secs = d.sections || [];
     if (!secs.length) return '';
     var h = '';
@@ -23445,18 +23480,28 @@
     // of content (calendar / ways-to-help / resources / board-notes).
     var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8', board: 'accent-36' };
     secs.forEach(function (s) {
+      var secKey = 'sec-' + s.id;
+      if (_collabCollapsed[secKey]) {
+        if (chips) chips.push({ key: secKey, title: String(evsSectionTitle(s)) });
+        return;
+      }
       h += '<div class="mf-card workspace-card evs-section">';
-      var headInner = '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>';
-      var headBits = '';
-      if (s.type === 'signup') headBits += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      // Top row = title + collapse arrow only; actions ride their own
+      // row below (Erin, 2026-07-25).
+      h += collabCardHead(secKey, '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>');
+      h += '<div class="workspace-card-body">';
+      var secActions = '';
+      if (s.type === 'signup') secActions += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      if (!d.can_edit && s.is_public === false) secActions += raCountPill('ws-wv-pending', '🔒 committee only');
       if (d.can_edit) {
-        headBits += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
+        // Visibility toggle (Erin, 2026-07-25): ON = every member sees
+        // this card; OFF = event committee + SEL + Sustaining Director.
+        var pub = s.is_public !== false;
+        secActions += '<button type="button" class="sc-btn evs-sec-pub" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" title="' + (pub ? 'Visible to all members — tap to limit to the event committee, SEL, and Sustaining Director' : 'Committee/SEL/Sustaining Director only — tap to show every member') + '">' + (pub ? '🌐 All members' : '🔒 Committee only') + '</button>';
+        secActions += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
           + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
       }
-      if (headBits) headInner += '<span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' + headBits + '</span>';
-      var secKey = 'sec-' + s.id;
-      h += collabCardHead(secKey, headInner);
-      h += '<div class="workspace-card-body"' + (_collabCollapsed[secKey] ? ' hidden' : '') + '>';
+      if (secActions) h += '<div class="rd-counts" style="justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 10px;">' + secActions + '</div>';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
         h += items.length
