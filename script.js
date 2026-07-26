@@ -1082,6 +1082,10 @@
   // interested" stores a hand-raise the Roles Assignments admin shows.
   function openSeatsListHtml(open) {
     var mine = (_roleInterest && _roleInterest.mine) || {};
+    // Extraction-safe (#114): test-open-seats.js re-hydrates this function
+    // standalone, so the brand mark uses the same typeof guard pattern as
+    // getWorkspaceRoles below (empty string in the harness, accent in the app).
+    var handIcon = (typeof brandIconImg === 'function') ? brandIconImg('helper', 'ag-icon') : '';
     // #95 (Lyndsey): say the quiet part — one seat per member, and show
     // what you already hold so eager helpers don't scoop every empty
     // spot before others open the site.
@@ -1108,10 +1112,10 @@
         + (chain.length ? ' · under ' + chain.join(' → ') : '') + '</span>';
       // #79: who else has raised a hand — no more silent parallel hands.
       var hands = byRole[o.id] || [];
-      if (hands.length) h += '<span class="ws-opp-committee">🙋 Interested so far: ' + escapeHtml(hands.join(', ')) + '</span>';
+      if (hands.length) h += '<span class="ws-opp-committee">' + handIcon + ' Interested so far: ' + escapeHtml(hands.join(', ')) + '</span>';
       h += '</span>';
       h += '<button type="button" class="sc-btn ws-opp-interest' + (mine[o.id] ? ' ws-opp-interested' : '') + '" data-resource-action="role-interest-toggle" data-role-id="' + o.id + '">'
-        + (mine[o.id] ? '✓ Interested' : '🙋 I’m interested') + '</button>';
+        + (mine[o.id] ? '✓ Interested' : handIcon + ' I’m interested') + '</button>';
       h += '<div class="ws-opp-desc" hidden style="flex-basis:100%;width:100%;font-size:0.88rem;color:var(--color-text);"></div>';
       h += '</li>';
     });
@@ -1158,7 +1162,7 @@
           var hands = byRole[m.id] || [];
           h += '<li>' + escapeHtml(m.title) + ' — '
             + (names.length ? escapeHtml(names.join(', ')) : '<em>open</em>'
-              + (hands.length ? ' · 🙋 ' + escapeHtml(hands.join(', ')) + ' interested' : ''))
+              + (hands.length ? ' · ' + brandIconImg('helper', 'ag-icon') + ' ' + escapeHtml(hands.join(', ')) + ' interested' : ''))
             + '</li>';
         });
         h += '</ul>';
@@ -1203,7 +1207,7 @@
         if (isOn) delete _roleInterest.mine[roleId];
         else _roleInterest.mine[roleId] = true;
         btn.classList.toggle('ws-opp-interested', !isOn);
-        btn.textContent = !isOn ? '✓ Interested' : '🙋 I’m interested';
+        btn.innerHTML = !isOn ? '✓ Interested' : brandIconImg('helper', 'ag-icon') + ' I’m interested';
       })
       .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
   }
@@ -2001,7 +2005,7 @@
         var time = ev.allDay ? '' : start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         h += '<tr><td>' + escapeHtml(start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</td>'
           + '<td><strong>' + escapeHtml(ev.summary || 'Event') + '</strong>'
-          + (ev.location ? '<br><span class="muted">📍 ' + escapeHtml(ev.location) + '</span>' : '') + '</td>'
+          + (ev.location ? '<br><span class="muted">' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtml(ev.location) + '</span>' : '') + '</td>'
           + '<td class="muted">' + escapeHtml(time) + '</td></tr>';
       });
       h += '</table>';
@@ -4223,7 +4227,7 @@
       }
     }
     if (planClassName) {
-      html += '<div style="margin-top:14px;"><button type="button" class="sc-btn" id="dutyLessonPlanBtn">📖 Build a Lesson Plan</button></div>';
+      html += '<div style="margin-top:14px;"><button type="button" class="sc-btn" id="dutyLessonPlanBtn">' + brandIconImg('guide', 'ag-icon') + ' Build a Lesson Plan</button></div>';
     }
 
     html += '</div>';
@@ -4347,8 +4351,8 @@
         var link = classLinks ? classLinks[linkKey] : null;
         if (link || roleWord === 'Leading') {
           html += '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">';
-          if (link) html += '<button type="button" class="sc-btn" id="dbClassViewPlanBtn" data-curriculum-id="' + link.curriculum_id + '">📖 View Lesson Plan</button>';
-          else html += '<button type="button" class="sc-btn" id="dbClassBuildPlanBtn">📖 Build a Lesson Plan</button>';
+          if (link) html += '<button type="button" class="sc-btn" id="dbClassViewPlanBtn" data-curriculum-id="' + link.curriculum_id + '">' + brandIconImg('guide', 'ag-icon') + ' View Lesson Plan</button>';
+          else html += '<button type="button" class="sc-btn" id="dbClassBuildPlanBtn">' + brandIconImg('guide', 'ag-icon') + ' Build a Lesson Plan</button>';
           html += '</div>';
         }
         html += '</div>';
@@ -5862,11 +5866,19 @@
   //   Resources emoji (waivers…forms below). ⚠ Those low-number picks
   //   were chosen by filename only — Erin reviews the art on dev and can
   //   reassign any of them; the meaning keys are what code depends on.
+  // 2026-07-26 final pass (#114): wired the rest of the sheet's reserved
+  //   picks to their own meanings — floaterPrep=29 (sheet groups floater
+  //   + prep as ONE meaning, so both pledge kinds share the mark),
+  //   fieldTrip=38, session=48, boardTask=56, outdoorRain=46 (one mark
+  //   for the outdoor-room/rain-backup pair, as the sheet groups them) —
+  //   and claimed NEW provisional picks (chosen by art, Erin may
+  //   reassign): calendar=55, welcome=45, outreach=41, departure=31,
+  //   tour=50. Board-cal "Special Event" type + 🎉 event-task rows ride
+  //   the existing specialEvents mark (same meaning, no new accent).
   // RESERVED (Erin's icon-ideas sheet, not wired yet — do NOT claim):
-  //   29 floater/prep · 38 field trip · 42 celebration · 46 outdoor/rain ·
-  //   48 session · 56 board task
-  // Sheet also marks locked/sign-in/permissions as ICON_SVG (purple
-  //   outline) territory — 🔐/🔑 rows stay emoji until that chrome pass.
+  //   42 celebration
+  // Locked/sign-in/permissions are ICON_SVG (purple outline) territory
+  //   per the sheet — lock + key now live there, not here.
   var BRAND_ICONS = {
     lead: 'accent-58',
     colead: 'accent-19',
@@ -5909,7 +5921,19 @@
     mail: 'accent-20',        // ✉️/📨 send / awaiting correspondence
     records: 'accent-23',     // 🗂 enrollment / record changes
     builder: 'accent-26',     // 📋 Class Builder (planner, not to-do)
-    forms: 'accent-27'        // ✍ forms to send out
+    forms: 'accent-27',       // ✍ forms to send out
+    // ── final pass (#114, 2026-07-26) — sheet-pick wirings ──
+    floaterPrep: 'accent-29', // 🦋/🧰 floater + prep pledges (one meaning per sheet)
+    fieldTrip: 'accent-38',   // 🚌 field trip (board calendar type)
+    session: 'accent-48',     // 📚 co-op session (board calendar type)
+    boardTask: 'accent-56',   // 📋/📌 board duty / board task
+    outdoorRain: 'accent-46', // 🌳/☔ outdoor room + its rain backup (one meaning per sheet)
+    // ── final pass — provisional picks by art (Erin may reassign) ──
+    calendar: 'accent-55',    // 📅/📆 dates & calendar rows (radial aster = day)
+    welcome: 'accent-45',     // 👋 orientation / greet new members (petal fan = wave)
+    outreach: 'accent-41',    // 💛 reach out / care (gold wings)
+    departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
+    tour: 'accent-50'         // 🏡 tour requests / visits (mushroom = cottage)
   };
   // cls sizes the mark for its context: 'brand-accent' (card titles,
   // default), 'ag-icon' (inline/pills/buttons), 'new-fam-icon' (gold bloom).
@@ -6057,7 +6081,9 @@
     // INSIDE the block sections above, next to the other responsibilities
     // (Erin, 2026-07-11: "show that inline with the others"). Only for the
     // CURRENT session — the chips below just preview other sessions.
-    var VOL_ICONS = { floater: '🦋', board: '📋', prep: '🧰' };
+    // #114: brand marks; the sheet groups floater + prep as ONE meaning,
+    // so both pledge kinds wear the same accent (labels tell them apart).
+    var VOL_ICONS = { floater: brandIconImg('floaterPrep', 'ag-icon'), board: brandIconImg('boardTask', 'ag-icon'), prep: brandIconImg('floaterPrep', 'ag-icon') };
     document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
     // Sign-up slots only open once there is something to sign up FOR
     // (Erin, 2026-07-11): morning hours need placed AM classes, the
@@ -6156,7 +6182,7 @@
       // available while open areas remain. Cleaning stays optional.
       myClean.forEach(function (c) {
         injectRow('Cleaning',
-          '<div class="mf-duty-icon">🧹</div>'
+          '<div class="mf-duty-icon">' + brandIconImg('cleaning', 'ag-icon') + '</div>'
           + '<div class="mf-duty-info"><strong>' + escapeHtml((c.floor ? c.floor + ' · ' : '') + c.area) + '</strong><span>Optional</span></div>'
           + '<div class="mf-duty-actions"><button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="clean" data-id="' + c.id + '" title="Release this spot">✕</button></div>');
       });
@@ -6199,7 +6225,7 @@
       h += '<button type="button" class="sb-sess-chip mf-vol-sess' + (i === sess ? ' sb-sess-match' : '') + '" data-sess="' + i + '" style="cursor:pointer;border:none;">S' + i + '</button>';
     }
     h += '</span>';
-    h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;white-space:nowrap;font-size:0.78rem;">👥 Everyone’s sign-ups</button>';
+    h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;white-space:nowrap;font-size:0.78rem;">' + brandIconImg('person', 'ag-icon') + ' Everyone’s sign-ups</button>';
     h += '</div>';
     var unavailNotes = [];
     if (!blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
@@ -6413,9 +6439,9 @@
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
           + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
       }
-      var pledges = pledgeBit('🦋', 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0) + ' · '
-        + pledgeBit('📋', 'Board', b.board, 2) + ' · '
-        + pledgeBit('🧰', 'Prep', b.prep, 2);
+      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0) + ' · '
+        + pledgeBit(brandIconImg('boardTask', 'ag-icon'), 'Board', b.board, 2) + ' · '
+        + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2);
       h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
@@ -6438,14 +6464,14 @@
             ? ageGroupIconHtml(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + ' <span class="ag-name ' + ageGroupClass(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + '">' + escapeHtmlWs(c.class_name) + '</span>'
             : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
-          if (c.co_teachers) helpers = '🤝 ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
+          if (c.co_teachers) helpers = brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
           h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
             + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
         });
         h += '</tbody></table></div>';
       }
     });
-    h += '<h4 class="roles-mgr-se-head">🧹 Cleaning (after co-op)</h4>';
+    h += '<h4 class="roles-mgr-se-head">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning (after co-op)</h4>';
     if ((d.cleaning || []).length === 0) {
       h += '<p class="ws-empty">No cleaning assignments for this session yet.</p>';
     } else {
@@ -6886,7 +6912,7 @@
         var soonest = g.tasks.map(function (t) { return t.due_date; }).filter(Boolean).sort()[0];
         duties.push({
           block: 'annual', icon: 'volunteer',
-          text: '🎉 ' + g.name + ' — ' + g.tasks.length + ' task' + (g.tasks.length === 1 ? '' : 's') + ' for you',
+          text: brandIconImg('specialEvents', 'ag-icon') + ' ' + g.name + ' — ' + g.tasks.length + ' task' + (g.tasks.length === 1 ? '' : 's') + ' for you',
           detail: soonest ? ('next due ' + boardCalFmtDate(soonest)) : 'Event planning',
           popup: null,
           manage: 'eventSpace-' + eid
@@ -7054,7 +7080,7 @@
         var planName = String(d.text).replace(/\s*—\s*Leading$/, '');
         planBtnHtml = '<button class="sc-btn mf-duty-plan" data-plan-name="' + escapeAttr(planName) + '" data-plan-block="' + (isAmRow ? 'AM' : 'PM') + '"'
           + (d.planKey ? ' data-plan-key="' + escapeAttr(d.planKey) + '" data-plan-sess="' + (d.planSess || '') + '"' : '')
-          + ' title="Build a lesson plan for ' + escapeAttr(planName) + '">📖 Plan</button>';
+          + ' title="Build a lesson plan for ' + escapeAttr(planName) + '">' + brandIconImg('guide', 'ag-icon') + ' Plan</button>';
       }
       if (isClassRow) {
         // #92 (Lyndsey): class rows stack so nothing truncates on phones.
@@ -7803,7 +7829,7 @@
         // family should see it's outstanding and can open it for them.
         var blcNeeds = ((d && d.pending_blc_waivers) || []).filter(function (w) { return w.waiver_token; });
         if (!needs.length && !blcNeeds.length) { el2.style.display = 'none'; return; }
-        var h = '<h3 class="mf-card-title">✍️ Waiver needed</h3>';
+        var h = '<h3 class="mf-card-title">' + brandIconImg('waivers') + ' Waiver needed</h3>';
         needs.forEach(function (rq) {
           var kidFirst = escapeHtml(String(rq.kid_first_name || '').trim() || 'Your new kid');
           h += '<p>' + kidFirst + ' was added to your family — an adult still needs to sign their waiver so the co-op has it on file.</p>';
@@ -9099,7 +9125,7 @@
       // — lands on the Collaboration page, where the server already
       // filters cards to the ones marked visible to all members.
       if (ev.id) {
-        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '">📋 View event details</button></p>';
+        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '">' + brandIconImg('specialEvents', 'ag-icon') + ' View event details</button></p>';
       }
 
       html += '</div></div>';
@@ -9399,13 +9425,13 @@
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">✨ Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>.</span></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('classes', 'ag-icon') + ' Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>.</span></p>';
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
           // #79: promoted to the same prominent treatment as Submit a
           // Class — the inline text link was easy to scroll past.
-          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">🧩 Committee Seats</button>'
+          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">' + brandIconImg('waysToHelp', 'ag-icon') + ' Committee Seats</button>'
             + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open year-long seat' + (open.length === 1 ? '' : 's')
             + ' — tap to see what each involves and who it reports to, or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</span></p>';
         }
@@ -9456,7 +9482,7 @@
         // Permissions admin (2026-07-09, Erin: "view and edit permissions
         // in one place") — who can use which feature, seeded to match the
         // long-standing hardcoded gates.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">' + ICON_SVG.lock + '</span>Permissions</button></li>';
         // Help content editor (2026-07-17) — edit the "?" card help text.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="help-editor"><span class="ws-link-icon">' + brandIconImg('help', 'ag-icon') + '</span>Card Help Text</button></li>';
         // Disaster Recovery Plan (#49) — printable systems map, scenario
@@ -9518,7 +9544,7 @@
           // Session Dates merged into the Admin Calendar (⚙ drawer there,
           // 2026-07-05) — the "Set up" nudge badge rides on this row now,
           // only for the two roles that can actually set the dates.
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">📅</span>Admin Calendar'
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar"><span class="ws-link-icon">' + brandIconImg('calendar', 'ag-icon') + '</span>Admin Calendar'
             + ((role === 'President' || role === 'Vice President') ? '<span class="ws-link-count" id="coop-cal-needs-setup" hidden>Set up</span>' : '')
             + '</button></li>';
         }
@@ -9579,10 +9605,10 @@
           var toWelcome = (_welcomeStageCounts && _welcomeStageCounts[0]) || 0;
           var toOrient  = (_welcomeStageCounts && _welcomeStageCounts[1]) || 0;
           h += '<li id="ws-todo-welcome-towelcome-item"' + (toWelcome > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="0"><span class="ws-link-count" id="ws-welcome-towelcome-count">' + toWelcome + '</span><span class="ws-link-icon">' + brandIconImg('newFamily', 'new-fam-icon') + '</span><span>To Welcome</span></button></li>';
-          h += '<li id="ws-todo-welcome-orientation-item"' + (toOrient > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="1"><span class="ws-link-count" id="ws-welcome-orientation-count">' + toOrient + '</span><span class="ws-link-icon">👋</span><span>Orientation</span></button></li>';
+          h += '<li id="ws-todo-welcome-orientation-item"' + (toOrient > 0 ? '' : ' hidden') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter="1"><span class="ws-link-count" id="ws-welcome-orientation-count">' + toOrient + '</span><span class="ws-link-icon">' + brandIconImg('welcome', 'ag-icon') + '</span><span>Orientation</span></button></li>';
           // Date-gated pre-co-op outreach nudge → opens the full list.
           var woHidden = !(_welcomeOutreachTodoState && _welcomeOutreachTodoState.visible);
-          h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter=""><span class="ws-link-icon">💛</span><span>Reach out to new families — co-op starts soon</span></button></li>';
+          h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter=""><span class="ws-link-icon">' + brandIconImg('outreach', 'ag-icon') + '</span><span>Reach out to new families — co-op starts soon</span></button></li>';
         }
         if (role === 'Treasurer') {
           h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">' + brandIconImg('billing', 'ag-icon') + '</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
@@ -9648,7 +9674,7 @@
           // backup Learning Coach (Erin, 2026-07-20). Painted by
           // loadBlcEmailRequestCount; the modal records the created
           // address, which grants login + emails the setup guide.
-          h += '<li id="ws-todo-blc-signin-item" hidden><button type="button" class="ws-link-btn" data-resource-action="blc-signin-requests"><span class="ws-link-count" id="ws-blc-signin-count">0</span><span class="ws-link-icon">🔑</span><span id="ws-blc-signin-label">Set up R&amp;W sign-ins</span></button></li>';
+          h += '<li id="ws-todo-blc-signin-item" hidden><button type="button" class="ws-link-btn" data-resource-action="blc-signin-requests"><span class="ws-link-count" id="ws-blc-signin-count">0</span><span class="ws-link-icon">' + ICON_SVG.key + '</span><span id="ws-blc-signin-label">Set up R&amp;W sign-ins</span></button></li>';
           // Confirm role holders for the new school year. Fires after
           // Field Day until the active year is marked confirmed in
           // role_holder_confirmations. Click opens the Confirm Role
@@ -9672,14 +9698,14 @@
           // offboarding modal — list + editable email + Send. The actual
           // Google-account deletion stays manual. Painted by
           // loadRemoveMembersTodo.
-          h += '<li id="ws-todo-removemembers-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-removemembers-btn"><span class="ws-link-count" id="ws-removemembers-count">0</span><span class="ws-link-icon">👋</span><span id="ws-removemembers-label">Notify non-returning members</span></button>'
+          h += '<li id="ws-todo-removemembers-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-removemembers-btn"><span class="ws-link-count" id="ws-removemembers-count">0</span><span class="ws-link-icon">' + brandIconImg('departure', 'ag-icon') + '</span><span id="ws-removemembers-label">Notify non-returning members</span></button>'
             + '<button type="button" class="sc-btn" id="ws-todo-removemembers-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
           // #71: withdrawn families (#44) whose Google accounts still
           // need removing in Google Admin. Appears whenever such a
           // family exists; each ✓ Removed stamp clears one family
           // (member_profiles.account_removed_at) and the item hides at
           // zero. Painted by loadWithdrawnAccountsTodo.
-          h += '<li id="ws-todo-gaccounts-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-gaccounts-btn"><span class="ws-link-count" id="ws-gaccounts-count">0</span><span class="ws-link-icon">🚪</span><span id="ws-gaccounts-label">Remove Google accounts — withdrawn families</span></button></li>';
+          h += '<li id="ws-todo-gaccounts-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-gaccounts-btn"><span class="ws-link-count" id="ws-gaccounts-count">0</span><span class="ws-link-icon">' + brandIconImg('departure', 'ag-icon') + '</span><span id="ws-gaccounts-label">Remove Google accounts — withdrawn families</span></button></li>';
           // #49: refresh the printed DR binder. Windowed to each session
           // start (opens start−7, stays until ✓ Done for THAT session —
           // todo_confirmations kind='drbinder-sN'). Click opens the DR
@@ -9699,14 +9725,14 @@
           // before tours (Erin, 2026-07-14): inquiries are the top of the
           // member funnel.
           h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">' + brandIconImg('mail', 'ag-icon') + '</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
-          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
+          h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">' + brandIconImg('tour', 'ag-icon') + '</span><span id="ws-tours-label">Tour Requests</span></button></li>';
           // Scheduled Tours entry has both the button (opens Pipeline
           // scoped to scheduled) AND a sibling <ul> rendered by
           // updateMembershipTourTodoCounts() — a glance-view list of
           // upcoming visits sorted by date/time so Membership can see
           // what's on her calendar without opening the modal.
           h += '<li id="ws-todo-tours-scheduled-item" hidden>';
-          h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">📅</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
+          h += '<button type="button" class="ws-link-btn" data-resource-action="membership-tours-scheduled"><span class="ws-link-count" id="ws-tours-scheduled-count">0</span><span class="ws-link-icon">' + brandIconImg('calendar', 'ag-icon') + '</span><span id="ws-tours-scheduled-label">Scheduled Tours</span></button>';
           h += '<ul class="ws-tours-sched-list" id="ws-tours-sched-list"></ul>';
           h += '</li>';
           // Registration-link funnel (inquire/tour → meet → send link →
@@ -9734,7 +9760,7 @@
           var coopCalHidden = !(_coopCalTodoState && _coopCalTodoState.visible);
           var coopCalCount  = (_coopCalTodoState && _coopCalTodoState.count) || 0;
           var coopCalLabel  = (_coopCalTodoState && _coopCalTodoState.label) || 'Set co-op calendar';
-          h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">📆</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
+          h += '<li id="ws-todo-coop-cal-item"' + (coopCalHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="coop-calendar"><span class="ws-link-count" id="ws-coop-cal-count">' + coopCalCount + '</span><span class="ws-link-icon">' + brandIconImg('calendar', 'ag-icon') + '</span><span id="ws-coop-cal-label">' + escapeHtml(coopCalLabel) + '</span></button></li>';
         }
         // Age-group Morning Class Liaisons ("Oaks Liaison", …): nag when a
         // session is within 2 weeks of starting and their group has no
@@ -9866,7 +9892,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">' + brandIconImg('calendar', 'ag-icon') + '</span>Event Dates</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager" data-roles-view="special-events"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Lead &amp; Assistants</button></li>';
         h += '</ul>';
         return h;
@@ -10032,7 +10058,7 @@
             return;
           }
           html += '<li class="ws-source-sheet-item"><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">';
-          html += '<span class="ws-link-icon">📊</span>';
+          html += '<span class="ws-link-icon">' + ICON_SVG.sheet + '</span>';
           html += '<strong>' + escapeHtml(s.label) + '</strong>';
           html += '</a>';
           if (s.purpose) {
@@ -11501,7 +11527,7 @@
         // Registered) right on the row. Reads _regInvitesCache (loaded
         // by the To Do loader / invites modal); no cache yet = no stamp.
         var inv = t.family_email ? regInviteForEmail(t.family_email) : null;
-        var invStamp = inv ? '<div class="ws-wv-context">🔗 ' + escapeHtmlWs(regInviteStampLabel(inv)) + '</div>' : '';
+        var invStamp = inv ? '<div class="ws-wv-context">' + brandIconImg('link', 'ag-icon') + ' ' + escapeHtmlWs(regInviteStampLabel(inv)) + '</div>' : '';
         var btns = '';
         if (t.status === 'inquiry') {
           // A general inquiry: turn it into a tour, or close it out once
@@ -12478,7 +12504,12 @@
     gear: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     sheet: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>',
     close: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-    add: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+    add: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    // Lock family (#114, 2026-07-26): Erin's icon sheet marks locked /
+    // sign-in / permissions as purple-outline SVG territory, not brand
+    // accents — these two retire the 🔒/🔐/🔑 UI emoji.
+    lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    key: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2"/><path d="m17 6 3 3"/><path d="m13.5 9.5 2.5 2.5"/></svg>'
   };
 
   // Shared shell for tabular Workspace reports (Participation Tracker,
@@ -14640,7 +14671,7 @@
     if (!personDetail || !personDetailCard) return;
     var shell = '<button class="detail-close" aria-label="Close">&times;</button>';
     shell += '<div class="elective-detail rd-modal mo-modal">';
-    shell += '<h3 class="rd-title">🔑 R&amp;W sign-in requests</h3>';
+    shell += '<h3 class="rd-title">' + ICON_SVG.key + ' R&amp;W sign-in requests</h3>';
     shell += '<div id="blc-signin-modal-body"><p class="ws-empty">Loading requests…</p></div>';
     shell += '</div>';
     personDetailCard.innerHTML = shell;
@@ -17142,7 +17173,7 @@
     if (item.location) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
     // Who holds it (members-location items) — its own line so it reads
     // cleanly instead of being buried in notes (Erin, 2026-07-17).
-    if (item.held_by) html += '<div class="sc-held-by">🤝 Held by ' + escapeAttr(item.held_by) + '</div>';
+    if (item.held_by) html += '<div class="sc-held-by">' + brandIconImg('person', 'ag-icon') + ' Held by ' + escapeAttr(item.held_by) + '</div>';
     if (item.notes) html += '<div class="sc-notes">' + linkify(item.notes) + '</div>';
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
@@ -21718,7 +21749,7 @@
         }
         // Build a lesson plan straight from the idea (2026-07-11, Erin) —
         // opens the Curriculum Library editor prefilled with this class.
-        html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">📖 Lesson Plan</button>';
+        html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson Plan</button>';
         html += '</div>';
         html += '</li>';
       });
@@ -21844,8 +21875,8 @@
           + (s.scheduled_room ? ' · ' + escClsHtml(s.scheduled_room) : '') + '</span>';
         html += '</div>';
         html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
-        html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">🧺 Supply list</button>';
-        html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">📖 Lesson plan</button>';
+        html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">' + brandIconImg('supplyCloset', 'ag-icon') + ' Supply list</button>';
+        html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson plan</button>';
         // #42: owners can edit an approved class — the modal warns that
         // saving sends it back for re-approval.
         html += '<button type="button" class="evs-ico-btn mf-myclasses-edit" data-idx="' + idx + '" aria-label="Edit class" title="Edit this class">' + ICON_SVG.pencil + '</button>';
@@ -22790,14 +22821,14 @@
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="roles">Board &amp; Committees</button>'
       // Hidden until the SEL/VP-gated special-events fetch succeeds — other
       // board chairs never see the second lens.
-      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="special-events" id="roles-mgr-se-pill" hidden>🎉 Special Events</button>'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="special-events" id="roles-mgr-se-pill" hidden>' + brandIconImg('specialEvents', 'ag-icon') + ' Special Events</button>'
       // Volunteer Assignments hub lenses (2026-07-09) — hidden until the
       // class-submissions reviewer fetch confirms FULL scope (VP /
       // Afternoon Class Liaison / super). Group-scoped liaisons and
       // other board chairs never see these.
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="am" id="roles-mgr-am-pill" hidden>' + brandIconImg('morning', 'ag-icon') + ' Morning Classes</button>'
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="pm" id="roles-mgr-pm-pill" hidden>' + brandIconImg('afternoon', 'ag-icon') + ' Afternoon Helpers</button>'
-      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="cleaning" id="roles-mgr-cl-pill" hidden>🧹 Cleaning</button>'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="cleaning" id="roles-mgr-cl-pill" hidden>' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning</button>'
       + '</div>';
     body.innerHTML = toolbar + viewPills
       + '<div id="roles-mgr-tree"><p class="ws-empty">Loading roles…</p></div>'
@@ -23003,7 +23034,7 @@
           // Hands raised for the lead seat — visible where the SEL
           // assigns, so co-lead volunteers stop vanishing (2026-07-25).
           var hands = (r.lead_interest || []).map(function (p) { return p.name || p.email; }).filter(Boolean);
-          if (hands.length) h2 += '<br><span class="ws-srt-actions-empty">🙋 Interested: ' + escapeHtmlWs(hands.join(', ')) + '</span>';
+          if (hands.length) h2 += '<br><span class="ws-srt-actions-empty">' + brandIconImg('helper', 'ag-icon') + ' Interested: ' + escapeHtmlWs(hands.join(', ')) + '</span>';
           return h2;
         } },
       { key: 'assists', label: 'Assistants', type: 'string',
@@ -23062,7 +23093,7 @@
       h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(evLeads[0] ? (evLeads[0].name || evLeads[0].email) : '') + '" placeholder="Lead name…"></div>';
       h += '<div class="se-row"><label class="se-lbl">Co-lead (optional)</label><input type="text" class="cl-input se-colead" list="seMemberList" value="' + escapeHtmlWs(evLeads[1] ? (evLeads[1].name || evLeads[1].email) : '') + '" placeholder="Co-lead name…"></div>';
       if ((ev.lead_interest || []).length) {
-        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
+        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">' + brandIconImg('helper', 'ag-icon') + ' Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
       }
       h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
@@ -23273,7 +23304,7 @@
     h += '<div class="workspace-card-header"><h4>' + brandIconImg('specialEvents') + ' ' + escapeHtmlWs(d.event.name) + '</h4></div>';
     h += '<div class="workspace-card-body">';
     h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
-      + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
+      + (d.event.event_date ? ' · ' + brandIconImg('calendar', 'ag-icon') + ' ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
       + (d.event.location ? ' · ' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(d.event.location) : '') + '</p>';
     h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
@@ -23314,7 +23345,7 @@
         var anyOpenTb = signupSecsTb.some(function (s) { return s.is_open; });
         h += anyOpenTb
           ? '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-close-signups">Close sign-ups</button>'
-          : '<button type="button" class="btn btn-primary btn-sm" id="evs-open-signups">📣 Request volunteers</button>';
+          : '<button type="button" class="btn btn-primary btn-sm" id="evs-open-signups">' + brandIconImg('announce', 'ag-icon') + ' Request volunteers</button>';
       }
       // One-button template save (#115): snapshots the CURRENT space as
       // next year's starting template for this event name — replaces the
@@ -23339,9 +23370,9 @@
         h += '<label class="evs-check"><input type="checkbox" class="evs-toggle"' + (t.done_at ? ' checked' : '') + (canToggle ? '' : ' disabled') + ' aria-label="Mark done"></label>';
         h += '<span class="evs-body"><span class="evs-title">' + escapeHtmlWs(t.title) + '</span>';
         var meta = [];
-        if (t.assigned_name || t.assigned_email) meta.push('👤 ' + escapeHtmlWs(t.assigned_name || t.assigned_email) + (isMine ? ' (you)' : ''));
+        if (t.assigned_name || t.assigned_email) meta.push(brandIconImg('person', 'ag-icon') + ' ' + escapeHtmlWs(t.assigned_name || t.assigned_email) + (isMine ? ' (you)' : ''));
         else if (!t.done_at) meta.push('<span class="ra-open-note" style="display:inline;">unassigned</span>');
-        if (t.due_date) meta.push('📅 due ' + escapeHtmlWs(boardCalFmtDate(t.due_date)));
+        if (t.due_date) meta.push(brandIconImg('calendar', 'ag-icon') + ' due ' + escapeHtmlWs(boardCalFmtDate(t.due_date)));
         if (t.done_at) meta.push('✓ done' + (t.done_by ? ' by ' + escapeHtmlWs(t.done_by) : ''));
         if (meta.length) h += '<span class="evs-meta">' + meta.join(' · ') + '</span>';
         h += '</span>';
@@ -23748,15 +23779,15 @@
         h += rows.length ? '<ul class="evs-task-list">' + rows.map(function (r) {
           var main = (r.time ? '<strong>' + escapeHtmlWs(r.time) + '</strong> — ' : '') + escapeHtmlWs(r.activity || '');
           var meta = [];
-          if (r.place) meta.push('📍 ' + escapeHtmlWs(r.place));
-          if (r.who) meta.push('👤 ' + escapeHtmlWs(r.who));
+          if (r.place) meta.push(brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(r.place));
+          if (r.who) meta.push(brandIconImg('person', 'ag-icon') + ' ' + escapeHtmlWs(r.who));
           return '<li class="evs-task"><span class="evs-body"><span class="evs-title">' + main + '</span>'
             + (meta.length ? '<span class="evs-meta">' + meta.join(' · ') + '</span>' : '') + '</span></li>';
         }).join('') + '</ul>' : '<p class="ws-empty">No schedule rows yet.</p>';
       } else if (s.type === 'notes') {
         var c = s.content || {};
         if (c.prev_text) {
-          h += '<p class="ws-body-hint"><strong>📔 Notes from ' + escapeHtmlWs(String(c.prev_year || 'last year')) + ':</strong></p>';
+          h += '<p class="ws-body-hint"><strong>' + brandIconImg('notes', 'ag-icon') + ' Notes from ' + escapeHtmlWs(String(c.prev_year || 'last year')) + ':</strong></p>';
           h += '<p class="ws-body-hint" style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.prev_text)) + '</p>';
         }
         h += String(c.text || '').trim()
@@ -23971,7 +24002,7 @@
       // #79: the date is key data — its own bold line instead of the
       // small context span that hid next to the name.
       var timeBit = specialEventTimeLabel({ startTime: ev.start_time, endTime: ev.end_time });
-      h += '<p class="ws-body-hint" style="margin:0 0 6px;">📅 <strong>' + escapeHtml(wthEventDateLabel(ev))
+      h += '<p class="ws-body-hint" style="margin:0 0 6px;">' + brandIconImg('calendar', 'ag-icon') + ' <strong>' + escapeHtml(wthEventDateLabel(ev))
         + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
       var seatRows = '';
       // 👑 Lead — ALWAYS shown (Erin, 2026-07-22): who's running it is
@@ -24035,7 +24066,7 @@
         if (ev && ev.my_seat_interest) ev.my_seat_interest[seat] = !isOn;
         btn.classList.toggle('ws-opp-interested', !isOn);
         // Both seats are direct adds (Erin, 2026-07-25 — no approvals).
-        btn.textContent = !isOn ? '✓ Signed up — undo' : '🙋 Sign up';
+        btn.innerHTML = !isOn ? '✓ Signed up — undo' : DUTY_ICONS.volunteer + ' Sign up';
         // Refresh the grid + card summary so the member SEES it landed —
         // patch the grid's local copy, then refetch live state.
         if (typeof evVolunteerPatchGrid === 'function') evVolunteerPatchGrid(eid, seat, !isOn);
@@ -24121,7 +24152,7 @@
     var h = '';
     if (meta) {
       var timeBit = specialEventTimeLabel(meta);
-      h += '<p class="ws-body-hint" style="margin:0 0 2px;">📅 <strong>' + escapeHtml(specialEventDateLabel(meta))
+      h += '<p class="ws-body-hint" style="margin:0 0 2px;">' + brandIconImg('calendar', 'ag-icon') + ' <strong>' + escapeHtml(specialEventDateLabel(meta))
         + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
       if (meta.location) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtml(meta.location) + '</p>';
       if (meta.notes) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + escapeHtml(meta.notes) + '</p>';
@@ -25304,11 +25335,11 @@
       h += '</div>';
     });
     if (_permAdminState.lockedRules.length) {
-      h += '<h4 class="roles-mgr-se-head">🔒 Fixed rules</h4>';
+      h += '<h4 class="roles-mgr-se-head">' + ICON_SVG.lock + ' Fixed rules</h4>';
       h += '<p class="ws-body-hint">Built into the system — shown here so the whole permission story is in one place.</p>';
       _permAdminState.lockedRules.forEach(function (rule) {
         h += '<div class="perm-row perm-row-locked">';
-        h += '<div class="perm-head"><span class="perm-label">🔒 ' + escapeHtmlWs(rule.label) + '</span></div>';
+        h += '<div class="perm-head"><span class="perm-label">' + ICON_SVG.lock + ' ' + escapeHtmlWs(rule.label) + '</span></div>';
         h += '<p class="perm-desc">' + escapeHtmlWs(rule.desc) + '</p>';
         h += '</div>';
       });
@@ -25476,7 +25507,7 @@
     },
     { key: 'is_outdoor', label: 'Outdoor', type: 'string',
       sortValue: function (r) { return r.is_outdoor ? '0' : '1'; },
-      render: function (r) { return r.is_outdoor ? '🌳 Outdoor' : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+      render: function (r) { return r.is_outdoor ? brandIconImg('outdoorRain', 'ag-icon') + ' Outdoor' : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
     },
     { key: 'details', label: 'Details', type: 'string', sortable: false,
       render: function (r) {
@@ -25557,7 +25588,7 @@
     h += '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(v.name || '') + '"></div>';
     h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(v.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
     h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="3" maxlength="2000">' + escapeHtmlWs(v.details || '') + '</textarea></div>';
-    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> 🌳 Outdoor space — needs an indoor rain backup when assigned</label>';
+    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> ' + brandIconImg('outdoorRain', 'ag-icon') + ' Outdoor space — needs an indoor rain backup when assigned</label>';
     h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;">';
     h += '<button type="button" class="btn btn-outline-dark btn-sm fac-cancel">Cancel</button>';
     h += '<button type="button" class="btn btn-primary btn-sm fac-save" data-room-id="' + v.id + '">Save changes</button>';
@@ -25581,7 +25612,7 @@
     var h = '<div class="cls-field"><label class="cls-label">Room name</label><input class="cl-input fac-name" type="text" maxlength="120" value="' + escapeAttr(v.name || '') + '"></div>';
     h += '<div class="cls-field"><label class="cls-label">Builder note (shows in the room picker)</label><input class="cl-input fac-note" type="text" maxlength="200" value="' + escapeAttr(v.builder_note || '') + '" placeholder="smaller class, has sinks, …"></div>';
     h += '<div class="cls-field"><label class="cls-label">Additional details</label><textarea class="cl-input cls-textarea fac-details" rows="3" maxlength="2000">' + escapeHtmlWs(v.details || '') + '</textarea></div>';
-    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> 🌳 Outdoor space — needs an indoor rain backup when assigned</label>';
+    h += '<label class="cls-cb-label"><input type="checkbox" class="fac-outdoor"' + (v.is_outdoor ? ' checked' : '') + '> ' + brandIconImg('outdoorRain', 'ag-icon') + ' Outdoor space — needs an indoor rain backup when assigned</label>';
     h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;">';
     h += '<button type="button" class="btn btn-primary btn-sm fac-save">' + (isEdit ? 'Save changes' : 'Add room') + '</button>';
     h += '<span class="perm-status fac-status" aria-live="polite"></span>';
@@ -26272,7 +26303,7 @@
   function welcomeShareBlockHtml() {
     var INSTALL_URL = 'https://www.rootsandwingsindy.com/install';
     return '<div class="ws-welcome-share">' +
-      '<div class="ws-welcome-share-head">💬 Help new families get connected</div>' +
+      '<div class="ws-welcome-share-head">' + brandIconImg('chat', 'ag-icon') + ' Help new families get connected</div>' +
       '<p class="ws-welcome-share-text">Share the Member Portal so they can install the app and join our chat channels:</p>' +
       '<div class="ws-welcome-share-row">' +
         '<a class="ws-welcome-share-link" href="' + INSTALL_URL + '" target="_blank" rel="noopener">rootsandwingsindy.com/install</a>' +
@@ -29431,12 +29462,15 @@
 
     // Sortable grid (Erin, 2026-07-18): Auto gets its own leading column; Type
     // shows only in the All view; headers sort. Default order stays by date.
+    // Type marks ride BRAND_ICONS (#114): session/fieldTrip/boardTask are
+    // the icon sheet's picks; Special Event reuses the existing event
+    // mark; General is the generic calendar mark.
     var calTypeMeta = {
-      session:    { rank: 1, label: '📚 Session' },
-      special:    { rank: 2, label: '🎉 Special Event' },
-      field_trip: { rank: 3, label: '🚌 Field Trip' },
-      general:    { rank: 4, label: '🗓 General' },
-      task:       { rank: 5, label: '📌 Board Task' }
+      session:    { rank: 1, label: 'Session', icon: 'session' },
+      special:    { rank: 2, label: 'Special Event', icon: 'specialEvents' },
+      field_trip: { rank: 3, label: 'Field Trip', icon: 'fieldTrip' },
+      general:    { rank: 4, label: 'General', icon: 'calendar' },
+      task:       { rank: 5, label: 'Board Task', icon: 'boardTask' }
     };
     var isAutoRow = function (r) { return !!(r.ev.derived || (r.kind === 'special' && r.autoDate)); };
     // Proposed/Approved state for the row (sessions + special events carry
@@ -29497,11 +29531,11 @@
     if (visibleRows.length === 0) {
       h += '<p class="ws-empty" style="margin-top:12px;">Nothing here yet for ' + escapeHtml(year) + '.</p>';
     } else {
-      h += '<p class="board-cal-legend">📚 Session dates'
+      h += '<p class="board-cal-legend">' + brandIconImg('session', 'ag-icon') + ' Session dates'
         + (canEditSessions ? ' edit from the row’s Manage menu — everything marked ' : ' drive everything marked ')
         + '<span class="board-cal-auto-pill">Auto</span>'
         + (canEditSessions ? ' recalculates from them' : ' (recalculated automatically)')
-        + '. 🎉 Special-event dates are proposed at the summer meeting, then approved'
+        + '. ' + brandIconImg('specialEvents', 'ag-icon') + ' Special-event dates are proposed at the summer meeting, then approved'
         + (canSE ? ' — use each row’s Manage menu.' : '.')
         + (viewerIsBoard ? ' One-off dates go in with “+ Add event”.' : '')
         + '</p>';
@@ -29546,7 +29580,7 @@
         }
         // Type column — only in the All view (a filtered view already knows).
         if (view === 'all') {
-          h += '<td class="board-cal-col-type">' + escapeHtml((calTypeMeta[r.kind] || {}).label || '') + '</td>';
+          h += '<td class="board-cal-col-type">' + brandIconImg((calTypeMeta[r.kind] || {}).icon, 'ag-icon') + ' ' + escapeHtml((calTypeMeta[r.kind] || {}).label || '') + '</td>';
         }
         {
           // Bare title — the emoji icons in front of event names read as
@@ -29572,12 +29606,12 @@
         // removed board-wide (Erin, 2026-07-18: "the board doesn't need
         // something extra").
         var notes = '';
-        if (e.location) notes = '📍 ' + escapeHtml(e.location);
+        if (e.location) notes = brandIconImg('location', 'ag-icon') + ' ' + escapeHtml(e.location);
         if (e.role) notes += '<span class="board-cal-role">' + escapeHtml(e.role) + '</span>';
         if (r.kind === 'special' && r.seRow && r.seRow.location) {
           // Location only — times moved up under the date like every other
           // row (Erin, 2026-07-19).
-          notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">📍 ' + escapeHtml(r.seRow.location) + '</span>';
+          notes = (notes ? notes + '<br>' : '') + '<span class="board-cal-se-detail">' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtml(r.seRow.location) + '</span>';
         }
         h += '<td>' + notes + '</td>';
         // Actions cell by kind. Sessions now use the same Manage ▾ dropdown
@@ -29734,7 +29768,7 @@
       if (sy) startVal = firstWedOfSeptember(sy);
     }
     var h = '<div class="board-cal-form">';
-    h += '<h4 style="margin:0 0 10px;">📚 Edit Session ' + sess.sessNum + '</h4>';
+    h += '<h4 style="margin:0 0 10px;">' + brandIconImg('session', 'ag-icon') + ' Edit Session ' + sess.sessNum + '</h4>';
     h += '<div class="board-cal-field"><label>Session name<br><input type="text" id="sess-edit-name" class="cl-input" maxlength="80" value="' + escapeAttr(sess.name || ('Session ' + sess.sessNum)) + '"></label></div>';
     h += '<div class="board-cal-field board-cal-fields-row">';
     h += '<label>Start date<br><input type="date" id="sess-edit-start" class="cl-input" value="' + escapeAttr(startVal) + '"></label>';
@@ -29798,7 +29832,7 @@
     if (!wrap || !ev) return;
     boardCalShowMsg('');
     var h = '<div class="board-cal-form">';
-    h += '<h4 style="margin:0 0 10px;">🎉 Edit special event</h4>';
+    h += '<h4 style="margin:0 0 10px;">' + brandIconImg('specialEvents', 'ag-icon') + ' Edit special event</h4>';
     h += '<div class="board-cal-field"><label>Event name<br><input type="text" class="cl-input" value="' + escapeAttr(ev.name || '') + '" readonly tabindex="-1" title="Special-event names are fixed."></label></div>';
     if (auto) {
       h += '<div class="board-cal-field"><label>Date<br><input type="date" class="cl-input" value="' + escapeAttr(displayDate || '') + '" readonly tabindex="-1"></label>';
@@ -30089,18 +30123,20 @@
       h += '<div class="board-cal-field" id="board-cal-type-row"><label class="board-cal-type-lbl">Type:<br>';
       h += '<select id="board-cal-f-type-select" class="cl-input">';
       if (!isEdit) h += '<option value=""' + (evType === '' ? ' selected' : '') + '>Choose a type…</option>';
-      h += '<option value="task"' + (evType === 'task' ? ' selected' : '') + '>📌 Board task</option>';
-      h += '<option value="general"' + (evType === 'general' ? ' selected' : '') + '>🗓 General event</option>';
-      h += '<option value="field_trip"' + (evType === 'field_trip' ? ' selected' : '') + '>🚌 Field trip</option>';
+      // Plain-text options (#114): <option> can't hold the brand-accent
+      // imgs the rest of the calendar wears, so emoji retire outright.
+      h += '<option value="task"' + (evType === 'task' ? ' selected' : '') + '>Board task</option>';
+      h += '<option value="general"' + (evType === 'general' ? ' selected' : '') + '>General event</option>';
+      h += '<option value="field_trip"' + (evType === 'field_trip' ? ' selected' : '') + '>Field trip</option>';
       if (!isEdit && canSEForm) {
-        h += '<option value="special">🎉 Special event</option>';
+        h += '<option value="special">Special event</option>';
       }
       h += '</select></label></div>';
       h += '<p class="board-cal-legend" style="margin:0 0 10px;">General events and field trips also publish to the co-op Google Calendar; board tasks stay internal.</p>';
     } else if (!isEdit && canSEForm && !boardForm) {
       // SEL-only viewer: special events are the only kind she can add.
       h += '<input type="hidden" name="board-cal-f-type" value="special" id="board-cal-f-type-fixed">';
-      h += '<p class="board-cal-legend" style="margin:0 0 8px;">🎉 Adding a special event (it lands under the Special Events view).</p>';
+      h += '<p class="board-cal-legend" style="margin:0 0 8px;">' + brandIconImg('specialEvents', 'ag-icon') + ' Adding a special event (it lands under the Special Events view).</p>';
     }
     h += '<div class="board-cal-field"><label>Event name<br><input type="text" id="board-cal-f-title" maxlength="200" value="' + escapeHtml(v.title) + '" placeholder="e.g. Registration opens" /></label></div>';
     h += '<div class="board-cal-field board-cal-fields-row"><label>Date' + (isEdit ? '' : ' <span class="board-cal-opt" id="board-cal-date-opt" hidden>(optional — special events can start undated)</span>') + '<br><input type="date" id="board-cal-f-date" value="' + escapeHtml(v.event_date) + '" /></label>';
@@ -30516,7 +30552,7 @@
       if (descOnly) {
         // These rows exist so the VP can maintain the job description and
         // responsibilities; the people come from the schedule.
-        h2 += '<div class="roles-row-holder-line"><span class="roles-row-board-note" title="This role exists for its job description. Staffing happens in the Class Builder / session schedule, not here.">📖 Description only - staffed via the class schedule</span></div>';
+        h2 += '<div class="roles-row-holder-line"><span class="roles-row-board-note" title="This role exists for its job description. Staffing happens in the Class Builder / session schedule, not here.">' + brandIconImg('guide', 'ag-icon') + ' Description only - staffed via the class schedule</span></div>';
       } else {
         h2 += '<div class="roles-row-holder-line">';
         if (held.length === 0) {
@@ -30540,14 +30576,14 @@
         if (canManageThisRow) {
           h2 += ' <button type="button" class="sc-btn roles-row-assign" data-role-id="' + r.id + '" aria-label="Assign holder for ' + escapeHtml(r.title) + '">Assign</button>';
         } else if (isBoardRow) {
-          h2 += ' <span class="roles-row-board-note" title="Board roles are tied to Google Workspace accounts and can only be changed by the Communications Director.">🔒 Comms-managed</span>';
+          h2 += ' <span class="roles-row-board-note" title="Board roles are tied to Google Workspace accounts and can only be changed by the Communications Director.">' + ICON_SVG.lock + ' Comms-managed</span>';
         }
         h2 += '</div>';
         // #39: members who tapped "I'm interested" on the open-seats list.
         // A signal for the assigners, not an assignment.
         var interested = (_rolesMgrState.interestByRoleId && _rolesMgrState.interestByRoleId[r.id]) || [];
         if (interested.length) {
-          h2 += '<div class="roles-row-holder-line roles-row-interest-line">🙋 <span class="roles-row-holder-label">Interested:</span> ';
+          h2 += '<div class="roles-row-holder-line roles-row-interest-line">' + brandIconImg('helper', 'ag-icon') + ' <span class="roles-row-holder-label">Interested:</span> ';
           h2 += escapeHtml(interested.map(function (iRow) { return iRow.person_name || iRow.email; }).join(', '));
           h2 += '</div>';
         }
@@ -32033,8 +32069,8 @@
     // First-year families get a green chip outline (.mcb-kid-new) instead of a
     // 🌱 badge — same cue as the Directory's green card outline, less clutter.
     var allergy = k.allergies ? ' <span class="mcb-flag" title="Allergies: ' + escapeHtmlWs(k.allergies) + '">⚠</span>' : '';
-    var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">📝</span>' : '';
-    var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">🔒</span>' : '';
+    var note = k.placement_notes ? ' <span class="mcb-flag" title="' + escapeHtmlWs(k.placement_notes) + '">' + brandIconImg('notes', 'ag-icon') + '</span>' : '';
+    var lock = k.locked ? ' <span class="mcb-flag" title="Finalized — reopen to change">' + ICON_SVG.lock + '</span>' : '';
     var pend = k.pending ? ' <span class="mcb-flag" title="Registered — payment not received yet">⏳</span>' : '';
     var cls = 'mcb-kid' + (k.locked ? ' mcb-kid-locked' : '') + (k.pending ? ' mcb-kid-pending' : '') + (k.new_member ? ' mcb-kid-new' : '');
     var titleAttr = k.new_member ? 'First-year family' : '';
@@ -32824,13 +32860,13 @@
       if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
       s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
       s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
-      if (c.co_teachers) s += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
+      if (c.co_teachers) s += '<div class="sb-coleader">' + brandIconImg('colead', 'ag-icon') + ' Co-leader: ' + escClsHtml(c.co_teachers) + '</div>';
       // Helpers assigned in the class editor show on the tile too, so
       // coverage reads at a glance without opening every class.
       var tileHelpers = (Array.isArray(c.helpers) ? c.helpers : [])
         .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
-      if (tileHelpers.length) s += '<div class="sb-coleader">🙋 Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
-      if (showRoom && c.class_period !== 'AM' && c.scheduled_room) s += '<div class="sb-coleader">📍 ' + escClsHtml(c.scheduled_room) + (c.scheduled_backup_room ? ' (☔ ' + escClsHtml(c.scheduled_backup_room) + ')' : '') + '</div>';
+      if (tileHelpers.length) s += '<div class="sb-coleader">' + brandIconImg('helper', 'ag-icon') + ' Helper' + (tileHelpers.length === 1 ? '' : 's') + ': ' + escClsHtml(tileHelpers.join(', ')) + '</div>';
+      if (showRoom && c.class_period !== 'AM' && c.scheduled_room) s += '<div class="sb-coleader">' + brandIconImg('location', 'ag-icon') + ' ' + escClsHtml(c.scheduled_room) + (c.scheduled_backup_room ? ' (' + brandIconImg('outdoorRain', 'ag-icon') + ' ' + escClsHtml(c.scheduled_backup_room) + ')' : '') + '</div>';
       s += '<div class="sb-pref-line">';
       s += '<span class="sb-pref-label">Pref:</span> ';
       s += prefSessChips;
@@ -32891,12 +32927,12 @@
         // card (2026-07-11).
         var backupOcc = occ ? null : list.filter(function (c) { return String(c.scheduled_backup_room || '').toLowerCase() === rname; })[0];
         s += '<div class="sb-room-card' + ((occ || backupOcc) ? ' sb-room-occupied' : '') + '" data-hour="' + hour + '" data-room="' + escClsAttr(r.name) + '">';
-        s += '<div class="sb-room-head">' + (r.is_outdoor ? '🌳' : '📍') + ' <strong>' + escClsHtml(r.name) + '</strong>' + (r.is_outdoor ? ' <span class="sb-room-note">outdoor</span>' : '') + (r.builder_note ? ' <span class="sb-room-note">' + escClsHtml(r.builder_note) + '</span>' : '') + '</div>';
+        s += '<div class="sb-room-head">' + brandIconImg(r.is_outdoor ? 'outdoorRain' : 'location', 'ag-icon') + ' <strong>' + escClsHtml(r.name) + '</strong>' + (r.is_outdoor ? ' <span class="sb-room-note">outdoor</span>' : '') + (r.builder_note ? ' <span class="sb-room-note">' + escClsHtml(r.builder_note) + '</span>' : '') + '</div>';
         if (occ) {
           s += sbTileHtml(occ, false);
-          if (occ.scheduled_backup_room) s += '<div class="sb-room-note">☔ Rain backup: ' + escClsHtml(occ.scheduled_backup_room) + '</div>';
+          if (occ.scheduled_backup_room) s += '<div class="sb-room-note">' + brandIconImg('outdoorRain', 'ag-icon') + ' Rain backup: ' + escClsHtml(occ.scheduled_backup_room) + '</div>';
         } else if (backupOcc) {
-          s += '<div class="sb-room-empty">☔ Reserved — rain backup for “' + escClsHtml(backupOcc.class_name) + '” (' + escClsHtml(backupOcc.scheduled_room || '') + ')</div>';
+          s += '<div class="sb-room-empty">' + brandIconImg('outdoorRain', 'ag-icon') + ' Reserved — rain backup for “' + escClsHtml(backupOcc.class_name) + '” (' + escClsHtml(backupOcc.scheduled_room || '') + ')</div>';
         } else {
           s += '<div class="sb-room-empty">' + (isApproved ? '—' : (r.is_outdoor ? 'Available — drop a class seated in an indoor room' : 'Available — drag a class here')) + '</div>';
         }
@@ -33074,16 +33110,16 @@
         if (palAges) paletteHtml += '<div class="sb-class-ages-words">' + palAges + '</div>';
         paletteHtml += '<div class="sb-class-name">' + escClsHtml(s.class_name) + '</div>';
         paletteHtml += '<div class="sb-palette-card-meta">' + escClsHtml(s.submitted_by_name || s.submitted_by_email) + (hourPrefs ? ' · ' + escClsHtml(hourPrefs) : '') + '</div>';
-        if (s.co_teachers) paletteHtml += '<div class="sb-coleader">🤝 Co-leader: ' + escClsHtml(s.co_teachers) + '</div>';
+        if (s.co_teachers) paletteHtml += '<div class="sb-coleader">' + brandIconImg('colead', 'ag-icon') + ' Co-leader: ' + escClsHtml(s.co_teachers) + '</div>';
         // Room/space preferences from the teacher's submission, so the
         // right room card is pickable without opening the class (Erin,
         // 2026-07-10). PM only — morning classes have no space request.
         if (s.class_period !== 'AM') {
           var spaceParts = (s.space_request || []).map(function (v) { return SPACE_REQ_LABELS[v] || v; });
           if (s.space_request_other) spaceParts.push(s.space_request_other);
-          if (spaceParts.length) paletteHtml += '<div class="sb-coleader">📍 Wants: ' + escClsHtml(spaceParts.join(', ')) + '</div>';
+          if (spaceParts.length) paletteHtml += '<div class="sb-coleader">' + brandIconImg('location', 'ag-icon') + ' Wants: ' + escClsHtml(spaceParts.join(', ')) + '</div>';
           // Class size the submitter asked for (Erin, 2026-07-10).
-          if (s.max_students) paletteHtml += '<div class="sb-coleader">👥 Up to ' + escClsHtml(String(s.max_students)) + ' kids</div>';
+          if (s.max_students) paletteHtml += '<div class="sb-coleader">' + brandIconImg('person', 'ag-icon') + ' Up to ' + escClsHtml(String(s.max_students)) + ' kids</div>';
         }
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
         paletteHtml += '</div>';
@@ -33419,7 +33455,7 @@
     html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))
       + ' · <strong>Hour:</strong> ' + escClsHtml(isAmSub ? amPrefWord : pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
     if (!isAmSub && s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
-    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(isAmSub ? sbAmHourLabel(s.scheduled_hour) : s.scheduled_hour) : '') + (s.scheduled_room ? ' · 📍 ' + escClsHtml(s.scheduled_room) : '') + '</div>';
+    if (s.scheduled_session) html += '<div><strong>Placed:</strong> Session ' + escClsHtml(String(s.scheduled_session)) + (s.scheduled_hour ? ' · ' + escClsHtml(isAmSub ? sbAmHourLabel(s.scheduled_hour) : s.scheduled_hour) : '') + (s.scheduled_room ? ' · ' + brandIconImg('location', 'ag-icon') + ' ' + escClsHtml(s.scheduled_room) : '') + '</div>';
     html += '</div>';
     if (s.description) {
       html += '<h4 class="sb-pick-section-title" style="margin-top:0.75rem;">Description</h4>';
@@ -34386,7 +34422,7 @@
     if (sub.description) html += '<p class="sb-subdetail-desc" style="margin:0 0 0.75rem;">' + escClsHtml(sub.description) + '</p>';
 
     if (locked) {
-      html += '<div class="sb-locked-callout">🔒 Session ' + sub.scheduled_session + ' is approved. Reopen it from the Class Builder header to make changes.</div>';
+      html += '<div class="sb-locked-callout">' + ICON_SVG.lock + ' Session ' + sub.scheduled_session + ' is approved. Reopen it from the Class Builder header to make changes.</div>';
     }
 
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,
@@ -34420,7 +34456,7 @@
     // info here at all (AM rooms are fixed for the year).
     if (!isAmSub) {
       html += '<div class="cls-field"><label class="cls-label">Room</label>';
-      html += '<div>' + (sub.scheduled_room ? '📍 ' + escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">— none —</span>')
+      html += '<div>' + (sub.scheduled_room ? brandIconImg('location', 'ag-icon') + ' ' + escClsHtml(sub.scheduled_room) : '<span class="board-cal-se-unset">— none —</span>')
         + (locked ? '' : ' <span class="cls-help" style="font-size:0.78rem;">(drag the class onto a room card in the builder to change)</span>') + '</div>';
       html += '</div>';
     }
@@ -35362,7 +35398,7 @@
       if (p.role === 'blc' && p.id && !/@rootsandwingsindy\.com$/i.test(String(p.email || ''))) {
         h += p.rw_email_requested
           ? '<div class="emi-full" style="color:#2f7d3b;font-size:0.9rem;">✓ R&amp;W sign-in requested — the Communications Director will set it up.</div>'
-          : '<div class="emi-full"><button type="button" class="sc-btn" data-role="request-rw-signin" data-idx="' + idx + '" title="Ask the Communications Director to create an @rootsandwingsindy.com sign-in for this backup coach">🔑 Request an R&amp;W sign-in</button></div>';
+          : '<div class="emi-full"><button type="button" class="sc-btn" data-role="request-rw-signin" data-idx="' + idx + '" title="Ask the Communications Director to create an @rootsandwingsindy.com sign-in for this backup coach">' + ICON_SVG.key + ' Request an R&amp;W sign-in</button></div>';
       }
       // Adult allergies/medical notes (Erin, 2026-07-20) — same field the
       // kid rows have, with adult-appropriate wording.
@@ -35475,7 +35511,7 @@
             // unsigned waivers.
             var wvKid = escapeHtml(String(pendReq.kid_first_name || k.name || '').trim().split(/\s+/)[0] || 'This child');
             chipCls += ' emi-pending-waiver';
-            chipTxt = '<strong>✍️ One more step: ' + wvKid + ' needs a waiver signature</strong> so the co-op has it on file.'
+            chipTxt = '<strong>' + brandIconImg('waivers', 'ag-icon') + ' One more step: ' + wvKid + ' needs a waiver signature</strong> so the co-op has it on file.'
               + '<div><a class="btn btn-primary btn-sm emi-waiver-btn" href="waiver.html?token=' + escapeHtml(pendReq.waiver_token) + '" target="_blank" rel="noopener">Sign ' + wvKid + '’s waiver</a></div>';
           }
         } else if (pendReq.kind === 'remove_kid') {
@@ -35516,7 +35552,7 @@
       // renaming the family_email primary key (which is wired into ~30 tables).
       if (isCommsUser()) {
         html += '<div class="emi-admin-box">';
-        html += '<div class="emi-admin-title">🔑 Alternate login emails <span class="emi-admin-tag">super-user only</span></div>';
+        html += '<div class="emi-admin-title">' + ICON_SVG.key + ' Alternate login emails <span class="emi-admin-tag">super-user only</span></div>';
         html += '<p class="emi-admin-note">Extra <strong>@' + escapeHtml('rootsandwingsindy.com') + '</strong> Workspace addresses this family can sign in with, in addition to their primary login (<code>' + escapeHtml(state.family_email) + '</code>). Use this when a member\'s real Workspace email doesn\'t match their auto-generated login and they can\'t get in. One per line; co-parent logins are managed automatically and don\'t need to be listed here.</p>';
         html += '<textarea class="rd-input" id="emiAltLogins" rows="2" placeholder="jane.smith@rootsandwingsindy.com" style="font-family:inherit;">' + escapeHtml((state.additional_emails || []).join('\n')) + '</textarea>';
         html += '<div class="emi-admin-status" id="emiAltStatus" style="display:none;"></div>';
@@ -35799,7 +35835,7 @@
           .then(function (res) {
             if (!res.ok) {
               showError((res.data && res.data.error) || 'Could not send the request.');
-              signinBtn.disabled = false; signinBtn.textContent = '🔑 Request an R&W sign-in';
+              signinBtn.disabled = false; signinBtn.innerHTML = ICON_SVG.key + ' Request an R&amp;W sign-in';
               return;
             }
             sp.rw_email_requested = true;
@@ -35808,7 +35844,7 @@
           })
           .catch(function () {
             showError('Could not reach the server — try again.');
-            signinBtn.disabled = false; signinBtn.textContent = '🔑 Request an R&W sign-in';
+            signinBtn.disabled = false; signinBtn.innerHTML = ICON_SVG.key + ' Request an R&amp;W sign-in';
           });
         return;
       }
