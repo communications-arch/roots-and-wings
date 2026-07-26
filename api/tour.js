@@ -198,7 +198,10 @@ const TOUR_TIME_VALUES = TOUR_TIME_SLOTS.map(s => s.value);
 // 'junk' (#45) is the hidden bucket for screened Contact-Us spam —
 // only ever set by the spam screen, and valid in tour-update so
 // Membership can rescue a real inquiry back out ('junk' → 'inquiry').
-const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'joined', 'declined', 'ghosted', 'junk'];
+// 'waitlisted' (#111) parks a toured family waiting for a spot to open;
+// Membership follows up later, sends the reg link, and closes them out
+// as joined / declined / ghosted like any other post-tour row.
+const VALID_TOUR_STATUSES = ['inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'waitlisted', 'joined', 'declined', 'ghosted', 'junk'];
 
 // Compute every future Wednesday that falls inside an active session
 // range (inclusive). Returns chronological order. Today is excluded —
@@ -311,12 +314,14 @@ async function verifyWorkspaceAuthWithViewAs(req) {
 // The person's open pipeline row, if any — repeat inquiries/requests from
 // the same email merge into it instead of creating duplicates (Erin,
 // 2026-07-14). Terminal statuses (joined/declined/ghosted) don't count:
-// a family who comes back later starts a fresh pass.
+// a family who comes back later starts a fresh pass. 'waitlisted' (#111)
+// is still open — a waitlisted family who writes in again merges into
+// their existing row instead of spawning a duplicate.
 async function findOpenTourByEmail(sql, email) {
   const rows = await sql`
     SELECT id, status, family_name, message FROM tours
     WHERE LOWER(family_email) = ${String(email || '').toLowerCase().trim()}
-      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'waitlisted')
     ORDER BY updated_at DESC, id DESC
     LIMIT 1
   `;
@@ -332,13 +337,13 @@ async function findOpenTourByEmail(sql, email) {
 // wins (an older 'toured' row must not reset to 'requested'). Older rows
 // are then deleted. Runs at the top of every pipeline list read;
 // no-ops when there are no duplicates.
-const TOUR_STAGE_RANK = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 4 };
+const TOUR_STAGE_RANK = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 4, waitlisted: 5 };
 async function mergeDuplicateOpenTours(sql) {
   const dupeEmails = await sql`
     SELECT LOWER(family_email) AS em
     FROM tours
     WHERE family_email <> ''
-      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+      AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'waitlisted')
     GROUP BY LOWER(family_email)
     HAVING COUNT(*) > 1
   `;
@@ -350,7 +355,7 @@ async function mergeDuplicateOpenTours(sql) {
              status, internal_notes, message, status_history, created_at
       FROM tours
       WHERE LOWER(family_email) = ${d.em}
-        AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up')
+        AND status IN ('inquiry', 'requested', 'scheduled', 'toured', 'followed_up', 'waitlisted')
       ORDER BY created_at DESC, id DESC
     `;
     if (rows.length < 2) continue;
@@ -4761,8 +4766,9 @@ async function handleTourList(req, res) {
           WHEN 'followed_up' THEN 3
           WHEN 'joined'    THEN 4
           WHEN 'declined'  THEN 5
-          WHEN 'ghosted'   THEN 6
-          ELSE 7
+          WHEN 'waitlisted' THEN 6
+          WHEN 'ghosted'   THEN 7
+          ELSE 8
         END,
         created_at DESC
     `;

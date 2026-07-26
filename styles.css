@@ -11951,7 +11951,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
    so all reports' status columns read as the same kind of badge.
    Color tracks the lifecycle: amber (waiting on us) → plum (committed
    slot) → chartreuse (in-flight) → green (success) → coral (lost) →
-   gray (no response). */
+   brown (parked on the waitlist, #111) → gray (no response). */
 .ws-tour-status {
   display: inline-block;
   padding: 2px 9px;
@@ -11969,6 +11969,7 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .ws-tour-status-toured    { background: rgba(var(--color-accent-light-rgb), 0.35); color: var(--color-accent-dark); }
 .ws-tour-status-joined    { background: rgba(90, 107, 57, 0.16);            color: var(--color-leaf); }
 .ws-tour-status-declined  { background: rgba(var(--color-coral-rgb), 0.18); color: #8A2222; }
+.ws-tour-status-waitlisted { background: rgba(90, 46, 2, 0.10);             color: var(--color-wood); }
 .ws-tour-status-ghosted   { background: rgba(0, 0, 0, 0.08);                color: var(--color-text-light); }
 /* #45: hidden spam bucket — muted, slightly "hazard" striped-free grey */
 .ws-tour-status-junk      { background: rgba(0, 0, 0, 0.06);                color: var(--color-text-light); border: 1px dashed rgba(0, 0, 0, 0.25); }

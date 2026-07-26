@@ -11262,7 +11262,7 @@
   // invites fall back to the base status — marking Joined is the
   // Membership Director's explicit close-out.
   function tourDisplayStatus(t) {
-    if (t.status !== 'toured' && t.status !== 'followed_up') return t.status;
+    if (t.status !== 'toured' && t.status !== 'followed_up' && t.status !== 'waitlisted') return t.status;
     var inv = t.family_email ? regInviteForEmail(t.family_email) : null;
     if (!inv) return t.status;
     var st = regInviteStatus(inv);
@@ -11291,7 +11291,7 @@
     },
     { key: 'status', label: 'Status', type: 'string',
       sortValue: function (t) {
-        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, link_sent: 3.6, reg_expired: 3.8, joined: 4, declined: 5, ghosted: 6, junk: 7 };
+        var order = { inquiry: 0, requested: 1, scheduled: 2, toured: 3, followed_up: 3.5, link_sent: 3.6, reg_expired: 3.8, joined: 4, declined: 5, waitlisted: 5.5, ghosted: 6, junk: 7 };
         var ds = tourDisplayStatus(t);
         return String(order[ds] != null ? order[ds] : 9);
       },
@@ -11350,13 +11350,15 @@
         } else if (t.status === 'scheduled') {
           btns += '<button type="button" class="sc-btn ws-tour-toured-btn" data-tour-id="' + t.id + '">Mark toured</button>';
           btns += '<button type="button" class="sc-btn ws-tour-schedule-btn" data-tour-id="' + t.id + '">Reschedule&hellip;</button>';
-        } else if (t.status === 'toured' || t.status === 'followed_up') {
+        } else if (t.status === 'toured' || t.status === 'followed_up' || t.status === 'waitlisted') {
           // The natural next step after a tour/meet-up: send the family
           // the registration link. Once a link is logged the stamp shows
           // instead — until it expires (2 weeks after the last send),
           // when a Resend button comes back (Erin, 2026-07-14). The
           // Joined / Declined… / Ghosted buttons collapsed into one
-          // Outcome dropdown (same ask).
+          // Outcome dropdown (same ask). Waitlisted rows (#111) keep the
+          // same tools: when a spot opens Membership follows up, sends
+          // the link, and records the outcome.
           var ds = tourDisplayStatus(t);
           if (t.family_email && (!inv || ds === 'reg_expired')) {
             btns += '<button type="button" class="sc-btn ws-tour-sendlink-btn" data-tour-id="' + t.id + '">' + (inv ? 'Resend link' : 'Send reg link') + '</button>';
@@ -11365,6 +11367,7 @@
           btns += '<option value="">Outcome&hellip;</option>';
           btns += '<option value="joined">Joined</option>';
           btns += '<option value="declined">Declined&hellip;</option>';
+          if (t.status !== 'waitlisted') btns += '<option value="waitlisted">Waitlisted</option>';
           btns += '<option value="ghosted">Ghosted</option>';
           btns += '</select>';
         } else if (t.status === 'junk') {
@@ -11513,7 +11516,7 @@
       function computeCounts() {
         // Counted on DISPLAY status so the Link Sent / Reg Expired
         // workflow stages (derived from the invites cache) get pills.
-        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, link_sent: 0, reg_expired: 0, joined: 0, declined: 0, ghosted: 0, junk: 0 };
+        var counts = { inquiry: 0, requested: 0, scheduled: 0, toured: 0, followed_up: 0, link_sent: 0, reg_expired: 0, joined: 0, declined: 0, waitlisted: 0, ghosted: 0, junk: 0 };
         (_toursCache || []).forEach(function (t) { var ds = tourDisplayStatus(t); if (counts[ds] != null) counts[ds] += 1; });
         return counts;
       }
@@ -11589,6 +11592,7 @@
           if (counts.reg_expired) s += pill('reg_expired', 'reg_expired', counts.reg_expired + ' Reg Expired');
           s += pill('joined', 'joined', counts.joined + ' Joined');
           s += pill('declined', 'declined', counts.declined + ' Declined');
+          s += pill('waitlisted', 'waitlisted', counts.waitlisted + ' Waitlisted');
           s += pill('ghosted', 'ghosted', counts.ghosted + ' Ghosted');
           // Hidden junk bucket (#45) — only pitched when it has rows.
           if (counts.junk) s += pill('junk', 'junk', counts.junk + ' Junk');
@@ -11637,6 +11641,7 @@
                 { value: 'reg_expired', label: 'Reg Expired', count: counts.reg_expired },
                 { value: 'joined',    label: 'Joined',    count: counts.joined },
                 { value: 'declined',  label: 'Declined',  count: counts.declined },
+                { value: 'waitlisted', label: 'Waitlisted', count: counts.waitlisted },
                 { value: 'ghosted',   label: 'Ghosted',   count: counts.ghosted }
               ].concat(counts.junk ? [{ value: 'junk', label: 'Junk (spam-screened)', count: counts.junk }] : []),
               current: _toursFilter,
@@ -11724,6 +11729,10 @@
           tourQuickAction(oId, 'joined', 'Mark this family as joined? They should now appear in the Membership Report once they register.');
         } else if (choice === 'ghosted') {
           tourQuickAction(oId, 'ghosted', 'Mark this family as ghosted (no response)?');
+        } else if (choice === 'waitlisted') {
+          // #111: park the family until a spot opens — Membership follows
+          // up then, sends the reg link, and records the final outcome.
+          tourQuickAction(oId, 'waitlisted', 'Move this family to the waitlist? Follow up when a spot opens.');
         } else if (choice === 'declined') {
           _toursPendingAction = { tourId: oId, type: 'decline' };
           var oRow = sel.closest('tr');
@@ -12048,7 +12057,7 @@
     // person). Only for toured/followed-up rows whose email has no
     // invite yet — once logged, the row's stamp + Link Sent stage show
     // instead (Erin, 2026-07-14).
-    if ((t.status === 'toured' || t.status === 'followed_up') && t.family_email
+    if ((t.status === 'toured' || t.status === 'followed_up' || t.status === 'waitlisted') && t.family_email
         && !(typeof regInviteForEmail === 'function' && regInviteForEmail(t.family_email))) {
       h += '<div class="ws-reg-detail-section"><h5>Registration link</h5>';
       h += '<p class="ws-reg-decline-hint">Sent them the link another way (text, in person)? Log it so the funnel tracks them — opens can’t be tracked for links sent outside the app.</p>';
