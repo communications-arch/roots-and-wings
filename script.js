@@ -6767,10 +6767,13 @@
           var evTs = Date.parse(ev.date + 'T12:00:00');
           if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
         }
+        // #113: keep the em dash OUT of the duty text — the row title
+        // vanished with "<name> — Event Volunteer"; standard idiom is
+        // title + "· detail".
         duties.push({
           block: 'annual', icon: 'event',
-          text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-Coordinator' : ' Coordinator') : ' — Event Volunteer'),
-          detail: specialEventDateLabel(ev),
+          text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-Coordinator' : ' Coordinator') : ''),
+          detail: (isCoord ? '' : 'Event Volunteer · ') + specialEventDateLabel(ev),
           popup: {type: 'event', name: ev.name},
           manage: ev.id ? 'eventSpace-' + ev.id : undefined
         });
