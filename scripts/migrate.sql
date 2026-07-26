@@ -2101,7 +2101,7 @@ ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_by TEXT N
 CREATE TABLE IF NOT EXISTS event_sections (
   id               SERIAL PRIMARY KEY,
   special_event_id INTEGER NOT NULL REFERENCES special_events(id) ON DELETE CASCADE,
-  type             TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes')),
+  type             TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes','board')),
   title            TEXT NOT NULL DEFAULT '',
   config           JSONB NOT NULL DEFAULT '{}',
   content          JSONB NOT NULL DEFAULT '[]',
@@ -2133,7 +2133,7 @@ CREATE INDEX IF NOT EXISTS event_section_signups_section_idx ON event_section_si
 CREATE TABLE IF NOT EXISTS event_template_sections (
   id         SERIAL PRIMARY KEY,
   event_name TEXT NOT NULL,
-  type       TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes')),
+  type       TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('timeline','signup','info','notes','board')),
   title      TEXT NOT NULL DEFAULT '',
   config     JSONB NOT NULL DEFAULT '{}',
   content    JSONB NOT NULL DEFAULT '[]',
@@ -2166,3 +2166,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS event_seat_interest_uniq
 -- NULL). The removal itself stays 100% manual in Google Admin.
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_at TIMESTAMPTZ;
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_by TEXT NOT NULL DEFAULT '';
+
+-- 2026-07-25: 'board' section type — shared Notes & Links in event spaces
+-- (Erin). Existing DBs carry the four-type CHECK; widen it. (Final
+-- drop/add pair for each constraint — see the 2026-07-21 rule.)
+ALTER TABLE event_sections DROP CONSTRAINT IF EXISTS event_sections_type_check;
+ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board'));
+ALTER TABLE event_template_sections DROP CONSTRAINT IF EXISTS event_template_sections_type_check;
+ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board'));

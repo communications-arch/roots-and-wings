@@ -7075,7 +7075,7 @@ async function handleEventSeatInterest(body, req, res) {
       } catch (e) { /* role unresolved — fallback below */ }
     }
     if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
-    const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
+    const seatLabel = seat === 'lead' ? 'Lead' : 'Support';
     const notifTitle = '🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel;
     const notifBody = who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name
       + '. Their name is already on the event in the Special Events grid — adjust there if needed.'
