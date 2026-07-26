@@ -4968,7 +4968,11 @@ button.staff-role:hover {
   text-overflow: ellipsis;
   min-width: 0;
 }
-/* Room never collapses — the class title is what truncates */
+/* Room never collapses — the class title is what truncates. BUT the
+   title keeps a readable floor (#113: a long event detail crushed the
+   title span to zero width, so the row read "· Support · Wed, Aug 19"
+   with no event name; the line's overflow:hidden clips the sub instead). */
+.mf-duty-line strong { min-width: 5em; }
 .mf-duty-line .mf-duty-sub { flex-shrink: 0; }
 .mf-duty-line .mf-role-tag { flex-shrink: 0; }
 .mf-duty-line2 { gap: 6px; align-items: center; margin-top: 1px; }
@@ -13031,6 +13035,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .evs-ico-btn:hover { color: var(--color-primary-dark); }
 .evs-ico-btn.evs-ico-del { color: var(--color-coral); font-size: 1.15rem; font-weight: 700; }
 .evs-ico-btn svg { display: block; }
+/* Visibility toggle = the accent-30 binoculars brand mark; greyed-out
+   when the card is committee-only (Erin, 2026-07-25). */
+.evs-ico-btn img { width: 18px; height: 18px; display: block; }
+.evs-ico-btn.evs-vis-off img { filter: grayscale(1); opacity: 0.45; }
 .ws-min-strip {
   display: flex;
   flex-wrap: wrap;

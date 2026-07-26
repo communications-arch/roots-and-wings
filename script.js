@@ -6771,9 +6771,11 @@
         // vanished with "<name> — Event Volunteer"; standard idiom is
         // title + "· detail".
         duties.push({
-          block: 'annual', icon: 'event',
+          block: 'annual', icon: 'volunteer',
           text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-lead' : ' Lead') : ''),
-          detail: (isCoord ? '' : 'Support · ') + specialEventDateLabel(ev),
+          // Short date only — the full date+time label crushed the title
+          // out of the row (#113); times live in the popup + space.
+          detail: (isCoord ? '' : 'Support · ') + (ev.date ? boardCalFmtDate(ev.date) : 'Date TBD'),
           popup: {type: 'event', name: ev.name},
           manage: ev.id ? 'eventSpace-' + ev.id : undefined
         });
@@ -23092,7 +23094,7 @@
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
     if (d.can_edit) {
       // Legend for the per-card hearts (Erin, 2026-07-25).
-      h += '<p class="ws-body-hint" style="margin:6px 0 0;">A <strong>filled heart</strong> on a card means every member can see it; an <strong>outline heart</strong> keeps it to the event committee, the Special Events Liaison, and the Sustaining Director.</p>';
+      h += '<p class="ws-body-hint" style="margin:6px 0 0;"><img src="brand/secondary/accent-30.png" alt="" style="width:16px;height:16px;vertical-align:-3px;"> <strong>Binoculars</strong> on a card mean every member can see it; <strong>greyed-out binoculars</strong> keep it to the event committee, the Special Events Liaison, and the Sustaining Director.</p>';
     }
 
     if (d.can_edit) {
@@ -23507,8 +23509,8 @@
       if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
       if (d.can_edit) {
         var pub = s.is_public !== false;
-        headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Filled heart: every member sees this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Outline heart: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'
-          + '<svg width="15" height="15" viewBox="0 0 24 24" fill="' + (pub ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub' + (pub ? '' : ' evs-vis-off') + '" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Every member can see this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'
+          + '<img src="brand/secondary/accent-30.png" alt=""></button>';
         headIcons += '<button type="button" class="evs-ico-btn evs-sec-edit" data-section-id="' + s.id + '" aria-label="Edit section" title="Edit this section">'
           + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>';
         headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
