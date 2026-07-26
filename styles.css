@@ -10060,6 +10060,7 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 }
 
 /* ── Manage Button on Duty Rows ── */
+.mf-manage-btn svg { width: 14px; height: 14px; }
 .mf-manage-btn {
   display: inline-flex;
   align-items: center;
