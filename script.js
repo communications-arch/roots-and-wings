@@ -23054,7 +23054,23 @@
     // header card spans the grid, then the checklist and each section
     // render as their own card. Brand accents follow WS_ACCENTS usage
     // (special-events / todos marks).
-    var h = '<div class="workspace-grid collab-cards">';
+    // Minimized cards live as ▸ chips at the TOP of the page (Erin,
+    // 2026-07-25 — was below the grid), same ws-min-strip idiom as
+    // My Workspace. Computed up front so the strip renders first.
+    var collabChips = [];
+    if (_collabCollapsed['checklist']) collabChips.push({ key: 'checklist', title: 'Checklist' });
+    (d.sections || []).forEach(function (sx) {
+      if (_collabCollapsed['sec-' + sx.id]) collabChips.push({ key: 'sec-' + sx.id, title: String(evsSectionTitle(sx)) });
+    });
+    var h = '';
+    if (collabChips.length) {
+      h += '<div class="ws-min-strip" style="margin:0 0 12px;">';
+      collabChips.forEach(function (c) {
+        h += '<button type="button" class="ws-min-chip" data-collab-chip="' + c.key + '" aria-label="Expand ' + escapeAttr(c.title) + '">▸ ' + escapeHtmlWs(c.title) + '</button>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="workspace-grid collab-cards">';
     h += '<div class="mf-card workspace-card evs-section collab-card-head">';
     h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-28.png" alt=""> ' + escapeHtmlWs(d.event.name) + '</h4></div>';
     h += '<div class="workspace-card-body">';
@@ -23074,6 +23090,10 @@
     h += '<p class="ws-body-hint">👑 Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
       + (assists.length ? ' · Support: ' + assists.map(escapeHtmlWs).join(', ') : '')
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
+    if (d.can_edit) {
+      // Legend for the per-card hearts (Erin, 2026-07-25).
+      h += '<p class="ws-body-hint" style="margin:6px 0 0;">A <strong>filled heart</strong> on a card means every member can see it; an <strong>outline heart</strong> keeps it to the event committee, the Special Events Liaison, and the Sustaining Director.</p>';
+    }
 
     if (d.can_edit) {
       var secsAll = d.sections || [];
@@ -23100,10 +23120,7 @@
     }
     h += '</div></div>'; // /body, /header card
 
-    var collabChips = [];
-    if (_collabCollapsed['checklist']) {
-      collabChips.push({ key: 'checklist', title: 'Checklist' });
-    } else {
+    if (!_collabCollapsed['checklist']) {
     h += '<div class="mf-card workspace-card evs-section">';
     h += collabCardHead('checklist', '<h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4>');
     h += '<div class="workspace-card-body">';
@@ -23139,17 +23156,8 @@
     }
     h += '</div></div>'; // /body, /checklist card
     }
-    h += renderEventSections(d, collabChips);
+    h += renderEventSections(d);
     h += '</div>'; // /.workspace-grid
-    // Minimized cards live on as chips below the grid — the same
-    // ws-min-strip idiom My Workspace uses (Erin, 2026-07-25).
-    if (collabChips.length) {
-      h += '<div class="ws-min-strip">';
-      collabChips.forEach(function (c) {
-        h += '<button type="button" class="ws-min-chip" data-collab-chip="' + c.key + '" aria-label="Expand ' + escapeAttr(c.title) + '">▸ ' + escapeHtmlWs(c.title) + '</button>';
-      });
-      h += '</div>';
-    }
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -23490,22 +23498,25 @@
         return;
       }
       h += '<div class="mf-card workspace-card evs-section">';
-      // Top row = title + collapse arrow only; actions ride their own
-      // row below (Erin, 2026-07-25).
-      h += collabCardHead(secKey, '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>');
-      h += '<div class="workspace-card-body">';
-      var secActions = '';
-      if (s.type === 'signup') secActions += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
-      if (!d.can_edit && s.is_public === false) secActions += raCountPill('ws-wv-pending', '🔒 committee only');
+      // Compact actions ride the header row beside the title (Erin,
+      // 2026-07-25): ♥ filled = all members / outline = committee-only,
+      // pencil = edit, × = delete — tooltips carry the words, and the
+      // header card explains the hearts.
+      var headIcons = '';
+      if (s.type === 'signup') headIcons += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
       if (d.can_edit) {
-        // Visibility toggle (Erin, 2026-07-25): ON = every member sees
-        // this card; OFF = event committee + SEL + Sustaining Director.
         var pub = s.is_public !== false;
-        secActions += '<button type="button" class="sc-btn evs-sec-pub" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" title="' + (pub ? 'Visible to all members — tap to limit to the event committee, SEL, and Sustaining Director' : 'Committee/SEL/Sustaining Director only — tap to show every member') + '">' + (pub ? '🌐 All members' : '🔒 Committee only') + '</button>';
-        secActions += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
-          + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Filled heart: every member sees this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Outline heart: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'
+          + '<svg width="15" height="15" viewBox="0 0 24 24" fill="' + (pub ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-sec-edit" data-section-id="' + s.id + '" aria-label="Edit section" title="Edit this section">'
+          + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
       }
-      if (secActions) h += '<div class="rd-counts" style="justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 10px;">' + secActions + '</div>';
+      h += collabCardHead(secKey,
+        '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>'
+        + (headIcons ? '<span class="evs-head-icons">' + headIcons + '</span>' : ''));
+      h += '<div class="workspace-card-body">';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
         h += items.length

@@ -13008,6 +13008,29 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 /* The [hidden] attribute loses to .workspace-card-body's own
    display:flex — make collapse win (Collaboration card nav). */
 .workspace-card-body[hidden] { display: none !important; }
+/* Compact per-card actions in the Collaboration card headers (Erin,
+   2026-07-25): heart visibility toggle, pencil edit, × delete. */
+.evs-head-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.evs-ico-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 3px;
+  cursor: pointer;
+  color: var(--color-primary);
+  line-height: 1;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.evs-ico-btn:hover { color: var(--color-primary-dark); }
+.evs-ico-btn.evs-ico-del { color: var(--color-coral); font-size: 1.15rem; font-weight: 700; }
+.evs-ico-btn svg { display: block; }
 .ws-min-strip {
   display: flex;
   flex-wrap: wrap;
