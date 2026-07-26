@@ -4073,7 +4073,7 @@
       var evPeople = [];
       var evCoords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
       evCoords.forEach(function (co, ci) { evPeople.push({ name: co.name, label: ci === 0 ? 'Lead' : 'Co-lead' }); });
-      (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Support' }); });
+      (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Assistant' }); });
       evPeople.forEach(function (person) {
         var pName = String(person.name || '');
         html += '<div class="elective-teacher">';
@@ -6775,7 +6775,7 @@
           text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-lead' : ' Lead') : ''),
           // Short date only — the full date+time label crushed the title
           // out of the row (#113); times live in the popup + space.
-          detail: (isCoord ? '' : 'Support · ') + (ev.date ? boardCalFmtDate(ev.date) : 'Date TBD'),
+          detail: (isCoord ? '' : 'Assisting · ') + (ev.date ? boardCalFmtDate(ev.date) : 'Date TBD'),
           popup: {type: 'event', name: ev.name},
           manage: ev.id ? 'eventSpace-' + ev.id : undefined
         });
@@ -8922,7 +8922,7 @@
         var sp = support[si] || null;
         var isMe = isMyPerson(sp);
         html += '<div class="event-role' + (isMe ? ' coord-my-row' : '') + '">';
-        html += '<span class="event-role-label">Support ' + (si + 1) + '</span>';
+        html += '<span class="event-role-label">Assistant ' + (si + 1) + '</span>';
         if (sp) {
           html += '<span class="event-role-person">' + (isMe ? myNameHtml(escapeHtml(sp.name), 'assist') + seatRemoveBtn('assist') : escapeHtml(sp.name)) + '</span>';
         } else {
@@ -8932,7 +8932,7 @@
       }
 
       // Summary line
-      html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
+      html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' assistant spots filled</div>';
 
       // Any member can open the event's shared details (Erin, 2026-07-25)
       // — lands on the Collaboration page, where the server already
@@ -22818,7 +22818,7 @@
           if (hands.length) h2 += '<br><span class="ws-srt-actions-empty">🙋 Interested: ' + escapeHtmlWs(hands.join(', ')) + '</span>';
           return h2;
         } },
-      { key: 'assists', label: 'Support', type: 'string',
+      { key: 'assists', label: 'Assistants', type: 'string',
         sortValue: function (r) { return (r.assists || []).length; },
         render: function (r) {
           var assists = (r.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
@@ -22876,7 +22876,7 @@
       if ((ev.lead_interest || []).length) {
         h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
       }
-      h += '<div class="se-row"><label class="se-lbl">Support (up to 4)</label><div class="se-assists">';
+      h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
         var a = (ev.assists || [])[i];
         h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
@@ -23098,7 +23098,7 @@
     var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
     h += '<p class="ws-body-hint">' + volRoleIconImg('lead') + ' Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
-      + (assists.length ? ' · Support: ' + assists.map(escapeHtmlWs).join(', ') : '')
+      + (assists.length ? ' · Assisting: ' + assists.map(escapeHtmlWs).join(', ') : '')
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
     if (d.can_edit) {
       // Legend for the per-card hearts (Erin, 2026-07-25).
@@ -23789,7 +23789,7 @@
         if ((ev.open_seats || []).indexOf('assist') === -1 && !isOn) return;
         // #79: show who's already in the seat(s) — teammates matter.
         var names = (ev.seat_names && ev.seat_names.assist) || [];
-        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>🤝 Support</strong>'
+        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + volRoleIconImg('assist') + ' Assistant</strong>'
           + '<span class="ws-opp-committee">' + (ev.assist_count || 0) + ' of 2 spots filled</span>'
           + (names.length ? '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(names.join(', ')) + '</span>' : '')
           + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.assist + '</span></span>'
@@ -23923,7 +23923,7 @@
     }
     var seats = [
       { key: 'lead', icon: volRoleIconImg('lead'), label: 'Lead', cap: 2 },
-      { key: 'assist', icon: '🤝', label: 'Support', cap: 2 }
+      { key: 'assist', icon: volRoleIconImg('assist'), label: 'Assistant', cap: 2 }
     ];
     h += '<ul class="ws-opportunities">';
     seats.forEach(function (s) {
@@ -24097,7 +24097,7 @@
             // still reads as pending so those volunteers aren't lost.
             var seatBit = r.seat === 'lead'
               ? 'Lead / Co-lead (already on the event — if not, place them on the event card)'
-              : 'Support (already on the event)';
+              : 'Assistant (already on the event)';
             h += '<li><strong>' + escapeHtmlWs(r.name) + '</strong> — ' + seatBit
               + ' · <a href="mailto:' + escapeAttr(r.email) + '">' + escapeHtmlWs(r.email) + '</a>'
               + (r.created_at && typeof timeAgo === 'function' ? ' · ' + escapeHtmlWs(timeAgo(r.created_at)) : '')

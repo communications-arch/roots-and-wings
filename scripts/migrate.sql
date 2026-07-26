@@ -2179,3 +2179,7 @@ ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_
 -- every member sees the card; FALSE = only the event committee, the
 -- Special Events Liaison, and the Sustaining Director.
 ALTER TABLE event_sections ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- 2026-07-25 (later): new event-space cards start COMMITTEE-ONLY —
+-- the lead flips the binoculars on when a card is ready for everyone.
+ALTER TABLE event_sections ALTER COLUMN is_public SET DEFAULT FALSE;
