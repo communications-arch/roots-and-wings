@@ -13040,6 +13040,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 /* Natural aspect — accent-30 is a wide mark; a forced square squished it. */
 .evs-ico-btn img { height: 16px; width: auto; max-width: 34px; display: block; }
 .evs-ico-btn.evs-vis-off img { filter: grayscale(1); opacity: 0.45; }
+/* The whole committee-only card tints light grey so its restricted
+   visibility reads at a glance (pairs with the greyed binoculars). */
+.evs-section.evs-private { background: #F3F2EF; }
 .ws-min-strip {
   display: flex;
   flex-wrap: wrap;

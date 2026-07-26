@@ -23507,7 +23507,8 @@
         if (chips) chips.push({ key: secKey, title: String(evsSectionTitle(s)) });
         return;
       }
-      h += '<div class="mf-card workspace-card evs-section">';
+      // Committee-only cards wear a light grey tint (Erin, 2026-07-25).
+      h += '<div class="mf-card workspace-card evs-section' + (s.is_public === false ? ' evs-private' : '') + '">';
       // Compact actions ride the header row beside the title (Erin,
       // 2026-07-25): ♥ filled = all members / outline = committee-only,
       // pencil = edit, × = delete — tooltips carry the words, and the
