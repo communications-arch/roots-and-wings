@@ -6163,9 +6163,6 @@ button.staff-role:hover {
    header card's full-width span is page-specific. */
 .collab-cards { align-items: start; }
 .collab-card-head { grid-column: 1 / -1; }
-/* #112 (Erin): match My Workspace's breathing room under the header —
-   and give the page a real bottom margin too (Erin, 2026-07-25). */
-#collabContent { padding-top: 24px; padding-bottom: 56px; }
 /* Drawers opened from a page (no modal overlay behind them, e.g. the
    Collaboration view's task/section editors) attach to <body> — lift
    them above the portal header and modals. */
@@ -10970,7 +10967,8 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   background: rgba(255, 255, 255, 0.95);
 }
 
-.page-mode-panel#page-workspace {
+.page-mode-panel#page-workspace,
+.page-mode-panel#page-collab {
   padding: 40px 0 60px;
 }
 
