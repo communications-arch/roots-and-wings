@@ -23082,7 +23082,6 @@
       if (tplTotal > 0 && (tasks.length === 0 || secsAll.length === 0)) {
         h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplTotal + ' item' + (tplTotal === 1 ? '' : 's') + ')</button>';
       }
-      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button>';
       // Generic sections (Erin, 2026-07-21): timeline / sign-ups / info /
       // notes join the checklist so the space replaces the old planning
       // spreadsheet end to end.
@@ -23101,11 +23100,11 @@
     }
     h += '</div></div>'; // /body, /header card
 
-    h += '<div class="mf-card workspace-card evs-section">';
     var collabChips = [];
     if (_collabCollapsed['checklist']) {
       collabChips.push({ key: 'checklist', title: 'Checklist' });
     } else {
+    h += '<div class="mf-card workspace-card evs-section">';
     h += collabCardHead('checklist', '<h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4>');
     h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
@@ -23132,6 +23131,11 @@
         h += '</li>';
       });
       h += '</ul>';
+    }
+    // + Add task lives ON the Checklist card (Erin, 2026-07-25) — it was
+    // in the header-card toolbar, a card away from the list it feeds.
+    if (d.can_edit) {
+      h += '<p style="margin:10px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button></p>';
     }
     h += '</div></div>'; // /body, /checklist card
     }
