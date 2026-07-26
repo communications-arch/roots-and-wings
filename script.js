@@ -2571,13 +2571,16 @@
   function showViewMode(mode) {
     var ws = document.getElementById('page-workspace');
     var info = document.getElementById('page-info');
+    var collab = document.getElementById('page-collab');
     if (ws) ws.style.display = mode === 'workspace' ? '' : 'none';
     if (info) info.style.display = mode === 'info' ? '' : 'none';
+    if (collab) collab.style.display = mode === 'collab' ? '' : 'none';
     document.querySelectorAll('[data-view]').forEach(function (el) {
       var isActive = el.getAttribute('data-view') === mode;
       el.classList.toggle('active', isActive);
     });
     if (mode === 'workspace' && typeof renderWorkspaceTab === 'function') renderWorkspaceTab();
+    if (mode === 'collab' && typeof renderCollabView === 'function') renderCollabView();
   }
   document.querySelectorAll('[data-view]').forEach(function (el) {
     el.addEventListener('click', function (e) {
@@ -4068,8 +4071,9 @@
       html += '</div>';
       html += '<div class="elective-staff-list">';
       var evPeople = [];
-      if (ev.coordinator) evPeople.push({ name: ev.coordinator.name, label: 'Coordinator' });
-      (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Planning Support' }); });
+      var evCoords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+      evCoords.forEach(function (co, ci) { evPeople.push({ name: co.name, label: ci === 0 ? 'Lead' : 'Co-lead' }); });
+      (ev.support || []).forEach(function (s) { evPeople.push({ name: s.name, label: 'Assistant' }); });
       evPeople.forEach(function (person) {
         var pName = String(person.name || '');
         html += '<div class="elective-teacher">';
@@ -6748,8 +6752,14 @@
       var seEmailLc = String(email || '').toLowerCase();
       if (!seEmailLc) return;
       SPECIAL_EVENTS_DB.forEach(function (ev) {
-        var isCoord = ev.coordinator && String(ev.coordinator.email || '').toLowerCase() === seEmailLc;
-        if (!isCoord) return;
+        var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+        var matchMe = function (p) { return p && String(p.email || '').toLowerCase() === seEmailLc; };
+        var isCoord = coords.some(matchMe);
+        // Event volunteers (assistants) get a duty too (Erin, 2026-07-25:
+        // "the volunteers don't show a to do card") — with Manage opening
+        // the event's planning space, same doorway the coordinator gets.
+        var isSupport = !isCoord && (ev.support || []).some(matchMe);
+        if (!isCoord && !isSupport) return;
         // Only UPCOMING events are responsibilities (1-day grace so the
         // event still shows on its own day); undated approved events stay
         // visible as the safe default.
@@ -6757,7 +6767,18 @@
           var evTs = Date.parse(ev.date + 'T12:00:00');
           if (isFinite(evTs) && evTs < (Date.now() - 86400000)) return;
         }
-        duties.push({block: 'annual', icon: 'event', text: ev.name + ' Coordinator', detail: specialEventDateLabel(ev), popup: {type: 'event', name: ev.name}});
+        // #113: keep the em dash OUT of the duty text — the row title
+        // vanished with "<name> — Event Volunteer"; standard idiom is
+        // title + "· detail".
+        duties.push({
+          block: 'annual', icon: 'volunteer',
+          text: ev.name + (isCoord ? (coords.length > 1 ? ' Co-lead' : ' Lead') : ''),
+          // Short date only — the full date+time label crushed the title
+          // out of the row (#113); times live in the popup + space.
+          detail: (isCoord ? '' : 'Assisting · ') + (ev.date ? boardCalFmtDate(ev.date) : 'Date TBD'),
+          popup: {type: 'event', name: ev.name},
+          manage: ev.id ? 'eventSpace-' + ev.id : undefined
+        });
       });
     })();
 
@@ -6926,8 +6947,15 @@
       if (planBtnHtml) h += planBtnHtml;
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
-        h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
-        h += ' Manage</button>';
+        // Special-event duties open the Collaboration space — heart +
+        // "Collaborate" (Erin, 2026-07-25); everything else keeps the
+        // gear + "Manage".
+        if (String(d.manage).indexOf('eventSpace-') === 0) {
+          h += DUTY_ICONS.volunteer + ' Collaborate</button>';
+        } else {
+          h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+          h += ' Manage</button>';
+        }
       }
       if (d.isCoverage && d.slotId) {
         h += '<button class="sc-btn sc-btn-del mf-duty-cancel-cover" data-slot-id="' + d.slotId + '" title="Cancel covering this slot">Cancel</button>';
@@ -8831,11 +8859,28 @@
         var ts = Date.parse((ev.endDate || ev.date) + 'T23:59:00');
         isPast = isFinite(ts) && ts < Date.now();
       }
-      var status = isPast ? 'Complete' : (ev.coordinator ? 'Planning' : 'Needs Volunteers');
-      var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
+      // Co-leads (Erin, 2026-07-25): coordinators carries every lead row;
+      // fall back to the single coordinator for a stale cached payload.
+      var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
       var support = ev.support || [];
-      var maxSupport = Math.max(support.length, 3);
-      var isMyCard = isMyPerson(ev.coordinator) || support.some(isMyPerson);
+      // Support pads to TWO open rows — the same recruiting threshold the
+      // openings feed and Jump In advertise ("N of 2 spots"), so the card
+      // never dangles a third "Open" slot no other surface counts (#107).
+      var maxSupport = Math.max(support.length, 2);
+      // #107 (Colleen): no "Planning" pill — an upcoming event either
+      // still needs volunteers (no coordinator, or open support rows) or
+      // its spots are filled.
+      var coreFull = coords.length >= 1 && support.length >= maxSupport;
+      var status = isPast ? 'Complete' : (coreFull ? 'Spots Filled' : 'Needs Volunteers');
+      var statusClass = status === 'Complete' ? 'status-done' : status === 'Needs Volunteers' ? 'status-open' : 'status-upcoming';
+      var isMyCard = coords.some(isMyPerson) || support.some(isMyPerson);
+      // #108 (Colleen): each open slot IS the volunteer button — clicking
+      // opens the per-event responsibilities + confirm modal (Erin's
+      // flow), no separate pill at the bottom. Gold chip + the shared
+      // volunteer heart mark (Erin, 2026-07-25: one consistent asset).
+      var volunteerSlot = (!isPast && ev.id)
+        ? '<button type="button" class="volunteer-cta" data-resource-action="event-volunteer" data-eid="' + ev.id + '">' + DUTY_ICONS.volunteer + ' Volunteer</button>'
+        : '<em class="event-open-slot">Open</em>';
 
       html += '<div class="event-card' + (isMyCard ? ' coord-my-card' : '') + '">';
       html += '<div class="event-card-header">';
@@ -8847,30 +8892,54 @@
       html += '<span class="status-badge ' + statusClass + '">' + status + '</span>';
       html += '</div>';
 
-      // Coordinator
-      html += '<div class="event-roles">';
-      var coordText = ev.coordinator ? escapeHtml(ev.coordinator.name) : '<em class="event-open-slot">Needs volunteer</em>';
-      html += '<div class="event-role' + (isMyPerson(ev.coordinator) ? ' coord-my-row' : '') + '">';
-      html += '<span class="event-role-label">Coordinator</span>';
-      html += '<span class="event-role-person">' + (isMyPerson(ev.coordinator) ? '<span class="coord-highlight">' + coordText + '</span>' : coordText) + '</span>';
-      html += '</div>';
+      // Your own name gets a × to step back out (Erin, 2026-07-25) —
+      // same affordance the sign-up lists use, "Confirm remove?" armed.
+      function seatRemoveBtn(seat) {
+        if (isPast || !ev.id) return '';
+        return ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-seat-remove" data-eid="' + ev.id + '" data-seat="' + seat + '" aria-label="Remove me from this event" title="Remove me">×</button>';
+      }
+      // #109 (Colleen): your own NAME is clickable too — tap → "Confirm
+      // remove?" → out.
+      function myNameHtml(nameHtml, seat) {
+        if (isPast || !ev.id) return '<span class="coord-highlight">' + nameHtml + '</span>';
+        return '<button type="button" class="ws-inline-link coord-highlight" data-resource-action="event-seat-remove" data-eid="' + ev.id + '" data-seat="' + seat + '" title="Tap to remove yourself from this event">' + nameHtml + '</button>';
+      }
 
-      // Planning support slots (padded to 3 so open seats stay visible)
+      // Coordinator row(s) — one per (co-)lead
+      html += '<div class="event-roles">';
+      if (!coords.length) coords = [null];
+      coords.forEach(function (co, ci) {
+        var mine = isMyPerson(co);
+        var coordText = co ? escapeHtml(co.name) : volunteerSlot;
+        html += '<div class="event-role' + (mine ? ' coord-my-row' : '') + '">';
+        html += '<span class="event-role-label">' + (ci === 0 ? 'Lead' : 'Co-lead') + '</span>';
+        html += '<span class="event-role-person">' + (mine ? myNameHtml(coordText, 'lead') + seatRemoveBtn('lead') : coordText) + '</span>';
+        html += '</div>';
+      });
+
+      // Planning support slots (open ones are volunteer buttons, #108)
       for (var si = 0; si < maxSupport; si++) {
         var sp = support[si] || null;
         var isMe = isMyPerson(sp);
         html += '<div class="event-role' + (isMe ? ' coord-my-row' : '') + '">';
-        html += '<span class="event-role-label">Support ' + (si + 1) + '</span>';
+        html += '<span class="event-role-label">Assistant ' + (si + 1) + '</span>';
         if (sp) {
-          html += '<span class="event-role-person">' + (isMe ? '<span class="coord-highlight">' + escapeHtml(sp.name) + '</span>' : escapeHtml(sp.name)) + '</span>';
+          html += '<span class="event-role-person">' + (isMe ? myNameHtml(escapeHtml(sp.name), 'assist') + seatRemoveBtn('assist') : escapeHtml(sp.name)) + '</span>';
         } else {
-          html += '<span class="event-role-person"><em class="event-open-slot">Open</em></span>';
+          html += '<span class="event-role-person">' + volunteerSlot + '</span>';
         }
         html += '</div>';
       }
 
       // Summary line
-      html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' support spots filled</div>';
+      html += '<div class="event-fill-summary">' + support.length + ' of ' + maxSupport + ' assistant spots filled</div>';
+
+      // Any member can open the event's shared details (Erin, 2026-07-25)
+      // — lands on the Collaboration page, where the server already
+      // filters cards to the ones marked visible to all members.
+      if (ev.id) {
+        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '">📋 View event details</button></p>';
+      }
 
       html += '</div></div>';
     });
@@ -9396,7 +9465,7 @@
           // Painted by updateEventSeatTodoItem (rides the event-openings
           // feed); the modal lists who wants what + a take-me-there link
           // to the Special Events grid.
-          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">Review special-event sign-ups</span></button></li>';
+          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">New special-event sign-ups</span></button></li>';
         }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
@@ -12604,6 +12673,11 @@
   function openReportDrawer(opts) {
     opts = opts || {};
     if (!personDetail) return null;
+    // Host: normally the open report modal; when a drawer opens from a
+    // PAGE (the Collaboration view, 2026-07-25) the overlay is hidden,
+    // so attach to <body> instead — the drawer is position:fixed either
+    // way, and a body-scoped z-index rule lifts it above the header.
+    var drawerHost = (getComputedStyle(personDetail).display !== 'none') ? personDetail : document.body;
     closeReportDrawer(true); // one at a time; silent — no onClose for the evicted drawer
     var backdrop = document.createElement('div');
     backdrop.className = 'rd-drawer-backdrop';
@@ -12620,8 +12694,8 @@
       + '</div>'
       + '<div class="rd-drawer-body" id="' + escapeHtmlWs(opts.bodyId || 'rd-drawer-body') + '">'
       + (opts.bodyPlaceholder || '') + '</div>';
-    personDetail.appendChild(backdrop);
-    personDetail.appendChild(drawer);
+    drawerHost.appendChild(backdrop);
+    drawerHost.appendChild(drawer);
     function close(silent) {
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
       if (drawer.parentNode) drawer.parentNode.removeChild(drawer);
@@ -12643,9 +12717,12 @@
   }
 
   function closeReportDrawer(silent) {
-    var d = personDetail && personDetail.querySelector('.rd-drawer');
+    // Document-wide: the drawer may live in the modal overlay OR on
+    // <body> (page-context drawers, e.g. Collaboration). One at a time
+    // either way.
+    var d = document.querySelector('.rd-drawer');
     if (d && typeof d._rdClose === 'function') { d._rdClose(silent); return; }
-    var b = personDetail && personDetail.querySelector('.rd-drawer-backdrop');
+    var b = document.querySelector('.rd-drawer-backdrop');
     if (b && b.parentNode) b.parentNode.removeChild(b);
     if (d && d.parentNode) d.parentNode.removeChild(d);
   }
@@ -19498,6 +19575,9 @@
     // same buttons render on Ways to Help AND inside the Event Space,
     // so they ride this document-level delegation.
     else if (action === 'event-seat-toggle' && typeof toggleEventSeatInterest === 'function') toggleEventSeatInterest(btn);
+    else if (action === 'event-volunteer' && typeof showEventVolunteerModal === 'function') showEventVolunteerModal(parseInt(btn.getAttribute('data-eid'), 10));
+    else if (action === 'event-seat-remove' && typeof removeEventSeatSelf === 'function') removeEventSeatSelf(btn);
+    else if (action === 'event-space-open' && typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
@@ -19515,6 +19595,10 @@
     renderCleaningTab();
     renderVolunteersTab();
     renderEventsTab();
+    // Live data landing while the Collaboration page is open: refresh
+    // its pills/space too (it reads SPECIAL_EVENTS_DB like the tabs do).
+    var collabPage = document.getElementById('page-collab');
+    if (collabPage && collabPage.style.display !== 'none' && typeof renderCollabView === 'function') renderCollabView();
   }
 
   // Render tabs on load
@@ -22695,7 +22779,10 @@
     var events = _rolesMgrEventsState.events || [];
     if (events.length === 0) { wrap.innerHTML = ''; return; }
     var staffed = 0, needLead = 0;
-    events.forEach(function (ev) { if (ev.lead && (ev.lead.name || ev.lead.email)) staffed++; else needLead++; });
+    events.forEach(function (ev) {
+      var ls = ev.leads || (ev.lead ? [ev.lead] : []);
+      if (ls.some(function (l) { return l && (l.name || l.email); })) staffed++; else needLead++;
+    });
     var pills = [
       raCountPill('ws-wv-ok', staffed + ' with a lead'),
       raCountPill(needLead > 0 ? 'ws-wv-resent' : 'ws-wv-ok', needLead + ' need a lead')
@@ -22721,11 +22808,15 @@
             + ' <span class="se-status se-status-' + escapeHtmlWs(r.date_status || 'proposed') + '">' + (r.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span>';
         } },
       { key: 'lead', label: 'Lead', type: 'string',
-        sortValue: function (r) { return (r.lead && (r.lead.name || r.lead.email)) || ''; },
+        sortValue: function (r) { var ls = r.leads || (r.lead ? [r.lead] : []); return ls.length ? (ls[0].name || ls[0].email) : ''; },
         render: function (r) {
-          return (r.lead && (r.lead.name || r.lead.email))
-            ? escapeHtmlWs(r.lead.name || r.lead.email)
-            : '<span class="ra-open-note">OPEN ⚠</span>';
+          var ls = (r.leads || (r.lead ? [r.lead] : [])).map(function (l) { return l.name || l.email; }).filter(Boolean);
+          var h2 = ls.length ? escapeHtmlWs(ls.join(' & ')) : '<span class="ra-open-note">OPEN ⚠</span>';
+          // Hands raised for the lead seat — visible where the SEL
+          // assigns, so co-lead volunteers stop vanishing (2026-07-25).
+          var hands = (r.lead_interest || []).map(function (p) { return p.name || p.email; }).filter(Boolean);
+          if (hands.length) h2 += '<br><span class="ws-srt-actions-empty">🙋 Interested: ' + escapeHtmlWs(hands.join(', ')) + '</span>';
+          return h2;
         } },
       { key: 'assists', label: 'Assistants', type: 'string',
         sortValue: function (r) { return (r.assists || []).length; },
@@ -22779,7 +22870,12 @@
       h += '<div class="se-card-head"><span class="se-name">' + escapeHtmlWs(ev.name) + '</span>';
       if (ev.event_date) h += '<span class="se-date-label">' + escapeHtmlWs(boardCalFmtDate(ev.event_date)) + '</span>';
       h += '<span class="se-status se-status-' + escapeHtmlWs(ev.date_status || 'proposed') + '">' + (ev.date_status === 'approved' ? '✓ Approved' : 'Proposed') + '</span></div>';
-      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(ev.lead ? (ev.lead.name || ev.lead.email) : '') + '" placeholder="Lead name…"></div>';
+      var evLeads = ev.leads || (ev.lead ? [ev.lead] : []);
+      h += '<div class="se-row"><label class="se-lbl">Lead</label><input type="text" class="cl-input se-lead" list="seMemberList" value="' + escapeHtmlWs(evLeads[0] ? (evLeads[0].name || evLeads[0].email) : '') + '" placeholder="Lead name…"></div>';
+      h += '<div class="se-row"><label class="se-lbl">Co-lead (optional)</label><input type="text" class="cl-input se-colead" list="seMemberList" value="' + escapeHtmlWs(evLeads[1] ? (evLeads[1].name || evLeads[1].email) : '') + '" placeholder="Co-lead name…"></div>';
+      if ((ev.lead_interest || []).length) {
+        h += '<p class="ws-body-hint" style="margin:2px 0 6px;">🙋 Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
+      }
       h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
       for (var i = 0; i < 4; i++) {
         var a = (ev.assists || [])[i];
@@ -22800,14 +22896,19 @@
       var peopleSave = card.querySelector('.se-people-save');
       if (peopleSave) peopleSave.addEventListener('click', function () {
         var statusEl = card.querySelector('.se-save-status');
-        var lead = seNameToPerson(card.querySelector('.se-lead').value);
+        var leads = [];
+        var leadP = seNameToPerson(card.querySelector('.se-lead').value);
+        var coleadEl = card.querySelector('.se-colead');
+        var coleadP = coleadEl ? seNameToPerson(coleadEl.value) : null;
+        if (leadP) leads.push(leadP);
+        if (coleadP) leads.push(coleadP);
         var assists = [];
         card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
         peopleSave.disabled = true;
         fetch('/api/tour', {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
-          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: lead, assists: assists })
+          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: leads[0] || null, leads: leads, assists: assists })
         })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
@@ -22817,7 +22918,16 @@
             // Keep the local state in step so the lens refresh on drawer
             // close shows the new assignments without waiting on refetch.
             var evRow = (_rolesMgrEventsState.events || []).filter(function (x) { return x.id === eid; })[0];
-            if (evRow) { evRow.lead = lead; evRow.assists = assists; }
+            if (evRow) {
+              evRow.lead = leads[0] || null;
+              evRow.leads = leads;
+              evRow.assists = assists;
+              // Anyone just confirmed as (co-)lead is no longer "interested".
+              var leadEmailsNow = leads.map(function (l) { return String(l.email || '').toLowerCase(); });
+              evRow.lead_interest = (evRow.lead_interest || []).filter(function (p) {
+                return leadEmailsNow.indexOf(String(p.email || '').toLowerCase()) === -1;
+              });
+            }
           })
           .catch(function (err) {
             peopleSave.disabled = false;
@@ -22834,18 +22944,82 @@
   // member's My Responsibilities.
   var _eventSpaceState = { id: null, data: null };
 
+  // Spaces live on the Collaboration PAGE now (Erin, 2026-07-25 — "on
+  // their own page, not a modal"). Every doorway that used to open the
+  // modal (To Do rows, My Responsibilities Manage, the roles lens "Open
+  // space") lands on the page with that event's pill selected. The old
+  // name stays so all call sites keep working.
   function showEventSpaceModal(eventId) {
     _eventSpaceState.id = eventId;
     _eventSpaceState.data = null;
-    var body = renderReportModal({
-      title: 'Event Planning',
-      subtitle: 'The event’s working checklist — assign tasks, check them off, and keep the plan in one place. Dates live on the Admin Calendar; lead & assistants in Roles Assignments.',
-      meta: '',
-      icons: [],
-      bodyId: 'event-space-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading planning space…</p>'
+    if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* no modal open */ } }
+    showViewMode('collab');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Collaboration page ─────────────────────────────────────────────
+  // A pill per event the member is working on (their event seats +
+  // events where they hold open tasks; SEL/VP/supers see every event),
+  // Workspace-pill-bar style, with the selected space's sections
+  // rendered as cards below.
+  function collabMyEvents() {
+    var em = String(getActiveEmail() || '').toLowerCase();
+    var canAll = isSuperUserEmail(em)
+      || (typeof clientHasCapability === 'function' && clientHasCapability('special_events_manage', ['Special Events Liaison', 'Vice President']));
+    var list = [];
+    (SPECIAL_EVENTS_DB || []).forEach(function (ev) {
+      if (!ev.id) return;
+      var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+      var onIt = coords.concat(ev.support || []).some(function (p) { return p && String(p.email || '').toLowerCase() === em; });
+      var hasTasks = Array.isArray(_myEventTasks) && _myEventTasks.some(function (t) { return t.event_id === ev.id; });
+      if (canAll || onIt || hasTasks) list.push(ev);
     });
-    if (!body) return;
+    return list;
+  }
+
+  function renderCollabView() {
+    var host = document.getElementById('collabContent');
+    if (!host) return;
+    var evs = collabMyEvents();
+    // An explicitly opened space (e.g. SEL from the lens) always gets a
+    // pill even if the viewer isn't on that event.
+    if (_eventSpaceState.id && !evs.some(function (e) { return e.id === _eventSpaceState.id; })) {
+      var extra = (SPECIAL_EVENTS_DB || []).filter(function (e) { return e.id === _eventSpaceState.id; })[0];
+      if (extra) evs.unshift(extra);
+    }
+    var h = '<h3>Collaboration</h3>';
+    h += '<p class="ws-body-hint">Planning spaces for the special events you’re part of — the checklist, sign-ups, day-of schedule, and notes, one card per section.</p>';
+    if (!evs.length && !liveDataReady) {
+      h += '<p class="ws-empty">Loading your events…</p>';
+      host.innerHTML = h;
+      return;
+    }
+    if (!evs.length) {
+      h += '<div class="mf-card"><p class="ws-empty">You’re not on any event teams yet. Volunteer from '
+        + '<button type="button" class="ws-inline-link" data-resource-action="goto-special-events">Special Events</button>'
+        + ' (My Family → Co-op Coordination) and that event’s planning space appears here.</p></div>';
+      host.innerHTML = h;
+      return;
+    }
+    if (!_eventSpaceState.id || !evs.some(function (e) { return e.id === _eventSpaceState.id; })) {
+      _eventSpaceState.id = evs[0].id;
+      _eventSpaceState.data = null;
+    }
+    // Same pill bar My Workspace wears (board-cal-views + ws-role-pillbar).
+    h += '<div class="board-cal-views ws-role-pillbar" role="group" aria-label="Choose an event">';
+    evs.forEach(function (ev) {
+      h += '<button type="button" class="board-cal-view-pill ws-role-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">🎪 ' + escapeHtml(ev.name) + '</button>';
+    });
+    h += '</div>';
+    h += '<div id="event-space-body"><p class="ws-empty">Loading planning space…</p></div>';
+    host.innerHTML = h;
+    host.querySelectorAll('[data-collab-eid]').forEach(function (p) {
+      p.addEventListener('click', function () {
+        _eventSpaceState.id = parseInt(p.getAttribute('data-collab-eid'), 10);
+        _eventSpaceState.data = null;
+        renderCollabView();
+      });
+    });
     loadEventSpace();
   }
 
@@ -22867,32 +23041,71 @@
       });
   }
 
+  // Standard card nav (Erin, 2026-07-25): tap a card's header to
+  // collapse/expand it, same ws-card-toggle idiom as My Workspace.
+  // In-memory per visit, keyed per card.
+  var _collabCollapsed = {};
+  function collabCardHead(key, innerHtml) {
+    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">'
+      + innerHtml + '<span class="ws-min-caret" aria-hidden="true">▾</span></div>';
+  }
+
   function renderEventSpaceBody() {
     var body = document.getElementById('event-space-body');
     var d = _eventSpaceState.data;
     if (!body || !d) return;
-    var titleEl = personDetailCard && personDetailCard.querySelector('.rd-title');
-    if (titleEl) titleEl.textContent = '🎉 ' + d.event.name + ' — Planning';
-    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
-    if (metaEl) metaEl.textContent = d.event.school_year + (d.event.event_date ? ' · ' + boardCalFmtDate(d.event.event_date) : '');
 
     var tasks = d.tasks || [];
     var doneCount = tasks.filter(function (t) { return t.done_at; }).length;
     var openCount = tasks.length - doneCount;
     var unassigned = tasks.filter(function (t) { return !t.done_at && !t.assigned_email && !t.assigned_name; }).length;
 
-    var h = '<div class="rd-counts">';
+    // Card layout (Erin, 2026-07-25): global workspace-card pattern —
+    // header card spans the grid, then the checklist and each section
+    // render as their own card. Brand accents follow WS_ACCENTS usage
+    // (special-events / todos marks).
+    // Minimized cards live as ▸ chips at the TOP of the page (Erin,
+    // 2026-07-25 — was below the grid), same ws-min-strip idiom as
+    // My Workspace. Computed up front so the strip renders first.
+    var collabChips = [];
+    if (_collabCollapsed['checklist']) collabChips.push({ key: 'checklist', title: 'Checklist' });
+    (d.sections || []).forEach(function (sx) {
+      if (_collabCollapsed['sec-' + sx.id]) collabChips.push({ key: 'sec-' + sx.id, title: String(evsSectionTitle(sx)) });
+    });
+    var h = '';
+    if (collabChips.length) {
+      h += '<div class="ws-min-strip" style="margin:0 0 12px;">';
+      collabChips.forEach(function (c) {
+        h += '<button type="button" class="ws-min-chip" data-collab-chip="' + c.key + '" aria-label="Expand ' + escapeAttr(c.title) + '">▸ ' + escapeHtmlWs(c.title) + '</button>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="workspace-grid collab-cards">';
+    h += '<div class="mf-card workspace-card evs-section collab-card-head">';
+    h += '<div class="workspace-card-header"><h4><img class="brand-accent" src="brand/secondary/accent-28.png" alt=""> ' + escapeHtmlWs(d.event.name) + '</h4></div>';
+    h += '<div class="workspace-card-body">';
+    h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
+      + (d.event.event_date ? ' · 📅 ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
+      + (d.event.location ? ' · 📍 ' + escapeHtmlWs(d.event.location) : '') + '</p>';
+    h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
     h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
     if (unassigned > 0) h += raCountPill('ws-wv-pending', unassigned + ' unassigned');
     h += '</div>';
 
-    var lead = (d.people || []).filter(function (p) { return p.role === 'lead'; })[0];
+    var spaceLeads = (d.people || []).filter(function (p) { return p.role === 'lead'; })
+      .map(function (p) { return p.name || p.email; }).filter(Boolean);
     var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
-    h += '<p class="ws-body-hint">👑 Lead: <strong>' + escapeHtmlWs(lead ? (lead.name || lead.email) : 'not set') + '</strong>'
-      + (assists.length ? ' · Assistants: ' + assists.map(escapeHtmlWs).join(', ') : '')
+    h += '<p class="ws-body-hint">' + volRoleIconImg('lead') + ' Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
+      + (assists.length ? ' · Assisting: ' + assists.map(escapeHtmlWs).join(', ') : '')
       + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
+    if (d.can_edit) {
+      // Legend for the per-card hearts (Erin, 2026-07-25).
+      h += '<p class="ws-body-hint" style="margin:6px 0 0;display:flex;gap:8px;align-items:flex-start;">'
+        + '<img src="brand/secondary/accent-30.png" alt="" style="height:16px;width:auto;flex-shrink:0;margin-top:2px;">'
+        + '<span><strong>Binoculars</strong> on a card mean every member can see it; <strong>greyed-out binoculars</strong> keep it to the event committee, the Special Events Liaison, and the Sustaining Director. New cards start committee-only.</span></p>';
+    }
 
     if (d.can_edit) {
       var secsAll = d.sections || [];
@@ -22901,7 +23114,6 @@
       if (tplTotal > 0 && (tasks.length === 0 || secsAll.length === 0)) {
         h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplTotal + ' item' + (tplTotal === 1 ? '' : 's') + ')</button>';
       }
-      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button>';
       // Generic sections (Erin, 2026-07-21): timeline / sign-ups / info /
       // notes join the checklist so the space replaces the old planning
       // spreadsheet end to end.
@@ -22918,7 +23130,12 @@
       }
       h += '</span></div>';
     }
+    h += '</div></div>'; // /body, /header card
 
+    if (!_collabCollapsed['checklist']) {
+    h += '<div class="mf-card workspace-card evs-section">';
+    h += collabCardHead('checklist', '<h4><img class="brand-accent" src="brand/secondary/accent-12.png" alt=""> Checklist</h4>');
+    h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
     } else {
@@ -22944,13 +23161,56 @@
       });
       h += '</ul>';
     }
+    // + Add task lives ON the Checklist card (Erin, 2026-07-25) — it was
+    // in the header-card toolbar, a card away from the list it feeds.
+    if (d.can_edit) {
+      h += '<p style="margin:10px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button></p>';
+    }
+    h += '</div></div>'; // /body, /checklist card
+    }
     h += renderEventSections(d);
+    h += '</div>'; // /.workspace-grid
     body.innerHTML = h;
     wireEventSpace(body);
   }
 
   function wireEventSpace(body) {
     var d = _eventSpaceState.data;
+    // Standard card nav: header tap (or Enter/Space) collapses the card —
+    // but taps on the header's own buttons (Edit/Delete/pills) pass through.
+    body.querySelectorAll('.collab-toggle').forEach(function (hd) {
+      function flip(e) {
+        if (e.target.closest('button:not(.collab-toggle)') || e.target.closest('.sc-btn')) return;
+        _collabCollapsed[hd.getAttribute('data-collab-card')] = true;
+        renderEventSpaceBody();
+      }
+      hd.addEventListener('click', flip);
+      hd.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(e); }
+      });
+    });
+    body.querySelectorAll('.ws-min-chip[data-collab-chip]').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        _collabCollapsed[chip.getAttribute('data-collab-chip')] = false;
+        renderEventSpaceBody();
+      });
+    });
+    body.querySelectorAll('.evs-sec-pub').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-section-id'), 10);
+        var on = btn.getAttribute('data-pub') !== '1';
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-section-public', id: id, public: on }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not change visibility.'); return; }
+            var sec = (_eventSpaceState.data.sections || []).filter(function (x) { return x.id === id; })[0];
+            if (sec) sec.is_public = on;
+            renderEventSpaceBody();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error.'); });
+      });
+    });
     body.querySelectorAll('.evs-toggle').forEach(function (cb) {
       cb.addEventListener('change', function () {
         var li = cb.closest('.evs-task');
@@ -23179,7 +23439,7 @@
   // member's Ways to Help card once the lead hits "Request volunteers".
   function evsSectionTitle(s) {
     if (s.title) return s.title;
-    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year' }[s.type] || 'Section';
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Notes & Links' }[s.type] || 'Section';
   }
 
   // Shared signup-section body — same markup in the Event Space and on
@@ -23188,7 +23448,7 @@
     var cfg = s.config || {};
     var h = '';
     if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
-    var canAct = s.is_open || canEdit;
+    var canAct = s.is_open || canEdit || s.type === 'board';
     if (cfg.mode === 'slots') {
       h += '<ul class="ws-opportunities">';
       (Array.isArray(s.content) ? s.content : []).forEach(function (slot, idx) {
@@ -23207,7 +23467,7 @@
         }
         h += '<span class="ws-opp-committee">' + meta + '</span></span>';
         if (mineClaim) h += '<span class="ws-opp-committee">✓ You’re signed up</span>';
-        else if (canAct && !full) h += '<button type="button" class="sc-btn ws-opp-interest" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">🙋 Sign up</button>';
+        else if (canAct && !full) h += '<button type="button" class="volunteer-cta" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
         else if (full) h += '<span class="ws-opp-committee">Full — thank you!</span>';
         h += '</li>';
       });
@@ -23216,7 +23476,10 @@
       if ((s.signups || []).length) {
         h += '<ul class="ws-part-recap">';
         s.signups.forEach(function (c) {
-          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + escapeHtmlWs(c.item_text)
+          var itemHtml = /^https?:\/\/\S+$/i.test(String(c.item_text || '').trim())
+            ? '<a href="' + escapeAttr(String(c.item_text).trim()) + '" target="_blank" rel="noopener">' + escapeHtmlWs(String(c.item_text).trim().replace(/^https?:\/\//i, '').slice(0, 60)) + '</a>'
+            : escapeHtmlWs(c.item_text);
+          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
           if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
           h += '</li>';
@@ -23226,28 +23489,47 @@
         h += '<p class="ws-empty">Nothing claimed yet' + (canAct ? ' — be the first!' : '.') + '</p>';
       }
       if (canAct) {
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">➕ Sign up to bring something</button></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
         h += '<div class="evs-bring-form" data-bring-form="' + s.id + '" hidden></div>';
       }
     }
     return h;
   }
 
-  function renderEventSections(d) {
+  function renderEventSections(d, chips) {
     var secs = d.sections || [];
     if (!secs.length) return '';
     var h = '';
+    // Brand accents mirror the workspace cards that host the same kind
+    // of content (calendar / ways-to-help / resources / board-notes).
+    var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8', board: 'accent-36' };
     secs.forEach(function (s) {
-      h += '<div class="evs-section">';
-      h += '<div class="rd-counts" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">';
-      h += '<h5 class="ws-part-subhead" style="margin:0;">' + ({ timeline: '🕐', signup: '🙋', info: 'ℹ️', notes: '📔' }[s.type] || '📄') + ' ' + escapeHtmlWs(evsSectionTitle(s));
-      h += '</h5>';
-      if (s.type === 'signup') h += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
-      if (d.can_edit) {
-        h += '<span class="ws-srt-actions"><button type="button" class="sc-btn evs-sec-edit" data-section-id="' + s.id + '">Edit</button>'
-          + '<button type="button" class="sc-btn sc-btn-del evs-sec-del" data-section-id="' + s.id + '">Delete</button></span>';
+      var secKey = 'sec-' + s.id;
+      if (_collabCollapsed[secKey]) {
+        if (chips) chips.push({ key: secKey, title: String(evsSectionTitle(s)) });
+        return;
       }
-      h += '</div>';
+      // Committee-only cards wear a light grey tint (Erin, 2026-07-25).
+      h += '<div class="mf-card workspace-card evs-section' + (s.is_public === false ? ' evs-private' : '') + '">';
+      // Compact actions ride the header row beside the title (Erin,
+      // 2026-07-25): ♥ filled = all members / outline = committee-only,
+      // pencil = edit, × = delete — tooltips carry the words, and the
+      // header card explains the hearts.
+      var headIcons = '';
+      if (s.type === 'signup') headIcons += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
+      if (d.can_edit) {
+        var pub = s.is_public !== false;
+        headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub' + (pub ? '' : ' evs-vis-off') + '" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Every member can see this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'
+          + '<img src="brand/secondary/accent-30.png" alt=""></button>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-sec-edit" data-section-id="' + s.id + '" aria-label="Edit section" title="Edit this section">'
+          + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>';
+        headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
+      }
+      h += collabCardHead(secKey,
+        '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>'
+        + (headIcons ? '<span class="evs-head-icons">' + headIcons + '</span>' : ''));
+      h += '<div class="workspace-card-body">';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
         h += items.length
@@ -23272,10 +23554,12 @@
         h += String(c.text || '').trim()
           ? '<p style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.text)) + '</p>'
           : '<p class="ws-empty">Jot lessons for next year here' + (d.can_edit ? ' — Edit this section' : '') + '.</p>';
-      } else if (s.type === 'signup') {
+      } else if (s.type === 'signup' || s.type === 'board') {
+        // 'board' (Erin, 2026-07-25): shared notes & links — the bring-list
+        // mechanics (attributed entries, own-entry ×) with adding always on.
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
       }
-      h += '</div>';
+      h += '</div></div>'; // /body, /card
     });
     return h;
   }
@@ -23325,6 +23609,7 @@
         + '<option value="signup">Sign-up list — toppings, supplies, volunteer spots</option>'
         + '<option value="timeline">Timeline — the day-of schedule</option>'
         + '<option value="notes">Notes for next year</option>'
+        + '<option value="board">Shared notes & links — anyone can add</option>'
         + '</select></div>';
     }
     h += '<div id="evs-sd-fields">' + fieldsFor(type, section) + '</div>';
@@ -23457,7 +23742,7 @@
   function showEventJumpInModal() {
     var body = renderReportModal({
       title: '🎪 Special Events — Jump In',
-      subtitle: 'Assist an event, claim a helper spot, or add what you’ll bring — those sign-ups put your name straight on the event (undo yours any time). Want to LEAD one? Raise a hand and the Special Events Liaison will confirm with you.',
+      subtitle: 'Lead or co-lead an event, assist one, claim a helper spot, or add what you’ll bring — every sign-up puts your name straight on the event, no approval needed (undo yours any time).',
       bodyId: 'event-jumpin-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23482,27 +23767,21 @@
         + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
       var seatRows = '';
       // 👑 Lead — ALWAYS shown (Erin, 2026-07-22): who's running it is
-      // key context even when the seat is filled, and an unfilled lead
-      // takes a HAND-RAISE the SEL confirms — leading is a bigger
-      // commitment than the assistants' instant sign-up (#75 stays for
-      // assists). A viewer who direct-added as lead pre-change keeps
-      // their undo button.
+      // key context even when the seat is filled. Direct sign-up with no
+      // approval step (Erin, 2026-07-25); up to two members share it as
+      // co-leads.
       (function () {
         var isOn = !!(ev.my_seat_interest && ev.my_seat_interest.lead);
         var leadNames = (ev.seat_names && ev.seat_names.lead) || [];
-        var hands = ev.lead_interest_names || [];
-        var row = '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>👑 Event Lead</strong>';
-        if (ev.lead_filled) {
-          row += '<span class="ws-opp-committee">✓ ' + escapeHtml(leadNames.join(', ') || 'Filled') + '</span>'
-            + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + '</span></span>';
-          if (isOn) {
-            row += '<button type="button" class="sc-btn ws-opp-interest ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
-          }
-        } else {
-          if (hands.length) row += '<span class="ws-opp-committee">🙋 Interested so far: ' + escapeHtml(hands.join(', ')) + '</span>';
-          row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Raising a hand isn’t instant — the Special Events Liaison confirms with you first.</span></span>';
-          row += '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">'
-            + (isOn ? '✓ Interested — undo' : '🙋 I’m interested') + '</button>';
+        var full = !!ev.lead_filled; // both co-lead spots taken
+        var row = '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + volRoleIconImg('lead') + ' Lead</strong>';
+        row += '<span class="ws-opp-committee">' + leadNames.length + ' of 2 spots filled</span>';
+        if (leadNames.length) row += '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(leadNames.join(', ')) + '</span>';
+        row += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.lead + ' Two members can share it as co-leads.</span></span>';
+        if (isOn) {
+          row += '<button type="button" class="volunteer-cta ws-opp-interested" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">✓ Signed up — undo</button>';
+        } else if (!full) {
+          row += '<button type="button" class="volunteer-cta" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="lead">' + DUTY_ICONS.volunteer + ' Sign up</button>';
         }
         seatRows += row + '</li>';
       })();
@@ -23512,12 +23791,12 @@
         if ((ev.open_seats || []).indexOf('assist') === -1 && !isOn) return;
         // #79: show who's already in the seat(s) — teammates matter.
         var names = (ev.seat_names && ev.seat_names.assist) || [];
-        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>🤝 Assistant</strong>'
+        seatRows += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + volRoleIconImg('assist') + ' Assistant</strong>'
           + '<span class="ws-opp-committee">' + (ev.assist_count || 0) + ' of 2 spots filled</span>'
           + (names.length ? '<span class="ws-opp-committee">✓ Signed up: ' + escapeHtml(names.join(', ')) + '</span>' : '')
           + '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS.assist + '</span></span>'
-          + '<button type="button" class="sc-btn ws-opp-interest' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="assist">'
-          + (isOn ? '✓ Signed up — undo' : '🙋 Sign up') + '</button></li>';
+          + '<button type="button" class="volunteer-cta' + (isOn ? ' ws-opp-interested' : '') + '" data-resource-action="event-seat-toggle" data-event-id="' + ev.id + '" data-seat="assist">'
+          + (isOn ? '✓ Signed up — undo' : DUTY_ICONS.volunteer + ' Sign up') + '</button></li>';
       })();
       if (seatRows) h += '<ul class="ws-opportunities">' + seatRows + '</ul>';
       (ev.signup_sections || []).forEach(function (s) {
@@ -23547,21 +23826,155 @@
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not save that — try again.'); loadEventOpenings(); return; }
         if (ev && ev.my_seat_interest) ev.my_seat_interest[seat] = !isOn;
         btn.classList.toggle('ws-opp-interested', !isOn);
-        // Lead is a hand-raise (SEL confirms); assist is a direct add.
-        btn.textContent = seat === 'lead'
-          ? (!isOn ? '✓ Interested — undo' : '🙋 I’m interested')
-          : (!isOn ? '✓ Signed up — undo' : '🙋 Sign up');
-        // Refresh the grid view + card summary (the name is live data now).
+        // Both seats are direct adds (Erin, 2026-07-25 — no approvals).
+        btn.textContent = !isOn ? '✓ Signed up — undo' : '🙋 Sign up';
+        // Refresh the grid + card summary so the member SEES it landed —
+        // patch the grid's local copy, then refetch live state.
+        if (typeof evVolunteerPatchGrid === 'function') evVolunteerPatchGrid(eid, seat, !isOn);
         loadEventOpenings();
-        if (typeof SPECIAL_EVENTS_DB !== 'undefined' && typeof loadLiveData === 'function' && typeof renderEventsTab === 'function') {
-          try { renderEventsTab(); } catch (e) { /* grid repaints on next data load */ }
-        }
       })
       .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
   }
 
   function evsMaybeRefreshSpace() {
     if (_eventSpaceState && _eventSpaceState.id && document.getElementById('event-space-body')) loadEventSpace();
+  }
+
+  // Self-removal straight from the Events grid (Erin, 2026-07-25): the ×
+  // next to YOUR name, two-step confirmed, same undo the modals offer.
+  function removeEventSeatSelf(btn) {
+    rwArmTwoStep(btn, 'remove', function (b) {
+      var eid = parseInt(b.getAttribute('data-eid'), 10);
+      var seat = b.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
+      if (!eid) return;
+      b.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: eid, seat: seat, on: false }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { b.disabled = false; alert((res.data && res.data.error) || 'Could not remove you — try again.'); return; }
+          if (typeof evVolunteerPatchGrid === 'function') evVolunteerPatchGrid(eid, seat, false);
+          loadEventOpenings();
+        })
+        .catch(function () { b.disabled = false; alert('Network error — try again.'); });
+    });
+  }
+
+  // ── Volunteer straight from the Events grid (Erin, 2026-07-25) ─────
+  // Each upcoming event card carries a "🙋 Volunteer" button → this
+  // per-event modal: responsibilities + dates/location first, then an
+  // explicit tap-again-to-confirm before the sign-up lands. (Jump In
+  // stays one-tap; this doorway is for members browsing the grid who
+  // haven't seen the role blurbs yet.)
+  var _evVolunteerEventId = null;
+  function showEventVolunteerModal(eventId) {
+    _evVolunteerEventId = eventId;
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === eventId) meta = e; });
+    var body = renderReportModal({
+      title: '🙋 Volunteer — ' + (meta ? meta.name : 'Special Event'),
+      subtitle: 'Here’s what each role involves and when you’d be needed. Tap a role to sign up — your name goes straight on the event, and you can undo any time.',
+      bodyId: 'event-volunteer-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    paintEventVolunteerModal();
+    if (!_eventOpenings || _eventOpenings === 'loading') loadEventOpenings(paintEventVolunteerModal);
+  }
+
+  // Instant feedback on the Co-op Coordination grid (Erin, 2026-07-25:
+  // "refresh the Special Events table so they see it worked") — patch
+  // SPECIAL_EVENTS_DB locally and re-render; the next /api/sheets load
+  // brings the server-truth copy.
+  function evVolunteerPatchGrid(eventId, seat, on) {
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === eventId) meta = e; });
+    if (!meta) return;
+    var em = String(getActiveEmail() || '').toLowerCase();
+    var nm = ((typeof getMyNames === 'function' && (getMyNames().fullNames || [])[0]) || em);
+    var arr = seat === 'lead'
+      ? (meta.coordinators = meta.coordinators || (meta.coordinator ? [meta.coordinator] : []))
+      : (meta.support = meta.support || []);
+    var without = arr.filter(function (p) { return String(p && p.email || '').toLowerCase() !== em; });
+    if (on) { without.push({ name: nm, email: em }); }
+    if (seat === 'lead') { meta.coordinators = without; meta.coordinator = without[0] || null; }
+    else meta.support = without;
+    try { renderEventsTab(); } catch (e) { /* grid repaints on next data load */ }
+    if (typeof renderMyFamily === 'function') { try { renderMyFamily(); } catch (e) { /* ditto */ } }
+  }
+
+  function paintEventVolunteerModal() {
+    var el = document.getElementById('event-volunteer-body');
+    if (!el || !_evVolunteerEventId) return;
+    var eo = _eventOpenings;
+    if (!eo || eo === 'loading') { el.innerHTML = '<p class="ws-empty">Loading…</p>'; return; }
+    var meta = null;
+    SPECIAL_EVENTS_DB.forEach(function (e) { if (e.id === _evVolunteerEventId) meta = e; });
+    var ev = (Array.isArray(eo.events) ? eo.events : []).filter(function (e) { return e.id === _evVolunteerEventId; })[0];
+    var h = '';
+    if (meta) {
+      var timeBit = specialEventTimeLabel(meta);
+      h += '<p class="ws-body-hint" style="margin:0 0 2px;">📅 <strong>' + escapeHtml(specialEventDateLabel(meta))
+        + (timeBit ? ' · ' + escapeHtml(timeBit) : '') + '</strong></p>';
+      if (meta.location) h += '<p class="ws-body-hint" style="margin:0 0 8px;">📍 ' + escapeHtml(meta.location) + '</p>';
+      if (meta.notes) h += '<p class="ws-body-hint" style="margin:0 0 8px;">' + escapeHtml(meta.notes) + '</p>';
+    }
+    if (!ev) {
+      h += '<p class="ws-empty">This event’s volunteer spots are all filled — thank you! 🎉 Check the other events, or the sign-up lists under Ways to Help.</p>';
+      el.innerHTML = h;
+      return;
+    }
+    var seats = [
+      { key: 'lead', icon: volRoleIconImg('lead'), label: 'Lead', cap: 2 },
+      { key: 'assist', icon: volRoleIconImg('assist'), label: 'Assistant', cap: 2 }
+    ];
+    h += '<ul class="ws-opportunities">';
+    seats.forEach(function (s) {
+      var isOn = !!(ev.my_seat_interest && ev.my_seat_interest[s.key]);
+      var names = (ev.seat_names && ev.seat_names[s.key]) || [];
+      var open = (ev.open_seats || []).indexOf(s.key) !== -1;
+      var cap = Math.max(s.cap, names.length);
+      h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + s.icon + ' ' + s.label + '</strong>';
+      h += '<span class="ws-opp-committee">' + names.length + ' of ' + cap + ' spots filled'
+        + (names.length ? ' · ' + escapeHtml(names.join(', ')) : '') + '</span>';
+      h += '<span class="ws-opp-committee">' + EVENT_SEAT_BLURBS[s.key]
+        + (s.key === 'lead' ? ' Two members can share it as co-leads.' : '') + '</span></span>';
+      if (isOn) {
+        h += '<button type="button" class="volunteer-cta ws-opp-interested ev-vol-seat" data-seat="' + s.key + '" data-on="1">✓ Signed up — undo</button>';
+      } else if (open) {
+        h += '<button type="button" class="volunteer-cta ev-vol-seat" data-seat="' + s.key + '" data-label="' + s.label + '">' + DUTY_ICONS.volunteer + ' Volunteer as ' + s.label + '</button>';
+      } else {
+        h += '<span class="ws-opp-committee">Full — thank you!</span>';
+      }
+      h += '</li>';
+    });
+    h += '</ul>';
+    h += '<p class="ws-body-hint">Sign-ups go straight onto the event — no approval needed, and you can undo yours any time. Your event appears under My Responsibilities and on the Special Events grid.</p>';
+    el.innerHTML = h;
+
+    el.querySelectorAll('.ev-vol-seat').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var seat = btn.getAttribute('data-seat') === 'lead' ? 'lead' : 'assist';
+        var undoing = btn.getAttribute('data-on') === '1';
+        // #109 (Colleen): one click signs you up — the modal itself is
+        // the "here's what you're committing to" step, no double-tap.
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-seat-interest', event_id: _evVolunteerEventId, seat: seat, on: !undoing }) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              btn.disabled = false;
+              btn.removeAttribute('data-armed');
+              alert((res.data && res.data.error) || 'Could not save that — try again.');
+              loadEventOpenings(paintEventVolunteerModal);
+              return;
+            }
+            // Repaint this modal from fresh data + show the grid update.
+            evVolunteerPatchGrid(_evVolunteerEventId, seat, !undoing);
+            loadEventOpenings(paintEventVolunteerModal);
+          })
+          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+      });
+    });
   }
 
   function claimEventSlot(btn) {
@@ -23658,7 +24071,7 @@
   function showEventSeatReviewModal() {
     var body = renderReportModal({
       title: '🙋 Special-Event Sign-ups',
-      subtitle: 'Recent event sign-ups (last 14 days). Assistants sign themselves straight onto the event; LEAD hand-raises are interest only — assign the lead on the event card if it’s a fit.',
+      subtitle: 'Recent event sign-ups (last 14 days) — a heads-up, not an approval queue: every sign-up goes straight onto the event. Mark rows reviewed to clear them.',
       bodyId: 'evseat-review-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -23681,22 +24094,23 @@
           h += '<h5 class="ws-part-subhead">🎪 ' + escapeHtmlWs(g.name) + (g.date ? ' — ' + boardCalFmtDate(g.date) : '') + '</h5>';
           h += '<ul class="ws-part-recap">';
           g.rows.forEach(function (r) {
-            // Lead rows are HAND-RAISES (not assigned yet); assist rows
-            // were direct-added onto the event (#75).
+            // All sign-ups are direct adds now (Erin, 2026-07-25). A
+            // legacy approval-era lead hand-raise that never got placed
+            // still reads as pending so those volunteers aren't lost.
             var seatBit = r.seat === 'lead'
-              ? '<span class="ws-wv-pending">wants to lead</span> — assign on the event card if it’s a fit'
+              ? 'Lead / Co-lead (already on the event — if not, place them on the event card)'
               : 'Assistant (already on the event)';
             h += '<li><strong>' + escapeHtmlWs(r.name) + '</strong> — ' + seatBit
               + ' · <a href="mailto:' + escapeAttr(r.email) + '">' + escapeHtmlWs(r.email) + '</a>'
               + (r.created_at && typeof timeAgo === 'function' ? ' · ' + escapeHtmlWs(timeAgo(r.created_at)) : '')
               // #80: reviewing clears the row from this card — the count
               // drops with it (assists stay on the event either way).
-              + ' <button type="button" class="sc-btn evseat-ack" data-ack-id="' + r.id + '" title="' + (r.seat === 'lead' ? 'Mark reviewed — removes it from this list (assign them on the event card first if you want them as lead)' : 'Mark reviewed — removes it from this list; they stay on the event') + '">✓ Seen</button>'
+              + ' <button type="button" class="sc-btn evseat-ack" data-ack-id="' + r.id + '" title="Mark reviewed — removes it from this list; they stay on the event">✓ Seen</button>'
               + '</li>';
           });
           h += '</ul>';
         });
-        h += '<p class="ws-body-hint">Assistants are already on their event card (Special Events, under Co-op Coordination) — swap or remove them there if plans change. Lead hand-raisers are NOT on the event until you assign them there.</p>';
+        h += '<p class="ws-body-hint">Everyone here is already on their event card (Special Events, under Co-op Coordination) — swap or remove people there if plans change.</p>';
       }
       el.innerHTML = h;
       var tk = document.getElementById('evseat-take-me');
@@ -24315,7 +24729,8 @@
           name: ev.name || '',
           date: ev.event_date ? boardCalFmtDate(ev.event_date) : '',
           approved: ev.date_status === 'approved',
-          lead: (ev.lead && (ev.lead.name || ev.lead.email)) || '',
+          lead: (ev.leads || (ev.lead ? [ev.lead] : []))
+            .map(function (l) { return l.name || l.email; }).filter(Boolean).join(' & '),
           assists: (ev.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean)
         };
       }),

@@ -6131,12 +6131,26 @@ async function handleSpecialEventsGet(req, res) {
       WHERE se.school_year = ${schoolYear}
       ORDER BY sep.event_id, sep.role DESC, sep.sort_order
     `;
+    // Lead hand-raises (event_seat_interest) — surfaced on the lens so
+    // "I want to lead/co-lead" volunteers are visible where the SEL
+    // actually assigns people, not only in the 14-day review To Do.
+    const leadHands = await sql`
+      SELECT esi.event_id, esi.person_name, LOWER(esi.person_email) AS person_email
+      FROM event_seat_interest esi
+      JOIN special_events se ON se.id = esi.event_id
+      WHERE se.school_year = ${schoolYear} AND esi.seat = 'lead'
+      ORDER BY esi.created_at, esi.id
+    `;
     const byEvent = {};
     people.forEach(p => { (byEvent[p.event_id] || (byEvent[p.event_id] = [])).push(p); });
     const out = events.map(e => {
       const ppl = byEvent[e.id] || [];
-      const lead = ppl.find(x => x.role === 'lead');
+      // Co-leads (Erin, 2026-07-25): an event can carry up to TWO lead
+      // rows. `leads` is the full list; `lead` stays the first row so
+      // older cached clients keep working.
+      const leads = ppl.filter(x => x.role === 'lead').map(x => ({ email: (x.person_email || '').toLowerCase(), name: x.person_name || '' }));
       const assists = ppl.filter(x => x.role === 'assist').map(x => ({ email: x.person_email || '', name: x.person_name || '' }));
+      const leadEmails = leads.map(l => l.email).filter(Boolean);
       return {
         id: e.id,
         name: e.name,
@@ -6146,8 +6160,13 @@ async function handleSpecialEventsGet(req, res) {
         // Ice Cream Social + Field Day dates are also driven by the session
         // calendar (board-calendar derived events) — flag so the UI can note it.
         date_from_calendar: (e.name === 'Ice Cream Social' || e.name === 'Field Day'),
-        lead: lead ? { email: lead.person_email || '', name: lead.person_name || '' } : null,
-        assists
+        lead: leads[0] || null,
+        leads,
+        assists,
+        // Hands raised for the lead seat, minus anyone already assigned.
+        lead_interest: leadHands
+          .filter(h => h.event_id === e.id && leadEmails.indexOf(h.person_email) === -1)
+          .map(h => ({ email: h.person_email, name: h.person_name || h.person_email }))
       };
     });
     const memRows = await sql`
@@ -6206,7 +6225,10 @@ function eventTaskShape(t) {
 // Reusable Event Space components — timeline / signup / info / notes —
 // so any event (Ice Cream Social, PJ Party, Field Day…) assembles its
 // own stack. Content/config shapes are documented in migrate.sql.
-const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes'];
+// 'board' (Erin, 2026-07-25): shared notes & links — any member adds/
+// removes their own entries (Pinterest boards etc.); rides the same
+// event_section_signups rows the bring-lists use.
+const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board'];
 
 function eventSectionShape(s, signups) {
   return {
@@ -6216,6 +6238,7 @@ function eventSectionShape(s, signups) {
     config: s.config || {},
     content: s.content == null ? [] : s.content,
     is_open: !!s.is_open,
+    is_public: s.is_public !== false,
     sort_order: s.sort_order,
     signups: (signups || []).filter(x => x.section_id === s.id).map(x => ({
       id: x.id,
@@ -6248,7 +6271,7 @@ async function handleEventSpaceGet(req, res) {
   try {
     const sql = getSql();
     const evRows = await sql`
-      SELECT id, school_year, name, event_date, date_status, notes
+      SELECT id, school_year, name, event_date, date_status, location, notes
       FROM special_events WHERE id = ${eventId}
     `;
     if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
@@ -6270,8 +6293,8 @@ async function handleEventSpaceGet(req, res) {
       SELECT COUNT(*)::int AS n FROM event_template_sections WHERE event_name = ${ev.name}
     `;
     // Generic sections (Erin, 2026-07-21) + their member sign-ups.
-    const sections = await sql`
-      SELECT id, type, title, config, content, is_open, sort_order
+    let sections = await sql`
+      SELECT id, type, title, config, content, is_open, is_public, sort_order
       FROM event_sections WHERE special_event_id = ${eventId}
       ORDER BY sort_order, id
     `;
@@ -6282,6 +6305,17 @@ async function handleEventSpaceGet(req, res) {
       ORDER BY created_at, id
     ` : [];
     const canEdit = await canEditEventSpace(sql, auth, eventId);
+    // Card visibility (Erin, 2026-07-25): is_public=false cards show only
+    // to the event committee (canEditEventSpace covers them + SEL/VP),
+    // plus the Sustaining Director.
+    let priv = canEdit;
+    if (!priv) {
+      try {
+        const sd = await getRoleHolderEmail('Sustaining Director');
+        priv = !!sd && String(sd).toLowerCase() === String(auth.email || '').toLowerCase();
+      } catch (e) { /* role unresolved — stay non-privileged */ }
+    }
+    if (!priv) sections = sections.filter(x => x.is_public !== false);
     const payload = {
       event: {
         id: ev.id,
@@ -6289,6 +6323,7 @@ async function handleEventSpaceGet(req, res) {
         name: ev.name,
         event_date: specialEventDateStr(ev.event_date),
         date_status: ev.date_status,
+        location: ev.location || '',
         notes: ev.notes || ''
       },
       tasks: tasks.map(eventTaskShape),
@@ -6581,6 +6616,28 @@ async function handleEventTemplateSave(body, req, res) {
   }
 }
 
+// kind=event-section-public — flip a section card's visibility (Erin,
+// 2026-07-25). Editors only; TRUE = all members, FALSE = committee+SEL+SD.
+async function handleEventSectionPublic(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT special_event_id FROM event_sections WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Section not found.' });
+    if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can change visibility.' });
+    }
+    await sql`UPDATE event_sections SET is_public = ${!!body.public}, updated_by = ${auth.realEmail}, updated_at = NOW() WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-section-public error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 // kind=event-section-save — add or edit a generic section (editors).
 // Type is fixed after creation (claims reference the shape); config and
 // content arrive as JSON and are size-capped, never trusted for HTML.
@@ -6710,9 +6767,9 @@ async function handleEventSignupClaim(body, req, res) {
       SELECT id, special_event_id, type, config, content, is_open
       FROM event_sections WHERE id = ${sectionId}
     `;
-    if (secRows.length === 0 || secRows[0].type !== 'signup') return res.status(404).json({ error: 'Sign-up list not found.' });
+    if (secRows.length === 0 || ['signup', 'board'].indexOf(secRows[0].type) === -1) return res.status(404).json({ error: 'Sign-up list not found.' });
     const sec = secRows[0];
-    if (!sec.is_open && !(await canEditEventSpace(sql, auth, sec.special_event_id))) {
+    if (sec.type === 'signup' && !sec.is_open && !(await canEditEventSpace(sql, auth, sec.special_event_id))) {
       return res.status(403).json({ error: 'Sign-ups aren’t open for this event yet.' });
     }
     const email = String(auth.email || '').toLowerCase();
@@ -6860,7 +6917,8 @@ async function handleEventOpeningsGet(req, res) {
     `;
     const ids = events.map(e => e.id);
     const people = ids.length ? await sql`
-      SELECT event_id, role, person_name FROM special_event_people WHERE event_id = ANY(${ids})
+      SELECT event_id, role, person_name, LOWER(person_email) AS person_email
+      FROM special_event_people WHERE event_id = ANY(${ids})
       ORDER BY sort_order, id
     ` : [];
     // #75: seats are direct-add now, so "mine" reads the REAL grid rows.
@@ -6878,7 +6936,7 @@ async function handleEventOpeningsGet(req, res) {
     const sections = ids.length ? await sql`
       SELECT id, special_event_id, type, title, config, content, is_open, sort_order
       FROM event_sections
-      WHERE special_event_id = ANY(${ids}) AND type = 'signup' AND is_open = TRUE
+      WHERE special_event_id = ANY(${ids}) AND type = 'signup' AND is_open = TRUE AND is_public = TRUE
       ORDER BY sort_order, id
     ` : [];
     const sectionIds = sections.map(s => s.id);
@@ -6894,17 +6952,21 @@ async function handleEventOpeningsGet(req, res) {
       // Past events drop off (1-day grace); undated ones stay listed.
       if (dateStr && dateStr < today) return;
       const evPeople = people.filter(p => p.event_id === ev.id);
-      const leadFilled = evPeople.some(p => p.role === 'lead');
+      const leadCount = evPeople.filter(p => p.role === 'lead').length;
       const assistCount = evPeople.filter(p => p.role === 'assist').length;
       const openSeats = [];
-      // Assistant seats: show while fewer than 2 helpers are assigned
-      // (spreadsheet-era events ran with 1–2; the grid itself caps at 4).
-      if (!leadFilled) openSeats.push('lead');
+      // Lead seat: direct sign-up, up to TWO co-leads (Erin, 2026-07-25 —
+      // no approval step). Assistant seats: show while fewer than 2
+      // helpers are assigned (spreadsheet-era events ran with 1–2; the
+      // grid itself caps at 4).
+      if (leadCount < 2) openSeats.push('lead');
       if (assistCount < 2) openSeats.push('assist');
+      // "Mine" reads the REAL grid rows only — a legacy approval-era
+      // hand-raise (interest row without a people row) shows as NOT
+      // signed up, so the member can tap again and land on the event.
       const mine = { lead: false, assist: false };
       myInterest.forEach(r => { if (r.event_id === ev.id) mine[r.seat] = true; });
       const evHands = handRows.filter(r => r.event_id === ev.id);
-      if (evHands.some(r => r.seat === 'lead' && r.em === email)) mine.lead = true;
       const evSections = sections.filter(s => s.special_event_id === ev.id)
         .map(s => eventSectionShape(s, signups));
       // Keep the event listed while the viewer holds a seat even if it's
@@ -6919,7 +6981,8 @@ async function handleEventOpeningsGet(req, res) {
         start_time: ev.start_time || '',
         end_time: ev.end_time || '',
         open_seats: openSeats,
-        lead_filled: leadFilled,
+        lead_filled: leadCount >= 2,
+        lead_count: leadCount,
         assist_count: assistCount,
         my_seat_interest: mine,
         // #79: who already holds each seat — the Jump In modal shows
@@ -6928,9 +6991,11 @@ async function handleEventOpeningsGet(req, res) {
           lead: evPeople.filter(p => p.role === 'lead').map(p => p.person_name).filter(Boolean),
           assist: evPeople.filter(p => p.role === 'assist').map(p => p.person_name).filter(Boolean)
         },
-        // Hands raised for the (unfilled) lead seat — interest, not
-        // assignment. The SEL confirms + assigns from the grid.
-        lead_interest_names: evHands.filter(r => r.seat === 'lead').map(r => r.person_name).filter(Boolean),
+        // Legacy approval-era hand-raises not yet on the event — kept so
+        // the lens/drawer can still surface them until they're placed.
+        lead_interest_names: evHands.filter(r => r.seat === 'lead'
+          && !evPeople.some(p => p.role === 'lead' && (p.person_email || '').toLowerCase() === r.em))
+          .map(r => r.person_name).filter(Boolean),
         signup_sections: evSections
       });
     });
@@ -6940,15 +7005,23 @@ async function handleEventOpeningsGet(req, res) {
       || isSuperUser(auth.email) || await isBoardMember(auth.email);
     payload.can_review = canReview;
     if (canReview) {
-      // Direct-add era (#75): the log's last 14 days = "recent sign-ups"
-      // for the SEL / Sustaining Director To Do; older rows age out.
+      // All sign-ups are direct adds (Erin, 2026-07-25 — no approvals),
+      // so this list is a pure FYI trail: the last 14 days = "recent
+      // sign-ups"; older rows age out. The one exception: a LEGACY
+      // approval-era lead hand-raise whose person never landed on the
+      // event stays visible until acked, so no volunteer is lost in the
+      // transition.
       const interest = await sql`
         SELECT esi.id, esi.event_id, esi.seat, esi.person_email, esi.person_name, esi.created_at,
                se.name AS event_name, se.school_year, se.event_date
         FROM event_seat_interest esi
         JOIN special_events se ON se.id = esi.event_id
         WHERE se.school_year = ${schoolYear}
-          AND esi.created_at >= NOW() - INTERVAL '14 days'
+          AND (esi.created_at >= NOW() - INTERVAL '14 days'
+               OR (esi.seat = 'lead' AND NOT EXISTS (
+                     SELECT 1 FROM special_event_people sep
+                     WHERE sep.event_id = esi.event_id AND sep.role = 'lead'
+                       AND LOWER(sep.person_email) = LOWER(esi.person_email))))
         ORDER BY esi.created_at DESC
       `;
       payload.seat_interest = interest.map(r => ({
@@ -6975,12 +7048,11 @@ async function handleEventOpeningsGet(req, res) {
 // grid. SEL + Sustaining Director still get a bell + their To Do lists
 // recent sign-ups (event_seat_interest doubles as the log). Members can
 // only remove THEMSELVES here.
-// #79 follow-up (Erin, 2026-07-22): the LEAD seat is the exception —
-// running an event is a bigger commitment than a helper spot, so a
-// lead tap is a hand-raise (event_seat_interest row only) that the
-// SEL confirms and assigns in the grid; it never direct-adds.
-// Assistants stay direct. The shared !on path still deletes both rows,
-// which doubles as the undo for pre-change direct-added leads.
+// Erin, 2026-07-25: "we don't need approvals for special event
+// volunteers" — the #79 lead hand-raise (SEL confirms first) is retired.
+// A lead tap direct-adds like assists do; up to TWO leads share the seat
+// as co-leads. The !on path deletes both rows (undo), including legacy
+// hand-raise-only rows from the approval era.
 async function handleEventSeatInterest(body, req, res) {
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -7013,21 +7085,18 @@ async function handleEventSeatInterest(body, req, res) {
     if (existing.some(r => r.role === seat && r.em === email)) {
       return res.status(200).json({ ok: true, already: true });
     }
-    if (seat === 'lead' && existing.some(r => r.role === 'lead')) {
-      return res.status(409).json({ error: 'This event just got a lead — thank you anyway! Grab an assistant spot instead.' });
+    if (seat === 'lead' && existing.filter(r => r.role === 'lead').length >= 2) {
+      return res.status(409).json({ error: 'This event already has its two leads — thank you anyway! Grab an assistant spot instead.' });
     }
     if (seat === 'assist' && existing.filter(r => r.role === 'assist').length >= 4) {
       return res.status(409).json({ error: 'The assistant spots just filled up — thank you anyway!' });
     }
-    if (seat === 'assist') {
-      const nextSort = existing.filter(r => r.role === 'assist').reduce((m, r) => Math.max(m, (r.sort_order || 0) + 1), 0);
-      await sql`
-        INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
-        VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${nextSort}, ${auth.realEmail})
-      `;
-    }
-    // Log row: assist = the "recent sign-ups" To Do trail; lead = THE
-    // hand-raise itself (no direct add — the SEL assigns from the grid).
+    const nextSort = existing.filter(r => r.role === seat).reduce((m, r) => Math.max(m, (r.sort_order || 0) + 1), 0);
+    await sql`
+      INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
+      VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${nextSort}, ${auth.realEmail})
+    `;
+    // Log row — the SEL / Sustaining Director "recent sign-ups" FYI trail.
     await sql`
       INSERT INTO event_seat_interest (event_id, seat, person_email, person_name, family_email)
       VALUES (${eventId}, ${seat}, ${email}, ${who.name}, ${who.family_email})
@@ -7042,12 +7111,10 @@ async function handleEventSeatInterest(body, req, res) {
     }
     if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
     const seatLabel = seat === 'lead' ? 'Lead' : 'Assistant';
-    const notifTitle = seat === 'lead'
-      ? '🙋 ' + who.name + ' wants to lead — ' + ev.name
-      : '🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel;
-    const notifBody = seat === 'lead'
-      ? who.name + ' raised a hand to LEAD the ' + ev.name + '. They are NOT on the event yet — if it’s a fit, assign them as lead in the Special Events grid and let them know.'
-      : who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name + '. Their name is already on the event in the Special Events grid — adjust there if needed.';
+    const notifTitle = '🙋 ' + who.name + ' signed up — ' + ev.name + ' ' + seatLabel;
+    const notifBody = who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name
+      + '. Their name is already on the event in the Special Events grid — adjust there if needed.'
+      + (seat === 'lead' ? ' (Two people can share the lead as co-leads.)' : '');
     for (const rcpt of recipients) {
       try {
         await sql`
@@ -7063,7 +7130,9 @@ async function handleEventSeatInterest(body, req, res) {
   }
 }
 
-// POST kind='special-event-people' — replace one event's lead + assistants.
+// POST kind='special-event-people' — replace one event's lead(s) + assistants.
+// Co-leads (Erin, 2026-07-25): up to TWO lead rows; body.leads array with
+// body.lead kept as the single-lead fallback for older clients.
 async function handleSpecialEventSave(body, req, res) {
   const auth = await requireSpecialEventsEditor(req, res);
   if (!auth) return;
@@ -7072,17 +7141,17 @@ async function handleSpecialEventSave(body, req, res) {
   const clean = (p) => (p && (p.name || p.email))
     ? { email: String(p.email || '').trim().toLowerCase(), name: String(p.name || '').trim() }
     : null;
-  const lead = clean(body.lead);
+  const leads = (Array.isArray(body.leads) ? body.leads : [body.lead]).map(clean).filter(Boolean).slice(0, 2);
   const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean).slice(0, 4);
   try {
     const sql = getSql();
     const owns = await sql`SELECT id FROM special_events WHERE id = ${eventId}`;
     if (!owns.length) return res.status(404).json({ error: 'Event not found' });
     await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
-    if (lead) {
+    for (let i = 0; i < leads.length; i++) {
       await sql`
         INSERT INTO special_event_people (event_id, role, person_email, person_name, sort_order, updated_by)
-        VALUES (${eventId}, 'lead', ${lead.email}, ${lead.name}, 0, ${auth.realEmail})
+        VALUES (${eventId}, 'lead', ${leads[i].email}, ${leads[i].name}, ${i}, ${auth.realEmail})
       `;
     }
     for (let i = 0; i < assists.length; i++) {
@@ -9980,6 +10049,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-space-template-start') return handleEventSpaceTemplateStart(body, req, res);
     if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
     if (kind === 'event-section-save') return handleEventSectionSave(body, req, res);
+    if (kind === 'event-section-public') return handleEventSectionPublic(body, req, res);
     if (kind === 'event-section-delete') return handleEventSectionDelete(body, req, res);
     if (kind === 'event-signups-open') return handleEventSignupsOpen(body, req, res);
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);

@@ -4968,7 +4968,11 @@ button.staff-role:hover {
   text-overflow: ellipsis;
   min-width: 0;
 }
-/* Room never collapses — the class title is what truncates */
+/* Room never collapses — the class title is what truncates. BUT the
+   title keeps a readable floor (#113: a long event detail crushed the
+   title span to zero width, so the row read "· Support · Wed, Aug 19"
+   with no event name; the line's overflow:hidden clips the sub instead). */
+.mf-duty-line strong { min-width: 5em; }
 .mf-duty-line .mf-duty-sub { flex-shrink: 0; }
 .mf-duty-line .mf-role-tag { flex-shrink: 0; }
 .mf-duty-line2 { gap: 6px; align-items: center; margin-top: 1px; }
@@ -6113,6 +6117,60 @@ button.staff-role:hover {
   color: var(--color-accent);
   font-style: italic;
 }
+/* One consistent volunteer CTA (Erin, 2026-07-25): the gold action chip
+   (btn-primary colors, gold owns action) + the heart mark that
+   My Responsibilities already uses for volunteer duties (DUTY_ICONS).
+   Used anywhere a member volunteers for a special event: the Events-grid
+   open slots (#108), the per-event volunteer modal, Jump In seat rows,
+   and sign-up-list slot claims. The .ws-opp-interested state keeps the
+   shared green "you're in" look when a button toggles in place. */
+.volunteer-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  background: var(--color-accent);
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-white);
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-fast);
+}
+.volunteer-cta:hover {
+  background: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
+}
+.volunteer-cta svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* In the modal seat rows the CTA pins right, same slot the old
+   outlined chip (.ws-opp-interest) occupied. */
+.ws-opp-seat .volunteer-cta { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+.volunteer-cta.ws-opp-interested {
+  background: #DEF3DE;
+  border-color: #2E6B2E;
+  color: #2E6B2E;
+  box-shadow: none;
+}
+
+/* ---------- Collaboration page (Erin, 2026-07-25) ----------
+   Reuses the global patterns wholesale: My Workspace's pill bar
+   (.board-cal-views.ws-role-pillbar), .workspace-grid, and
+   .mf-card.workspace-card with .workspace-card-header/-body. Only the
+   header card's full-width span is page-specific. */
+.collab-cards { align-items: start; }
+.collab-card-head { grid-column: 1 / -1; }
+/* #112 (Erin): match My Workspace's breathing room under the header —
+   and give the page a real bottom margin too (Erin, 2026-07-25). */
+#collabContent { padding-top: 24px; padding-bottom: 56px; }
+/* Drawers opened from a page (no modal overlay behind them, e.g. the
+   Collaboration view's task/section editors) attach to <body> — lift
+   them above the portal header and modals. */
+body > .rd-drawer-backdrop { z-index: 10001; }
+body > .rd-drawer { z-index: 10002; }
 
 .event-fill-summary {
   margin-top: 10px;
@@ -10007,6 +10065,7 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 }
 
 /* ── Manage Button on Duty Rows ── */
+.mf-manage-btn svg { width: 14px; height: 14px; }
 .mf-manage-btn {
   display: inline-flex;
   align-items: center;
@@ -11503,6 +11562,46 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   border-color: #2E6B2E;
   color: #2E6B2E;
 }
+/* Volunteer-from-the-grid + Jump In modals (Erin, 2026-07-25): these seat
+   rows carry role blurbs, counts, and names — inline spans ran together
+   into a wall of text. Stack each info line inside the purple row, give
+   the row a little more padding, and let the title breathe. Scoped by
+   modal body id, same pattern as #open-seats-body above. */
+#event-volunteer-body .ws-opportunities li.ws-opp-seat,
+#event-jumpin-body .ws-opportunities li.ws-opp-seat,
+#event-space-body .ws-opportunities li.ws-opp-seat {
+  padding: 12px 14px;
+}
+#event-volunteer-body .ws-opp-main strong,
+#event-jumpin-body .ws-opp-main strong,
+#event-space-body .ws-opp-main strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 2px;
+}
+#event-volunteer-body .ws-opp-committee,
+#event-jumpin-body .ws-opp-committee,
+#event-space-body .ws-opp-committee {
+  display: block;
+  margin: 3px 0 0;
+  line-height: 1.45;
+}
+/* Inside the narrow Collaboration cards the sign-up button drops to its
+   own full-width row instead of squeezing beside the text (Erin,
+   2026-07-25: Maker's Market booth buttons). */
+#event-space-body .ws-opp-seat .volunteer-cta {
+  margin-left: 0;
+  flex-basis: 100%;
+  justify-content: center;
+}
+/* Section-card headers: let the Edit/Delete actions wrap BELOW the
+   title as a row instead of stacking vertically beside it. */
+.evs-section .workspace-card-header { flex-wrap: wrap; }
+.evs-section .workspace-card-header h4 { min-width: 0; }
+/* Air above the closing "how sign-ups work" note under the seats list. */
+#event-volunteer-body .ws-opportunities + .ws-body-hint {
+  margin-top: 16px;
+}
 /* Roles Assignments (#39): members who raised a hand for a seat. */
 .roles-row-interest-line {
   color: var(--color-text-light);
@@ -12902,10 +13001,48 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: var(--radius-sm);
 }
 .ws-min-caret {
-  font-size: 0.85rem;
+  /* Erin, 2026-07-25: bumped from 0.85rem — the toggle affordance was
+     too easy to miss. Applies everywhere the caret renders (workspace
+     cards + Collaboration cards). */
+  font-size: 1.15rem;
+  line-height: 1;
   color: var(--color-text-light);
   flex-shrink: 0;
 }
+/* The [hidden] attribute loses to .workspace-card-body's own
+   display:flex — make collapse win (Collaboration card nav). */
+.workspace-card-body[hidden] { display: none !important; }
+/* Compact per-card actions in the Collaboration card headers (Erin,
+   2026-07-25): heart visibility toggle, pencil edit, × delete. */
+.evs-head-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.evs-ico-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 3px;
+  cursor: pointer;
+  color: var(--color-primary);
+  line-height: 1;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.evs-ico-btn:hover { color: var(--color-primary-dark); }
+.evs-ico-btn.evs-ico-del { color: var(--color-coral); font-size: 1.15rem; font-weight: 700; }
+.evs-ico-btn svg { display: block; }
+/* Visibility toggle = the accent-30 binoculars brand mark; greyed-out
+   when the card is committee-only (Erin, 2026-07-25). */
+/* Natural aspect — accent-30 is a wide mark; a forced square squished it. */
+.evs-ico-btn img { height: 16px; width: auto; max-width: 34px; display: block; }
+.evs-ico-btn.evs-vis-off img { filter: grayscale(1); opacity: 0.45; }
+/* The whole committee-only card tints light grey so its restricted
+   visibility reads at a glance (pairs with the greyed binoculars). */
+.evs-section.evs-private { background: #F3F2EF; }
 .ws-min-strip {
   display: flex;
   flex-wrap: wrap;
