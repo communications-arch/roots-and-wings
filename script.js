@@ -23008,7 +23008,7 @@
     // Same pill bar My Workspace wears (board-cal-views + ws-role-pillbar).
     h += '<div class="board-cal-views ws-role-pillbar" role="group" aria-label="Choose an event">';
     evs.forEach(function (ev) {
-      h += '<button type="button" class="board-cal-view-pill ws-role-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">🎪 ' + escapeHtml(ev.name) + '</button>';
+      h += '<button type="button" class="board-cal-view-pill ws-role-pill' + (ev.id === _eventSpaceState.id ? ' is-active' : '') + '" data-collab-eid="' + ev.id + '">' + escapeHtml(ev.name) + '</button>';
     });
     h += '</div>';
     h += '<div id="event-space-body"><p class="ws-empty">Loading planning space…</p></div>';
