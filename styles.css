@@ -12993,10 +12993,17 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: var(--radius-sm);
 }
 .ws-min-caret {
-  font-size: 0.85rem;
+  /* Erin, 2026-07-25: bumped from 0.85rem — the toggle affordance was
+     too easy to miss. Applies everywhere the caret renders (workspace
+     cards + Collaboration cards). */
+  font-size: 1.15rem;
+  line-height: 1;
   color: var(--color-text-light);
   flex-shrink: 0;
 }
+/* The [hidden] attribute loses to .workspace-card-body's own
+   display:flex — make collapse win (Collaboration card nav). */
+.workspace-card-body[hidden] { display: none !important; }
 .ws-min-strip {
   display: flex;
   flex-wrap: wrap;
