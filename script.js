@@ -23373,7 +23373,7 @@
   // member's Ways to Help card once the lead hits "Request volunteers".
   function evsSectionTitle(s) {
     if (s.title) return s.title;
-    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year' }[s.type] || 'Section';
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Notes & Links' }[s.type] || 'Section';
   }
 
   // Shared signup-section body — same markup in the Event Space and on
@@ -23382,7 +23382,7 @@
     var cfg = s.config || {};
     var h = '';
     if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
-    var canAct = s.is_open || canEdit;
+    var canAct = s.is_open || canEdit || s.type === 'board';
     if (cfg.mode === 'slots') {
       h += '<ul class="ws-opportunities">';
       (Array.isArray(s.content) ? s.content : []).forEach(function (slot, idx) {
@@ -23410,7 +23410,10 @@
       if ((s.signups || []).length) {
         h += '<ul class="ws-part-recap">';
         s.signups.forEach(function (c) {
-          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + escapeHtmlWs(c.item_text)
+          var itemHtml = /^https?:\/\/\S+$/i.test(String(c.item_text || '').trim())
+            ? '<a href="' + escapeAttr(String(c.item_text).trim()) + '" target="_blank" rel="noopener">' + escapeHtmlWs(String(c.item_text).trim().replace(/^https?:\/\//i, '').slice(0, 60)) + '</a>'
+            : escapeHtmlWs(c.item_text);
+          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
           if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
           h += '</li>';
@@ -23420,7 +23423,7 @@
         h += '<p class="ws-empty">Nothing claimed yet' + (canAct ? ' — be the first!' : '.') + '</p>';
       }
       if (canAct) {
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">➕ Sign up to bring something</button></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
         h += '<div class="evs-bring-form" data-bring-form="' + s.id + '" hidden></div>';
       }
     }
@@ -23433,7 +23436,7 @@
     var h = '';
     // Brand accents mirror the workspace cards that host the same kind
     // of content (calendar / ways-to-help / resources / board-notes).
-    var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8' };
+    var SEC_ACCENTS = { timeline: 'accent-40', signup: 'accent-25', info: 'accent-44', notes: 'accent-8', board: 'accent-36' };
     secs.forEach(function (s) {
       h += '<div class="mf-card workspace-card evs-section">';
       var headInner = '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || 'accent-2') + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>';
@@ -23471,7 +23474,9 @@
         h += String(c.text || '').trim()
           ? '<p style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.text)) + '</p>'
           : '<p class="ws-empty">Jot lessons for next year here' + (d.can_edit ? ' — Edit this section' : '') + '.</p>';
-      } else if (s.type === 'signup') {
+      } else if (s.type === 'signup' || s.type === 'board') {
+        // 'board' (Erin, 2026-07-25): shared notes & links — the bring-list
+        // mechanics (attributed entries, own-entry ×) with adding always on.
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
       }
       h += '</div></div>'; // /body, /card
@@ -23524,6 +23529,7 @@
         + '<option value="signup">Sign-up list — toppings, supplies, volunteer spots</option>'
         + '<option value="timeline">Timeline — the day-of schedule</option>'
         + '<option value="notes">Notes for next year</option>'
+        + '<option value="board">Shared notes & links — anyone can add</option>'
         + '</select></div>';
     }
     h += '<div id="evs-sd-fields">' + fieldsFor(type, section) + '</div>';

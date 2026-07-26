@@ -6225,7 +6225,10 @@ function eventTaskShape(t) {
 // Reusable Event Space components — timeline / signup / info / notes —
 // so any event (Ice Cream Social, PJ Party, Field Day…) assembles its
 // own stack. Content/config shapes are documented in migrate.sql.
-const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes'];
+// 'board' (Erin, 2026-07-25): shared notes & links — any member adds/
+// removes their own entries (Pinterest boards etc.); rides the same
+// event_section_signups rows the bring-lists use.
+const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board'];
 
 function eventSectionShape(s, signups) {
   return {
@@ -6729,9 +6732,9 @@ async function handleEventSignupClaim(body, req, res) {
       SELECT id, special_event_id, type, config, content, is_open
       FROM event_sections WHERE id = ${sectionId}
     `;
-    if (secRows.length === 0 || secRows[0].type !== 'signup') return res.status(404).json({ error: 'Sign-up list not found.' });
+    if (secRows.length === 0 || ['signup', 'board'].indexOf(secRows[0].type) === -1) return res.status(404).json({ error: 'Sign-up list not found.' });
     const sec = secRows[0];
-    if (!sec.is_open && !(await canEditEventSpace(sql, auth, sec.special_event_id))) {
+    if (sec.type === 'signup' && !sec.is_open && !(await canEditEventSpace(sql, auth, sec.special_event_id))) {
       return res.status(403).json({ error: 'Sign-ups aren’t open for this event yet.' });
     }
     const email = String(auth.email || '').toLowerCase();
