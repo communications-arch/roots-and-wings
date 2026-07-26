@@ -847,6 +847,8 @@
         }
 
     liveDataReady = true;
+    // Reveal the settled page just after the coalesced re-render (#116).
+    setTimeout(function () { if (typeof rwBootDone === 'function') rwBootDone(); }, 150);
 
     // Re-render if dashboard is already visible
     if (dashboard && dashboard.classList.contains('visible')) {
@@ -2391,9 +2393,27 @@
     }
   }
 
+  // #116 round 2 (Erin: "still bounces a lot"): the first seconds used
+  // to ghost-fade the static sections while the grid grew card-by-card.
+  // While booting, entrance animations are OFF and the grid reserves
+  // space (CSS body.rw-booting rules); when live data lands, everything
+  // reveals in one settled paint. Safety timeout so a dead fetch can't
+  // strand the page in boot dress.
+  var _rwBooted = false;
+  function rwBootDone() {
+    if (_rwBooted) return;
+    _rwBooted = true;
+    document.querySelectorAll('.fade-in').forEach(function (el) { el.classList.add('visible'); });
+    document.body.classList.remove('rw-booting');
+  }
+
   function showDashboard() {
     if (loginSection) loginSection.style.display = 'none';
     if (dashboard) dashboard.classList.add('visible');
+    if (!liveDataReady && !_rwBooted) {
+      document.body.classList.add('rw-booting');
+      setTimeout(rwBootDone, 6000);
+    }
     // Always reveal My Family from the top. Browsers restore the prior scroll
     // position on reload (scrollRestoration 'auto'), which landed the portal
     // scrolled partway down on sign-in / refresh (Erin, 2026-07-18, desktop).

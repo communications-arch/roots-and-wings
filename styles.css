@@ -2623,6 +2623,11 @@ p + p { margin-top: 1rem; }
 }
 
 /* ---------- Animations ---------- */
+/* #116: during the portal's first data load, entrance animations are
+   suppressed and the family grid holds its space so arriving cards
+   don't shove the page around (rw-booting is set in showDashboard). */
+body.rw-booting .fade-in { opacity: 1; transform: none; transition: none; }
+body.rw-booting #myFamilyGrid { min-height: 72vh; }
 .fade-in {
   opacity: 0;
   transform: translateY(24px);
