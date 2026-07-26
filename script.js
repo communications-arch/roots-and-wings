@@ -5856,10 +5856,17 @@
   //   sheet's outdoor/rain meaning later.
   // 2026-07-26: location wired to accent-37 (her sheet's pick — Erin's
   //   request; replaces leading-📍 usage as surfaces convert).
+  // 2026-07-26 ws-link pass (#114): wired FOUR sheet picks to their own
+  //   meanings — helper=13, guide=35, person=51, cleaning=52 — and
+  //   claimed LOW-numbered unused accents for the rest of the To Do /
+  //   Resources emoji (waivers…forms below). ⚠ Those low-number picks
+  //   were chosen by filename only — Erin reviews the art on dev and can
+  //   reassign any of them; the meaning keys are what code depends on.
   // RESERVED (Erin's icon-ideas sheet, not wired yet — do NOT claim):
-  //   13 helper/interested · 29 floater/prep · 35 lesson plan/guide ·
-  //   38 field trip · 42 celebration · 46 outdoor/rain · 48 session ·
-  //   51 person/assignee · 52 cleaning · 56 board task
+  //   29 floater/prep · 38 field trip · 42 celebration · 46 outdoor/rain ·
+  //   48 session · 56 board task
+  // Sheet also marks locked/sign-in/permissions as ICON_SVG (purple
+  //   outline) territory — 🔐/🔑 rows stay emoji until that chrome pass.
   var BRAND_ICONS = {
     lead: 'accent-58',
     colead: 'accent-19',
@@ -5884,7 +5891,25 @@
     waysToHelp: 'accent-25',
     resources: 'accent-44',
     adminConsoles: 'accent-22',
-    timeline: 'accent-40'
+    timeline: 'accent-40',
+    // ── ws-link pass (#114, 2026-07-26) — sheet-pick wirings ──
+    helper: 'accent-13',      // 🙋 "I'm interested" / sign-up review
+    guide: 'accent-35',       // 📖/📘 handbook, lesson plan, guide
+    person: 'accent-51',      // 🧑‍🏫 person / assignee / placement
+    cleaning: 'accent-52',    // 🧹 cleaning duty
+    // ── ws-link pass — provisional low-number picks (Erin may reassign) ──
+    waivers: 'accent-1',      // ✍/📝 agreements & waivers
+    chat: 'accent-3',         // 💬 Google Chat guide
+    curriculum: 'accent-4',   // 📚 curriculum library
+    installApp: 'accent-6',   // 📲 install the app
+    link: 'accent-9',         // 🔗 generic saved/external link
+    help: 'accent-10',        // ❓ card help text
+    drPlan: 'accent-14',      // 🛟 disaster recovery / binder
+    announce: 'accent-17',    // 📣 tell families / announcements
+    mail: 'accent-20',        // ✉️/📨 send / awaiting correspondence
+    records: 'accent-23',     // 🗂 enrollment / record changes
+    builder: 'accent-26',     // 📋 Class Builder (planner, not to-do)
+    forms: 'accent-27'        // ✍ forms to send out
   };
   // cls sizes the mark for its context: 'brand-accent' (card titles,
   // default), 'ag-icon' (inline/pills/buttons), 'new-fam-icon' (gold bloom).
@@ -9237,17 +9262,17 @@
       render: function () {
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
+        h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Member Handbook</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Organization &amp; Roles</button></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">\u270D</span>Member Agreement &amp; Waivers</button></li>';
-        h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span>Member Agreement &amp; Waivers</button></li>';
+        h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('chat', 'ag-icon') + '</span>Google Chat Guide</a></li>';
         h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('billing', 'ag-icon') + '</span>Reimbursement Form</a></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">' + brandIconImg('curriculum', 'ag-icon') + '</span>Curriculum Library</button></li>';
         // Renamed from "Class Ideas" (2026-07-05) \u2014 that name now belongs
         // to the Workspace card listing YOUR submitted classes (#38 moved
         // it from My Family); this is the browse-for-inspiration list.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span>Supply Closet Inventory</button></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">' + brandIconImg('installApp', 'ag-icon') + '</span>Install the App</button></li>';
         h += '</ul>';
         return h;
       }
@@ -9262,7 +9287,7 @@
           h += '<li class="ws-empty">No links yet. Add your first below.</li>';
         } else {
           prefs.myLinks.forEach(function (l, idx) {
-            h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDD17</span>' + l.title + '</a>';
+            h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('link', 'ag-icon') + '</span>' + l.title + '</a>';
             h += ' <button class="sc-btn sc-btn-del ws-mylink-del" data-idx="' + idx + '" aria-label="Remove">\u00d7</button></li>';
           });
         }
@@ -9433,11 +9458,11 @@
         // long-standing hardcoded gates.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="permissions-admin"><span class="ws-link-icon">🔐</span>Permissions</button></li>';
         // Help content editor (2026-07-17) — edit the "?" card help text.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="help-editor"><span class="ws-link-icon">❓</span>Card Help Text</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="help-editor"><span class="ws-link-icon">' + brandIconImg('help', 'ag-icon') + '</span>Card Help Text</button></li>';
         // Disaster Recovery Plan (#49) — printable systems map, scenario
         // first-steps, and the hard-copy binder checklist. Pairs with the
         // nightly encrypted DB backup workflow + RESTORE.md in the repo.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="dr-plan"><span class="ws-link-icon">🛟</span>Disaster Recovery Plan</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="dr-plan"><span class="ws-link-icon">' + brandIconImg('drPlan', 'ag-icon') + '</span>Disaster Recovery Plan</button></li>';
         // Facilities (2026-07-10): rooms + the notes the Class Builder's
         // room picker shows. Also reachable from the builder's class
         // editor via "Manage rooms…" for Facilities managers.
@@ -9505,14 +9530,14 @@
           // added only to pair with Membership's morning row — read as
           // a role statement, and a wrong one: the VP's builder covers
           // both blocks, and afternoon is the ACL's lane).
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder</span>'
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span class="ws-link-label">Class Builder</span>'
             + '<span class="ws-link-count pmrep-pending-count"' + (role === 'Afternoon Class Liaison' ? ' data-pm-only="1"' : '') + ' hidden></span></button></li>';
         }
         if (role === 'Membership Director') {
           // Membership owns the morning age-group placement builder (Erin,
           // 2026-07-18). Membership Director passes the morning_builder
           // capability by default; server re-checks (morningBuilderAccess).
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">📋</span><span class="ws-link-label">Class Builder <span class="ws-link-sub">Morning Classes</span></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span class="ws-link-label">Class Builder <span class="ws-link-sub">Morning Classes</span></span></button></li>';
         }
         // Facilities — rooms admin lives HERE, not inside the Class
         // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).
@@ -9566,8 +9591,8 @@
           // Session placement gaps (Erin, 2026-07-15): adults with an
           // uncovered hour + classes short on assistants. Painted by
           // loadSignupTodos; clicks open list modals for placing people.
-          h += '<li id="ws-todo-vp-adults-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-adults"><span class="ws-link-count" id="ws-vp-adults-count">0</span><span class="ws-link-icon">🧑‍🏫</span><span id="ws-vp-adults-label">Place adults</span></button></li>';
-          h += '<li id="ws-todo-vp-assist-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-assist"><span class="ws-link-count" id="ws-vp-assist-count">0</span><span class="ws-link-icon">🤝</span><span id="ws-vp-assist-label">Fill assistant spots</span></button></li>';
+          h += '<li id="ws-todo-vp-adults-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-adults"><span class="ws-link-count" id="ws-vp-adults-count">0</span><span class="ws-link-icon">' + brandIconImg('person', 'ag-icon') + '</span><span id="ws-vp-adults-label">Place adults</span></button></li>';
+          h += '<li id="ws-todo-vp-assist-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-assist"><span class="ws-link-count" id="ws-vp-assist-count">0</span><span class="ws-link-icon">' + brandIconImg('assist', 'ag-icon') + '</span><span id="ws-vp-assist-label">Fill assistant spots</span></button></li>';
         }
         if (role === 'Vice President' || role === 'Afternoon Class Liaison') {
           // Class submissions sitting in the inbox (Erin's testers,
@@ -9584,30 +9609,30 @@
           h += '<li id="ws-todo-classreview-item"' + (crPmOnly ? ' data-pm-only="1"' : '') + ' hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">' + brandIconImg('todo', 'ag-icon') + '</span><span>Review new ' + (crPmOnly ? 'afternoon ' : '') + 'class submissions — schedule, mark reviewed, or decline</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
-          h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">🎨</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
+          h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">' + brandIconImg('classes', 'ag-icon') + '</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
         }
         if (role === 'Afternoon Class Liaison') {
           // Post-close resolution (Erin, 2026-07-15): first clear over-full
           // classes (raise max / 2nd section / lottery), then send each
           // lead their class list + budget.
-          h += '<li id="ws-todo-acl-overmax-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-overmax"><span class="ws-link-count" id="ws-acl-overmax-count">0</span><span class="ws-link-icon">🎟️</span><span id="ws-acl-overmax-label">Resolve over-full classes</span></button></li>';
+          h += '<li id="ws-todo-acl-overmax-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-overmax"><span class="ws-link-count" id="ws-acl-overmax-count">0</span><span class="ws-link-icon">' + brandIconImg('classes', 'ag-icon') + '</span><span id="ws-acl-overmax-label">Resolve over-full classes</span></button></li>';
           // Kids bumped by a lottery whose family hasn't been told yet —
           // shows which lottery and where they landed (Erin, 2026-07-16).
-          h += '<li id="ws-todo-acl-lotmoves-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-lottery-moves"><span class="ws-link-count" id="ws-acl-lotmoves-count">0</span><span class="ws-link-icon">📣</span><span id="ws-acl-lotmoves-label">Tell families about lottery moves</span></button></li>';
-          h += '<li id="ws-todo-acl-confirm-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-confirm"><span class="ws-link-count" id="ws-acl-confirm-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-acl-confirm-label">Send class confirmations</span></button></li>';
+          h += '<li id="ws-todo-acl-lotmoves-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-lottery-moves"><span class="ws-link-count" id="ws-acl-lotmoves-count">0</span><span class="ws-link-icon">' + brandIconImg('announce', 'ag-icon') + '</span><span id="ws-acl-lotmoves-label">Tell families about lottery moves</span></button></li>';
+          h += '<li id="ws-todo-acl-confirm-item" hidden><button type="button" class="ws-link-btn" data-resource-action="acl-confirm"><span class="ws-link-count" id="ws-acl-confirm-count">0</span><span class="ws-link-icon">' + brandIconImg('mail', 'ag-icon') + '</span><span id="ws-acl-confirm-label">Send class confirmations</span></button></li>';
         }
         if (role === 'Special Events Liaison' || role === 'Sustaining Director') {
           // #53: members raising a hand for open event seats land here.
           // Painted by updateEventSeatTodoItem (rides the event-openings
           // feed); the modal lists who wants what + a take-me-there link
           // to the Special Events grid.
-          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">🙋</span><span id="ws-evseats-label">New special-event sign-ups</span></button></li>';
+          h += '<li id="ws-todo-evseats-item" hidden><button type="button" class="ws-link-btn" data-resource-action="event-seat-review"><span class="ws-link-count" id="ws-evseats-count">0</span><span class="ws-link-icon">' + brandIconImg('helper', 'ag-icon') + '</span><span id="ws-evseats-label">New special-event sign-ups</span></button></li>';
         }
         if (role === 'Cleaning Crew Liaison') {
           // Areas with no family assigned for the current session — opens
           // Cleaning Crew Management (Erin, 2026-07-15). Painted by
           // loadCleaningTodoCount.
-          h += '<li id="ws-todo-cleaning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="cleaning-crew-manage"><span class="ws-link-count" id="ws-cleaning-open-count">0</span><span class="ws-link-icon">🧹</span><span id="ws-cleaning-open-label">Assign cleaning areas</span></button></li>';
+          h += '<li id="ws-todo-cleaning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="cleaning-crew-manage"><span class="ws-link-count" id="ws-cleaning-open-count">0</span><span class="ws-link-icon">' + brandIconImg('cleaning', 'ag-icon') + '</span><span id="ws-cleaning-open-label">Assign cleaning areas</span></button></li>';
         }
         if (role === 'Supply Coordinator') {
           // Items flagged as needing restock (Erin, 2026-07-17) — opens the
@@ -9617,8 +9642,8 @@
         }
         if (role === 'Communications Director') {
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">' + brandIconImg('newFamily', 'new-fam-icon') + '</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
-          h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">📝</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
-          h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">🔁</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
+          h += '<li id="ws-todo-waivers-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-count">0</span><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span><span id="ws-waivers-label">Pending Waivers</span></button></li>';
+          h += '<li id="ws-todo-waivers-resent-item" hidden><button type="button" class="ws-link-btn" data-resource-action="waivers-pending"><span class="ws-link-count" id="ws-waivers-resent-count">0</span><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span><span id="ws-waivers-resent-label">Resent Waivers</span></button></li>';
           // Families requesting an @rootsandwingsindy.com sign-in for a
           // backup Learning Coach (Erin, 2026-07-20). Painted by
           // loadBlcEmailRequestCount; the modal records the created
@@ -9637,7 +9662,7 @@
           // summer board meeting and STAYS until ticked done for the year
           // (Erin, 2026-07-19). Row click opens the handbook PDF; the
           // ✓ Done chip stamps todo_confirmations via loadHandbookReviewTodo.
-          h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">📘</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button>'
+          h += '<li id="ws-todo-handbook-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-handbook-btn"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span><span id="ws-handbook-label">Review &amp; update the Membership Handbook</span></button>'
             + '<button type="button" class="sc-btn" id="ws-todo-handbook-done" title="Mark done for this school year — the reminder disappears until next summer">✓ Done</button></li>';
           // #48: notify non-returning members before account deletion.
           // Appears ~7 days before the Ice Cream Social (the Admin
@@ -9660,20 +9685,20 @@
           // todo_confirmations kind='drbinder-sN'). Click opens the DR
           // Plan modal, whose hard-copy list says what to print. Painted
           // by loadDrBinderTodo; dev unlock keeps it visible year-round.
-          h += '<li id="ws-todo-drbinder-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-drbinder-btn"><span class="ws-link-icon">🛟</span><span id="ws-drbinder-label">Refresh the printed DR binder</span></button>'
+          h += '<li id="ws-todo-drbinder-item" hidden><button type="button" class="ws-link-btn" id="ws-todo-drbinder-btn"><span class="ws-link-icon">' + brandIconImg('drPlan', 'ag-icon') + '</span><span id="ws-drbinder-label">Refresh the printed DR binder</span></button>'
             + '<button type="button" class="sc-btn" id="ws-todo-drbinder-done" title="Mark done for this session — the reminder returns a week before the next session starts">✓ Done</button></li>';
         }
         if (role === 'Membership Director') {
           // Enrollment approval queue (Erin, 2026-07-19 Option B): schedule
           // changes / kid adds / removals wait here for approval. Painted
           // by loadEnrollmentRequestCount.
-          h += '<li id="ws-todo-enroll-req-item" hidden><button type="button" class="ws-link-btn" data-resource-action="enrollment-requests"><span class="ws-link-count" id="ws-enroll-req-count">0</span><span class="ws-link-icon">🗂️</span><span id="ws-enroll-req-label">Approve enrollment changes</span></button></li>';
+          h += '<li id="ws-todo-enroll-req-item" hidden><button type="button" class="ws-link-btn" data-resource-action="enrollment-requests"><span class="ws-link-count" id="ws-enroll-req-count">0</span><span class="ws-link-icon">' + brandIconImg('records', 'ag-icon') + '</span><span id="ws-enroll-req-label">Approve enrollment changes</span></button></li>';
           // General inquiries from the public Contact Us form — a separate
           // bucket from tour requests so questions don't mix into the tour
           // queue. Opens the pipeline scoped to inquiries. Listed FIRST,
           // before tours (Erin, 2026-07-14): inquiries are the top of the
           // member funnel.
-          h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">✉️</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
+          h += '<li id="ws-todo-inquiry-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-inquiries"><span class="ws-link-count" id="ws-inquiry-count">0</span><span class="ws-link-icon">' + brandIconImg('mail', 'ag-icon') + '</span><span id="ws-inquiry-label">New Inquiries</span></button></li>';
           h += '<li id="ws-todo-tours-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-tour-requests"><span class="ws-link-count" id="ws-tours-count">0</span><span class="ws-link-icon">🏡</span><span id="ws-tours-label">Tour Requests</span></button></li>';
           // Scheduled Tours entry has both the button (opens Pipeline
           // scoped to scheduled) AND a sibling <ul> rendered by
@@ -9688,8 +9713,8 @@
           // register): toured families who still need the link, then links
           // sent and awaiting a completed registration. Counts painted by
           // updateRegInviteTodoItems() from _toursCache × _regInvitesCache.
-          h += '<li id="ws-todo-reginv-send-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-send"><span class="ws-link-count" id="ws-reginv-send-count">0</span><span class="ws-link-icon">🔗</span><span id="ws-reginv-send-label">Send Registration Link</span></button></li>';
-          h += '<li id="ws-todo-reginv-wait-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-wait"><span class="ws-link-count" id="ws-reginv-wait-count">0</span><span class="ws-link-icon">📨</span><span id="ws-reginv-wait-label">Awaiting Registration</span></button></li>';
+          h += '<li id="ws-todo-reginv-send-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-send"><span class="ws-link-count" id="ws-reginv-send-count">0</span><span class="ws-link-icon">' + brandIconImg('link', 'ag-icon') + '</span><span id="ws-reginv-send-label">Send Registration Link</span></button></li>';
+          h += '<li id="ws-todo-reginv-wait-item" hidden><button type="button" class="ws-link-btn" data-resource-action="membership-reginv-wait"><span class="ws-link-count" id="ws-reginv-wait-count">0</span><span class="ws-link-icon">' + brandIconImg('mail', 'ag-icon') + '</span><span id="ws-reginv-wait-label">Awaiting Registration</span></button></li>';
           // Morning class setup — one workflow nudge, gated to on/after
           // June 1 of the season's fall year (building morning classes is a
           // summer task) and hidden once finalized. Label/icon adapt as work
@@ -9915,13 +9940,13 @@
         } else {
           items.forEach(function (r) {
             if (r.url) {
-              h += '<li><a class="ws-link-btn" href="' + r.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCCA</span>' + escapeHtml(r.title) + '</a></li>';
+              h += '<li><a class="ws-link-btn" href="' + r.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('reports', 'ag-icon') + '</span>' + escapeHtml(r.title) + '</a></li>';
             } else {
-              h += '<li><button type="button" class="ws-link-btn" data-report-key="' + r.key + '"><span class="ws-link-icon">\uD83D\uDCCA</span>' + escapeHtml(r.title) + '</button></li>';
+              h += '<li><button type="button" class="ws-link-btn" data-report-key="' + r.key + '"><span class="ws-link-icon">' + brandIconImg('reports', 'ag-icon') + '</span>' + escapeHtml(r.title) + '</button></li>';
             }
           });
           formItems.forEach(function (f) {
-            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '"><span class="ws-link-icon">✍</span>' + escapeHtml(f.title) + '</button></li>';
+            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '"><span class="ws-link-icon">' + brandIconImg('forms', 'ag-icon') + '</span>' + escapeHtml(f.title) + '</button></li>';
           });
         }
         h += '</ul>';
@@ -24378,7 +24403,7 @@
         li.className = 'ws-todo-evt';
         li.id = 'ws-todo-evt-' + eid + '-item';
         li.innerHTML = '<button type="button" class="ws-link-btn">'
-          + '<span class="ws-link-count">' + g.n + '</span><span class="ws-link-icon">🎉</span>'
+          + '<span class="ws-link-count">' + g.n + '</span><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
           + '<span>' + escapeHtml(g.name) + ' — planning task' + (g.n === 1 ? '' : 's')
           + (g.due ? ' · next due ' + boardCalFmtDate(g.due) : '') + '</span></button>';
         li.querySelector('button').addEventListener('click', function () {
