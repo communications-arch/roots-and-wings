@@ -8105,11 +8105,11 @@
         return g.name !== 'Greenhouse' && counts[g.name.toLowerCase()];
       });
       if (!gs.length) return '';
-      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
       var tbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
       gs.forEach(function (g) {
         t += '<tr class="session-class-row" data-group="' + g.name + '">';
-        t += '<td>' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
+        t += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
         t += '<td class="am-ages-col">' + groupRangeHtml(g.range || '', g.name) + '</td>';
         t += '<td>' + amLiaisonHtml(g.name) + '</td>';
         t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
@@ -8135,7 +8135,7 @@
           if (ai !== bi) return ai - bi;
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
         amRows.forEach(function (c) {
           var key = String((c.age_groups || [])[0] || '').toLowerCase();
           var meta = groupIdx[key];
@@ -8149,7 +8149,7 @@
           });
           html += '<tr class="' + (isMyRow ? 'coord-my-row' : '') + '">';
           // Group mark beside the colored name (Erin, 2026-07-11).
-          html += '<td>' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
+          html += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
           html += '<td class="am-ages-col">' + (meta
             ? groupRangeHtml(meta.g.range, meta.g.name)
             : escapeHtml(c.scheduled_age_range || '')) + '</td>';
@@ -8164,7 +8164,7 @@
         html += '</tbody></table></div>';
       }
     } else if (Object.keys(AM_CLASSES).length > 0) {
-      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
       var groups = Object.keys(AM_CLASSES);
       groups.forEach(function (groupName) {
         var cls = AM_CLASSES[groupName];
@@ -8173,7 +8173,7 @@
         var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
         var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
         html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
-        html += '<td><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
+        html += '<td class="am-group-col"><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
         html += '<td class="am-ages-col">' + groupRangeHtml(cls.ages, groupName) + '</td>';
         html += '<td>' + amLiaisonHtml(groupName, cls.liaison) + '</td>';
         html += '<td>' + s.topic + '</td>';
@@ -9238,15 +9238,15 @@
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCD6</span>Member Handbook</a></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">\uD83C\uDF33</span>Organization &amp; Roles</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">\u270D</span>Member Agreement &amp; Waivers</button></li>';
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCAC</span>Google Chat Guide</a></li>';
-        h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">\uD83D\uDCB5</span>Reimbursement Form</a></li>';
+        h += '<li><a href="https://docs.google.com/forms/d/e/1FAIpQLSc85NIjyGcESji-RD73yGQB6BHko34lVMzhxvyE1sYBb620kA/viewform" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('billing', 'ag-icon') + '</span>Reimbursement Form</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="curriculum"><span class="ws-link-icon">\uD83D\uDCDA</span>Curriculum Library</button></li>';
         // Renamed from "Class Ideas" (2026-07-05) \u2014 that name now belongs
         // to the Workspace card listing YOUR submitted classes (#38 moved
         // it from My Family); this is the browse-for-inspiration list.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">\uD83D\uDCE6</span>Supply Closet Inventory</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span>Supply Closet Inventory</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">\uD83D\uDCF2</span>Install the App</button></li>';
         h += '</ul>';
         return h;
@@ -9441,7 +9441,7 @@
         // Facilities (2026-07-10): rooms + the notes the Class Builder's
         // room picker shows. Also reachable from the builder's class
         // editor via "Manage rooms…" for Facilities managers.
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">🏫</span>Facilities — Rooms</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">' + brandIconImg('location', 'ag-icon') + '</span>Facilities — Rooms</button></li>';
         WORKSPACE_ADMIN_CONSOLES.forEach(function (l) {
           h += '<li><a href="' + l.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + l.icon + '</span>' + l.title + '</a></li>';
         });
@@ -9519,7 +9519,7 @@
         // Capability-gated (facilities_manage; defaults Pres/VP/ACL).
         if (typeof clientHasCapability === 'function'
             && clientHasCapability('facilities_manage', ['President', 'Vice President', 'Afternoon Class Liaison'])) {
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">🏫</span>Facilities — Rooms</button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="facilities-admin"><span class="ws-link-icon">' + brandIconImg('location', 'ag-icon') + '</span>Facilities — Rooms</button></li>';
         }
         h += '</ul>';
         return h;
@@ -9560,7 +9560,7 @@
           h += '<li id="ws-todo-welcome-outreach-item"' + (woHidden ? ' hidden' : '') + '><button type="button" class="ws-link-btn" data-resource-action="welcome-new-members" data-welcome-filter=""><span class="ws-link-icon">💛</span><span>Reach out to new families — co-op starts soon</span></button></li>';
         }
         if (role === 'Treasurer') {
-          h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">💰</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
+          h += '<li id="ws-todo-pending-item" hidden><button type="button" class="ws-link-btn" data-resource-action="treasurer-pending-payments"><span class="ws-link-count" id="ws-todo-pending-count">0</span><span class="ws-link-icon">' + brandIconImg('billing', 'ag-icon') + '</span><span id="ws-todo-pending-label">Pending Payment Registrations</span></button></li>';
         }
         if (role === 'Vice President') {
           // Session placement gaps (Erin, 2026-07-15): adults with an
@@ -9613,7 +9613,7 @@
           // Items flagged as needing restock (Erin, 2026-07-17) — opens the
           // Supply Closet, which floats flagged items to the top. Painted by
           // loadSupplyRestockCount.
-          h += '<li id="ws-todo-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-count" id="ws-restock-count">0</span><span class="ws-link-icon">🛒</span><span id="ws-restock-label">Buy / restock supplies</span></button></li>';
+          h += '<li id="ws-todo-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-count" id="ws-restock-count">0</span><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span><span id="ws-restock-label">Buy / restock supplies</span></button></li>';
         }
         if (role === 'Communications Director') {
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">' + brandIconImg('newFamily', 'new-fam-icon') + '</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
@@ -9696,7 +9696,7 @@
           // progresses: set up → place stragglers → finalize. Driven by
           // loadMorningClassTodos. The Report entry stays available
           // year-round for anyone who wants to start earlier.
-          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-count" id="ws-morning-count" hidden style="display:none;">0</span><span class="ws-link-icon" id="ws-morning-icon">🌱</span><span id="ws-morning-label">Set morning classes</span></button></li>';
+          h += '<li id="ws-todo-morning-item" hidden><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-count" id="ws-morning-count" hidden style="display:none;">0</span><span class="ws-link-icon" id="ws-morning-icon">' + brandIconImg('morning', 'ag-icon') + '</span><span id="ws-morning-label">Set morning classes</span></button></li>';
         }
         if (role === 'President' || role === 'Vice President') {
           // "Set next year's co-op calendar". Triggered by
@@ -9842,7 +9842,7 @@
         var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">📅</span>Event Dates</button></li>';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager" data-roles-view="special-events"><span class="ws-link-icon">🎉</span>Lead &amp; Assistants</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager" data-roles-view="special-events"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Lead &amp; Assistants</button></li>';
         h += '</ul>';
         return h;
       }
@@ -9859,7 +9859,7 @@
         // hero button; matches every other action card.
         var h = '<p class="ws-body-hint">Add and update inventory, adjust quantities, and manage storage locations.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-icon">📦</span>Inventory &amp; Locations</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet-manage"><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span>Inventory &amp; Locations</button></li>';
         h += '</ul>';
         return h;
       }
@@ -30974,7 +30974,10 @@
           else { pill.style.display = 'none'; pill.hidden = true; }
         }
 
-        var show = true, lbl = '', ic = '🌱', count = null;
+        // #114: the action states carry the morning-class brand mark; the
+        // nothing-left-but-finalize states keep the ✅ status glyph (text
+        // glyphs used as status, not icons, stay per the audit).
+        var show = true, lbl = '', ic = brandIconImg('morning', 'ag-icon'), count = null;
         if (unplaced > 0) {
           // Late additions / unknown-age kids waiting for a class. The only
           // state that carries a count.
@@ -30993,7 +30996,8 @@
 
         if (!show) { item.hidden = true; recomputeTodoEmptyState(); return; }
         if (label) label.textContent = lbl;
-        if (icon) icon.textContent = ic;
+        // innerHTML: ic is either the brand <img> or the ✅ glyph (#114).
+        if (icon) icon.innerHTML = ic;
         setPill(count != null, count);
         item.hidden = false;
         recomputeTodoEmptyState();
@@ -31445,7 +31449,10 @@
             el.innerHTML = '<p class="ws-empty">No data for this role yet this year.</p>';
             return;
           }
-          var html = '<div class="ws-bg-holder">' + (t.icon ? '<span class="ws-bg-icon">' + escapeHtmlWs(t.icon) + '</span> ' : '')
+          // #120: no icon beside the holder's name — the card HEADER
+          // carries the role's mark (see the bg- entries in WS_ACCENTS);
+          // the server-sent t.icon emoji is deliberately unused.
+          var html = '<div class="ws-bg-holder">'
             + (t.holder ? escapeHtmlWs(t.holder) : '<span class="ws-bg-unfilled">Unfilled</span>') + '</div>';
           if (t.metrics && t.metrics.length) {
             html += '<ul class="ws-bg-metrics">';

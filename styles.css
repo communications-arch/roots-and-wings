@@ -5564,6 +5564,14 @@ button.staff-role:hover {
   white-space: nowrap;
 }
 
+/* Morning Classes "Group" column — the group mark + colored name were
+   wrapping onto two lines in narrow layouts (#121, Erin 2026-07-26).
+   Same treatment as the Ages column: keep it on one line. */
+.portal-table th.am-group-col,
+.portal-table td.am-group-col {
+  white-space: nowrap;
+}
+
 .portal-table tbody tr:last-child td {
   border-bottom: none;
 }
