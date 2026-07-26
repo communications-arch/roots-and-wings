@@ -204,9 +204,14 @@ async function createCurriculum(sql, user, body) {
     `;
     const lessonId = lessonResult[0].id;
     for (const sp of ls.supplies) {
+      // Subselect guards the closet FK (#110): the client auto-links by a
+      // cached closet list, so a deleted/merged closet item arrives as a
+      // stale id — inserted raw it violates the FK; resolved through the
+      // subselect it degrades to NULL and the supply row still saves.
       await sql`
         INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes},
+                (SELECT id FROM supply_closet WHERE id = ${sp.closet_item_id}))
       `;
     }
   }
@@ -240,9 +245,17 @@ async function replaceLessons(sql, curriculumId, lessonCount, lessonRows) {
   normalized.forEach((ls, k) => {
     const lessonId = results[k + 1][0].id;
     ls.supplies.forEach(sp => {
+      // #110 (Jody): a STALE closet_item_id (client auto-links from a
+      // cached closet list; the item may have been deleted since) broke
+      // the FK — and because every supply rides ONE transaction, a single
+      // stale id wiped the ENTIRE supply list while the lessons kept
+      // saving ("all items of the supply list disappear"). The subselect
+      // degrades a missing closet id to NULL so the rows always land;
+      // the GET re-resolves closet links by item name anyway.
       supplyStmts.push(sql`
         INSERT INTO curriculum_supplies (lesson_id, item_name, qty, qty_unit, notes, closet_item_id)
-        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes}, ${sp.closet_item_id})
+        VALUES (${lessonId}, ${sp.item_name}, ${sp.qty}, ${sp.qty_unit || ''}, ${sp.notes},
+                (SELECT id FROM supply_closet WHERE id = ${sp.closet_item_id}))
       `);
     });
   });
