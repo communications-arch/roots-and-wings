@@ -2405,6 +2405,28 @@
     _rwBooted = true;
     document.querySelectorAll('.fade-in').forEach(function (el) { el.classList.add('visible'); });
     document.body.classList.remove('rw-booting');
+    var bs = document.getElementById('rwBootScreen');
+    if (bs) {
+      bs.style.opacity = '0';
+      setTimeout(function () { if (bs.parentNode) bs.parentNode.removeChild(bs); }, 350);
+    }
+  }
+
+  // Round 3 (Erin: "still blinks and bounces"): stop patching the moving
+  // pieces — cover them. A calm branded screen sits over the portal while
+  // the first data load runs; the page underneath settles completely,
+  // then the cover fades out in one transition. Removed by rwBootDone
+  // (data ready), the 6s safety, or showLogin (dead session).
+  function rwShowBootScreen() {
+    if (document.getElementById('rwBootScreen')) return;
+    var bs = document.createElement('div');
+    bs.id = 'rwBootScreen';
+    bs.innerHTML = '<div class="rw-boot-inner">'
+      + '<img src="logo-combined.svg?v=20260430g" alt="" style="width:96px;height:auto;">'
+      + '<div class="rw-boot-brand">ROOTS &amp; WINGS<span>Indianapolis</span></div>'
+      + '<div class="rw-boot-msg">Getting your dashboard ready…</div>'
+      + '</div>';
+    document.body.appendChild(bs);
   }
 
   function showDashboard() {
@@ -2412,6 +2434,7 @@
     if (dashboard) dashboard.classList.add('visible');
     if (!liveDataReady && !_rwBooted) {
       document.body.classList.add('rw-booting');
+      rwShowBootScreen();
       setTimeout(rwBootDone, 6000);
     }
     // Always reveal My Family from the top. Browsers restore the prior scroll
@@ -2460,6 +2483,7 @@
   }
 
   function showLogin() {
+    if (typeof rwBootDone === 'function') { try { rwBootDone(); } catch (e) { /* boot screen already gone */ } }
     if (loginSection) loginSection.style.display = '';
     if (dashboard) dashboard.classList.remove('visible');
     localStorage.removeItem(SESSION_KEY);

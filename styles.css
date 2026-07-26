@@ -2628,6 +2628,44 @@ p + p { margin-top: 1rem; }
    don't shove the page around (rw-booting is set in showDashboard). */
 body.rw-booting .fade-in { opacity: 1; transform: none; transition: none; }
 body.rw-booting #myFamilyGrid { min-height: 72vh; }
+/* Round 3: the boot cover itself — calm cream screen with the brand,
+   fades away in one piece once the page underneath has settled. Sits
+   under modals (9999) but over everything else. */
+#rwBootScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: var(--color-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+.rw-boot-inner { text-align: center; }
+.rw-boot-inner img { animation: rwBootPulse 1.6s ease-in-out infinite; }
+.rw-boot-brand {
+  margin-top: 10px;
+  font-family: var(--font-rounded);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--color-primary-dark);
+}
+.rw-boot-brand span {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.3em;
+  color: var(--color-primary-light);
+}
+.rw-boot-msg {
+  margin-top: 14px;
+  font-size: 0.9rem;
+  color: var(--color-text-light);
+}
+@keyframes rwBootPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.06); opacity: 0.85; }
+}
 .fade-in {
   opacity: 0;
   transform: translateY(24px);
