@@ -5852,6 +5852,8 @@
   //   colead        accent-30 → accent-19  (30 = visibility binoculars,
   //                 Erin's pick; 19 = her icon-sheet pick for co-leader)
   //   kidSchedule   accent-18 → accent-21  (18 stays the assist leaf)
+  //                 → accent-34 2026-07-27 (#122: "more fun" — the sparkly
+  //                 butterfly; provisional art pick, Erin reviews; 21 freed)
   //   notes         accent-8  → accent-16  (8 stays My Responsibilities)
   //   membersSummary accent-5 → accent-32  (5 stays the Afternoon/PM mark)
   //   supplyCloset  accent-33 → accent-7   (33 stays Coverage Board)
@@ -5885,7 +5887,7 @@
     assist: 'accent-18',
     morning: 'accent-64',
     afternoon: 'accent-5',
-    kidSchedule: 'accent-21',
+    kidSchedule: 'accent-34', // #122 fun-ify: sparkly butterfly (was 21; art pick — Erin may reassign)
     responsibilities: 'accent-8',
     notes: 'accent-16',
     coverage: 'accent-33',
@@ -23725,10 +23727,12 @@
         });
         h += '</ul>';
       } else {
-        h += '<p class="ws-empty">Nothing claimed yet' + (canAct ? ' — be the first!' : '.') + '</p>';
+        // #123 (Colleen): board sections share the bring machinery but not
+        // its wording — "claimed" reads wrong for shared notes & links.
+        h += '<p class="ws-empty">' + (s.type === 'board' ? 'Nothing shared yet' : 'Nothing claimed yet') + (canAct ? ' — be the first!' : '.') + '</p>';
       }
       if (canAct) {
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-sec-type="' + escapeAttr(s.type || '') + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
         h += '<div class="evs-bring-form" data-bring-form="' + s.id + '" hidden></div>';
       }
     }
@@ -23815,7 +23819,7 @@
     if (!el) return;
     function fieldsFor(t, s) {
       var cfg = (s && s.config) || {};
-      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year' }[t] || '') + '"></div>';
+      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year', board: 'Shared notes & links' }[t] || '') + '"></div>';
       if (t === 'info') {
         var lines = Array.isArray(s && s.content) ? s.content.join('\n') : '';
         fh += '<div class="cls-field"><label class="cls-label">Items — one per line</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Dairy ice cream — chocolate and vanilla\nNon-dairy vegan ice cream\nAll paper goods">' + escapeHtmlWs(lines) + '</textarea></div>';
@@ -23838,6 +23842,12 @@
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
         var sl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) { return (r.label || '') + (r.capacity ? ' | ' + r.capacity : ''); }).join('\n');
         fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label | how many people (one per line)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Set Up — 11:30 am | 4\nServing — 12:30 pm | 3\nClean Up — 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+      } else if (t === 'board') {
+        // #123 (Colleen): board sections get an EDITABLE hint like signup
+        // sections do — no bring machinery in the drawer. New sections
+        // start from a friendly default; clearing it is fine.
+        var bHint = s ? (cfg.hint || '') : 'Share notes, links, and ideas with the team.';
+        fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(bHint) + '" placeholder="Share notes, links, and ideas with the team."></div>';
       }
       return fh;
     }
@@ -23904,6 +23914,11 @@
           });
           if (!content.length) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Add at least one spot'; return; }
         }
+      } else if (type === 'board') {
+        // #123: board entries live in signups; content stays [] — only the
+        // hint rides config.
+        var bHintEl = el.querySelector('.evs-sd-hint');
+        if (bHintEl && bHintEl.value.trim()) config.hint = bHintEl.value.trim();
       }
       var payload = { kind: 'event-section-save', event_id: _eventSpaceState.id, title: title, config: config, content: content };
       if (isEdit) payload.id = section.id; else payload.type = type;
@@ -24254,18 +24269,24 @@
     var form = document.querySelector('[data-bring-form="' + sid + '"]');
     if (!form) return;
     if (!form.hidden) { form.hidden = true; form.innerHTML = ''; return; }
+    // #123 (Colleen): 'board' (shared notes & links) rides the bring
+    // machinery but gets its own wording — ONE field, no bring prompt.
+    var isBoard = btn.getAttribute('data-sec-type') === 'board';
     var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
     form.hidden = false;
-    form.innerHTML = '<div class="cls-field"><label class="cls-label">What will you bring?</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="e.g. rainbow sprinkles"></div>'
-      + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>'
-      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Sign up</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
+    form.innerHTML = (isBoard
+      ? '<div class="cls-field"><label class="cls-label">Add a note or link</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="A note, idea, or link…"></div>'
+      : '<div class="cls-field"><label class="cls-label">What will you bring?</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="e.g. rainbow sprinkles"></div>'
+        + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">' + (isBoard ? 'Add it' : 'Sign up') + '</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
     var itemInp = form.querySelector('.evs-bring-item');
     if (itemInp) itemInp.focus();
     form.querySelector('.evs-bring-save').addEventListener('click', function () {
       var st = form.querySelector('.evs-bring-status');
       var item = form.querySelector('.evs-bring-item').value.trim();
-      if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Say what you’ll bring'; return; }
-      var note = form.querySelector('.evs-bring-note').value.trim();
+      if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = isBoard ? 'Type a note or link first' : 'Say what you’ll bring'; return; }
+      var noteEl = form.querySelector('.evs-bring-note');
+      var note = noteEl ? noteEl.value.trim() : '';
       var saveBtn = this;
       saveBtn.disabled = true;
       fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, item_text: item, note: note }) })

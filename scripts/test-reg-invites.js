@@ -35,7 +35,12 @@ const { regInviteStatus, regInviteAwaiting, regInviteBucket, regInviteExpired } 
 )();
 
 const DAY = 24 * 60 * 60 * 1000;
-const NOW = Date.parse('2026-07-14T12:00:00Z');
+// NOW must track the REAL clock: regInviteBucket/regInviteAwaiting call
+// regInviteStatus() with its Date.now() default, so a pinned date rots —
+// this suite started failing 14 days after the original 2026-07-14 pin
+// once daysAgo(1) fixtures crossed the expiry window. Same rule as the
+// tourDisplayStatus section below (realDaysAgo).
+const NOW = Date.now();
 const daysAgo = n => new Date(NOW - n * DAY).toISOString();
 
 console.log('Registration-link invite funnel');
