@@ -16801,6 +16801,66 @@
     });
   }
 
+  // Wire up the firefly bug/idea buttons (desktop navbar + mobile icon row).
+  // The pills are plain mailto: anchors — kept as the no-JS fallback — but a
+  // bare mailto silently does NOTHING in browsers without a registered mail
+  // handler (#124: DuckDuckGo members clicked and nothing happened; DDG
+  // blocks/ignores the protocol handoff instead of asking). So JS intercepts
+  // the click and opens a small same-page chooser instead: Gmail compose
+  // (every member has a Workspace account, works in any browser), the device
+  // mail app (the original mailto), and copy-the-address. All synchronous
+  // same-tab DOM — nothing here for a privacy browser to block.
+  document.querySelectorAll('.firefly-btn').forEach(function (fireflyBtn) {
+    fireflyBtn.addEventListener('click', function (e) {
+      if (!personDetail || !personDetailCard) return; // no overlay → let mailto try
+      e.preventDefault();
+      var addr = 'communications@rootsandwingsindy.com';
+      var subj = 'Bug Report / Idea';
+      var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+      html += '<div class="elective-detail" style="text-align:center;">';
+      html += '<h3>Report a bug — or share an idea</h3>';
+      html += '<p style="font-size:0.85rem;color:var(--color-text-light);margin-bottom:1rem;">Email the Communications Director at<br><strong style="word-break:break-all;">' + addr + '</strong></p>';
+      html += '<div style="display:flex;justify-content:center;gap:0.6rem;flex-wrap:wrap;">';
+      html += '<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(addr) + '&su=' + encodeURIComponent(subj) + '">Open in Gmail</a>';
+      html += '<a class="btn btn-outline-dark btn-sm" href="mailto:' + addr + '?subject=' + encodeURIComponent(subj) + '">Use my mail app</a>';
+      html += '<button type="button" class="btn btn-outline-dark btn-sm" id="fireflyCopyBtn">Copy address</button>';
+      html += '</div>';
+      html += '</div>';
+      personDetailCard.innerHTML = html;
+      personDetail.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+      personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+      personDetail.addEventListener('click', function (ev) {
+        if (ev.target === personDetail) closeDetail();
+      });
+      var copyBtn = personDetailCard.querySelector('#fireflyCopyBtn');
+      if (copyBtn) copyBtn.addEventListener('click', function () {
+        var done = function () {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = 'Copy address'; }, 2000);
+        };
+        // navigator.clipboard needs a secure context and can be permission-
+        // gated (privacy browsers again) — textarea+execCommand is the
+        // fallback that works everywhere.
+        var fallbackCopy = function () {
+          var ta = document.createElement('textarea');
+          ta.value = addr;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); done(); } catch (copyErr) {}
+          document.body.removeChild(ta);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(addr).then(done, fallbackCopy);
+        } else {
+          fallbackCopy();
+        }
+      });
+    });
+  });
+
   // Wire up Class Ideas button
   var classIdeasBtn = document.getElementById('classIdeasBtn');
   if (classIdeasBtn) {
