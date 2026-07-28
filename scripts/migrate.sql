@@ -2301,3 +2301,25 @@ ALTER TABLE roles ADD COLUMN IF NOT EXISTS dormant BOOLEAN NOT NULL DEFAULT FALS
 -- rides the flag until the coordinator restocks. Free text (room NAME, not
 -- FK) so a renamed/archived room never strands a flag.
 ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS restock_room TEXT NOT NULL DEFAULT '';
+
+-- 2026-07-28 (#140, Erin): liaison My Class card — per-kid working notes
+-- for the group liaison (private to the liaison chain: group liaison,
+-- VP, super user; served only through the liaison-notes gate).
+-- kid_key = 'first|family' lowercased, the same convention the roster
+-- matching uses client-side.
+CREATE TABLE IF NOT EXISTS liaison_kid_notes (
+  id          SERIAL PRIMARY KEY,
+  school_year TEXT NOT NULL DEFAULT '',
+  class_group TEXT NOT NULL DEFAULT '',
+  kid_key     TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  updated_by  TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, class_group, kid_key)
+);
+
+-- 2026-07-28 (#150, Erin): Merchandise form gets the Contact form's
+-- layered spam screening (#45). Screened orders keep their row but wear
+-- screen_reason — hidden in a collapsed "screened" bucket on the Merch
+-- Orders report, rescuable with one click; no emails fire for them.
+ALTER TABLE merch_orders ADD COLUMN IF NOT EXISTS screen_reason TEXT NOT NULL DEFAULT '';

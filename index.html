@@ -25,7 +25,7 @@
        neither was on-brand and they were costing bytes. -->
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260728e">
+  <link rel="stylesheet" href="styles.css?v=20260728f">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <link rel="manifest" href="manifest-public.json?v=20260430g">
@@ -955,6 +955,8 @@
       <h2 class="tour-modal-title">Order Merch</h2>
       <p class="tour-modal-subtitle">Fill this out and our Merchandise Manager will follow up by email with Venmo payment details and pickup info.</p>
       <form id="merch-modal-form" class="tour-modal-form">
+        <!-- Bot screening: honeypot (never visible; humans leave it empty). -->
+        <input type="text" id="merch-website" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;border:0;padding:0;">
         <div class="tour-form-field">
           <label for="merch-name">Your Name</label>
           <input type="text" id="merch-name" name="name" required placeholder="First and Last Name">
@@ -1100,7 +1102,9 @@
                   size:  sizeField.style.display === 'none' ? '' : sizeSel.value,
                   color: colorField.style.display === 'none' ? '' : colorSel.value,
                   qty:   parseInt(document.getElementById('merch-qty').value, 10) || 1,
-                  notes: document.getElementById('merch-notes').value
+                  notes: document.getElementById('merch-notes').value,
+                  website: document.getElementById('merch-website').value,
+                  form_ts: window.__rwPageTs || 0
                 })
               });
               if (!res.ok) {
@@ -1126,7 +1130,7 @@
     </div>
   </div>
 
-  <script src="script.js?v=20260728g"></script>
+  <script src="script.js?v=20260728h"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.

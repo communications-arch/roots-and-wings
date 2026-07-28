@@ -6425,8 +6425,9 @@
       }
       h += '</div>';
 
-      // Your family's areas this session (with release ✕) — family match
-      // mirrors the My Family picker (name-keyed cleaning rota rows).
+      // #146 (Erin): ONE inline list, SE-style — every area shows its
+      // state in place (✓ yours with release, taken by name, or Sign up)
+      // instead of hopping between "Your family" and "Open" sections.
       var meEmail = String(getActiveEmail() || '').toLowerCase();
       var fam = null;
       (Array.isArray(FAMILIES) ? FAMILIES : []).some(function (f) {
@@ -6437,44 +6438,47 @@
       });
       var famName = String((fam && fam.name) || '').trim().toLowerCase();
       var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
-      var mine = (d.cleaning || []).filter(function (c) {
-        var f = String(c.family || '').toLowerCase();
+      var isMineFam = function (family) {
+        var f = String(family || '').toLowerCase();
         return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
+      };
+      var CLEAN_FLOOR_LABELS2 = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
+      // Merge assigned (label floors) + open (key floors) into one
+      // floor-ordered list.
+      var rowsByFloor = {}, floorOrder = [];
+      var pushRow = function (floorLabel, row) {
+        var key = floorLabel || 'Other';
+        if (!rowsByFloor[key]) { rowsByFloor[key] = []; floorOrder.push(key); }
+        rowsByFloor[key].push(row);
+      };
+      (d.cleaning || []).forEach(function (c) {
+        pushRow(c.floor || 'Other', { area: c.area, taken: true, mine: isMineFam(c.family), family: c.family, id: c.id });
       });
-      if (mine.length) {
-        h += '<p class="ws-lending-head" style="margin-top:12px;">Your family — Session ' + sess + '</p>';
+      (d.cleaning_open || []).forEach(function (a) {
+        pushRow(CLEAN_FLOOR_LABELS2[a.floor] || (a.floater ? 'Floater' : 'Other'), { area: a.area, taken: false, floater: a.floater, id: a.id });
+      });
+      if (!floorOrder.length) {
+        h += '<p class="ws-empty">No cleaning areas set up for this session yet.</p>';
+      }
+      floorOrder.forEach(function (fl) {
+        h += '<p class="ws-opp-committee" style="display:block;margin:10px 0 2px;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">' + escapeHtml(fl) + '</p>';
         h += '<ul class="ws-opportunities">';
-        mine.forEach(function (c) {
-          h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(c.area) + '</strong>'
-            + (c.floor ? '<span class="ws-opp-committee">' + escapeHtml(c.floor) + '</span>' : '') + '</span>'
-            + '<button type="button" class="sc-btn sc-btn-del clean-su-release" data-id="' + c.id + '">✕ Release</button></li>';
+        rowsByFloor[fl].forEach(function (r) {
+          h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(r.area) + '</strong>';
+          if (r.floater) h += '<span class="ws-opp-committee">floaters welcome — more than one family can join</span>';
+          h += '</span>';
+          if (r.taken && r.mine) {
+            h += '<span class="ws-opp-committee">✓ Your family</span>'
+              + '<button type="button" class="sc-btn sc-btn-del clean-su-release" data-id="' + r.id + '" title="Release this spot">×</button>';
+          } else if (r.taken) {
+            h += '<span class="ws-opp-committee">' + escapeHtml(r.family || 'taken') + '</span>';
+          } else {
+            h += '<button type="button" class="volunteer-cta clean-su-claim" data-id="' + r.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
+          }
+          h += '</li>';
         });
         h += '</ul>';
-      }
-
-      var opens = d.cleaning_open || [];
-      h += '<p class="ws-lending-head" style="margin-top:12px;">Open areas — Session ' + sess + '</p>';
-      if (!opens.length) {
-        h += '<p class="ws-empty">All areas are covered for this session. Thank you!</p>';
-      } else {
-        var CLEAN_FLOOR_LABELS2 = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
-        var floors = [], byFloor2 = {};
-        opens.forEach(function (a) {
-          var fk = a.floor || (a.floater ? 'floater' : '');
-          if (!byFloor2[fk]) { byFloor2[fk] = []; floors.push(fk); }
-          byFloor2[fk].push(a);
-        });
-        floors.forEach(function (fk) {
-          h += '<p class="ws-opp-committee" style="display:block;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">' + escapeHtml(CLEAN_FLOOR_LABELS2[fk] || fk || 'Other') + '</p>';
-          h += '<ul class="ws-opportunities">';
-          byFloor2[fk].forEach(function (a) {
-            h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(a.area) + '</strong>'
-              + (a.floater ? '<span class="ws-opp-committee">floaters welcome — more than one family can join</span>' : '') + '</span>'
-              + '<button type="button" class="sc-btn sc-save clean-su-claim" data-id="' + a.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button></li>';
-          });
-          h += '</ul>';
-        });
-      }
+      });
       body.innerHTML = h;
 
       body.querySelectorAll('.clean-su-sess').forEach(function (btn) {
@@ -6495,8 +6499,7 @@
             .then(function (res) {
               if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not claim that area.'); return; }
               loadCleaningSignupBody();
-              if (typeof renderCleaningTab === 'function') renderCleaningTab();
-              if (typeof renderMyFamily === 'function') renderMyFamily();
+              refreshCleaningAfterSignup();
             })
             .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
         });
@@ -6510,8 +6513,7 @@
               .then(function (res) {
                 if (!res.ok) { alert((res.data && res.data.error) || 'Could not release.'); return; }
                 loadCleaningSignupBody();
-                if (typeof renderCleaningTab === 'function') renderCleaningTab();
-                if (typeof renderMyFamily === 'function') renderMyFamily();
+                refreshCleaningAfterSignup();
               })
               .catch(function () { alert('Network error — try again.'); });
           });
@@ -8740,6 +8742,71 @@
     return null;
   }
 
+  // #155 (Colleen): sign up for cleaning spots right on the Co-op
+  // Coordination tab. The volunteer-matrix (same source as the Ways to
+  // Help modal) says which areas are open and which row is ours to
+  // release; cached per session so the tab stays snappy.
+  var _cleanTabMatrix = {};
+  var _cleanTabMatrixPending = {};
+  function ensureCleanTabMatrix(sess) {
+    if (_cleanTabMatrix[sess] || _cleanTabMatrixPending[sess]) return;
+    _cleanTabMatrixPending[sess] = true;
+    fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + '&session=' + sess + notifViewAsSuffix(), {
+      headers: rwAuthHeaders()
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      _cleanTabMatrixPending[sess] = false;
+      if (d && !d.error) {
+        _cleanTabMatrix[sess] = d;
+        if (cleaningTabView === sess) renderCleaningTab();
+      }
+    }).catch(function () { _cleanTabMatrixPending[sess] = false; });
+  }
+  // Shared post-claim/release refresh: the tab draws families from
+  // CLEANING_CREW (via applyCleaningData), so re-pull both sources.
+  function refreshCleaningAfterSignup() {
+    _cleanTabMatrix = {};
+    return fetch('/api/cleaning', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { if (data && !data.error) applyCleaningData(data); })
+      .catch(function () {})
+      .then(function () {
+        renderCleaningTab();
+        if (typeof renderMyFamily === 'function') renderMyFamily();
+      });
+  }
+
+  function wireCleaningTabSignups(container, sess) {
+    container.querySelectorAll('.clean-tab-claim').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        fetch('/api/cleaning?action=cleaning-signup', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+          body: JSON.stringify({ area_id: parseInt(btn.getAttribute('data-id'), 10), session: sess })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not claim that area.'); return; }
+            refreshCleaningAfterSignup();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+      });
+    });
+    container.querySelectorAll('.clean-tab-release').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'release', function () {
+          fetch('/api/cleaning?action=cleaning-signup&id=' + self.getAttribute('data-id'), { method: 'DELETE', headers: rwAuthHeaders() })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert((res.data && res.data.error) || 'Could not release.'); return; }
+              refreshCleaningAfterSignup();
+            })
+            .catch(function () { alert('Network error — try again.'); });
+        });
+      });
+    });
+  }
+
   function renderCleaningTab() {
     var container = document.getElementById('cleaningTabContent');
     if (!container) return;
@@ -8783,34 +8850,77 @@
     ];
 
     var myNames = getMyNames();
+    // #155: open spots + your release ride the grid (SE-tab style). The
+    // matrix loads async on first view of a session; until then the tab
+    // shows assignments only, then re-renders with the sign-up buttons.
+    ensureCleanTabMatrix(viewSess);
+    var matrix = _cleanTabMatrix[viewSess] || null;
+    var openByFloor = {}; // floor KEY (or 'floater') -> [{id, area, floater}]
+    if (matrix) {
+      (matrix.cleaning_open || []).forEach(function (a) {
+        var k = a.floater ? 'floater' : a.floor;
+        (openByFloor[k] = openByFloor[k] || []).push(a);
+      });
+    }
+    var myAssignmentId = function (floorLabel, area) {
+      if (!matrix) return null;
+      var hit = null;
+      (matrix.cleaning || []).some(function (c) {
+        if (c.floor === floorLabel && c.area === area
+          && String(c.family || '').trim().toLowerCase() === myNames.familyName.toLowerCase()) { hit = c; return true; }
+        return false;
+      });
+      return hit ? hit.id : null;
+    };
+    var areaNameHtml = function (floorKey, area) {
+      return findAreaTasks(floorKey, area).length > 0
+        ? '<a class="cleaning-area cleaning-area-link" data-floor="' + floorKey + '" data-area="' + area + '" href="#" onclick="return false;">' + area + '</a>'
+        : '<span class="cleaning-area">' + area + '</span>';
+    };
+
     html += '<div class="cleaning-grid">';
     floors.forEach(function (floor) {
-      if (!sessClean[floor.key]) return;
+      var assignedAreas = sessClean[floor.key] ? Object.keys(sessClean[floor.key]) : [];
+      var openRows = (openByFloor[floor.key] || []).filter(function (a) {
+        return assignedAreas.indexOf(a.area) === -1;
+      });
+      if (!assignedAreas.length && !openRows.length) return;
       html += '<div class="cleaning-floor-card">';
       html += '<h4>' + floor.label + '</h4>';
-      var areas = Object.keys(sessClean[floor.key]);
-      areas.forEach(function (area) {
+      assignedAreas.forEach(function (area) {
         var families = sessClean[floor.key][area];
         var isMyArea = families.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
         html += '<div class="cleaning-role' + (isMyArea ? ' coord-my-row' : '') + '">';
-        // Area name — clickable if tasks exist
-        var areaTaskCount = findAreaTasks(floor.key, area).length;
-        if (areaTaskCount > 0) {
-          html += '<a class="cleaning-area cleaning-area-link" data-floor="' + floor.key + '" data-area="' + area + '" href="#" onclick="return false;">' + area + '</a>';
-        } else {
-          html += '<span class="cleaning-area">' + area + '</span>';
-        }
-        html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ') + '</span>';
+        html += areaNameHtml(floor.key, area);
+        html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
+        var relId = isMyArea ? myAssignmentId(floor.label, area) : null;
+        if (relId) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relId + '" title="Release this spot">×</button>';
+        html += '</span></div>';
+      });
+      openRows.forEach(function (a) {
+        html += '<div class="cleaning-role">';
+        html += areaNameHtml(floor.key, a.area);
+        html += '<span class="cleaning-families"><button type="button" class="volunteer-cta clean-tab-claim" data-id="' + a.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button></span>';
         html += '</div>';
       });
       html += '</div>';
     });
 
-    if (sessClean.floater && sessClean.floater.length > 0) {
-      var isMyFloater = sessClean.floater.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
+    var floaterFams = sessClean.floater || [];
+    var floaterOpen = (openByFloor.floater || [])[0] || null;
+    if (floaterFams.length > 0 || floaterOpen) {
+      var isMyFloater = floaterFams.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
       html += '<div class="cleaning-floor-card">';
       html += '<h4>Floater</h4>';
-      html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">' + sessClean.floater.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ') + '</span></div>';
+      html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">';
+      html += floaterFams.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
+      var relFl = isMyFloater ? myAssignmentId('Floater', 'Floater') : null;
+      if (relFl) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relFl + '" title="Release this spot">×</button>';
+      if (floaterOpen && !isMyFloater) {
+        html += (floaterFams.length ? ' ' : '') + '<button type="button" class="volunteer-cta clean-tab-claim" data-id="' + floaterOpen.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
+      }
+      html += '</span></div>';
+      if (floaterOpen) html += '<p style="color:var(--color-text-light);font-size:0.82rem;margin:4px 0 0;">Floaters welcome — more than one family can join.</p>';
       html += '</div>';
     }
     html += '</div>';
@@ -8818,6 +8928,7 @@
     container.innerHTML = html;
     wirePager(container);
     wireCleaningTabInfoButtons(container);
+    wireCleaningTabSignups(container, viewSess);
   }
 
   function wireCleaningTabInfoButtons(container) {
@@ -9516,6 +9627,21 @@
         return h;
       }
     },
+    'my-class': {
+      // #140 (Erin): the liaison's quick view of their class — roster
+      // with directory info + allergies, teacher/assistants per session,
+      // topic + lesson plan, and private per-kid notes.
+      title: 'My Class',
+      roleGate: ['*'],
+      render: function () {
+        var h = '<p class="ws-body-hint">Key info for your group at a glance — kids, parents, phones, allergies, and who’s teaching each session. Notes are visible only to you (and the VP).</p>';
+        h += '<div id="ws-myclass-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadMyClassCard === 'function') loadMyClassCard();
+      }
+    },
     'group-bring': {
       // #139 final form (Erin, 07-28 evening): the liaison card is the
       // group's SNACK LIST — the liaison owns snacks for the year.
@@ -9636,9 +9762,9 @@
             h += '<div class="ws-part-meter" role="img" aria-label="' + total.toFixed(1) + ' of ' + expected.toFixed(1) + ' participation points">';
             h += '<div class="ws-part-meter-fill" style="width:' + pct + '%;"></div>';
             h += '</div>';
-            h += '<p class="ws-part-meter-caption"><strong>' + total.toFixed(1) + '</strong> of <strong>' + expected.toFixed(1) + '</strong> participation points';
-            if (member.isNewMember) h += ' <span class="ws-part-new-pill">New this year</span>';
-            h += '</p>';
+            // #149 (Erin): no "New this year" pill after the points — the
+            // reduced new-member goal already speaks for itself.
+            h += '<p class="ws-part-meter-caption"><strong>' + total.toFixed(1) + '</strong> of <strong>' + expected.toFixed(1) + '</strong> participation points</p>';
           }
 
           // Recap: translate counts into sentences.
@@ -9694,15 +9820,14 @@
         // A PM class proposal is always a welcome way to contribute, whether
         // or not committee seats are open. Button opens the same submission
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('classes', 'ag-icon') + ' Submit a Class</button><span class="ws-part-submit-hint">Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>.</span></p>';
+        // #154 (Erin): rows keep counts only — the explanatory copy moved
+        // into each modal so the card stays short.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('classes', 'ag-icon') + ' Submit a Class</button></p>';
         if (open.length === 0) {
           h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
         } else {
-          // #79: promoted to the same prominent treatment as Submit a
-          // Class — the inline text link was easy to scroll past.
           h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">' + brandIconImg('waysToHelp', 'ag-icon') + ' Committee Seats</button>'
-            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open year-long seat' + (open.length === 1 ? '' : 's')
-            + ' — tap to see what each involves and who it reports to, or email <a href="mailto:vp@rootsandwingsindy.com">vp@rootsandwingsindy.com</a> to claim one.</span></p>';
+            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's') + '</span></p>';
         }
         // Special events (#53/#73/#75): one summary line — the seats and
         // sign-up lists live in the Jump In modal, mirroring the
@@ -10470,7 +10595,9 @@
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     // 'class-ideas' joined the universal set 2026-07-20 (#38 — moved
     // from My Family, whose old slot now hosts the My Classes card).
-    '*': ['shared-todos', 'members-summary', 'class-ideas', 'lending', 'ways-to-help', 'resources']
+    // #152 (Erin): Shared order — row 1: Members, Ways to Help, Class
+    // Development; row 2: Special Events (To Do), Lending, Resources.
+    '*': ['members-summary', 'ways-to-help', 'class-ideas', 'shared-todos', 'lending', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -10497,6 +10624,7 @@
     'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
     'shared-todos': 'Special-event work waiting on you personally — tasks you’ve been assigned and events you’re helping plan. Shows once here instead of repeating under each of your roles.',
     'group-bring': 'Your group’s snack sign-ups — the liaison is in charge of snacks for the year. Post spots (one family per snack day works well); families claim them from their Kid Schedule and claimed days land on their Packing List.',
+    'my-class': 'A liaison’s quick view of their class — every kid with parents, phone, and allergies, who’s teaching each session, the topic and lesson plan, plus private per-kid notes only the liaison chain can see.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
@@ -10992,8 +11120,9 @@
       // exact titles like Afternoon Class Liaison (explicit defaults
       // below) stay out.
       if (!WORKSPACE_DEFAULTS[role] && isMorningGroupLiaisonTitle(role)) {
-        // #139: liaisons get their group's "Things to Bring" editor.
-        return ['todos', 'group-bring', 'roles'];
+        // #139: liaisons get their group's Snack List editor; #140 adds
+        // the My Class roster card.
+        return ['todos', 'my-class', 'group-bring', 'roles'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
@@ -11147,6 +11276,7 @@
           var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes,
             'shared-todos': BRAND_ICONS.specialEvents, 'lending': BRAND_ICONS.lending,
             'group-bring': BRAND_ICONS.supplyCloset,
+            'my-class': BRAND_ICONS.classes,
             // #129: every board card carries its role's own mark now
             // (replaces #120's two shared marks + generic fallback).
             'bg-president': BRAND_ICONS.boardPresident, 'bg-vp': BRAND_ICONS.boardVicePresident,
@@ -13257,6 +13387,7 @@
   var _merchInventoryItemFilter = 'all';
   var _merchOrderEditId = null; // order id with the in-place edit panel open
   var _merchInventoryAddOpen = false; // "+ Add item" form visibility
+  var _merchScreenedOpen = false; // #150: screened-as-spam bucket expanded
 
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'customer_name', label: 'Name', type: 'string',
@@ -13643,7 +13774,11 @@
   }
 
   function renderMerchOrdersBody(body) {
-    var orders = _merchOrdersCache || [];
+    // #150: orders the spam screen caught sit in a collapsed bucket at
+    // the bottom — out of the working list, one click from rescue.
+    var allOrders = _merchOrdersCache || [];
+    var screened = allOrders.filter(function (o) { return o.screen_reason; });
+    var orders = allOrders.filter(function (o) { return !o.screen_reason; });
     var total = orders.length;
     var unpaid     = orders.filter(function (o) { return !o.paid_at; }).length;
     var unfulfilled = orders.filter(function (o) { return !o.delivered_at; }).length;
@@ -13665,15 +13800,76 @@
     var addToolbar = '<div class="coop-cal-toolbar">'
       + '<button id="ws-merch-add-order-btn" class="btn btn-outline-dark btn-sm" type="button">+ Add order</button>'
       + '</div>';
+    // #150: collapsed screened-orders bucket (shown under the table).
+    var screenedHtml = '';
+    if (screened.length > 0) {
+      screenedHtml += '<div class="ws-merch-screened" style="margin-top:14px;">';
+      screenedHtml += '<button type="button" class="sc-btn" id="ws-merch-screened-toggle" aria-expanded="' + (_merchScreenedOpen ? 'true' : 'false') + '">'
+        + (_merchScreenedOpen ? '▾' : '▸') + ' Screened as likely spam (' + screened.length + ')</button>';
+      if (_merchScreenedOpen) {
+        screenedHtml += '<p class="ws-body-hint" style="margin:8px 0 4px;">These never emailed anyone. “Not spam” moves an order back into the list above — follow up with the customer by hand, since their confirmation email never sent.</p>';
+        screened.forEach(function (o) {
+          screenedHtml += '<div class="ws-lending-row"><span class="ws-lending-main">'
+            + escapeHtmlWs(o.customer_name || '(no name)') + ' · ' + escapeHtmlWs(o.item) + (o.qty > 1 ? ' ×' + o.qty : '')
+            + '<span class="ws-lending-sub">' + escapeHtmlWs(o.customer_email || '') + ' · ' + escapeHtmlWs(formatReportDate(o.created_at)) + ' · <em>' + escapeHtmlWs(o.screen_reason) + '</em></span></span>'
+            + '<span class="ws-lending-actions">'
+            + '<button type="button" class="sc-btn sc-save merch-rescue-btn" data-merch-id="' + o.id + '">Not spam</button>'
+            + '<button type="button" class="sc-btn sc-btn-del merch-order-del-btn merch-screened-del" data-merch-id="' + o.id + '">Delete</button>'
+            + '</span></div>';
+        });
+      }
+      screenedHtml += '</div>';
+    }
+    function wireScreenedBucket() {
+      var tog = body.querySelector('#ws-merch-screened-toggle');
+      if (tog) tog.addEventListener('click', function () {
+        _merchScreenedOpen = !_merchScreenedOpen;
+        renderMerchOrdersBody(body);
+      });
+      body.querySelectorAll('.merch-rescue-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = parseInt(btn.getAttribute('data-merch-id'), 10);
+          btn.disabled = true;
+          fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'merch-order-rescue', id: id }) })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert((res.data && res.data.error) || 'Could not rescue the order.'); btn.disabled = false; return; }
+              var hit = (_merchOrdersCache || []).filter(function (o) { return o.id === id; })[0];
+              if (hit) hit.screen_reason = '';
+              renderMerchOrdersBody(body);
+            })
+            .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+        });
+      });
+      body.querySelectorAll('.merch-screened-del').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var self = this;
+          rwArmTwoStep(self, 'delete', function () {
+            var id = parseInt(self.getAttribute('data-merch-id'), 10);
+            self.disabled = true;
+            fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'merch-order-delete', id: id }) })
+              .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res) {
+                if (!res.ok) { alert((res.data && res.data.error) || 'Could not delete the order.'); self.disabled = false; return; }
+                _merchOrdersCache = (_merchOrdersCache || []).filter(function (o) { return o.id !== id; });
+                renderMerchOrdersBody(body);
+              })
+              .catch(function () { alert('Network error — try again.'); self.disabled = false; });
+          });
+        });
+      });
+    }
     if (total === 0) {
-      body.innerHTML = countsHtml + addToolbar + '<p class="ws-empty">No orders yet — the public form is open and will land orders here.</p>';
+      body.innerHTML = countsHtml + addToolbar + '<p class="ws-empty">No orders yet — the public form is open and will land orders here.</p>' + screenedHtml;
       var addBtnEmpty = body.querySelector('#ws-merch-add-order-btn');
       if (addBtnEmpty) addBtnEmpty.addEventListener('click', toggleMerchAddOrderForm);
+      wireScreenedBucket();
       return;
     }
-    body.innerHTML = countsHtml + addToolbar + '<div id="ws-merch-orders-table-target"></div>';
+    body.innerHTML = countsHtml + addToolbar + '<div id="ws-merch-orders-table-target"></div>' + screenedHtml;
     var addBtn = body.querySelector('#ws-merch-add-order-btn');
     if (addBtn) addBtn.addEventListener('click', toggleMerchAddOrderForm);
+    wireScreenedBucket();
     var target = body.querySelector('#ws-merch-orders-table-target');
 
     function rowsForFilter() {
@@ -17197,7 +17393,8 @@
     flaggingId: null,      // id currently being flagged/unflagged (UI busy state)
     flagPickingId: null,   // classroom item whose which-room picker is open (#125-3)
     rooms: null,           // Facilities rooms for that picker (lazy, active only)
-    qtyBusyId: null        // id currently being updated via the qty segmented control
+    qtyBusyId: null,       // id currently being updated via the qty segmented control
+    mineOnly: false        // #148: "My items" lens — only lending items I offer
   };
 
   function getSupplyCoordinatorName() {
@@ -17296,8 +17493,12 @@
     if (!state.items) return [];
     var q = state.searchQuery.trim().toLowerCase();
     var locFilter = (state.locationFilter || '').toLowerCase();
+    var myEmailForMine = String(getActiveEmail() || '').toLowerCase();
     var rows = state.items.filter(function (item) {
       if (!state.enabledCats[item.category]) return false;
+      // #148: "My items" lens — only the lending items this member offers.
+      if (state.mineOnly && !(item.category === 'member_lending' &&
+        String(item.held_by_email || '').toLowerCase() === myEmailForMine)) return false;
       // Given-away donations are done — history lives on the loan record.
       if (item.donated_at) return false;
       if (locFilter && (item.location || '').toLowerCase() !== locFilter) return false;
@@ -17387,6 +17588,10 @@
       html += '<span class="sc-cat-label">' + cat.short + '</span>';
       html += '</button>';
     });
+    // #148 (Erin): "My items" pill — just the lending items this member
+    // offers (the Lending card links here with it pre-lit).
+    html += '<button class="sc-cat-chip sc-cat-member_lending' + (state.mineOnly ? ' sc-on' : ' sc-off') + '" data-cat="__mine__" aria-pressed="' + (state.mineOnly ? 'true' : 'false') + '">';
+    html += '<span class="sc-cat-dot" aria-hidden="true"></span><span class="sc-cat-label">My items</span></button>';
     html += '</div>';
 
     // Count + Add toolbar — the Add button sits above the table like every
@@ -17948,6 +18153,13 @@
     personDetailCard.querySelectorAll('.sc-cat-chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         var key = chip.getAttribute('data-cat');
+        // #148: the "My items" pill is a standalone lens, not a category.
+        if (key === '__mine__') {
+          supplyClosetState.mineOnly = !supplyClosetState.mineOnly;
+          if (supplyClosetState.mineOnly) supplyClosetState.enabledCats.member_lending = true;
+          renderSupplyClosetModal();
+          return;
+        }
         supplyClosetState.enabledCats[key] = !supplyClosetState.enabledCats[key];
         // Don't allow all off — re-enable if user toggled the last one
         var anyOn = false;
@@ -18622,6 +18834,7 @@
       game_closet: !opts.lendingOnly,
       member_lending: true
     };
+    supplyClosetState.mineOnly = !!opts.mineOnly;
     supplyClosetState.editingId = null;
     supplyClosetState.addingNew = false;
     supplyClosetState.addingLend = !!opts.addLend;
@@ -18730,41 +18943,29 @@
           + '<span class="ws-lending-actions">' + acts + '</span></div>';
       });
     }
-    // #135 (Lyndsey): every item this member has in the library, with a
-    // remove for things they no longer have. Given-away items show their
-    // ending; the server blocks deleting anything currently out.
+    // #148 (Erin): the full "my items" list moved to the Supply Closet's
+    // "My items" lens — the card links there instead of repeating it.
+    // Edit/remove live on the closet rows (#135's remove included).
     var itemsList = (myItems || []);
     if (itemsList.length > 0) {
-      h += '<p class="ws-lending-head">Your items in the library</p>';
-      itemsList.forEach(function (it) {
-        var sub = it.donated_at
-          ? 'given to ' + escapeHtml(it.donated_to || 'a member') + ' 💛'
-          : (it.offer_type === 'donate' ? 'offered to give away' : 'offered to lend')
-            + (it.notes ? ' · ' + escapeHtml(it.notes) : '');
-        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + escapeHtml(it.item_name)
-          + '<span class="ws-lending-sub">' + sub + '</span></span>'
-          + '<span class="ws-lending-actions"><button type="button" class="sc-btn sc-btn-del ll-item-del" data-item="' + it.id + '">Remove</button></span></div>';
-      });
+      var activeCount = itemsList.filter(function (it) { return !it.donated_at; }).length;
+      if (activeCount > 0) {
+        h += '<p class="ws-lending-head">Your items in the library</p>';
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">'
+          + '<a href="#" class="ws-inline-link ll-my-items">See your ' + activeCount
+          + (activeCount === 1 ? ' item' : ' items') + ' in the Supply Closet</a>'
+          + '<span class="ws-lending-sub">edit or remove them there</span></span></div>';
+      }
     }
     if (!h) {
       h = '<p class="ws-empty">Nothing borrowed or lent right now.</p>';
     }
     target.innerHTML = h;
 
-    target.querySelectorAll('.ll-item-del').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var self = this;
-        rwArmTwoStep(self, 'remove', function () {
-          self.disabled = true;
-          var payloadUrl = '/api/supply-closet?id=' + self.getAttribute('data-item') + notifViewAsSuffix();
-          fetch(payloadUrl, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') } })
-            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-            .then(function (res) {
-              if (!res.ok) { alert(res.data.error || 'Could not remove the item.'); self.disabled = false; return; }
-              loadLendingCard();
-            })
-            .catch(function (err) { alert('Network error: ' + err.message); self.disabled = false; });
-        });
+    target.querySelectorAll('.ll-my-items').forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        showSupplyClosetPopup(true, { lendingOnly: true, mineOnly: true });
       });
     });
 
@@ -19006,6 +19207,216 @@
       }
     });
     return out;
+  }
+
+  // ── #140 My Class card (group liaisons) ─────────────────────────────
+  // Roster + directory info for the liaison's group, teacher/assistants
+  // per session (session pills), topic + lesson plan, and private
+  // per-kid notes (liaison_kid_notes via the liaison-notes gate).
+  var _myClassSession = null;
+  var _myClassNotes = {};        // group -> { kid_key: note }
+  var _myClassNotesLoaded = {};  // group -> true once fetched
+  var _myClassEditingKey = null; // 'group|kid_key' with the editor open
+  var _myClassRetry = 0;
+
+  function myClassKidKey(first, fam) {
+    return String(first || '').trim().split(/\s+/)[0].toLowerCase() + '|' + String(fam || '').toLowerCase();
+  }
+
+  // Season roster for a group — same snapshot-first logic as the View
+  // Classmates modal (community roster decides membership; directory
+  // records supply photos/pronouns/allergies; snapshot-only kids get
+  // name-only rows).
+  function myClassRosterForGroup(group) {
+    var grpLower = String(group || '').toLowerCase();
+    var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
+    var seasonKids = {};
+    if (snapshotReady) {
+      _communityRoster.forEach(function (fam) {
+        (fam.kids || []).forEach(function (k) {
+          if (k.class) seasonKids[myClassKidKey(k.name, fam.name)] = String(k.class).toLowerCase();
+        });
+      });
+    }
+    var kids = allPeople.filter(function (person) {
+      if (person.type !== 'kid') return false;
+      if (!snapshotReady) return String(person.group || '').toLowerCase() === grpLower;
+      return seasonKids[myClassKidKey(person.name, person.family || person.lastName)] === grpLower;
+    });
+    if (snapshotReady) {
+      var have = {};
+      kids.forEach(function (k) { have[myClassKidKey(k.name, k.family || k.lastName)] = true; });
+      _communityRoster.forEach(function (fam) {
+        (fam.kids || []).forEach(function (k) {
+          if (String(k.class || '').toLowerCase() !== grpLower) return;
+          if (have[myClassKidKey(k.name, fam.name)]) return;
+          kids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name });
+        });
+      });
+    }
+    kids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    return kids;
+  }
+
+  function ensureLiaisonNotes(group) {
+    if (_myClassNotesLoaded[group]) return;
+    _myClassNotesLoaded[group] = true;
+    fetch('/api/supply-closet?action=liaison-notes&group=' + encodeURIComponent(group) + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && Array.isArray(d.notes)) {
+        var map = {};
+        d.notes.forEach(function (n) { map[n.kid_key] = n.note; });
+        _myClassNotes[group] = map;
+        renderMyClassCardBody();
+      }
+    }).catch(function () {});
+  }
+
+  function loadMyClassCard() {
+    var target = document.getElementById('ws-myclass-body');
+    if (!target) return;
+    var groups = myLiaisonGroups();
+    if (!groups.length) { target.innerHTML = '<p class="ws-empty">No liaison group on file.</p>'; return; }
+    if (_myClassSession == null) _myClassSession = currentSession || 1;
+    var sess = _myClassSession;
+    if (!publishedSchedule.loaded) loadPublishedSchedule();
+    var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
+    if (!snapshotReady && typeof loadMembersSummary === 'function') loadMembersSummary();
+    ensureClassLinksForSession(sess, renderMyClassCardBody);
+    groups.forEach(ensureLiaisonNotes);
+    // The schedule + snapshot load async with no callback hook — retry a
+    // few times until both are in, then the render is complete.
+    if ((!publishedSchedule.loaded || !snapshotReady) && _myClassRetry < 8) {
+      _myClassRetry++;
+      setTimeout(loadMyClassCard, 1200);
+    }
+    renderMyClassCardBody();
+  }
+
+  function renderMyClassCardBody() {
+    var target = document.getElementById('ws-myclass-body');
+    if (!target) return;
+    var groups = myLiaisonGroups();
+    if (!groups.length) return;
+    var sess = _myClassSession || currentSession || 1;
+    var h = '<div class="board-cal-views" role="group" aria-label="Session" style="margin-bottom:8px;">';
+    for (var i = 1; i <= 5; i++) {
+      h += '<button type="button" class="board-cal-view-pill mc-sess-pill' + (i === sess ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
+    }
+    h += '</div>';
+
+    groups.forEach(function (group) {
+      if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(groupWithAge(group)) + '</p>';
+
+      // Who's teaching this session (+ topic, room, lesson plan).
+      h += '<p class="ws-lending-head">Session ' + sess + ' class</p>';
+      var pub = (typeof publishedAmForGroup === 'function') ? publishedAmForGroup(sess, group) : [];
+      if (!publishedSchedule.loaded) {
+        h += '<p class="ws-empty">Loading the schedule…</p>';
+      } else if (!pub.length) {
+        h += '<p class="ws-empty">No morning class published for Session ' + sess + ' yet.</p>';
+      } else {
+        var amHourLabel2 = { AM: '', AM1: 'AM 1 · ', AM2: 'AM 2 · ' };
+        pub.forEach(function (c) {
+          var sub = [];
+          var who = escapeHtml(c.teacher || 'TBD') + (c.co_teachers ? ' &amp; ' + escapeHtml(c.co_teachers) : '');
+          sub.push('Teaching: <strong>' + who + '</strong>');
+          if ((c.helpers || []).length) sub.push('Assisting: ' + c.helpers.map(escapeHtml).join(', '));
+          if (c.scheduled_room) sub.push(escapeHtml(c.scheduled_room));
+          h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + (amHourLabel2[c.scheduled_hour] || '') + escapeHtml(c.class_name || 'Morning class') + '</strong>'
+            + '<span class="ws-lending-sub">' + sub.join(' · ')
+            + (c.description ? '<br>' + escapeHtml(c.description) : '') + '</span></span>';
+          var link = (_classLinksBySession[sess] || {})[group];
+          if (link && link.curriculum_id) {
+            h += '<span class="ws-lending-actions"><button type="button" class="sc-btn mc-plan-btn" data-curr="' + link.curriculum_id + '">Lesson Plan</button></span>';
+          }
+          h += '</div>';
+        });
+      }
+
+      // Roster — season membership; year-round (not per session).
+      var kids = myClassRosterForGroup(group);
+      var notes = _myClassNotes[group] || {};
+      h += '<p class="ws-lending-head">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</p>';
+      if (!kids.length) {
+        h += '<p class="ws-empty">' + ((Array.isArray(_communityRoster) && _communityRoster.length) ? 'No kids placed in this group yet.' : 'Loading the roster…') + '</p>';
+      }
+      kids.forEach(function (kid) {
+        var key = myClassKidKey(kid.name, kid.family || kid.lastName);
+        var editKey = group + '|' + key;
+        var note = notes[key] || '';
+        var famLabel = kid.familyDisplay || kid.family || kid.lastName || '';
+        var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+        var subBits = [];
+        var parents = Array.isArray(kid.parentNames) ? kid.parentNames.filter(Boolean).join(' & ') : '';
+        if (parents) subBits.push(escapeHtml(parents));
+        if (kid.phone) subBits.push('<a href="tel:' + escapeHtml(kid.phone) + '">' + escapeHtml(kid.phone) + '</a>');
+        if (kid.age) subBits.push('age ' + kid.age);
+        h += '<div class="ws-lending-row mc-kid-row"><span class="ws-lending-main">'
+          + '<span style="display:flex;align-items:center;gap:8px;">'
+          + '<span class="elective-student-dot" style="background:' + faceColor(kid.name) + ';flex-shrink:0;">' + kidAvatarInnerHtml(kid.name, kid.email || '', kid.family || kid.lastName || '') + '</span>'
+          + '<span><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + escapeHtml(kid.lastName || kid.family || '') + '</span>' + pronounTag(kid) + noPhoto
+          + (subBits.length ? '<span class="ws-lending-sub">' + subBits.join(' · ') + '</span>' : '')
+          + (kid.allergies ? '<span class="ws-lending-sub" style="color:var(--color-error);font-weight:600;">⚠ ' + escapeHtml(kid.allergies) + '</span>' : '')
+          + (famLabel ? '<span class="ws-lending-sub">' + escapeHtml(famLabel) + ' family</span>' : '')
+          + (note && _myClassEditingKey !== editKey ? '<span class="ws-lending-sub mc-note-text">📝 ' + escapeHtml(note) + '</span>' : '')
+          + '</span></span>'
+          + '<span class="ws-lending-actions"><button type="button" class="sc-btn mc-note-btn" data-key="' + escapeHtml(editKey) + '">' + (note ? 'Edit note' : '+ Note') + '</button></span>'
+          + '</span></div>';
+        if (_myClassEditingKey === editKey) {
+          h += '<div class="mc-note-editor" data-group="' + escapeHtml(group) + '" data-kid="' + escapeHtml(key) + '" style="margin:4px 0 8px;">'
+            + '<textarea class="cl-input mc-note-input" rows="2" maxlength="1000" placeholder="Only you (and the VP) see this note.">' + escapeHtml(note) + '</textarea>'
+            + '<div style="display:flex;gap:6px;margin-top:4px;"><button type="button" class="btn btn-primary btn-sm mc-note-save">Save</button>'
+            + '<button type="button" class="sc-btn mc-note-cancel">Cancel</button></div></div>';
+        }
+      });
+    });
+    target.innerHTML = h;
+
+    target.querySelectorAll('.mc-sess-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _myClassSession = parseInt(btn.getAttribute('data-sess'), 10);
+        ensureClassLinksForSession(_myClassSession, renderMyClassCardBody);
+        renderMyClassCardBody();
+      });
+    });
+    target.querySelectorAll('.mc-plan-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openClassPlanDetail(parseInt(btn.getAttribute('data-curr'), 10), false);
+      });
+    });
+    target.querySelectorAll('.mc-note-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var k = btn.getAttribute('data-key');
+        _myClassEditingKey = (_myClassEditingKey === k) ? null : k;
+        renderMyClassCardBody();
+      });
+    });
+    target.querySelectorAll('.mc-note-editor').forEach(function (ed) {
+      var group = ed.getAttribute('data-group');
+      var kidKey = ed.getAttribute('data-kid');
+      var saveBtn = ed.querySelector('.mc-note-save');
+      var cancelBtn = ed.querySelector('.mc-note-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', function () { _myClassEditingKey = null; renderMyClassCardBody(); });
+      if (saveBtn) saveBtn.addEventListener('click', function () {
+        var val = String((ed.querySelector('.mc-note-input') || {}).value || '').trim();
+        saveBtn.disabled = true;
+        fetch('/api/supply-closet?action=liaison-note-save' + notifViewAsSuffix(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') },
+          body: JSON.stringify({ class_group: group, kid_key: kidKey, note: val })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { saveBtn.disabled = false; alert((res.data && res.data.error) || 'Could not save the note.'); return; }
+            if (!_myClassNotes[group]) _myClassNotes[group] = {};
+            if (val) _myClassNotes[group][kidKey] = val; else delete _myClassNotes[group][kidKey];
+            _myClassEditingKey = null;
+            renderMyClassCardBody();
+          })
+          .catch(function () { saveBtn.disabled = false; alert('Network error — try again.'); });
+      });
+    });
   }
 
   function loadGroupBringCard() {
@@ -19322,7 +19733,7 @@
       subtitle: 'Everything to load in the car for the next co-op day.',
       icons: [{ label: 'Print', icon: ICON_SVG.print, aria: 'Print the packing list', action: function () {
         var el = document.getElementById('packing-list-body');
-        if (el) openPrintIframe('<!doctype html><html><head><meta charset="utf-8"><title>Packing List</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px;}h1{font-size:18px;}h2{font-size:14px;margin:14px 0 4px;}ul{margin:4px 0 10px 20px;padding:0;}li{margin:2px 0;}em{color:#555;}</style></head><body><h1>Packing List</h1>' + el.innerHTML.replace(/<button[^>]*>.*?<\/button>/g, '') + '</body></html>');
+        if (el) openPrintIframe('<!doctype html><html><head><meta charset="utf-8"><title>Packing List</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px;}h1{font-size:18px;}h2{font-size:14px;margin:16px 0 4px;border-bottom:1px solid #ccc;padding-bottom:2px;}ul{margin:4px 0 10px 20px;padding:0;}li{margin:3px 0;}em{color:#555;font-size:12px;}ul.pl-list{list-style:none;margin-left:0;}ul.pl-list li{padding-left:24px;position:relative;}ul.pl-list li::before{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border:1.5px solid #444;border-radius:2px;}.pl-group-title{margin:8px 0 2px;font-weight:bold;}.pl-closet-pill{display:inline-block;border:1px solid #7c6a9c;color:#4a3d63;border-radius:10px;padding:0 7px;font-size:11px;margin-left:4px;}</style></head><body><h1>Packing List</h1>' + el.innerHTML.replace(/<button[^>]*>.*?<\/button>/g, '') + '</body></html>');
       } }],
       bodyId: 'packing-list-body',
       bodyPlaceholder: '<p class="ws-empty">Building your list…</p>'
@@ -19339,7 +19750,7 @@
     if (!next) { body.innerHTML = '<p class="ws-empty">No upcoming co-op days on the calendar — see you next session!</p>'; return; }
 
     var h = '<p class="ws-body-hint"><strong>Next co-op day: ' + fmtLendDate(next.date) + '</strong> · Session ' + next.session + ', week ' + next.week + '</p>';
-    h += '<h2 class="ws-lending-head">The staples</h2><ul>';
+    h += '<h2 class="ws-lending-head">The staples</h2><ul class="pl-list">';
     PACKING_STAPLES.forEach(function (s) { h += '<li>' + s + '</li>'; });
     h += '</ul>';
     h += '<div id="pl-family"><h2 class="ws-lending-head">For your family</h2><p class="ws-empty">Checking your sign-ups…</p></div>';
@@ -19402,7 +19813,7 @@
         });
       });
       el.innerHTML = '<h2 class="ws-lending-head">For your family</h2>'
-        + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">Nothing signed up for this day.</p>');
+        + (lines.length ? '<ul class="pl-list">' + lines.join('') + '</ul>' : '<p class="ws-empty">Nothing signed up for this day.</p>');
     });
 
     // ② Supplies for classes this family teaches that day — the linked
@@ -19413,12 +19824,28 @@
         ? myClassesForSession(myClassSubmissions, next.session, (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || null)
         : [];
       if (!mine.length) { var e0 = el(); if (e0) e0.innerHTML = '<h2 class="ws-lending-head">For classes you lead</h2><p class="ws-empty">No classes scheduled this session.</p>'; return; }
-      var done = 0, lines = [];
+      // #151 (Erin): grouped per class, and supply-closet items split out
+      // and labeled — they're already at the building, so they aren't
+      // pack-from-home checkboxes.
+      var done = 0, groups = [];
       var finish = function () {
         var e = el();
         if (!e) return;
+        var out = '';
+        groups.forEach(function (g) {
+          if (!g.pack.length && !g.closet.length) return;
+          out += '<p class="pl-group-title"><strong>' + escapeHtml(g.name) + '</strong></p>';
+          if (g.pack.length) out += '<ul class="pl-list">' + g.pack.join('') + '</ul>';
+          if (g.closet.length) {
+            out += '<p class="ws-body-hint" style="margin:2px 0 0;">Already at co-op — pull from the Supply Closet:</p>';
+            out += '<ul>' + g.closet.join('') + '</ul>';
+          }
+        });
         e.innerHTML = '<h2 class="ws-lending-head">For classes you lead</h2>'
-          + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">No supplies listed for week ' + next.week + ' — check your lesson plans.</p>');
+          + (out || '<p class="ws-empty">No supplies listed for week ' + next.week + ' — check your lesson plans.</p>');
+      };
+      var fmtQty = function (sp) {
+        return sp.qty ? ' (' + escapeHtml(sp.qty) + (sp.qty_unit === 'student' ? ' per student' : sp.qty_unit === 'class' ? ' per class' : '') + ')' : '';
       };
       ensureClassLinksForSession(next.session, function () {
         var map = _classLinksBySession[next.session] || {};
@@ -19427,12 +19854,20 @@
           var link = map[myClassLinkKey(s)];
           if (!link) return;
           pend++;
+          var g = { name: s.class_name, pack: [], closet: [] };
+          groups.push(g);
           fetch('/api/curriculum?id=' + link.curriculum_id, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') } })
             .then(function (r) { return r.json(); })
             .then(function (d) {
               var ls = ((d.curriculum || {}).lessons || [])[next.week - 1];
               ((ls && ls.supplies) || []).forEach(function (sp) {
-                lines.push('<li>' + escapeHtml(sp.item_name) + (sp.qty ? ' (' + escapeHtml(sp.qty) + (sp.qty_unit === 'student' ? ' per student' : sp.qty_unit === 'class' ? ' per class' : '') + ')' : '') + ' <em>— ' + escapeHtml(s.class_name) + '</em></li>');
+                if (sp.closet_item_id) {
+                  g.closet.push('<li>' + escapeHtml(sp.item_name) + fmtQty(sp)
+                    + ' <span class="pl-closet-pill">Supply Closet' + (sp.closet_location ? ' · ' + escapeHtml(sp.closet_location) : '') + '</span>'
+                    + (sp.closet_needs_restock ? ' <em>⚠ flagged “needs restock” — have a backup</em>' : '') + '</li>');
+                } else {
+                  g.pack.push('<li>' + escapeHtml(sp.item_name) + fmtQty(sp) + '</li>');
+                }
               });
             })
             .catch(function () {})
@@ -19463,7 +19898,7 @@
           }
         });
         el.innerHTML = '<h2 class="ws-lending-head">Lending Library</h2>'
-          + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">No hand-offs or returns due.</p>');
+          + (lines.length ? '<ul class="pl-list">' + lines.join('') + '</ul>' : '<p class="ws-empty">No hand-offs or returns due.</p>');
       }).catch(function () {});
     })();
   }
@@ -23735,8 +24170,9 @@
           + (s.scheduled_room ? ' · ' + escClsHtml(s.scheduled_room) : '') + '</span>';
         html += '</div>';
         html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
-        html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">' + brandIconImg('supplyCloset', 'ag-icon') + ' Supply list</button>';
-        html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson plan</button>';
+        // #153 (Erin): one button — both landed on the same plan detail
+        // anyway (the supply list is its Master Supply List section).
+        html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson Plan &amp; Supply List</button>';
         // #139 (class scope): the lead's Things to Bring list for THIS
         // class/session — sign-up spots or "everyone brings" items.
         html += '<button type="button" class="sc-btn mf-myclasses-bring" data-idx="' + idx + '">' + brandIconImg('waysToHelp', 'ag-icon') + ' Things to Bring</button>';
@@ -23777,8 +24213,7 @@
         });
       });
     }
-    mcWire('.mf-myclasses-supply', true);
-    mcWire('.mf-myclasses-plan', false);
+    mcWire('.mf-myclasses-plan', false); // #153: single combined button
     body.querySelectorAll('.mf-myclasses-bring').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var s = mine[parseInt(this.getAttribute('data-idx'), 10)];
@@ -23846,6 +24281,8 @@
     html += '<button class="detail-close" id="clsCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3 style="margin:0 0 0.25rem;">' + (isEdit ? 'Edit Class Submission' : 'Submit a Class') + '</h3>';
     html += '<p style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
+    // #154: the Ways to Help card's copy lives here now, keeping the card short.
+    html += 'Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>. ';
     html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
     html += '</p>';
     // #42: editing an already drafted/scheduled class sends it back for
@@ -24982,18 +25419,20 @@
   // Workspace-pill-bar style, with the selected space's sections
   // rendered as cards below.
   function collabMyEvents() {
+    // #145 (Erin, prod): every member can already open any event's space
+    // from the Special Events tab, so the Collaboration page lists EVERY
+    // event — the ones you're on (or have tasks for) lead the pill bar,
+    // the rest follow.
     var em = String(getActiveEmail() || '').toLowerCase();
-    var canAll = isSuperUserEmail(em)
-      || (typeof clientHasCapability === 'function' && clientHasCapability('special_events_manage', ['Special Events Liaison', 'Vice President']));
-    var list = [];
+    var mine = [], rest = [];
     (SPECIAL_EVENTS_DB || []).forEach(function (ev) {
       if (!ev.id) return;
       var coords = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
       var onIt = coords.concat(ev.support || []).some(function (p) { return p && String(p.email || '').toLowerCase() === em; });
       var hasTasks = Array.isArray(_myEventTasks) && _myEventTasks.some(function (t) { return t.event_id === ev.id; });
-      if (canAll || onIt || hasTasks) list.push(ev);
+      (onIt || hasTasks ? mine : rest).push(ev);
     });
-    return list;
+    return mine.concat(rest);
   }
 
   function renderCollabView() {
@@ -25132,6 +25571,10 @@
       // the button shows — and counts — only what will actually copy.
       var tplCopy = (tasks.length === 0 ? (d.template_count || 0) : 0)
         + (secsAll.length === 0 ? (d.template_section_count || 0) : 0);
+      // #141 (Erin): the toolbar keeps only the frequent actions —
+      // Add section leads; Request volunteers moved onto the sign-up
+      // card(s); Save-as-template moved to the quiet footer below the
+      // grid (used once, at the end).
       h += '<div class="coop-cal-toolbar"><span></span><span style="display:flex;gap:8px;flex-wrap:wrap;">';
       if (tplCopy > 0) {
         h += '<button type="button" class="btn btn-primary btn-sm" id="evs-start-template">Start from template (' + tplCopy + ' item' + (tplCopy === 1 ? '' : 's') + ')</button>';
@@ -25139,20 +25582,12 @@
       // Generic sections (Erin, 2026-07-21): timeline / sign-ups / info /
       // notes join the checklist so the space replaces the old planning
       // spreadsheet end to end.
-      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-section">+ Add section</button>';
-      var signupSecsTb = secsAll.filter(function (s) { return s.type === 'signup'; });
-      if (signupSecsTb.length) {
-        var anyOpenTb = signupSecsTb.some(function (s) { return s.is_open; });
-        h += anyOpenTb
-          ? '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-close-signups">Close sign-ups</button>'
-          : '<button type="button" class="btn btn-primary btn-sm" id="evs-open-signups">' + brandIconImg('announce', 'ag-icon') + ' Request volunteers</button>';
-      }
-      // One-button template save (#115): snapshots the CURRENT space as
-      // next year's starting template for this event name — replaces the
-      // old "Edit template" drawer (whose saves 403'd non-board leads).
-      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="evs-save-template" title="Replaces next year’s starting template for “' + escapeAttr(d.event.name) + '” with this space’s current checklist and sections. Task titles and section layouts carry; sign-ups, assignees, and notes text don’t.">Save as next year’s template</button>';
+      h += '<button type="button" class="btn ' + (tplCopy > 0 ? 'btn-outline-dark' : 'btn-primary') + ' btn-sm" id="evs-add-section">+ Add section</button>';
       h += '</span></div>';
     }
+    // #142 (Erin): allergies list one tap away on every event's header
+    // card — food shows up at nearly every event.
+    h += '<p class="ws-body-hint" style="margin:10px 0 0;"><a href="#" class="ws-inline-link" id="evs-allergies-link">⚠ View the allergies &amp; medical list</a></p>';
     h += '</div></div>'; // /body, /header card
 
     // #131 (Lyndsey): the checklist card carries the same binoculars as
@@ -25203,6 +25638,11 @@
     }
     h += renderEventSections(d);
     h += '</div>'; // /.workspace-grid
+    // #141: Save-as-template demoted to a quiet footer — it's a once-at-
+    // the-end action, not a daily one (one-button snapshot per #115).
+    if (d.can_edit) {
+      h += '<p style="margin:14px 0 0;text-align:right;"><button type="button" class="btn btn-outline-dark btn-sm" id="evs-save-template" title="Replaces next year’s starting template for “' + escapeAttr(d.event.name) + '” with this space’s current checklist and sections. Task titles and section layouts carry; sign-ups, assignees, and notes text don’t.">Save as next year’s template</button></p>';
+    }
     body.innerHTML = h;
     wireEventSpace(body);
   }
@@ -25316,6 +25756,66 @@
         })
         .catch(function () { alert('Network error.'); loadEventSpace(); });
     });
+    // #143: drag-drop reorder — live-move the dragged card while over
+    // another card, then persist the full order (collapsed cards keep
+    // their original slots) on dragend. Editors only; everyone sees it.
+    if (d && d.can_edit) {
+      var _dragCard = null;
+      body.querySelectorAll('.evs-draggable').forEach(function (card) {
+        card.addEventListener('dragstart', function (e) {
+          _dragCard = card;
+          card.classList.add('evs-dragging');
+          try { e.dataTransfer.setData('text/plain', card.getAttribute('data-sec-id')); e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+        });
+        card.addEventListener('dragover', function (e) {
+          if (!_dragCard || _dragCard === card) return;
+          e.preventDefault();
+          var rect = card.getBoundingClientRect();
+          var before = (e.clientY - rect.top) < rect.height / 2;
+          card.parentNode.insertBefore(_dragCard, before ? card : card.nextSibling);
+        });
+        card.addEventListener('dragend', function () {
+          card.classList.remove('evs-dragging');
+          if (!_dragCard) return;
+          _dragCard = null;
+          var all = (_eventSpaceState.data && _eventSpaceState.data.sections) || [];
+          var domIds = Array.prototype.map.call(body.querySelectorAll('.evs-draggable'), function (c) {
+            return parseInt(c.getAttribute('data-sec-id'), 10);
+          });
+          // Full order: collapsed (chip-only) sections hold their original
+          // index; the dragged/expanded cards fill the remaining slots in
+          // DOM order.
+          var result = new Array(all.length);
+          all.forEach(function (s, i) { if (_collabCollapsed['sec-' + s.id]) result[i] = s.id; });
+          var di = 0;
+          for (var ri = 0; ri < result.length; ri++) {
+            if (result[ri] == null && di < domIds.length) result[ri] = domIds[di++];
+          }
+          var newOrder = result.filter(function (x) { return x != null; });
+          var curOrder = all.map(function (s) { return s.id; });
+          if (newOrder.join(',') === curOrder.join(',')) return;
+          var byId = {};
+          all.forEach(function (s) { byId[s.id] = s; });
+          _eventSpaceState.data.sections = newOrder.map(function (id) { return byId[id]; }).filter(Boolean);
+          fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-section-reorder', event_id: _eventSpaceState.id, order: newOrder }) })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert((res.data && res.data.error) || 'Could not save the new order.'); loadEventSpace(); }
+            })
+            .catch(function () { alert('Network error — the order didn’t save.'); loadEventSpace(); });
+          renderEventSpaceBody();
+        });
+      });
+    }
+
+    // #142: allergies list from the header card — same printable list
+    // the Directory's allergies filter uses (openPrintIframe, no popup).
+    var allergiesLink = body.querySelector('#evs-allergies-link');
+    if (allergiesLink) allergiesLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      printAllergiesList();
+    });
+
     // Save as next year's template (#115): two-step confirm — it
     // replaces the previous snapshot for this event name.
     var snapBtn = body.querySelector('#evs-save-template');
@@ -25361,8 +25861,9 @@
     });
     // Request volunteers / Close sign-ups — the open flips is_open on
     // every sign-up section and (open only) bell-notifies all members.
-    var openSuBtn = body.querySelector('#evs-open-signups');
-    if (openSuBtn) openSuBtn.addEventListener('click', function () {
+    // #141: buttons now live on each sign-up card, so wire them all.
+    body.querySelectorAll('.evs-open-signups').forEach(function (openSuBtn) {
+    openSuBtn.addEventListener('click', function () {
       var self = this;
       rwArmTwoStep(self, 'notify members', function () {
         self.disabled = true;
@@ -25376,8 +25877,9 @@
           .catch(function () { alert('Network error.'); loadEventSpace(); });
       });
     });
-    var closeSuBtn = body.querySelector('#evs-close-signups');
-    if (closeSuBtn) closeSuBtn.addEventListener('click', function () {
+    });
+    body.querySelectorAll('.evs-close-signups').forEach(function (closeSuBtn) {
+    closeSuBtn.addEventListener('click', function () {
       var self = this;
       rwArmTwoStep(self, 'close', function () {
         self.disabled = true;
@@ -25389,6 +25891,7 @@
           })
           .catch(function () { alert('Network error.'); loadEventSpace(); });
       });
+    });
     });
   }
 
@@ -25605,7 +26108,9 @@
         return;
       }
       // Committee-only cards wear a light grey tint (Erin, 2026-07-25).
-      h += '<div class="mf-card workspace-card evs-section' + (s.is_public === false ? ' evs-private' : '') + '">';
+      // #143: editors can drag cards to reorder — order saves for everyone.
+      h += '<div class="mf-card workspace-card evs-section' + (s.is_public === false ? ' evs-private' : '')
+        + (d.can_edit ? ' evs-draggable" draggable="true" data-sec-id="' + s.id : '') + '">';
       // Compact actions ride the header row beside the title (Erin,
       // 2026-07-25): ♥ filled = all members / outline = committee-only,
       // pencil = edit, × = delete — tooltips carry the words, and the
@@ -25649,6 +26154,14 @@
           ? '<p style="white-space:pre-wrap;">' + escapeHtmlWs(String(c.text)) + '</p>'
           : '<p class="ws-empty">Jot lessons for next year here' + (d.can_edit ? ' — Edit this section' : '') + '.</p>';
       } else if (s.type === 'signup' || s.type === 'board') {
+        // #141 (Erin): Request volunteers lives ON the sign-up card now
+        // (was in the header toolbar). Still event-wide: opening flips
+        // every sign-up list and bell-notifies members once.
+        if (s.type === 'signup' && d.can_edit) {
+          h += '<p style="margin:0 0 10px;">' + (s.is_open
+            ? '<button type="button" class="btn btn-outline-dark btn-sm evs-close-signups" title="Closes every sign-up list on this event.">Close sign-ups</button>'
+            : '<button type="button" class="btn btn-primary btn-sm evs-open-signups" title="Opens every sign-up list on this event and notifies all members.">' + brandIconImg('announce', 'ag-icon') + ' Request volunteers</button>') + '</p>';
+        }
         // 'board' (Erin, 2026-07-25): shared notes & links — the bring-list
         // mechanics (attributed entries, own-entry ×) with adding always on.
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
@@ -25844,8 +26357,9 @@
     if (c.lists) bits.push('<strong>' + c.lists + '</strong> sign-up list' + (c.lists === 1 ? '' : 's') + ' open');
     // #79: same prominent treatment as Submit a Class (was a one-line
     // text link members scrolled past).
+    // #154 (Erin): counts only — the how-to copy lives in the modal.
     return '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-jump-in">' + brandIconImg('specialEvents', 'ag-icon') + ' Special Events</button>'
-      + '<span class="ws-part-submit-hint">' + bits.join(' · ') + ' — jump in and grab one.</span></p>';
+      + '<span class="ws-part-submit-hint">' + bits.join(' · ') + '</span></p>';
   }
 
   // The Jump In modal — every event's open seats (direct sign-up, #75)

@@ -93,8 +93,10 @@ module.exports = async function handler(req, res) {
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
   const isLoanAction = ['loan-request', 'loan-respond', 'loan-status'].indexOf(req.query.action) !== -1
-    // #139 bring-* actions carry their own liaison/self checks below.
-    || String(req.query.action || '').indexOf('bring-') === 0;
+    // #139 bring-* / #140 liaison-note* actions carry their own
+    // liaison/self checks below.
+    || String(req.query.action || '').indexOf('bring-') === 0
+    || String(req.query.action || '').indexOf('liaison-note') === 0;
   // Gate writes on the ACTING identity (View-As target when a
   // canImpersonate caller sends view_as, else the real login) — #43.
   const actingEmail = actingEmailFor(user, req);
@@ -197,7 +199,8 @@ module.exports = async function handler(req, res) {
     }
 
     // ── Things to Bring (#139): liaison-posted group items + claims ──
-    if (String(req.query.action || '').indexOf('bring-') === 0) {
+    if (String(req.query.action || '').indexOf('bring-') === 0
+      || String(req.query.action || '').indexOf('liaison-note') === 0) {
       return handleBringActions(req, res, sql, user, actingEmail);
     }
 
@@ -530,7 +533,46 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
     return res.status(200).json({ sections, signups, me: email, school_year: yr });
   }
 
+  // ── #140 liaison per-kid notes (My Class card) ──
+  // Liaison-only both ways: the notes are the liaison's private working
+  // notes for their group, never shown to families.
+  if (req.query.action === 'liaison-notes') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const group = String(req.query.group || '').trim();
+    if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
+    if (!(await canManageBringGroup(email, group))) {
+      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can see these notes.' });
+    }
+    const rows = await sql`
+      SELECT kid_key, note FROM liaison_kid_notes
+      WHERE school_year = ${yr} AND class_group = ${group}
+    `;
+    return res.status(200).json({ notes: rows, school_year: yr });
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (req.query.action === 'liaison-note-save') {
+    const group = String(body.class_group || '').trim();
+    if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
+    if (!(await canManageBringGroup(email, group))) {
+      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit these notes.' });
+    }
+    const kidKey = String(body.kid_key || '').trim().toLowerCase().slice(0, 200);
+    if (!kidKey) return res.status(400).json({ error: 'kid_key required' });
+    const note = String(body.note || '').trim().slice(0, 1000);
+    if (!note) {
+      await sql`DELETE FROM liaison_kid_notes WHERE school_year = ${yr} AND class_group = ${group} AND kid_key = ${kidKey}`;
+      return res.status(200).json({ ok: true, deleted: true });
+    }
+    await sql`
+      INSERT INTO liaison_kid_notes (school_year, class_group, kid_key, note, updated_by)
+      VALUES (${yr}, ${group}, ${kidKey}, ${note}, ${email})
+      ON CONFLICT (school_year, class_group, kid_key)
+      DO UPDATE SET note = ${note}, updated_by = ${email}, updated_at = NOW()
+    `;
+    return res.status(200).json({ ok: true });
+  }
 
   if (req.query.action === 'bring-section-save') {
     const scope = body.scope === 'class' ? 'class' : 'group';

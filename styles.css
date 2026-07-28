@@ -6786,9 +6786,41 @@ body > .rd-drawer { z-index: 10002; }
 }
 .ws-lending-head:first-child { margin-top: 0; }
 .ws-lending-overdue { color: var(--color-error); font-weight: 700; }
-/* #137 (Erin): To Do line items drop their per-row icons — the counts and
-   text carry the row; the card accent carries the look. CSS-level so the
-   many loader-injected rows don't each need markup surgery. */
+
+/* #151 Packing List formatting — checkbox rows for pack-from-home items,
+   a labeled pill for supplies already waiting in the Supply Closet. */
+.pl-list { list-style: none; margin: 4px 0 10px; padding: 0; }
+.pl-list li { margin: 4px 0; padding-left: 26px; position: relative; }
+.pl-list li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.3em;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--color-text-light);
+  border-radius: 3px;
+}
+.pl-group-title { margin: 10px 0 2px; }
+.pl-group-title:first-child { margin-top: 4px; }
+/* #143 Collaboration card drag-drop reorder (editors only) */
+.evs-draggable { cursor: grab; }
+.evs-draggable.evs-dragging { opacity: 0.55; cursor: grabbing; outline: 2px dashed var(--color-primary); outline-offset: 2px; }
+
+.pl-closet-pill {
+  display: inline-block;
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+/* #137 + #147 (Erin): per-row icons come off EVERY workspace card list —
+   the counts and text carry the rows; each card's header accent carries
+   the look. CSS-level so loader-injected rows are covered too. */
+.workspace-card .ws-link-list .ws-link-icon,
 ul[id="ws-todo-list"] .ws-link-icon,
 #ws-shared-todo-list .ws-link-icon { display: none; }
 

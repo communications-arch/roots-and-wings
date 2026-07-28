@@ -4930,7 +4930,7 @@ async function canManageMerch(email) {
   return await hasCapability(email, 'merch_manage');
 }
 
-async function handleMerchOrder(body, res) {
+async function handleMerchOrder(body, req, res) {
   const name = String(body.name || '').trim();
   const email = String(body.email || '').trim();
   const phone = String(body.phone || '').trim();
@@ -4956,6 +4956,46 @@ async function handleMerchOrder(body, res) {
   const size = String(body.size || '').trim();
   const color = String(body.color || '').trim();
 
+  // ── #150 (Erin): same layered screening as the Contact form (#45) —
+  // honeypot + timing + content heuristics + stamp reuse + per-IP rate
+  // caps. A tripped layer still SAVES the order (hidden behind
+  // screen_reason, rescuable from the Merch Orders report), fires no
+  // emails, and answers a plain 200 so bots get no signal to adapt.
+  let junkReason = String(body.website || '').trim() ? 'honeypot filled' : null;
+  if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
+  if (!junkReason) junkReason = inquiryContentScreen({ name, email, message: notes });
+
+  const ip = clientIp(req);
+  const formTs = parseInt(body.form_ts, 10) || 0;
+  let hardDrop = false;
+  try {
+    const sql = getSql();
+    if (!junkReason && formTs > 0) {
+      const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'merch' AND form_ts = ${formTs} LIMIT 1`;
+      if (reused.length) junkReason = 'form_ts reused';
+    }
+    const cnt = await sql`
+      SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '10 minutes') AS short_n,
+             COUNT(*) AS day_n
+      FROM public_form_hits
+      WHERE form = 'merch' AND ip = ${ip} AND created_at > NOW() - INTERVAL '24 hours'
+    `;
+    const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
+    const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
+    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'merch', ${formTs})`;
+    await sql`DELETE FROM public_form_hits WHERE created_at < NOW() - INTERVAL '2 days'`;
+  } catch (rlErr) {
+    // Rate plumbing must never block a real order.
+    console.error('merch rate/reuse check error (non-fatal):', rlErr);
+  }
+  if (hardDrop) {
+    console.warn('merch-form hard-dropped (IP over daily cap):', ip);
+    return res.status(200).json({ success: true });
+  }
+
   // DB insert is the source of truth — if the email below fails, the
   // Merchandise Manager still sees the order in the portal report.
   let orderId = null;
@@ -4964,10 +5004,11 @@ async function handleMerchOrder(body, res) {
     const inserted = await sql`
       INSERT INTO merch_orders (
         customer_name, customer_email, customer_phone,
-        item, size, color, qty, notes, updated_by
+        item, size, color, qty, notes, updated_by, screen_reason
       ) VALUES (
         ${name}, ${email.toLowerCase()}, ${phone},
-        ${itemDef.label}, ${size}, ${color}, ${qty}, ${notes}, 'public-form'
+        ${itemDef.label}, ${size}, ${color}, ${qty}, ${notes}, 'public-form',
+        ${junkReason || ''}
       )
       RETURNING id
     `;
@@ -4975,6 +5016,10 @@ async function handleMerchOrder(body, res) {
   } catch (dbErr) {
     console.error('Merch DB insert error:', dbErr);
     return res.status(500).json({ error: 'Could not save your order. Please try again.' });
+  }
+  if (junkReason) {
+    console.warn('merch-form screened to junk:', junkReason);
+    return res.status(200).json({ success: true, id: orderId });
   }
 
   // Email work runs in the background so the user gets a snappy ack.
@@ -5120,7 +5165,7 @@ async function handleMerchOrdersList(req, res) {
     const sql = getSql();
     const rows = await sql`
       SELECT id, customer_name, customer_email, customer_phone,
-             item, size, color, qty, notes,
+             item, size, color, qty, notes, screen_reason,
              paid_at, delivered_at, created_at, updated_at, updated_by
       FROM merch_orders
       ORDER BY created_at DESC
@@ -5264,6 +5309,35 @@ async function handleMerchOrderDelete(body, req, res) {
   } catch (err) {
     console.error('Merch order delete error:', err);
     return res.status(500).json({ error: 'Failed to delete order.' });
+  }
+}
+
+// #150: one-click rescue for an order the spam screen caught — clears
+// screen_reason so it rejoins the normal report list. (The customer's
+// confirmation email never fired; the manager follows up by hand.)
+async function handleMerchOrderRescue(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  if (!(await canManageMerch(auth.email))) {
+    return res.status(403).json({
+      error: 'Not authorized to update merch orders.',
+      youAre: auth.realEmail,
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const id = parseInt(body.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      UPDATE merch_orders SET screen_reason = '', updated_at = NOW(), updated_by = ${auth.email}
+      WHERE id = ${id} RETURNING id
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
+    return res.status(200).json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('Merch order rescue error:', err);
+    return res.status(500).json({ error: 'Failed to rescue order.' });
   }
 }
 
@@ -6718,6 +6792,35 @@ async function handleEventSectionSave(body, req, res) {
     return res.status(200).json({ ok: true, id: ins[0].id });
   } catch (err) {
     console.error('event-section-save error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-section-reorder (#143) — editors drag cards; the new order
+// persists in sort_order and applies to every viewer. Body: {event_id,
+// order: [section ids, first→last]}. Ids not listed keep sorting after
+// the listed ones (stable via the ORDER BY sort_order, id read).
+async function handleEventSectionReorder(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  const order = Array.isArray(body.order) ? body.order.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n > 0) : [];
+  if (!order.length || order.length > 200) return res.status(400).json({ error: 'order required' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this space.', youAre: auth.realEmail });
+    }
+    for (let i = 0; i < order.length; i++) {
+      await sql`
+        UPDATE event_sections SET sort_order = ${i + 1}, updated_by = ${auth.realEmail}, updated_at = NOW()
+        WHERE id = ${order[i]} AND special_event_id = ${eventId}
+      `;
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-section-reorder error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -8296,6 +8399,14 @@ async function handleCommunitySnapshot(req, res) {
              r.kids, r.track, r.track_other, r.created_at
       FROM registrations r
       WHERE r.season = ${season} AND r.declined_at IS NULL
+        -- #144 (Erin, prod): withdrawn families vanish from the community
+        -- snapshot too — same stamp the directory overlay reads.
+        AND NOT EXISTS (
+          SELECT 1 FROM member_profiles mp
+          WHERE mp.withdrawn_at IS NOT NULL
+            AND (LOWER(mp.family_email) = LOWER(NULLIF(r.family_email, ''))
+              OR LOWER(mp.family_email) = LOWER(r.email))
+        )
       ORDER BY r.main_learning_coach
     `;
     // New vs returning — same canonical rule as the Directory First-Year badge
@@ -10091,11 +10202,12 @@ module.exports = async function handler(req, res) {
     const kind = String(body.kind || 'tour').toLowerCase();
     if (kind === 'tour') return handleTour(body, res);
     if (kind === 'contact') return handleContact(body, req, res);
-    if (kind === 'merch-order') return handleMerchOrder(body, res);
+    if (kind === 'merch-order') return handleMerchOrder(body, req, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'merch-order-edit') return handleMerchOrderEdit(body, req, res);
     if (kind === 'merch-order-delete') return handleMerchOrderDelete(body, req, res);
+  if (kind === 'merch-order-rescue') return handleMerchOrderRescue(body, req, res);
     if (kind === 'merch-inventory-add') return handleMerchInventoryAdd(body, req, res);
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
@@ -10142,6 +10254,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-space-template-start') return handleEventSpaceTemplateStart(body, req, res);
     if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
     if (kind === 'event-section-save') return handleEventSectionSave(body, req, res);
+  if (kind === 'event-section-reorder') return handleEventSectionReorder(body, req, res);
     if (kind === 'event-section-public') return handleEventSectionPublic(body, req, res);
     if (kind === 'event-tasks-public') return handleEventTasksPublic(body, req, res);
     if (kind === 'event-section-delete') return handleEventSectionDelete(body, req, res);
