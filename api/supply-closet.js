@@ -16,7 +16,7 @@
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { canEditAsRole, getRoleHolderEmail, canImpersonate } = require('./_permissions');
+const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isSuperUser } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { sendToUser } = require('./_push');
 
@@ -92,7 +92,9 @@ module.exports = async function handler(req, res) {
   // Everything else that isn't GET is restricted to the Supply Coordinator
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
-  const isLoanAction = ['loan-request', 'loan-respond', 'loan-status'].indexOf(req.query.action) !== -1;
+  const isLoanAction = ['loan-request', 'loan-respond', 'loan-status'].indexOf(req.query.action) !== -1
+    // #139 bring-* actions carry their own liaison/self checks below.
+    || String(req.query.action || '').indexOf('bring-') === 0;
   // Gate writes on the ACTING identity (View-As target when a
   // canImpersonate caller sends view_as, else the real login) — #43.
   const actingEmail = actingEmailFor(user, req);
@@ -192,6 +194,11 @@ module.exports = async function handler(req, res) {
         });
       }
       return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // ── Things to Bring (#139): liaison-posted group items + claims ──
+    if (String(req.query.action || '').indexOf('bring-') === 0) {
+      return handleBringActions(req, res, sql, user, actingEmail);
     }
 
     // ── Lending Library: loans list / request / respond / status ──
@@ -442,6 +449,120 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'Server error' });
   }
 };
+
+// ══════════════════════════════════════════════════════════════════
+// Things to Bring (#139, 2026-07-28) — group liaisons post items their
+// age group needs at co-op (sign-up style, one family per spot, dated
+// to a co-op day). Claims surface under the kid's class on Kid Schedule
+// and on the Packing List (#138).
+// ══════════════════════════════════════════════════════════════════
+
+const BRING_GROUPS = ['Greenhouse', 'Saplings', 'Sassafras', 'Oaks', 'Maples', 'Birch', 'Cedars', 'Willows', 'Pigeons'];
+
+// Liaison gate: the group's "<Group> Liaison" (or "<Group> Morning Class
+// Liaison") role holder, the VP, or a super user.
+async function canManageBringGroup(email, group) {
+  if (isSuperUser(email)) return true;
+  if (await canEditAsRole(email, 'Vice President')) return true;
+  if (await canEditAsRole(email, group + ' Liaison')) return true;
+  return await canEditAsRole(email, group + ' Morning Class Liaison');
+}
+
+async function handleBringActions(req, res, sql, user, actingEmail) {
+  const email = String(actingEmail).toLowerCase();
+  const yr = activeSchoolYear(new Date());
+  const body = req.body || {};
+
+  if (req.query.action === 'bring-items') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const items = await sql`
+      SELECT id, class_group, label, note, capacity, bring_date, created_by
+      FROM group_bring_items WHERE school_year = ${yr}
+      ORDER BY bring_date NULLS LAST, id
+    `;
+    const signups = await sql`
+      SELECT s.id, s.item_id, s.person_email, s.person_name
+      FROM group_bring_signups s
+      JOIN group_bring_items i ON i.id = s.item_id
+      WHERE i.school_year = ${yr}
+      ORDER BY s.created_at
+    `;
+    return res.status(200).json({ items, signups, me: email, school_year: yr });
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (req.query.action === 'bring-item-save') {
+    const group = String(body.class_group || '').trim();
+    if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
+    if (!(await canManageBringGroup(email, group))) {
+      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit this group’s list.' });
+    }
+    const label = String(body.label || '').trim().slice(0, 200);
+    if (!label) return res.status(400).json({ error: 'What should families bring?' });
+    const note = String(body.note || '').trim().slice(0, 300);
+    let capacity = parseInt(body.capacity, 10);
+    if (!Number.isFinite(capacity) || capacity < 1) capacity = 1;
+    if (capacity > 30) capacity = 30;
+    const bring_date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.bring_date || '')) ? body.bring_date : null;
+    const id = body.id != null ? parseInt(body.id, 10) : null;
+    let row;
+    if (Number.isInteger(id) && id > 0) {
+      const upd = await sql`
+        UPDATE group_bring_items
+        SET label = ${label}, note = ${note}, capacity = ${capacity}, bring_date = ${bring_date}, updated_at = NOW()
+        WHERE id = ${id} AND school_year = ${yr} AND class_group = ${group}
+        RETURNING *
+      `;
+      if (upd.length === 0) return res.status(404).json({ error: 'Item not found' });
+      row = upd[0];
+    } else {
+      const ins = await sql`
+        INSERT INTO group_bring_items (school_year, class_group, label, note, capacity, bring_date, created_by)
+        VALUES (${yr}, ${group}, ${label}, ${note}, ${capacity}, ${bring_date}, ${email})
+        RETURNING *
+      `;
+      row = ins[0];
+    }
+    return res.status(200).json({ item: row });
+  }
+
+  if (req.query.action === 'bring-item-delete') {
+    const id = parseInt(body.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+    const rows = await sql`SELECT class_group FROM group_bring_items WHERE id = ${id} AND school_year = ${yr}`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Item not found' });
+    if (!(await canManageBringGroup(email, rows[0].class_group))) {
+      return res.status(403).json({ error: 'Only the group’s liaison (or VP) can remove this.' });
+    }
+    await sql`DELETE FROM group_bring_items WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.query.action === 'bring-claim') {
+    const itemId = parseInt(body.item_id, 10);
+    if (!Number.isInteger(itemId) || itemId < 1) return res.status(400).json({ error: 'item_id required' });
+    const items = await sql`SELECT capacity FROM group_bring_items WHERE id = ${itemId} AND school_year = ${yr}`;
+    if (items.length === 0) return res.status(404).json({ error: 'Item not found' });
+    const existing = await sql`SELECT id, LOWER(person_email) AS em FROM group_bring_signups WHERE item_id = ${itemId}`;
+    if (existing.some(s => s.em === email)) return res.status(200).json({ ok: true, already: true });
+    if (existing.length >= (items[0].capacity || 1)) {
+      return res.status(409).json({ error: 'All spots for this item are covered — thank you!' });
+    }
+    const name = String(body.person_name || '').trim().slice(0, 200) || user.name || email;
+    await sql`INSERT INTO group_bring_signups (item_id, person_email, person_name) VALUES (${itemId}, ${email}, ${name})`;
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.query.action === 'bring-unclaim') {
+    const itemId2 = parseInt(body.item_id, 10);
+    if (!Number.isInteger(itemId2) || itemId2 < 1) return res.status(400).json({ error: 'item_id required' });
+    await sql`DELETE FROM group_bring_signups WHERE item_id = ${itemId2} AND LOWER(person_email) = ${email}`;
+    return res.status(200).json({ ok: true });
+  }
+
+  return res.status(400).json({ error: 'Unknown action' });
+}
 
 // ══════════════════════════════════════════════════════════════════
 // Lending Library (2026-07-28, Erin)

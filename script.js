@@ -7364,6 +7364,15 @@
       html += '<div id="coverageNotesArea" class="coverage-notes-area"></div>';
       // My absences area (populated after absences load)
       html += '<div id="myAbsencesArea"></div>';
+      // #138 (Erin): Reminders — the printable Packing List for the next
+      // co-op day (staples + claimed bring-items + class supplies +
+      // lending hand-offs/returns) and the Retrieve Items list.
+      html += '<div class="mf-reminders">';
+      html += '<div class="mf-block-label">Reminders</div>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      html += '<button type="button" class="sc-btn" id="mfPackingListBtn">' + brandIconImg('supplyCloset', 'ag-icon') + ' Packing List</button>';
+      html += '<button type="button" class="sc-btn" id="mfRetrieveBtn">' + brandIconImg('lending', 'ag-icon') + ' Retrieve Items</button>';
+      html += '</div></div>';
     }
     html += '</div>';
 
@@ -7398,6 +7407,9 @@
       html += '</div>';
     } else {
     html += '<h3 class="mf-card-title" data-help-key="mf-kids-schedule">' + brandIconImg('kidSchedule') + ' Kid Schedule &mdash; Session ' + currentSession + '</h3>';
+    // #139: each group's "Things to bring" renders once, under the first
+    // kid in that group.
+    var bringShownGroups = {};
     fam.kids.forEach(function (kid) {
       // Finalized morning placement wins over the directory's stale group.
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
@@ -7453,6 +7465,14 @@
         html += '<span class="mf-sched-room">' + room + '</span>';
         html += '<span class="mf-sched-teacher">' + teacher + '</span>';
         html += '</div>';
+      }
+
+      // #139: the group's liaison-posted "Things to bring" sits right
+      // below the morning class it belongs to (Erin, 07-28).
+      var bringKey = String(kidGroup || '').toLowerCase();
+      if (bringKey && !bringShownGroups[bringKey]) {
+        bringShownGroups[bringKey] = true;
+        html += renderGroupBringBlock(kidGroup);
       }
 
       // Afternoon. No programming under 3 (Erin, 2026-07-15): Greenhouse
@@ -7841,6 +7861,14 @@
     if (absenceBtn) {
       absenceBtn.addEventListener('click', showAbsenceModal);
     }
+
+    // #138 Reminders buttons + #139 bring-items fetch (first paint pulls
+    // the data; changes re-render this card via loadGroupBringItems).
+    var packBtn = grid.querySelector('#mfPackingListBtn');
+    if (packBtn) packBtn.addEventListener('click', function () { showPackingListModal(); });
+    var retrieveBtn = grid.querySelector('#mfRetrieveBtn');
+    if (retrieveBtn) retrieveBtn.addEventListener('click', function () { showRetrieveItemsModal(); });
+    if (typeof loadGroupBringItems === 'function') loadGroupBringItems();
 
     // Render data that may already be loaded from async fetches.
     // Re-render the coverage board so it survives renderMyFamily() being
@@ -9481,6 +9509,23 @@
         return h;
       }
     },
+    'group-bring': {
+      // #139 (Lyndsey/Erin, 07-28): group liaisons post dated, sign-up
+      // style "Things to Bring" items for their age group. Families claim
+      // them under the kid's class on Kid Schedule; claims feed the
+      // Packing List (#138). roleGate '*' — widgetListFor's liaison
+      // special-case is the only list that includes this card.
+      title: 'Things to Bring',
+      roleGate: ['*'],
+      render: function () {
+        var h = '<p class="ws-body-hint">What your group needs at co-op — one family signs up per spot. Items show under the kid’s class on each family’s Kid Schedule and on their Packing List.</p>';
+        h += '<div id="ws-bring-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
+      }
+    },
     'shared-todos': {
       // #125-4 (Erin, 07-28): personal special-event To Dos (assigned
       // tasks + "Plan the <event>" planning-window rows) used to inject
@@ -10443,6 +10488,7 @@
     'ways-to-help': 'Open volunteer roles and ways to pitch in this year, plus your own participation so far.',
     'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
     'shared-todos': 'Special-event work waiting on you personally — tasks you’ve been assigned and events you’re helping plan. Shows once here instead of repeating under each of your roles.',
+    'group-bring': 'Things your group needs brought to co-op — add items with the co-op day they’re needed and how many families should sign up. Families claim them from their Kid Schedule, and claimed items land on their Packing List.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
@@ -10938,7 +10984,8 @@
       // exact titles like Afternoon Class Liaison (explicit defaults
       // below) stay out.
       if (!WORKSPACE_DEFAULTS[role] && isMorningGroupLiaisonTitle(role)) {
-        return ['todos', 'roles'];
+        // #139: liaisons get their group's "Things to Bring" editor.
+        return ['todos', 'group-bring', 'roles'];
       }
       var explicit = WORKSPACE_DEFAULTS[role];
       var out = [];
@@ -11091,6 +11138,7 @@
           // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
           var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes,
             'shared-todos': BRAND_ICONS.specialEvents, 'lending': BRAND_ICONS.lending,
+            'group-bring': BRAND_ICONS.supplyCloset,
             // #129: every board card carries its role's own mark now
             // (replaces #120's two shared marks + generic fallback).
             'bg-president': BRAND_ICONS.boardPresident, 'bg-vp': BRAND_ICONS.boardVicePresident,
@@ -18742,6 +18790,417 @@
   }
 
   // ──────────────────────────────────────────────
+  // Things to Bring (#139) + Reminders / Packing List (#138)
+  // ──────────────────────────────────────────────
+  // Liaisons post dated, sign-up-style items for their group (Workspace
+  // card); families claim them under the kid's class on Kid Schedule;
+  // the Packing List reads the claims (+ class supplies + lending).
+  var _groupBring = null;   // { items, signups, byItem, me }
+  var _groupBringSig = '';
+
+  function loadGroupBringItems(force, cb) {
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { if (cb) cb(); return; }
+    if (_groupBring && !force) { if (cb) cb(); return; }
+    fetch('/api/supply-closet?action=bring-items' + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || d.error) { if (cb) cb(); return; }
+      var byItem = {};
+      (d.signups || []).forEach(function (s) {
+        (byItem[s.item_id] = byItem[s.item_id] || []).push(s);
+      });
+      var sig = JSON.stringify([d.items, d.signups]);
+      var changed = sig !== _groupBringSig;
+      _groupBringSig = sig;
+      _groupBring = { items: d.items || [], signups: d.signups || [], byItem: byItem, me: String(d.me || '').toLowerCase() };
+      if (cb) cb();
+      // First arrival / changes repaint the Kid Schedule blocks.
+      if (changed && typeof renderMyFamily === 'function') renderMyFamily();
+    }).catch(function () { if (cb) cb(); });
+  }
+
+  function bringItemsForGroup(group) {
+    if (!_groupBring) return [];
+    var g = String(group || '').toLowerCase();
+    return _groupBring.items.filter(function (i) { return String(i.class_group || '').toLowerCase() === g; });
+  }
+  function bringDateStr(d) { return String(d || '').slice(0, 10); }
+
+  // The block under a kid's morning class row on Kid Schedule (#139 —
+  // Erin: "items needed for their kids' classes should be under
+  // My Family > Kid Schedule, below the related class").
+  function renderGroupBringBlock(group) {
+    if (!_groupBring) return '';
+    var today = new Date().toISOString().slice(0, 10);
+    var items = bringItemsForGroup(group).filter(function (i) {
+      var d = bringDateStr(i.bring_date);
+      return !d || d >= today;
+    });
+    if (!items.length) return '';
+    var me = _groupBring.me;
+    var h = '<div class="mf-bring-block">';
+    h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' Things to bring — ' + escapeHtml(group) + '</div>';
+    items.forEach(function (it) {
+      var claims = _groupBring.byItem[it.id] || [];
+      var mine = claims.some(function (c) { return String(c.person_email || '').toLowerCase() === me; });
+      var full = claims.length >= (it.capacity || 1);
+      h += '<div class="mf-bring-row">';
+      h += '<span class="mf-bring-main"><strong>' + escapeHtml(it.label) + '</strong>';
+      var bits = [];
+      if (it.bring_date) bits.push('bring ' + fmtLendDate(it.bring_date));
+      if ((it.capacity || 1) > 1) bits.push(claims.length + ' of ' + it.capacity + ' covered');
+      if (it.note) bits.push(escapeHtml(it.note));
+      if (claims.length) bits.push('👍 ' + escapeHtml(claims.map(function (c) { return c.person_name; }).filter(Boolean).join(', ')));
+      if (bits.length) h += '<span class="ws-lending-sub">' + bits.join(' · ') + '</span>';
+      h += '</span>';
+      if (mine) {
+        h += '<span class="ws-lending-actions"><span class="ws-opp-committee">✓ You’re bringing this</span>'
+          + '<button type="button" class="sc-btn sc-btn-del" data-resource-action="bring-release" data-item="' + it.id + '" title="Release">×</button></span>';
+      } else if (!full) {
+        h += '<span class="ws-lending-actions"><button type="button" class="sc-btn sc-save" data-resource-action="bring-claim" data-item="' + it.id + '">I’ll bring it</button></span>';
+      } else {
+        h += '<span class="ws-lending-actions"><span class="ws-opp-committee">Covered — thanks!</span></span>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function handleBringClaimAction(btn, unclaim) {
+    var itemId = parseInt(btn.getAttribute('data-item'), 10);
+    if (!itemId) return;
+    btn.disabled = true;
+    var payload = { item_id: itemId, person_name: lendingDisplayNameFor(getActiveEmail()) };
+    var vaEmail = supplyViewAsEmail();
+    if (vaEmail) payload.view_as = vaEmail;
+    fetch('/api/supply-closet?action=' + (unclaim ? 'bring-unclaim' : 'bring-claim'), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert(res.data.error || 'Could not update.'); btn.disabled = false; return; }
+        loadGroupBringItems(true);
+      })
+      .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+  }
+
+  // ── Liaison Workspace card ──
+  function myLiaisonGroups() {
+    var out = [];
+    ((typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : []).forEach(function (t) {
+      var g = (typeof liaisonGroupOfRole === 'function') ? liaisonGroupOfRole(t) : '';
+      if (g) {
+        var cap = g.charAt(0).toUpperCase() + g.slice(1);
+        if (out.indexOf(cap) === -1) out.push(cap);
+      }
+    });
+    return out;
+  }
+
+  function loadGroupBringCard() {
+    var target = document.getElementById('ws-bring-body');
+    if (!target) return;
+    loadGroupBringItems(true, function () {
+      target = document.getElementById('ws-bring-body');
+      if (!target || !_groupBring) return;
+      var groups = myLiaisonGroups();
+      if (!groups.length) { target.innerHTML = '<p class="ws-empty">No liaison group on file.</p>'; return; }
+      var h = '';
+      groups.forEach(function (g) {
+        if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(g) + '</p>';
+        var items = bringItemsForGroup(g);
+        if (!items.length) h += '<p class="ws-empty">Nothing posted yet — add the first item below.</p>';
+        items.forEach(function (it) {
+          var claims = _groupBring.byItem[it.id] || [];
+          h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(it.label) + '</strong>'
+            + '<span class="ws-lending-sub">'
+            + (it.bring_date ? 'bring ' + fmtLendDate(it.bring_date) + ' · ' : '')
+            + claims.length + ' of ' + (it.capacity || 1) + ' covered'
+            + (claims.length ? ' · ' + escapeHtml(claims.map(function (c) { return c.person_name; }).filter(Boolean).join(', ')) : '')
+            + (it.note ? ' · ' + escapeHtml(it.note) : '')
+            + '</span></span>';
+          h += '<span class="ws-lending-actions">'
+            + '<button type="button" class="sc-btn ws-bring-edit" data-id="' + it.id + '" data-group="' + escapeAttr(it.class_group) + '">Edit</button>'
+            + '<button type="button" class="sc-btn sc-btn-del ws-bring-del" data-id="' + it.id + '">Delete</button></span></div>';
+        });
+        h += renderBringForm(g, null);
+      });
+      target.innerHTML = h;
+      wireBringCard(target);
+    });
+  }
+
+  // Add/edit form — co-op day picker built from the session Wednesdays
+  // (getCoopDatesInSession), custom date as the escape hatch.
+  function renderBringForm(group, item) {
+    var idAttr = item ? item.id : 'new-' + group;
+    var h = '<div class="sc-edit-form" data-bring-group="' + escapeAttr(group) + '" data-bring-id="' + (item ? item.id : '') + '">';
+    h += '<div class="sc-edit-grid">';
+    h += '<input class="cl-input ws-bring-label" placeholder="What do families need to bring? (e.g. Egg cartons)" maxlength="200" value="' + (item ? escapeAttr(item.label) : '') + '">';
+    h += '<input class="cl-input ws-bring-cap" type="number" min="1" max="30" style="max-width:110px;" title="How many families" value="' + (item ? (item.capacity || 1) : 1) + '">';
+    h += '</div>';
+    var today = new Date().toISOString().slice(0, 10);
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">';
+    h += '<select class="cl-input ws-bring-date" style="max-width:260px;"><option value="">Needed when? (co-op day)</option>';
+    for (var sn = 1; sn <= 5; sn++) {
+      var dates = (typeof getCoopDatesInSession === 'function') ? getCoopDatesInSession(sn) : [];
+      var future = dates.filter(function (d) { return d >= today; });
+      if (!future.length) continue;
+      h += '<optgroup label="Session ' + sn + '">';
+      future.forEach(function (d) {
+        var sel = item && bringDateStr(item.bring_date) === d ? ' selected' : '';
+        h += '<option value="' + d + '"' + sel + '>' + fmtLendDate(d) + '</option>';
+      });
+      h += '</optgroup>';
+    }
+    h += '</select>';
+    h += '<label style="font-size:0.85em;">or <input type="date" class="cl-input ws-bring-date-custom" min="' + today + '" value="' + (item && item.bring_date ? bringDateStr(item.bring_date) : '') + '"></label>';
+    h += '</div>';
+    h += '<input class="cl-input ws-bring-note sc-edit-notes" placeholder="Detail note (optional — what it’s for, size, clean/empty…)" maxlength="300" value="' + (item ? escapeAttr(item.note) : '') + '">';
+    h += '<div class="sc-edit-actions">'
+      + (item ? '<button type="button" class="sc-btn ws-bring-cancel">Cancel</button>' : '')
+      + '<button type="button" class="sc-save ws-bring-save" data-id="' + idAttr + '">' + (item ? 'Save' : '+ Add item') + '</button></div>';
+    h += '</div>';
+    return h;
+  }
+
+  function wireBringCard(target) {
+    target.querySelectorAll('.ws-bring-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var form = btn.closest('[data-bring-group]');
+        var group = form.getAttribute('data-bring-group');
+        var editId = form.getAttribute('data-bring-id');
+        var dateSel = form.querySelector('.ws-bring-date');
+        var dateCustom = form.querySelector('.ws-bring-date-custom');
+        var payload = {
+          id: editId ? parseInt(editId, 10) : null,
+          class_group: group,
+          label: (form.querySelector('.ws-bring-label') || {}).value || '',
+          capacity: parseInt((form.querySelector('.ws-bring-cap') || {}).value, 10) || 1,
+          note: (form.querySelector('.ws-bring-note') || {}).value || '',
+          bring_date: (dateCustom && dateCustom.value) || (dateSel && dateSel.value) || ''
+        };
+        if (!payload.label.trim()) { alert('What should families bring?'); return; }
+        var vaEmail = supplyViewAsEmail();
+        if (vaEmail) payload.view_as = vaEmail;
+        btn.disabled = true;
+        fetch('/api/supply-closet?action=bring-item-save', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert(res.data.error || 'Save failed'); btn.disabled = false; return; }
+            loadGroupBringCard();
+          })
+          .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+      });
+    });
+    target.querySelectorAll('.ws-bring-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'delete', function () {
+          var payload = { id: parseInt(self.getAttribute('data-id'), 10) };
+          var vaEmail = supplyViewAsEmail();
+          if (vaEmail) payload.view_as = vaEmail;
+          fetch('/api/supply-closet?action=bring-item-delete', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert(res.data.error || 'Delete failed'); return; }
+              loadGroupBringCard();
+            })
+            .catch(function () { alert('Network error — try again.'); });
+        });
+      });
+    });
+    target.querySelectorAll('.ws-bring-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var it = (_groupBring && _groupBring.items.filter(function (x) { return x.id === id; })[0]) || null;
+        if (!it) return;
+        var row = btn.closest('.ws-lending-row');
+        var holder = document.createElement('div');
+        holder.innerHTML = renderBringForm(it.class_group, it);
+        row.parentNode.replaceChild(holder.firstChild, row);
+        wireBringCard(target);
+      });
+    });
+    target.querySelectorAll('.ws-bring-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () { loadGroupBringCard(); });
+    });
+  }
+
+  // ── #138: Reminders — Packing List + Retrieve Items ──
+  function nextCoopDayInfo() {
+    var today = new Date().toISOString().slice(0, 10);
+    for (var sn = 1; sn <= 5; sn++) {
+      var dates = (typeof getCoopDatesInSession === 'function') ? getCoopDatesInSession(sn) : [];
+      for (var i = 0; i < dates.length; i++) {
+        if (dates[i] >= today) return { date: dates[i], session: sn, week: i + 1 };
+      }
+    }
+    return null;
+  }
+
+  var PACKING_STAPLES = ['Lunches', 'Water bottles', 'Sunscreen', 'Snacks', 'Lawn chairs', 'Blanket'];
+
+  function showPackingListModal() {
+    var body = renderReportModal({
+      title: 'Packing List',
+      subtitle: 'Everything to load in the car for the next co-op day.',
+      icons: [{ label: 'Print', icon: ICON_SVG.print, aria: 'Print the packing list', action: function () {
+        var el = document.getElementById('packing-list-body');
+        if (el) openPrintIframe('<!doctype html><html><head><meta charset="utf-8"><title>Packing List</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px;}h1{font-size:18px;}h2{font-size:14px;margin:14px 0 4px;}ul{margin:4px 0 10px 20px;padding:0;}li{margin:2px 0;}em{color:#555;}</style></head><body><h1>Packing List</h1>' + el.innerHTML.replace(/<button[^>]*>.*?<\/button>/g, '') + '</body></html>');
+      } }],
+      bodyId: 'packing-list-body',
+      bodyPlaceholder: '<p class="ws-empty">Building your list…</p>'
+    });
+    if (!body) return;
+    buildPackingListBody();
+  }
+  window.showPackingListModal = showPackingListModal;
+
+  function buildPackingListBody() {
+    var body = document.getElementById('packing-list-body');
+    if (!body) return;
+    var next = nextCoopDayInfo();
+    if (!next) { body.innerHTML = '<p class="ws-empty">No upcoming co-op days on the calendar — see you next session!</p>'; return; }
+
+    var h = '<p class="ws-body-hint"><strong>Next co-op day: ' + fmtLendDate(next.date) + '</strong> · Session ' + next.session + ', week ' + next.week + '</p>';
+    h += '<h2 class="ws-lending-head">The staples</h2><ul>';
+    PACKING_STAPLES.forEach(function (s) { h += '<li>' + s + '</li>'; });
+    h += '</ul>';
+    h += '<div id="pl-family"><h2 class="ws-lending-head">For your family</h2><p class="ws-empty">Checking your sign-ups…</p></div>';
+    h += '<div id="pl-classes"><h2 class="ws-lending-head">For classes you lead</h2><p class="ws-empty">Checking your lesson plans…</p></div>';
+    h += '<div id="pl-lending"><h2 class="ws-lending-head">Lending Library</h2><p class="ws-empty">Checking loans…</p></div>';
+    body.innerHTML = h;
+
+    // ① Claimed group bring-items due that day (or undated).
+    loadGroupBringItems(false, function () {
+      var el = document.getElementById('pl-family');
+      if (!el || !_groupBring) return;
+      var mine = _groupBring.items.filter(function (it) {
+        var claims = _groupBring.byItem[it.id] || [];
+        if (!claims.some(function (c) { return String(c.person_email || '').toLowerCase() === _groupBring.me; })) return false;
+        var d = bringDateStr(it.bring_date);
+        return !d || d === next.date;
+      });
+      el.innerHTML = '<h2 class="ws-lending-head">For your family</h2>'
+        + (mine.length
+          ? '<ul>' + mine.map(function (it) {
+              return '<li>' + escapeHtml(it.label) + ' <em>— ' + escapeHtml(it.class_group) + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</em></li>';
+            }).join('') + '</ul>'
+          : '<p class="ws-empty">Nothing signed up for this day.</p>');
+    });
+
+    // ② Supplies for classes this family teaches that day — the linked
+    // plan's lesson for that session week.
+    (function fillClasses() {
+      var el = function () { return document.getElementById('pl-classes'); };
+      var mine = (typeof myClassesForSession === 'function')
+        ? myClassesForSession(myClassSubmissions, next.session, (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || null)
+        : [];
+      if (!mine.length) { var e0 = el(); if (e0) e0.innerHTML = '<h2 class="ws-lending-head">For classes you lead</h2><p class="ws-empty">No classes scheduled this session.</p>'; return; }
+      var done = 0, lines = [];
+      var finish = function () {
+        var e = el();
+        if (!e) return;
+        e.innerHTML = '<h2 class="ws-lending-head">For classes you lead</h2>'
+          + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">No supplies listed for week ' + next.week + ' — check your lesson plans.</p>');
+      };
+      ensureClassLinksForSession(next.session, function () {
+        var map = _classLinksBySession[next.session] || {};
+        var pend = 0;
+        mine.forEach(function (s) {
+          var link = map[myClassLinkKey(s)];
+          if (!link) return;
+          pend++;
+          fetch('/api/curriculum?id=' + link.curriculum_id, { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var ls = ((d.curriculum || {}).lessons || [])[next.week - 1];
+              ((ls && ls.supplies) || []).forEach(function (sp) {
+                lines.push('<li>' + escapeHtml(sp.item_name) + (sp.qty ? ' (' + escapeHtml(sp.qty) + (sp.qty_unit === 'student' ? ' per student' : sp.qty_unit === 'class' ? ' per class' : '') + ')' : '') + ' <em>— ' + escapeHtml(s.class_name) + '</em></li>');
+              });
+            })
+            .catch(function () {})
+            .then(function () { done++; if (done >= pend) finish(); });
+        });
+        if (pend === 0) finish();
+      });
+    })();
+
+    // ③ Lending hand-offs + returns due that day.
+    (function fillLending() {
+      fetch('/api/supply-closet?action=loans' + notifViewAsSuffix(), {
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        var el = document.getElementById('pl-lending');
+        if (!el || !d || d.error) return;
+        var me = String(d.me || '').toLowerCase();
+        var lines = [];
+        (d.loans || []).forEach(function (l) {
+          var start = bringDateStr(l.start_date), end = bringDateStr(l.end_date);
+          var owner = String(l.owner_email || '').toLowerCase() === me;
+          var borrower = String(l.borrower_email || '').toLowerCase() === me;
+          if (owner && l.status === 'approved' && start && start <= next.date && (!end || end >= next.date)) {
+            lines.push('<li>Hand off: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.borrower_name || l.borrower_email) + '</em></li>');
+          }
+          if (borrower && (l.status === 'approved' || l.status === 'handed_off') && end && end <= next.date) {
+            lines.push('<li>Return: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.owner_name || l.owner_email) + '</em></li>');
+          }
+        });
+        el.innerHTML = '<h2 class="ws-lending-head">Lending Library</h2>'
+          + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">No hand-offs or returns due.</p>');
+      }).catch(function () {});
+    })();
+  }
+
+  // Items you lent out whose time is up — collect them (#138).
+  function showRetrieveItemsModal() {
+    var body = renderReportModal({
+      title: 'Retrieve Items',
+      subtitle: 'Lending Library items of yours that are due back — and who has them.',
+      icons: [{ label: 'Print', icon: ICON_SVG.print, aria: 'Print the retrieve list', action: function () {
+        var el = document.getElementById('retrieve-items-body');
+        if (el) openPrintIframe('<!doctype html><html><head><meta charset="utf-8"><title>Retrieve Items</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px;}h1{font-size:18px;}ul{margin:8px 0 0 20px;}li{margin:3px 0;}em{color:#555;}</style></head><body><h1>Retrieve Items</h1>' + el.innerHTML + '</body></html>');
+      } }],
+      bodyId: 'retrieve-items-body',
+      bodyPlaceholder: '<p class="ws-empty">Checking your loans…</p>'
+    });
+    if (!body) return;
+    fetch('/api/supply-closet?action=loans' + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      var el = document.getElementById('retrieve-items-body');
+      if (!el || !d || d.error) return;
+      var me = String(d.me || '').toLowerCase();
+      var next = nextCoopDayInfo();
+      var horizon = next ? next.date : new Date().toISOString().slice(0, 10);
+      var lines = [];
+      (d.loans || []).forEach(function (l) {
+        if (String(l.owner_email || '').toLowerCase() !== me) return;
+        if (l.kind === 'donate' || (l.status !== 'approved' && l.status !== 'handed_off')) return;
+        var end = bringDateStr(l.end_date);
+        if (!end || end > horizon) return;
+        var today = new Date().toISOString().slice(0, 10);
+        lines.push('<li>' + escapeHtml(l.item_name) + ' <em>— with ' + escapeHtml(l.borrower_name || l.borrower_email)
+          + ' · due ' + fmtLendDate(end) + (end < today ? ' · <strong>overdue</strong>' : '') + '</em></li>');
+      });
+      el.innerHTML = lines.length
+        ? '<ul>' + lines.join('') + '</ul><p class="ws-body-hint" style="margin-top:10px;">Mark items returned on the Lending Library card once they’re back.</p>'
+        : '<p class="ws-empty">Nothing due back right now — all your lending items are home or on schedule.</p>';
+    }).catch(function () {});
+  }
+  window.showRetrieveItemsModal = showRetrieveItemsModal;
+
+  // ──────────────────────────────────────────────
   // Curriculum Library
   // ──────────────────────────────────────────────
   var SUBJECT_OPTIONS = [
@@ -20558,6 +21017,9 @@
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
     else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
+    // #139: claim/release a group "Things to bring" spot (Kid Schedule).
+    else if (action === 'bring-claim' && typeof handleBringClaimAction === 'function') handleBringClaimAction(btn, false);
+    else if (action === 'bring-release' && typeof handleBringClaimAction === 'function') handleBringClaimAction(btn, true);
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();

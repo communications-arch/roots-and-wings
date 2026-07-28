@@ -2232,6 +2232,33 @@ CREATE INDEX IF NOT EXISTS supply_loans_item_idx     ON supply_loans (item_id);
 CREATE INDEX IF NOT EXISTS supply_loans_owner_idx    ON supply_loans (owner_email);
 CREATE INDEX IF NOT EXISTS supply_loans_borrower_idx ON supply_loans (borrower_email);
 
+-- 2026-07-28 (#139, Lyndsey/Erin): group liaisons post "Things to Bring"
+-- for their age group — sign-up style (one family claims each spot, like
+-- the collab sign-up lists) with the co-op day it's needed. Families claim
+-- under the kid's class on Kid Schedule; claims feed the Packing List
+-- (#138). class_group stores the capitalized group name ('Sassafras').
+CREATE TABLE IF NOT EXISTS group_bring_items (
+  id           SERIAL PRIMARY KEY,
+  school_year  TEXT NOT NULL,
+  class_group  TEXT NOT NULL,
+  label        TEXT NOT NULL,
+  note         TEXT NOT NULL DEFAULT '',
+  capacity     INTEGER NOT NULL DEFAULT 1,
+  bring_date   DATE,
+  created_by   TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS group_bring_items_year_group_idx ON group_bring_items (school_year, class_group);
+CREATE TABLE IF NOT EXISTS group_bring_signups (
+  id           SERIAL PRIMARY KEY,
+  item_id      INTEGER NOT NULL REFERENCES group_bring_items(id) ON DELETE CASCADE,
+  person_email TEXT NOT NULL,
+  person_name  TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS group_bring_signups_item_idx ON group_bring_signups (item_id);
+
 -- 2026-07-28 (#131, Lyndsey): the event-space CHECKLIST card gets the same
 -- binocular visibility as section cards. TRUE (default) = all members see
 -- it; FALSE = event committee + SEL + Sustaining Director only. Default

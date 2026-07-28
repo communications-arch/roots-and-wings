@@ -6792,6 +6792,42 @@ body > .rd-drawer { z-index: 10002; }
 ul[id="ws-todo-list"] .ws-link-icon,
 #ws-shared-todo-list .ws-link-icon { display: none; }
 
+/* #139 Things to Bring — block under the kid's class on Kid Schedule */
+.mf-bring-block {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  background: rgba(var(--color-teal-rgb), 0.05);
+  border: 1px solid rgba(var(--color-teal-rgb), 0.18);
+  border-radius: 8px;
+}
+.mf-bring-head {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-teal);
+  margin-bottom: 4px;
+}
+.mf-bring-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(var(--color-teal-rgb), 0.12);
+  font-size: 0.9rem;
+}
+.mf-bring-row:first-of-type { border-top: none; }
+.mf-bring-main { flex: 1 1 auto; min-width: 0; }
+.mf-bring-row .ws-lending-actions { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
+
+/* #138 Reminders strip at the bottom of My Responsibilities */
+.mf-reminders {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-cream-dark);
+}
+
 /* Per-spot details on sign-up lists (#125-6) */
 .ws-opp-slotnote {
   display: block;
