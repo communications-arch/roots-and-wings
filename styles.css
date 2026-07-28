@@ -6786,6 +6786,12 @@ body > .rd-drawer { z-index: 10002; }
 }
 .ws-lending-head:first-child { margin-top: 0; }
 .ws-lending-overdue { color: var(--color-error); font-weight: 700; }
+/* #137 (Erin): To Do line items drop their per-row icons — the counts and
+   text carry the row; the card accent carries the look. CSS-level so the
+   many loader-injected rows don't each need markup surgery. */
+ul[id="ws-todo-list"] .ws-link-icon,
+#ws-shared-todo-list .ws-link-icon { display: none; }
+
 /* Per-spot details on sign-up lists (#125-6) */
 .ws-opp-slotnote {
   display: block;

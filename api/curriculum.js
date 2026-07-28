@@ -640,13 +640,22 @@ function kidLacksAfternoonPick(k, pickedIds, pickedKeys) {
 // session — the same read signup-todos does, condensed to a count for
 // the class-confirm-send gate.
 async function countKidsUnpicked(sql, year, sess) {
+  // #134 (Erin): kids of families with NO registration this season (or a
+  // withdrawn family) were showing as "needs picks" — leftover 'enrolled'
+  // seed rows. The registration EXISTS + withdrawn_at filters here must
+  // stay in lockstep with the signup-todos kids query below.
   const [kids, picked] = await Promise.all([
     sql`SELECT k.id AS kid_id, k.first_name, k.class_group, k.birth_date,
                LOWER(e.family_email) AS fam
         FROM kid_enrollments e
         JOIN kids k ON k.id = e.kid_id
+        LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(e.family_email)
         WHERE e.season = ${year} AND e.status = 'enrolled'
-          AND e.schedule IN ('all-day', 'afternoon')`,
+          AND e.schedule IN ('all-day', 'afternoon')
+          AND mp.withdrawn_at IS NULL
+          AND EXISTS (SELECT 1 FROM registrations r WHERE r.season = ${year}
+                AND (LOWER(NULLIF(r.family_email, '')) = LOWER(e.family_email)
+                  OR LOWER(r.email) = LOWER(e.family_email)))`,
     sql`SELECT DISTINCT kid_id, LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
         FROM class_signup_picks WHERE school_year = ${year} AND session_number = ${sess}`
   ]);
@@ -1177,7 +1186,11 @@ module.exports = async function handler(req, res) {
               JOIN kids k ON k.id = e.kid_id
               LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(e.family_email)
               WHERE e.season = ${stYear} AND e.status = 'enrolled'
-                AND e.schedule IN ('all-day', 'afternoon')`,
+                AND e.schedule IN ('all-day', 'afternoon')
+                AND mp.withdrawn_at IS NULL
+                AND EXISTS (SELECT 1 FROM registrations r WHERE r.season = ${stYear}
+                      AND (LOWER(NULLIF(r.family_email, '')) = LOWER(e.family_email)
+                        OR LOWER(r.email) = LOWER(e.family_email)))`,
           sql`SELECT DISTINCT kid_id, LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid
               FROM class_signup_picks WHERE school_year = ${stYear} AND session_number = ${stSess}`,
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,

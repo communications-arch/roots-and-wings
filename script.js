@@ -10184,15 +10184,17 @@
         if (items.length === 0 && formItems.length === 0) {
           h += '<li class="ws-empty">No reports configured for this role yet.</li>';
         } else {
+          // #136 (Erin): no per-row icons — every row wore the same mark,
+          // so it said nothing. The card header's accent carries the look.
           items.forEach(function (r) {
             if (r.url) {
-              h += '<li><a class="ws-link-btn" href="' + r.url + '" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('reports', 'ag-icon') + '</span>' + escapeHtml(r.title) + '</a></li>';
+              h += '<li><a class="ws-link-btn" href="' + r.url + '" target="_blank" rel="noopener">' + escapeHtml(r.title) + '</a></li>';
             } else {
-              h += '<li><button type="button" class="ws-link-btn" data-report-key="' + r.key + '"><span class="ws-link-icon">' + brandIconImg('reports', 'ag-icon') + '</span>' + escapeHtml(r.title) + '</button></li>';
+              h += '<li><button type="button" class="ws-link-btn" data-report-key="' + r.key + '">' + escapeHtml(r.title) + '</button></li>';
             }
           });
           formItems.forEach(function (f) {
-            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '"><span class="ws-link-icon">' + brandIconImg('forms', 'ag-icon') + '</span>' + escapeHtml(f.title) + '</button></li>';
+            h += '<li><button type="button" class="ws-link-btn" data-form-key="' + f.key + '">' + escapeHtml(f.title) + '</button></li>';
           });
         }
         h += '</ul>';
@@ -18597,14 +18599,14 @@
       target = document.getElementById('ws-lending-body');
       if (!target) return; // tab re-rendered while we were fetching
       if (data.error) { target.innerHTML = '<p class="ws-empty">Couldn’t load loans: ' + escapeHtml(data.error) + '</p>'; return; }
-      renderLendingCardBody(target, data.loans || [], String(data.me || '').toLowerCase());
+      renderLendingCardBody(target, data.loans || [], String(data.me || '').toLowerCase(), data.my_items || []);
     }).catch(function () {
       var t = document.getElementById('ws-lending-body');
       if (t) t.innerHTML = '<p class="ws-empty">Couldn’t load the lending list.</p>';
     });
   }
 
-  function renderLendingCardBody(target, loans, me) {
+  function renderLendingCardBody(target, loans, me, myItems) {
     var today = new Date().toISOString().slice(0, 10);
     var isOpen = function (l) { return ['requested', 'approved', 'handed_off'].indexOf(l.status) !== -1; };
     var asks = loans.filter(function (l) { return l.status === 'requested' && String(l.owner_email).toLowerCase() === me; });
@@ -18672,10 +18674,43 @@
           + '<span class="ws-lending-actions">' + acts + '</span></div>';
       });
     }
+    // #135 (Lyndsey): every item this member has in the library, with a
+    // remove for things they no longer have. Given-away items show their
+    // ending; the server blocks deleting anything currently out.
+    var itemsList = (myItems || []);
+    if (itemsList.length > 0) {
+      h += '<p class="ws-lending-head">Your items in the library</p>';
+      itemsList.forEach(function (it) {
+        var sub = it.donated_at
+          ? 'given to ' + escapeHtml(it.donated_to || 'a member') + ' 💛'
+          : (it.offer_type === 'donate' ? 'offered to give away' : 'offered to lend')
+            + (it.notes ? ' · ' + escapeHtml(it.notes) : '');
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + escapeHtml(it.item_name)
+          + '<span class="ws-lending-sub">' + sub + '</span></span>'
+          + '<span class="ws-lending-actions"><button type="button" class="sc-btn sc-btn-del ll-item-del" data-item="' + it.id + '">Remove</button></span></div>';
+      });
+    }
     if (!h) {
       h = '<p class="ws-empty">Nothing borrowed or lent right now.</p>';
     }
     target.innerHTML = h;
+
+    target.querySelectorAll('.ll-item-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'remove', function () {
+          self.disabled = true;
+          var payloadUrl = '/api/supply-closet?id=' + self.getAttribute('data-item') + notifViewAsSuffix();
+          fetch(payloadUrl, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') } })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert(res.data.error || 'Could not remove the item.'); self.disabled = false; return; }
+              loadLendingCard();
+            })
+            .catch(function (err) { alert('Network error: ' + err.message); self.disabled = false; });
+        });
+      });
+    });
 
     target.querySelectorAll('.ll-card-act').forEach(function (btn) {
       btn.addEventListener('click', function () {

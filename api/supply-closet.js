@@ -419,9 +419,13 @@ module.exports = async function handler(req, res) {
 
       // A lending item that's currently out (or promised) can't be quietly
       // deleted — the borrower's record would vanish with it (loans cascade).
+      // A COMPLETED donation (kind=donate, handed_off) is fine to delete —
+      // that item's story is over (#135).
       const activeLoans = await sql`
         SELECT COUNT(*)::int AS n FROM supply_loans
-        WHERE item_id = ${id} AND status IN ('approved', 'handed_off')
+        WHERE item_id = ${id}
+          AND ((kind = 'borrow' AND status IN ('approved', 'handed_off'))
+            OR (kind = 'donate' AND status = 'approved'))
       `;
       if (activeLoans[0].n > 0) {
         return res.status(409).json({ error: 'This item is currently lent out (or promised). Mark the loan returned or canceled first.' });
@@ -490,7 +494,15 @@ async function handleLoanActions(req, res, sql, user, actingEmail, coordAllowed)
       ORDER BY l.requested_at DESC
       LIMIT 200
     `;
-    return res.status(200).json({ loans: rows, me: email });
+    // #135 (Lyndsey): the card also lists every item the member has in
+    // the library so they can prune what they no longer have.
+    const myItems = await sql`
+      SELECT id, item_name, offer_type, notes, donated_at, donated_to
+      FROM supply_closet
+      WHERE category = 'member_lending' AND LOWER(held_by_email) = ${email}
+      ORDER BY item_name
+    `;
+    return res.status(200).json({ loans: rows, my_items: myItems, me: email });
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
