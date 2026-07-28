@@ -93,10 +93,10 @@ module.exports = async function handler(req, res) {
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
   const isLoanAction = ['loan-request', 'loan-respond', 'loan-status'].indexOf(req.query.action) !== -1
-    // #139 bring-* / #140 liaison-note* actions carry their own
+    // #139 bring-* / #140+#156 liaison-* actions carry their own
     // liaison/self checks below.
     || String(req.query.action || '').indexOf('bring-') === 0
-    || String(req.query.action || '').indexOf('liaison-note') === 0;
+    || String(req.query.action || '').indexOf('liaison-') === 0;
   // Gate writes on the ACTING identity (View-As target when a
   // canImpersonate caller sends view_as, else the real login) — #43.
   const actingEmail = actingEmailFor(user, req);
@@ -200,7 +200,7 @@ module.exports = async function handler(req, res) {
 
     // ── Things to Bring (#139): liaison-posted group items + claims ──
     if (String(req.query.action || '').indexOf('bring-') === 0
-      || String(req.query.action || '').indexOf('liaison-note') === 0) {
+      || String(req.query.action || '').indexOf('liaison-') === 0) {
       return handleBringActions(req, res, sql, user, actingEmail);
     }
 
