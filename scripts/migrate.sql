@@ -2240,10 +2240,9 @@ CREATE INDEX IF NOT EXISTS supply_loans_borrower_idx ON supply_loans (borrower_e
 -- per-section co-op day (config.bring_date). Families sign up under the
 -- kid's class on Kid Schedule; claims feed the Packing List (#138).
 -- class_group stores the capitalized group name ('Sassafras').
--- (The short-lived per-item tables from earlier today are dropped —
--- they only ever held one dev test row and never reached prod.)
-DROP TABLE IF EXISTS group_bring_signups;
-DROP TABLE IF EXISTS group_bring_items;
+-- (The short-lived per-item tables group_bring_items/_signups from
+-- earlier today never reached prod; their one-test-row dev orphans were
+-- dropped by hand — the auto-migration stays additive-only.)
 CREATE TABLE IF NOT EXISTS group_sections (
   id           SERIAL PRIMARY KEY,
   school_year  TEXT NOT NULL,
