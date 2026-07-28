@@ -8862,12 +8862,22 @@
         (openByFloor[k] = openByFloor[k] || []).push(a);
       });
     }
+    // "Mine" matching mirrors the Ways to Help modal: assignments store
+    // either the FAMILY name (seeded rows) or the member's display name
+    // (self sign-ups), so exact-family equality alone misses half of them.
+    var meNameTab = (matrix && matrix.me && matrix.me.name) ? String(matrix.me.name).trim().toLowerCase() : '';
+    var famLowerTab = String(myNames.familyName || '').trim().toLowerCase();
+    var isMineFamTab = function (family) {
+      var f = String(family || '').trim().toLowerCase();
+      if (!f) return false;
+      if (famLowerTab && (f === famLowerTab || f.indexOf(famLowerTab) !== -1)) return true;
+      return !!(meNameTab && f === meNameTab);
+    };
     var myAssignmentId = function (floorLabel, area) {
       if (!matrix) return null;
       var hit = null;
       (matrix.cleaning || []).some(function (c) {
-        if (c.floor === floorLabel && c.area === area
-          && String(c.family || '').trim().toLowerCase() === myNames.familyName.toLowerCase()) { hit = c; return true; }
+        if (c.floor === floorLabel && c.area === area && isMineFamTab(c.family)) { hit = c; return true; }
         return false;
       });
       return hit ? hit.id : null;
@@ -8889,7 +8899,8 @@
       html += '<h4>' + floor.label + '</h4>';
       assignedAreas.forEach(function (area) {
         var families = sessClean[floor.key][area];
-        var isMyArea = families.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
+        var isMyArea = families.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); })
+          || families.some(isMineFamTab);
         html += '<div class="cleaning-role' + (isMyArea ? ' coord-my-row' : '') + '">';
         html += areaNameHtml(floor.key, area);
         html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
@@ -8909,7 +8920,8 @@
     var floaterFams = sessClean.floater || [];
     var floaterOpen = (openByFloor.floater || [])[0] || null;
     if (floaterFams.length > 0 || floaterOpen) {
-      var isMyFloater = floaterFams.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); });
+      var isMyFloater = floaterFams.some(function (f) { return f.trim().toLowerCase() === myNames.familyName.toLowerCase(); })
+        || floaterFams.some(isMineFamTab);
       html += '<div class="cleaning-floor-card">';
       html += '<h4>Floater</h4>';
       html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">';
