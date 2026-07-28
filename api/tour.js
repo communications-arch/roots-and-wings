@@ -6277,7 +6277,7 @@ async function handleEventSpaceGet(req, res) {
   try {
     const sql = getSql();
     const evRows = await sql`
-      SELECT id, school_year, name, event_date, date_status, location, notes
+      SELECT id, school_year, name, event_date, date_status, location, notes, tasks_public
       FROM special_events WHERE id = ${eventId}
     `;
     if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
@@ -6322,6 +6322,9 @@ async function handleEventSpaceGet(req, res) {
       } catch (e) { /* role unresolved — stay non-privileged */ }
     }
     if (!priv) sections = sections.filter(x => x.is_public !== false);
+    // #131: a committee-only checklist vanishes for regular members the
+    // same way private section cards do.
+    const tasksHidden = ev.tasks_public === false && !priv;
     const payload = {
       event: {
         id: ev.id,
@@ -6332,7 +6335,9 @@ async function handleEventSpaceGet(req, res) {
         location: ev.location || '',
         notes: ev.notes || ''
       },
-      tasks: tasks.map(eventTaskShape),
+      tasks: tasksHidden ? [] : tasks.map(eventTaskShape),
+      tasks_public: ev.tasks_public !== false,
+      tasks_hidden: tasksHidden,
       sections: sections.map(s => eventSectionShape(s, sectionSignups)),
       people: people.map(p => ({ role: p.role, email: p.person_email || '', name: p.person_name || '' })),
       template_count: tplCount[0].n,
@@ -6642,6 +6647,27 @@ async function handleEventSectionPublic(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-section-public error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-tasks-public — flip the CHECKLIST card's visibility (#131,
+// Lyndsey 07-28: the checklist needs the same binoculars the section
+// cards have). Editors only; TRUE = all members, FALSE = committee+SEL+SD.
+async function handleEventTasksPublic(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can change visibility.' });
+    }
+    await sql`UPDATE special_events SET tasks_public = ${!!body.public} WHERE id = ${eventId}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-tasks-public error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -10117,6 +10143,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-template-save') return handleEventTemplateSave(body, req, res);
     if (kind === 'event-section-save') return handleEventSectionSave(body, req, res);
     if (kind === 'event-section-public') return handleEventSectionPublic(body, req, res);
+    if (kind === 'event-tasks-public') return handleEventTasksPublic(body, req, res);
     if (kind === 'event-section-delete') return handleEventSectionDelete(body, req, res);
     if (kind === 'event-signups-open') return handleEventSignupsOpen(body, req, res);
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);

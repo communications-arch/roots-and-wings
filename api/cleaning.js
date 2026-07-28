@@ -46,7 +46,9 @@ const STRUCTURAL_META_FIELDS = new Set([
   'committee', 'committee_id', 'parent_role_id', 'category'
 ]);
 const SUBTREE_META_FIELDS = new Set([
-  'title', 'display_order', 'status'
+  // dormant = "not being filled this year" (#130) — chairs may toggle it
+  // for their own subtree, same tier as archive.
+  'title', 'display_order', 'status', 'dormant'
 ]);
 const META_FIELDS = new Set([
   ...STRUCTURAL_META_FIELDS,
@@ -660,7 +662,7 @@ module.exports = async function handler(req, res) {
                      r.term_length AS job_length,
                      r.overview, r.duties,
                      c.name AS committee,
-                     r.parent_role_id, r.category, r.display_order, r.status,
+                     r.parent_role_id, r.category, r.display_order, r.status, r.dormant,
                      r.last_reviewed_by, r.last_reviewed_date, r.playbook,
                      r.icon_emoji, r.card_summary, r.role_email,
                      r.revision_history,
@@ -674,7 +676,7 @@ module.exports = async function handler(req, res) {
                      r.term_length AS job_length,
                      r.overview, r.duties,
                      c.name AS committee,
-                     r.parent_role_id, r.category, r.display_order, r.status,
+                     r.parent_role_id, r.category, r.display_order, r.status, r.dormant,
                      r.last_reviewed_by, r.last_reviewed_date, r.playbook,
                      r.icon_emoji, r.card_summary, r.role_email,
                      r.revision_history,
@@ -780,7 +782,7 @@ module.exports = async function handler(req, res) {
         const currentRows = await sql`
           SELECT r.id, r.title, r.term_length, r.overview, r.duties, r.playbook,
                  r.parent_role_id, r.category, r.committee_id, r.display_order,
-                 r.status, c.name AS committee
+                 r.status, r.dormant, c.name AS committee
           FROM roles r LEFT JOIN committees c ON c.id = r.committee_id
           WHERE r.id = ${id}
         `;
@@ -793,6 +795,7 @@ module.exports = async function handler(req, res) {
           else if (field === 'duties') cur = Array.isArray(current.duties) ? current.duties : [];
           else if (field === 'parent_role_id') cur = current.parent_role_id == null ? null : Number(current.parent_role_id);
           else if (field === 'display_order') cur = Number(current.display_order || 0);
+          else if (field === 'dormant') cur = !!current.dormant;
           else cur = current[field] == null ? '' : current[field];
           // Loose equality on scalars; deep-equal on duties arrays.
           if (Array.isArray(cur) && Array.isArray(incoming)) {
@@ -818,7 +821,7 @@ module.exports = async function handler(req, res) {
         //    user, President, and the committee chair for this role.
         const hitsStructural = touchedFields.some(k => STRUCTURAL_META_FIELDS.has(k));
         if (hitsStructural && !(await canEditRoleMeta(user.email))) {
-          return res.status(403).json({ error: 'Only the President can move a role between committees or change its category. (View-As president@ if you need to.)' });
+          return res.status(403).json({ error: 'Only the President or Vice President can move a role between committees or change its category.' });
         }
         if (!(await canEditRoleContent(user.email, sql, id))) {
           return res.status(403).json({ error: 'You don\'t have permission to edit this role.' });
@@ -859,6 +862,11 @@ module.exports = async function handler(req, res) {
         if (body.status !== undefined) {
           if (VALID_STATUSES.indexOf(body.status) === -1) return res.status(400).json({ error: 'Invalid status' });
           await sql`UPDATE roles SET status = ${body.status}, updated_at = NOW(), updated_by = ${user.email} WHERE id = ${id}`;
+        }
+        if (body.dormant !== undefined) {
+          // #130: "not being filled this year" — drops the role out of
+          // Open Committee Seats without archiving its description.
+          await sql`UPDATE roles SET dormant = ${!!body.dormant}, updated_at = NOW(), updated_by = ${user.email} WHERE id = ${id}`;
         }
         if (body.display_order !== undefined) {
           const n = parseInt(body.display_order, 10);
@@ -926,7 +934,7 @@ module.exports = async function handler(req, res) {
       const rolesRows = await sql`
         SELECT
           id, role_key, title, category, committee_id, parent_role_id,
-          display_order, status, term_length, overview, duties, playbook,
+          display_order, status, dormant, term_length, overview, duties, playbook,
           icon_emoji, card_summary, role_email,
           last_reviewed_by, last_reviewed_date, revision_history,
           updated_at, updated_by

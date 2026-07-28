@@ -14832,6 +14832,8 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .roles-pill-cat-cleaning_area  { background: rgba(var(--color-chartreuse-rgb), 0.18); color: var(--color-leaf); }
 .roles-pill-cat-class       { background: rgba(var(--color-coral-rgb), 0.15);      color: var(--color-coral); }
 .roles-pill-archived        { background: #eee; color: #555; }
+/* #130: "not being filled this year" — in the chart, out of Open Seats */
+.roles-pill-dormant         { background: rgba(90, 46, 2, 0.08); color: var(--color-wood); }
 .roles-row-meta {
   display: flex;
   flex-wrap: wrap;

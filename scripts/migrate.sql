@@ -2232,6 +2232,18 @@ CREATE INDEX IF NOT EXISTS supply_loans_item_idx     ON supply_loans (item_id);
 CREATE INDEX IF NOT EXISTS supply_loans_owner_idx    ON supply_loans (owner_email);
 CREATE INDEX IF NOT EXISTS supply_loans_borrower_idx ON supply_loans (borrower_email);
 
+-- 2026-07-28 (#131, Lyndsey): the event-space CHECKLIST card gets the same
+-- binocular visibility as section cards. TRUE (default) = all members see
+-- it; FALSE = event committee + SEL + Sustaining Director only. Default
+-- TRUE so existing checklists don't vanish on ship.
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS tasks_public BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- 2026-07-28 (#130, Erin): a role can be marked "not being filled this
+-- year" — it stays in the org chart but drops out of Open Committee
+-- Seats so members stop volunteering for it. Cleared manually when the
+-- role comes back.
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS dormant BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- 2026-07-28 (#125-3, Erin): a classroom-cabinet restock flag needs to say
 -- WHICH classroom — the flagger picks a room (Facilities > Rooms) and it
 -- rides the flag until the coordinator restocks. Free text (room NAME, not

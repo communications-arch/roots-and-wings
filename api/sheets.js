@@ -2323,7 +2323,7 @@ module.exports = async function handler(req, res) {
       var rdYear = (rdYearRows[0] && rdYearRows[0].sy) || '';
       var rdRows = await sql`
         SELECT r.id, r.role_key, r.title, r.category, r.parent_role_id,
-               r.term_length, c.name AS committee,
+               r.term_length, r.dormant, c.name AS committee,
                LOWER(rhv.person_email) AS holder_email,
                p.first_name AS holder_first, p.last_name AS holder_last
         FROM roles r
@@ -2345,6 +2345,7 @@ module.exports = async function handler(req, res) {
             id: row.id, role_key: row.role_key, title: row.title,
             category: row.category, parent_role_id: row.parent_role_id,
             term_length: row.term_length || '', committee: row.committee || '',
+            dormant: !!row.dormant, // #130: hidden from Open Seats
             holders: []
           };
           rdById[row.id] = entry;

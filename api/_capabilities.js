@@ -182,7 +182,8 @@ const CAPABILITIES = [
     area: 'Roles & Events',
     label: 'Roles — create, archive & restructure',
     desc: 'Add roles, archive them, move them between committees, and change categories.',
-    defaultRoles: ['President']
+    // #126 (Erin, 07-28): President AND VP can move/modify any role.
+    defaultRoles: ['President', 'Vice President']
   },
   {
     key: 'board_roles_assign',
@@ -196,7 +197,8 @@ const CAPABILITIES = [
     area: 'Roles & Events',
     label: 'Committee roles — assign any holder',
     desc: 'Assign or remove holders on ANY committee/volunteer role. (Committee chairs can always assign within their own committee — see the fixed rules below.)',
-    defaultRoles: ['Vice President']
+    // #126 (Erin, 07-28): the President joins the VP here.
+    defaultRoles: ['Vice President', 'President']
   },
   {
     key: 'board_confirm',

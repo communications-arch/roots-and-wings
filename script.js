@@ -524,6 +524,7 @@
     }
     var viewAsEmail = sessionStorage.getItem(VIEW_AS_KEY) || '';
     var html = '<option value="">\u2014 My Dashboard \u2014</option>';
+    var viewAsOpts = [];
     try {
       var sortedFams = FAMILIES.slice().sort(function (a, b) {
         return String(a && a.name || '').localeCompare(String(b && b.name || ''));
@@ -585,9 +586,15 @@
               label = familyDisplay || emLc;
             }
           }
-          var selected = viewAsEmail === emLc ? ' selected' : '';
-          html += '<option value="' + emLc + '"' + selected + '>' + escapeHtml(label) + '</option>';
+          viewAsOpts.push({ email: emLc, label: label });
         });
+      });
+      // #127 (Erin): member lists sort alphabetically by FIRST name —
+      // the label leads with it, so a plain label sort does the job.
+      viewAsOpts.sort(function (a, b) { return a.label.toLowerCase().localeCompare(b.label.toLowerCase()); });
+      viewAsOpts.forEach(function (o) {
+        var selected = viewAsEmail === o.email ? ' selected' : '';
+        html += '<option value="' + o.email + '"' + selected + '>' + escapeHtml(o.label) + '</option>';
       });
     } catch (err) {
       // If a single bad family blows up the loop, log it and still render the
@@ -1023,6 +1030,9 @@
       if (r.category !== 'committee_role' || !r.committee) return;
       if (String(r.term_length || '').toLowerCase() === '1 session') return;
       if (r.holders && r.holders.length) return;
+      // #130 (Erin): "not being filled this year" roles stay in the org
+      // chart but never show as an open seat to volunteer for.
+      if (r.dormant) return;
       open.push({ id: r.id, committee: r.committee, title: r.title });
     });
     return open;
@@ -3319,6 +3329,8 @@
           parentOfTag = '<div class="yb-parent-of">Parent of ' + escapeHtml(label) + '</div>';
         }
 
+        // #129: brand accents replace the emoji (kept as fallback for
+        // any board title without a mark — e.g. a brand-new role).
         var boardEmojis = {
           'President': '\u{1F333}', 'Vice President': '\u{1F33F}',
           'Treasurer': '\u{1F9EE}', 'Secretary': '\u{270F}\uFE0F',
@@ -3327,7 +3339,7 @@
           'Communications Director': '\u{1F4AC}'
         };
         var boardTag = person.boardRole
-          ? '<div class="yb-board-badge"><span class="yb-board-emoji">' + (boardEmojis[person.boardRole] || '\u{1F331}') + '</span> ' + person.boardRole + '</div>'
+          ? '<div class="yb-board-badge"><span class="yb-board-emoji">' + (boardRoleAccentImg(person.boardRole) || boardEmojis[person.boardRole] || '\u{1F331}') + '</span> ' + person.boardRole + '</div>'
           : '';
 
         // Absences/coverage are parent-level (only learning coaches are ever
@@ -5937,8 +5949,37 @@
     departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
     tour: 'accent-50',        // 🏡 tour requests / visits (mushroom = cottage)
     brandKit: 'accent-59',    // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
-    lending: 'accent-47'      // 🤝 Lending Library (teal bloom = community sharing; art pick — Erin may reassign)
+    lending: 'accent-47',     // 🤝 Lending Library (teal bloom = community sharing; art pick — Erin may reassign)
+    // ── #129 board-role marks (art picks — Erin may reassign). Used on
+    // the Workspace Board cards, the Board of Directors grids (members +
+    // public — those pages carry their own copy of this map inline), and
+    // the Directory board badge.
+    boardPresident: 'accent-53',      // 🌳 purple twin leaves — the brand color leads
+    boardVicePresident: 'accent-68',  // purple petal strokes — echoes the President
+    boardTreasurer: 'accent-62',      // 🌰 acorn = stored value
+    boardSecretary: 'accent-57',      // ✏ gold script squiggles = the minutes
+    boardMembership: 'accent-21',     // 💚 heart-leaf = welcoming families
+    boardSustaining: 'accent-61',     // seed cluster = sustaining next year
+    boardCommunications: 'accent-66', // 💬 dashes = messages in flight
+    boardCleaningLiaison: 'accent-49',// 🧹 upright tuft reads like a little broom
+    boardEventsLiaison: 'accent-39'   // 🐞 ladybug = the fun guest star
   };
+  // Role title → board mark, for surfaces keyed by title (Directory badge).
+  var BOARD_ROLE_ACCENTS = {
+    'President': BRAND_ICONS.boardPresident,
+    'Vice President': BRAND_ICONS.boardVicePresident,
+    'Treasurer': BRAND_ICONS.boardTreasurer,
+    'Secretary': BRAND_ICONS.boardSecretary,
+    'Membership Director': BRAND_ICONS.boardMembership,
+    'Sustaining Director': BRAND_ICONS.boardSustaining,
+    'Communications Director': BRAND_ICONS.boardCommunications,
+    'Cleaning Crew Liaison': BRAND_ICONS.boardCleaningLiaison,
+    'Special Events Liaison': BRAND_ICONS.boardEventsLiaison
+  };
+  function boardRoleAccentImg(roleTitle, cls) {
+    var f = BOARD_ROLE_ACCENTS[String(roleTitle || '').trim()];
+    return f ? '<img class="' + (cls || 'ag-icon') + '" src="brand/secondary/' + f + '.png" alt="">' : '';
+  }
   // cls sizes the mark for its context: 'brand-accent' (card titles,
   // default), 'ag-icon' (inline/pills/buttons), 'new-fam-icon' (gold bloom).
   function brandIconImg(meaning, cls) {
@@ -6347,6 +6388,138 @@
           if (typeof renderCleaningTab === 'function') renderCleaningTab();
         })
         .catch(function () { showErr('Network error — try again.'); selEl.value = ''; });
+    });
+  }
+
+  // #133 (Colleen): Cleaning Crew sign-ups from Ways to Help — the same
+  // claim/release flow as My Family's cleaning picker, in the house
+  // report-modal shell with S1–S5 chips.
+  var _cleanSignupSession = null;
+  function showCleaningSignupModal(session) {
+    _cleanSignupSession = session || currentSession;
+    var body = renderReportModal({
+      title: 'Cleaning Crew',
+      subtitle: 'Grab one or two spaces for the year — one family per area each session (floaters always welcome). Release a spot anytime if plans change.',
+      bodyId: 'clean-signup-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading areas…</p>'
+    });
+    if (!body) return;
+    loadCleaningSignupBody();
+  }
+  window.showCleaningSignupModal = showCleaningSignupModal;
+
+  function loadCleaningSignupBody() {
+    var body = document.getElementById('clean-signup-body');
+    if (!body) return;
+    var sess = _cleanSignupSession || currentSession;
+    fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + '&session=' + sess + notifViewAsSuffix(), {
+      headers: rwAuthHeaders()
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      body = document.getElementById('clean-signup-body');
+      if (!body) return;
+      if (d.error) { body.innerHTML = '<p class="ws-empty">' + escapeHtml(d.error) + '</p>'; return; }
+
+      var h = '<div class="board-cal-views" role="group" aria-label="Session">';
+      for (var i = 1; i <= 5; i++) {
+        h += '<button type="button" class="board-cal-view-pill clean-su-sess' + (i === sess ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
+      }
+      h += '</div>';
+
+      // Your family's areas this session (with release ✕) — family match
+      // mirrors the My Family picker (name-keyed cleaning rota rows).
+      var meEmail = String(getActiveEmail() || '').toLowerCase();
+      var fam = null;
+      (Array.isArray(FAMILIES) ? FAMILIES : []).some(function (f) {
+        if (!f) return false;
+        var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+        if (logins.some(function (e) { return String(e || '').toLowerCase() === meEmail; })) { fam = f; return true; }
+        return false;
+      });
+      var famName = String((fam && fam.name) || '').trim().toLowerCase();
+      var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
+      var mine = (d.cleaning || []).filter(function (c) {
+        var f = String(c.family || '').toLowerCase();
+        return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
+      });
+      if (mine.length) {
+        h += '<p class="ws-lending-head" style="margin-top:12px;">Your family — Session ' + sess + '</p>';
+        h += '<ul class="ws-opportunities">';
+        mine.forEach(function (c) {
+          h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(c.area) + '</strong>'
+            + (c.floor ? '<span class="ws-opp-committee">' + escapeHtml(c.floor) + '</span>' : '') + '</span>'
+            + '<button type="button" class="sc-btn sc-btn-del clean-su-release" data-id="' + c.id + '">✕ Release</button></li>';
+        });
+        h += '</ul>';
+      }
+
+      var opens = d.cleaning_open || [];
+      h += '<p class="ws-lending-head" style="margin-top:12px;">Open areas — Session ' + sess + '</p>';
+      if (!opens.length) {
+        h += '<p class="ws-empty">All areas are covered for this session. Thank you!</p>';
+      } else {
+        var CLEAN_FLOOR_LABELS2 = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
+        var floors = [], byFloor2 = {};
+        opens.forEach(function (a) {
+          var fk = a.floor || (a.floater ? 'floater' : '');
+          if (!byFloor2[fk]) { byFloor2[fk] = []; floors.push(fk); }
+          byFloor2[fk].push(a);
+        });
+        floors.forEach(function (fk) {
+          h += '<p class="ws-opp-committee" style="display:block;margin:8px 0 2px;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">' + escapeHtml(CLEAN_FLOOR_LABELS2[fk] || fk || 'Other') + '</p>';
+          h += '<ul class="ws-opportunities">';
+          byFloor2[fk].forEach(function (a) {
+            h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(a.area) + '</strong>'
+              + (a.floater ? '<span class="ws-opp-committee">floaters welcome — more than one family can join</span>' : '') + '</span>'
+              + '<button type="button" class="sc-btn sc-save clean-su-claim" data-id="' + a.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button></li>';
+          });
+          h += '</ul>';
+        });
+      }
+      body.innerHTML = h;
+
+      body.querySelectorAll('.clean-su-sess').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          _cleanSignupSession = parseInt(btn.getAttribute('data-sess'), 10);
+          loadCleaningSignupBody();
+        });
+      });
+      body.querySelectorAll('.clean-su-claim').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var areaId = parseInt(btn.getAttribute('data-id'), 10);
+          btn.disabled = true;
+          fetch('/api/cleaning?action=cleaning-signup', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
+            body: JSON.stringify({ area_id: areaId, session: sess })
+          }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not claim that area.'); return; }
+              loadCleaningSignupBody();
+              if (typeof renderCleaningTab === 'function') renderCleaningTab();
+              if (typeof renderMyFamily === 'function') renderMyFamily();
+            })
+            .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+        });
+      });
+      body.querySelectorAll('.clean-su-release').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var self = this;
+          rwArmTwoStep(self, 'release', function () {
+            fetch('/api/cleaning?action=cleaning-signup&id=' + self.getAttribute('data-id'), { method: 'DELETE', headers: rwAuthHeaders() })
+              .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+              .then(function (res) {
+                if (!res.ok) { alert((res.data && res.data.error) || 'Could not release.'); return; }
+                loadCleaningSignupBody();
+                if (typeof renderCleaningTab === 'function') renderCleaningTab();
+                if (typeof renderMyFamily === 'function') renderMyFamily();
+              })
+              .catch(function () { alert('Network error — try again.'); });
+          });
+        });
+      });
+    }).catch(function () {
+      var b = document.getElementById('clean-signup-body');
+      if (b) b.innerHTML = '<p class="ws-empty">Couldn’t load the cleaning areas.</p>';
     });
   }
 
@@ -8410,7 +8583,7 @@
             person_name: fullName,
             family_name: last || familyLast,
             displayName: fullName,
-            sortKey: (familyLast + ' ' + first).toLowerCase()
+            sortKey: (first + ' ' + familyLast).toLowerCase() // #127: first-name order (Erin)
           });
         });
         return;
@@ -8431,7 +8604,7 @@
           person_name: first + ' ' + familyLast,
           family_name: familyLast,
           displayName: first + ' ' + familyLast,
-          sortKey: (familyLast + ' ' + first).toLowerCase()
+          sortKey: (first + ' ' + familyLast).toLowerCase() // #127: first-name order (Erin)
         });
       });
     });
@@ -9483,6 +9656,10 @@
         // committee-seats line above (the inline list made the card long
         // again; Erin 2026-07-21 evening).
         h += renderWthEventsSummary();
+        // #133 (Colleen): Cleaning Crew joins the same row idiom — copy
+        // is hers verbatim; the modal lists open areas per session.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="cleaning-signup-modal">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning Crew</button>'
+          + '<span class="ws-part-submit-hint">Grab one or two spaces for the year.</span></p>';
         return h;
       },
       afterRender: function () {
@@ -9580,7 +9757,7 @@
           : 'Review inbound class submissions — morning and afternoon — and draft the upcoming session.') + '</p>';
         h += '<ul class="ws-link-list">';
         if (isBoardChair) {
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Roles Assignments<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Roles &amp; Committees<span class="ws-link-count" id="rolesmgr-count" hidden></span></button></li>';
           // Board Calendar — any board member can view/edit the standalone
           // date-driven events. Server gate (isBoardMember) is the real
           // enforcement; shown to every board chair on this card.
@@ -9933,7 +10110,7 @@
       title: 'Special Events',
       roleGate: ['Special Events Liaison'],
       render: function () {
-        var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles Assignments.</p>';
+        var h = '<p class="ws-body-hint">Propose &amp; approve event dates on the Admin Calendar; assign each event’s lead and assistants in Roles &amp; Committees.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="board-calendar" data-cal-view="special"><span class="ws-link-icon">' + brandIconImg('calendar', 'ag-icon') + '</span>Event Dates</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="roles-manager" data-roles-view="special-events"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Lead &amp; Assistants</button></li>';
@@ -10253,7 +10430,7 @@
     // Workspace widget cards
     'todos': 'Your personal to-do list. Items appear here automatically when something needs your attention — pending payments, waivers, cleaning gaps, class reviews, restocks, and more. The number is a live count; click an item to jump straight to it. “All caught up” means nothing’s pending for your roles.',
     'reports': 'Reports and forms for the roles you hold. Each opens a table you can filter, print, and export. What shows here depends on your role and the permissions the Communications Director has granted.',
-    'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles Assignments, Facilities, and more. In the Class Builder, scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.”',
+    'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles &amp; Committees, Facilities, and more. In the Class Builder, scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.”',
     'admin-consoles': 'Admin tools and data sources for the roles you hold — permissions, calendars, and other back-office consoles.',
     'roles': 'Who holds each board and committee role this year. Depending on your role you can assign or update holders here.',
     'members-summary': 'A friendly snapshot of this season’s registered families — returning vs. new, and kids by track. Click a count to see the roster (names, members, track). No sensitive info.',
@@ -10386,7 +10563,7 @@
   var HELP_CARD_LABELS = {
     'todos': 'To Do', 'reports': 'Reports & Forms',
     'coop-management': 'Co-op Management', 'admin-consoles': 'Admin Consoles & Sources',
-    'roles': 'Roles Assignments', 'members-summary': 'Members Snapshot', 'board-notes': 'Board Notes',
+    'roles': 'Roles & Committees', 'members-summary': 'Members Snapshot', 'board-notes': 'Board Notes',
     'special-events': 'Special Events', 'supply-closet-mgmt': 'Supply Closet', 'upcoming-events': 'Upcoming Events',
     'ways-to-help': 'Ways to Help', 'resources': 'Resources', 'my-links': 'My Links',
     'bg-president': 'Board — President', 'bg-vp': 'Board — Vice President', 'bg-treasurer': 'Board — Treasurer',
@@ -10911,11 +11088,14 @@
           // set) — purely ornamental, the title carries the meaning.
           // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
           var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes,
-            // #120: board-role card headers carry the ROLE's own mark where
-            // one exists in BRAND_ICONS (same meaning, same asset)…
-            'bg-treasurer': BRAND_ICONS.billing, 'bg-events-liaison': BRAND_ICONS.specialEvents };
-          // …the other bg- cards share the generic accent until their
-          // roles get marks of their own (#120).
+            'shared-todos': BRAND_ICONS.specialEvents, 'lending': BRAND_ICONS.lending,
+            // #129: every board card carries its role's own mark now
+            // (replaces #120's two shared marks + generic fallback).
+            'bg-president': BRAND_ICONS.boardPresident, 'bg-vp': BRAND_ICONS.boardVicePresident,
+            'bg-treasurer': BRAND_ICONS.boardTreasurer, 'bg-secretary': BRAND_ICONS.boardSecretary,
+            'bg-membership': BRAND_ICONS.boardMembership, 'bg-sustaining': BRAND_ICONS.boardSustaining,
+            'bg-communications': BRAND_ICONS.boardCommunications, 'bg-cleaning': BRAND_ICONS.boardCleaningLiaison,
+            'bg-events-liaison': BRAND_ICONS.boardEventsLiaison };
           var wsAccentKey = WS_ACCENTS[type] || (type.indexOf('bg-') === 0 ? BRAND_ICONS.notes : '');
           var wsAccent = wsAccentKey ? '<img class="brand-accent" src="brand/secondary/' + wsAccentKey + '.png" alt=""> ' : '';
           // Tap the header to minimize — the card shrinks to a chip in
@@ -13922,7 +14102,7 @@
       html += '<li><strong>1. Send the waiver</strong> with the form below — to their <strong>personal email</strong>, not a co-op account.<br><span class="mo-row-hint">Each season’s waiver is tied to the email it’s sent to, so a loaner account that later gets recycled would collide with the next guest’s waiver.</span></li>';
       html += '<li><strong>2. They sign online</strong> via the emailed link — the signature lands in the report labeled “Guest.” <button type="button" class="mo-step-link ws-guest-doorway" data-guest-doorway="waivers">Waivers Report&nbsp;↗</button></li>';
       html += '<li><strong>3. Portal access</strong> <span class="mo-row-sub">(optional)</span> — create a temporary @rootsandwingsindy.com account and share the login with them. Recycle it when they’re done. <a class="mo-step-link" href="https://admin.google.com/ac/users" target="_blank" rel="noopener" title="Open Google Workspace Admin Console in a new tab">admin.google.com&nbsp;↗</a></li>';
-      html += '<li><strong>4. Give them the role</strong> <span class="mo-row-sub">(optional)</span> — add that temporary account as a holder of the <em>Guest</em> role, under Membership Director. <button type="button" class="mo-step-link ws-guest-doorway" data-guest-doorway="roles">Roles Assignments&nbsp;↗</button></li>';
+      html += '<li><strong>4. Give them the role</strong> <span class="mo-row-sub">(optional)</span> — add that temporary account as a holder of the <em>Guest</em> role, under Membership Director. <button type="button" class="mo-step-link ws-guest-doorway" data-guest-doorway="roles">Roles &amp; Committees&nbsp;↗</button></li>';
       html += '</ul>';
       html += '<p class="mo-row-hint ws-guest-steps-note">Setting up a Community Liaison? Same steps — just pick Community Liaison below.</p>';
     } else {
@@ -20342,6 +20522,7 @@
     else if (action === 'brand-kit' && typeof showBrandKitModal === 'function') showBrandKitModal();
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
+    else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
@@ -24160,9 +24341,19 @@
     }
     h += '</div></div>'; // /body, /header card
 
-    if (!_collabCollapsed['checklist']) {
-    h += '<div class="mf-card workspace-card evs-section">';
-    h += collabCardHead('checklist', '<h4>' + brandIconImg('todo') + ' Checklist</h4>');
+    // #131 (Lyndsey): the checklist card carries the same binoculars as
+    // section cards — committee-only checklists don't render at all for
+    // regular members (server already withholds the tasks).
+    var tasksPub = d.tasks_public !== false;
+    if (!_collabCollapsed['checklist'] && !(d.tasks_hidden && !d.can_edit)) {
+    h += '<div class="mf-card workspace-card evs-section' + (!tasksPub ? ' evs-private' : '') + '">';
+    var tHeadIcons = '';
+    if (d.can_edit) {
+      tHeadIcons += '<button type="button" class="evs-ico-btn evs-tasks-pub' + (tasksPub ? '' : ' evs-vis-off') + '" data-pub="' + (tasksPub ? '1' : '0') + '" aria-label="' + (tasksPub ? 'Visible to all members' : 'Committee only') + '" title="' + (tasksPub ? 'Every member can see the checklist. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see the checklist. Tap to show every member.') + '">'
+        + '<img src="brand/secondary/' + BRAND_ICONS.visibility + '.png" alt=""></button>';
+    }
+    h += collabCardHead('checklist', '<h4>' + brandIconImg('todo') + ' Checklist</h4>'
+      + (tHeadIcons ? '<span class="evs-head-icons">' + tHeadIcons + '</span>' : ''));
     h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
@@ -24234,6 +24425,21 @@
             if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not change visibility.'); return; }
             var sec = (_eventSpaceState.data.sections || []).filter(function (x) { return x.id === id; })[0];
             if (sec) sec.is_public = on;
+            renderEventSpaceBody();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error.'); });
+      });
+    });
+    // #131: checklist visibility — same flow, flag lives on the event.
+    body.querySelectorAll('.evs-tasks-pub').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var on = btn.getAttribute('data-pub') !== '1';
+        btn.disabled = true;
+        fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-tasks-public', event_id: _eventSpaceState.id, public: on }) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not change visibility.'); return; }
+            _eventSpaceState.data.tasks_public = on;
             renderEventSpaceBody();
           })
           .catch(function () { btn.disabled = false; alert('Network error.'); });
@@ -26905,7 +27111,7 @@
       : ACTIVE_SESSION_YEAR;
     var body = renderReportModal({
       title: 'Confirm Board Roles — ' + activeYear + ' (2-year term)',
-      subtitle: 'Board terms run two years. Update the board roles in Google Admin (group members + mailbox access) AND here in the portal (Roles Assignments), then mark the term confirmed and the reminder will clear until the next cycle.',
+      subtitle: 'Board terms run two years. Update the board roles in Google Admin (group members + mailbox access) AND here in the portal (Roles &amp; Committees), then mark the term confirmed and the reminder will clear until the next cycle.',
       meta: '',
       icons: [],
       bodyId: 'confirm-roles-body',
@@ -27826,7 +28032,7 @@
     h += '<tr><td>Waivers report (signature records)</td><td>Legal record of who signed what</td><td>Waivers Report (🖨)</td></tr>';
     h += '<tr><td>Allergies &amp; medical + emergency list</td><td>Safety-critical on co-op days, no screens needed</td><td>Directory tab → ⚠ Allergies &amp; Medical filter → <strong>🖨 Print allergies &amp; medical list</strong>; Class Packs carry per-class alerts</td></tr>';
     h += '<tr><td>Current class schedules</td><td>Run a co-op day from paper</td><td>Schedules Report (🖨 — by-class and by-person views)</td></tr>';
-    h += '<tr><td>Role holders (board + committees)</td><td>Who owns what, with the site down</td><td>Roles Assignments (Co-op Management card; browser Print)</td></tr>';
+    h += '<tr><td>Role holders (board + committees)</td><td>Who owns what, with the site down</td><td>Roles &amp; Committees (Co-op Management card; browser Print)</td></tr>';
     h += '<tr><td>Dues / payments status snapshot</td><td>Treasurer continuity</td><td>Membership Report (🖨 — payment status rides the rows)</td></tr>';
     h += '<tr><td>This DR plan + RESTORE.md</td><td>The recovery instructions themselves</td><td>This page’s 🖨; RESTORE.md from the GitHub repo root</td></tr>';
     h += '<tr><td>Sealed passphrase envelope</td><td>Decrypts the database backups</td><td>Verify it’s present and sealed — reprint/reseal only if compromised</td></tr>';
@@ -31389,7 +31595,10 @@
 
       var h2 = '<div class="' + classes + '" data-role-id="' + r.id + '">';
       h2 += '<button type="button" class="roles-row-head" data-role-id="' + r.id + '" aria-expanded="false">';
-      h2 += '<span class="roles-row-head-title">' + titleInner + (archived ? ' <span class="roles-pill roles-pill-archived">archived</span>' : '') + '</span>';
+      h2 += '<span class="roles-row-head-title">' + titleInner
+        + (archived ? ' <span class="roles-pill roles-pill-archived">archived</span>' : '')
+        + (!archived && r.dormant ? ' <span class="roles-pill roles-pill-dormant">not filled this year</span>' : '')
+        + '</span>';
       h2 += '<span class="roles-row-head-holders">' + headHolders + '</span>';
       h2 += '</button>';
 
@@ -31708,6 +31917,9 @@
     h += '<option value="archived"' + (existing.status === 'archived' ? ' selected' : '') + '>Archived</option>';
     h += '</select></label>';
     h += '<label class="role-edit-field">Display order<input type="number" name="display_order" step="1" value="' + (existing.display_order || 0) + '" /></label>';
+    // #130 (Erin): keeps the role in the org chart but out of Open
+    // Committee Seats, so nobody volunteers for a seat we're skipping.
+    h += '<label class="role-edit-field role-edit-field-wide" style="flex-direction:row;align-items:center;gap:8px;"><input type="checkbox" name="dormant" value="1"' + (existing.dormant ? ' checked' : '') + ' style="width:auto;" />Not being filled this year (hidden from Open Seats &amp; volunteering)</label>';
     h += '<label class="role-edit-field role-edit-field-wide">Overview<textarea name="overview" rows="3">' + escapeHtml(existing.overview || '') + '</textarea></label>';
     h += '<label class="role-edit-field role-edit-field-wide">Duties (one per line)<textarea name="duties" rows="6">' + escapeHtml((existing.duties || []).join('\n')) + '</textarea></label>';
     h += '<label class="role-edit-field role-edit-field-wide">Playbook / handoff notes<textarea name="playbook" rows="4">' + escapeHtml(existing.playbook || '') + '</textarea></label>';
@@ -31757,6 +31969,7 @@
         status: fd.get('status') || 'active',
         parent_role_id: fd.get('parent_role_id') ? parseInt(fd.get('parent_role_id'), 10) : null,
         display_order: parseInt(fd.get('display_order'), 10) || 0,
+        dormant: !!fd.get('dormant'), // #130
         overview: String(fd.get('overview') || '').trim(),
         duties: dutiesRaw.split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
         playbook: String(fd.get('playbook') || '').trim()
