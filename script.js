@@ -19240,37 +19240,52 @@
     return String(first || '').trim().split(/\s+/)[0].toLowerCase() + '|' + String(fam || '').toLowerCase();
   }
 
-  // Season roster for a group — same snapshot-first logic as the View
-  // Classmates modal (community roster decides membership; directory
-  // records supply photos/pronouns/allergies; snapshot-only kids get
-  // name-only rows).
+  // #156 (Lyndsey): the roster comes from the Morning Class Builder's
+  // finalized placements (liaison-roster action) — the community snapshot
+  // only carried kids whose family had a season registration row, which
+  // left most groups looking empty (13 of 25 dev placements survived that
+  // join). Directory records still enrich each row with photo/pronouns/
+  // allergies/parents/phone; unmatched kids get name-only rows. Returns
+  // null while the fetch is in flight.
+  var _myClassRoster = {};        // group -> [{kid_name, kid_last_name, family_email}]
+  var _myClassRosterLoaded = {};  // group -> true once fetch fired
+
+  function ensureMyClassRoster(group) {
+    if (_myClassRosterLoaded[group]) return;
+    _myClassRosterLoaded[group] = true;
+    fetch('/api/supply-closet?action=liaison-roster&group=' + encodeURIComponent(group) + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && Array.isArray(d.roster)) {
+        _myClassRoster[group] = d.roster;
+        renderMyClassCardBody();
+      }
+    }).catch(function () { _myClassRosterLoaded[group] = false; });
+  }
+
   function myClassRosterForGroup(group) {
-    var grpLower = String(group || '').toLowerCase();
-    var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
-    var seasonKids = {};
-    if (snapshotReady) {
-      _communityRoster.forEach(function (fam) {
-        (fam.kids || []).forEach(function (k) {
-          if (k.class) seasonKids[myClassKidKey(k.name, fam.name)] = String(k.class).toLowerCase();
-        });
-      });
-    }
-    var kids = allPeople.filter(function (person) {
-      if (person.type !== 'kid') return false;
-      if (!snapshotReady) return String(person.group || '').toLowerCase() === grpLower;
-      return seasonKids[myClassKidKey(person.name, person.family || person.lastName)] === grpLower;
+    var rows = _myClassRoster[group];
+    if (!rows) return null; // still loading
+    var famNameByEmail = {};
+    (Array.isArray(FAMILIES) ? FAMILIES : []).forEach(function (f) {
+      if (!f) return;
+      var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+      logins.forEach(function (e) { if (e) famNameByEmail[String(e).toLowerCase()] = f.name; });
     });
-    if (snapshotReady) {
-      var have = {};
-      kids.forEach(function (k) { have[myClassKidKey(k.name, k.family || k.lastName)] = true; });
-      _communityRoster.forEach(function (fam) {
-        (fam.kids || []).forEach(function (k) {
-          if (String(k.class || '').toLowerCase() !== grpLower) return;
-          if (have[myClassKidKey(k.name, fam.name)]) return;
-          kids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name });
-        });
+    var kids = rows.map(function (r) {
+      var first = String(r.kid_name || '').trim().split(/\s+/)[0];
+      var fe = String(r.family_email || '').toLowerCase();
+      var hit = null;
+      allPeople.some(function (p) {
+        if (p.type !== 'kid') return false;
+        if (String(p.name || '').trim().toLowerCase() !== first.toLowerCase()) return false;
+        if (String(p.email || '').toLowerCase() === fe) { hit = p; return true; }
+        return false;
       });
-    }
+      if (hit) return hit;
+      var famName = famNameByEmail[fe] || r.kid_last_name || '';
+      return { type: 'kid', name: first, lastName: r.kid_last_name || famName, family: famName };
+    });
     kids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
     return kids;
   }
@@ -19298,13 +19313,13 @@
     if (_myClassSession == null) _myClassSession = currentSession || 1;
     var sess = _myClassSession;
     if (!publishedSchedule.loaded) loadPublishedSchedule();
-    var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
-    if (!snapshotReady && typeof loadMembersSummary === 'function') loadMembersSummary();
     ensureClassLinksForSession(sess, renderMyClassCardBody);
     groups.forEach(ensureLiaisonNotes);
-    // The schedule + snapshot load async with no callback hook — retry a
-    // few times until both are in, then the render is complete.
-    if ((!publishedSchedule.loaded || !snapshotReady) && _myClassRetry < 8) {
+    groups.forEach(ensureMyClassRoster);
+    // The published schedule loads async with no callback hook — retry a
+    // few times until it's in, then the render is complete. (The roster
+    // and notes fetches re-render themselves on arrival.)
+    if (!publishedSchedule.loaded && _myClassRetry < 8) {
       _myClassRetry++;
       setTimeout(loadMyClassCard, 1200);
     }
@@ -19352,12 +19367,18 @@
         });
       }
 
-      // Roster — season membership; year-round (not per session).
+      // Roster — the builder's finalized placements; year-round (not per
+      // session). null = fetch still in flight.
       var kids = myClassRosterForGroup(group);
       var notes = _myClassNotes[group] || {};
-      h += '<p class="ws-lending-head">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</p>';
-      if (!kids.length) {
-        h += '<p class="ws-empty">' + ((Array.isArray(_communityRoster) && _communityRoster.length) ? 'No kids placed in this group yet.' : 'Loading the roster…') + '</p>';
+      if (kids === null) {
+        h += '<p class="ws-lending-head">Kids</p><p class="ws-empty">Loading the roster…</p>';
+        kids = [];
+      } else {
+        h += '<p class="ws-lending-head">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</p>';
+        if (!kids.length) {
+          h += '<p class="ws-empty">No finalized placements for this group yet — the roster fills in from the Morning Class Builder.</p>';
+        }
       }
       kids.forEach(function (kid) {
         var key = myClassKidKey(kid.name, kid.family || kid.lastName);

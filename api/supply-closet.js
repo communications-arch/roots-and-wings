@@ -550,6 +550,31 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
     return res.status(200).json({ notes: rows, school_year: yr });
   }
 
+  // #156: the roster comes straight from the Morning Class Builder's
+  // finalized placements — the community snapshot only carries kids whose
+  // family has a season REGISTRATION row, which missed half the builder's
+  // roster (13 of 25 on dev). kids join supplies current names + the real
+  // family_email for client-side directory enrichment.
+  if (req.query.action === 'liaison-roster') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const group = String(req.query.group || '').trim();
+    if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
+    if (!(await canManageBringGroup(email, group))) {
+      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can see this roster.' });
+    }
+    const rows = await sql`
+      SELECT COALESCE(NULLIF(k.first_name, ''), a.kid_first_name) AS kid_name,
+             COALESCE(k.last_name, '') AS kid_last_name,
+             LOWER(COALESCE(NULLIF(k.family_email, ''), a.family_email)) AS family_email
+      FROM morning_class_assignments a
+      LEFT JOIN kids k ON k.id = a.kid_id
+      WHERE a.school_year = ${yr} AND LOWER(a.class_group) = LOWER(${group})
+        AND a.finalized = TRUE
+      ORDER BY 1
+    `;
+    return res.status(200).json({ roster: rows, school_year: yr });
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   if (req.query.action === 'liaison-note-save') {
