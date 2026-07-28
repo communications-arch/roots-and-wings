@@ -5935,7 +5935,8 @@
     welcome: 'accent-45',     // 👋 orientation / greet new members (petal fan = wave)
     outreach: 'accent-41',    // 💛 reach out / care (gold wings)
     departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
-    tour: 'accent-50'         // 🏡 tour requests / visits (mushroom = cottage)
+    tour: 'accent-50',        // 🏡 tour requests / visits (mushroom = cottage)
+    brandKit: 'accent-59'     // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
   };
   // cls sizes the mark for its context: 'brand-accent' (card titles,
   // default), 'ag-icon' (inline/pills/buttons), 'new-fam-icon' (gold bloom).
@@ -9300,6 +9301,7 @@
         // to the Workspace card listing YOUR submitted classes (#38 moved
         // it from My Family); this is the browse-for-inspiration list.
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="supply-closet"><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span>Supply Closet Inventory</button></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="brand-kit"><span class="ws-link-icon">' + brandIconImg('brandKit', 'ag-icon') + '</span>Brand &amp; Logo Kit</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="install-app"><span class="ws-link-icon">' + brandIconImg('installApp', 'ag-icon') + '</span>Install the App</button></li>';
         h += '</ul>';
         return h;
@@ -19767,6 +19769,7 @@
     var action = btn.getAttribute('data-resource-action');
     if (action === 'waiver') showWaiverModal();
     else if (action === 'install-app' && typeof showInstallHelpModal === 'function') showInstallHelpModal();
+    else if (action === 'brand-kit' && typeof showBrandKitModal === 'function') showBrandKitModal();
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
@@ -20233,6 +20236,153 @@
   }
   // Expose for the delegated Resources-widget handler.
   window.showInstallHelpModal = showInstallHelpModal;
+
+  // Brand & Logo Kit (2026-07-27) — the 2026 brand style guide, palette,
+  // logo files, and artwork, downloadable from the Resources card so
+  // members making flyers/signs/swag don't have to ask Comms for files.
+  // Files live in /brand/kit/ (plus the two SVGs already at the site root).
+  function showBrandKitModal() {
+    if (!personDetail || !personDetailCard) return;
+
+    // Official palette per the 2026 Brand Style Guide (section 03) —
+    // same hexes as the CSS custom properties up top in styles.css.
+    var BRAND_KIT_COLORS = [
+      { group: 'Primary — core identity', colors: [
+        { name: 'Deep Purple', hex: '#523A79' },
+        { name: 'Olive Green', hex: '#5A6B39' },
+        { name: 'Warm Cream', hex: '#F5F0E8', light: true }
+      ]},
+      { group: 'Secondary — support & variety', colors: [
+        { name: 'Medium Purple', hex: '#8858AD' },
+        { name: 'Deep Teal', hex: '#1A7A7A' },
+        { name: 'Golden Yellow', hex: '#E0B52C' }
+      ]},
+      { group: 'Accent — energy & attention', colors: [
+        { name: 'Chartreuse', hex: '#9BC431' },
+        { name: 'Warm Coral', hex: '#D95F3B' }
+      ]},
+      { group: 'Depth — use sparingly', colors: [
+        { name: 'Dark Brown', hex: '#5A2E02' }
+      ]}
+    ];
+
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail" style="max-width:640px;">';
+    html += '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 6px;">Brand &amp; Logo Kit</h2>';
+    html += '<p style="color:#555;margin:0 0 18px;">Making a flyer, sign, or something for the co-op? Everything is here to download — start with the style guide, it shows how the pieces fit together.</p>';
+
+    function sectionHead(title) {
+      return '<p style="font-weight:700;color:var(--color-primary-dark,#3d2a5c);margin:20px 0 8px;padding-top:14px;border-top:1px solid #eee;">' + title + '</p>';
+    }
+
+    // ── The guides ──────────────────────────────────────────────────
+    html += '<ul class="ws-link-list">';
+    html += '<li><a href="/brand/kit/RW_BrandStyleGuide_2026.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Brand Style Guide 2026 <span style="color:#999;font-weight:400;">(PDF, 6 pages)</span></a></li>';
+    html += '<li><a href="/brand/kit/RW_ColorPalette_2026.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('brandKit', 'ag-icon') + '</span>Color Palette one-pager <span style="color:#999;font-weight:400;">(PDF)</span></a></li>';
+    html += '</ul>';
+
+    // ── Colors ──────────────────────────────────────────────────────
+    html += sectionHead('Colors');
+    html += '<p style="color:#777;font-size:0.92em;margin:0 0 10px;">Tap any color to copy its hex code.</p>';
+    BRAND_KIT_COLORS.forEach(function (grp) {
+      html += '<p style="color:#888;font-size:0.85em;text-transform:uppercase;letter-spacing:0.04em;margin:10px 0 6px;">' + grp.group + '</p>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+      grp.colors.forEach(function (c) {
+        html += '<button type="button" class="rw-swatch" data-hex="' + c.hex + '" title="Copy ' + c.hex + '" style="cursor:pointer;border:1px solid ' + (c.light ? '#ddd' : c.hex) + ';border-radius:10px;padding:0;background:#fff;overflow:hidden;width:104px;text-align:left;">'
+          + '<span style="display:block;height:44px;background:' + c.hex + ';"></span>'
+          + '<span style="display:block;padding:5px 8px 6px;"><strong style="display:block;font-size:0.78em;color:#333;">' + c.name + '</strong>'
+          + '<span class="rw-swatch-hex" style="font-size:0.75em;color:#888;">' + c.hex + '</span></span></button>';
+      });
+      html += '</div>';
+    });
+
+    // ── Logos ───────────────────────────────────────────────────────
+    html += sectionHead('Logos');
+    function logoCard(previewSrc, dark, title, links) {
+      var card = '<div style="border:1px solid #eee;border-radius:10px;padding:10px;width:calc(50% - 5px);min-width:180px;box-sizing:border-box;background:#fff;">';
+      card += '<div style="display:flex;align-items:center;justify-content:center;height:96px;background:' + (dark ? 'var(--color-primary,#523A79)' : '#fff') + ';border-radius:6px;margin-bottom:8px;">'
+        + '<img src="' + previewSrc + '" alt="' + title + '" loading="lazy" style="max-height:84px;max-width:92%;width:auto;">' + '</div>';
+      card += '<strong style="display:block;font-size:0.9em;color:#333;margin-bottom:3px;">' + title + '</strong>';
+      card += '<span style="font-size:0.86em;">' + links.map(function (l) {
+        return '<a href="' + l[1] + '" ' + (l[2] ? 'download' : 'target="_blank" rel="noopener"') + ' style="color:var(--color-primary,#523A79);font-weight:600;">' + l[0] + '</a>';
+      }).join(' · ') + '</span></div>';
+      return card;
+    }
+    html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
+    html += logoCard('/brand/kit/RootsAndWings_Logo2026_Stacked.png', false, 'Primary — stacked', [
+      ['PNG', '/brand/kit/RootsAndWings_Logo2026_Stacked.png', true],
+      ['JPG', '/brand/kit/RootsAndWings_Logo2026_Stacked.jpg', true]
+    ]);
+    html += logoCard('/brand/kit/RootsAndWings_Logo2026_Horizontal.png', false, 'Secondary — horizontal', [
+      ['PNG', '/brand/kit/RootsAndWings_Logo2026_Horizontal.png', true],
+      ['JPG', '/brand/kit/RootsAndWings_Logo2026_Horizontal.jpg', true]
+    ]);
+    html += logoCard('/logo-combined.svg', false, 'Full logo — vector', [
+      ['SVG', '/logo-combined.svg', true]
+    ]);
+    html += logoCard('/logo-mark.svg', false, 'Tree icon — vector', [
+      ['SVG', '/logo-mark.svg', true]
+    ]);
+    html += logoCard('/brand/kit/logo-black.svg', false, 'One-color black', [
+      ['SVG', '/brand/kit/logo-black.svg', true],
+      ['Outlined text SVG', '/brand/kit/logo-black-outlines.svg', true]
+    ]);
+    html += '</div>';
+    html += '<p style="color:#777;font-size:0.9em;margin:10px 0 0;">Designer masters: '
+      + '<a href="/brand/kit/RootsAndWings_Logo2026.pdf" download style="color:var(--color-primary,#523A79);font-weight:600;">print PDF (5.6&nbsp;MB)</a> · '
+      + '<a href="/brand/kit/RootsAndWings_Logo2026.ai" download style="color:var(--color-primary,#523A79);font-weight:600;">Illustrator .ai (4.1&nbsp;MB)</a></p>';
+    html += '<p style="color:#777;font-size:0.9em;margin:8px 0 0;">Quick rules from the guide: keep clear space around the logo (at least the height of the &ldquo;R&rdquo;), and please don’t stretch it, recolor it, add effects, or set it on a busy background.</p>';
+
+    // ── Type ────────────────────────────────────────────────────────
+    html += sectionHead('Type');
+    html += '<p style="margin:0 0 4px;"><span style="font-family:\'Playfair Display\',serif;font-weight:900;font-size:1.15em;color:var(--color-primary-dark,#3a285c);">Playfair Display Black</span> <span style="color:#777;font-size:0.9em;">&amp; Sirenia SemiBold — display headings</span></p>';
+    html += '<p style="margin:0 0 4px;"><span style="font-family:\'Quicksand\',sans-serif;font-size:1.05em;color:var(--color-primary-dark,#3a285c);">KitRounded Light</span> <span style="color:#777;font-size:0.9em;">— headers &amp; labels</span></p>';
+    html += '<p style="margin:0 0 8px;"><span style="font-family:\'Nunito Sans\',sans-serif;font-size:1em;color:#333;">Avenir LT Pro Book</span> <span style="color:#777;font-size:0.9em;">— body text</span></p>';
+    html += '<p style="color:#777;font-size:0.9em;margin:0;">No license for those? The website itself uses free Google Fonts stand-ins that pair the same way: <strong>Playfair Display</strong>, <strong>Quicksand</strong>, and <strong>Nunito Sans</strong>.</p>';
+
+    // ── Artwork ─────────────────────────────────────────────────────
+    html += sectionHead('Artwork');
+    html += '<p style="color:#777;font-size:0.92em;margin:0 0 10px;">Right-click (or long-press) any icon to save it as a PNG.</p>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
+    ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples', 'birch', 'cedars', 'willows', 'pigeons'].forEach(function (g) {
+      html += '<span style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;width:58px;">'
+        + '<img src="/brand/group-' + g + '.png" alt="' + g + '" loading="lazy" style="height:34px;width:auto;">'
+        + '<span style="font-size:0.72em;color:#888;text-transform:capitalize;">' + g + '</span></span>';
+    });
+    html += '</div>';
+    html += '<details style="margin-top:12px;"><summary style="cursor:pointer;color:var(--color-primary,#523A79);font-weight:600;">Show all 68 accent icons</summary>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">';
+    for (var ai = 1; ai <= 68; ai++) {
+      html += '<img src="/brand/secondary/accent-' + ai + '.png" alt="accent ' + ai + '" title="accent-' + ai + '" loading="lazy" style="height:26px;width:auto;">';
+    }
+    html += '</div></details>';
+
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+
+    // Tap-to-copy on the swatches. Brief "Copied!" feedback in place of
+    // the hex; clipboard API needs https or localhost, both true here.
+    personDetailCard.querySelectorAll('.rw-swatch').forEach(function (sw) {
+      sw.addEventListener('click', function () {
+        var hex = sw.getAttribute('data-hex');
+        var label = sw.querySelector('.rw-swatch-hex');
+        function flash(msg) {
+          if (!label) return;
+          var orig = label.textContent;
+          label.textContent = msg;
+          setTimeout(function () { label.textContent = orig; }, 1200);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(hex).then(function () { flash('Copied!'); }, function () { flash(hex); });
+        } else flash(hex);
+      });
+    });
+  }
+  window.showBrandKitModal = showBrandKitModal;
 
   function stepCard(badge, title, text) {
     return '<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-top:1px solid #eee;">' +
