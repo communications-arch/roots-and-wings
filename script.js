@@ -6439,8 +6439,11 @@
       var famName = String((fam && fam.name) || '').trim().toLowerCase();
       var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
       var isMineFam = function (family) {
-        var f = String(family || '').toLowerCase();
-        return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
+        var f = String(family || '').trim().toLowerCase();
+        // Word-boundary only (same trap as the tab: family "me" must not
+        // substring-match "Lime Narwhal").
+        return (famName && (f === famName || f.slice(-(famName.length + 1)) === ' ' + famName))
+          || (meName && f === meName);
       };
       var CLEAN_FLOOR_LABELS2 = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
       // Merge assigned (label floors) + open (key floors) into one
@@ -8870,7 +8873,9 @@
     var isMineFamTab = function (family) {
       var f = String(family || '').trim().toLowerCase();
       if (!f) return false;
-      if (famLowerTab && (f === famLowerTab || f.indexOf(famLowerTab) !== -1)) return true;
+      // Word-boundary only: "Erin Bogan" matches family "Bogan", but
+      // "Lime Narwhal" must NOT match family "me" (substring trap).
+      if (famLowerTab && (f === famLowerTab || f.slice(-(famLowerTab.length + 1)) === ' ' + famLowerTab)) return true;
       return !!(meNameTab && f === meNameTab);
     };
     var myAssignmentId = function (floorLabel, area) {
