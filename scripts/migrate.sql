@@ -2183,3 +2183,51 @@ ALTER TABLE event_sections ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL D
 -- 2026-07-25 (later): new event-space cards start COMMITTEE-ONLY —
 -- the lead flips the binoculars on when a card is ready for everyone.
 ALTER TABLE event_sections ALTER COLUMN is_public SET DEFAULT FALSE;
+
+-- ──────────────────────────────────────────────
+-- Lending Library (2026-07-28, Erin)
+-- ──────────────────────────────────────────────
+-- Members offer their own supplies to lend or give away. Items live in the
+-- supply_closet as a fifth category, 'member_lending', with held_by/_email
+-- meaning the OWNER. Borrows go through supply_loans: requested → approved
+-- (owner) → handed_off → returned; donations end at handed_off.
+ALTER TABLE supply_closet DROP CONSTRAINT IF EXISTS supply_closet_category_check;
+ALTER TABLE supply_closet ADD CONSTRAINT supply_closet_category_check CHECK (category IN ('permanent','currently_available','classroom_cabinet','game_closet','member_lending'));
+
+-- 'lend' = expect it back; 'donate' = claim it and keep it.
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS offer_type TEXT NOT NULL DEFAULT 'lend';
+ALTER TABLE supply_closet DROP CONSTRAINT IF EXISTS supply_closet_offer_type_check;
+ALTER TABLE supply_closet ADD CONSTRAINT supply_closet_offer_type_check CHECK (offer_type IN ('lend','donate'));
+-- Stamped when a donate-item is handed off — the item drops out of the
+-- browse list but the row (and its loan history) stays.
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS donated_at TIMESTAMPTZ;
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS donated_to TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS supply_loans (
+  id             SERIAL PRIMARY KEY,
+  item_id        INTEGER NOT NULL REFERENCES supply_closet(id) ON DELETE CASCADE,
+  owner_email    TEXT NOT NULL DEFAULT '',   -- denormalized from held_by_email at request time
+  owner_name     TEXT NOT NULL DEFAULT '',
+  borrower_email TEXT NOT NULL,
+  borrower_name  TEXT NOT NULL DEFAULT '',
+  kind           TEXT NOT NULL DEFAULT 'borrow' CHECK (kind IN ('borrow','donate')),
+  purpose        TEXT NOT NULL DEFAULT 'personal' CHECK (purpose IN ('class','event','personal')),
+  purpose_note   TEXT NOT NULL DEFAULT '',
+  session_id     INTEGER REFERENCES co_op_sessions(id) ON DELETE SET NULL,
+  start_date     DATE,                        -- null allowed for donations
+  end_date       DATE,
+  status         TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','approved','declined','handed_off','returned','canceled')),
+  decline_note   TEXT NOT NULL DEFAULT '',
+  requested_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  responded_at   TIMESTAMPTZ,
+  handed_off_at  TIMESTAMPTZ,
+  returned_at    TIMESTAMPTZ,
+  -- Daily-cron reminder dedupe (see /api/supply-closet?cron=loan-reminders)
+  pack_reminder_sent   BOOLEAN NOT NULL DEFAULT FALSE,
+  return_reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  overdue_last_sent    DATE,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS supply_loans_item_idx     ON supply_loans (item_id);
+CREATE INDEX IF NOT EXISTS supply_loans_owner_idx    ON supply_loans (owner_email);
+CREATE INDEX IF NOT EXISTS supply_loans_borrower_idx ON supply_loans (borrower_email);

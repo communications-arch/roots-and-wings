@@ -5936,7 +5936,8 @@
     outreach: 'accent-41',    // 💛 reach out / care (gold wings)
     departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
     tour: 'accent-50',        // 🏡 tour requests / visits (mushroom = cottage)
-    brandKit: 'accent-59'     // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
+    brandKit: 'accent-59',    // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
+    lending: 'accent-47'      // 🤝 Lending Library (teal bloom = community sharing; art pick — Erin may reassign)
   };
   // cls sizes the mark for its context: 'brand-accent' (card titles,
   // default), 'ag-icon' (inline/pills/buttons), 'new-fam-icon' (gold bloom).
@@ -9307,6 +9308,24 @@
         return h;
       }
     },
+    'lending': {
+      // Lending Library (2026-07-28): borrow fellow members' supplies, or
+      // offer your own to lend / give away. The card is the owner's
+      // approve/decline surface AND both parties' who-has-what record;
+      // the browse/add UI lives in the Supply Closet's Lending section.
+      title: 'Lending Library',
+      roleGate: null,
+      render: function () {
+        var h = '<p class="ws-body-hint">Borrow supplies from fellow members — and keep track of what’s out.</p>';
+        h += '<div id="ws-lending-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-browse">' + brandIconImg('lending', 'ag-icon') + ' Browse the Lending Library</button>'
+          + '<span class="ws-part-submit-hint">Have supplies others could use? <button type="button" class="ws-inline-link" data-resource-action="lending-offer">Offer something to lend or give away</button>.</span></p>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof loadLendingCard === 'function') loadLendingCard();
+      }
+    },
     'my-links': {
       title: 'My Links',
       roleGate: null,
@@ -10199,7 +10218,7 @@
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     // 'class-ideas' joined the universal set 2026-07-20 (#38 — moved
     // from My Family, whose old slot now hosts the My Classes card).
-    '*': ['members-summary', 'class-ideas', 'ways-to-help', 'resources']
+    '*': ['members-summary', 'class-ideas', 'lending', 'ways-to-help', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -10224,6 +10243,7 @@
     'upcoming-events': 'Upcoming co-op dates pulled from the calendar — sessions, special events, and field trips.',
     'ways-to-help': 'Open volunteer roles and ways to pitch in this year, plus your own participation so far.',
     'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
+    'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
     'bg-president': 'President tools and the board’s at-a-glance view for the year.',
@@ -16881,7 +16901,11 @@
     { key: 'permanent',           label: 'Permanent',    short: 'Permanent',  sub: 'Always available' },
     { key: 'currently_available', label: 'Currently',    short: 'Currently',  sub: 'May not always be available' },
     { key: 'classroom_cabinet',   label: 'Classroom',    short: 'Classroom',  sub: 'Each AM classroom' },
-    { key: 'game_closet',         label: 'Games',        short: 'Games',      sub: 'Shared with the church' }
+    { key: 'game_closet',         label: 'Games',        short: 'Games',      sub: 'Shared with the church' },
+    // Lending Library (2026-07-28): items OWNED BY MEMBERS, offered to
+    // lend or give away. held_by/_email = the owner; borrows tracked in
+    // supply_loans via the loan-* API actions.
+    { key: 'member_lending',      label: 'Lending Library', short: 'Lending', sub: 'Members’ own supplies to borrow' }
   ];
 
   function supplyCategoryMeta(key) {
@@ -16893,14 +16917,17 @@
 
   var supplyClosetState = {
     items: null,           // flat array of all items
+    bookings: null,        // open supply_loans rows on Lending Library items
     locations: null,       // array of { id, name, sort_order } from DB
     searchQuery: '',
     enabledCats: {         // which categories are visible
       permanent: true,
       currently_available: true,
       classroom_cabinet: true,
-      game_closet: true
+      game_closet: true,
+      member_lending: true
     },
+    addingLend: false,     // member "Offer to lend or give" inline form open
     sortBy: 'name',        // 'name' | 'location' | 'category' | 'attention'
     locationFilter: '',    // '' = all locations; otherwise exact name
     editingId: null,
@@ -17010,6 +17037,8 @@
     var locFilter = (state.locationFilter || '').toLowerCase();
     var rows = state.items.filter(function (item) {
       if (!state.enabledCats[item.category]) return false;
+      // Given-away donations are done — history lives on the loan record.
+      if (item.donated_at) return false;
       if (locFilter && (item.location || '').toLowerCase() !== locFilter) return false;
       if (!q) return true;
       return (
@@ -17058,7 +17087,7 @@
       aria: 'Print the visible inventory', action: printSupplyCloset });
     var body = renderReportModal({
       title: 'Supply Closet Inventory',
-      subtitle: 'Search what’s available in the co-op’s closets and cabinets. If something is running low, tap Report low next to the item and the Supply Coordinator will be notified.',
+      subtitle: 'Search what’s available in the co-op’s closets and cabinets. If something is running low, tap Report low next to the item and the Supply Coordinator will be notified. The Lending Library section holds fellow members’ own supplies — tap “Lend or give away an item” to offer yours.',
       icons: icons,
       bodyId: 'sc-modal-body'
     });
@@ -17108,6 +17137,8 @@
     if (state.canEdit) {
       html += '<button id="sc-add-btn" class="btn btn-outline-dark btn-sm" type="button">+ Add item</button>';
     }
+    // Lending Library: EVERY member can offer their own supplies.
+    html += '<button id="sc-lend-btn" class="btn btn-outline-dark btn-sm" type="button">+ Lend or give away an item</button>';
     html += '<div class="sc-count">Showing ' + rows.length + ' of ' + totalCount + ' items</div>';
     html += '</div>';
 
@@ -17192,7 +17223,8 @@
   function renderSupplyListBody(rows, state) {
     var html = '';
     if (state.addingNew) html += renderEditRow(null);
-    if (rows.length === 0 && !state.addingNew) {
+    if (state.addingLend) html += renderLendEditRow(null);
+    if (rows.length === 0 && !state.addingNew && !state.addingLend) {
       var msg = state.searchQuery ? 'No items match your search.' : 'No items in the selected categories.';
       html += '<div class="sc-empty">' + msg + '</div>';
       return html;
@@ -17204,7 +17236,11 @@
     });
     function renderGroup(group) {
       return group.map(function (item) {
-        return state.editingId === item.id ? renderEditRow(item) : renderReadRow(item);
+        if (state.editingId !== item.id) return renderReadRow(item);
+        // Lending items get the simplified owner form (name / offer / notes)
+        // for everyone — the coordinator's full form doesn't apply to
+        // member-owned items.
+        return item.category === 'member_lending' ? renderLendEditRow(item) : renderEditRow(item);
       }).join('');
     }
     if (flagged.length > 0) {
@@ -17224,24 +17260,57 @@
     var badgeLabel = cat ? cat.short : item.category;
     var flagged = !!item.needs_restock;
     var busy = supplyClosetState.flaggingId === item.id;
+    var isLending = item.category === 'member_lending';
+    var myEmail = String(getActiveEmail() || '').toLowerCase();
+    var isMine = isLending && String(item.held_by_email || '').toLowerCase() === myEmail;
 
     var rowClass = 'sc-row' + (flagged ? ' sc-flagged' : '');
     var html = '<div class="' + rowClass + '">';
     html += '<div>';
     html += '<div class="sc-name">' + escapeAttr(item.item_name);
+    if (isLending) {
+      var give = item.offer_type === 'donate';
+      html += '<span class="sc-offer-chip ' + (give ? 'sc-offer-donate' : 'sc-offer-lend') + '">' + (give ? 'Free to a good home' : 'For lending') + '</span>';
+    }
     if (flagged) {
       var who = item.restock_flagged_by ? ' by ' + escapeAttr(item.restock_flagged_by) : '';
       html += ' <span class="sc-flag-indicator" title="Flagged' + who + '">Needs restock</span>';
     }
     html += '</div>';
-    if (item.location) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
+    if (item.location && !isLending) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
     // Who holds it (members-location items) — its own line so it reads
-    // cleanly instead of being buried in notes (Erin, 2026-07-17).
-    if (item.held_by) html += '<div class="sc-held-by">' + brandIconImg('person', 'ag-icon') + ' Held by ' + escapeAttr(item.held_by) + '</div>';
+    // cleanly instead of being buried in notes (Erin, 2026-07-17). For
+    // Lending Library items held_by is the OWNER.
+    if (item.held_by) html += '<div class="sc-held-by">' + brandIconImg('person', 'ag-icon') + ' ' + (isLending ? 'Offered by ' : 'Held by ') + escapeAttr(item.held_by) + (isMine ? ' (you)' : '') + '</div>';
     if (item.notes) html += '<div class="sc-notes">' + linkify(item.notes) + '</div>';
+    if (isLending) {
+      // Availability: upcoming approved/out bookings, visible to everyone
+      // so nobody plans around an item that's already spoken for.
+      (supplyClosetState.bookings || []).forEach(function (b) {
+        if (b.item_id !== item.id) return;
+        if (b.status === 'requested') return; // pending asks show on the owner's Workspace card
+        var range = fmtLendDateRange(b.start_date, b.end_date);
+        html += '<div class="sc-booking-line">📅 ' + (b.status === 'handed_off' ? 'Out with ' : 'Booked by ') + escapeAttr(b.borrower_name || 'a member') + (range ? ' · ' + range : '') + '</div>';
+      });
+    }
     html += '</div>';
     html += '<span class="sc-badge sc-badge-' + item.category + '">' + escapeAttr(badgeLabel) + '</span>';
     html += '<div class="sc-actions">';
+    if (isLending) {
+      // Lending rows: no restock flag / quantity — a Request (or Claim)
+      // button for other members, Edit + Delete for the owner (and the
+      // coordinator, who can tidy anyone's entries).
+      if (isMine || canEdit) {
+        html += '<button class="sc-btn sc-edit-btn" data-id="' + item.id + '">Edit</button>';
+        html += '<button class="sc-btn sc-btn-del sc-del-btn" data-id="' + item.id + '">Delete</button>';
+      }
+      if (!isMine) {
+        html += '<button class="sc-btn sc-save sc-borrow-btn" data-id="' + item.id + '">'
+          + (item.offer_type === 'donate' ? 'Ask to have it' : 'Request to borrow') + '</button>';
+      }
+      html += '</div></div>';
+      return html;
+    }
     // Coordinator quantity segmented control (sets quantity_level on click).
     // Shown only to the coordinator; informational, independent of the flag.
     if (canEdit) {
@@ -17322,6 +17391,65 @@
     html += '<div class="sc-edit-actions">';
     html += '<button class="sc-btn sc-cancel-btn" data-id="' + idAttr + '">Cancel</button>';
     html += '<button class="sc-save sc-save-btn" data-id="' + idAttr + '">Save</button>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  // ── Lending Library (2026-07-28) ──
+
+  // 'YYYY-MM-DD' (or ISO) → 'M/D/YY'; range collapses same-day.
+  function fmtLendDate(d) {
+    var s = String(d || '').slice(0, 10);
+    var p = s.split('-');
+    if (p.length !== 3) return s;
+    return parseInt(p[1], 10) + '/' + parseInt(p[2], 10) + '/' + p[0].slice(2);
+  }
+  function fmtLendDateRange(start, end) {
+    if (!start) return '';
+    var a = fmtLendDate(start);
+    var b = end ? fmtLendDate(end) : '';
+    return b && b !== a ? a + '–' + b : a;
+  }
+
+  // The acting member's display name, from the same FAMILIES-backed list
+  // the held-by picker uses. Server falls back to the Google profile name.
+  function lendingDisplayNameFor(email) {
+    var em = String(email || '').toLowerCase();
+    if (!em) return '';
+    var opts = buildParentPickerOptions();
+    for (var i = 0; i < opts.length; i++) {
+      if (String(opts[i].email || '').toLowerCase() === em) return opts[i].person_name || opts[i].displayName || '';
+    }
+    return '';
+  }
+
+  // Simplified add/edit form for member-owned Lending Library items:
+  // name + lend/give toggle + notes. No location/category/holder fields —
+  // the owner is always the acting member (server-enforced), and these
+  // items live at co-op only while a loan is happening.
+  function renderLendEditRow(item) {
+    var isNew = !item;
+    var idAttr = isNew ? 'newlend' : item.id;
+    var name = isNew ? '' : escapeAttr(item.item_name);
+    var notes = isNew ? '' : escapeAttr(item.notes);
+    var offer = isNew ? 'lend' : (item.offer_type || 'lend');
+
+    var html = '<div class="sc-edit-form" data-lend-form="' + idAttr + '">';
+    if (isNew) {
+      html += '<div class="sc-notes" style="margin-bottom:6px;">Offer one of your own supplies for fellow members to borrow — or give away. You approve every request, and the portal keeps track of who has what.</div>';
+    }
+    html += '<div class="sc-edit-grid">';
+    html += '<input class="sc-lend-name" data-id="' + idAttr + '" placeholder="What are you offering? (e.g. Set of 12 printmaking brayers)" value="' + name + '">';
+    html += '<select class="sc-lend-offer" data-id="' + idAttr + '">';
+    html += '<option value="lend"' + (offer === 'lend' ? ' selected' : '') + '>To lend (I want it back)</option>';
+    html += '<option value="donate"' + (offer === 'donate' ? ' selected' : '') + '>To give away</option>';
+    html += '</select>';
+    html += '</div>';
+    html += '<input class="sc-lend-notes sc-edit-notes" data-id="' + idAttr + '" placeholder="Notes — condition, quantities, what it’s good for (optional)" value="' + notes + '">';
+    html += '<div class="sc-edit-actions">';
+    html += '<button class="sc-btn sc-lend-cancel-btn" data-id="' + idAttr + '">Cancel</button>';
+    html += '<button class="sc-save sc-lend-save-btn" data-id="' + idAttr + '">' + (isNew ? 'Add to Lending Library' : 'Save') + '</button>';
     html += '</div>';
     html += '</div>';
     return html;
@@ -17566,6 +17694,7 @@
     if (addBtn) {
       addBtn.addEventListener('click', function () {
         supplyClosetState.addingNew = true;
+        supplyClosetState.addingLend = false;
         supplyClosetState.editingId = null;
         renderSupplyClosetModal();
         var newName = personDetailCard.querySelector('.sc-in-name[data-id="new"]');
@@ -17575,6 +17704,25 @@
         }
       });
     }
+
+    // Lending Library: "+ Lend or give away an item" (every member)
+    var lendBtn = personDetailCard.querySelector('#sc-lend-btn');
+    if (lendBtn) {
+      lendBtn.addEventListener('click', function () {
+        supplyClosetState.addingLend = true;
+        supplyClosetState.addingNew = false;
+        supplyClosetState.editingId = null;
+        supplyClosetState.enabledCats.member_lending = true; // form + list must be visible
+        renderSupplyClosetModal();
+        var lendName = personDetailCard.querySelector('.sc-lend-name[data-id="newlend"]');
+        if (lendName) {
+          try { lendName.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { lendName.scrollIntoView(); }
+          lendName.focus();
+        }
+      });
+    }
+
+    wireLendingRowEvents();
 
     // Held-by dropdown visibility follows the location select (only the
     // "Supplies held by members" location shows it).
@@ -17856,6 +18004,8 @@
     personDetailCard.querySelectorAll('.sc-list .sc-qty-opt').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetQuantity);
     });
+    // Lending rows (offer form + request buttons)
+    wireLendingRowEvents();
   }
 
   function handleSupplyClosetSave() {
@@ -17918,6 +18068,67 @@
     });
   }
 
+  // ── Lending Library row handlers (shared by full + list-only wiring) ──
+  function handleLendSave() {
+    var btn = this;
+    var idAttr = btn.getAttribute('data-id');
+    var nameEl = personDetailCard.querySelector('.sc-lend-name[data-id="' + idAttr + '"]');
+    var offerEl = personDetailCard.querySelector('.sc-lend-offer[data-id="' + idAttr + '"]');
+    var notesEl = personDetailCard.querySelector('.sc-lend-notes[data-id="' + idAttr + '"]');
+    var isNew = idAttr === 'newlend';
+    var myEmail = String(getActiveEmail() || '').toLowerCase();
+    var payload = {
+      item_name: nameEl ? nameEl.value : '',
+      category: 'member_lending',
+      location: '',
+      notes: notesEl ? notesEl.value : '',
+      offer_type: offerEl ? offerEl.value : 'lend',
+      held_by: lendingDisplayNameFor(myEmail),
+      held_by_email: myEmail
+    };
+    if (!payload.item_name.trim()) { alert('Please name the item you’re offering.'); return; }
+    var vaEmail = supplyViewAsEmail();
+    if (vaEmail) payload.view_as = vaEmail;
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    var cred = localStorage.getItem('rw_google_credential');
+    var url = '/api/supply-closet' + (isNew ? '' : '?id=' + encodeURIComponent(idAttr));
+    fetch(url, {
+      method: isNew ? 'POST' : 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert('Error: ' + (res.data.error || 'save failed')); btn.disabled = false; btn.textContent = 'Save'; return; }
+        supplyClosetState.addingLend = false;
+        supplyClosetState.editingId = null;
+        if (isNew) showSupplyToast('Added to the Lending Library — thanks for sharing!');
+        loadSupplyClosetAndRender();
+      })
+      .catch(function (err) { alert('Network error: ' + err.message); btn.disabled = false; btn.textContent = 'Save'; });
+  }
+  function handleLendCancel() {
+    supplyClosetState.addingLend = false;
+    supplyClosetState.editingId = null;
+    renderSupplyClosetModal();
+  }
+  function handleLendRequestClick() {
+    var id = parseInt(this.getAttribute('data-id'), 10);
+    var item = (supplyClosetState.items || []).find(function (it) { return it.id === id; });
+    if (item) showLendRequestDrawer(item);
+  }
+  function wireLendingRowEvents() {
+    personDetailCard.querySelectorAll('.sc-lend-save-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleLendSave);
+    });
+    personDetailCard.querySelectorAll('.sc-lend-cancel-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleLendCancel);
+    });
+    personDetailCard.querySelectorAll('.sc-borrow-btn').forEach(function (btn) {
+      btn.addEventListener('click', handleLendRequestClick);
+    });
+  }
+
   function loadSupplyClosetAndRender() {
     fetchSupplyCloset().then(function (data) {
       if (data.error) { alert('Error loading supply closet: ' + data.error); return; }
@@ -17928,25 +18139,166 @@
         rows.forEach(function (r) { flat.push(r); });
       });
       supplyClosetState.items = flat;
+      supplyClosetState.bookings = data.bookings || [];
       renderSupplyClosetModal();
     }).catch(function (err) {
       alert('Could not load supply closet: ' + err.message);
     });
   }
 
-  function showSupplyClosetPopup(browseOnly) {
+  // Request drawer — slides over the Supply Closet modal (openReportDrawer,
+  // same pattern as Storage Locations). Borrow: purpose + session quick-pick
+  // or custom dates. Donation claims: just an optional note.
+  function showLendRequestDrawer(item) {
+    var isDonate = item.offer_type === 'donate';
+    var body = openReportDrawer({
+      title: isDonate ? 'Ask to have it' : 'Request to borrow',
+      bodyId: 'll-req-body'
+    });
+    if (!body) return;
+
+    var today = new Date().toISOString().slice(0, 10);
+    var html = '';
+    html += '<p style="margin:0 0 2px;"><strong>' + escapeHtml(item.item_name) + '</strong></p>';
+    html += '<p style="margin:0 0 12px;color:var(--color-text-light);font-size:0.88em;">Offered by ' + escapeHtml(item.held_by || 'a member') + (item.notes ? ' · ' + escapeHtml(item.notes) : '') + '</p>';
+
+    if (!isDonate) {
+      var bks = (supplyClosetState.bookings || []).filter(function (b) {
+        return b.item_id === item.id && b.status !== 'requested' && String(b.end_date || '').slice(0, 10) >= today;
+      });
+      if (bks.length > 0) {
+        html += '<p style="margin:0 0 10px;font-size:0.85em;color:var(--color-text-light);">Already spoken for: '
+          + bks.map(function (b) { return fmtLendDateRange(b.start_date, b.end_date); }).join(', ')
+          + ' — pick dates around those.</p>';
+      }
+
+      html += '<p class="ws-body-hint" style="margin:0 0 4px;font-weight:700;">What’s it for?</p>';
+      html += '<div class="board-cal-views" id="ll-purpose" role="group" aria-label="Purpose">';
+      [['class', 'Teaching a class'], ['event', 'A co-op event'], ['personal', 'Personal use']].forEach(function (p, i) {
+        html += '<button type="button" class="board-cal-view-pill' + (i === 0 ? ' is-active' : '') + '" data-purpose="' + p[0] + '">' + p[1] + '</button>';
+      });
+      html += '</div>';
+
+      html += '<p class="ws-body-hint" style="margin:12px 0 4px;font-weight:700;">When do you need it?</p>';
+      var sessKeys = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; })
+        .filter(function (n) { return SESSION_DATES[n] && SESSION_DATES[n].end >= today; });
+      if (sessKeys.length > 0) {
+        html += '<div class="board-cal-views" id="ll-sessions" role="group" aria-label="Session quick picks">';
+        sessKeys.forEach(function (n) {
+          var s = SESSION_DATES[n];
+          html += '<button type="button" class="board-cal-view-pill" data-start="' + s.start + '" data-end="' + s.end + '">S' + n + ' · ' + fmtLendDateRange(s.start, s.end) + '</button>';
+        });
+        html += '</div>';
+      }
+      html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 0;">';
+      html += '<label style="font-size:0.85em;">From <input type="date" id="ll-start" class="cl-input" min="' + today + '"></label>';
+      html += '<label style="font-size:0.85em;">to <input type="date" id="ll-end" class="cl-input" min="' + today + '"></label>';
+      html += '</div>';
+    }
+
+    html += '<input type="text" id="ll-note" class="cl-input" maxlength="300" placeholder="' + (isDonate ? 'Anything to add? (optional)' : 'Note for ' + escapeAttr(item.held_by || 'the owner') + ' — e.g. which class (optional)') + '" style="width:100%;margin:12px 0 0;">';
+    html += '<p id="ll-req-err" style="color:var(--color-error);font-size:0.88em;margin:8px 0 0;" hidden></p>';
+    html += '<div style="display:flex;justify-content:flex-end;margin-top:14px;">';
+    html += '<button type="button" class="sc-btn sc-save" id="ll-req-submit">' + (isDonate ? 'Ask for it' : 'Send request') + '</button>';
+    html += '</div>';
+    html += '<p style="color:var(--color-text-light);font-size:0.82em;margin:10px 0 0;">' + escapeHtml(item.held_by || 'The owner') + ' gets a notification and approves or declines. You’ll both get reminders when it’s time to hand off' + (isDonate ? '.' : ' and return.') + '</p>';
+
+    body.innerHTML = html;
+
+    // Purpose pills (single-select)
+    body.querySelectorAll('#ll-purpose .board-cal-view-pill').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        body.querySelectorAll('#ll-purpose .board-cal-view-pill').forEach(function (p) { p.classList.remove('is-active'); });
+        pill.classList.add('is-active');
+      });
+    });
+    // Session quick-picks fill the date inputs
+    body.querySelectorAll('#ll-sessions .board-cal-view-pill').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        body.querySelectorAll('#ll-sessions .board-cal-view-pill').forEach(function (p) { p.classList.remove('is-active'); });
+        pill.classList.add('is-active');
+        var st = body.querySelector('#ll-start'), en = body.querySelector('#ll-end');
+        if (st) st.value = pill.getAttribute('data-start');
+        if (en) en.value = pill.getAttribute('data-end');
+      });
+    });
+    // Hand-edited dates un-highlight the session pick
+    ['#ll-start', '#ll-end'].forEach(function (sel) {
+      var el = body.querySelector(sel);
+      if (el) el.addEventListener('input', function () {
+        body.querySelectorAll('#ll-sessions .board-cal-view-pill').forEach(function (p) { p.classList.remove('is-active'); });
+      });
+    });
+
+    var submit = body.querySelector('#ll-req-submit');
+    submit.addEventListener('click', function () {
+      var errEl = body.querySelector('#ll-req-err');
+      var payload = {
+        purpose: 'personal',
+        purpose_note: (body.querySelector('#ll-note') || {}).value || '',
+        borrower_name: lendingDisplayNameFor(getActiveEmail())
+      };
+      if (!isDonate) {
+        var active = body.querySelector('#ll-purpose .is-active');
+        payload.purpose = active ? active.getAttribute('data-purpose') : 'personal';
+        payload.start_date = (body.querySelector('#ll-start') || {}).value || '';
+        payload.end_date = (body.querySelector('#ll-end') || {}).value || '';
+        if (!payload.start_date || !payload.end_date) {
+          errEl.textContent = 'Pick a session or enter both dates.';
+          errEl.hidden = false;
+          return;
+        }
+      }
+      var vaEmail = supplyViewAsEmail();
+      if (vaEmail) payload.view_as = vaEmail;
+      submit.disabled = true;
+      submit.textContent = 'Sending…';
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/supply-closet?id=' + item.id + '&action=loan-request', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            errEl.textContent = res.data.error || 'Could not send the request.';
+            errEl.hidden = false;
+            submit.disabled = false;
+            submit.textContent = isDonate ? 'Ask for it' : 'Send request';
+            return;
+          }
+          closeReportDrawer(true);
+          showSupplyToast('Request sent — ' + (item.held_by || 'the owner') + ' has been notified.');
+          loadSupplyClosetAndRender();
+          if (typeof loadLendingCard === 'function') loadLendingCard();
+        })
+        .catch(function (err) {
+          errEl.textContent = 'Network error: ' + err.message;
+          errEl.hidden = false;
+          submit.disabled = false;
+          submit.textContent = isDonate ? 'Ask for it' : 'Send request';
+        });
+    });
+  }
+
+  function showSupplyClosetPopup(browseOnly, opts) {
+    opts = opts || {};
     supplyClosetState.canEdit = browseOnly ? false : computeSupplyClosetCanEdit();
     supplyClosetState.browseMode = !!browseOnly;
     supplyClosetState.searchQuery = '';
     supplyClosetState.sortBy = 'name';
+    // lendingOnly: opened from the Workspace Lending card — start scoped
+    // to the Lending Library (the other chips stay one tap away).
     supplyClosetState.enabledCats = {
-      permanent: true,
-      currently_available: true,
-      classroom_cabinet: true,
-      game_closet: true
+      permanent: !opts.lendingOnly,
+      currently_available: !opts.lendingOnly,
+      classroom_cabinet: !opts.lendingOnly,
+      game_closet: !opts.lendingOnly,
+      member_lending: true
     };
     supplyClosetState.editingId = null;
     supplyClosetState.addingNew = false;
+    supplyClosetState.addingLend = !!opts.addLend;
     supplyClosetState.newItemCategory = 'permanent';
     supplyClosetState.showLocations = false;
     supplyClosetState.locationFilter = '';
@@ -17960,6 +18312,130 @@
   var supplyClosetBtn = document.getElementById('supplyClosetBtn');
   if (supplyClosetBtn) {
     supplyClosetBtn.addEventListener('click', function () { showSupplyClosetPopup(true); });
+  }
+
+  // ── Workspace "Lending Library" card loader ──
+  // Fills #ws-lending-body with three lists scoped to the acting member:
+  // requests awaiting THEIR approval, things they're borrowing, and things
+  // they've lent out (or promised). Donations use claim/give wording.
+  function loadLendingCard() {
+    var target = document.getElementById('ws-lending-body');
+    if (!target) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    fetch('/api/supply-closet?action=loans' + notifViewAsSuffix(), {
+      headers: { 'Authorization': 'Bearer ' + cred }
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      target = document.getElementById('ws-lending-body');
+      if (!target) return; // tab re-rendered while we were fetching
+      if (data.error) { target.innerHTML = '<p class="ws-empty">Couldn’t load loans: ' + escapeHtml(data.error) + '</p>'; return; }
+      renderLendingCardBody(target, data.loans || [], String(data.me || '').toLowerCase());
+    }).catch(function () {
+      var t = document.getElementById('ws-lending-body');
+      if (t) t.innerHTML = '<p class="ws-empty">Couldn’t load the lending list.</p>';
+    });
+  }
+
+  function renderLendingCardBody(target, loans, me) {
+    var today = new Date().toISOString().slice(0, 10);
+    var isOpen = function (l) { return ['requested', 'approved', 'handed_off'].indexOf(l.status) !== -1; };
+    var asks = loans.filter(function (l) { return l.status === 'requested' && String(l.owner_email).toLowerCase() === me; });
+    var borrowing = loans.filter(function (l) { return isOpen(l) && String(l.borrower_email).toLowerCase() === me; });
+    var lentOut = loans.filter(function (l) {
+      return String(l.owner_email).toLowerCase() === me && (l.status === 'approved' || l.status === 'handed_off');
+    });
+
+    var purposeLabel = { class: 'for a class', event: 'for a co-op event', personal: 'for personal use' };
+    function loanMeta(l) {
+      var bits = [];
+      var range = fmtLendDateRange(l.start_date, l.end_date);
+      if (range) bits.push(range);
+      if (l.kind !== 'donate' && purposeLabel[l.purpose]) bits.push(purposeLabel[l.purpose]);
+      if (l.purpose_note) bits.push('“' + escapeHtml(l.purpose_note) + '”');
+      return bits.join(' · ');
+    }
+    function overdueBit(l) {
+      var end = String(l.end_date || '').slice(0, 10);
+      return l.kind !== 'donate' && end && end < today && l.status !== 'requested'
+        ? ' <span class="ws-lending-overdue">overdue</span>' : '';
+    }
+    function actBtn(loanId, act, label, extraClass) {
+      return '<button type="button" class="sc-btn ' + (extraClass || '') + ' ll-card-act" data-loan="' + loanId + '" data-act="' + act + '">' + label + '</button>';
+    }
+
+    var h = '';
+    if (asks.length > 0) {
+      h += '<p class="ws-lending-head">Requests for your items</p>';
+      asks.forEach(function (l) {
+        h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(l.borrower_name || l.borrower_email) + '</strong> — ' + escapeHtml(l.item_name)
+          + '<span class="ws-lending-sub">' + (l.kind === 'donate' ? 'would like to have it' : loanMeta(l)) + '</span></span>';
+        h += '<span class="ws-lending-actions">' + actBtn(l.id, 'approve', 'Approve', 'sc-save') + actBtn(l.id, 'decline', 'Decline') + '</span></div>';
+      });
+    }
+    if (borrowing.length > 0) {
+      h += '<p class="ws-lending-head">You’re borrowing</p>';
+      borrowing.forEach(function (l) {
+        var sub, acts = '';
+        if (l.status === 'requested') {
+          sub = 'asked ' + escapeHtml(l.owner_name || l.owner_email) + ' — awaiting approval';
+          acts = actBtn(l.id, 'canceled', 'Cancel');
+        } else if (l.kind === 'donate') {
+          sub = escapeHtml(l.owner_name) + ' said yes — arrange pick-up at co-op';
+          acts = actBtn(l.id, 'handed_off', 'Got it', 'sc-save');
+        } else {
+          sub = 'from ' + escapeHtml(l.owner_name || l.owner_email) + (loanMeta(l) ? ' · ' + loanMeta(l) : '') + overdueBit(l);
+          acts = (l.status === 'approved' ? actBtn(l.id, 'canceled', 'Cancel') : '') + actBtn(l.id, 'returned', 'Mark returned', 'sc-save');
+        }
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + escapeHtml(l.item_name)
+          + '<span class="ws-lending-sub">' + sub + '</span></span>'
+          + '<span class="ws-lending-actions">' + acts + '</span></div>';
+      });
+    }
+    if (lentOut.length > 0) {
+      h += '<p class="ws-lending-head">Lent out</p>';
+      lentOut.forEach(function (l) {
+        var give = l.kind === 'donate';
+        var sub = (give ? 'promised to ' : 'to ') + escapeHtml(l.borrower_name || l.borrower_email)
+          + (loanMeta(l) ? ' · ' + loanMeta(l) : '') + overdueBit(l);
+        var acts = l.status === 'approved' ? actBtn(l.id, 'handed_off', give ? 'Given ✓' : 'Handed off', 'sc-save') : '';
+        if (!give) acts += actBtn(l.id, 'returned', 'Returned ✓', l.status === 'handed_off' ? 'sc-save' : '');
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + escapeHtml(l.item_name)
+          + '<span class="ws-lending-sub">' + sub + '</span></span>'
+          + '<span class="ws-lending-actions">' + acts + '</span></div>';
+      });
+    }
+    if (!h) {
+      h = '<p class="ws-empty">Nothing borrowed or lent right now.</p>';
+    }
+    target.innerHTML = h;
+
+    target.querySelectorAll('.ll-card-act').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var loanId = btn.getAttribute('data-loan');
+        var act = btn.getAttribute('data-act');
+        var isRespond = act === 'approve' || act === 'decline';
+        var url = '/api/supply-closet?id=' + loanId + '&action=' + (isRespond ? 'loan-respond' : 'loan-status') + notifViewAsSuffix();
+        var payload = isRespond ? { approve: act === 'approve' } : { status: act };
+        var vaEmail = supplyViewAsEmail();
+        if (vaEmail) payload.view_as = vaEmail;
+        var go = function () {
+          btn.disabled = true;
+          fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert(res.data.error || 'Could not update the loan.'); btn.disabled = false; return; }
+              loadLendingCard();
+            })
+            .catch(function (err) { alert('Network error: ' + err.message); btn.disabled = false; });
+        };
+        // Decline and cancel get a two-step confirm; the rest act at once.
+        if (act === 'decline' || act === 'canceled') rwArmTwoStep(btn, act === 'decline' ? 'decline' : 'cancel', go);
+        else go();
+      });
+    });
   }
 
   // ──────────────────────────────────────────────
@@ -19770,6 +20246,8 @@
     if (action === 'waiver') showWaiverModal();
     else if (action === 'install-app' && typeof showInstallHelpModal === 'function') showInstallHelpModal();
     else if (action === 'brand-kit' && typeof showBrandKitModal === 'function') showBrandKitModal();
+    else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
+    else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();

@@ -6632,11 +6632,13 @@ body > .rd-drawer { z-index: 10002; }
 .sc-cat-chip.sc-cat-currently_available .sc-cat-dot { background: var(--color-accent); }
 .sc-cat-chip.sc-cat-classroom_cabinet   .sc-cat-dot { background: var(--color-primary-light); }
 .sc-cat-chip.sc-cat-game_closet         .sc-cat-dot { background: var(--color-accent-light); }
+.sc-cat-chip.sc-cat-member_lending      .sc-cat-dot { background: var(--color-teal); }
 /* Active state: soft tinted fill in the category's color */
 .sc-cat-chip.sc-on.sc-cat-permanent           { background: rgba(var(--color-primary-rgb), 0.10);       border-color: var(--color-primary);       color: var(--color-primary-dark); }
 .sc-cat-chip.sc-on.sc-cat-currently_available { background: rgba(196, 74, 56, 0.10);                    border-color: var(--color-accent-dark);   color: var(--color-accent-dark); }
 .sc-cat-chip.sc-on.sc-cat-classroom_cabinet   { background: rgba(var(--color-primary-light-rgb), 0.14); border-color: var(--color-primary-light); color: var(--color-primary-dark); }
 .sc-cat-chip.sc-on.sc-cat-game_closet         { background: rgba(var(--color-accent-light-rgb), 0.25); border-color: var(--color-accent-light);  color: var(--color-text); }
+.sc-cat-chip.sc-on.sc-cat-member_lending      { background: rgba(var(--color-teal-rgb), 0.10);         border-color: var(--color-teal);          color: var(--color-teal); }
 .sc-cat-chip.sc-off {
   opacity: 0.7;
   color: var(--color-text-light);
@@ -6734,6 +6736,56 @@ body > .rd-drawer { z-index: 10002; }
 .sc-badge-currently_available { background: var(--color-accent); }
 .sc-badge-classroom_cabinet   { background: var(--color-primary-light); }
 .sc-badge-game_closet         { background: var(--color-accent-light); color: var(--color-text); }
+.sc-badge-member_lending      { background: var(--color-teal); }
+
+/* ── Lending Library (2026-07-28) ── */
+/* Lend/Donate chip on browse rows + small booking line */
+.sc-offer-chip {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.sc-offer-lend   { background: rgba(var(--color-teal-rgb), 0.12); color: var(--color-teal); }
+.sc-offer-donate { background: rgba(var(--color-accent-light-rgb), 0.35); color: var(--color-accent-dark); }
+.sc-booking-line {
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  margin-top: 2px;
+}
+/* Workspace Lending card rows */
+.ws-lending-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--color-cream-dark);
+  font-size: 0.92rem;
+}
+.ws-lending-row:first-child { border-top: none; }
+.ws-lending-main { flex: 1 1 auto; min-width: 0; }
+.ws-lending-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+}
+.ws-lending-actions { flex: 0 0 auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ws-lending-head {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-light);
+  margin: 12px 0 2px;
+}
+.ws-lending-head:first-child { margin-top: 0; }
+.ws-lending-overdue { color: var(--color-error); font-weight: 700; }
 .sc-actions {
   display: flex;
   gap: 0.35rem;
