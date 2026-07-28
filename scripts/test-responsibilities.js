@@ -492,8 +492,9 @@ t('Class Builder lives on Co-op Management only — no standalone pm-scheduling 
   assert.ok(/isMorningGroupLiaisonTitle\(role\)/.test(showsBuilder[0]), 'group morning liaisons must be a builder audience');
   const builderRow = src2.match(/if \(showsBuilder\) \{[\s\S]*?schedule-builder[\s\S]*?pmrep-pending-count[\s\S]*?\}/);
   assert.ok(builderRow, 'roles card must render the Class Builder row with its pending pill');
-  // Group liaisons' fallback widget list points at the roles card now.
-  assert.ok(/return \['todos', 'roles'\];/.test(src2), "group-liaison fallback must return ['todos', 'roles']");
+  // Group liaisons' fallback widget list: roles card + the #139 Things
+  // to Bring editor.
+  assert.ok(/return \['todos', 'group-bring', 'roles'\];/.test(src2), "group-liaison fallback must return ['todos', 'group-bring', 'roles']");
 });
 
 t('Committee roles resolve by holder EMAIL even with no family/people row', () => {
