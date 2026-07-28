@@ -23881,7 +23881,10 @@
     if (!body) return;
 
     var html = '';
-    var activeSubs = myClassSubmissions.filter(function (s) { return s.status !== 'withdrawn'; });
+    // Guard: the top-level workspace render (line ~21874) runs BEFORE
+    // this file reaches `var myClassSubmissions = []` — hoisted var is
+    // still undefined on that first paint (IIFE load-order gotcha).
+    var activeSubs = (myClassSubmissions || []).filter(function (s) { return s.status !== 'withdrawn'; });
 
     // #54: the submit button leads the card instead of trailing the list.
     html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;margin-bottom:0.75rem;">';
