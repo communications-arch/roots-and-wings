@@ -9308,6 +9308,26 @@
         return h;
       }
     },
+    'shared-todos': {
+      // #125-4 (Erin, 07-28): personal special-event To Dos (assigned
+      // tasks + "Plan the <event>" planning-window rows) used to inject
+      // into EVERY role section's To Do card — multi-role members saw
+      // them once per role. They now live here, once, in Shared. Rows
+      // are painted by updateEventTasksTodoItems (loadMyEventTasks).
+      title: 'Special Events To Do',
+      roleGate: null,
+      render: function () {
+        var h = '<p class="ws-body-hint">Event tasks assigned to you, and events you’re helping plan.</p>';
+        h += '<ul class="ws-link-list" id="ws-shared-todo-list">';
+        h += '<li class="ws-empty" id="ws-shared-todo-empty">Nothing waiting on you right now.</li>';
+        h += '</ul>';
+        return h;
+      },
+      afterRender: function () {
+        if (typeof updateEventTasksTodoItems === 'function') updateEventTasksTodoItems();
+        if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
+      }
+    },
     'lending': {
       // Lending Library (2026-07-28): borrow fellow members' supplies, or
       // offer your own to lend / give away. The card is the owner's
@@ -10218,7 +10238,7 @@
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     // 'class-ideas' joined the universal set 2026-07-20 (#38 — moved
     // from My Family, whose old slot now hosts the My Classes card).
-    '*': ['members-summary', 'class-ideas', 'lending', 'ways-to-help', 'resources']
+    '*': ['shared-todos', 'members-summary', 'class-ideas', 'lending', 'ways-to-help', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -10243,6 +10263,7 @@
     'upcoming-events': 'Upcoming co-op dates pulled from the calendar — sessions, special events, and field trips.',
     'ways-to-help': 'Open volunteer roles and ways to pitch in this year, plus your own participation so far.',
     'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
+    'shared-todos': 'Special-event work waiting on you personally — tasks you’ve been assigned and events you’re helping plan. Shows once here instead of repeating under each of your roles.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
@@ -16936,6 +16957,8 @@
     canEdit: false,
     showLocations: false,  // true when location manager panel is open
     flaggingId: null,      // id currently being flagged/unflagged (UI busy state)
+    flagPickingId: null,   // classroom item whose which-room picker is open (#125-3)
+    rooms: null,           // Facilities rooms for that picker (lazy, active only)
     qtyBusyId: null        // id currently being updated via the qty segmented control
   };
 
@@ -17203,7 +17226,7 @@
       html += '<table><thead><tr><th>Item</th><th>Qty</th><th>Location</th><th>Notes</th></tr></thead><tbody>';
       list.forEach(function (it) {
         html += '<tr>'
-          + '<td>' + escapeHtmlWs(it.item_name || '') + (it.needs_restock ? ' <em class="flag">⚑ low</em>' : '') + '</td>'
+          + '<td>' + escapeHtmlWs(it.item_name || '') + (it.needs_restock ? ' <em class="flag">⚑ low' + (it.restock_room ? ' — ' + escapeHtmlWs(it.restock_room) : '') + '</em>' : '') + '</td>'
           + '<td>' + escapeHtmlWs(levelLabel[it.quantity_level] || '') + '</td>'
           + '<td>' + escapeHtmlWs(it.location || '') + '</td>'
           + '<td>' + escapeHtmlWs(it.notes || '') + '</td>'
@@ -17274,7 +17297,8 @@
     }
     if (flagged) {
       var who = item.restock_flagged_by ? ' by ' + escapeAttr(item.restock_flagged_by) : '';
-      html += ' <span class="sc-flag-indicator" title="Flagged' + who + '">Needs restock</span>';
+      // #125-3: classroom flags say WHICH classroom needs the restock.
+      html += ' <span class="sc-flag-indicator" title="Flagged' + who + '">Needs restock' + (item.restock_room ? ' — ' + escapeAttr(item.restock_room) : '') + '</span>';
     }
     html += '</div>';
     if (item.location && !isLending) html += '<div class="sc-loc">' + escapeAttr(item.location) + '</div>';
@@ -17330,7 +17354,18 @@
       html += '</div>';
     }
     // Flag (any member) / unflag (coord only)
-    if (!flagged) {
+    if (!flagged && supplyClosetState.flagPickingId === item.id) {
+      // #125-3: classroom-cabinet flags first pick WHICH classroom —
+      // rooms come from Facilities > Rooms (active only).
+      html += '<select class="sc-flagroom-select cl-input" data-id="' + item.id + '" aria-label="Which classroom?">';
+      html += '<option value="">Which classroom?</option>';
+      (supplyClosetState.rooms || []).forEach(function (rm) {
+        html += '<option value="' + escapeAttr(rm.name) + '">' + escapeAttr(rm.name) + '</option>';
+      });
+      html += '</select>';
+      html += '<button class="sc-btn sc-save sc-flagroom-go" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Reporting…' : 'Report') + '</button>';
+      html += '<button class="sc-btn sc-flagroom-cancel" data-id="' + item.id + '" aria-label="Cancel">×</button>';
+    } else if (!flagged) {
       html += '<button class="sc-btn sc-flag-btn" data-id="' + item.id + '"' + (busy ? ' disabled' : '') + '>'
         + (busy ? 'Reporting…' : 'Report low') + '</button>';
     } else if (canEdit) {
@@ -17837,6 +17872,7 @@
     personDetailCard.querySelectorAll('.sc-unflag-btn').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetUnflag);
     });
+    wireFlagRoomEvents();
     // Quantity segmented control (coordinator only)
     personDetailCard.querySelectorAll('.sc-qty-opt').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetQuantity);
@@ -17885,16 +17921,47 @@
   function handleSupplyClosetFlag() {
     var id = parseInt(this.getAttribute('data-id'), 10);
     if (!id) return;
+    // #125-3: classroom-cabinet items ask WHICH classroom first — the
+    // picker renders inline in the row's action area.
+    var item = (supplyClosetState.items || []).find(function (it) { return it.id === id; });
+    if (item && item.category === 'classroom_cabinet') {
+      ensureSupplyRooms(function () {
+        supplyClosetState.flagPickingId = id;
+        updateSupplyClosetListOnly();
+      });
+      return;
+    }
+    doSupplyFlag(id, '');
+  }
+
+  // Facilities rooms for the which-classroom picker (lazy, once per open).
+  function ensureSupplyRooms(cb) {
+    if (supplyClosetState.rooms) { cb(); return; }
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/cleaning?action=rooms', { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        supplyClosetState.rooms = ((d && d.rooms) || []).filter(function (rm) {
+          return String(rm.status || 'active') === 'active';
+        });
+        cb();
+      })
+      .catch(function () { supplyClosetState.rooms = []; cb(); });
+  }
+
+  function doSupplyFlag(id, room) {
     supplyClosetState.flaggingId = id;
     var cred = localStorage.getItem('rw_google_credential');
     // Optimistically re-render busy state
     renderSupplyClosetModal();
     fetch('/api/supply-closet?id=' + encodeURIComponent(id) + '&action=flag', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }
+      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: room || '' })
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         supplyClosetState.flaggingId = null;
+        supplyClosetState.flagPickingId = null;
         if (!res.ok) {
           alert('Could not flag item: ' + (res.data.error || 'error'));
           renderSupplyClosetModal();
@@ -17908,6 +17975,26 @@
         alert('Network error: ' + err.message);
         renderSupplyClosetModal();
       });
+  }
+
+  // Which-classroom picker buttons (#125-3) — shared by the full and
+  // list-only wiring passes, same pattern as the lending rows.
+  function wireFlagRoomEvents() {
+    personDetailCard.querySelectorAll('.sc-flagroom-go').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var sel = personDetailCard.querySelector('.sc-flagroom-select[data-id="' + id + '"]');
+        var room = sel ? sel.value : '';
+        if (!room) { alert('Pick which classroom needs the restock.'); return; }
+        doSupplyFlag(id, room);
+      });
+    });
+    personDetailCard.querySelectorAll('.sc-flagroom-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        supplyClosetState.flagPickingId = null;
+        updateSupplyClosetListOnly();
+      });
+    });
   }
 
   function handleSupplyClosetUnflag() {
@@ -18004,8 +18091,9 @@
     personDetailCard.querySelectorAll('.sc-list .sc-qty-opt').forEach(function (btn) {
       btn.addEventListener('click', handleSupplyClosetQuantity);
     });
-    // Lending rows (offer form + request buttons)
+    // Lending rows (offer form + request buttons) + which-classroom picker
     wireLendingRowEvents();
+    wireFlagRoomEvents();
   }
 
   function handleSupplyClosetSave() {
@@ -19317,7 +19405,13 @@
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_number: linkSession, class_key: linkKey, curriculum_id: res.data.curriculum.id })
-          }).then(function () { if (typeof loadClassLinks === 'function') loadClassLinks(); }).catch(function () {});
+          }).then(function () {
+            // 07-28: the My Classes buttons read the per-session cache —
+            // drop the saved session's entry so the next tap sees this
+            // fresh link instead of healing/creating another plan.
+            delete _classLinksBySession[linkSession];
+            if (typeof loadClassLinks === 'function') loadClassLinks();
+          }).catch(function () {});
         }
       }
 
@@ -22469,10 +22563,15 @@
       btn.addEventListener('click', function () {
         var id = parseInt(btn.getAttribute('data-id'), 10);
         var sub = myClassSubmissions.filter(function (s) { return s.id === id; })[0];
-        if (!sub || typeof startLessonPlanForClass !== 'function') return;
-        startLessonPlanForClass(sub.class_name,
-          (typeof prettyAgesClient === 'function' ? prettyAgesClient(sub.age_groups, sub.age_groups_other) : ''),
-          sub.class_period === 'AM' ? 'AM' : 'PM');
+        if (!sub) return;
+        // 07-28 fix: this button used to ALWAYS open a blank editor — each
+        // return visit created ANOTHER plan and the one you'd already put
+        // supplies into was orphaned ("all the supplies are gone"). Now it
+        // reuses the linked plan (scheduled classes) or your own same-title
+        // plan before ever creating a new one.
+        var sess2 = (sub.status === 'scheduled' && sub.scheduled_session) ? sub.scheduled_session : null;
+        var go2 = function () { openOrCreateClassPlan(sub, sess2, false); };
+        if (!sess2 || _classLinksBySession[sess2]) go2(); else ensureClassLinksForSession(sess2, go2);
       });
     });
   }
@@ -22512,6 +22611,91 @@
       return g ? g.charAt(0).toUpperCase() + g.slice(1) : '';
     }
     return 'PM:' + s.class_name;
+  }
+
+  // Open a plan's detail view from a class button. wantSupplies=true lands
+  // on the Master Supply List (forced open + scrolled); false = PLAN focus:
+  // the supply <details> collapses so the lessons lead (Erin, 07-28:
+  // "clicking Lesson Plan goes to the Supply List" — the list rendered
+  // open-by-default above the lessons and owned the first screenful).
+  // Library browsing keeps its open-by-default behavior; only these
+  // class-button opens set the state explicitly.
+  function openClassPlanDetail(currId, wantSupplies) {
+    var cred = localStorage.getItem('rw_google_credential');
+    fetch('/api/curriculum?id=' + currId, { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.curriculum) { alert('Could not load the lesson plan.'); return; }
+        curriculumState.current = data.curriculum;
+        curriculumState.view = 'detail';
+        renderCurriculumModal();
+        // #118: renderCurriculumModal only swaps innerHTML — the card
+        // (.person-detail-card, overflow-y:auto) KEEPS its scrollTop, so
+        // always reset to the top first; only a supplies request then
+        // jumps down.
+        if (personDetailCard) personDetailCard.scrollTop = 0;
+        var det = personDetailCard && personDetailCard.querySelector('.cl-master-details');
+        if (wantSupplies) {
+          if (det) det.open = true;
+          var target = personDetailCard && personDetailCard.querySelector('.cl-master-supplies');
+          if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (det) {
+          det.open = false;
+        }
+      })
+      .catch(function () { alert('Network error — try again.'); });
+  }
+
+  // Link-aware plan open shared by My Classes AND the Class Development
+  // card (07-28: Class Dev's "Lesson Plan" button ALWAYS opened a fresh
+  // blank editor — every return visit spawned a duplicate plan and the
+  // previous one, with its supplies, was orphaned → "all the supplies
+  // are gone"). Order: ① the class's linked plan; ② the member's own
+  // most-recently-updated plan with the same title (list is updated_at
+  // DESC), linking it when the class is scheduled (#96 heal); ③ a blank
+  // editor carrying the link context so the save auto-links.
+  // sess=null → unscheduled idea: skip link steps, still reuse ②.
+  function openOrCreateClassPlan(s, sess, wantSupplies) {
+    var linkKey = sess ? myClassLinkKey(s) : '';
+    if (sess) {
+      var map = _classLinksBySession[sess];
+      // The always-loaded currentSession cache covers a not-yet-fetched
+      // per-session map for the common (current session) case.
+      if (!map && sess === currentSession && classLinks) map = classLinks;
+      var link = (map && linkKey) ? map[linkKey] : null;
+      if (link) { openClassPlanDetail(link.curriculum_id, wantSupplies); return; }
+    }
+    var openBlank = function () {
+      if (typeof startLessonPlanForClass === 'function') {
+        startLessonPlanForClass(s.class_name,
+          (typeof prettyAgesClient === 'function' ? prettyAgesClient(s.age_groups, s.age_groups_other) : ''),
+          s.class_period === 'AM' ? 'AM' : 'PM',
+          linkKey || undefined, sess || undefined);
+      }
+    };
+    var cred2 = localStorage.getItem('rw_google_credential');
+    var meLc = String((typeof getActiveEmail === 'function' && getActiveEmail()) || '').toLowerCase();
+    if (!cred2 || !meLc) { openBlank(); return; }
+    fetch('/api/curriculum', { headers: { 'Authorization': 'Bearer ' + cred2 } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var hit = ((data && data.curricula) || []).filter(function (c) {
+          return String(c.title || '').trim().toLowerCase() === String(s.class_name || '').trim().toLowerCase()
+            && String(c.author_email || '').toLowerCase() === meLc;
+        })[0]; // list is updated_at DESC → the plan they last worked on
+        if (!hit) { openBlank(); return; }
+        if (!sess) { openClassPlanDetail(hit.id, wantSupplies); return; }
+        fetch('/api/curriculum?action=link', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + cred2, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_number: sess, class_key: linkKey, curriculum_id: hit.id })
+        }).then(function () {
+          delete _classLinksBySession[sess];
+          if (typeof loadClassLinks === 'function') loadClassLinks();
+          openClassPlanDetail(hit.id, wantSupplies);
+        }).catch(openBlank);
+      })
+      .catch(openBlank);
   }
 
   // Pure: the family's approved classes for one session (#38) — status
@@ -22591,84 +22775,15 @@
     var mcSubmitBtn = document.getElementById('mfMyClassesSubmit');
     if (mcSubmitBtn) mcSubmitBtn.addEventListener('click', function () { showClassSubmissionModal(null); });
 
-    function mcLinkFor(s) {
-      var key = myClassLinkKey(s);
-      var map = _classLinksBySession[sess];
-      // The always-loaded currentSession cache covers a not-yet-fetched
-      // per-session map for the common (current session) case.
-      if (!map && sess === currentSession && classLinks) map = classLinks;
-      return (map && key) ? map[key] : null;
-    }
-    function mcOpenPlan(currId, wantSupplies) {
-      var cred = localStorage.getItem('rw_google_credential');
-      fetch('/api/curriculum?id=' + currId, { headers: { 'Authorization': 'Bearer ' + cred } })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (!data.curriculum) { alert('Could not load the lesson plan.'); return; }
-          curriculumState.current = data.curriculum;
-          curriculumState.view = 'detail';
-          renderCurriculumModal();
-          // #118: renderCurriculumModal only swaps innerHTML — the card
-          // (.person-detail-card, overflow-y:auto) KEEPS its scrollTop, so
-          // after a Supply-list jump every later "Lesson plan" open showed
-          // the card still scrolled to the supplies. Always reset to the
-          // top first; only a supplies request then jumps down.
-          if (personDetailCard) personDetailCard.scrollTop = 0;
-          if (wantSupplies) {
-            // The supply list lives in the plan detail's Master Supply
-            // List — jump there. A plan with no supplies yet just opens
-            // at the top (the teacher can Edit to add them).
-            var target = personDetailCard && personDetailCard.querySelector('.cl-master-supplies');
-            if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        })
-        .catch(function () { alert('Network error — try again.'); });
-    }
+    // Link lookup / #96 title heal / blank-editor fallback all live in the
+    // shared openOrCreateClassPlan (07-28) — the Class Development card's
+    // Lesson Plan button uses the same path now.
     function mcWire(selector, wantSupplies) {
       body.querySelectorAll(selector).forEach(function (btn) {
         btn.addEventListener('click', function () {
           var s = mine[parseInt(this.getAttribute('data-idx'), 10)];
           if (!s) return;
-          var go = function () {
-            var link = mcLinkFor(s);
-            if (link) { mcOpenPlan(link.curriculum_id, wantSupplies); return; }
-            var openBlank = function () {
-              // No plan anywhere — open the editor prefilled AND carrying
-              // the class context so the save auto-links (#96).
-              if (typeof startLessonPlanForClass === 'function') {
-                startLessonPlanForClass(s.class_name,
-                  (typeof prettyAgesClient === 'function' ? prettyAgesClient(s.age_groups, s.age_groups_other) : ''),
-                  s.class_period === 'AM' ? 'AM' : 'PM',
-                  myClassLinkKey(s), sess);
-              }
-            };
-            // #96 heal: a plan may already exist UNLINKED (created via a
-            // Plan button before auto-linking, like Lyndsey's) — find the
-            // member's own plan by exact title, link it, open it. Never
-            // silently grabs someone else's plan.
-            var cred2 = localStorage.getItem('rw_google_credential');
-            var meLc = String((typeof getActiveEmail === 'function' && getActiveEmail()) || '').toLowerCase();
-            if (!cred2 || !meLc) { openBlank(); return; }
-            fetch('/api/curriculum', { headers: { 'Authorization': 'Bearer ' + cred2 } })
-              .then(function (r) { return r.ok ? r.json() : null; })
-              .then(function (data) {
-                var hit = ((data && data.curricula) || []).filter(function (c) {
-                  return String(c.title || '').trim().toLowerCase() === String(s.class_name || '').trim().toLowerCase()
-                    && String(c.author_email || '').toLowerCase() === meLc;
-                })[0];
-                if (!hit) { openBlank(); return; }
-                fetch('/api/curriculum?action=link', {
-                  method: 'POST',
-                  headers: { 'Authorization': 'Bearer ' + cred2, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ session_number: sess, class_key: myClassLinkKey(s), curriculum_id: hit.id })
-                }).then(function () {
-                  delete _classLinksBySession[sess];
-                  if (typeof loadClassLinks === 'function') loadClassLinks();
-                  mcOpenPlan(hit.id, wantSupplies);
-                }).catch(openBlank);
-              })
-              .catch(openBlank);
-          };
+          var go = function () { openOrCreateClassPlan(s, sess, wantSupplies); };
           if (_classLinksBySession[sess]) go(); else ensureClassLinksForSession(sess, go);
         });
       });
@@ -24270,11 +24385,22 @@
     h += '</datalist>';
     h += '<div class="cls-field"><label class="cls-label">Task</label><input class="cl-input evs-f-title" type="text" maxlength="300" value="' + escapeAttr(task ? task.title : '') + '" placeholder="e.g. Order ice cream"></div>';
     h += '<div class="cls-field"><label class="cls-label">Assigned to (optional)</label><input class="cl-input evs-f-who" type="text" list="evsMemberList" value="' + escapeAttr(task ? (task.assigned_name || task.assigned_email) : '') + '" placeholder="Start typing a member’s name…"></div>';
-    h += '<div class="cls-field"><label class="cls-label">Due date (optional)</label><input class="cl-input evs-f-due" type="date" value="' + escapeAttr(task && task.due_date ? task.due_date : '') + '"></div>';
+    // #125-5 (Erin, 07-28): a date input gives no obvious way to EMPTY a
+    // date once set (mobile pickers have none at all) — the explicit ×
+    // clears it, and the save path already stores '' as no-date.
+    h += '<div class="cls-field"><label class="cls-label">Due date (optional)</label><div style="display:flex;gap:6px;align-items:center;">'
+      + '<input class="cl-input evs-f-due" type="date" value="' + escapeAttr(task && task.due_date ? task.due_date : '') + '">'
+      + '<button type="button" class="sc-btn evs-f-due-clear" title="Remove the date" aria-label="Remove the due date">× No date</button>'
+      + '</div></div>';
     h += '<div class="perm-chips rd-btn-row-end" style="margin-top:12px;"><button type="button" class="btn btn-primary btn-sm evs-f-save">' + (isEdit ? 'Save changes' : 'Add task') + '</button><span class="perm-status evs-f-status" aria-live="polite"></span></div>';
     el.innerHTML = h;
     var titleInp = el.querySelector('.evs-f-title');
     if (titleInp) titleInp.focus();
+    var dueClear = el.querySelector('.evs-f-due-clear');
+    if (dueClear) dueClear.addEventListener('click', function () {
+      var due = el.querySelector('.evs-f-due');
+      if (due) due.value = '';
+    });
     el.querySelector('.evs-f-save').addEventListener('click', function () {
       var st = el.querySelector('.evs-f-status');
       var title = el.querySelector('.evs-f-title').value.trim();
@@ -24386,6 +24512,8 @@
         var mineClaim = claims.filter(function (x) { return x.email === viewerEmail; })[0];
         var full = cap > 0 && claims.length >= cap;
         h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
+        // #125-6: per-spot details so members know what the action involves.
+        if (slot.note) h += '<span class="ws-opp-slotnote">' + escapeHtmlWs(slot.note) + '</span>';
         var meta = cap > 0 ? (claims.length + ' of ' + cap + ' filled') : (claims.length + ' signed up');
         if (claims.length) {
           meta += ' · ' + claims.map(function (c) {
@@ -24528,8 +24656,16 @@
           + '</select></div>';
         fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input evs-sd-notelabel" type="text" maxlength="120" value="' + escapeAttr(cfg.note_label || '') + '" placeholder="Allergy info — nut-free facility!"></div>';
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
-        var sl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) { return (r.label || '') + (r.capacity ? ' | ' + r.capacity : ''); }).join('\n');
-        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label | how many people (one per line)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Set Up — 11:30 am | 4\nServing — 12:30 pm | 3\nClean Up — 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+        // #125-6 (Erin, 07-28): spots carry an optional third field — a
+        // details note shown under the spot so members know what the
+        // action involves.
+        var sl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) {
+          var parts = [r.label || ''];
+          if (r.capacity || r.note) parts.push(r.capacity || '');
+          if (r.note) parts.push(r.note);
+          return parts.join(' | ');
+        }).join('\n');
+        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label | how many people | details (one per line, details optional)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Set Up — 11:30 am | 4 | Tables, chairs &amp; coolers from the kitchen\nServing — 12:30 pm | 3 | Scoop &amp; hand out; gloves provided\nClean Up — 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
       } else if (t === 'board') {
         // #123 (Colleen): board sections get an EDITABLE hint like signup
         // sections do — no bring machinery in the drawer. New sections
@@ -24598,7 +24734,9 @@
         if (config.mode === 'slots') {
           content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
             var p = ln.split('|');
-            return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0 };
+            // #125-6: third field = optional details note (pipes inside
+            // the note survive via the re-join).
+            return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() };
           });
           if (!content.length) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Add at least one spot'; return; }
         }
@@ -25113,14 +25251,14 @@
       .catch(function () { /* silent */ });
   }
 
-  // Inject one "🎉 <event> — tasks for you" row into every To Do card
-  // from _myEventTasks. Role-agnostic: the tasks are personal, so the row
-  // rides every role section's card (same duplicate-id quirk as the rest
-  // of the To Do machinery). Members without a role keep seeing their
-  // tasks in My Responsibilities on the dashboard.
+  // Render the "🎉 <event> — tasks for you" rows from _myEventTasks into
+  // the SHARED "Special Events To Do" card — exactly once (#125-4, Erin:
+  // the old version injected the same rows into EVERY role section's To
+  // Do card, so multi-role members saw them three times over). Members
+  // without a role see the shared card too, so nothing is lost.
   function updateEventTasksTodoItems() {
-    var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
-    if (!lists.length) return;
+    var list = document.getElementById('ws-shared-todo-list');
+    if (!list) return;
     var byEvent = {};
     (Array.isArray(_myEventTasks) ? _myEventTasks : []).forEach(function (t) {
       var g = byEvent[t.event_id] || (byEvent[t.event_id] = { name: t.event_name, due: null, n: 0 });
@@ -25134,37 +25272,39 @@
     (Array.isArray(_myEventPlanning) ? _myEventPlanning : []).forEach(function (p) {
       if (!byEvent[p.event_id]) planByEvent[p.event_id] = p;
     });
-    lists.forEach(function (list) {
-      list.querySelectorAll('li.ws-todo-evt').forEach(function (li) { li.remove(); });
-      var anchor = list.querySelector('li[id="ws-todo-empty"]');
-      Object.keys(byEvent).forEach(function (eid) {
-        var g = byEvent[eid];
-        var li = document.createElement('li');
-        li.className = 'ws-todo-evt';
-        li.id = 'ws-todo-evt-' + eid + '-item';
-        li.innerHTML = '<button type="button" class="ws-link-btn">'
-          + '<span class="ws-link-count">' + g.n + '</span><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
-          + '<span>' + escapeHtml(g.name) + ' — planning task' + (g.n === 1 ? '' : 's')
-          + (g.due ? ' · next due ' + boardCalFmtDate(g.due) : '') + '</span></button>';
-        li.querySelector('button').addEventListener('click', function () {
-          if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
-        });
-        list.insertBefore(li, anchor);
+    list.querySelectorAll('li.ws-todo-evt').forEach(function (li) { li.remove(); });
+    var rows = 0;
+    Object.keys(byEvent).forEach(function (eid) {
+      var g = byEvent[eid];
+      var li = document.createElement('li');
+      li.className = 'ws-todo-evt';
+      li.id = 'ws-todo-evt-' + eid + '-item';
+      li.innerHTML = '<button type="button" class="ws-link-btn">'
+        + '<span class="ws-link-count">' + g.n + '</span><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
+        + '<span>' + escapeHtml(g.name) + ' — planning task' + (g.n === 1 ? '' : 's')
+        + (g.due ? ' · next due ' + boardCalFmtDate(g.due) : '') + '</span></button>';
+      li.querySelector('button').addEventListener('click', function () {
+        if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
       });
-      Object.keys(planByEvent).forEach(function (eid) {
-        var p = planByEvent[eid];
-        var li = document.createElement('li');
-        li.className = 'ws-todo-evt';
-        li.id = 'ws-todo-evtplan-' + eid + '-item';
-        li.innerHTML = '<button type="button" class="ws-link-btn"><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
-          + '<span>Plan the ' + escapeHtml(p.event_name)
-          + (p.event_date ? ' — ' + boardCalFmtDate(p.event_date) : '') + '</span></button>';
-        li.querySelector('button').addEventListener('click', function () {
-          if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
-        });
-        list.insertBefore(li, anchor);
-      });
+      list.appendChild(li);
+      rows++;
     });
+    Object.keys(planByEvent).forEach(function (eid) {
+      var p = planByEvent[eid];
+      var li = document.createElement('li');
+      li.className = 'ws-todo-evt';
+      li.id = 'ws-todo-evtplan-' + eid + '-item';
+      li.innerHTML = '<button type="button" class="ws-link-btn"><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
+        + '<span>Plan the ' + escapeHtml(p.event_name)
+        + (p.event_date ? ' — ' + boardCalFmtDate(p.event_date) : '') + '</span></button>';
+      li.querySelector('button').addEventListener('click', function () {
+        if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
+      });
+      list.appendChild(li);
+      rows++;
+    });
+    var empty = document.getElementById('ws-shared-todo-empty');
+    if (empty) empty.hidden = rows > 0;
     updateEventSeatTodoItem();
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }

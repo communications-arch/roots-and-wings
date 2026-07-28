@@ -203,7 +203,7 @@ module.exports = async function handler(req, res) {
       const rows = await sql`
         SELECT id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                held_by, held_by_email, offer_type, donated_at, donated_to,
-               needs_restock, restock_flagged_at, restock_flagged_by,
+               needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                quantity_level, quantity_updated_at, quantity_updated_by
         FROM supply_closet
         ORDER BY category, sort_order, item_name
@@ -243,14 +243,18 @@ module.exports = async function handler(req, res) {
       }
 
       const flaggerLabel = user.name || user.email;
+      // #125-3: classroom-cabinet flags carry WHICH classroom (room name
+      // from Facilities > Rooms, picked client-side at flag time).
+      const flagRoom = String((req.body && req.body.room) || '').trim().slice(0, 120);
       const updated = await sql`
         UPDATE supply_closet
         SET needs_restock = TRUE,
             restock_flagged_at = NOW(),
-            restock_flagged_by = ${flaggerLabel}
+            restock_flagged_by = ${flaggerLabel},
+            restock_room = ${flagRoom}
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
-                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
 
@@ -259,7 +263,8 @@ module.exports = async function handler(req, res) {
         const coordEmail = await getRoleHolderEmail('Supply Coordinator');
         if (coordEmail) {
           const title = 'Supply needs restock: ' + existing[0].item_name;
-          const body = flaggerLabel + ' flagged ' + existing[0].item_name + ' as low/empty';
+          const body = flaggerLabel + ' flagged ' + existing[0].item_name + ' as low/empty'
+            + (flagRoom ? ' — ' + flagRoom : '');
           await sql`
             INSERT INTO notifications (recipient_email, type, title, body, link_url)
             VALUES (${coordEmail}, 'supply_low', ${title}, ${body}, ${'/members.html#supply-' + id})
@@ -286,10 +291,11 @@ module.exports = async function handler(req, res) {
         UPDATE supply_closet
         SET needs_restock = FALSE,
             restock_flagged_at = NULL,
-            restock_flagged_by = ''
+            restock_flagged_by = '',
+            restock_room = ''
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
-                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });
@@ -314,7 +320,7 @@ module.exports = async function handler(req, res) {
             quantity_updated_by = ${actingEmail}
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
-                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });
@@ -351,7 +357,7 @@ module.exports = async function handler(req, res) {
         VALUES (${item_name}, ${location}, ${category}, ${notes}, ${held_by}, ${held_by_email}, ${offer_type}, ${actingEmail})
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                   held_by, held_by_email, offer_type, donated_at, donated_to,
-                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
       return res.status(201).json({ item: inserted[0] });
@@ -400,7 +406,7 @@ module.exports = async function handler(req, res) {
         WHERE id = ${id}
         RETURNING id, item_name, location, category, notes, sort_order, updated_at, updated_by,
                   held_by, held_by_email, offer_type, donated_at, donated_to,
-                  needs_restock, restock_flagged_at, restock_flagged_by,
+                  needs_restock, restock_flagged_at, restock_flagged_by, restock_room,
                   quantity_level, quantity_updated_at, quantity_updated_by
       `;
       if (updated.length === 0) return res.status(404).json({ error: 'Item not found' });

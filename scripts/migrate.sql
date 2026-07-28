@@ -2231,3 +2231,9 @@ CREATE TABLE IF NOT EXISTS supply_loans (
 CREATE INDEX IF NOT EXISTS supply_loans_item_idx     ON supply_loans (item_id);
 CREATE INDEX IF NOT EXISTS supply_loans_owner_idx    ON supply_loans (owner_email);
 CREATE INDEX IF NOT EXISTS supply_loans_borrower_idx ON supply_loans (borrower_email);
+
+-- 2026-07-28 (#125-3, Erin): a classroom-cabinet restock flag needs to say
+-- WHICH classroom — the flagger picks a room (Facilities > Rooms) and it
+-- rides the flag until the coordinator restocks. Free text (room NAME, not
+-- FK) so a renamed/archived room never strands a flag.
+ALTER TABLE supply_closet ADD COLUMN IF NOT EXISTS restock_room TEXT NOT NULL DEFAULT '';

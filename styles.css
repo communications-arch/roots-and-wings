@@ -6786,6 +6786,13 @@ body > .rd-drawer { z-index: 10002; }
 }
 .ws-lending-head:first-child { margin-top: 0; }
 .ws-lending-overdue { color: var(--color-error); font-weight: 700; }
+/* Per-spot details on sign-up lists (#125-6) */
+.ws-opp-slotnote {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  margin: 1px 0 2px;
+}
 .sc-actions {
   display: flex;
   gap: 0.35rem;
