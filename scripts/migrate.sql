@@ -2270,6 +2270,20 @@ CREATE TABLE IF NOT EXISTS group_section_signups (
 );
 CREATE INDEX IF NOT EXISTS group_section_signups_section_idx ON group_section_signups (section_id);
 
+-- 2026-07-28 (Erin, later): the feature splits in two. Group liaisons own
+-- a SNACK LIST (year-long, per group — same section machinery, snack
+-- framing). CLASS LEADS get "Things to Bring" scoped to one scheduled
+-- class/session; slots may be marked everyone:true in content ("white
+-- t-shirt for tie-dye day") — announcement rows nobody claims. scope
+-- 'group' rows keep class_group; scope 'class' rows carry the class link.
+ALTER TABLE group_sections ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'group';
+ALTER TABLE group_sections DROP CONSTRAINT IF EXISTS group_sections_scope_check;
+ALTER TABLE group_sections ADD CONSTRAINT group_sections_scope_check CHECK (scope IN ('group', 'class'));
+ALTER TABLE group_sections ADD COLUMN IF NOT EXISTS class_submission_id INTEGER REFERENCES class_submissions(id) ON DELETE CASCADE;
+ALTER TABLE group_sections ADD COLUMN IF NOT EXISTS class_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE group_sections ADD COLUMN IF NOT EXISTS session_number INTEGER;
+CREATE INDEX IF NOT EXISTS group_sections_class_idx ON group_sections (class_submission_id);
+
 -- 2026-07-28 (#131, Lyndsey): the event-space CHECKLIST card gets the same
 -- binocular visibility as section cards. TRUE (default) = all members see
 -- it; FALSE = event committee + SEL + Sustaining Director only. Default

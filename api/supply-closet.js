@@ -484,10 +484,28 @@ function normalizeBringSection(body) {
     content = body.content.map(s => ({
       label: String((s && s.label) || '').trim().slice(0, 200),
       capacity: Math.max(0, Math.min(50, parseInt(s && s.capacity, 10) || 0)),
-      note: String((s && s.note) || '').trim().slice(0, 300)
+      note: String((s && s.note) || '').trim().slice(0, 300),
+      // "everyone brings this" rows (white t-shirt for tie-dye day) —
+      // announcement lines nobody claims.
+      everyone: !!(s && s.everyone)
     })).filter(s => s.label).slice(0, 30);
   }
   return { config, content };
+}
+
+// Class-scope gate: the class's lead (submitter), the VP / Afternoon
+// Class Liaison, or a super user.
+async function canManageBringClass(sql, email, classId) {
+  const rows = await sql`
+    SELECT LOWER(submitted_by_email) AS lead, class_name, scheduled_session, status
+    FROM class_submissions WHERE id = ${classId}
+  `;
+  if (rows.length === 0) return { ok: false };
+  const cls = rows[0];
+  let ok = cls.lead === email || isSuperUser(email);
+  if (!ok) ok = await canEditAsRole(email, 'Vice President');
+  if (!ok) ok = await canEditAsRole(email, 'Afternoon Class Liaison');
+  return { ok, cls };
 }
 
 async function handleBringActions(req, res, sql, user, actingEmail) {
@@ -498,7 +516,8 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
   if (req.query.action === 'bring-items') {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const sections = await sql`
-      SELECT id, class_group, type, title, config, content, is_open, sort_order
+      SELECT id, class_group, scope, class_submission_id, class_name, session_number,
+             type, title, config, content, is_open, sort_order
       FROM group_sections WHERE school_year = ${yr}
       ORDER BY class_group, sort_order, id
     `;
@@ -514,32 +533,48 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   if (req.query.action === 'bring-section-save') {
-    const group = String(body.class_group || '').trim();
-    if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
-    if (!(await canManageBringGroup(email, group))) {
-      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit this group’s lists.' });
+    const scope = body.scope === 'class' ? 'class' : 'group';
+    let group = '';
+    let classId = null, className = '', sessNum = null;
+    if (scope === 'group') {
+      group = String(body.class_group || '').trim();
+      if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
+      if (!(await canManageBringGroup(email, group))) {
+        return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit this group’s lists.' });
+      }
+    } else {
+      classId = parseInt(body.class_submission_id, 10);
+      if (!Number.isInteger(classId) || classId < 1) return res.status(400).json({ error: 'class_submission_id required' });
+      const gate = await canManageBringClass(sql, email, classId);
+      if (!gate.cls) return res.status(404).json({ error: 'Class not found' });
+      if (!gate.ok) return res.status(403).json({ error: 'Only the class lead (or VP / Afternoon Class Liaison) can edit this class’s list.' });
+      className = gate.cls.class_name || '';
+      sessNum = gate.cls.scheduled_session || null;
     }
-    const title = String(body.title || '').trim().slice(0, 200) || 'Things to Bring';
+    const title = String(body.title || '').trim().slice(0, 200) || (scope === 'class' ? 'Things to Bring' : 'Snack List');
     const { config, content } = normalizeBringSection(body);
     if (config.mode === 'slots' && content.length === 0) {
-      return res.status(400).json({ error: 'Add at least one spot (label | how many | details).' });
+      return res.status(400).json({ error: 'Add at least one item (item | how many | details).' });
     }
     const id = body.id != null ? parseInt(body.id, 10) : null;
     let row;
     if (Number.isInteger(id) && id > 0) {
+      // Scope/link fields are fixed at creation; edits touch content only.
       const upd = await sql`
         UPDATE group_sections
         SET title = ${title}, config = ${JSON.stringify(config)}::jsonb, content = ${JSON.stringify(content)}::jsonb,
             updated_by = ${email}, updated_at = NOW()
-        WHERE id = ${id} AND school_year = ${yr} AND class_group = ${group}
+        WHERE id = ${id} AND school_year = ${yr}
+          AND (${scope === 'group'} AND class_group = ${group} OR ${scope === 'class'} AND class_submission_id = ${classId})
         RETURNING *
       `;
       if (upd.length === 0) return res.status(404).json({ error: 'Section not found' });
       row = upd[0];
     } else {
       const ins = await sql`
-        INSERT INTO group_sections (school_year, class_group, title, config, content, updated_by)
-        VALUES (${yr}, ${group}, ${title}, ${JSON.stringify(config)}::jsonb, ${JSON.stringify(content)}::jsonb, ${email})
+        INSERT INTO group_sections (school_year, class_group, scope, class_submission_id, class_name, session_number, title, config, content, updated_by)
+        VALUES (${yr}, ${group}, ${scope}, ${classId}, ${className}, ${sessNum},
+                ${title}, ${JSON.stringify(config)}::jsonb, ${JSON.stringify(content)}::jsonb, ${email})
         RETURNING *
       `;
       row = ins[0];
@@ -550,11 +585,16 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
   if (req.query.action === 'bring-section-delete') {
     const id = parseInt(body.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
-    const rows = await sql`SELECT class_group FROM group_sections WHERE id = ${id} AND school_year = ${yr}`;
+    const rows = await sql`SELECT scope, class_group, class_submission_id FROM group_sections WHERE id = ${id} AND school_year = ${yr}`;
     if (rows.length === 0) return res.status(404).json({ error: 'Section not found' });
-    if (!(await canManageBringGroup(email, rows[0].class_group))) {
-      return res.status(403).json({ error: 'Only the group’s liaison (or VP) can remove this.' });
+    let allowed;
+    if (rows[0].scope === 'class') {
+      const gate = await canManageBringClass(sql, email, rows[0].class_submission_id);
+      allowed = gate.ok;
+    } else {
+      allowed = await canManageBringGroup(email, rows[0].class_group);
     }
+    if (!allowed) return res.status(403).json({ error: 'Only the list’s owner (or VP) can remove this.' });
     await sql`DELETE FROM group_sections WHERE id = ${id}`;
     return res.status(200).json({ ok: true });
   }
@@ -570,6 +610,7 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
       const idx = parseInt(body.slot_index, 10);
       const slots = Array.isArray(secs[0].content) ? secs[0].content : [];
       if (!Number.isInteger(idx) || idx < 0 || idx >= slots.length) return res.status(400).json({ error: 'slot_index required' });
+      if (slots[idx] && slots[idx].everyone) return res.status(400).json({ error: 'Everyone brings that one — no sign-up needed.' });
       const claims = await sql`SELECT LOWER(person_email) AS em FROM group_section_signups WHERE section_id = ${sid} AND slot_index = ${idx}`;
       if (claims.some(c => c.em === email)) return res.status(200).json({ ok: true, already: true });
       const cap = parseInt(slots[idx] && slots[idx].capacity, 10) || 0;

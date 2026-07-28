@@ -7511,6 +7511,13 @@
           html += '<span class="mf-sched-room">' + e.room + '</span>';
           html += '<span class="mf-sched-teacher">' + e.leader + '</span>';
           html += '</div>';
+          // #139 class scope: the lead's Things to Bring for this class,
+          // right under its row (dedup: once per class per family).
+          var cbKey = 'cls:' + String(e.name || '').toLowerCase();
+          if (!bringShownGroups[cbKey]) {
+            bringShownGroups[cbKey] = true;
+            html += renderClassBringBlock(e.name);
+          }
         });
       } else {
         html += '<div class="mf-sched-row mf-sched-empty">';
@@ -9510,15 +9517,16 @@
       }
     },
     'group-bring': {
-      // #139 (Lyndsey/Erin, 07-28): group liaisons post dated, sign-up
-      // style "Things to Bring" items for their age group. Families claim
-      // them under the kid's class on Kid Schedule; claims feed the
-      // Packing List (#138). roleGate '*' — widgetListFor's liaison
-      // special-case is the only list that includes this card.
-      title: 'Things to Bring',
+      // #139 final form (Erin, 07-28 evening): the liaison card is the
+      // group's SNACK LIST — the liaison owns snacks for the year.
+      // Class-specific "Things to Bring" belongs to class leads (My
+      // Classes card). Families sign up under the kid's class on Kid
+      // Schedule; claims feed the Packing List (#138). roleGate '*' —
+      // widgetListFor's liaison special-case is the only list with this.
+      title: 'Snack List',
       roleGate: ['*'],
       render: function () {
-        var h = '<p class="ws-body-hint">What your group needs at co-op — one family signs up per spot. Items show under the kid’s class on each family’s Kid Schedule and on their Packing List.</p>';
+        var h = '<p class="ws-body-hint">You’re in charge of snacks! Post sign-ups — one family per snack day works well — and families claim spots from their Kid Schedule. Claims land on their Packing List.</p>';
         h += '<div id="ws-bring-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
         return h;
       },
@@ -10488,7 +10496,7 @@
     'ways-to-help': 'Open volunteer roles and ways to pitch in this year, plus your own participation so far.',
     'resources': 'Quick links to co-op resources — the Member Handbook, forms, curricula, and shared drives.',
     'shared-todos': 'Special-event work waiting on you personally — tasks you’ve been assigned and events you’re helping plan. Shows once here instead of repeating under each of your roles.',
-    'group-bring': 'Things your group needs brought to co-op — add items with the co-op day they’re needed and how many families should sign up. Families claim them from their Kid Schedule, and claimed items land on their Packing List.',
+    'group-bring': 'Your group’s snack sign-ups — the liaison is in charge of snacks for the year. Post spots (one family per snack day works well); families claim them from their Kid Schedule and claimed days land on their Packing List.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
@@ -18819,6 +18827,8 @@
       var sections = (d.sections || []).map(function (s) {
         return {
           id: s.id, class_group: s.class_group, type: 'signup',
+          scope: s.scope || 'group', class_submission_id: s.class_submission_id || null,
+          class_name: s.class_name || '', session_number: s.session_number || null,
           title: s.title || '', config: s.config || {}, content: s.content || [],
           is_open: s.is_open !== false, signups: byShaped[s.id] || []
         };
@@ -18836,7 +18846,20 @@
   function bringSectionsForGroup(group) {
     if (!_groupBring) return [];
     var g = String(group || '').toLowerCase();
-    return _groupBring.sections.filter(function (s) { return String(s.class_group || '').toLowerCase() === g; });
+    return _groupBring.sections.filter(function (s) {
+      return s.scope !== 'class' && String(s.class_group || '').toLowerCase() === g;
+    });
+  }
+  // Class-scope sections for one scheduled class (matched by name +
+  // session — the elective rows on Kid Schedule carry names, not ids).
+  function bringSectionsForClass(className, sessionNumber) {
+    if (!_groupBring) return [];
+    var n = String(className || '').trim().toLowerCase();
+    return _groupBring.sections.filter(function (s) {
+      return s.scope === 'class'
+        && String(s.class_name || '').trim().toLowerCase() === n
+        && (!s.session_number || s.session_number === sessionNumber);
+    });
   }
   function bringDateStr(d) { return String(d || '').slice(0, 10); }
   var GROUP_BRING_ACTS = { claimAction: 'group-slot-claim', removeAction: 'group-signup-remove', addAction: 'group-bring-add', formPrefix: 'g' };
@@ -18857,6 +18880,29 @@
       h += '<div class="mf-bring-block">';
       h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' '
         + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(group)
+        + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
+      h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
+      h += '</div>';
+    });
+    return h;
+  }
+
+  // Class-scope Things to Bring under a kid's elective row (matched by
+  // class name + current session; sections carry the id but the elective
+  // rows only know names).
+  function renderClassBringBlock(className) {
+    if (!_groupBring) return '';
+    var today = new Date().toISOString().slice(0, 10);
+    var secs = bringSectionsForClass(className, currentSession).filter(function (s) {
+      var d = bringDateStr((s.config || {}).bring_date);
+      return !d || d >= today;
+    });
+    if (!secs.length) return '';
+    var h = '';
+    secs.forEach(function (s) {
+      h += '<div class="mf-bring-block">';
+      h += '<div class="mf-bring-head">' + brandIconImg('waysToHelp', 'ag-icon') + ' '
+        + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(className)
         + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
       h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
       h += '</div>';
@@ -18974,7 +19020,7 @@
       groups.forEach(function (g) {
         if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(g) + '</p>';
         var secs = bringSectionsForGroup(g);
-        if (!secs.length) h += '<p class="ws-empty">Nothing posted yet — add the first list below.</p>';
+        if (!secs.length) h += '<p class="ws-empty">No snack sign-ups yet — add the first list below.</p>';
         secs.forEach(function (s) {
           var cfg = s.config || {};
           h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(s.title || 'Things to Bring') + '</strong>'
@@ -18991,40 +19037,49 @@
           h += '<div class="mf-bring-block">' + renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS) + '</div>';
         });
         h += '<div data-bring-formhost="' + escapeAttr(g) + '"></div>';
-        h += '<p style="margin:8px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm ws-bring-addsec" data-group="' + escapeAttr(g) + '">+ Add a Things to Bring list</button></p>';
+        h += '<p style="margin:8px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm ws-bring-addsec" data-group="' + escapeAttr(g) + '">+ Add a snack sign-up</button></p>';
       });
       target.innerHTML = h;
       wireBringCard(target);
     });
   }
 
-  // Section editor — the Collaboration "Add Section" sign-up fields
-  // (Erin, 07-28: "model it after Add Section"): title, bring-vs-spots
-  // mode, hint, note label, spots as `label | how many | details` lines —
-  // plus the co-op-day picker (#139's date requirement, per section).
-  function renderBringSectionForm(group, section) {
+  // Section editor — the Collaboration "Add Section" sign-up fields.
+  // ctx.scope 'group' = the liaison SNACK LIST (year-long — any session's
+  // co-op days); ctx.scope 'class' = a class lead's Things to Bring
+  // (single session: the day picker only offers that session, and slots
+  // support `item | all | note` = everyone brings it). Dates are co-op
+  // days ONLY (Erin: no free-date picker).
+  function renderBringSectionForm(ctx, section) {
+    var isClass = ctx.scope === 'class';
     var cfg = (section && section.config) || {};
-    var mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+    var mode = section ? (cfg.mode === 'slots' ? 'slots' : 'bring') : 'slots';
     var slotLines = (Array.isArray(section && section.content) ? section.content : []).map(function (r) {
       var parts = [r.label || ''];
-      if (r.capacity || r.note) parts.push(r.capacity || '');
+      var capTok = r.everyone ? 'all' : (r.capacity || '');
+      if (capTok || r.note) parts.push(capTok);
       if (r.note) parts.push(r.note);
       return parts.join(' | ');
     }).join('\n');
     var today = new Date().toISOString().slice(0, 10);
-    var h = '<div class="sc-edit-form" data-bring-group="' + escapeAttr(group) + '" data-bring-id="' + (section ? section.id : '') + '">';
-    h += '<div class="cls-field"><label class="cls-label">List title</label><input class="cl-input ws-bs-title" maxlength="200" placeholder="Things to Bring — first co-op day" value="' + escapeAttr((section && section.title) || '') + '"></div>';
+    var h = '<div class="sc-edit-form" data-bring-scope="' + ctx.scope + '" data-bring-group="' + escapeAttr(ctx.group || '') + '" data-bring-class="' + (ctx.classId || '') + '" data-bring-id="' + (section ? section.id : '') + '">';
+    h += '<div class="cls-field"><label class="cls-label">List title</label><input class="cl-input ws-bs-title" maxlength="200" placeholder="' + (isClass ? 'Things to Bring — Tie-Dye Day' : 'Snacks — Session 1') + '" value="' + escapeAttr((section && section.title) || '') + '"></div>';
     h += '<div class="cls-field"><label class="cls-label">Sign-up style</label><select class="cl-input ws-bs-mode">'
+      + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>' + (isClass ? 'Specific items — spots to claim, or “all” = everyone brings it' : 'Specific spots — e.g. one family per snack day') + '</option>'
       + '<option value="bring"' + (mode === 'bring' ? ' selected' : '') + '>Bring something — families add what they’ll bring</option>'
-      + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Specific items — fixed spots families claim</option>'
       + '</select></div>';
     h += '<div class="cls-field ws-bs-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input ws-bs-notelabel" maxlength="120" placeholder="Allergy info — nut-free facility!" value="' + escapeAttr(cfg.note_label || '') + '"></div>';
-    h += '<div class="cls-field"><label class="cls-label">Hint shown to families (optional)</label><input class="cl-input ws-bs-hint" maxlength="300" placeholder="We’re building bird feeders — save your recyclables!" value="' + escapeAttr(cfg.hint || '') + '"></div>';
-    h += '<div class="cls-field ws-bs-slots-only"><label class="cls-label">Spots — item | how many families | details (one per line)</label><textarea class="cl-input cls-textarea ws-bs-lines" rows="5" placeholder="Egg cartons | 3 | clean &amp; empty, a dozen each\nOld magazines | 2\nScissors | 1 | kid-safe if possible">' + escapeHtmlWs(slotLines) + '</textarea></div>';
+    h += '<div class="cls-field"><label class="cls-label">Hint shown to families (optional)</label><input class="cl-input ws-bs-hint" maxlength="300" placeholder="' + (isClass ? 'We’re tie-dying! One white t-shirt per kid.' : 'Snacks for the whole group — nut-free, plan for ~15 kids.') + '" value="' + escapeAttr(cfg.hint || '') + '"></div>';
+    h += '<div class="cls-field ws-bs-slots-only"><label class="cls-label">' + (isClass
+        ? 'Items — item | how many families (or “all” = everyone) | details'
+        : 'Spots — one line per snack day: label | how many | details')
+      + '</label><textarea class="cl-input cls-textarea ws-bs-lines" rows="5" placeholder="' + (isClass
+        ? 'White t-shirt | all | one per kid, pre-washed\nRubber bands | 2 | a big bag each\nSquirt bottles | 3'
+        : 'Snacks — 8/19 | 1\nSnacks — 8/26 | 1\nSnacks — 9/2 | 1') + '">' + escapeHtmlWs(slotLines) + '</textarea></div>';
     h += '<div class="cls-field"><label class="cls-label">Needed for (co-op day, optional)</label>';
-    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
     h += '<select class="cl-input ws-bs-date" style="max-width:240px;"><option value="">— any time —</option>';
     for (var sn = 1; sn <= 5; sn++) {
+      if (isClass && ctx.session && sn !== ctx.session) continue; // class lists live in ONE session
       var dates = (typeof getCoopDatesInSession === 'function') ? getCoopDatesInSession(sn) : [];
       var future = dates.filter(function (d) { return d >= today; });
       if (!future.length) continue;
@@ -19035,9 +19090,7 @@
       });
       h += '</optgroup>';
     }
-    h += '</select>';
-    h += '<label style="font-size:0.85em;">or <input type="date" class="cl-input ws-bs-date-custom" min="' + today + '"></label>';
-    h += '</div></div>';
+    h += '</select></div>';
     h += '<div class="sc-edit-actions">'
       + '<button type="button" class="sc-btn ws-bring-cancel">Cancel</button>'
       + '<button type="button" class="sc-save ws-bs-save">' + (section ? 'Save changes' : 'Add list') + '</button></div>';
@@ -19060,24 +19113,30 @@
       if (btn._wired) return; btn._wired = true;
       btn.addEventListener('click', function () {
         var form = btn.closest('[data-bring-group]');
+        var scope = form.getAttribute('data-bring-scope') === 'class' ? 'class' : 'group';
         var mode = (form.querySelector('.ws-bs-mode') || {}).value === 'slots' ? 'slots' : 'bring';
         var lines = String((form.querySelector('.ws-bs-lines') || {}).value || '');
         var content = mode === 'slots'
           ? lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
               var p = ln.split('|');
-              return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() };
+              // second field 'all'/'everyone' = everyone brings it (class lists).
+              var capRaw = (p[1] || '').trim();
+              var everyone = /^(all|everyone|\*)$/i.test(capRaw);
+              return { label: (p[0] || '').trim(), capacity: everyone ? 0 : (parseInt(capRaw, 10) || 0), note: p.slice(2).join('|').trim(), everyone: everyone };
             })
           : [];
-        if (mode === 'slots' && !content.length) { alert('Add at least one spot (item | how many | details).'); return; }
+        if (mode === 'slots' && !content.length) { alert('Add at least one item (item | how many | details).'); return; }
         var payload = {
           id: form.getAttribute('data-bring-id') ? parseInt(form.getAttribute('data-bring-id'), 10) : null,
+          scope: scope,
           class_group: form.getAttribute('data-bring-group'),
+          class_submission_id: form.getAttribute('data-bring-class') ? parseInt(form.getAttribute('data-bring-class'), 10) : null,
           title: (form.querySelector('.ws-bs-title') || {}).value || '',
           config: {
             mode: mode,
             hint: (form.querySelector('.ws-bs-hint') || {}).value || '',
             note_label: (form.querySelector('.ws-bs-notelabel') || {}).value || '',
-            bring_date: ((form.querySelector('.ws-bs-date-custom') || {}).value) || ((form.querySelector('.ws-bs-date') || {}).value) || ''
+            bring_date: ((form.querySelector('.ws-bs-date') || {}).value) || ''
           },
           content: content
         };
@@ -19091,14 +19150,20 @@
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
             if (!res.ok) { alert(res.data.error || 'Save failed'); btn.disabled = false; return; }
-            loadGroupBringCard();
+            if (scope === 'class' && typeof refreshClassBringDrawer === 'function') refreshClassBringDrawer();
+            else loadGroupBringCard();
+            loadGroupBringItems(true);
           })
           .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
       });
     });
     target.querySelectorAll('.ws-bring-cancel').forEach(function (btn) {
       if (btn._wired) return; btn._wired = true;
-      btn.addEventListener('click', function () { loadGroupBringCard(); });
+      btn.addEventListener('click', function () {
+        var form = btn.closest('[data-bring-group]');
+        if (form && form.getAttribute('data-bring-scope') === 'class' && typeof refreshClassBringDrawer === 'function') refreshClassBringDrawer();
+        else loadGroupBringCard();
+      });
     });
   }
 
@@ -19108,7 +19173,7 @@
         var g = btn.getAttribute('data-group');
         var host = target.querySelector('[data-bring-formhost="' + g + '"]');
         if (!host) return;
-        host.innerHTML = renderBringSectionForm(g, null);
+        host.innerHTML = renderBringSectionForm({ scope: 'group', group: g }, null);
         wireBringForm(target);
         var t = host.querySelector('.ws-bs-title');
         if (t) { try { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} t.focus(); }
@@ -19142,13 +19207,99 @@
         var host = target.querySelector('[data-bring-formhost="' + escapeAttr(s.class_group) + '"]')
           || target.querySelector('[data-bring-formhost]');
         if (!host) return;
-        host.innerHTML = renderBringSectionForm(s.class_group, s);
+        host.innerHTML = renderBringSectionForm({ scope: 'group', group: s.class_group }, s);
         wireBringForm(target);
         var t = host.querySelector('.ws-bs-title');
         if (t) { try { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} t.focus(); }
       });
     });
     wireBringForm(target);
+  }
+
+  // ── Class-lead "Things to Bring" drawer (#139 class scope) ──
+  // Opened from the My Classes card; lists this class's lists with the
+  // family-facing preview + the collab-style editor. Single session, and
+  // slots accept `item | all | note` = everyone brings it.
+  var _classBringSub = null;
+  function showClassBringDrawer(sub) {
+    _classBringSub = sub;
+    openReportDrawer({
+      title: 'Things to Bring — ' + (sub.class_name || 'your class'),
+      bodyId: 'class-bring-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>',
+      onClose: function () { _classBringSub = null; }
+    });
+    refreshClassBringDrawer();
+  }
+  window.showClassBringDrawer = showClassBringDrawer;
+
+  function refreshClassBringDrawer() {
+    var body = document.getElementById('class-bring-body');
+    var sub = _classBringSub;
+    if (!body || !sub) return;
+    loadGroupBringItems(true, function () {
+      body = document.getElementById('class-bring-body');
+      if (!body || !_groupBring) return;
+      var secs = _groupBring.sections.filter(function (s) {
+        return s.scope === 'class' && s.class_submission_id === sub.id;
+      });
+      var h = '<p class="ws-body-hint">Sign-up spots families claim, or mark an item “all” so <strong>everyone</strong> brings it (white t-shirt for tie-dye day). Families see this under the class on their Kid Schedule, and it lands on their Packing List.</p>';
+      if (!secs.length) h += '<p class="ws-empty">Nothing posted for this class yet.</p>';
+      secs.forEach(function (s) {
+        h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(s.title || 'Things to Bring') + '</strong>'
+          + '<span class="ws-lending-sub">' + (s.signups || []).length + ' sign-up' + ((s.signups || []).length === 1 ? '' : 's')
+          + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</span></span>';
+        h += '<span class="ws-lending-actions">'
+          + '<button type="button" class="sc-btn cb-edit" data-id="' + s.id + '">Edit</button>'
+          + '<button type="button" class="sc-btn sc-btn-del cb-del" data-id="' + s.id + '">Delete</button></span></div>';
+        h += '<div class="mf-bring-block">' + renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS) + '</div>';
+      });
+      h += '<div data-bring-formhost="class"></div>';
+      h += '<p style="margin:8px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm" id="cb-addsec">+ Add a Things to Bring list</button></p>';
+      body.innerHTML = h;
+
+      var ctx = { scope: 'class', classId: sub.id, session: sub.scheduled_session };
+      var addBtn = body.querySelector('#cb-addsec');
+      if (addBtn) addBtn.addEventListener('click', function () {
+        var host = body.querySelector('[data-bring-formhost="class"]');
+        if (!host) return;
+        host.innerHTML = renderBringSectionForm(ctx, null);
+        wireBringForm(body);
+        var t = host.querySelector('.ws-bs-title');
+        if (t) t.focus();
+      });
+      body.querySelectorAll('.cb-edit').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = parseInt(btn.getAttribute('data-id'), 10);
+          var s = _groupBring.sections.filter(function (x) { return x.id === id; })[0];
+          var host = body.querySelector('[data-bring-formhost="class"]');
+          if (!s || !host) return;
+          host.innerHTML = renderBringSectionForm(ctx, s);
+          wireBringForm(body);
+        });
+      });
+      body.querySelectorAll('.cb-del').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var self = this;
+          rwArmTwoStep(self, 'delete', function () {
+            var payload = { id: parseInt(self.getAttribute('data-id'), 10) };
+            var vaEmail = supplyViewAsEmail();
+            if (vaEmail) payload.view_as = vaEmail;
+            fetch('/api/supply-closet?action=bring-section-delete', {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res) {
+                if (!res.ok) { alert(res.data.error || 'Delete failed'); return; }
+                refreshClassBringDrawer();
+              })
+              .catch(function () { alert('Network error — try again.'); });
+          });
+        });
+      });
+      wireBringForm(body);
+    });
   }
 
   // ── #138: Reminders — Packing List + Retrieve Items ──
@@ -19196,12 +19347,14 @@
     h += '<div id="pl-lending"><h2 class="ws-lending-head">Lending Library</h2><p class="ws-empty">Checking loans…</p></div>';
     body.innerHTML = h;
 
-    // ① Your family's group-section sign-ups due that day (or undated) —
-    // slots you claimed and things you said you'd bring.
+    // ① Your family's section sign-ups due that day (or undated) — snack
+    // spots and class items you claimed, things you said you'd bring,
+    // PLUS "everyone brings" items for classes your kids are in.
     loadGroupBringItems(false, function () {
       var el = document.getElementById('pl-family');
       if (!el || !_groupBring) return;
       var lines = [];
+      var sourceOf = function (s) { return s.scope === 'class' ? (s.class_name || 'class') : s.class_group; };
       _groupBring.sections.forEach(function (s) {
         var d = bringDateStr((s.config || {}).bring_date);
         if (d && d !== next.date) return;
@@ -19212,9 +19365,40 @@
           var label = slot ? slot.label : su.item_text;
           if (!label) return;
           lines.push('<li>' + escapeHtml(label)
-            + ' <em>— ' + escapeHtml(s.class_group)
+            + ' <em>— ' + escapeHtml(sourceOf(s))
             + (slot && slot.note ? ' · ' + escapeHtml(slot.note) : '')
             + (su.note ? ' · ' + escapeHtml(su.note) : '') + '</em></li>');
+        });
+      });
+      // Everyone-brings items for my kids' classes this session.
+      var meEmail2 = String(getActiveEmail() || '').toLowerCase();
+      var fam2 = null;
+      (Array.isArray(FAMILIES) ? FAMILIES : []).some(function (f) {
+        if (!f) return false;
+        var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+        if (logins.some(function (e2) { return String(e2 || '').toLowerCase() === meEmail2; })) { fam2 = f; return true; }
+        return false;
+      });
+      var kidClassNames = {};
+      if (fam2 && Array.isArray(fam2.kids) && typeof getKidElectives === 'function') {
+        fam2.kids.forEach(function (kid) {
+          var kidFull = kid.name + ' ' + (kid.lastName || fam2.name);
+          (getKidElectives(kidFull) || []).forEach(function (e2) {
+            if (e2 && e2.name) kidClassNames[String(e2.name).trim().toLowerCase()] = e2.name;
+          });
+        });
+      }
+      _groupBring.sections.forEach(function (s) {
+        if (s.scope !== 'class') return;
+        if (s.session_number && s.session_number !== next.session) return;
+        if (!kidClassNames[String(s.class_name || '').trim().toLowerCase()]) return;
+        var d = bringDateStr((s.config || {}).bring_date);
+        if (d && d !== next.date) return;
+        (Array.isArray(s.content) ? s.content : []).forEach(function (slot) {
+          if (!slot.everyone || !slot.label) return;
+          lines.push('<li>' + escapeHtml(slot.label)
+            + ' <em>— ' + escapeHtml(s.class_name) + ' · everyone brings this'
+            + (slot.note ? ' · ' + escapeHtml(slot.note) : '') + '</em></li>');
         });
       });
       el.innerHTML = '<h2 class="ws-lending-head">For your family</h2>'
@@ -23553,6 +23737,9 @@
         html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
         html += '<button type="button" class="sc-btn mf-myclasses-supply" data-idx="' + idx + '">' + brandIconImg('supplyCloset', 'ag-icon') + ' Supply list</button>';
         html += '<button type="button" class="sc-btn mf-myclasses-plan" data-idx="' + idx + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson plan</button>';
+        // #139 (class scope): the lead's Things to Bring list for THIS
+        // class/session — sign-up spots or "everyone brings" items.
+        html += '<button type="button" class="sc-btn mf-myclasses-bring" data-idx="' + idx + '">' + brandIconImg('waysToHelp', 'ag-icon') + ' Things to Bring</button>';
         // #42: owners can edit an approved class — the modal warns that
         // saving sends it back for re-approval.
         html += '<button type="button" class="evs-ico-btn mf-myclasses-edit" data-idx="' + idx + '" aria-label="Edit class" title="Edit this class">' + ICON_SVG.pencil + '</button>';
@@ -23592,6 +23779,12 @@
     }
     mcWire('.mf-myclasses-supply', true);
     mcWire('.mf-myclasses-plan', false);
+    body.querySelectorAll('.mf-myclasses-bring').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var s = mine[parseInt(this.getAttribute('data-idx'), 10)];
+        if (s && typeof showClassBringDrawer === 'function') showClassBringDrawer(s);
+      });
+    });
     // #42: edit an approved class straight from My Classes — same form
     // the Class Ideas card uses; the server reverts it to 'submitted'.
     body.querySelectorAll('.mf-myclasses-edit').forEach(function (btn) {
@@ -25341,6 +25534,14 @@
     if (cfg.mode === 'slots') {
       h += '<ul class="ws-opportunities">';
       (Array.isArray(s.content) ? s.content : []).forEach(function (slot, idx) {
+        // "Everyone brings this" rows (class Things to Bring — white
+        // t-shirt for tie-dye day): an announcement, not a sign-up.
+        if (slot.everyone) {
+          h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
+          if (slot.note) h += '<span class="ws-opp-slotnote">' + escapeHtmlWs(slot.note) + '</span>';
+          h += '</span><span class="ws-opp-committee">Everyone brings this</span></li>';
+          return;
+        }
         var claims = (s.signups || []).filter(function (x) { return x.slot_index === idx; });
         var cap = parseInt(slot.capacity, 10) || 0;
         var mineClaim = claims.filter(function (x) { return x.email === viewerEmail; })[0];
