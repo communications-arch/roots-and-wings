@@ -468,6 +468,28 @@ async function canManageBringGroup(email, group) {
   return await canEditAsRole(email, group + ' Morning Class Liaison');
 }
 
+// Slots arrive as [{label, capacity, note}] (same shape the collab
+// section editor produces); config carries mode/hint/note_label plus the
+// per-section co-op day (bring_date).
+function normalizeBringSection(body) {
+  const cfgIn = (body.config && typeof body.config === 'object') ? body.config : {};
+  const config = {
+    mode: cfgIn.mode === 'slots' ? 'slots' : 'bring',
+    hint: String(cfgIn.hint || '').trim().slice(0, 300),
+    note_label: String(cfgIn.note_label || '').trim().slice(0, 120),
+    bring_date: /^\d{4}-\d{2}-\d{2}$/.test(String(cfgIn.bring_date || '')) ? cfgIn.bring_date : ''
+  };
+  let content = [];
+  if (config.mode === 'slots' && Array.isArray(body.content)) {
+    content = body.content.map(s => ({
+      label: String((s && s.label) || '').trim().slice(0, 200),
+      capacity: Math.max(0, Math.min(50, parseInt(s && s.capacity, 10) || 0)),
+      note: String((s && s.note) || '').trim().slice(0, 300)
+    })).filter(s => s.label).slice(0, 30);
+  }
+  return { config, content };
+}
+
 async function handleBringActions(req, res, sql, user, actingEmail) {
   const email = String(actingEmail).toLowerCase();
   const yr = activeSchoolYear(new Date());
@@ -475,89 +497,109 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
 
   if (req.query.action === 'bring-items') {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-    const items = await sql`
-      SELECT id, class_group, label, note, capacity, bring_date, created_by
-      FROM group_bring_items WHERE school_year = ${yr}
-      ORDER BY bring_date NULLS LAST, id
+    const sections = await sql`
+      SELECT id, class_group, type, title, config, content, is_open, sort_order
+      FROM group_sections WHERE school_year = ${yr}
+      ORDER BY class_group, sort_order, id
     `;
-    const signups = await sql`
-      SELECT s.id, s.item_id, s.person_email, s.person_name
-      FROM group_bring_signups s
-      JOIN group_bring_items i ON i.id = s.item_id
-      WHERE i.school_year = ${yr}
-      ORDER BY s.created_at
-    `;
-    return res.status(200).json({ items, signups, me: email, school_year: yr });
+    const ids = sections.map(s => s.id);
+    const signups = ids.length ? await sql`
+      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      FROM group_section_signups WHERE section_id = ANY(${ids})
+      ORDER BY created_at, id
+    ` : [];
+    return res.status(200).json({ sections, signups, me: email, school_year: yr });
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  if (req.query.action === 'bring-item-save') {
+  if (req.query.action === 'bring-section-save') {
     const group = String(body.class_group || '').trim();
     if (BRING_GROUPS.indexOf(group) === -1) return res.status(400).json({ error: 'Unknown group' });
     if (!(await canManageBringGroup(email, group))) {
-      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit this group’s list.' });
+      return res.status(403).json({ error: 'Only the ' + group + ' Liaison (or VP) can edit this group’s lists.' });
     }
-    const label = String(body.label || '').trim().slice(0, 200);
-    if (!label) return res.status(400).json({ error: 'What should families bring?' });
-    const note = String(body.note || '').trim().slice(0, 300);
-    let capacity = parseInt(body.capacity, 10);
-    if (!Number.isFinite(capacity) || capacity < 1) capacity = 1;
-    if (capacity > 30) capacity = 30;
-    const bring_date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.bring_date || '')) ? body.bring_date : null;
+    const title = String(body.title || '').trim().slice(0, 200) || 'Things to Bring';
+    const { config, content } = normalizeBringSection(body);
+    if (config.mode === 'slots' && content.length === 0) {
+      return res.status(400).json({ error: 'Add at least one spot (label | how many | details).' });
+    }
     const id = body.id != null ? parseInt(body.id, 10) : null;
     let row;
     if (Number.isInteger(id) && id > 0) {
       const upd = await sql`
-        UPDATE group_bring_items
-        SET label = ${label}, note = ${note}, capacity = ${capacity}, bring_date = ${bring_date}, updated_at = NOW()
+        UPDATE group_sections
+        SET title = ${title}, config = ${JSON.stringify(config)}::jsonb, content = ${JSON.stringify(content)}::jsonb,
+            updated_by = ${email}, updated_at = NOW()
         WHERE id = ${id} AND school_year = ${yr} AND class_group = ${group}
         RETURNING *
       `;
-      if (upd.length === 0) return res.status(404).json({ error: 'Item not found' });
+      if (upd.length === 0) return res.status(404).json({ error: 'Section not found' });
       row = upd[0];
     } else {
       const ins = await sql`
-        INSERT INTO group_bring_items (school_year, class_group, label, note, capacity, bring_date, created_by)
-        VALUES (${yr}, ${group}, ${label}, ${note}, ${capacity}, ${bring_date}, ${email})
+        INSERT INTO group_sections (school_year, class_group, title, config, content, updated_by)
+        VALUES (${yr}, ${group}, ${title}, ${JSON.stringify(config)}::jsonb, ${JSON.stringify(content)}::jsonb, ${email})
         RETURNING *
       `;
       row = ins[0];
     }
-    return res.status(200).json({ item: row });
+    return res.status(200).json({ section: row });
   }
 
-  if (req.query.action === 'bring-item-delete') {
+  if (req.query.action === 'bring-section-delete') {
     const id = parseInt(body.id, 10);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
-    const rows = await sql`SELECT class_group FROM group_bring_items WHERE id = ${id} AND school_year = ${yr}`;
-    if (rows.length === 0) return res.status(404).json({ error: 'Item not found' });
+    const rows = await sql`SELECT class_group FROM group_sections WHERE id = ${id} AND school_year = ${yr}`;
+    if (rows.length === 0) return res.status(404).json({ error: 'Section not found' });
     if (!(await canManageBringGroup(email, rows[0].class_group))) {
       return res.status(403).json({ error: 'Only the group’s liaison (or VP) can remove this.' });
     }
-    await sql`DELETE FROM group_bring_items WHERE id = ${id}`;
+    await sql`DELETE FROM group_sections WHERE id = ${id}`;
     return res.status(200).json({ ok: true });
   }
 
   if (req.query.action === 'bring-claim') {
-    const itemId = parseInt(body.item_id, 10);
-    if (!Number.isInteger(itemId) || itemId < 1) return res.status(400).json({ error: 'item_id required' });
-    const items = await sql`SELECT capacity FROM group_bring_items WHERE id = ${itemId} AND school_year = ${yr}`;
-    if (items.length === 0) return res.status(404).json({ error: 'Item not found' });
-    const existing = await sql`SELECT id, LOWER(person_email) AS em FROM group_bring_signups WHERE item_id = ${itemId}`;
-    if (existing.some(s => s.em === email)) return res.status(200).json({ ok: true, already: true });
-    if (existing.length >= (items[0].capacity || 1)) {
-      return res.status(409).json({ error: 'All spots for this item are covered — thank you!' });
-    }
+    const sid = parseInt(body.section_id, 10);
+    if (!Number.isInteger(sid) || sid < 1) return res.status(400).json({ error: 'section_id required' });
+    const secs = await sql`SELECT config, content FROM group_sections WHERE id = ${sid} AND school_year = ${yr}`;
+    if (secs.length === 0) return res.status(404).json({ error: 'Section not found' });
+    const cfg = secs[0].config || {};
     const name = String(body.person_name || '').trim().slice(0, 200) || user.name || email;
-    await sql`INSERT INTO group_bring_signups (item_id, person_email, person_name) VALUES (${itemId}, ${email}, ${name})`;
+    if (cfg.mode === 'slots') {
+      const idx = parseInt(body.slot_index, 10);
+      const slots = Array.isArray(secs[0].content) ? secs[0].content : [];
+      if (!Number.isInteger(idx) || idx < 0 || idx >= slots.length) return res.status(400).json({ error: 'slot_index required' });
+      const claims = await sql`SELECT LOWER(person_email) AS em FROM group_section_signups WHERE section_id = ${sid} AND slot_index = ${idx}`;
+      if (claims.some(c => c.em === email)) return res.status(200).json({ ok: true, already: true });
+      const cap = parseInt(slots[idx] && slots[idx].capacity, 10) || 0;
+      if (cap > 0 && claims.length >= cap) return res.status(409).json({ error: 'That spot just filled — thank you though!' });
+      await sql`INSERT INTO group_section_signups (section_id, slot_index, person_email, person_name)
+                VALUES (${sid}, ${idx}, ${email}, ${name})`;
+    } else {
+      const item_text = String(body.item_text || '').trim().slice(0, 200);
+      if (!item_text) return res.status(400).json({ error: 'Say what you’ll bring.' });
+      const note = String(body.note || '').trim().slice(0, 300);
+      await sql`INSERT INTO group_section_signups (section_id, person_email, person_name, item_text, note)
+                VALUES (${sid}, ${email}, ${name}, ${item_text}, ${note})`;
+    }
     return res.status(200).json({ ok: true });
   }
 
   if (req.query.action === 'bring-unclaim') {
-    const itemId2 = parseInt(body.item_id, 10);
-    if (!Number.isInteger(itemId2) || itemId2 < 1) return res.status(400).json({ error: 'item_id required' });
-    await sql`DELETE FROM group_bring_signups WHERE item_id = ${itemId2} AND LOWER(person_email) = ${email}`;
+    const suId = parseInt(body.id, 10);
+    if (!Number.isInteger(suId) || suId < 1) return res.status(400).json({ error: 'id required' });
+    // Members remove their own; the group's liaison can tidy anyone's.
+    const rows = await sql`
+      SELECT s.id, LOWER(s.person_email) AS em, g.class_group
+      FROM group_section_signups s JOIN group_sections g ON g.id = s.section_id
+      WHERE s.id = ${suId}
+    `;
+    if (rows.length === 0) return res.status(200).json({ ok: true });
+    if (rows[0].em !== email && !(await canManageBringGroup(email, rows[0].class_group))) {
+      return res.status(403).json({ error: 'You can only remove your own sign-up.' });
+    }
+    await sql`DELETE FROM group_section_signups WHERE id = ${suId}`;
     return res.status(200).json({ ok: true });
   }
 

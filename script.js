@@ -18806,85 +18806,147 @@
       headers: { 'Authorization': 'Bearer ' + cred }
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || d.error) { if (cb) cb(); return; }
-      var byItem = {};
-      (d.signups || []).forEach(function (s) {
-        (byItem[s.item_id] = byItem[s.item_id] || []).push(s);
+      // Attach signups to their sections in the exact shape
+      // renderSignupSectionBody expects ({email, name, ...}).
+      var byShaped = {};
+      (d.signups || []).forEach(function (su) {
+        (byShaped[su.section_id] = byShaped[su.section_id] || []).push({
+          id: su.id, slot_index: su.slot_index,
+          email: String(su.person_email || '').toLowerCase(),
+          name: su.person_name || '', item_text: su.item_text || '', note: su.note || ''
+        });
       });
-      var sig = JSON.stringify([d.items, d.signups]);
+      var sections = (d.sections || []).map(function (s) {
+        return {
+          id: s.id, class_group: s.class_group, type: 'signup',
+          title: s.title || '', config: s.config || {}, content: s.content || [],
+          is_open: s.is_open !== false, signups: byShaped[s.id] || []
+        };
+      });
+      var sig = JSON.stringify([d.sections, d.signups]);
       var changed = sig !== _groupBringSig;
       _groupBringSig = sig;
-      _groupBring = { items: d.items || [], signups: d.signups || [], byItem: byItem, me: String(d.me || '').toLowerCase() };
+      _groupBring = { sections: sections, me: String(d.me || '').toLowerCase() };
       if (cb) cb();
       // First arrival / changes repaint the Kid Schedule blocks.
       if (changed && typeof renderMyFamily === 'function') renderMyFamily();
     }).catch(function () { if (cb) cb(); });
   }
 
-  function bringItemsForGroup(group) {
+  function bringSectionsForGroup(group) {
     if (!_groupBring) return [];
     var g = String(group || '').toLowerCase();
-    return _groupBring.items.filter(function (i) { return String(i.class_group || '').toLowerCase() === g; });
+    return _groupBring.sections.filter(function (s) { return String(s.class_group || '').toLowerCase() === g; });
   }
   function bringDateStr(d) { return String(d || '').slice(0, 10); }
+  var GROUP_BRING_ACTS = { claimAction: 'group-slot-claim', removeAction: 'group-signup-remove', addAction: 'group-bring-add', formPrefix: 'g' };
 
   // The block under a kid's morning class row on Kid Schedule (#139 —
-  // Erin: "items needed for their kids' classes should be under
-  // My Family > Kid Schedule, below the related class").
+  // Erin: sections modeled on the Collaboration "Add Section" sign-ups,
+  // rendered with the SAME shared markup, claiming right here).
   function renderGroupBringBlock(group) {
     if (!_groupBring) return '';
     var today = new Date().toISOString().slice(0, 10);
-    var items = bringItemsForGroup(group).filter(function (i) {
-      var d = bringDateStr(i.bring_date);
+    var secs = bringSectionsForGroup(group).filter(function (s) {
+      var d = bringDateStr((s.config || {}).bring_date);
       return !d || d >= today;
     });
-    if (!items.length) return '';
-    var me = _groupBring.me;
-    var h = '<div class="mf-bring-block">';
-    h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' Things to bring — ' + escapeHtml(group) + '</div>';
-    items.forEach(function (it) {
-      var claims = _groupBring.byItem[it.id] || [];
-      var mine = claims.some(function (c) { return String(c.person_email || '').toLowerCase() === me; });
-      var full = claims.length >= (it.capacity || 1);
-      h += '<div class="mf-bring-row">';
-      h += '<span class="mf-bring-main"><strong>' + escapeHtml(it.label) + '</strong>';
-      var bits = [];
-      if (it.bring_date) bits.push('bring ' + fmtLendDate(it.bring_date));
-      if ((it.capacity || 1) > 1) bits.push(claims.length + ' of ' + it.capacity + ' covered');
-      if (it.note) bits.push(escapeHtml(it.note));
-      if (claims.length) bits.push('👍 ' + escapeHtml(claims.map(function (c) { return c.person_name; }).filter(Boolean).join(', ')));
-      if (bits.length) h += '<span class="ws-lending-sub">' + bits.join(' · ') + '</span>';
-      h += '</span>';
-      if (mine) {
-        h += '<span class="ws-lending-actions"><span class="ws-opp-committee">✓ You’re bringing this</span>'
-          + '<button type="button" class="sc-btn sc-btn-del" data-resource-action="bring-release" data-item="' + it.id + '" title="Release">×</button></span>';
-      } else if (!full) {
-        h += '<span class="ws-lending-actions"><button type="button" class="sc-btn sc-save" data-resource-action="bring-claim" data-item="' + it.id + '">I’ll bring it</button></span>';
-      } else {
-        h += '<span class="ws-lending-actions"><span class="ws-opp-committee">Covered — thanks!</span></span>';
-      }
+    if (!secs.length) return '';
+    var h = '';
+    secs.forEach(function (s) {
+      h += '<div class="mf-bring-block">';
+      h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' '
+        + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(group)
+        + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
+      h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
       h += '</div>';
     });
-    h += '</div>';
     return h;
   }
 
-  function handleBringClaimAction(btn, unclaim) {
-    var itemId = parseInt(btn.getAttribute('data-item'), 10);
-    if (!itemId) return;
+  // Group-section twins of the event signup handlers — same buttons,
+  // group endpoints.
+  function claimGroupSlot(btn) {
+    if (btn.disabled) return;
     btn.disabled = true;
-    var payload = { item_id: itemId, person_name: lendingDisplayNameFor(getActiveEmail()) };
+    var payload = {
+      section_id: parseInt(btn.getAttribute('data-section-id'), 10),
+      slot_index: parseInt(btn.getAttribute('data-slot-index'), 10),
+      person_name: lendingDisplayNameFor(getActiveEmail())
+    };
     var vaEmail = supplyViewAsEmail();
     if (vaEmail) payload.view_as = vaEmail;
-    fetch('/api/supply-closet?action=' + (unclaim ? 'bring-unclaim' : 'bring-claim'), {
+    fetch('/api/supply-closet?action=bring-claim', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
-        if (!res.ok) { alert(res.data.error || 'Could not update.'); btn.disabled = false; return; }
+        if (!res.ok) { alert(res.data.error || 'Could not sign you up.'); btn.disabled = false; return; }
         loadGroupBringItems(true);
+        if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
       })
       .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+  }
+  function removeGroupSignup(btn) {
+    if (btn.disabled) return;
+    if (!confirm('Remove this sign-up?')) return;
+    btn.disabled = true;
+    var payload = { id: parseInt(btn.getAttribute('data-signup-id'), 10) };
+    var vaEmail = supplyViewAsEmail();
+    if (vaEmail) payload.view_as = vaEmail;
+    fetch('/api/supply-closet?action=bring-unclaim', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert(res.data.error || 'Could not remove it.'); btn.disabled = false; return; }
+        loadGroupBringItems(true);
+        if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
+      })
+      .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
+  }
+  // Bring-mode mini-form (mirrors toggleEventBringForm; the shared body
+  // stamps data-form-key so group + event forms never collide).
+  function toggleGroupBringForm(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var formKey = btn.getAttribute('data-form-key') || ('g' + sid);
+    var form = document.querySelector('[data-bring-form="' + formKey + '"]');
+    if (!form) return;
+    if (!form.hidden) { form.hidden = true; form.innerHTML = ''; return; }
+    var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
+    form.hidden = false;
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">What will you bring?</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="e.g. a dozen egg cartons"></div>'
+      + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>'
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Sign up</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
+    var itemInp = form.querySelector('.evs-bring-item');
+    if (itemInp) itemInp.focus();
+    form.querySelector('.evs-bring-save').addEventListener('click', function () {
+      var st = form.querySelector('.evs-bring-status');
+      var item = form.querySelector('.evs-bring-item').value.trim();
+      if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Say what you’ll bring'; return; }
+      var payload = {
+        section_id: sid, item_text: item,
+        note: (form.querySelector('.evs-bring-note') || {}).value || '',
+        person_name: lendingDisplayNameFor(getActiveEmail())
+      };
+      var vaEmail = supplyViewAsEmail();
+      if (vaEmail) payload.view_as = vaEmail;
+      var saveBtn = this;
+      saveBtn.disabled = true;
+      fetch('/api/supply-closet?action=bring-claim', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = res.data.error || 'Save failed'; return; }
+          loadGroupBringItems(true);
+          if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
+        })
+        .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
   }
 
   // ── Liaison Workspace card ──
@@ -18911,83 +18973,118 @@
       var h = '';
       groups.forEach(function (g) {
         if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(g) + '</p>';
-        var items = bringItemsForGroup(g);
-        if (!items.length) h += '<p class="ws-empty">Nothing posted yet — add the first item below.</p>';
-        items.forEach(function (it) {
-          var claims = _groupBring.byItem[it.id] || [];
-          h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(it.label) + '</strong>'
+        var secs = bringSectionsForGroup(g);
+        if (!secs.length) h += '<p class="ws-empty">Nothing posted yet — add the first list below.</p>';
+        secs.forEach(function (s) {
+          var cfg = s.config || {};
+          h += '<div class="ws-lending-row"><span class="ws-lending-main"><strong>' + escapeHtml(s.title || 'Things to Bring') + '</strong>'
             + '<span class="ws-lending-sub">'
-            + (it.bring_date ? 'bring ' + fmtLendDate(it.bring_date) + ' · ' : '')
-            + claims.length + ' of ' + (it.capacity || 1) + ' covered'
-            + (claims.length ? ' · ' + escapeHtml(claims.map(function (c) { return c.person_name; }).filter(Boolean).join(', ')) : '')
-            + (it.note ? ' · ' + escapeHtml(it.note) : '')
+            + (cfg.mode === 'slots' ? (s.content || []).length + ' spot' + ((s.content || []).length === 1 ? '' : 's') : 'bring-something list')
+            + ' · ' + (s.signups || []).length + ' sign-up' + ((s.signups || []).length === 1 ? '' : 's')
+            + (cfg.bring_date ? ' · bring ' + fmtLendDate(cfg.bring_date) : '')
             + '</span></span>';
           h += '<span class="ws-lending-actions">'
-            + '<button type="button" class="sc-btn ws-bring-edit" data-id="' + it.id + '" data-group="' + escapeAttr(it.class_group) + '">Edit</button>'
-            + '<button type="button" class="sc-btn sc-btn-del ws-bring-del" data-id="' + it.id + '">Delete</button></span></div>';
+            + '<button type="button" class="sc-btn ws-bring-edit" data-id="' + s.id + '">Edit</button>'
+            + '<button type="button" class="sc-btn sc-btn-del ws-bring-del" data-id="' + s.id + '">Delete</button></span></div>';
+          // Live preview — exactly what families see under Kid Schedule
+          // (liaison view keeps remove-any powers server-side).
+          h += '<div class="mf-bring-block">' + renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS) + '</div>';
         });
-        h += renderBringForm(g, null);
+        h += '<div data-bring-formhost="' + escapeAttr(g) + '"></div>';
+        h += '<p style="margin:8px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm ws-bring-addsec" data-group="' + escapeAttr(g) + '">+ Add a Things to Bring list</button></p>';
       });
       target.innerHTML = h;
       wireBringCard(target);
     });
   }
 
-  // Add/edit form — co-op day picker built from the session Wednesdays
-  // (getCoopDatesInSession), custom date as the escape hatch.
-  function renderBringForm(group, item) {
-    var idAttr = item ? item.id : 'new-' + group;
-    var h = '<div class="sc-edit-form" data-bring-group="' + escapeAttr(group) + '" data-bring-id="' + (item ? item.id : '') + '">';
-    h += '<div class="sc-edit-grid">';
-    h += '<input class="cl-input ws-bring-label" placeholder="What do families need to bring? (e.g. Egg cartons)" maxlength="200" value="' + (item ? escapeAttr(item.label) : '') + '">';
-    h += '<input class="cl-input ws-bring-cap" type="number" min="1" max="30" style="max-width:110px;" title="How many families" value="' + (item ? (item.capacity || 1) : 1) + '">';
-    h += '</div>';
+  // Section editor — the Collaboration "Add Section" sign-up fields
+  // (Erin, 07-28: "model it after Add Section"): title, bring-vs-spots
+  // mode, hint, note label, spots as `label | how many | details` lines —
+  // plus the co-op-day picker (#139's date requirement, per section).
+  function renderBringSectionForm(group, section) {
+    var cfg = (section && section.config) || {};
+    var mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+    var slotLines = (Array.isArray(section && section.content) ? section.content : []).map(function (r) {
+      var parts = [r.label || ''];
+      if (r.capacity || r.note) parts.push(r.capacity || '');
+      if (r.note) parts.push(r.note);
+      return parts.join(' | ');
+    }).join('\n');
     var today = new Date().toISOString().slice(0, 10);
-    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">';
-    h += '<select class="cl-input ws-bring-date" style="max-width:260px;"><option value="">Needed when? (co-op day)</option>';
+    var h = '<div class="sc-edit-form" data-bring-group="' + escapeAttr(group) + '" data-bring-id="' + (section ? section.id : '') + '">';
+    h += '<div class="cls-field"><label class="cls-label">List title</label><input class="cl-input ws-bs-title" maxlength="200" placeholder="Things to Bring — first co-op day" value="' + escapeAttr((section && section.title) || '') + '"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Sign-up style</label><select class="cl-input ws-bs-mode">'
+      + '<option value="bring"' + (mode === 'bring' ? ' selected' : '') + '>Bring something — families add what they’ll bring</option>'
+      + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Specific items — fixed spots families claim</option>'
+      + '</select></div>';
+    h += '<div class="cls-field ws-bs-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input ws-bs-notelabel" maxlength="120" placeholder="Allergy info — nut-free facility!" value="' + escapeAttr(cfg.note_label || '') + '"></div>';
+    h += '<div class="cls-field"><label class="cls-label">Hint shown to families (optional)</label><input class="cl-input ws-bs-hint" maxlength="300" placeholder="We’re building bird feeders — save your recyclables!" value="' + escapeAttr(cfg.hint || '') + '"></div>';
+    h += '<div class="cls-field ws-bs-slots-only"><label class="cls-label">Spots — item | how many families | details (one per line)</label><textarea class="cl-input cls-textarea ws-bs-lines" rows="5" placeholder="Egg cartons | 3 | clean &amp; empty, a dozen each\nOld magazines | 2\nScissors | 1 | kid-safe if possible">' + escapeHtmlWs(slotLines) + '</textarea></div>';
+    h += '<div class="cls-field"><label class="cls-label">Needed for (co-op day, optional)</label>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+    h += '<select class="cl-input ws-bs-date" style="max-width:240px;"><option value="">— any time —</option>';
     for (var sn = 1; sn <= 5; sn++) {
       var dates = (typeof getCoopDatesInSession === 'function') ? getCoopDatesInSession(sn) : [];
       var future = dates.filter(function (d) { return d >= today; });
       if (!future.length) continue;
       h += '<optgroup label="Session ' + sn + '">';
       future.forEach(function (d) {
-        var sel = item && bringDateStr(item.bring_date) === d ? ' selected' : '';
+        var sel = bringDateStr(cfg.bring_date) === d ? ' selected' : '';
         h += '<option value="' + d + '"' + sel + '>' + fmtLendDate(d) + '</option>';
       });
       h += '</optgroup>';
     }
     h += '</select>';
-    h += '<label style="font-size:0.85em;">or <input type="date" class="cl-input ws-bring-date-custom" min="' + today + '" value="' + (item && item.bring_date ? bringDateStr(item.bring_date) : '') + '"></label>';
-    h += '</div>';
-    h += '<input class="cl-input ws-bring-note sc-edit-notes" placeholder="Detail note (optional — what it’s for, size, clean/empty…)" maxlength="300" value="' + (item ? escapeAttr(item.note) : '') + '">';
+    h += '<label style="font-size:0.85em;">or <input type="date" class="cl-input ws-bs-date-custom" min="' + today + '"></label>';
+    h += '</div></div>';
     h += '<div class="sc-edit-actions">'
-      + (item ? '<button type="button" class="sc-btn ws-bring-cancel">Cancel</button>' : '')
-      + '<button type="button" class="sc-save ws-bring-save" data-id="' + idAttr + '">' + (item ? 'Save' : '+ Add item') + '</button></div>';
+      + '<button type="button" class="sc-btn ws-bring-cancel">Cancel</button>'
+      + '<button type="button" class="sc-save ws-bs-save">' + (section ? 'Save changes' : 'Add list') + '</button></div>';
     h += '</div>';
     return h;
   }
 
-  function wireBringCard(target) {
-    target.querySelectorAll('.ws-bring-save').forEach(function (btn) {
+  function wireBringForm(target) {
+    function syncMode(form) {
+      var isSlots = (form.querySelector('.ws-bs-mode') || {}).value === 'slots';
+      form.querySelectorAll('.ws-bs-slots-only').forEach(function (x) { x.style.display = isSlots ? '' : 'none'; });
+      form.querySelectorAll('.ws-bs-bring-only').forEach(function (x) { x.style.display = isSlots ? 'none' : ''; });
+    }
+    target.querySelectorAll('[data-bring-group]').forEach(function (form) {
+      syncMode(form);
+      var ms = form.querySelector('.ws-bs-mode');
+      if (ms && !ms._wired) { ms._wired = true; ms.addEventListener('change', function () { syncMode(form); }); }
+    });
+    target.querySelectorAll('.ws-bs-save').forEach(function (btn) {
+      if (btn._wired) return; btn._wired = true;
       btn.addEventListener('click', function () {
         var form = btn.closest('[data-bring-group]');
-        var group = form.getAttribute('data-bring-group');
-        var editId = form.getAttribute('data-bring-id');
-        var dateSel = form.querySelector('.ws-bring-date');
-        var dateCustom = form.querySelector('.ws-bring-date-custom');
+        var mode = (form.querySelector('.ws-bs-mode') || {}).value === 'slots' ? 'slots' : 'bring';
+        var lines = String((form.querySelector('.ws-bs-lines') || {}).value || '');
+        var content = mode === 'slots'
+          ? lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
+              var p = ln.split('|');
+              return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() };
+            })
+          : [];
+        if (mode === 'slots' && !content.length) { alert('Add at least one spot (item | how many | details).'); return; }
         var payload = {
-          id: editId ? parseInt(editId, 10) : null,
-          class_group: group,
-          label: (form.querySelector('.ws-bring-label') || {}).value || '',
-          capacity: parseInt((form.querySelector('.ws-bring-cap') || {}).value, 10) || 1,
-          note: (form.querySelector('.ws-bring-note') || {}).value || '',
-          bring_date: (dateCustom && dateCustom.value) || (dateSel && dateSel.value) || ''
+          id: form.getAttribute('data-bring-id') ? parseInt(form.getAttribute('data-bring-id'), 10) : null,
+          class_group: form.getAttribute('data-bring-group'),
+          title: (form.querySelector('.ws-bs-title') || {}).value || '',
+          config: {
+            mode: mode,
+            hint: (form.querySelector('.ws-bs-hint') || {}).value || '',
+            note_label: (form.querySelector('.ws-bs-notelabel') || {}).value || '',
+            bring_date: ((form.querySelector('.ws-bs-date-custom') || {}).value) || ((form.querySelector('.ws-bs-date') || {}).value) || ''
+          },
+          content: content
         };
-        if (!payload.label.trim()) { alert('What should families bring?'); return; }
         var vaEmail = supplyViewAsEmail();
         if (vaEmail) payload.view_as = vaEmail;
         btn.disabled = true;
-        fetch('/api/supply-closet?action=bring-item-save', {
+        fetch('/api/supply-closet?action=bring-section-save', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -18999,6 +19096,24 @@
           .catch(function () { alert('Network error — try again.'); btn.disabled = false; });
       });
     });
+    target.querySelectorAll('.ws-bring-cancel').forEach(function (btn) {
+      if (btn._wired) return; btn._wired = true;
+      btn.addEventListener('click', function () { loadGroupBringCard(); });
+    });
+  }
+
+  function wireBringCard(target) {
+    target.querySelectorAll('.ws-bring-addsec').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var g = btn.getAttribute('data-group');
+        var host = target.querySelector('[data-bring-formhost="' + g + '"]');
+        if (!host) return;
+        host.innerHTML = renderBringSectionForm(g, null);
+        wireBringForm(target);
+        var t = host.querySelector('.ws-bs-title');
+        if (t) { try { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} t.focus(); }
+      });
+    });
     target.querySelectorAll('.ws-bring-del').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var self = this;
@@ -19006,7 +19121,7 @@
           var payload = { id: parseInt(self.getAttribute('data-id'), 10) };
           var vaEmail = supplyViewAsEmail();
           if (vaEmail) payload.view_as = vaEmail;
-          fetch('/api/supply-closet?action=bring-item-delete', {
+          fetch('/api/supply-closet?action=bring-section-delete', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -19022,18 +19137,18 @@
     target.querySelectorAll('.ws-bring-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(btn.getAttribute('data-id'), 10);
-        var it = (_groupBring && _groupBring.items.filter(function (x) { return x.id === id; })[0]) || null;
-        if (!it) return;
-        var row = btn.closest('.ws-lending-row');
-        var holder = document.createElement('div');
-        holder.innerHTML = renderBringForm(it.class_group, it);
-        row.parentNode.replaceChild(holder.firstChild, row);
-        wireBringCard(target);
+        var s = (_groupBring && _groupBring.sections.filter(function (x) { return x.id === id; })[0]) || null;
+        if (!s) return;
+        var host = target.querySelector('[data-bring-formhost="' + escapeAttr(s.class_group) + '"]')
+          || target.querySelector('[data-bring-formhost]');
+        if (!host) return;
+        host.innerHTML = renderBringSectionForm(s.class_group, s);
+        wireBringForm(target);
+        var t = host.querySelector('.ws-bs-title');
+        if (t) { try { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} t.focus(); }
       });
     });
-    target.querySelectorAll('.ws-bring-cancel').forEach(function (btn) {
-      btn.addEventListener('click', function () { loadGroupBringCard(); });
-    });
+    wireBringForm(target);
   }
 
   // ── #138: Reminders — Packing List + Retrieve Items ──
@@ -19081,22 +19196,29 @@
     h += '<div id="pl-lending"><h2 class="ws-lending-head">Lending Library</h2><p class="ws-empty">Checking loans…</p></div>';
     body.innerHTML = h;
 
-    // ① Claimed group bring-items due that day (or undated).
+    // ① Your family's group-section sign-ups due that day (or undated) —
+    // slots you claimed and things you said you'd bring.
     loadGroupBringItems(false, function () {
       var el = document.getElementById('pl-family');
       if (!el || !_groupBring) return;
-      var mine = _groupBring.items.filter(function (it) {
-        var claims = _groupBring.byItem[it.id] || [];
-        if (!claims.some(function (c) { return String(c.person_email || '').toLowerCase() === _groupBring.me; })) return false;
-        var d = bringDateStr(it.bring_date);
-        return !d || d === next.date;
+      var lines = [];
+      _groupBring.sections.forEach(function (s) {
+        var d = bringDateStr((s.config || {}).bring_date);
+        if (d && d !== next.date) return;
+        (s.signups || []).forEach(function (su) {
+          if (su.email !== _groupBring.me) return;
+          var slots = Array.isArray(s.content) ? s.content : [];
+          var slot = (su.slot_index != null) ? slots[su.slot_index] : null;
+          var label = slot ? slot.label : su.item_text;
+          if (!label) return;
+          lines.push('<li>' + escapeHtml(label)
+            + ' <em>— ' + escapeHtml(s.class_group)
+            + (slot && slot.note ? ' · ' + escapeHtml(slot.note) : '')
+            + (su.note ? ' · ' + escapeHtml(su.note) : '') + '</em></li>');
+        });
       });
       el.innerHTML = '<h2 class="ws-lending-head">For your family</h2>'
-        + (mine.length
-          ? '<ul>' + mine.map(function (it) {
-              return '<li>' + escapeHtml(it.label) + ' <em>— ' + escapeHtml(it.class_group) + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</em></li>';
-            }).join('') + '</ul>'
-          : '<p class="ws-empty">Nothing signed up for this day.</p>');
+        + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '<p class="ws-empty">Nothing signed up for this day.</p>');
     });
 
     // ② Supplies for classes this family teaches that day — the linked
@@ -21017,9 +21139,11 @@
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
     else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
-    // #139: claim/release a group "Things to bring" spot (Kid Schedule).
-    else if (action === 'bring-claim' && typeof handleBringClaimAction === 'function') handleBringClaimAction(btn, false);
-    else if (action === 'bring-release' && typeof handleBringClaimAction === 'function') handleBringClaimAction(btn, true);
+    // #139: group "Things to Bring" sections (Kid Schedule + liaison card)
+    // — the shared signup markup with group endpoints.
+    else if (action === 'group-slot-claim' && typeof claimGroupSlot === 'function') claimGroupSlot(btn);
+    else if (action === 'group-signup-remove' && typeof removeGroupSignup === 'function') removeGroupSignup(btn);
+    else if (action === 'group-bring-add' && typeof toggleGroupBringForm === 'function') toggleGroupBringForm(btn);
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
@@ -25200,9 +25324,16 @@
     return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Notes & Links' }[s.type] || 'Section';
   }
 
-  // Shared signup-section body — same markup in the Event Space and on
-  // Ways to Help (the global data-resource-action dispatcher wires both).
-  function renderSignupSectionBody(s, viewerEmail, canEdit) {
+  // Shared signup-section body — same markup in the Event Space, on
+  // Ways to Help, AND (#139) the group "Things to Bring" blocks on Kid
+  // Schedule. opts swaps the dispatcher action names + form-key prefix so
+  // group sections hit the group endpoints instead of the event ones.
+  function renderSignupSectionBody(s, viewerEmail, canEdit, opts) {
+    opts = opts || {};
+    var ACT_CLAIM = opts.claimAction || 'event-slot-claim';
+    var ACT_REMOVE = opts.removeAction || 'event-signup-remove';
+    var ACT_ADD = opts.addAction || 'event-bring-add';
+    var FORM_KEY = (opts.formPrefix || '') + s.id;
     var cfg = s.config || {};
     var h = '';
     if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
@@ -25221,13 +25352,13 @@
         if (claims.length) {
           meta += ' · ' + claims.map(function (c) {
             var nm = escapeHtmlWs(c.name);
-            if (canEdit || c.email === viewerEmail) nm += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove sign-up" title="Remove">×</button>';
+            if (canEdit || c.email === viewerEmail) nm += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove sign-up" title="Remove">×</button>';
             return nm;
           }).join(', ');
         }
         h += '<span class="ws-opp-committee">' + meta + '</span></span>';
         if (mineClaim) h += '<span class="ws-opp-committee">✓ You’re signed up</span>';
-        else if (canAct && !full) h += '<button type="button" class="volunteer-cta" data-resource-action="event-slot-claim" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
+        else if (canAct && !full) h += '<button type="button" class="volunteer-cta" data-resource-action="' + ACT_CLAIM + '" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
         else if (full) h += '<span class="ws-opp-committee">Full — thank you!</span>';
         h += '</li>';
       });
@@ -25241,7 +25372,7 @@
             : escapeHtmlWs(c.item_text);
           h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
-          if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="event-signup-remove" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
+          if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
           h += '</li>';
         });
         h += '</ul>';
@@ -25251,8 +25382,8 @@
         h += '<p class="ws-empty">' + (s.type === 'board' ? 'Nothing shared yet' : 'Nothing claimed yet') + (canAct ? ' — be the first!' : '.') + '</p>';
       }
       if (canAct) {
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-bring-add" data-section-id="' + s.id + '" data-sec-type="' + escapeAttr(s.type || '') + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
-        h += '<div class="evs-bring-form" data-bring-form="' + s.id + '" hidden></div>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="' + ACT_ADD + '" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '') + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
+        h += '<div class="evs-bring-form" data-bring-form="' + FORM_KEY + '" hidden></div>';
       }
     }
     return h;
