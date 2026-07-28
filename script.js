@@ -20299,7 +20299,7 @@
     // ── Logos ───────────────────────────────────────────────────────
     html += sectionHead('Logos');
     function logoCard(previewSrc, dark, title, links) {
-      var card = '<div style="border:1px solid #eee;border-radius:10px;padding:10px;flex:1 1 180px;max-width:260px;box-sizing:border-box;background:#fff;">';
+      var card = '<div style="border:1px solid #eee;border-radius:10px;padding:10px;flex:1 1 150px;max-width:260px;box-sizing:border-box;background:#fff;">';
       card += '<div style="display:flex;align-items:center;justify-content:center;height:96px;background:' + (dark ? 'var(--color-primary,#523A79)' : '#fff') + ';border-radius:6px;margin-bottom:8px;">'
         + '<img src="' + previewSrc + '" alt="' + title + '" loading="lazy" style="max-height:84px;max-width:92%;width:auto;">' + '</div>';
       card += '<strong style="display:block;font-size:0.9em;color:#333;margin-bottom:3px;">' + title + '</strong>';
