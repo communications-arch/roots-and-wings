@@ -4560,6 +4560,25 @@
         paintCalendarEvents();
       });
     });
+    // Manual-add fallback (Erin, 2026-07-29): the ?cid= subscribe button is
+    // flaky on phones (the Calendar app intercepts the link without actually
+    // subscribing), so a details box under it shows the raw calendar address
+    // with a Copy button. Deliberately self-contained: rwFallbackCopy lives
+    // ~24k lines later and this block runs at startup.
+    var calAddrCopy = document.getElementById('calAddrCopy');
+    if (calAddrCopy) calAddrCopy.addEventListener('click', function () {
+      var input = document.getElementById('calAddrInput');
+      var addr = input ? input.value : '';
+      var self = this;
+      function done() { self.textContent = '✓ Copied'; setTimeout(function () { self.textContent = 'Copy'; }, 1600); }
+      function fallback() {
+        try { input.focus(); input.select(); document.execCommand('copy'); done(); }
+        catch (e) { if (input) input.select(); /* leave it selected for a manual copy */ }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(addr).then(done, fallback);
+      } else { fallback(); }
+    });
     var calClose = calendarOverlay.querySelector('.calendar-close');
     if (calClose) calClose.addEventListener('click', function () {
       calendarOverlay.style.display = 'none';

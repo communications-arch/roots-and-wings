@@ -358,6 +358,17 @@
           </a>
         </div>
         <p class="text-center" style="font-size:0.85rem; color:var(--color-text-light); margin-top:10px;">Subscribe to stay up to date in your Google Calendar.</p>
+        <details style="max-width:560px; margin:8px auto 0; font-size:0.85rem; color:var(--color-text-muted);">
+          <summary style="cursor:pointer; text-align:center; color:var(--color-text-light);">Button not working? Add the calendar manually</summary>
+          <div style="margin-top:8px; background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:12px 14px;">
+            <p style="margin:0 0 8px;">On a computer, open <a href="https://calendar.google.com" target="_blank" rel="noopener">calendar.google.com</a>, find <strong>Other calendars</strong> in the left sidebar, click the <strong>+</strong> next to it and choose <strong>Subscribe to calendar</strong>, then paste this address:</p>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input id="calAddrInput" type="text" readonly value="c_fdc0b20caba65262b9aac95ac1df638ab892fcdf1ee1ad79a1880dcc2a95b291@group.calendar.google.com" aria-label="Co-op Google Calendar address" style="flex:1; min-width:0; font-size:0.78rem; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; color:var(--color-text-muted); background:var(--color-bg);">
+              <button type="button" id="calAddrCopy" class="btn btn-outline btn-sm">Copy</button>
+            </div>
+            <p style="margin:8px 0 0;">Once subscribed on the computer, the calendar shows up in the Google Calendar phone app too. If it doesn&rsquo;t appear there, open the app&rsquo;s <strong>Settings</strong>, tap the Roots &amp; Wings calendar, and turn on <strong>Sync</strong>.</p>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -517,7 +528,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260729a"></script>
+  <script src="script.js?v=20260729b"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
