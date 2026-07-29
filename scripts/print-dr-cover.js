@@ -158,7 +158,7 @@ ${logoImg}
 
 <section class="copies">
   <h2>This copy lives at</h2>
-  <label><span class="box"></span>The R&amp;W supply cabinet &mdash; <strong>includes</strong> the sealed passphrase envelope</label>
+  <label><span class="box"></span>The MPR supply cabinet &mdash; <strong>includes</strong> the sealed passphrase envelope</label>
   <label><span class="box"></span>The Communications Director&rsquo;s home &mdash; no envelope</label>
 </section>
 
