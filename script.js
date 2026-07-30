@@ -1832,6 +1832,12 @@
   // The R&W Special Events shared calendar (Field Day, Talent Show, …).
   var SPECIAL_EVENTS_CAL_ID = 'c_f7e599c566fa32ba8da0c20bf51c82967e9d8aedffa8f775673db5146646b1b2@group.calendar.google.com';
 
+  // Temporary (Erin, 2026-07-30): hide each member's OWN participation
+  // points (Ways to Help panel + greeting plant badge) until the VP has
+  // explained the system to everyone. The VP/tracker Participation report
+  // is unaffected. Flip to false to restore both surfaces.
+  var RW_HIDE_MEMBER_POINTS = true;
+
   // Per-calendar fallback colors. Used when an event has no colorId set
   // (which is the common case — event-level colors in Google Calendar are
   // rarely used, but shared calendars each have a default background color
@@ -9763,14 +9769,16 @@
       roleGate: null,
       render: function () {
         // Leading hint matches every other card's anatomy (2026-07-05).
-        var h = '<p class="ws-body-hint">Your participation so far this year, and ways to jump in.</p>';
+        var h = RW_HIDE_MEMBER_POINTS
+          ? '<p class="ws-body-hint">Ways to jump in this year.</p>'
+          : '<p class="ws-body-hint">Your participation so far this year, and ways to jump in.</p>';
 
         // ── Your year so far (personal participation panel) ────────────
         // Backed by the same data as the greeting's plant badge
         // (_participationMine). If it hasn't loaded yet we show a
         // placeholder; loadParticipationBadge() re-renders the workspace
         // tab once the fetch completes.
-        var member = _participationMine && _participationMine.member;
+        var member = !RW_HIDE_MEMBER_POINTS && _participationMine && _participationMine.member;
         if (member) {
           var tier = deriveParticipationTier(member);
           var tierHeadline = {
@@ -9826,20 +9834,20 @@
           }
 
           h += '</div>'; // /.ws-part-panel
-        } else if (_participationMine && _participationMine.fetchError) {
+        } else if (!RW_HIDE_MEMBER_POINTS && _participationMine && _participationMine.fetchError) {
           // The lookup itself failed (server error / offline) — say so
           // rather than pretending nothing is recorded.
           h += '<div class="ws-part-panel ws-part-panel-empty">';
           h += '<p class="ws-part-meter-caption">Couldn’t load your participation right now — refresh to try again.</p>';
           h += '</div>';
-        } else if (_participationMine) {
+        } else if (!RW_HIDE_MEMBER_POINTS && _participationMine) {
           // Fetch completed but you're not on the participation roster yet
           // (e.g. a backup coach, or no AM/PM/cleaning/role activity recorded
           // this year). Don't hang on the loading placeholder.
           h += '<div class="ws-part-panel ws-part-panel-empty">';
           h += '<p class="ws-part-meter-caption">No participation recorded for you yet this year — see the ways to jump in below.</p>';
           h += '</div>';
-        } else if (_participationMineEmail && localStorage.getItem('rw_google_credential')) {
+        } else if (!RW_HIDE_MEMBER_POINTS && _participationMineEmail && localStorage.getItem('rw_google_credential')) {
           // Fetch is in flight. Show a gentle placeholder so the card isn't
           // empty on first paint.
           h += '<div class="ws-part-panel ws-part-panel-loading">';
@@ -15974,6 +15982,7 @@
     var btn = document.getElementById('qsbPlantBadge');
     var iconEl = document.getElementById('qsbPlantIcon');
     if (!btn || !iconEl) return;
+    if (RW_HIDE_MEMBER_POINTS) { btn.hidden = true; return; }
     var member = _participationMine && _participationMine.member;
     if (!member) { btn.hidden = true; return; }
     var tier = deriveParticipationTier(member);
