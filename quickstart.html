@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="New member quick start guide for Roots & Wings Indy — set up your Google account, Google Chat, Google Calendar, and the Member Portal.">
+  <meta name="theme-color" content="#523A79">
+  <title>New Member Quick Start — Roots & Wings Indy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
+  <link rel="stylesheet" href="styles.css?v=20260728g">
+  <style>
+    /* Page-local: numbered step cards + troubleshooting boxes. */
+    .qs-step { background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 28px 28px 24px; margin-bottom: 24px; }
+    .qs-step-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+    .qs-step-num { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; font-family: 'Source Sans 3', sans-serif; }
+    .qs-step h2 { font-family: 'Playfair Display', serif; color: var(--color-primary-dark); font-size: 1.45rem; margin: 0; }
+    .qs-step p, .qs-step li { color: var(--color-text); line-height: 1.6; }
+    .qs-step ol, .qs-step ul { padding-left: 22px; margin: 10px 0; }
+    .qs-step li { margin-bottom: 6px; }
+    .qs-first { font-weight: 600; color: var(--color-primary-dark); }
+    .qs-trouble { background: var(--color-bg); border-left: 4px solid var(--color-gold, #C9A227); border-radius: 0 var(--radius-sm, 8px) var(--radius-sm, 8px) 0; padding: 14px 18px; margin-top: 16px; }
+    .qs-trouble h3 { font-size: 0.95rem; margin: 0 0 8px; color: var(--color-primary-dark); text-transform: uppercase; letter-spacing: 0.04em; font-family: 'Source Sans 3', sans-serif; }
+    .qs-trouble ul { margin: 0; padding-left: 20px; }
+    .qs-trouble li { font-size: 0.95rem; margin-bottom: 8px; }
+    .qs-trouble li:last-child { margin-bottom: 0; }
+    .qs-addr { display: block; word-break: break-all; background: var(--color-white); border: 1px dashed var(--color-border); border-radius: 6px; padding: 8px 10px; font-size: 0.82rem; margin: 8px 0; user-select: all; }
+    .qs-help { text-align: center; background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 24px; }
+    @media print {
+      .navbar, .footer, .no-print { display: none !important; }
+      .page-header { padding: 12px 0 0; }
+      .hero-watermark { display: none; }
+      .qs-step { border: 1px solid #ccc; break-inside: avoid; margin-bottom: 14px; padding: 16px 18px 12px; }
+      .qs-trouble { border-left-color: #999; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ====== Navigation ====== -->
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="container">
+      <a href="index.html" class="nav-brand" aria-label="Roots & Wings Indy home">
+        <img src="logo-combined.svg?v=20260430g" alt="Roots & Wings Indianapolis" onerror="this.style.display='none'">
+        <div class="nav-brand-text">
+          ROOTS & WINGS
+          <span>Indianapolis</span>
+        </div>
+      </a>
+
+      <button class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <div class="nav-links" role="menubar">
+        <a href="index.html#about" role="menuitem">About</a>
+        <a href="index.html#programs" role="menuitem">Programs</a>
+        <a href="index.html#contact" role="menuitem">Contact</a>
+        <a href="members.html" class="btn btn-primary btn-sm" role="menuitem">Members</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ====== Page Header ====== -->
+  <header class="page-header">
+    <div class="hero-watermark" aria-hidden="true">
+      <img src="logo-mark.svg?v=20260430g" alt="">
+    </div>
+    <div class="container text-center" style="position: relative; z-index: 1;">
+      <h1>New Member Quick Start</h1>
+      <p class="hero-tagline">Four steps to get connected — start with step 1</p>
+    </div>
+  </header>
+
+  <section class="support-section">
+    <div class="container" style="max-width: 820px;">
+      <p class="section-subtitle text-center fade-in" style="max-width: 680px; margin: 0 auto 40px;">
+        Welcome to Roots &amp; Wings! Everything we use — the members website, our
+        chat spaces, the calendar, and shared files — runs on your new
+        Roots&nbsp;&amp;&nbsp;Wings Google account, so <strong>step 1 has to happen
+        first</strong>. The rest can go in any order.
+      </p>
+
+      <!-- ── Step 1: Google account ── -->
+      <div class="qs-step fade-in">
+        <div class="qs-step-head">
+          <div class="qs-step-num" aria-hidden="true">1</div>
+          <h2>Activate your Roots &amp; Wings Google account</h2>
+        </div>
+        <p class="qs-first">Do this first — nothing else works until it's done.</p>
+        <p>
+          When your family joins, our Communications Director creates a
+          <strong>@rootsandwingsindy.com</strong> Google account for you. Google sends an
+          invitation to your <em>personal</em> email address:
+        </p>
+        <ol>
+          <li>Find the email from Google and click its <strong>Sign in</strong> button.</li>
+          <li>Set your password — that's it, your account is active.</li>
+          <li>Heads up: <strong>the invitation link expires after 48 hours</strong>. If yours has expired, just email <a href="mailto:communications@rootsandwingsindy.com">communications@rootsandwingsindy.com</a> and we'll send a fresh one.</li>
+        </ol>
+        <div class="qs-trouble">
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li><strong>Can't find the invitation email?</strong> Check your Spam and Promotions folders, and search your inbox for "Google". Still nothing — email <a href="mailto:communications@rootsandwingsindy.com">communications@</a> and we'll re-send it.</li>
+            <li><strong>Link expired?</strong> Email <a href="mailto:communications@rootsandwingsindy.com">communications@</a> for a new invitation.</li>
+            <li><strong>Forgot your password later on?</strong> The Communications Director can reset it for you.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Step 2: Google Chat ── -->
+      <div class="qs-step fade-in">
+        <div class="qs-step-head">
+          <div class="qs-step-num" aria-hidden="true">2</div>
+          <h2>Join us on Google Chat</h2>
+        </div>
+        <p>
+          Google Chat is where all day-to-day co-op communication happens, organized into
+          <strong>Spaces</strong> (group conversations by topic).
+          <a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=share_link" target="_blank" rel="noopener">Our Google Chat Guide describes each Space</a>.
+        </p>
+        <ul>
+          <li><strong>On the web:</strong> go to <a href="https://chat.google.com" target="_blank" rel="noopener">chat.google.com</a> signed in with your <strong>@rootsandwingsindy.com</strong> account.</li>
+          <li><strong>On your phone:</strong> install the <strong>Google Chat</strong> app (App Store / Google Play) and sign in with your Roots &amp; Wings account.</li>
+          <li><strong>Add a profile photo</strong> — it helps other members put a face to your name.</li>
+        </ul>
+        <div class="qs-trouble">
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li><strong>Don't see any Spaces?</strong> You're almost certainly signed in with your personal Gmail. Check the profile picture in the top-right corner and switch to your @rootsandwingsindy.com account.</li>
+            <li><strong>Phone app only shows your personal account?</strong> Tap your profile picture → <strong>Add another account</strong>, then sign in with your Roots &amp; Wings account and switch to it.</li>
+            <li><strong>Missing messages?</strong> Open a Space → tap its name → check the notification setting isn't muted.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Google Calendar ── -->
+      <div class="qs-step fade-in">
+        <div class="qs-step-head">
+          <div class="qs-step-num" aria-hidden="true">3</div>
+          <h2>Get the co-op calendar</h2>
+        </div>
+        <p>
+          Co-op days, field trips, and events all live on our shared Google Calendar. The
+          easiest view is the <strong>Calendar</strong> inside the
+          <a href="members.html">Member Portal</a> (step 4) — it's always up to date. To see
+          co-op events alongside your own family calendar:
+        </p>
+        <ol>
+          <li>Open the portal's Calendar and tap <strong>Add to Google Calendar</strong> at the bottom.</li>
+          <li>Make sure Google is using your <strong>@rootsandwingsindy.com</strong> account when it opens, then confirm.</li>
+        </ol>
+        <div class="qs-trouble">
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li><strong>Button didn't work, or "Could not find calendar"?</strong> Add it manually — on a <em>computer</em>, open <a href="https://calendar.google.com" target="_blank" rel="noopener">calendar.google.com</a> (signed in as your Roots &amp; Wings account), find <strong>Other calendars</strong> in the left sidebar, click the <strong>+</strong>, choose <strong>Subscribe to calendar</strong>, and paste this address:
+              <code class="qs-addr">c_fdc0b20caba65262b9aac95ac1df638ab892fcdf1ee1ad79a1880dcc2a95b291@group.calendar.google.com</code>
+            </li>
+            <li><strong>Subscribed on the computer but it's not on your phone?</strong> Open the Google Calendar app → <strong>Settings</strong> → tap the Roots &amp; Wings calendar → turn on <strong>Sync</strong>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Step 4: Member Portal ── -->
+      <div class="qs-step fade-in">
+        <div class="qs-step-head">
+          <div class="qs-step-num" aria-hidden="true">4</div>
+          <h2>Sign in to the Member Portal</h2>
+        </div>
+        <p>
+          The <a href="members.html">Member Portal</a> at
+          <strong>www.rootsandwingsindy.com</strong> is your home base: the family directory,
+          schedules and rosters, the calendar, waivers, financials, and ways to get involved.
+        </p>
+        <ol>
+          <li>Open the <a href="members.html">Members page</a> and tap <strong>Sign in with Google</strong>.</li>
+          <li>Choose your <strong>@rootsandwingsindy.com</strong> account. If your device offers your personal Gmail, tap <strong>Use another account</strong>.</li>
+          <li>Once you're in, open <strong>Resources → Install the App</strong> to put the portal on your phone's home screen. You'll stay signed in for about 30 days at a time.</li>
+        </ol>
+        <div class="qs-trouble">
+          <h3>Troubleshooting</h3>
+          <ul>
+            <li><strong>"That Google account isn't a Roots &amp; Wings account"?</strong> You picked your personal Gmail — sign in again and choose the @rootsandwingsindy.com address.</li>
+            <li><strong>Can't sign in at all?</strong> Your Google account may not be activated yet — go back to step 1.</li>
+            <li><strong>Page looks stale or half-loaded?</strong> Sign out, refresh the page, and sign back in.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── Help ── -->
+      <div class="qs-help fade-in">
+        <h2 style="font-family:'Playfair Display',serif;color:var(--color-primary-dark);font-size:1.3rem;margin:0 0 8px;">Stuck on anything?</h2>
+        <p style="margin:0;">
+          Email <a href="mailto:communications@rootsandwingsindy.com">communications@rootsandwingsindy.com</a>
+          for account and tech questions, or
+          <a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a>
+          for everything else. We're glad you're here!
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== Footer ====== -->
+  <footer class="footer" role="contentinfo">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="nav-brand-text">
+            ROOTS & WINGS
+            <span>Indianapolis</span>
+          </div>
+          <p>
+            A secular, parent-led homeschool cooperative nurturing curious, confident
+            learners in Indianapolis, Indiana.
+          </p>
+        </div>
+
+        <div>
+          <h4>Quick Links</h4>
+          <ul>
+            <li><a href="index.html#about">About Us</a></li>
+            <li><a href="index.html#programs">Programs</a></li>
+            <li><a href="index.html#contact">Contact</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>For Members</h4>
+          <ul>
+            <li><a href="members.html">Member Portal</a></li>
+            <li><a href="quickstart.html">New Member Quick Start</a></li>
+            <li><a href="support.html">Ways to Support</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>Contact</h4>
+          <ul>
+            <li><a href="mailto:membership@rootsandwingsindy.com">membership@rootsandwingsindy.com</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <p>&copy; 2026 Roots & Wings Indy. All rights reserved.</p>
+        <p>Made with care in Indianapolis</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js?v=20260730a"></script>
+</body>
+</html>

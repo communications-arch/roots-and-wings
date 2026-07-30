@@ -9648,6 +9648,7 @@
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
         h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Member Handbook</a></li>';
+        h += '<li><a href="/quickstart.html" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('newFamily', 'ag-icon') + '</span>New Member Quick Start</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span>Member Agreement &amp; Waivers</button></li>';
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('chat', 'ag-icon') + '</span>Google Chat Guide</a></li>';
