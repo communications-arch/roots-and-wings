@@ -11,7 +11,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
-const { canEditAsRole, BOARD_ROLE_EMAILS, isSuperUser } = require('./_permissions');
+const { canEditAsRole, BOARD_ROLE_EMAILS, isSuperUser, canImpersonate } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 
@@ -30,6 +30,22 @@ async function verifyGoogleAuth(req) {
     if ((email.split('@')[1] || '') !== ALLOWED_DOMAIN) return null;
     return { email, name: payload.name || '' };
   } catch (e) { return null; }
+}
+
+// View-As wrapper (#171): testers/super users impersonating a family got a
+// 403 from the POST ownership gate because this endpoint ignored the
+// X-View-As header — the client filed the VIEWED family's email under the
+// REAL login. Mirrors verifyWorkspaceAuthWithViewAs in api/tour.js /
+// cleaning.js: `email` becomes the viewed identity so ownership checks see
+// the family being acted as; `realEmail` is kept for audit stamps.
+async function verifyGoogleAuthWithViewAs(req) {
+  const real = await verifyGoogleAuth(req);
+  if (!real) return null;
+  const viewAsRaw = String(req.headers['x-view-as'] || '').trim().toLowerCase();
+  if (viewAsRaw && canImpersonate(real.email)) {
+    return { email: viewAsRaw, realEmail: real.email, viewedBy: real.email, name: real.name };
+  }
+  return { email: real.email, realEmail: real.email, name: real.name };
 }
 
 // Routed through the 'coverage_admin' capability (defaults to the VP;
@@ -147,10 +163,10 @@ module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-View-As');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const user = await verifyGoogleAuth(req);
+  const user = await verifyGoogleAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
@@ -262,7 +278,7 @@ module.exports = async function handler(req, res) {
       // Insert absence
       const inserted = await sql`
         INSERT INTO absences (family_email, family_name, absent_person, session_number, absence_date, blocks, notes, created_by)
-        VALUES (${family_email}, ${family_name}, ${absent_person}, ${session_number}, ${absence_date}, ${blocks}, ${notes}, ${user.email})
+        VALUES (${family_email}, ${family_name}, ${absent_person}, ${session_number}, ${absence_date}, ${blocks}, ${notes}, ${user.realEmail || user.email})
         RETURNING id
       `;
       const absenceId = inserted[0].id;
@@ -318,6 +334,7 @@ module.exports = async function handler(req, res) {
       // Same ownership rule as DELETE: creator, the absence's family
       // (primary or co-parent), or the coverage admin.
       const isOwner = absence.created_by === user.email
+        || absence.created_by === (user.realEmail || user.email)
         || absence.family_email === user.email
         || (await canActAs(sql, user.email, absence.family_email));
       if (!isOwner && !(await isVP(user.email))) {
@@ -369,6 +386,7 @@ module.exports = async function handler(req, res) {
       // Only original creator, the family the absence belongs to (primary or
       // co-parent via additional_emails), or VP can cancel.
       const isOwner = existing[0].created_by === user.email
+        || existing[0].created_by === (user.realEmail || user.email)
         || existing[0].family_email === user.email
         || (await canActAs(sql, user.email, existing[0].family_email));
       if (!isOwner && !(await isVP(user.email))) {

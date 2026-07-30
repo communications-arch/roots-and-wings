@@ -22898,7 +22898,10 @@
       function doPost() {
         return fetch('/api/absences', {
           method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          // rwAuthHeaders carries X-View-As (#171): a tester/super user
+          // acting as a family files under that family's identity — the
+          // plain Bearer header alone 403'd the ownership gate.
+          headers: rwAuthHeaders(true),
           body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal })
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
       }
@@ -22907,7 +22910,7 @@
       if (editingAbsenceId) {
         chain = fetch('/api/absences?id=' + encodeURIComponent(editingAbsenceId), {
           method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
+          headers: rwAuthHeaders()
         }).then(function (r) { return r.json().catch(function () { return {}; }); })
           .then(function () { return doPost(); });
       } else {
@@ -22945,7 +22948,7 @@
     // numbers repeat every school year, so a from_session=currentSession
     // filter silently dropped next-season absences around the boundary
     // (the board vanished right after a claim re-fetch, Erin 2026-07-19).
-    fetch('/api/absences?upcoming=1', { headers: { 'Authorization': 'Bearer ' + cred } })
+    fetch('/api/absences?upcoming=1', { headers: rwAuthHeaders() })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       var raw = data.absences || [];
@@ -23498,7 +23501,7 @@
         var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/absences?id=' + encodeURIComponent(id), {
           method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
+          headers: rwAuthHeaders()
         }).then(function (r) { return r.json(); }).then(function (res) {
           if (res.error) { alert('Error: ' + res.error); btn.disabled = false; btn.textContent = 'Cancel'; return; }
           showSupplyToast('Absence cancelled');
@@ -23586,7 +23589,7 @@
         pending.push(
           fetch('/api/absences?id=' + encodeURIComponent(a.id), {
             method: 'PATCH',
-            headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+            headers: rwAuthHeaders(true),
             body: JSON.stringify({ slots: missing })
           }).then(function (r) {
             // Only count it when the server actually added something —
