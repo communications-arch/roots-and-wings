@@ -24332,8 +24332,10 @@
     };
     // Morning vs afternoon proposal (2026-07-05): the period drives which
     // fields render — AM has no hour/space/size picks and exactly one
-    // age group.
-    var curPeriod = (cur.class_period === 'AM') ? 'AM' : 'PM';
+    // age group. New submissions start with NEITHER checked (2026-07-30,
+    // Erin): the old PM default was going through unnoticed even when the
+    // member meant morning.
+    var curPeriod = isEdit ? ((cur.class_period === 'AM') ? 'AM' : 'PM') : null;
 
     function has(arr, v) { return Array.isArray(arr) && arr.indexOf(v) !== -1; }
     function checkbox(field, value, label) {
@@ -24693,25 +24695,31 @@
 
     // ── Period-driven UI ──
     function currentPeriod() {
+      // null until the member explicitly picks — the submit handler blocks
+      // on it, so the old silent PM default can't slip through.
       var sel = overlay.querySelector('input[name="clsPeriod"]:checked');
-      return sel && sel.value === 'AM' ? 'AM' : 'PM';
+      if (!sel) return null;
+      return sel.value === 'AM' ? 'AM' : 'PM';
     }
     function applyPeriodUi() {
-      var am = currentPeriod() === 'AM';
+      var p = currentPeriod();
       // PM-only fields hide for morning; morning gets its own hour radios
-      // + single age-group dropdown instead.
+      // + single age-group dropdown instead. With no pick yet, BOTH sets
+      // stay hidden so nothing anchors the member to one answer.
       ['clsHourField', 'clsSpaceField', 'clsMaxField', 'clsPmAgeField'].forEach(function (fid) {
         var el = document.getElementById(fid);
-        if (el) el.hidden = am;
+        if (el) el.hidden = (p !== 'PM');
       });
       ['clsAmHourField', 'clsAmGroupField'].forEach(function (fid) {
         var el = document.getElementById(fid);
-        if (el) el.hidden = !am;
+        if (el) el.hidden = (p !== 'AM');
       });
       var hint = document.getElementById('clsPeriodHint');
-      if (hint) hint.textContent = am
+      if (hint) hint.textContent = (p === 'AM')
         ? 'Morning classes teach ONE age group, as one 2-hour class or a 1-hour slot. No room or class-size picks — rooms are assigned for the year and the group’s roster is the size.'
-        : 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.';
+        : (p === 'PM')
+          ? 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.'
+          : 'Pick one to see the rest of the questions — morning and afternoon classes ask for different details.';
     }
     overlay.querySelectorAll('input[name="clsPeriod"]').forEach(function (r) {
       r.addEventListener('change', applyPeriodUi);
@@ -24735,6 +24743,9 @@
       }
 
       var period = currentPeriod();
+      if (!period) {
+        errEl.textContent = 'Choose Morning or Afternoon at the top first.'; errEl.style.display = ''; return;
+      }
       var amHourSel = overlay.querySelector('input[name="clsAmHour"]:checked');
       var amGroupSel = document.getElementById('clsAmGroup');
       if (period === 'AM' && (!amGroupSel || !amGroupSel.value)) {
