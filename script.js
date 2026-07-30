@@ -22493,9 +22493,17 @@
   // opens the install helper straight away — one tap on Chrome once the prompt
   // is armed, clear steps on iPhone. Re-checked on hashchange too.
   function maybeOpenInstallFromHash() {
-    if (/install/i.test(location.hash || '')) {
-      setTimeout(function () { try { showInstallHelpModal(); } catch (e) { /* ignore */ } }, 600);
-    }
+    if (!/install/i.test(location.hash || '')) return;
+    // A member who added the app to her home screen FROM the QR page kept
+    // the #install hash in the saved URL (iOS uses the page URL when the
+    // manifest start_url isn't honored) — so her installed app re-opened
+    // this modal on every launch (2026-07-30). Installed = nothing to
+    // promote; the helper stays reachable via Resources → Install the App.
+    if (rwInstallEnv().isStandalone) return;
+    setTimeout(function () { try { showInstallHelpModal(); } catch (e) { /* ignore */ } }, 600);
+    // One-shot: drop the hash so a refresh (or a bookmark of the QR URL)
+    // doesn't nag again this visit onward.
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
   }
   window.addEventListener('hashchange', maybeOpenInstallFromHash);
   maybeOpenInstallFromHash();
