@@ -14517,9 +14517,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .ws-part-submit-line {
   margin: 4px 0 10px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px 12px;
 }
 .ws-part-submit-link {
   appearance: none;
