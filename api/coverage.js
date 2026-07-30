@@ -8,7 +8,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { sendToUser } = require('./_push');
-const { canEditAsRole, isBoardMember } = require('./_permissions');
+const { canEditAsRole, isBoardMember, canImpersonate } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 
 // Building Opener / Closer slots may only be covered by a board member
@@ -41,6 +41,20 @@ async function verifyGoogleAuth(req) {
   } catch (e) { return null; }
 }
 
+// View-As wrapper (#171 wave): same fix as api/absences.js — this endpoint
+// ignored X-View-As, so a tester impersonating the VP couldn't reassign
+// and impersonated claims/unclaims ran under the real login. `email` is
+// the viewed identity for the gates; `realEmail` preserved for fallbacks.
+async function verifyGoogleAuthWithViewAs(req) {
+  const real = await verifyGoogleAuth(req);
+  if (!real) return null;
+  const viewAsRaw = String(req.headers['x-view-as'] || '').trim().toLowerCase();
+  if (viewAsRaw && canImpersonate(real.email)) {
+    return { email: viewAsRaw, realEmail: real.email, viewedBy: real.email, name: real.name };
+  }
+  return { email: real.email, realEmail: real.email, name: real.name };
+}
+
 // Routed through the 'coverage_admin' capability (defaults to the VP;
 // Permissions-table editable). The holder's personal login authorizes
 // automatically via role_holders_v2 — the function name predates the table.
@@ -55,10 +69,10 @@ module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-View-As');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const user = await verifyGoogleAuth(req);
+  const user = await verifyGoogleAuthWithViewAs(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
@@ -171,8 +185,11 @@ module.exports = async function handler(req, res) {
       const slot = await sql`SELECT * FROM coverage_slots WHERE id = ${id}`;
       if (slot.length === 0) return res.status(404).json({ error: 'Slot not found' });
 
-      // Only the claimer or VP can unclaim
-      if (slot[0].claimed_by_email !== user.email && !(await isVP(user.email))) {
+      // Only the claimer or VP can unclaim (realEmail too: a claim made
+      // without impersonation is still unclaimable mid-View-As)
+      if (slot[0].claimed_by_email !== user.email
+          && slot[0].claimed_by_email !== (user.realEmail || user.email)
+          && !(await isVP(user.email))) {
         return res.status(403).json({ error: 'Not authorized' });
       }
 

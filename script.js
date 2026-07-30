@@ -7841,10 +7841,9 @@
         var origText = this.textContent;
         this.textContent = 'Cancelling\u2026';
         var self = this;
-        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage?id=' + slotId, {
           method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
+          headers: rwAuthHeaders()
         })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
@@ -23243,7 +23242,7 @@
         var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
         btn.disabled = true; btn.textContent = 'Claiming\u2026';
         var cred = localStorage.getItem('rw_google_credential');
-        fetch('/api/coverage', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ slot_id: slotId, claimer_name: myName }) })
+        fetch('/api/coverage', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ slot_id: slotId, claimer_name: myName }) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) { if (!res.ok) { alert('Error: ' + (res.data.error || 'claim failed')); btn.disabled = false; btn.textContent = 'I\'ll Cover This'; return; } loadCoverageBoard(); loadNotifications(); });
       });
@@ -23266,10 +23265,9 @@
         if (!confirm('Cancel your coverage for this slot? It will go back to Needs Coverage.')) return;
         var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
         btn.disabled = true; btn.textContent = 'Cancelling\u2026';
-        var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage?id=' + slotId, {
           method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + cred }
+          headers: rwAuthHeaders()
         })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
@@ -23289,7 +23287,7 @@
         var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage?id=' + slotId, {
           method: 'PATCH',
-          headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          headers: rwAuthHeaders(true),
           body: JSON.stringify({ claimed_by_email: '', claimed_by_name: '' })
         })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -23352,7 +23350,7 @@
       var cred = localStorage.getItem('rw_google_credential');
       fetch('/api/coverage?id=' + slotId, {
         method: 'PATCH',
-        headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+        headers: rwAuthHeaders(true),
         body: JSON.stringify({ claimed_by_email: assigneeEmail, claimed_by_name: assigneeName })
       })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
