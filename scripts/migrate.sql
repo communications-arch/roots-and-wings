@@ -2334,6 +2334,30 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS assistant_slots INTEGER NOT 
 -- (Kitchen / Kitchen Annex / Pavilion). One booking per facility × session
 -- × week × hour — the UNIQUE constraint IS the conflict rule. Liaisons
 -- book for their group from the Morning Class Builder's Facilities panel.
+-- 2026-07-30 (#161, Lyndsey): Lending Library REQUESTS — members ask for
+-- items the library doesn't have; any number of members pledge, with
+-- quantity splits (six bottles = 2+3+1) or open-ended when no quantity.
+CREATE TABLE IF NOT EXISTS lending_requests (
+  id                 SERIAL PRIMARY KEY,
+  school_year        TEXT NOT NULL DEFAULT '',
+  item_text          TEXT NOT NULL,
+  quantity           INTEGER,
+  note               TEXT NOT NULL DEFAULT '',
+  status             TEXT NOT NULL DEFAULT 'open',
+  requested_by_email TEXT NOT NULL,
+  requested_by_name  TEXT NOT NULL DEFAULT '',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS lending_request_pledges (
+  id           SERIAL PRIMARY KEY,
+  request_id   INTEGER NOT NULL REFERENCES lending_requests(id) ON DELETE CASCADE,
+  person_email TEXT NOT NULL,
+  person_name  TEXT NOT NULL DEFAULT '',
+  quantity     INTEGER NOT NULL DEFAULT 1,
+  note         TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- 2026-07-30 (#169, Lyndsey): the I'll-Be-Out form now asks whether
 -- coverage is needed (backup learning coach covering = no slots created)
 -- and whether the kids are out too (yes → their teachers get a bell

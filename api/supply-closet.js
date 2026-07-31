@@ -18,7 +18,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isSuperUser } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
-const { sendToUser } = require('./_push');
+const { sendToUser, broadcastAll } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -92,7 +92,8 @@ module.exports = async function handler(req, res) {
   // Everything else that isn't GET is restricted to the Supply Coordinator
   // or the communications@ super user.
   const isMemberFlag = req.method === 'POST' && req.query.action === 'flag';
-  const isLoanAction = ['loan-request', 'loan-respond', 'loan-status'].indexOf(req.query.action) !== -1
+  const isLoanAction = ['loan-request', 'loan-respond', 'loan-status',
+    'loan-requests', 'loan-request-add', 'loan-request-pledge', 'loan-request-close'].indexOf(req.query.action) !== -1
     // #139 bring-* / #140+#156 liaison-* actions carry their own
     // liaison/self checks below.
     || String(req.query.action || '').indexOf('bring-') === 0
@@ -835,6 +836,114 @@ async function handleLoanActions(req, res, sql, user, actingEmail, coordAllowed)
       ORDER BY item_name
     `;
     return res.status(200).json({ loans: rows, my_items: myItems, me: email });
+  }
+
+  // ── #161 Lending Library REQUESTS ──
+  // Members ask for items the library doesn't have. Every member gets a
+  // bell row (+ push broadcast); any number of members pledge, with
+  // quantity splits or open-ended commitments.
+  if (req.query.action === 'loan-requests') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const lrRows = await sql`
+      SELECT id, item_text, quantity, note, status, requested_by_email, requested_by_name, created_at
+      FROM lending_requests WHERE status <> 'closed'
+      ORDER BY created_at DESC LIMIT 200`;
+    const lrIds = lrRows.map(r => r.id);
+    const lrPledges = lrIds.length ? await sql`
+      SELECT id, request_id, person_email, person_name, quantity, note
+      FROM lending_request_pledges WHERE request_id = ANY(${lrIds})
+      ORDER BY created_at, id` : [];
+    return res.status(200).json({ requests: lrRows, pledges: lrPledges, me: email });
+  }
+  if (req.query.action === 'loan-request-add') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const raBody = req.body || {};
+    const raItem = String(raBody.item_text || '').trim().slice(0, 200);
+    if (!raItem) return res.status(400).json({ error: 'Say what you need.' });
+    const raQtyRaw = parseInt(raBody.quantity, 10);
+    const raQty = Number.isFinite(raQtyRaw) && raQtyRaw > 0 ? Math.min(raQtyRaw, 999) : null;
+    const raNote = String(raBody.note || '').trim().slice(0, 300);
+    const raP = await sql`SELECT first_name, last_name FROM people
+      WHERE LOWER(email) = ${email} OR LOWER(personal_email) = ${email} LIMIT 1`;
+    const raName = raP.length ? ((raP[0].first_name || '') + ' ' + (raP[0].last_name || '')).trim() : '';
+    const raIns = await sql`
+      INSERT INTO lending_requests (school_year, item_text, quantity, note, requested_by_email, requested_by_name)
+      VALUES (${activeSchoolYear(new Date())}, ${raItem}, ${raQty}, ${raNote}, ${email}, ${raName})
+      RETURNING id`;
+    const raId = raIns[0].id;
+    const raTitle = 'Lending Library request';
+    const raBodyTxt = (raName || 'A member') + ' is looking for: ' + raItem + (raQty ? ' ×' + raQty : '') + '. Can you help?';
+    try {
+      const raMembers = await sql`SELECT DISTINCT LOWER(email) AS em FROM people WHERE COALESCE(email, '') <> ''`;
+      for (const m of raMembers) {
+        if (m.em === email) continue;
+        await sql`INSERT INTO notifications (recipient_email, type, title, body, link_url)
+          VALUES (${m.em}, 'lending_request', ${raTitle}, ${raBodyTxt}, '')`;
+      }
+      await broadcastAll(sql, { title: raTitle, body: raBodyTxt, tag: 'lend-req-' + raId, url: '/members.html' });
+    } catch (nErr) { console.error('lending-request notify (non-fatal):', nErr); }
+    return res.status(201).json({ ok: true, id: raId });
+  }
+  if (req.query.action === 'loan-request-pledge') {
+    const rpBody = req.body || {};
+    if (req.method === 'DELETE') {
+      const rpDelId = parseInt(req.query.id, 10);
+      if (!Number.isFinite(rpDelId)) return res.status(400).json({ error: 'id required' });
+      const rpOwn = await sql`SELECT id, request_id, LOWER(person_email) AS em FROM lending_request_pledges WHERE id = ${rpDelId}`;
+      if (!rpOwn.length) return res.status(404).json({ error: 'Pledge not found.' });
+      if (rpOwn[0].em !== email && !coordAllowed) return res.status(403).json({ error: 'That pledge isn’t yours to remove.' });
+      await sql`DELETE FROM lending_request_pledges WHERE id = ${rpDelId}`;
+      await sql`UPDATE lending_requests SET status = 'open' WHERE id = ${rpOwn[0].request_id} AND status = 'fulfilled'`;
+      return res.status(200).json({ ok: true });
+    }
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const rpReqId = parseInt(rpBody.request_id, 10);
+    if (!Number.isFinite(rpReqId)) return res.status(400).json({ error: 'request_id required' });
+    const rpRows = await sql`SELECT * FROM lending_requests WHERE id = ${rpReqId}`;
+    if (!rpRows.length) return res.status(404).json({ error: 'Request not found.' });
+    const rpReq = rpRows[0];
+    if (rpReq.status === 'closed') return res.status(409).json({ error: 'This request is closed.' });
+    let rpQty = parseInt(rpBody.quantity, 10);
+    if (!Number.isFinite(rpQty) || rpQty < 1) rpQty = 1;
+    if (rpReq.quantity != null) {
+      const rpSum = await sql`SELECT COALESCE(SUM(quantity), 0)::int AS n FROM lending_request_pledges WHERE request_id = ${rpReqId}`;
+      const rpRemaining = rpReq.quantity - rpSum[0].n;
+      if (rpRemaining <= 0) return res.status(409).json({ error: 'This request is already fully covered — thank you though!' });
+      rpQty = Math.min(rpQty, rpRemaining);
+    }
+    const rpP = await sql`SELECT first_name, last_name FROM people
+      WHERE LOWER(email) = ${email} OR LOWER(personal_email) = ${email} LIMIT 1`;
+    const rpName = rpP.length ? ((rpP[0].first_name || '') + ' ' + (rpP[0].last_name || '')).trim() : '';
+    await sql`
+      INSERT INTO lending_request_pledges (request_id, person_email, person_name, quantity, note)
+      VALUES (${rpReqId}, ${email}, ${rpName}, ${rpQty}, ${String(rpBody.note || '').trim().slice(0, 300)})`;
+    if (rpReq.quantity != null) {
+      const rpAfter = await sql`SELECT COALESCE(SUM(quantity), 0)::int AS n FROM lending_request_pledges WHERE request_id = ${rpReqId}`;
+      if (rpAfter[0].n >= rpReq.quantity) {
+        await sql`UPDATE lending_requests SET status = 'fulfilled' WHERE id = ${rpReqId}`;
+      }
+    }
+    // Requester hears about every pledge.
+    try {
+      const rpTitle = 'Someone can help — ' + rpReq.item_text;
+      const rpTxt = (rpName || 'A member') + ' pledged ' + rpQty + ' for your request.';
+      await sql`INSERT INTO notifications (recipient_email, type, title, body, link_url)
+        VALUES (${String(rpReq.requested_by_email).toLowerCase()}, 'lending_pledge', ${rpTitle}, ${rpTxt}, '')`;
+      await sendToUser(sql, String(rpReq.requested_by_email).toLowerCase(), { title: rpTitle, body: rpTxt, tag: 'lend-pledge-' + rpReqId, url: '/members.html' });
+    } catch (pErr) { console.error('pledge notify (non-fatal):', pErr); }
+    return res.status(201).json({ ok: true, quantity: rpQty });
+  }
+  if (req.query.action === 'loan-request-close') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const rcId = parseInt((req.body || {}).request_id, 10);
+    if (!Number.isFinite(rcId)) return res.status(400).json({ error: 'request_id required' });
+    const rcRows = await sql`SELECT id, LOWER(requested_by_email) AS em FROM lending_requests WHERE id = ${rcId}`;
+    if (!rcRows.length) return res.status(404).json({ error: 'Request not found.' });
+    if (rcRows[0].em !== email && !coordAllowed && !isSuperUser(email)) {
+      return res.status(403).json({ error: 'Only the requester (or the Supply Coordinator) can close this.' });
+    }
+    await sql`UPDATE lending_requests SET status = 'closed' WHERE id = ${rcId}`;
+    return res.status(200).json({ ok: true });
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });

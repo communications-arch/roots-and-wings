@@ -9787,6 +9787,10 @@
         h += '<div id="ws-lending-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
         h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-browse">' + brandIconImg('lending', 'ag-icon') + ' Browse the Lending Library</button>'
           + '<span class="ws-part-submit-hint">Have supplies others could use? <button type="button" class="ws-inline-link" data-resource-action="lending-offer">Offer something to lend or give away</button>.</span></p>';
+        // #161 (Lyndsey): ask for something the library doesn't have —
+        // every member gets a heads-up, and pledges can split quantities.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-requests">' + brandIconImg('helper', 'ag-icon') + ' Requests</button>'
+          + '<span class="ws-part-submit-hint">Need something that isn’t listed? Ask everyone at once.</span></p>';
         return h;
       },
       afterRender: function () {
@@ -17990,6 +17994,142 @@
     return html;
   }
 
+  // ── #161 Lending Library Requests ─────────────────────────────────
+  // Ask for items the library doesn't have; every member gets a bell +
+  // push, and any number of members pledge (quantity splits or
+  // open-ended). Requester (or Supply Coordinator) closes when done.
+  var _lendReqState = null;
+  function showLendingRequestsModal() {
+    var body = renderReportModal({
+      title: 'Lending Library — Requests',
+      subtitle: 'Ask the whole co-op for something the library doesn’t have. Every member gets a heads-up; several people can chip in together (six bottles can arrive as 2 + 3 + 1).',
+      bodyId: 'lend-req-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    loadLendingRequests();
+  }
+  window.showLendingRequestsModal = showLendingRequestsModal;
+  function loadLendingRequests() {
+    fetch('/api/supply-closet?action=loan-requests' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && Array.isArray(d.requests)) { _lendReqState = d; paintLendingRequests(); }
+        else { var b = document.getElementById('lend-req-body'); if (b) b.innerHTML = '<p class="ws-empty">' + escapeHtml((d && d.error) || 'Could not load requests.') + '</p>'; }
+      })
+      .catch(function () { var b = document.getElementById('lend-req-body'); if (b) b.innerHTML = '<p class="ws-empty">Network error — try again.</p>'; });
+  }
+  function paintLendingRequests() {
+    var body = document.getElementById('lend-req-body');
+    if (!body || !_lendReqState) return;
+    var me = String(_lendReqState.me || '').toLowerCase();
+    var pledgesByReq = {};
+    (_lendReqState.pledges || []).forEach(function (p) {
+      (pledgesByReq[p.request_id] || (pledgesByReq[p.request_id] = [])).push(p);
+    });
+    var h = '<div class="ws-part-panel" style="margin-bottom:12px;">';
+    h += '<p class="ws-lending-head" style="margin-top:0;">Ask for something</p>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+    h += '<input class="cl-input" id="lendReqItem" maxlength="200" placeholder="What do you need? e.g. 2-liter bottles" style="flex:1;min-width:180px;">';
+    h += '<input class="cl-input" id="lendReqQty" type="number" min="1" max="999" placeholder="Qty (optional)" style="width:110px;">';
+    h += '<button type="button" class="btn btn-primary btn-sm" id="lendReqAddBtn">Ask everyone</button>';
+    h += '</div>';
+    h += '<p class="ws-body-hint" style="margin:6px 0 0;">Leave quantity blank for open-ended asks (“magazines for a collage class” — any amount helps). Submitting pings every member.</p>';
+    h += '<div class="cls-error" id="lendReqErr" style="display:none;"></div></div>';
+
+    var reqs = _lendReqState.requests || [];
+    if (!reqs.length) h += '<p class="ws-empty">No open requests right now.</p>';
+    reqs.forEach(function (r) {
+      var ps = pledgesByReq[r.id] || [];
+      var pledged = 0;
+      ps.forEach(function (p) { pledged += (p.quantity || 0); });
+      var progress = (r.quantity != null)
+        ? pledged + ' of ' + r.quantity + ' pledged'
+        : (pledged ? pledged + ' pledged (open-ended)' : 'open-ended');
+      h += '<div class="ws-lending-row" style="align-items:flex-start;"><span class="ws-lending-main">'
+        + '<strong>' + escapeHtml(r.item_text) + '</strong>'
+        + (r.status === 'fulfilled' ? ' <span class="ws-wv-ok" style="font-weight:700;">✓ covered</span>' : '')
+        + '<span class="ws-lending-sub">' + escapeHtml(r.requested_by_name || r.requested_by_email) + ' · ' + progress + '</span>'
+        + (r.note ? '<span class="ws-lending-sub">' + escapeHtml(r.note) + '</span>' : '');
+      ps.forEach(function (p) {
+        h += '<span class="ws-lending-sub">🤝 ' + escapeHtml(p.person_name || p.person_email) + ' — ' + p.quantity
+          + (String(p.person_email || '').toLowerCase() === me ? ' <button type="button" class="sc-btn sc-btn-del lend-req-unpledge" data-id="' + p.id + '" title="Remove your pledge">×</button>' : '')
+          + '</span>';
+      });
+      h += '</span><span class="ws-lending-actions" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
+      if (r.status !== 'fulfilled') {
+        h += '<input class="cl-input lend-req-pqty" data-id="' + r.id + '" type="number" min="1" max="999" value="1" style="width:64px;">';
+        h += '<button type="button" class="volunteer-cta lend-req-pledge" data-id="' + r.id + '">' + DUTY_ICONS.volunteer + ' I can help</button>';
+      }
+      if (String(r.requested_by_email || '').toLowerCase() === me) {
+        h += '<button type="button" class="sc-btn lend-req-close" data-id="' + r.id + '">Close</button>';
+      }
+      h += '</span></div>';
+    });
+    body.innerHTML = h;
+
+    var addBtn = document.getElementById('lendReqAddBtn');
+    if (addBtn) addBtn.addEventListener('click', function () {
+      var errEl = document.getElementById('lendReqErr');
+      var item = String((document.getElementById('lendReqItem') || {}).value || '').trim();
+      if (!item) { if (errEl) { errEl.textContent = 'Say what you need.'; errEl.style.display = ''; } return; }
+      addBtn.disabled = true;
+      fetch('/api/supply-closet?action=loan-request-add' + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({ item_text: item, quantity: (document.getElementById('lendReqQty') || {}).value })
+      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          addBtn.disabled = false;
+          if (!res.ok) { if (errEl) { errEl.textContent = (res.data && res.data.error) || 'Could not post the request.'; errEl.style.display = ''; } return; }
+          loadLendingRequests();
+        })
+        .catch(function () { addBtn.disabled = false; if (errEl) { errEl.textContent = 'Network error — try again.'; errEl.style.display = ''; } });
+    });
+    body.querySelectorAll('.lend-req-pledge').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var rid = btn.getAttribute('data-id');
+        var qtyEl = body.querySelector('.lend-req-pqty[data-id="' + rid + '"]');
+        btn.disabled = true;
+        fetch('/api/supply-closet?action=loan-request-pledge' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ request_id: rid, quantity: qtyEl ? qtyEl.value : 1 })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not pledge.'); return; }
+            loadLendingRequests();
+          })
+          .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+      });
+    });
+    body.querySelectorAll('.lend-req-unpledge').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        fetch('/api/supply-closet?action=loan-request-pledge&id=' + btn.getAttribute('data-id') + notifViewAsSuffix(), { method: 'DELETE', headers: rwAuthHeaders() })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { alert((res.data && res.data.error) || 'Could not remove.'); return; }
+            loadLendingRequests();
+          })
+          .catch(function () { alert('Network error — try again.'); });
+      });
+    });
+    body.querySelectorAll('.lend-req-close').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'close', function () {
+          fetch('/api/supply-closet?action=loan-request-close' + notifViewAsSuffix(), {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ request_id: self.getAttribute('data-id') })
+          }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert((res.data && res.data.error) || 'Could not close.'); return; }
+              loadLendingRequests();
+            })
+            .catch(function () { alert('Network error — try again.'); });
+        });
+      });
+    });
+  }
+
   // ── Lending Library (2026-07-28) ──
 
   // 'YYYY-MM-DD' (or ISO) → 'M/D/YY'; range collapses same-day.
@@ -21917,6 +22057,7 @@
     else if (action === 'brand-kit' && typeof showBrandKitModal === 'function') showBrandKitModal();
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
+    else if (action === 'lending-requests' && typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
     else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
     // #139: group "Things to Bring" sections (Kid Schedule + liaison card)
     // — the shared signup markup with group endpoints.
