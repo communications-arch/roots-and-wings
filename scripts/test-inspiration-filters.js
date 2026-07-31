@@ -109,8 +109,9 @@ t('missing idea → error', () => {
 });
 
 t('no valid group → error', () => {
-  assertEq(norm({ idea: 'X' }).error, 'Pick at least one age group.');
-  assertEq(norm({ idea: 'X', group_names: ['Klingons'] }).error, 'Pick at least one age group.');
+  // "Groves" rename (Erin, 2026-07-31) — age groups are groves user-facing.
+  assertEq(norm({ idea: 'X' }).error, 'Pick at least one grove.');
+  assertEq(norm({ idea: 'X', group_names: ['Klingons'] }).error, 'Pick at least one grove.');
 });
 
 t('length caps: idea 200, note 300', () => {
