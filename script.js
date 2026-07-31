@@ -3134,6 +3134,11 @@
     // rewritten on the next render, which always happens before the user can
     // see them (opening the Directory modal re-renders).
     if (!Array.isArray(MORNING_GROUP_ORDER)) return;
+    // Erin 2026-07-31: NO ranges on the directory pills — bare grove names
+    // only (this rewriter was re-appending the roster-aware range even
+    // after the static markup lost it). The roster-aware span still shows
+    // in the grove-view staff banner's "Ages" line; the hover title keeps
+    // it discoverable here without the visual noise.
     MORNING_GROUP_ORDER.forEach(function (g) {
       var pill = wrap.querySelector('.filter-pill[data-filter="' + g.name + '"]');
       if (!pill) return;
@@ -3141,18 +3146,8 @@
       var icon = pill.querySelector('img.ag-icon');
       pill.innerHTML = '';
       if (icon) pill.appendChild(icon); // same node, so no image re-fetch
-      pill.appendChild(document.createTextNode(' ' + g.name + ' '));
-      if (wide === g.range) {
-        pill.appendChild(document.createTextNode('(' + wide + ')'));
-        pill.removeAttribute('title');
-      } else {
-        var span = document.createElement('span');
-        span.className = 'ag-range-wide';
-        span.textContent = '(' + wide + ')';
-        pill.appendChild(span);
-        pill.title = 'Typical range ' + g.range
-          + ' — shown wider to cover the students placed in ' + g.name;
-      }
+      pill.appendChild(document.createTextNode(' ' + g.name));
+      pill.title = 'Ages ' + wide;
     });
   }
 
