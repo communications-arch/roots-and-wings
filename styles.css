@@ -8053,6 +8053,12 @@ ul[id="ws-todo-list"] .ws-link-icon,
 .mf-coverage-details {
   cursor: default;
 }
+/* Scroll-to targets (Erin, 2026-07-31): the bell's #coverage link and the
+   greeting badge's card-scroll used scrollIntoView, which put the card's
+   top edge UNDER the fixed portal chrome (~140px of navbar + purple band)
+   and clipped the "Coverage Board" label. scroll-margin reserves that
+   height for every programmatic/anchor scroll to these cards. */
+#coverageBoardCard, .mf-card, .ws-card { scroll-margin-top: 150px; }
 .mf-coverage-summary {
   cursor: pointer;
   list-style: none;
