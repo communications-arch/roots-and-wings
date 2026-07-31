@@ -23210,8 +23210,12 @@
         var ph = '';
         mine.forEach(function (s) {
           var key = s.block + '|' + s.role_description;
-          ph += '<div class="absence-slot-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0;">' + s.role_description
-            + (s.role_type === 'general' ? ' <em style="color:var(--color-text-light);font-size:0.8rem;">(general — no specific duty on file)</em>' : '')
+          // General spots sit right under their own checkbox — repeating
+          // the block label there is noise, so show only the note.
+          ph += '<div class="absence-slot-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0;font-size:0.85rem;">'
+            + (s.role_type === 'general'
+              ? '<em style="color:var(--color-text-light);font-size:0.8rem;">general spot — no specific duty on file</em>'
+              : s.role_description)
             + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '" style="width:auto;max-width:220px;margin-left:auto;font-size:0.82rem;">'
             + '<option value="">— open, ask for coverage —</option>'
             + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"' + (_absRepl[key] === n ? ' selected' : '') + '>' + escAttr(n) + '</option>'; }).join('')
