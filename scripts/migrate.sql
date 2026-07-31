@@ -2334,6 +2334,21 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS assistant_slots INTEGER NOT 
 -- (Kitchen / Kitchen Annex / Pavilion). One booking per facility × session
 -- × week × hour — the UNIQUE constraint IS the conflict rule. Liaisons
 -- book for their group from the Morning Class Builder's Facilities panel.
+-- 2026-07-31 (Erin): split the "Kitchen Annex & FH" cleaning area into
+-- separate Kitchen Annex + Fellowship Hall areas. The rename keeps any
+-- existing sign-ups attached (they become Kitchen Annex); Fellowship
+-- Hall starts open. Same sort slot — ORDER BY sort_order, id keeps
+-- Fellowship Hall right after Kitchen Annex. Idempotent both ways.
+UPDATE cleaning_areas
+SET area_name = 'Kitchen Annex',
+    tasks = 'Remove bagged trash from the kitchen annex and place in the hall by the entranceway,Replace trash bags in the kitchen annex,Sweep or vacuum as needed,Wipe surfaces as needed,Turn off lights to show rooms are cleaned'
+WHERE area_name = 'Kitchen Annex & FH';
+INSERT INTO cleaning_areas (floor_key, area_name, tasks, sort_order)
+SELECT 'mainFloor', 'Fellowship Hall',
+       'Remove bagged trash from the Fellowship Hall and place in the hall by the entranceway,Replace trash bags in the Fellowship Hall,Sweep or vacuum as needed,Wipe surfaces as needed,Reset chairs and tables as needed,Turn off lights to show rooms are cleaned',
+       2
+WHERE NOT EXISTS (SELECT 1 FROM cleaning_areas WHERE area_name = 'Fellowship Hall');
+
 -- 2026-07-30 (#161, Lyndsey): Lending Library REQUESTS — members ask for
 -- items the library doesn't have; any number of members pledge, with
 -- quantity splits (six bottles = 2+3+1) or open-ended when no quantity.
