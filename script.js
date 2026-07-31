@@ -23081,6 +23081,30 @@
           slots.push({ block: 'Cleaning', role_type: 'cleaning', role_description: 'Cleaning Floater', group_or_class: 'Floater' });
       }
     }
+
+    // Scheduled DB class submissions (Erin 2026-07-31, Alice/PM2): classes
+    // placed by the Class Builder are duties the sheet-era loops above
+    // can't see. They belong to the submitting login (= the active/viewed
+    // person), so they only count when THAT person is being looked up.
+    var subActiveP = fam ? getActivePerson(fam) : null;
+    var subActiveFull = subActiveP ? personFullName(subActiveP, fam) : '';
+    if (subActiveFull && parentFullNames.some(function (f) { return nameMatchAbsence(subActiveFull, f); })) {
+      (typeof myClassSubmissions !== 'undefined' && Array.isArray(myClassSubmissions) ? myClassSubmissions : []).forEach(function (s) {
+        if (s.status !== 'scheduled' || s.scheduled_session !== session) return;
+        if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && s.school_year && ACTIVE_SESSION_YEAR && s.school_year !== ACTIVE_SESSION_YEAR) return;
+        if (slots.some(function (sl) { return sl.group_or_class === s.class_name; })) return;
+        if (s.class_period === 'AM') {
+          if (!has('AM')) return;
+          var amHr = s.scheduled_hour === 'AM1' ? '10:00–11:00' : s.scheduled_hour === 'AM2' ? '11:00–12:00' : '10:00–12:00';
+          slots.push({ block: 'AM', role_type: 'teacher', role_description: 'Leading ' + s.class_name + ' ' + amHr, group_or_class: s.class_name });
+        } else {
+          var subPM1 = s.scheduled_hour === 'PM1' || s.scheduled_hour === 'both';
+          var subPM2 = s.scheduled_hour === 'PM2' || s.scheduled_hour === 'both';
+          if (subPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'teacher', role_description: 'Leading ' + s.class_name + ' 1:00–1:55', group_or_class: s.class_name });
+          if (subPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'teacher', role_description: 'Leading ' + s.class_name + ' 2:00–2:55', group_or_class: s.class_name });
+        }
+      });
+    }
     return slots;
   }
 
@@ -23186,9 +23210,63 @@
       if (s && s.claimed_by_name) _absRepl[s.block + '|' + s.role_description] = s.claimed_by_name;
     });
     var ABS_GENERIC_LABEL = { AM: 'Morning (10:00–12:00)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning' };
+    // Volunteer sign-ups (assists, floater, board, prep — Erin 2026-07-31,
+    // Alice/PM1 Prep Period) live in the DB matrix, keyed to the ACTIVE
+    // person + session; fetched per session and merged into effectiveSlots.
+    var VOL_ABS_BLOCK = { AM1: 'AM', AM2: 'AM', PM1: 'PM1', PM2: 'PM2' };
+    var VOL_ABS_TIME = { AM1: '10:00–11:00', AM2: '11:00–12:00', PM1: '1:00–1:55', PM2: '2:00–2:55' };
+    var _absActiveP = getActivePerson(me);
+    var _absActiveFull = _absActiveP ? personFullName(_absActiveP, me) : '';
+    var _absVolMine = null, _absVolSession = null, _absTouched = false;
+    function loadAbsVolMine() {
+      var volCred = localStorage.getItem('rw_google_credential');
+      if (!volCred) return;
+      var want = selectedSession;
+      fetch('/api/curriculum?action=volunteer-matrix&school_year=' + encodeURIComponent((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '') + '&session=' + want + notifViewAsSuffix(), {
+        headers: { 'Authorization': 'Bearer ' + volCred }
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || want !== selectedSession || !document.getElementById('absenceOverlay')) return;
+          _absVolMine = d.mine || {};
+          _absVolSession = want;
+          // Untouched modal: re-render so sign-up blocks pre-check too;
+          // after any user interaction just refresh the pickers in place.
+          if (!_absTouched) renderDynamic(); else updatePreview();
+        })
+        .catch(function () { /* pickers just show what the sync scan found */ });
+    }
+    function volMineSlots(blocks, anyPerson) {
+      // Sign-ups belong to the active person — only their absence shows them.
+      // anyPerson = family-wide checkbox defaults (the active person is
+      // always one of the parents).
+      if (!_absVolMine || _absVolSession !== selectedSession) return [];
+      if (!anyPerson && (!_absActiveFull || !nameMatchAbsence(_absActiveFull, selectedPerson))) return [];
+      var out = [];
+      Object.keys(_absVolMine).forEach(function (bk) {
+        var m = _absVolMine[bk];
+        if (!m) return;
+        var ab = VOL_ABS_BLOCK[bk] || bk;
+        if (blocks.indexOf(ab) === -1) return;
+        var cls = (String(m.label || '').match(/“(.+)”/) || [])[1] || '';
+        out.push({
+          block: ab,
+          role_type: m.kind === 'lead' ? 'teacher' : m.kind === 'assist' ? 'assistant' : m.kind,
+          role_description: String(m.label || '') + ' ' + (VOL_ABS_TIME[bk] || ''),
+          group_or_class: cls
+        });
+      });
+      return out;
+    }
     function effectiveSlots() {
       var blocks = getSelectedBlocks();
       var slots = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me);
+      // DB sign-ups ride along; class rows the scan already found (sheet or
+      // submission) win over the matrix's lead/assist duplicate.
+      volMineSlots(blocks).forEach(function (v) {
+        if (v.group_or_class && slots.some(function (s) { return s.group_or_class === v.group_or_class; })) return;
+        slots.push(v);
+      });
       // #179: no duty on file for a selected block (classes not scheduled
       // yet, or nothing signed up) still yields a claimable GENERAL spot.
       blocks.forEach(function (b) {
@@ -23250,6 +23328,7 @@
       var allSlots = getResponsibilitiesForBlocks(parentNames, selectedSession, allBlocks, me.name, me);
       var activeBlocks = {};
       allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
+      volMineSlots(allBlocks, true).forEach(function (s) { activeBlocks[s.block] = true; });
       var hasAnyDuties = Object.keys(activeBlocks).length > 0;
       var activeBlockList = allBlocks.filter(function (b) { return activeBlocks[b]; });
       var initialChecked = (prefillBlocks && isPrefillSession)
@@ -23297,6 +23376,7 @@
 
       dyn.querySelectorAll('.absence-date-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
+          _absTouched = true;
           dyn.querySelectorAll('.absence-date-btn').forEach(function (b) { b.classList.remove('active'); });
           btn.classList.add('active');
           selectedDate = btn.getAttribute('data-date');
@@ -23305,12 +23385,14 @@
       var wholeDayCb = document.getElementById('absenceWholeDay');
       if (wholeDayCb) {
         wholeDayCb.addEventListener('change', function () {
+          _absTouched = true;
           dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
           updatePreview();
         });
       }
       dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) {
         cb.addEventListener('change', function () {
+          _absTouched = true;
           if (wholeDayCb) {
             var allChecked = true;
             dyn.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
@@ -23329,12 +23411,14 @@
         selectedSession = parseInt(btn.getAttribute('data-sess'), 10);
         overlay.querySelectorAll('.absence-sess-chip').forEach(function (b) { b.classList.toggle('sb-sess-match', b === btn); });
         renderDynamic();
+        loadAbsVolMine();
       });
     });
-    document.getElementById('absenceWho').addEventListener('change', function () { selectedPerson = this.value; updatePreview(); });
+    document.getElementById('absenceWho').addEventListener('change', function () { _absTouched = true; selectedPerson = this.value; updatePreview(); });
     // #169: show the name inputs only for the branch that needs them.
     overlay.querySelectorAll('input[name="absCov"]').forEach(function (r) {
       r.addEventListener('change', function () {
+        _absTouched = true;
         var el = document.getElementById('absBlcName');
         if (el) el.style.display = (this.value === 'blc' && this.checked) ? '' : 'none';
         updatePreview();
@@ -23417,6 +23501,7 @@
       });
     });
     renderDynamic();
+    loadAbsVolMine();
   }
 
   function loadCoverageBoard() {
