@@ -23133,9 +23133,6 @@
       });
       html += '</div></div>';
     }
-    // Dates + blocks + preview depend on the selected session (duties differ
-    // session to session), so they live in a re-renderable container.
-    html += '<div id="absenceDynamic"></div>';
     // #169 (Lyndsey): coverage + kids questions. Adult picker options come
     // from the directory (every family's parents).
     var prefillCov = (prefill && prefill.coverage_needed === false) ? 'blc' : 'yes';
@@ -23152,10 +23149,15 @@
     });
     dirAdults.sort();
     html += '<datalist id="absenceAdultList">' + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"></option>'; }).join('') + '</datalist>';
+    // Erin 2026-07-31: coverage question asked FIRST — the What-will-you-miss
+    // section below only shows replacement pickers when the answer is yes.
     html += '<div class="absence-field"><label>Do you need coverage?</label>'
       + '<div><label style="display:block;margin:2px 0;"><input type="radio" name="absCov" value="yes"' + (prefillCov === 'yes' ? ' checked' : '') + '> Yes, request coverage</label>'
       + '<label style="display:block;margin:2px 0;"><input type="radio" name="absCov" value="blc"' + (prefillCov === 'blc' ? ' checked' : '') + '> No, my backup learning coach is covering me</label></div>'
       + '<input class="cl-input" id="absBlcName" list="absenceAdultList" placeholder="Backup learning coach’s name…" value="' + escAttr(prefillBlc) + '" style="' + (prefillCov === 'blc' ? '' : 'display:none;') + 'margin-top:4px;"></div>';
+    // Dates + blocks + preview depend on the selected session (duties differ
+    // session to session), so they live in a re-renderable container.
+    html += '<div id="absenceDynamic"></div>';
     html += '<div class="absence-field"><label>Will your kids be out too?</label>'
       + '<p class="ws-body-hint" style="margin:2px 0 4px;">Remember: if anyone in the household is sick, the whole family stays home.</p>'
       + '<div><label style="display:block;margin:2px 0;"><input type="radio" name="absKids" value="yes"' + (prefillKids === 'yes' ? ' checked' : '') + '> Yes — their teachers will get a heads-up automatically</label>'
@@ -23199,7 +23201,10 @@
     // Erin 2026-07-31: each block's coverage rows render INLINE directly
     // under that block's own checkbox, not in one combined box below.
     function updatePreview() {
-      var slotsPreview = effectiveSlots();
+      // Erin 2026-07-31: no coverage needed (BLC covering) → no pickers.
+      var covSel = overlay.querySelector('input[name="absCov"]:checked');
+      var covNeeded = !covSel || covSel.value === 'yes';
+      var slotsPreview = covNeeded ? effectiveSlots() : [];
       var hint = document.getElementById('absenceReplHint');
       if (hint) hint.style.display = slotsPreview.length ? '' : 'none';
       allBlocks.forEach(function (blk) {
@@ -23332,6 +23337,7 @@
       r.addEventListener('change', function () {
         var el = document.getElementById('absBlcName');
         if (el) el.style.display = (this.value === 'blc' && this.checked) ? '' : 'none';
+        updatePreview();
       });
     });
     overlay.querySelectorAll('input[name="absKids"]').forEach(function (r) {
