@@ -3467,17 +3467,23 @@
 
     function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+    // #191 (Erin): grove rows show icon + brand-colored bare name \u2014 no
+    // age range.
+    function groveHtml(g) {
+      return (typeof ageGroupIconHtml === 'function' ? ageGroupIconHtml(g) + ' ' : '')
+        + '<span class="ag-name ' + ageGroupClass(g) + '">' + esc(g) + '</span>';
+    }
     if (person.type === 'kid') {
       // AM: kid's group = their AM class
       var group = person.group;
       var amClass = group && AM_CLASSES[group];
       var amSess = amClass && amClass.sessions && amClass.sessions[currentSession];
       if (amSess) {
-        var amLine = groupWithAge(group);
+        var amLine = groveHtml(group);
         if (amSess.topic) amLine += ' \u2014 ' + esc(amSess.topic);
         am.push({ label: amLine, detail: amSess.room ? esc(amSess.room) : '' });
       } else if (group) {
-        am.push({ label: groupWithAge(group), detail: '' });
+        am.push({ label: groveHtml(group), detail: '' });
       }
       // PM: kid's electives
       var kidFullName = person.name + ' ' + (person.lastName || fam.name);
@@ -3533,10 +3539,10 @@
         var sess = staff.sessions && staff.sessions[currentSession];
         if (!sess) return;
         if (isMe(sess.teacher)) {
-          am.push({ label: groupWithAge(groupName) + ' \u2014 Leading', detail: sess.room ? esc(sess.room) : '' });
+          am.push({ label: groveHtml(groupName) + ' \u2014 Leading', detail: sess.room ? esc(sess.room) : '' });
         }
         (sess.assistants || []).forEach(function (a) {
-          if (isMe(a)) am.push({ label: groupWithAge(groupName) + ' \u2014 Assisting', detail: sess.room ? esc(sess.room) : '' });
+          if (isMe(a)) am.push({ label: groveHtml(groupName) + ' \u2014 Assisting', detail: sess.room ? esc(sess.room) : '' });
         });
       });
       // AM support (floater / prep / board)
@@ -3679,8 +3685,9 @@
       html += '<p class="detail-board-role">' + boardInfo.role + '</p>';
     }
     if (person.type === 'kid') {
-      // Class group only, no age (Erin, 2026-07-17).
-      if (person.group) html += '<p class="detail-group">' + escapeHtml(person.group) + '</p>';
+      // Class group only, no age (Erin, 2026-07-17); #191: grove icon +
+      // brand color on the name.
+      if (person.group) html += '<p class="detail-group">' + ageGroupIconHtml(person.group) + ' <span class="ag-name ' + ageGroupClass(person.group) + '">' + escapeHtml(person.group) + '</span></p>';
       if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
       if (person.schedule && person.schedule !== 'all-day') {
         html += '<p class="detail-schedule">' + (person.schedule === 'morning' ? 'Morning only' : 'Afternoon only') + '</p>';
@@ -3699,6 +3706,11 @@
       var roleLabels = { mlc: 'Main Learning Coach', blc: 'Back Up Learning Coach', parent: 'Parent' };
       var personRoleLabel = roleLabels[person.role] || 'Parent';
       if (!boardInfo) html += '<p class="detail-group">' + personRoleLabel + '</p>';
+      // #192 (Erin): appointed board/co-op roles show on the contact
+      // details too — same source as the Directory card badge.
+      if (!boardInfo && person.boardRole) {
+        html += '<p class="detail-board-role">' + (typeof boardRoleAccentImg === 'function' ? (boardRoleAccentImg(person.boardRole) || '') + ' ' : '') + escapeHtml(person.boardRole) + '</p>';
+      }
       if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
       if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — opted out of photo and film use.</p>';
       // Kids shown in family grid below
@@ -23169,6 +23181,8 @@
     var html = '<div class="absence-overlay" id="absenceOverlay"><div class="absence-modal">';
     html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
     html += '<h3>' + (editingAbsenceId ? 'Edit Absence Alert' : 'Absence Alert') + '</h3>';
+    // #188: report-modal-style subtitle under the title.
+    html += '<p class="ws-body-hint" style="margin:-10px 0 14px;">Let the co-op know you’ll be out — teachers get a heads-up, and anything needing coverage goes on the board.</p>';
     html += '<div class="absence-field"><label>Who will be out?</label><select class="cl-input" id="absenceWho">';
     parentNames.forEach(function (name) {
       var sel = (prefillPerson && name === prefillPerson) ? ' selected' : '';
@@ -23292,9 +23306,19 @@
         if (v.group_or_class && slots.some(function (s) { return s.group_or_class === v.group_or_class; })) return;
         slots.push(v);
       });
+      // #187 (Erin): Prep Periods don't need coverage — drop their slots,
+      // but remember the block HAD a real duty so it doesn't grow a
+      // generic filler spot below.
+      var prepBlocks = {};
+      slots = slots.filter(function (s) {
+        if (s.role_type !== 'prep') return true;
+        prepBlocks[s.block] = true;
+        return false;
+      });
       // #179: no duty on file for a selected block (classes not scheduled
       // yet, or nothing signed up) still yields a claimable GENERAL spot.
       blocks.forEach(function (b) {
+        if (prepBlocks[b]) return;
         if (!slots.some(function (s) { return s.block === b; })) {
           slots.push({ block: b, role_type: 'general', role_description: ABS_GENERIC_LABEL[b] || b, group_or_class: '' });
         }
@@ -23320,12 +23344,17 @@
           var key = s.block + '|' + s.role_description;
           // General spots sit right under their own checkbox — repeating
           // the block label there is noise, so show only the note.
-          ph += '<div class="absence-slot-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0;font-size:0.85rem;">'
+          // #188: fixed two-column row (what you'll miss · who covers) so
+          // nothing wraps into a misaligned pile; #189: neutral blank label,
+          // the how-to lives in the hint above the checkboxes.
+          ph += '<div class="absence-slot-row">'
+            + '<span class="absence-slot-desc">'
             + (s.role_type === 'general'
-              ? '<em style="color:var(--color-text-light);font-size:0.8rem;">general spot — no specific duty on file</em>'
-              : s.role_description)
-            + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '" style="width:auto;max-width:220px;margin-left:auto;font-size:0.82rem;">'
-            + '<option value="">— open, ask for coverage —</option>'
+              ? '<em>general spot — no specific duty on file</em>'
+              : escapeHtml(s.role_description))
+            + '</span>'
+            + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '">'
+            + '<option value="">— no one yet —</option>'
             + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"' + (_absRepl[key] === n ? ' selected' : '') + '>' + escAttr(n) + '</option>'; }).join('')
             + '</select></div>';
         });
@@ -23378,7 +23407,9 @@
       // Blocks and preview now always render; no-duty blocks become
       // general claimable spots (effectiveSlots).
       h += '<div class="absence-field"><label>What will you miss?</label>';
-      h += '<p class="ws-body-hint" id="absenceReplHint" style="margin:2px 0 4px;">Already arranged a replacement for a spot? Pick them \u2014 they\u2019ll get a heads-up. Blanks go to the Coverage Board for anyone to claim.</p>';
+      // #189 (Erin): coverage is usually arranged person-to-person first \u2014
+      // the hint teaches that flow; the Alert is the formal tracking.
+      h += '<p class="ws-body-hint" id="absenceReplHint" style="margin:2px 0 4px;">Most coverage is arranged ahead of time in Chat \u2014 often an adult whose class can spare them clears it with their lead, then offers to cover you. Pick them below to make it official (they\u2019ll get a heads-up). Spots left blank go to the Coverage Board for anyone to claim.</p>';
       h += '<div class="absence-blocks">';
       h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked || !hasAnyDuties ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
       allBlocks.forEach(function (blk) {
@@ -24161,7 +24192,9 @@
         // so reconcile them against every block; absences that already have
         // slots stick to the blocks the member actually picked.
         var blocks = (a.slots && a.slots.length > 0) ? (a.blocks || []) : allBlocks;
-        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name, me);
+        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name, me)
+          // #187: Prep Periods don't need coverage — never sync them in.
+          .filter(function (s) { return s.role_type !== 'prep'; });
         if (expected.length === 0) return;
         var have = {};
         (a.slots || []).forEach(function (s) { have[slotKey(s)] = true; });

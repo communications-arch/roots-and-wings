@@ -9680,6 +9680,41 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   font-size: 0.78rem;
   color: var(--color-text-light);
 }
+/* #188 (Erin): inline coverage rows under each block checkbox — a boxed
+   two-column grid (duty · replacement picker) so long class names truncate
+   instead of shoving the dropdown onto its own misaligned line. */
+.absence-block-slots {
+  background: rgba(var(--color-primary-rgb), 0.04);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.absence-slot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 0.82rem;
+}
+.absence-slot-row + .absence-slot-row {
+  border-top: 1px solid rgba(var(--color-primary-rgb), 0.08);
+}
+.absence-slot-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.absence-slot-desc em {
+  color: var(--color-text-light);
+  font-size: 0.78rem;
+}
+.absence-slot-row select.absence-repl {
+  width: auto;
+  max-width: 200px;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+}
 .absence-slot-list {
   list-style: none;
   padding: 0;
