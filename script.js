@@ -23047,16 +23047,53 @@
       overlay.querySelectorAll('.absence-block-cb').forEach(function (cb) { if (cb.checked) blocks.push(cb.value); });
       return blocks;
     }
+    // #179 (Colleen): each activity you'll miss gets its own replacement
+    // dropdown — a named pick creates the slot already covered (they get
+    // a personal heads-up); blanks land on the Coverage Board for anyone.
+    // Selections keyed by block|description so they survive re-renders.
+    var _absRepl = {};
+    (prefill && Array.isArray(prefill.slots) ? prefill.slots : []).forEach(function (s) {
+      if (s && s.claimed_by_name) _absRepl[s.block + '|' + s.role_description] = s.claimed_by_name;
+    });
+    var ABS_GENERIC_LABEL = { AM: 'Morning (10:00–12:00)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning' };
+    function effectiveSlots() {
+      var blocks = getSelectedBlocks();
+      var slots = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me);
+      // #179: no duty on file for a selected block (classes not scheduled
+      // yet, or nothing signed up) still yields a claimable GENERAL spot.
+      blocks.forEach(function (b) {
+        if (!slots.some(function (s) { return s.block === b; })) {
+          slots.push({ block: b, role_type: 'general', role_description: ABS_GENERIC_LABEL[b] || b, group_or_class: '' });
+        }
+      });
+      return slots;
+    }
     function updatePreview() {
       var previewEl = document.getElementById('absencePreview');
       if (!previewEl) return;
-      var slotsPreview = getResponsibilitiesForBlocks([selectedPerson], selectedSession, getSelectedBlocks(), me.name, me);
-      if (slotsPreview.length === 0) { previewEl.innerHTML = '<em class="absence-no-slots">No session-specific responsibilities for these blocks.</em>'; }
-      else {
-        var ph = '<ul class="absence-slot-list">';
-        slotsPreview.forEach(function (s) { ph += '<li><span class="absence-slot-block">' + s.block + '</span> ' + s.role_description + '</li>'; });
-        previewEl.innerHTML = ph + '</ul>';
+      var slotsPreview = effectiveSlots();
+      if (slotsPreview.length === 0) {
+        previewEl.innerHTML = '<em class="absence-no-slots">Pick at least one block above.</em>';
+        return;
       }
+      var ph = '<p class="ws-body-hint" style="margin:0 0 6px;">Already arranged a replacement for a spot? Pick them — they’ll get a heads-up. Blanks go to the Coverage Board for anyone to claim.</p>';
+      ph += '<ul class="absence-slot-list">';
+      slotsPreview.forEach(function (s) {
+        var key = s.block + '|' + s.role_description;
+        ph += '<li style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="absence-slot-block">' + s.block + '</span> ' + s.role_description
+          + (s.role_type === 'general' ? ' <em style="color:var(--color-text-light);font-size:0.8rem;">(general — no specific duty on file)</em>' : '')
+          + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '" style="width:auto;max-width:220px;margin-left:auto;font-size:0.82rem;">'
+          + '<option value="">— open, ask for coverage —</option>'
+          + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"' + (_absRepl[key] === n ? ' selected' : '') + '>' + escAttr(n) + '</option>'; }).join('')
+          + '</select></li>';
+      });
+      previewEl.innerHTML = ph + '</ul>';
+      previewEl.querySelectorAll('.absence-repl').forEach(function (sel) {
+        sel.addEventListener('change', function () {
+          var k = sel.getAttribute('data-key');
+          if (sel.value) _absRepl[k] = sel.value; else delete _absRepl[k];
+        });
+      });
     }
 
     function renderDynamic() {
@@ -23182,7 +23219,12 @@
       var kidsAbsent = !kidsSel || kidsSel.value === 'yes';
       var kidsAdult = String((document.getElementById('absKidsAdult') || {}).value || '').trim();
       if (!kidsAbsent && !kidsAdult) { alert('Pick which adult is responsible for your kids that day.'); return; }
-      var slotsToSend = covNeeded ? getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me) : [];
+      // #179: slots ride with their chosen replacements (blank = open);
+      // blocks with no duty on file still send a general claimable spot.
+      var slotsToSend = covNeeded ? effectiveSlots().map(function (s) {
+        var key = s.block + '|' + s.role_description;
+        return { block: s.block, role_type: s.role_type, role_description: s.role_description, group_or_class: s.group_or_class || '', replacement_name: _absRepl[key] || '' };
+      }) : [];
       submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
       var cred = localStorage.getItem('rw_google_credential');
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';

@@ -352,26 +352,62 @@ module.exports = async function handler(req, res) {
         } catch (ntErr) { console.error('kid-teacher notify (non-fatal):', ntErr); }
       }
 
-      // Insert coverage slots
+      // Insert coverage slots. #179 (Colleen): each slot may carry a
+      // pre-picked replacement — that slot is created ALREADY COVERED
+      // (claimed by the named member, attributed to the absent family via
+      // assigned_by), the replacement gets a personal bell+push, and only
+      // the still-open slots go into the Coverage Needed broadcast.
       const createdSlots = [];
+      const openSlots = [];
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
         const role_description = String(slot.role_description || '').trim();
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
-        await sql`
+        const ins = await sql`
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
           VALUES (${absenceId}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
+          RETURNING id
         `;
-        createdSlots.push({ block, role_type, role_description });
+        const slotRow = { block, role_type, role_description };
+        createdSlots.push(slotRow);
+        const replName = String(slot.replacement_name || '').trim().slice(0, 120);
+        if (!replName) { openSlots.push(slotRow); continue; }
+        try {
+          const pr = await sql`
+            SELECT email, personal_email FROM people
+            WHERE LOWER(TRIM(CONCAT_WS(' ', first_name, last_name))) = ${replName.toLowerCase()}
+            LIMIT 1`;
+          const replEmail = pr.length ? String(pr[0].email || pr[0].personal_email || '').toLowerCase() : '';
+          await sql`
+            UPDATE coverage_slots
+            SET claimed_by_email = ${replEmail}, claimed_by_name = ${replName},
+                claimed_at = NOW(), assigned_by = ${user.realEmail || user.email}
+            WHERE id = ${ins[0].id}`;
+          if (replEmail) {
+            const rDate = new Date(String(absence_date).slice(0, 10) + 'T12:00:00')
+              .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const rTitle = 'You’re covering — ' + rDate;
+            const rBody = absent_person + ' put you down for: ' + role_description + '. Not able to? Open the Coverage Board to release it.';
+            await sql`
+              INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+              VALUES (${replEmail}, 'slot_reassigned', ${rTitle}, ${rBody}, '#coverage', ${absenceId})`;
+            try { await sendToUser(sql, replEmail, { title: rTitle, body: rBody, tag: 'preassign-' + ins[0].id, url: '/members.html#coverage' }); }
+            catch (pushErr) { console.error('preassign push (non-fatal):', pushErr); }
+          }
+        } catch (replErr) {
+          // Name didn't resolve or the update failed — slot stays open.
+          console.error('replacement pre-assign (non-fatal):', replErr);
+          openSlots.push(slotRow);
+        }
       }
 
-      // Notify members — but only when there's actually something to cover.
+      // Notify members — but only about slots actually needing coverage.
       // A zero-slot absence (no session duties on file) is informational;
       // if duties appear later, PATCH below fires the notification then.
-      if (createdSlots.length > 0) {
-        await notifyCoverageNeeded(sql, { id: absenceId, absence_date, absent_person, family_email }, createdSlots);
+      if (openSlots.length > 0) {
+        await notifyCoverageNeeded(sql, { id: absenceId, absence_date, absent_person, family_email }, openSlots);
       }
 
       // Return the full absence with slots
