@@ -8081,7 +8081,9 @@ ul[id="ws-todo-list"] .ws-link-icon,
   font-weight: 600;
   padding: 0.1rem 0.45rem;
   border-radius: 3px;
-  margin-left: auto;
+  /* Erin 2026-07-31: sits beside the title now — the Absence Alert
+     header button owns the right edge. */
+  margin-left: 8px;
 }
 .coverage-summary-open {
   background: #fef3cd;
