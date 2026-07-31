@@ -234,7 +234,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'role-interest' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'role-interest' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms' && action !== 'cleaning-open-count') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -353,10 +353,43 @@ module.exports = async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    // ── #159: open cleaning spots for the rest of the year ──
+    // Feeds the Ways to Help card's Cleaning Crew hint: open areas (one
+    // family each) plus floater headroom (capped at 2 per session, #168),
+    // summed over sessions that haven't ENDED yet (Indy local day). With
+    // no session dates on file yet, all five sessions count.
+    if (action === 'cleaning-open-count' && req.method === 'GET') {
+      const cocYear = await activeCleaningYear(sql);
+      const [cocAreas, cocAsg, cocSess] = await Promise.all([
+        sql`SELECT id, floor_key FROM cleaning_areas`,
+        sql`SELECT cleaning_area_id, session_number, COUNT(*)::int AS n
+            FROM cleaning_assignments WHERE school_year = ${cocYear}
+            GROUP BY cleaning_area_id, session_number`,
+        sql`SELECT session_number, end_date FROM co_op_sessions WHERE school_year = ${cocYear}`
+      ]);
+      const cocToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Indiana/Indianapolis' }).format(new Date());
+      const cocDay = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v || '').slice(0, 10);
+      const cocLive = [];
+      cocSess.forEach(s => { if (cocDay(s.end_date) >= cocToday) cocLive.push(s.session_number); });
+      const cocSessions = cocLive.length ? cocLive : [1, 2, 3, 4, 5];
+      const cocByKey = {};
+      cocAsg.forEach(a => { cocByKey[a.cleaning_area_id + ':' + a.session_number] = a.n; });
+      let cocOpen = 0;
+      cocSessions.forEach(sn => {
+        cocAreas.forEach(a => {
+          const n = cocByKey[a.id + ':' + sn] || 0;
+          cocOpen += a.floor_key === 'floater' ? Math.max(0, 2 - n) : (n ? 0 : 1);
+        });
+      });
+      return res.status(200).json({ open: cocOpen, sessions: cocSessions });
+    }
+
     // ── Cleaning self-signup (2026-07-11, Erin's volunteer build) ──
     // Any member claims an OPEN area for a session (one family per area;
-    // the Floater area always accepts more). Their display name comes
-    // from their people row, matching the rota's person-name convention.
+    // the Floater area takes up to two families for a not-yet-started
+    // session — #168; a session already underway still takes extra
+    // last-minute floaters). Their display name comes from their people
+    // row, matching the rota's person-name convention.
     // DELETE releases their own row only.
     if (action === 'cleaning-signup') {
       const csEmail = String(user.email || '').toLowerCase();
@@ -379,6 +412,19 @@ module.exports = async function handler(req, res) {
           WHERE cleaning_area_id = ${areaId} AND session_number = ${csSess} AND school_year = ${csYear}`;
         if (areaRows[0].floor_key !== 'floater' && taken.length) {
           return res.status(409).json({ error: '“' + areaRows[0].area_name + '” is already covered by ' + taken[0].family_name + ' for that session.' });
+        }
+        // #168 (Colleen): floater caps at 2 for sessions that haven't
+        // started yet. Once a session is underway, extra last-minute
+        // floaters are welcome again.
+        if (areaRows[0].floor_key === 'floater' && taken.length >= 2) {
+          const fcSess = await sql`SELECT start_date FROM co_op_sessions
+            WHERE school_year = ${csYear} AND session_number = ${csSess}`;
+          const fcDay = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v || '').slice(0, 10);
+          const fcToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Indiana/Indianapolis' }).format(new Date());
+          const fcStarted = fcSess.length > 0 && fcDay(fcSess[0].start_date) <= fcToday;
+          if (!fcStarted) {
+            return res.status(409).json({ error: 'The Floater crew for that session is full (2 spots) — grab a cleaning area instead, or check back once the session starts.' });
+          }
         }
         if (taken.some(t => String(t.family_name || '').trim().toLowerCase() === csName.toLowerCase())) {
           return res.status(409).json({ error: 'You are already on that area for this session.' });

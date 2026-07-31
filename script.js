@@ -6301,9 +6301,24 @@
     if (!blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
     if (!d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the schedule is approved.');
     if (isCurrent && openBlocks.length > 0) {
-      h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>'
-        + openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ')
-        + '</strong> this session — pick a spot in each hour below.</p>';
+      // #170 (Colleen): the ⚠ nag only inside the 2 weeks before the
+      // session starts — further out it reads as a soft note instead.
+      // Noon-anchored dates per the local-day convention.
+      var nagStart = SESSION_DATES[sess] && SESSION_DATES[sess].start;
+      var inNagWindow = true;
+      if (nagStart) {
+        var nagStartMs = new Date(nagStart + 'T12:00:00').getTime();
+        var nagTodayMs = new Date().setHours(12, 0, 0, 0);
+        inNagWindow = (nagStartMs - nagTodayMs) <= 14 * 24 * 60 * 60 * 1000;
+      }
+      var openLabels = openBlocks.map(function (b) { return b.label.split(' (')[0]; }).join(', ');
+      if (inNagWindow) {
+        h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>' + openLabels
+          + '</strong> this session — pick a spot in each hour below.</p>';
+      } else {
+        h += '<p class="mf-vol-optional" style="margin:4px 0;">Open for you in Session ' + sess + ': '
+          + openLabels + ' — grab spots below whenever you’re ready.</p>';
+      }
     } else if (openBlocks.length === 0 && unavailNotes.length === 0) {
       h += '<p class="mf-vol-optional" style="margin:4px 0;">✓ All your hours are covered for Session ' + sess + '.</p>';
     } else if (!isCurrent && openBlocks.length > 0) {
@@ -6416,6 +6431,24 @@
     });
   }
 
+  // #159 (Colleen): live open-spot count for the Ways to Help card's
+  // Cleaning Crew hint. null = not fetched yet (the render shows the old
+  // static copy until the fetch paints the count in place).
+  var _cleaningOpenCount = null;
+  function loadCleaningOpenCount() {
+    fetch('/api/cleaning?action=cleaning-open-count', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || typeof d.open !== 'number') return;
+        _cleaningOpenCount = d.open;
+        var el = document.getElementById('ws-clean-open-hint');
+        if (el) el.innerHTML = d.open === 0
+          ? 'All spots covered for the year — thank you!'
+          : '<strong>' + d.open + '</strong> spot' + (d.open === 1 ? '' : 's') + ' open this year';
+      })
+      .catch(function () { /* keep the static copy */ });
+  }
+
   // #133 (Colleen): Cleaning Crew sign-ups from Ways to Help — the same
   // claim/release flow as My Family's cleaning picker, in the house
   // report-modal shell with S1–S5 chips.
@@ -6424,7 +6457,7 @@
     _cleanSignupSession = session || currentSession;
     var body = renderReportModal({
       title: 'Cleaning Crew',
-      subtitle: 'Grab one or two spaces for the year — one family per area each session (floaters always welcome). Release a spot anytime if plans change.',
+      subtitle: 'Grab one or two spaces for the year — one family per area each session (the Floater crew takes up to two families). Release a spot anytime if plans change.',
       bodyId: 'clean-signup-body',
       bodyPlaceholder: '<p class="ws-empty">Loading areas…</p>'
     });
@@ -6491,15 +6524,26 @@
       floorOrder.forEach(function (fl) {
         h += '<p class="ws-opp-committee" style="display:block;margin:10px 0 2px;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">' + escapeHtml(fl) + '</p>';
         h += '<ul class="ws-opportunities">';
+        // #168: floater caps at 2 for a session that hasn't started yet —
+        // the open row flips to "full" instead of offering Sign up. Once
+        // the session is underway, last-minute floaters are welcome again.
+        var floaterTaken = (d.cleaning || []).filter(function (c) { return c.floor === 'Floater'; }).length;
+        var sessStartStr = SESSION_DATES[sess] && SESSION_DATES[sess].start;
+        var sessStarted = sessStartStr
+          ? new Date(sessStartStr + 'T12:00:00').getTime() <= new Date().setHours(12, 0, 0, 0)
+          : false;
+        var floaterFull = floaterTaken >= 2 && !sessStarted;
         rowsByFloor[fl].forEach(function (r) {
           h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtml(r.area) + '</strong>';
-          if (r.floater) h += '<span class="ws-opp-committee">floaters welcome — more than one family can join</span>';
+          if (r.floater) h += '<span class="ws-opp-committee">up to two families — extra hands welcome once the session starts</span>';
           h += '</span>';
           if (r.taken && r.mine) {
             h += '<span class="ws-opp-committee">✓ Your family</span>'
               + '<button type="button" class="sc-btn sc-btn-del clean-su-release" data-id="' + r.id + '" title="Release this spot">×</button>';
           } else if (r.taken) {
             h += '<span class="ws-opp-committee">' + escapeHtml(r.family || 'taken') + '</span>';
+          } else if (r.floater && floaterFull) {
+            h += '<span class="ws-opp-committee">Floater crew is full for this session</span>';
           } else {
             h += '<button type="button" class="volunteer-cta clean-su-claim" data-id="' + r.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
           }
@@ -8792,6 +8836,8 @@
   // CLEANING_CREW (via applyCleaningData), so re-pull both sources.
   function refreshCleaningAfterSignup() {
     _cleanTabMatrix = {};
+    // #159: a claim/release changes the year-wide open count too.
+    if (typeof loadCleaningOpenCount === 'function') loadCleaningOpenCount();
     return fetch('/api/cleaning', { headers: rwAuthHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (data) { if (data && !data.error) applyCleaningData(data); })
@@ -9878,14 +9924,21 @@
         // committee-seats line above (the inline list made the card long
         // again; Erin 2026-07-21 evening).
         h += renderWthEventsSummary();
-        // #133 (Colleen): Cleaning Crew joins the same row idiom — copy
-        // is hers verbatim; the modal lists open areas per session.
+        // #133 (Colleen): Cleaning Crew joins the same row idiom; #159
+        // (Colleen): the hint shows the LIVE count of open spots for the
+        // rest of the year (painted async by loadCleaningOpenCount).
+        var cleanHint = (_cleaningOpenCount === null)
+          ? 'Grab one or two spaces for the year.'
+          : (_cleaningOpenCount === 0
+            ? 'All spots covered for the year — thank you!'
+            : '<strong>' + _cleaningOpenCount + '</strong> spot' + (_cleaningOpenCount === 1 ? '' : 's') + ' open this year');
         h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="cleaning-signup-modal">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning Crew</button>'
-          + '<span class="ws-part-submit-hint">Grab one or two spaces for the year.</span></p>';
+          + '<span class="ws-part-submit-hint" id="ws-clean-open-hint">' + cleanHint + '</span></p>';
         return h;
       },
       afterRender: function () {
         if (_eventOpenings === null && typeof loadEventOpenings === 'function') loadEventOpenings();
+        if (_cleaningOpenCount === null && typeof loadCleaningOpenCount === 'function') loadCleaningOpenCount();
       }
     },
     'class-ideas': {
@@ -24428,7 +24481,9 @@
     html += '<div class="cls-field" id="clsAmHourField" hidden>';
     html += '<label class="cls-label">Which morning hour? <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group cls-cb-inline">';
-    [['both', 'Both hours (10:00–12:00)'], ['first', '1st hour (10:00–10:55)'], ['last', '2nd hour (11:00–11:55)']].forEach(function (o) {
+    // #162 (Colleen): 'either' = one hour, flexible on which — the VP picks
+    // the hour during drafting (defaults Hour 1, counts as matched either way).
+    [['both', 'Both hours (10:00–12:00)'], ['first', '1st hour (10:00–10:55)'], ['last', '2nd hour (11:00–11:55)'], ['either', 'One hour — either works']].forEach(function (o) {
       html += '<label class="cls-cb-label"><input type="radio" name="clsAmHour" value="' + o[0] + '"' + (amHourCur === o[0] ? ' checked' : '') + '> ' + o[1] + '</label>';
     });
     html += '</div></div>';
@@ -35306,7 +35361,7 @@
       }).join('');
       if (!prefSessChips) prefSessChips = '<span class="sb-sess-chip sb-sess-none">any</span>';
       var hourPrefShort = (c.hour_preference || []).map(function (h) {
-        if (c.class_period === 'AM') return h === 'first' ? 'Hr 1' : h === 'last' ? 'Hr 2' : 'Both';
+        if (c.class_period === 'AM') return h === 'first' ? 'Hr 1' : h === 'last' ? 'Hr 2' : h === 'either' ? 'Either' : 'Both';
         if (h === 'first') return 'PM1';
         if (h === 'last') return 'PM2';
         if (h === 'flexible') return 'Either';
@@ -35318,6 +35373,7 @@
         if (c.class_period === 'AM') {
           var ap = (c.hour_preference || [])[0] || 'both';
           var ah = c.scheduled_hour || 'AM';
+          if (ap === 'either') return ah === 'AM1' || ah === 'AM2'; // #162: any single hour matches
           return ap === 'both' ? ah === 'AM' : ap === 'first' ? ah === 'AM1' : ah === 'AM2';
         }
         var prefs = c.hour_preference || [];
@@ -35947,7 +36003,7 @@
     if (detHelpers.length) html += '<div><strong>Helper' + (detHelpers.length === 1 ? '' : 's') + ':</strong> ' + escClsHtml(detHelpers.join(', ')) + '</div>';
     if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
     var amPref0 = (s.hour_preference || [])[0];
-    var amPrefWord = amPref0 === 'first' ? '1st hour (10:00–10:55)' : amPref0 === 'last' ? '2nd hour (11:00–11:55)' : 'Both hours (10:00–12:00)';
+    var amPrefWord = amPref0 === 'first' ? '1st hour (10:00–10:55)' : amPref0 === 'last' ? '2nd hour (11:00–11:55)' : amPref0 === 'either' ? 'One hour — either works' : 'Both hours (10:00–12:00)';
     html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))
       + ' · <strong>Hour:</strong> ' + escClsHtml(isAmSub ? amPrefWord : pmrepFormatHourPrefs(s.hour_preference)) + '</div>';
     if (!isAmSub && s.max_students) html += '<div><strong>Max students:</strong> ' + escClsHtml(String(s.max_students)) + '</div>';
@@ -36123,9 +36179,11 @@
 
   // Placement hour from the teacher's submitted preference:
   // first → AM1 (10:00–10:55), last → AM2 (11:00–11:55), both/blank → AM.
+  // #162: 'either' (one hour, flexible) defaults to AM1 — the VP can move
+  // it to Hour 2 during drafting and hourMatches() won't flag either spot.
   function sbAmHourFor(sub) {
     var p = ((sub && sub.hour_preference) || [])[0];
-    return p === 'first' ? 'AM1' : p === 'last' ? 'AM2' : 'AM';
+    return p === 'first' || p === 'either' ? 'AM1' : p === 'last' ? 'AM2' : 'AM';
   }
 
   function sbAmHourLabel(h) {

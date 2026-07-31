@@ -342,7 +342,7 @@ function normalizeSubmission(body) {
   // or two 1-hour classes — submitters pick 1st / 2nd / both (default both).
   let hour_preference;
   if (isAM) {
-    hour_preference = pickArray(body.hour_preference, ['first', 'last', 'both']).slice(0, 1);
+    hour_preference = pickArray(body.hour_preference, ['first', 'last', 'both', 'either']).slice(0, 1);
     if (hour_preference.length === 0) hour_preference = ['both'];
   } else {
     hour_preference = pickArray(body.hour_preference, HOUR_PREF_VALUES);
@@ -586,7 +586,8 @@ function prettyHourPrefs(a, isAM) {
     ? {
         'both': 'Both morning hours (10:00–11:55)',
         'first': 'Hour 1 (10:00–10:55)',
-        'last': 'Hour 2 (11:00–11:55)'
+        'last': 'Hour 2 (11:00–11:55)',
+        'either': 'One hour — either works'
       }
     : {
         'first': 'PM1 (first hour)',
