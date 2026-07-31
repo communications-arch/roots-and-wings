@@ -3900,7 +3900,9 @@
       var cls = AM_CLASSES[p.group];
       var sess = cls ? cls.sessions[p.session] : null;
       html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">';
-      html += '<h3 style="margin:0;">' + groupWithAge(p.group) + '</h3>';
+      // Erin 2026-07-31 (View Classmates): grove icon + bare name — no
+      // range in the title; each kid carries their own (age) below.
+      html += '<h3 style="margin:0;">' + (typeof ageGroupIconHtml === 'function' ? ageGroupIconHtml(p.group) + ' ' : '') + '<span class="ag-name ' + ageGroupClass(p.group) + '">' + escapeHtml(p.group) + '</span></h3>';
       if (cls && cls.liaison) {
         html += '<span style="font-size:0.85rem;color:var(--color-text-light);">Liaison: <strong style="color:var(--color-text);">' + cls.liaison + '</strong></span>';
       }
@@ -3994,6 +3996,10 @@
       } else if (!_grpLower) {
         // Unplaced kid: no morning group yet, so there's no roster to show.
         html += '<p class="mf-vol-optional">Not placed in a morning class yet — once the Grove Builder assigns a grove, classmates will appear here.</p>';
+      } else {
+        // Erin 2026-07-31: a grove with no matched kids rendered NOTHING —
+        // say so instead of an empty modal.
+        html += '<p class="mf-vol-optional">No kids on the ' + escapeHtml(p.group) + ' roster yet — classmates appear once placements land in the Grove Builder.</p>';
       }
     }
 
