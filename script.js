@@ -8569,7 +8569,16 @@
     var sess = SESSION_DATES[viewSess];
     var electives = PM_ELECTIVES[viewSess] || [];
 
-    var html = buildSessionPager(viewSess, 'session');
+    // #190 (Erin): shared tab anatomy — every Coordination tab opens with
+    // the same serif title + an org-summary count strip (the Volunteers
+    // tab's pattern), so the four tabs read the same way at a glance.
+    var stYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? String(ACTIVE_SESSION_YEAR).replace('-', '–') : '';
+    var html = '<h3>Session Schedule' + (stYear ? ' &mdash; ' + escapeHtml(stYear) : '') + '</h3>';
+    html += buildSessionPager(viewSess, 'session');
+    var stBits = [];
+    if (sess && sess.start && sess.end) stBits.push(formatDateLabel(sess.start) + ' – ' + formatDateLabel(sess.end));
+    if (electives.length) stBits.push(electives.length + ' afternoon elective' + (electives.length === 1 ? '' : 's'));
+    if (stBits.length) html += '<div class="org-summary">Session <strong>' + viewSess + '</strong> &middot; ' + stBits.join(' &middot; ') + '</div>';
 
     // Morning classes table \u2014 DB-first: an approved morning side renders
     // from the published Class Builder schedule; otherwise fall back to
@@ -9064,11 +9073,14 @@
     var viewSess = cleaningTabView;
     var sessClean = CLEANING_CREW.sessions[viewSess];
 
-    var html = buildSessionPager(viewSess, 'cleaning');
+    // #190 (Erin): shared tab anatomy — serif title + org-summary strip
+    // (liaison + coverage counts) matching the other Coordination tabs.
+    var html = '<h3>Cleaning Crew</h3>' + buildSessionPager(viewSess, 'cleaning');
     var liaisonLabel = getRoleByKey('cleaning_crew_liaison') ? '<a class="rd-role-link" data-role-key="cleaning_crew_liaison" href="#" onclick="return false;">Liaison</a>' : 'Liaison';
-    html += '<p style="color:var(--color-text-light);margin-bottom:16px;">' + liaisonLabel + ': <strong>' + CLEANING_CREW.liaison + '</strong></p>';
+    var liaisonBit = liaisonLabel + ': <strong>' + CLEANING_CREW.liaison + '</strong>';
 
     if (!sessClean) {
+      html += '<div class="org-summary">' + liaisonBit + '</div>';
       html += '<p style="color:var(--color-text-light);"><em>Cleaning assignments not yet available for this session.</em></p>';
       container.innerHTML = html;
       wirePager(container);
@@ -9122,6 +9134,18 @@
         ? '<a class="cleaning-area cleaning-area-link" data-floor="' + floorKey + '" data-area="' + area + '" href="#" onclick="return false;">' + area + '</a>'
         : '<span class="cleaning-area">' + area + '</span>';
     };
+
+    // #190: coverage counts for the summary strip (open = matrix spots in
+    // areas nobody holds yet; the matrix loads async, counts fill in on
+    // the re-render it triggers).
+    var covCovered = 0, covOpen = 0;
+    floors.forEach(function (fl) {
+      var assigned = sessClean[fl.key] ? Object.keys(sessClean[fl.key]) : [];
+      covCovered += assigned.length;
+      covOpen += (openByFloor[fl.key] || []).filter(function (a) { return assigned.indexOf(a.area) === -1; }).length;
+    });
+    html += '<div class="org-summary">' + liaisonBit + ' &middot; ' + covCovered + ' area' + (covCovered === 1 ? '' : 's') + ' covered'
+      + (covOpen > 0 ? ' &middot; <span class="org-open-count">' + covOpen + ' open</span>' : '') + '</div>';
 
     html += '<div class="cleaning-grid">';
     floors.forEach(function (floor) {
@@ -9600,6 +9624,20 @@
 
     var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '';
     var html = '<h3>Special Events' + (seYear ? ' &mdash; ' + escapeHtml(String(seYear).replace('-', '–')) : '') + '</h3>';
+    // #190 (Erin): org-summary count strip in the shared tab anatomy.
+    if (SPECIAL_EVENTS_DB.length) {
+      var seNeeds = 0, seDone = 0;
+      SPECIAL_EVENTS_DB.forEach(function (ev) {
+        var ts = ev.date ? Date.parse((ev.endDate || ev.date) + 'T23:59:00') : NaN;
+        if (isFinite(ts) && ts < Date.now()) { seDone++; return; }
+        var cs = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
+        if (!(cs.length >= 1 && (ev.support || []).length >= 2)) seNeeds++;
+      });
+      html += '<div class="org-summary"><strong>' + SPECIAL_EVENTS_DB.length + '</strong> event' + (SPECIAL_EVENTS_DB.length === 1 ? '' : 's')
+        + ' &middot; ' + (SPECIAL_EVENTS_DB.length - seDone) + ' upcoming'
+        + (seNeeds > 0 ? ' &middot; <span class="org-open-count">' + seNeeds + ' need' + (seNeeds === 1 ? 's' : '') + ' volunteers</span>' : '')
+        + (seDone > 0 ? ' &middot; ' + seDone + ' complete' : '') + '</div>';
+    }
     if (!SPECIAL_EVENTS_DB.length) {
       html += '<p style="color:var(--color-text-light);">The board is lining up this year’s special events now. Approved dates appear here and on the <strong>Co-op Calendar</strong>, and volunteer roles for each event show up in My Responsibilities once assigned.</p>';
       container.innerHTML = html;
