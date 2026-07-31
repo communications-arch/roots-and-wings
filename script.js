@@ -24731,11 +24731,10 @@
     html += '</div>';
 
     // 2. Description (moved up from #12 so it sits with Class Name).
-    // #175 (Lyndsey): optional for MORNING classes — the star and the
-    // help line flip with the period (applyPeriodUi).
+    // #175 + Erin 2026-07-31: optional for EVERY submission.
     html += '<div class="cls-field">';
-    html += '<label class="cls-label">Brief description <span class="cls-req" id="clsDescReq">*</span></label>';
-    html += '<p class="cls-help" id="clsDescHint">Just a start — can get updated along the way.</p>';
+    html += '<label class="cls-label">Brief description (optional)</label>';
+    html += '<p class="cls-help">Just a start — can get added or updated along the way.</p>';
     html += '<textarea class="cl-input cls-textarea" id="clsDescription" rows="4" maxlength="3000">' + escClsHtml(cur.description) + '</textarea>';
     html += '</div>';
 
@@ -25063,13 +25062,6 @@
         : (p === 'PM')
           ? 'Afternoon electives pick hour(s), a space request, a class size, and any mix of groves.'
           : 'Pick one to see the rest of the questions — morning and afternoon classes ask for different details.';
-      // #175: description is optional for morning classes.
-      var descReq = document.getElementById('clsDescReq');
-      if (descReq) descReq.style.display = (p === 'AM') ? 'none' : '';
-      var descHint = document.getElementById('clsDescHint');
-      if (descHint) descHint.textContent = (p === 'AM')
-        ? 'Optional for morning classes — just a start if you add one.'
-        : 'Just a start — can get updated along the way.';
     }
     overlay.querySelectorAll('input[name="clsPeriod"]').forEach(function (r) {
       r.addEventListener('change', applyPeriodUi);

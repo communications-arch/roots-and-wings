@@ -333,10 +333,8 @@ function normalizeSubmission(body) {
   if (!class_name) throw new Error('Class Name is required.');
 
   const description = String(body.description || '').trim().slice(0, 3000);
-  // #175 (Lyndsey): morning classes don't need a description — the group
-  // and hour say what it is. Afternoon electives still require one (it's
-  // what families read when picking classes).
-  if (!description && !isAM) throw new Error('A class description is required.');
+  // #175 (Lyndsey) then Erin 2026-07-31: description is OPTIONAL for all
+  // submissions — teachers can flesh it out later via edit / lesson plan.
 
   const session_preferences = pickArray(body.session_preferences, SESSION_PREF_VALUES);
   if (session_preferences.length === 0) throw new Error('Pick at least one session preference.');
