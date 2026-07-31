@@ -23196,30 +23196,34 @@
       });
       return slots;
     }
+    // Erin 2026-07-31: each block's coverage rows render INLINE directly
+    // under that block's own checkbox, not in one combined box below.
     function updatePreview() {
-      var previewEl = document.getElementById('absencePreview');
-      if (!previewEl) return;
       var slotsPreview = effectiveSlots();
-      if (slotsPreview.length === 0) {
-        previewEl.innerHTML = '<em class="absence-no-slots">Pick at least one block above.</em>';
-        return;
-      }
-      var ph = '<p class="ws-body-hint" style="margin:0 0 6px;">Already arranged a replacement for a spot? Pick them — they’ll get a heads-up. Blanks go to the Coverage Board for anyone to claim.</p>';
-      ph += '<ul class="absence-slot-list">';
-      slotsPreview.forEach(function (s) {
-        var key = s.block + '|' + s.role_description;
-        ph += '<li style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="absence-slot-block">' + s.block + '</span> ' + s.role_description
-          + (s.role_type === 'general' ? ' <em style="color:var(--color-text-light);font-size:0.8rem;">(general — no specific duty on file)</em>' : '')
-          + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '" style="width:auto;max-width:220px;margin-left:auto;font-size:0.82rem;">'
-          + '<option value="">— open, ask for coverage —</option>'
-          + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"' + (_absRepl[key] === n ? ' selected' : '') + '>' + escAttr(n) + '</option>'; }).join('')
-          + '</select></li>';
-      });
-      previewEl.innerHTML = ph + '</ul>';
-      previewEl.querySelectorAll('.absence-repl').forEach(function (sel) {
-        sel.addEventListener('change', function () {
-          var k = sel.getAttribute('data-key');
-          if (sel.value) _absRepl[k] = sel.value; else delete _absRepl[k];
+      var hint = document.getElementById('absenceReplHint');
+      if (hint) hint.style.display = slotsPreview.length ? '' : 'none';
+      allBlocks.forEach(function (blk) {
+        var box = document.getElementById('absSlots-' + blk);
+        if (!box) return;
+        var mine = slotsPreview.filter(function (s) { return s.block === blk; });
+        if (mine.length === 0) { box.innerHTML = ''; box.style.display = 'none'; return; }
+        var ph = '';
+        mine.forEach(function (s) {
+          var key = s.block + '|' + s.role_description;
+          ph += '<div class="absence-slot-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0;">' + s.role_description
+            + (s.role_type === 'general' ? ' <em style="color:var(--color-text-light);font-size:0.8rem;">(general — no specific duty on file)</em>' : '')
+            + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '" style="width:auto;max-width:220px;margin-left:auto;font-size:0.82rem;">'
+            + '<option value="">— open, ask for coverage —</option>'
+            + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"' + (_absRepl[key] === n ? ' selected' : '') + '>' + escAttr(n) + '</option>'; }).join('')
+            + '</select></div>';
+        });
+        box.innerHTML = ph;
+        box.style.display = '';
+        box.querySelectorAll('.absence-repl').forEach(function (sel) {
+          sel.addEventListener('change', function () {
+            var k = sel.getAttribute('data-key');
+            if (sel.value) _absRepl[k] = sel.value; else delete _absRepl[k];
+          });
         });
       });
     }
@@ -23260,20 +23264,21 @@
       // with none got hidden auto-checked blocks and NO picker at all.
       // Blocks and preview now always render; no-duty blocks become
       // general claimable spots (effectiveSlots).
-      h += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
+      h += '<div class="absence-field"><label>What will you miss?</label>';
+      h += '<p class="ws-body-hint" id="absenceReplHint" style="margin:2px 0 4px;">Already arranged a replacement for a spot? Pick them \u2014 they\u2019ll get a heads-up. Blanks go to the Coverage Board for anyone to claim.</p>';
+      h += '<div class="absence-blocks">';
       h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked || !hasAnyDuties ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
       allBlocks.forEach(function (blk) {
         var checked = hasAnyDuties ? (initialChecked.indexOf(blk) !== -1) : true;
         h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
+        // Erin 2026-07-31: this block's coverage rows paint here, inline
+        // under its own checkbox (updatePreview fills it).
+        h += '<div class="absence-block-slots" id="absSlots-' + blk + '" style="display:none;margin:0 0 4px 24px;"></div>';
       });
       if (!hasAnyDuties) {
         h += '<em class="absence-no-slots" style="display:block;">No session-specific duties on file for either parent yet \u2014 each block you pick becomes a general coverage spot. Duties you sign up for later create their own coverage requests automatically.</em>';
       }
-      h += '</div>';
-      // Erin 2026-07-31: one combined field \u2014 the coverage rows (with
-      // their replacement dropdowns) sit directly under the checkboxes.
-      h += '<div class="absence-preview" id="absencePreview" style="margin-top:8px;"></div>';
-      h += '</div>';
+      h += '</div></div>';
       dyn.innerHTML = h;
 
       selectedDate = null;
