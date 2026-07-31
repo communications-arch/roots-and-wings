@@ -5948,10 +5948,11 @@ button.staff-role:hover {
 }
 
 .elective-card {
-  background: var(--color-white);
+  /* #190: cream + spacing matched to the shared Coordination card. */
+  background: var(--color-cream);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 20px;
   cursor: pointer;
   text-align: left;
   font-family: var(--font-body);
@@ -5972,11 +5973,15 @@ button.staff-role:hover {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  /* #190: same title underline as the event + cleaning cards. */
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--color-primary-light);
 }
 
 .elective-card-name {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 1rem;
   color: var(--color-primary-dark);
 }
 
@@ -6080,22 +6085,26 @@ button.staff-role:hover {
   border: 1px solid var(--color-border);
 }
 
+/* #190 (Erin): one card anatomy across the Coordination tabs — the
+   event card is the reference: 1rem title over a 2px primary-light
+   underline, then single-line label·value rows with hairline separators. */
 .cleaning-floor-card h4 {
   font-family: var(--font-body);
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--color-primary-dark);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 2px solid var(--color-primary-light);
 }
 
 .cleaning-role {
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
 }
 
 .cleaning-role:last-child {
@@ -6111,6 +6120,7 @@ button.staff-role:hover {
 .cleaning-families {
   font-size: 0.85rem;
   color: var(--color-text);
+  text-align: right;
 }
 
 /* ---------- Events Grid ---------- */
