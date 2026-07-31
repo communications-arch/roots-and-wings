@@ -5971,7 +5971,9 @@ button.staff-role:hover {
 .elective-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  /* flex-start: a wrapped multi-line age pill grows down, not around
+     the title (Erin 2026-08-01). */
+  align-items: flex-start;
   gap: 8px;
   /* #190: same title underline as the event + cleaning cards. */
   margin-bottom: 12px;
@@ -5987,13 +5989,20 @@ button.staff-role:hover {
 
 .elective-age-pill {
   display: inline-block;
-  padding: 2px 10px;
-  border-radius: 50px;
+  padding: 3px 12px;
+  border-radius: 14px;
   font-size: 0.7rem;
   font-weight: 700;
   background: rgba(var(--color-primary-rgb), 0.1);
   color: var(--color-primary);
-  white-space: nowrap;
+  /* Long grove lists WRAP inside the card (Erin 2026-08-01: nowrap ran
+     the pill straight out of the elective card). min-width:0 lets the
+     flex header actually shrink it. */
+  white-space: normal;
+  min-width: 0;
+  max-width: 58%;
+  text-align: center;
+  line-height: 1.4;
 }
 
 .elective-both-badge {
