@@ -10616,7 +10616,7 @@
     ],
     'Membership Director': [
       { key: 'tour-pipeline', title: 'Member Pipeline' },
-      { key: 'morning-classes', title: 'Morning Classes' },
+      { key: 'morning-classes', title: 'Grove Builder' },
       { key: 'membership', title: 'Membership' }
     ],
     'Treasurer': [
@@ -11033,7 +11033,7 @@
   // render checks and need no entry here.
   var CAPABILITY_SURFACES = {
     'tours_view':            { reports: [{ key: 'tour-pipeline', title: 'Member Pipeline' }] },
-    'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Morning Classes' }] },
+    'morning_builder':       { reports: [{ key: 'morning-classes', title: 'Grove Builder' }] },
     'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
                                forms:   [{ key: 'send-waiver', title: 'Send Waiver' },
                                          { key: 'guest-setup', title: 'Set Up a Guest' }] },
@@ -25497,7 +25497,7 @@
       // class-submissions reviewer fetch confirms FULL scope (VP /
       // Afternoon Class Liaison / super). Group-scoped liaisons and
       // other board chairs never see these.
-      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="am" id="roles-mgr-am-pill" hidden>' + brandIconImg('morning', 'ag-icon') + ' Morning Classes</button>'
+      + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="am" id="roles-mgr-am-pill" hidden>' + brandIconImg('morning', 'ag-icon') + ' Grove Classes</button>'
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="pm" id="roles-mgr-pm-pill" hidden>' + brandIconImg('afternoon', 'ag-icon') + ' Afternoon Helpers</button>'
       + '<button type="button" class="board-cal-view-pill roles-mgr-view-pill" data-roles-view="cleaning" id="roles-mgr-cl-pill" hidden>' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning</button>'
       + '</div>';
@@ -27985,7 +27985,7 @@
           else openAm++;
         });
       });
-      doc += sectionHead('🌅 Morning Classes',
+      doc += sectionHead('🌅 Grove Classes',
         full + ' covered · ' + partial + ' hour open · ' + openAm + ' open');
       if (loading.am) {
         doc += stillLoading('the class submissions');
