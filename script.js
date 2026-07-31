@@ -19695,7 +19695,10 @@
       + '<span class="ws-part-submit-hint">Kitchen, Kitchen Annex, or Pavilion — by week and hour.</span></p>';
 
     groups.forEach(function (group) {
-      if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(groupWithAge(group)) + '</p>';
+      // Erin 2026-07-31: grove identity leads the card — icon + name in
+      // the grove color (always, not just multi-grove liaisons).
+      h += '<p class="ws-lending-head" style="font-size:1rem;">' + (typeof ageGroupIconHtml === 'function' ? ageGroupIconHtml(group) + ' ' : '')
+        + '<span class="ag-name ' + (typeof ageGroupClass === 'function' ? ageGroupClass(group) : '') + '">' + escapeHtml(group) + '</span></p>';
 
       // Who's teaching this session (+ topic, room, lesson plan).
       h += '<p class="ws-lending-head">Session ' + sess + ' class</p>';
@@ -19731,7 +19734,14 @@
         h += '<p class="ws-lending-head">Kids</p><p class="ws-empty">Loading the roster…</p>';
         kids = [];
       } else {
-        h += '<p class="ws-lending-head">' + kids.length + ' Kid' + (kids.length === 1 ? '' : 's') + '</p>';
+        // Erin 2026-07-31: header carries the roster's actual age span.
+        var mcAges = kids.map(function (k) { return k.age; }).filter(function (a) { return a != null && a !== ''; });
+        var mcSpan = '';
+        if (mcAges.length) {
+          var mcLo = Math.min.apply(null, mcAges), mcHi = Math.max.apply(null, mcAges);
+          mcSpan = ' · ages ' + (mcLo === mcHi ? mcLo : mcLo + '–' + mcHi);
+        }
+        h += '<p class="ws-lending-head">' + kids.length + ' Kid' + (kids.length === 1 ? '' : 's') + mcSpan + '</p>';
         if (!kids.length) {
           h += '<p class="ws-empty">No finalized placements for this grove yet — the roster fills in from the Grove Builder.</p>';
         }
@@ -19763,18 +19773,20 @@
         var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
         var mlcName = mlcByEmail[String(kid.email || '').toLowerCase()]
           || mlcByFamName[String(kid.family || kid.lastName || '').toLowerCase()] || '';
+        // Erin 2026-07-31: age rides the NAME as "(10)"; the sub-line is a
+        // labeled "Parent:" only — no phone number on this card.
         var subBits = [];
-        if (mlcName) subBits.push(escapeHtml(mlcName));
+        if (mlcName) subBits.push('Parent: ' + escapeHtml(mlcName));
         else {
           var parents = Array.isArray(kid.parentNames) ? kid.parentNames.filter(Boolean).join(' & ') : '';
-          if (parents) subBits.push(escapeHtml(parents));
+          if (parents) subBits.push('Parent: ' + escapeHtml(parents));
         }
-        if (kid.phone) subBits.push('<a href="tel:' + escapeHtml(kid.phone) + '">' + escapeHtml(kid.phone) + '</a>');
-        if (kid.age) subBits.push('age ' + kid.age);
         h += '<div class="ws-lending-row mc-kid-row"><span class="ws-lending-main">'
           + '<span style="display:flex;align-items:center;gap:8px;">'
           + '<span class="elective-student-dot" style="background:' + faceColor(kid.name) + ';flex-shrink:0;">' + kidAvatarInnerHtml(kid.name, kid.email || '', kid.family || kid.lastName || '') + '</span>'
-          + '<span><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + escapeHtml(kid.lastName || kid.family || '') + '</span>' + pronounTag(kid) + noPhoto
+          + '<span><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + escapeHtml(kid.lastName || kid.family || '') + '</span>'
+          + (kid.age != null && kid.age !== '' ? ' <span class="elective-student-last">(' + kid.age + ')</span>' : '')
+          + pronounTag(kid) + noPhoto
           + (subBits.length ? '<span class="ws-lending-sub">' + subBits.join(' · ') + '</span>' : '')
           + (kid.allergies ? '<span class="ws-lending-sub" style="color:var(--color-error);font-weight:600;">⚠ ' + escapeHtml(kid.allergies) + '</span>' : '')
           + (note && _myClassEditingKey !== editKey ? '<span class="ws-lending-sub mc-note-text">📝 ' + escapeHtml(note) + '</span>' : '')
