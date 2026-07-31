@@ -333,7 +333,10 @@ function normalizeSubmission(body) {
   if (!class_name) throw new Error('Class Name is required.');
 
   const description = String(body.description || '').trim().slice(0, 3000);
-  if (!description) throw new Error('A class description is required.');
+  // #175 (Lyndsey): morning classes don't need a description — the group
+  // and hour say what it is. Afternoon electives still require one (it's
+  // what families read when picking classes).
+  if (!description && !isAM) throw new Error('A class description is required.');
 
   const session_preferences = pickArray(body.session_preferences, SESSION_PREF_VALUES);
   if (session_preferences.length === 0) throw new Error('Pick at least one session preference.');
@@ -838,6 +841,50 @@ module.exports = async function handler(req, res) {
       // Class submissions — list view. scope='mine' (default) returns only the
       // caller's rows; scope='all' is gated to VP / Afternoon Class Liaison /
       // super user for the Phase 2 review dashboard.
+      // #167 (Lyndsey): live per-group age spans for the Submit-a-Class
+      // labels — each group's ENROLLED kids' ages, year start → year end
+      // (same math as #166's per-class ranges). Any signed-in member.
+      if (action === 'group-age-ranges') {
+        const garYear = activeSchoolYear(new Date());
+        const [garKids, garBounds] = await Promise.all([
+          sql`SELECT k.class_group, k.birth_date
+              FROM kids k
+              JOIN kid_enrollments e ON e.kid_id = k.id
+              WHERE e.season = ${garYear} AND e.status = 'enrolled'
+                AND COALESCE(k.class_group, '') <> '' AND k.birth_date IS NOT NULL`,
+          sql`SELECT MIN(start_date) AS ystart, MAX(end_date) AS yend
+              FROM co_op_sessions WHERE school_year = ${garYear}`
+        ]);
+        const garIso = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v || '').slice(0, 10);
+        const garAge = (birth, on) => {
+          const b = garIso(birth), o = garIso(on);
+          if (!b || !o) return null;
+          let a = parseInt(o.slice(0, 4), 10) - parseInt(b.slice(0, 4), 10);
+          if (o.slice(5) < b.slice(5)) a--;
+          return a;
+        };
+        const garS = garBounds.length ? garIso(garBounds[0].ystart) : '';
+        const garE = garBounds.length ? (garIso(garBounds[0].yend) || garS) : '';
+        const garOut = {};
+        if (garS) {
+          garKids.forEach(k => {
+            const g = String(k.class_group || '').toLowerCase();
+            const a1 = garAge(k.birth_date, garS), a2 = garAge(k.birth_date, garE);
+            if (a1 == null) return;
+            if (!garOut[g]) garOut[g] = { lo: a1, hi: a2 == null ? a1 : a2 };
+            else {
+              garOut[g].lo = Math.min(garOut[g].lo, a1);
+              garOut[g].hi = Math.max(garOut[g].hi, a2 == null ? a1 : a2);
+            }
+          });
+        }
+        const garFinal = {};
+        Object.keys(garOut).forEach(g => {
+          garFinal[g] = garOut[g].lo === garOut[g].hi ? String(garOut[g].lo) : garOut[g].lo + '–' + garOut[g].hi;
+        });
+        return res.status(200).json({ school_year: garYear, groups: garFinal });
+      }
+
       if (action === 'class-submissions') {
         const scope = (req.query.scope || 'mine').toLowerCase();
         if (scope === 'all') {

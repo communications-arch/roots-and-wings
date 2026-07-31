@@ -9508,8 +9508,11 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 @media (max-width: 820px) {
   .sb-layout { flex-direction: column; }
   .sb-side { position: static; flex: none; width: 100%; max-height: none; }
-  .sb-side .sb-palette-cards { flex-direction: row; overflow-x: auto; }
-  .sb-side .sb-palette-card { flex: 0 0 200px; }
+  /* #174 (Lyndsey): the sideways shelf forced a horizontal scrollbar on
+     phones — stack the queue vertically instead, same as the desktop
+     sidebar; everything scrolls with the page. */
+  .sb-side .sb-palette-cards { flex-direction: column; overflow-x: visible; }
+  .sb-side .sb-palette-card { flex: 0 0 auto; width: auto; }
 }
 .sb-pick-section-title {
   font-size: 0.9rem;

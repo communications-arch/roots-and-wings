@@ -9785,11 +9785,13 @@
       render: function () {
         var h = '<p class="ws-body-hint">Borrow supplies from fellow members — and keep track of what’s out.</p>';
         h += '<div id="ws-lending-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-browse">' + brandIconImg('lending', 'ag-icon') + ' Browse the Lending Library</button>'
+        // #176 (Lyndsey): no icons on these two buttons — text only reads
+        // cleaner (and the helper accent vanished against the background).
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-browse">Browse the Lending Library</button>'
           + '<span class="ws-part-submit-hint">Have supplies others could use? <button type="button" class="ws-inline-link" data-resource-action="lending-offer">Offer something to lend or give away</button>.</span></p>';
         // #161 (Lyndsey): ask for something the library doesn't have —
         // every member gets a heads-up, and pledges can split quantities.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-requests">' + brandIconImg('helper', 'ag-icon') + ' Requests</button>'
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-requests">Request Items</button>'
           + '<span class="ws-part-submit-hint">Need something that isn’t listed? Ask everyone at once.</span></p>';
         return h;
       },
@@ -19576,6 +19578,12 @@
       h += '<button type="button" class="board-cal-view-pill mc-sess-pill' + (i === sess ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
     }
     h += '</div>';
+    // #160 follow-up (Lyndsey: "still broken"): the first doorway lived in
+    // the Morning Class Builder header — a VP/board surface liaisons never
+    // open. The booking modal belongs HERE, on the card liaisons actually
+    // have.
+    h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" id="mcFacilitiesBtn">Book a Shared Facility</button>'
+      + '<span class="ws-part-submit-hint">Kitchen, Kitchen Annex, or Pavilion — by week and hour.</span></p>';
 
     groups.forEach(function (group) {
       if (groups.length > 1) h += '<p class="ws-lending-head">' + escapeHtml(groupWithAge(group)) + '</p>';
@@ -19680,6 +19688,10 @@
         ensureClassLinksForSession(_myClassSession, renderMyClassCardBody);
         renderMyClassCardBody();
       });
+    });
+    var mcFacBtn = target.querySelector('#mcFacilitiesBtn');
+    if (mcFacBtn) mcFacBtn.addEventListener('click', function () {
+      if (typeof showFacilityBookingModal === 'function') showFacilityBookingModal();
     });
     target.querySelectorAll('.mc-plan-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -24157,6 +24169,40 @@
     // render in the form and applyPeriodUi shows/hides per period.
     'greenhouse','saplings','sassafras','oaks','maples','birch','willows','cedars','pigeons','all-ages'
   ];
+  // #167 (Lyndsey): live per-group age spans (from enrolled kids' birth
+  // dates, year start → year end) replace the static band numbers on the
+  // Submit-a-Class labels once fetched. null until the first fetch.
+  var _groupAgeRanges = null;
+  function loadGroupAgeRanges() {
+    if (_groupAgeRanges) { applyGroupAgeRangesToForm(); return; }
+    fetch('/api/curriculum?action=group-age-ranges', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.groups) { _groupAgeRanges = d.groups; applyGroupAgeRangesToForm(); }
+      })
+      .catch(function () { /* static band labels stay */ });
+  }
+  function applyGroupAgeRangesToForm() {
+    if (!_groupAgeRanges) return;
+    function liveLabel(v) {
+      var r = _groupAgeRanges[String(v || '').toLowerCase()];
+      if (!r) return null;
+      var base = (AGE_GROUP_LABELS[v] || String(v)).replace(/\s*\(.*\)$/, '');
+      return base + ' (ages ' + r + ' this year)';
+    }
+    document.querySelectorAll('#clsPmAgeField input.cls-cb[data-field="age_groups"]').forEach(function (cb) {
+      var txt = liveLabel(cb.value);
+      if (!txt) return;
+      var lab = cb.parentNode;
+      if (lab && lab.lastChild && lab.lastChild.nodeType === 3) lab.lastChild.textContent = ' ' + txt;
+    });
+    var amSel = document.getElementById('clsAmGroup');
+    if (amSel) Array.prototype.forEach.call(amSel.options, function (o) {
+      var txt = o.value && liveLabel(o.value);
+      if (txt) o.textContent = txt;
+    });
+  }
+
   var AGE_GROUP_LABELS = {
     greenhouse: 'Greenhouse (0–2)',
     saplings: 'Saplings (3–5)',
@@ -24684,11 +24730,13 @@
     html += '<input class="cl-input cls-input" type="text" id="clsClassName" maxlength="200" value="' + escClsAttr(cur.class_name) + '" required>';
     html += '</div>';
 
-    // 2. Description (moved up from #12 so it sits with Class Name)
+    // 2. Description (moved up from #12 so it sits with Class Name).
+    // #175 (Lyndsey): optional for MORNING classes — the star and the
+    // help line flip with the period (applyPeriodUi).
     html += '<div class="cls-field">';
-    html += '<label class="cls-label">Brief description <span class="cls-req">*</span></label>';
-    html += '<p class="cls-help">Just a start — can get updated along the way.</p>';
-    html += '<textarea class="cl-input cls-textarea" id="clsDescription" rows="4" maxlength="3000" required>' + escClsHtml(cur.description) + '</textarea>';
+    html += '<label class="cls-label">Brief description <span class="cls-req" id="clsDescReq">*</span></label>';
+    html += '<p class="cls-help" id="clsDescHint">Just a start — can get updated along the way.</p>';
+    html += '<textarea class="cl-input cls-textarea" id="clsDescription" rows="4" maxlength="3000">' + escClsHtml(cur.description) + '</textarea>';
     html += '</div>';
 
     // 3. Session preferences
@@ -25015,6 +25063,13 @@
         : (p === 'PM')
           ? 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.'
           : 'Pick one to see the rest of the questions — morning and afternoon classes ask for different details.';
+      // #175: description is optional for morning classes.
+      var descReq = document.getElementById('clsDescReq');
+      if (descReq) descReq.style.display = (p === 'AM') ? 'none' : '';
+      var descHint = document.getElementById('clsDescHint');
+      if (descHint) descHint.textContent = (p === 'AM')
+        ? 'Optional for morning classes — just a start if you add one.'
+        : 'Just a start — can get updated along the way.';
     }
     overlay.querySelectorAll('input[name="clsPeriod"]').forEach(function (r) {
       r.addEventListener('change', applyPeriodUi);
@@ -25022,6 +25077,8 @@
     applyPeriodUi();
 
     if (!isEdit) loadInspirationStrip();
+    // #167: swap static band numbers for live enrolled-age spans.
+    loadGroupAgeRanges();
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();

@@ -6206,14 +6206,17 @@ function specialEventDateStr(v) {
 // for the year on first load, then returns each event + lead/assistants + a
 // member picker list.
 async function handleSpecialEventsGet(req, res) {
-  // Editors (SEL/VP via special_events_manage) get the full read + the
-  // seed pass; board members get the same payload READ-ONLY (Board at a
-  // Glance, 2026-07-15) — viewer_can_edit=false hides the Manage drawer
-  // client-side, and every write kind still requires the capability.
+  // #24 (Erin): viewer_can_edit now MIRRORS the write gate
+  // (requireSpecialEventsEditor) — any board member may edit, not just
+  // the SEL/VP capability holders. The old split (capability=edit,
+  // board=read-only) left board members with 403-ing Manage buttons:
+  // writes were widened 2026-07-17 but this flag never followed.
   const auth = await verifyWorkspaceAuthWithViewAs(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-  const canEdit = await hasCapability(auth.email, 'special_events_manage');
-  if (!canEdit && !(await isBoardMember(auth.email))) {
+  const canEdit = await hasCapability(auth.email, 'special_events_manage')
+    || isSuperUser(auth.email)
+    || await isBoardMember(auth.email);
+  if (!canEdit) {
     return res.status(403).json({
       error: 'Only the Special Events Liaison, Vice President, or a board member can view special events.',
       youAre: auth.realEmail
