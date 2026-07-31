@@ -9705,7 +9705,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Handbooks, forms, and co-op references.</p>';
         h += '<ul class="ws-link-list">';
-        h += '<li><a href="/handbook.pdf" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Member Handbook</a></li>';
+        h += '<li><a href="/handbook.pdf?v=20260731" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Member Handbook</a></li>';
         h += '<li><a href="/quickstart.html" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('newFamily', 'ag-icon') + '</span>New Member Quick Start</a></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span>Member Agreement &amp; Waivers</button></li>';
@@ -29477,7 +29477,7 @@
     var btn = document.getElementById('ws-todo-handbook-btn');
     if (btn && !btn._rwWired) {
       btn._rwWired = true;
-      btn.addEventListener('click', function () { window.open('/handbook.pdf', '_blank', 'noopener'); });
+      btn.addEventListener('click', function () { window.open('/handbook.pdf?v=20260731', '_blank', 'noopener'); });
     }
     var doneBtn = document.getElementById('ws-todo-handbook-done');
     if (doneBtn && !doneBtn._rwWired) {
