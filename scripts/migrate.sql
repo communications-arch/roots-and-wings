@@ -2334,6 +2334,15 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS assistant_slots INTEGER NOT 
 -- (Kitchen / Kitchen Annex / Pavilion). One booking per facility × session
 -- × week × hour — the UNIQUE constraint IS the conflict rule. Liaisons
 -- book for their group from the Morning Class Builder's Facilities panel.
+-- 2026-07-30 (#169, Lyndsey): the I'll-Be-Out form now asks whether
+-- coverage is needed (backup learning coach covering = no slots created)
+-- and whether the kids are out too (yes → their teachers get a bell
+-- notification; no → which adult is responsible for them that day).
+ALTER TABLE absences ADD COLUMN IF NOT EXISTS coverage_needed BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE absences ADD COLUMN IF NOT EXISTS blc_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE absences ADD COLUMN IF NOT EXISTS kids_absent BOOLEAN;
+ALTER TABLE absences ADD COLUMN IF NOT EXISTS kids_adult TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS facility_bookings (
   id             SERIAL PRIMARY KEY,
   school_year    TEXT NOT NULL,

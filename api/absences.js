@@ -11,7 +11,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { broadcastAll, sendToUser } = require('./_push');
-const { canEditAsRole, BOARD_ROLE_EMAILS, isSuperUser, canImpersonate } = require('./_permissions');
+const { canEditAsRole, BOARD_ROLE_EMAILS, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { canActAs } = require('./_family');
 
@@ -58,6 +58,50 @@ function getSql() {
 }
 
 const VALID_BLOCKS = ['AM', 'PM1', 'PM2', 'Cleaning'];
+
+// #169: bell + push heads-up to the absent family's kids' teachers.
+// Morning teacher = the group's scheduled AM class for this session
+// (age_groups[0] names the group); afternoon = rank-1 pick teachers.
+async function notifyKidTeachers(sql, a) {
+  const kids = await sql`
+    SELECT first_name, class_group FROM kids
+    WHERE LOWER(family_email) = ${a.familyEmail}`;
+  if (!kids.length) return;
+  const yr = activeSchoolYear();
+  const teacherEmails = new Set();
+  const groups = kids.map(k => String(k.class_group || '').toLowerCase()).filter(Boolean);
+  if (groups.length) {
+    const amCls = await sql`
+      SELECT submitted_by_email, age_groups FROM class_submissions
+      WHERE school_year = ${yr} AND class_period = 'AM'
+        AND status = 'scheduled' AND scheduled_session = ${a.sessionNumber}`;
+    amCls.forEach(c => {
+      const g = String(((c.age_groups || [])[0]) || '').toLowerCase();
+      if (groups.indexOf(g) !== -1 && c.submitted_by_email) teacherEmails.add(String(c.submitted_by_email).toLowerCase());
+    });
+  }
+  const pmRows = await sql`
+    SELECT DISTINCT c.submitted_by_email
+    FROM class_signup_picks p
+    JOIN class_submissions c ON c.id = p.class_submission_id
+    WHERE p.school_year = ${yr} AND p.session_number = ${a.sessionNumber} AND p.rank = 1
+      AND LOWER(p.family_email) = ${a.familyEmail}`;
+  pmRows.forEach(r => { if (r.submitted_by_email) teacherEmails.add(String(r.submitted_by_email).toLowerCase()); });
+  teacherEmails.delete(a.familyEmail);
+  if (!teacherEmails.size) return;
+  const dateLabel = new Date(String(a.absenceDate).slice(0, 10) + 'T12:00:00')
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const title = 'Student absence — ' + dateLabel;
+  const bodyTxt = 'The ' + a.familyName + ' kids (' + kids.map(k => k.first_name).join(', ') + ') will be out on ' + dateLabel + '.';
+  for (const em of teacherEmails) {
+    await sql`
+      INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+      VALUES (${em}, 'kids_absent', ${title}, ${bodyTxt}, '', ${a.absenceId})`;
+    try {
+      await sendToUser(sql, em, { title, body: bodyTxt, tag: 'kids-absent-' + a.absenceId, url: '/members.html' });
+    } catch (pushErr) { console.error('kids-absent push (non-fatal):', pushErr); }
+  }
+}
 
 // Building Opener / Closer slots may only be covered by a board member
 // (Erin, 2026-07-16) — their "Coverage Needed" ping goes to the board,
@@ -187,7 +231,8 @@ module.exports = async function handler(req, res) {
       const absences = upcoming
         ? await sql`
             SELECT id, family_email, family_name, absent_person, session_number, absence_date,
-                   blocks, notes, created_by, created_at
+                   blocks, notes, created_by, created_at,
+                   coverage_needed, blc_name, kids_absent, kids_adult
             FROM absences
             WHERE cancelled_at IS NULL
               AND absence_date >= (NOW() AT TIME ZONE 'America/Indianapolis')::date
@@ -196,14 +241,16 @@ module.exports = async function handler(req, res) {
         : fromSession
         ? await sql`
             SELECT id, family_email, family_name, absent_person, session_number, absence_date,
-                   blocks, notes, created_by, created_at
+                   blocks, notes, created_by, created_at,
+                   coverage_needed, blc_name, kids_absent, kids_adult
             FROM absences
             WHERE session_number >= ${fromSession} AND cancelled_at IS NULL
             ORDER BY session_number, absence_date, absent_person
           `
         : await sql`
             SELECT id, family_email, family_name, absent_person, session_number, absence_date,
-                   blocks, notes, created_by, created_at
+                   blocks, notes, created_by, created_at,
+                   coverage_needed, blc_name, kids_absent, kids_adult
             FROM absences
             WHERE session_number = ${session} AND cancelled_at IS NULL
             ORDER BY absence_date, absent_person
@@ -239,8 +286,14 @@ module.exports = async function handler(req, res) {
       const session_number = parseInt(body.session_number, 10);
       const absence_date = String(body.absence_date || '').trim();
       const blocks = Array.isArray(body.blocks) ? body.blocks.filter(b => VALID_BLOCKS.includes(b)) : [];
-      const slotsData = Array.isArray(body.slots) ? body.slots : [];
       const notes = String(body.notes || '').trim().slice(0, 500);
+      // #169: BLC-covered absences create NO coverage slots (server guard,
+      // not just client); kids_absent=true pings the kids' teachers.
+      const coverageNeeded = body.coverage_needed !== false;
+      const blcName = String(body.blc_name || '').trim().slice(0, 120);
+      const kidsAbsent = typeof body.kids_absent === 'boolean' ? body.kids_absent : null;
+      const kidsAdult = String(body.kids_adult || '').trim().slice(0, 120);
+      const slotsData = coverageNeeded && Array.isArray(body.slots) ? body.slots : [];
 
       if (!absent_person || !family_email || !family_name) {
         return res.status(400).json({ error: 'absent_person, family_email, and family_name required' });
@@ -277,11 +330,27 @@ module.exports = async function handler(req, res) {
 
       // Insert absence
       const inserted = await sql`
-        INSERT INTO absences (family_email, family_name, absent_person, session_number, absence_date, blocks, notes, created_by)
-        VALUES (${family_email}, ${family_name}, ${absent_person}, ${session_number}, ${absence_date}, ${blocks}, ${notes}, ${user.realEmail || user.email})
+        INSERT INTO absences (family_email, family_name, absent_person, session_number, absence_date, blocks, notes, created_by,
+                              coverage_needed, blc_name, kids_absent, kids_adult)
+        VALUES (${family_email}, ${family_name}, ${absent_person}, ${session_number}, ${absence_date}, ${blocks}, ${notes}, ${user.realEmail || user.email},
+                ${coverageNeeded}, ${coverageNeeded ? '' : blcName}, ${kidsAbsent}, ${kidsAbsent === false ? kidsAdult : ''})
         RETURNING id
       `;
       const absenceId = inserted[0].id;
+      // #169: heads-up to the kids' teachers (morning group teacher for
+      // this session + afternoon rank-1 pick teachers). Never blocks the
+      // absence save.
+      if (kidsAbsent === true) {
+        try {
+          await notifyKidTeachers(sql, {
+            familyEmail: family_email.toLowerCase(),
+            familyName: family_name,
+            sessionNumber: session_number,
+            absenceDate: absence_date,
+            absenceId
+          });
+        } catch (ntErr) { console.error('kid-teacher notify (non-fatal):', ntErr); }
+      }
 
       // Insert coverage slots
       const createdSlots = [];

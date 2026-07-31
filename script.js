@@ -6827,7 +6827,10 @@
     if (!isSummerBreak || (loadedAbsences || []).length > 0) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
       html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage">' + brandIconImg('coverage') + ' Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
-      html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
+      // #169 (Lyndsey, Erin's call): a second I'll Be Out doorway here —
+      // the My Responsibilities header button stays put.
+      html += '<p class="coverage-intro" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span>See who needs coverage and volunteer to help.</span>'
+        + (!isSummerBreak ? '<button class="btn btn-absence" id="reportAbsenceBtn2">I\'ll Be Out</button>' : '') + '</p>';
       html += '<div id="coverageBoardContent"></div>';
       html += '</details>';
     }
@@ -7936,10 +7939,14 @@
       });
     });
 
-    // Wire up "I'll Be Out" button
+    // Wire up "I'll Be Out" buttons (header + #169's Coverage Board copy)
     var absenceBtn = grid.querySelector('#reportAbsenceBtn');
     if (absenceBtn) {
       absenceBtn.addEventListener('click', showAbsenceModal);
+    }
+    var absenceBtn2 = grid.querySelector('#reportAbsenceBtn2');
+    if (absenceBtn2) {
+      absenceBtn2.addEventListener('click', function () { showAbsenceModal(); });
     }
 
     // #138 Reminders buttons + #139 bring-items fetch (first paint pulls
@@ -22848,6 +22855,31 @@
     // Dates + blocks + preview depend on the selected session (duties differ
     // session to session), so they live in a re-renderable container.
     html += '<div id="absenceDynamic"></div>';
+    // #169 (Lyndsey): coverage + kids questions. Adult picker options come
+    // from the directory (every family's parents).
+    var prefillCov = (prefill && prefill.coverage_needed === false) ? 'blc' : 'yes';
+    var prefillBlc = (prefill && prefill.blc_name) || '';
+    var prefillKids = (prefill && prefill.kids_absent === false) ? 'no' : 'yes';
+    var prefillAdult = (prefill && prefill.kids_adult) || '';
+    var dirAdults = [];
+    (Array.isArray(FAMILIES) ? FAMILIES : []).forEach(function (f) {
+      if (!f || !f.parents) return;
+      String(f.parents).split(' & ').forEach(function (p) {
+        var nm = (p.trim() + ' ' + (f.name || '')).trim();
+        if (nm && dirAdults.indexOf(nm) === -1) dirAdults.push(nm);
+      });
+    });
+    dirAdults.sort();
+    html += '<datalist id="absenceAdultList">' + dirAdults.map(function (n) { return '<option value="' + escAttr(n) + '"></option>'; }).join('') + '</datalist>';
+    html += '<div class="absence-field"><label>Do you need coverage?</label>'
+      + '<div><label style="display:block;margin:2px 0;"><input type="radio" name="absCov" value="yes"' + (prefillCov === 'yes' ? ' checked' : '') + '> Yes, request coverage</label>'
+      + '<label style="display:block;margin:2px 0;"><input type="radio" name="absCov" value="blc"' + (prefillCov === 'blc' ? ' checked' : '') + '> No, my backup learning coach is covering me</label></div>'
+      + '<input class="cl-input" id="absBlcName" list="absenceAdultList" placeholder="Backup learning coach’s name…" value="' + escAttr(prefillBlc) + '" style="' + (prefillCov === 'blc' ? '' : 'display:none;') + 'margin-top:4px;"></div>';
+    html += '<div class="absence-field"><label>Will your kids be out too?</label>'
+      + '<p class="ws-body-hint" style="margin:2px 0 4px;">Remember: if anyone in the household is sick, the whole family stays home.</p>'
+      + '<div><label style="display:block;margin:2px 0;"><input type="radio" name="absKids" value="yes"' + (prefillKids === 'yes' ? ' checked' : '') + '> Yes — their teachers will get a heads-up automatically</label>'
+      + '<label style="display:block;margin:2px 0;"><input type="radio" name="absKids" value="no"' + (prefillKids === 'no' ? ' checked' : '') + '> No, they’ll be at co-op</label></div>'
+      + '<input class="cl-input" id="absKidsAdult" list="absenceAdultList" placeholder="Which adult is responsible for them that day?" value="' + escAttr(prefillAdult) + '" style="' + (prefillKids === 'no' ? '' : 'display:none;') + 'margin-top:4px;"></div>';
     html += '<div class="absence-field"><label>Notes (optional)</label><input class="cl-input" id="absenceNotes" placeholder="e.g. sick kids, appointment..." value="' + escAttr(prefillNotes) + '"></div>';
     html += '<button class="btn btn-primary absence-submit" id="absenceSubmitBtn">' + (editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out') + '</button>';
     html += '</div></div>';
@@ -22968,13 +23000,36 @@
       });
     });
     document.getElementById('absenceWho').addEventListener('change', function () { selectedPerson = this.value; updatePreview(); });
+    // #169: show the name inputs only for the branch that needs them.
+    overlay.querySelectorAll('input[name="absCov"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        var el = document.getElementById('absBlcName');
+        if (el) el.style.display = (this.value === 'blc' && this.checked) ? '' : 'none';
+      });
+    });
+    overlay.querySelectorAll('input[name="absKids"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        var el = document.getElementById('absKidsAdult');
+        if (el) el.style.display = (this.value === 'no' && this.checked) ? '' : 'none';
+      });
+    });
     document.getElementById('absenceSubmitBtn').addEventListener('click', function () {
       var submitBtn = document.getElementById('absenceSubmitBtn');
       if (submitBtn.disabled) return;
       if (!selectedDate) { alert('Please pick a day.'); return; }
       var blocks = getSelectedBlocks();
       if (blocks.length === 0) { alert('Please select at least one block.'); return; }
-      var slotsToSend = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me);
+      // #169: coverage + kids answers ride the payload; a BLC-covered
+      // absence sends NO coverage slots (nothing to claim).
+      var covSel = overlay.querySelector('input[name="absCov"]:checked');
+      var covNeeded = !covSel || covSel.value === 'yes';
+      var blcName = String((document.getElementById('absBlcName') || {}).value || '').trim();
+      if (!covNeeded && !blcName) { alert('Add your backup learning coach’s name.'); return; }
+      var kidsSel = overlay.querySelector('input[name="absKids"]:checked');
+      var kidsAbsent = !kidsSel || kidsSel.value === 'yes';
+      var kidsAdult = String((document.getElementById('absKidsAdult') || {}).value || '').trim();
+      if (!kidsAbsent && !kidsAdult) { alert('Pick which adult is responsible for your kids that day.'); return; }
+      var slotsToSend = covNeeded ? getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me) : [];
       submitBtn.disabled = true; submitBtn.textContent = 'Submitting\u2026';
       var cred = localStorage.getItem('rw_google_credential');
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
@@ -22987,7 +23042,7 @@
           // acting as a family files under that family's identity — the
           // plain Bearer header alone 403'd the ownership gate.
           headers: rwAuthHeaders(true),
-          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal })
+          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal, coverage_needed: covNeeded, blc_name: covNeeded ? '' : blcName, kids_absent: kidsAbsent, kids_adult: kidsAbsent ? '' : kidsAdult })
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
       }
 
