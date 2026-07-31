@@ -109,7 +109,7 @@ console.log('buildRolesPrintHtml — all pills in one doc');
   });
 
   t('ALL FIVE section heads are present', () => {
-    ['Board &amp; Committees', '🎉 Special Events', '🌅 Morning Classes',
+    ['Board &amp; Committees', '🎉 Special Events', '🌅 Grove Classes',
      '🌇 Afternoon Helpers', '🧹 Cleaning'].forEach(head => {
       assert.ok(html.includes(head), 'missing section: ' + head);
     });
@@ -137,7 +137,7 @@ console.log('\nsection gating');
   t('a hidden pill omits its whole section', () => {
     const html = build(fullData({ sections: { roles: true, se: false, am: false, pm: false, cleaning: false } }));
     assert.ok(html.includes('Board &amp; Committees'));
-    ['🎉 Special Events', '🌅 Morning Classes', '🌇 Afternoon Helpers', '🧹 Cleaning'].forEach(head => {
+    ['🎉 Special Events', '🌅 Grove Classes', '🌇 Afternoon Helpers', '🧹 Cleaning'].forEach(head => {
       assert.ok(!html.includes(head), 'gated-off section leaked: ' + head);
     });
     assert.ok(!html.includes('Fall Festival'), 'gated-off DATA leaked');
@@ -147,7 +147,7 @@ console.log('\nsection gating');
   t('cleaning-liaison view: only roles + cleaning', () => {
     const html = build(fullData({ sections: { roles: true, se: false, am: false, pm: false, cleaning: true } }));
     assert.ok(html.includes('🧹 Cleaning'));
-    assert.ok(!html.includes('🌅 Morning Classes'));
+    assert.ok(!html.includes('🌅 Grove Classes'));
     assert.ok(!html.includes('Tara Teach'));
   });
 }
@@ -243,7 +243,7 @@ console.log('\nloading and empty states');
 {
   t('a lens still in flight says so instead of printing blank', () => {
     const html = build(fullData({ loading: { roles: false, se: false, am: true, pm: true, cleaning: true } }));
-    assert.ok(html.includes('🌅 Morning Classes'), 'head should still render');
+    assert.ok(html.includes('🌅 Grove Classes'), 'head should still render');
     assert.ok(html.includes('Still loading when this was printed'));
     assert.ok(!html.includes('Tara Teach'), 'must not print half-loaded data');
   });
