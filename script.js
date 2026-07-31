@@ -3205,7 +3205,9 @@
       var sess = staff.sessions[currentSession];
       html += '<div class="class-staff-banner">';
       html += '<div class="class-staff-header">';
-      html += '<span class="class-staff-title">' + groupWithAge(activeFilter) + '</span>';
+      // Bare grove name (Erin, 2026-07-31) — the "Ages" meta right beside
+      // it already carries the roster-aware range once.
+      html += '<span class="class-staff-title">' + escapeHtml(activeFilter) + '</span>';
       html += '<span class="class-staff-meta">Room: ' + (sess ? sess.room : '') + ' &middot; Ages ' + staff.ages;
       if (staff.note) html += ' &middot; ' + staff.note;
       if (sess && sess.topic) html += '<br><em>' + sess.topic + '</em>';
