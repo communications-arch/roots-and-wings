@@ -23119,7 +23119,7 @@
 
     var html = '<div class="absence-overlay" id="absenceOverlay"><div class="absence-modal">';
     html += '<button class="detail-close absence-close" id="absenceCloseBtn">&times;</button>';
-    html += '<h3>' + (editingAbsenceId ? 'Edit Absence' : 'Report an Absence') + '</h3>';
+    html += '<h3>' + (editingAbsenceId ? 'Edit Absence Alert' : 'Absence Alert') + '</h3>';
     html += '<div class="absence-field"><label>Who will be out?</label><select class="cl-input" id="absenceWho">';
     parentNames.forEach(function (name) {
       var sel = (prefillPerson && name === prefillPerson) ? ' selected' : '';
@@ -23269,8 +23269,11 @@
       if (!hasAnyDuties) {
         h += '<em class="absence-no-slots" style="display:block;">No session-specific duties on file for either parent yet \u2014 each block you pick becomes a general coverage spot. Duties you sign up for later create their own coverage requests automatically.</em>';
       }
-      h += '</div></div>';
-      h += '<div class="absence-field"><label>Coverage for what you\u2019ll miss:</label><div class="absence-preview" id="absencePreview"></div></div>';
+      h += '</div>';
+      // Erin 2026-07-31: one combined field \u2014 the coverage rows (with
+      // their replacement dropdowns) sit directly under the checkboxes.
+      h += '<div class="absence-preview" id="absencePreview" style="margin-top:8px;"></div>';
+      h += '</div>';
       dyn.innerHTML = h;
 
       selectedDate = null;
