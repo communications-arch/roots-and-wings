@@ -3894,6 +3894,13 @@
     html += '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail">';
 
+    // Erin 2026-07-31: rosters show capitalized full names + (age).
+    function rwCapName(s) {
+      return String(s || '').trim().split(/\s+/).map(function (w) {
+        return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+      }).join(' ');
+    }
+
     if (p.type === 'amClass') {
       var cls = AM_CLASSES[p.group];
       var sess = cls ? cls.sessions[p.session] : null;
@@ -3974,7 +3981,7 @@
       }
       if (groupKids.length > 0) {
         var studentFullNames = groupKids.map(function (kid) { return kid.name + ' ' + (kid.lastName || kid.family); });
-        html += '<h4 class="elective-roster-title">' + groupKids.length + ' Students</h4>';
+        html += '<h4 class="elective-roster-title">' + groupKids.length + ' Kids</h4>';
         // Allergy / medical alerts surface BEFORE the roster so they're visible
         // without scrolling on smaller modals.
         html += studentAllergyCallout(studentFullNames);
@@ -3983,7 +3990,9 @@
           var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
           html += '<div class="elective-student' + (kid.photoConsent === false ? ' elective-student-nophoto-card' : '') + '">';
           html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, kid.email, kid.family) + '</div>';
-          html += '<div><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + (kid.lastName || kid.family) + '</span>' + pronounTag(kid) + noPhoto + '</div>';
+          html += '<div><strong>' + rwCapName(nickOr(kid.nickname, kid.name)) + '</strong> <span class="elective-student-last">' + rwCapName(kid.lastName || kid.family) + '</span>'
+            + (kid.age ? ' <span class="elective-student-last">(' + kid.age + ')</span>' : '')
+            + pronounTag(kid) + noPhoto + '</div>';
           html += '</div>';
         });
         html += '</div>';
@@ -8257,8 +8266,9 @@
     html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
     html += '</div>';
 
-    // Student roster
-    html += '<h4 class="elective-roster-title">' + elec.students.length + ' Students</h4>';
+    // Student roster (Erin 2026-07-31: count-first "N Kids", capitalized
+    // full names, age in parens)
+    html += '<h4 class="elective-roster-title">' + elec.students.length + ' Kids</h4>';
     // Allergy / medical alerts surface BEFORE the roster so they're visible
     // without scrolling on smaller modals.
     html += studentAllergyCallout(elec.students);
@@ -8273,7 +8283,14 @@
       var noPhoto = optedOut ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
       html += '<div class="elective-student' + (optedOut ? ' elective-student-nophoto-card' : '') + '">';
       html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '">' + kidAvatarInnerHtml(kidName, kidEmail, kidFamily) + '</div>';
-      html += '<div><strong>' + first + '</strong> <span class="elective-student-last">' + last + '</span>' + pronounTag(kidPerson) + noPhoto + '</div>';
+      var kidCap = function (s) {
+        return String(s || '').trim().split(/\s+/).map(function (w) {
+          return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+        }).join(' ');
+      };
+      html += '<div><strong>' + kidCap(first) + '</strong> <span class="elective-student-last">' + kidCap(last) + '</span>'
+        + (kidPerson && kidPerson.age ? ' <span class="elective-student-last">(' + kidPerson.age + ')</span>' : '')
+        + pronounTag(kidPerson) + noPhoto + '</div>';
       html += '</div>';
     });
     html += '</div>';
@@ -19686,7 +19703,7 @@
         h += '<p class="ws-lending-head">Kids</p><p class="ws-empty">Loading the roster…</p>';
         kids = [];
       } else {
-        h += '<p class="ws-lending-head">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</p>';
+        h += '<p class="ws-lending-head">' + kids.length + ' Kid' + (kids.length === 1 ? '' : 's') + '</p>';
         if (!kids.length) {
           h += '<p class="ws-empty">No finalized placements for this grove yet — the roster fills in from the Grove Builder.</p>';
         }
