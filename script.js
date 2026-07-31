@@ -6907,11 +6907,13 @@
     // entered over the summer): real data always outranks the season gate.
     if (!isSummerBreak || (loadedAbsences || []).length > 0) {
       html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
-      html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage">' + brandIconImg('coverage') + ' Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span></summary>';
-      // #169 (Lyndsey, Erin's call): a second I'll Be Out doorway here —
-      // the My Responsibilities header button stays put.
-      html += '<p class="coverage-intro" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span>See who needs coverage and volunteer to help.</span>'
-        + (!isSummerBreak ? '<button class="btn btn-absence" id="reportAbsenceBtn2">I\'ll Be Out</button>' : '') + '</p>';
+      // #169 + Erin 2026-07-31: the doorway lives in the card HEADER (like
+      // My Responsibilities' I'll Be Out) and reads "Absence Alert". The
+      // click handler stops propagation so it doesn't toggle the details.
+      html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage">' + brandIconImg('coverage') + ' Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span>'
+        + (!isSummerBreak ? '<button class="btn btn-absence btn-absence-header" id="reportAbsenceBtn2" style="margin-left:auto;">Absence Alert</button>' : '')
+        + '</summary>';
+      html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
       html += '<div id="coverageBoardContent"></div>';
       html += '</details>';
     }
@@ -8027,7 +8029,12 @@
     }
     var absenceBtn2 = grid.querySelector('#reportAbsenceBtn2');
     if (absenceBtn2) {
-      absenceBtn2.addEventListener('click', function () { showAbsenceModal(); });
+      absenceBtn2.addEventListener('click', function (e) {
+        // Inside a <summary>: don't toggle the Coverage Board open/shut.
+        e.preventDefault();
+        e.stopPropagation();
+        showAbsenceModal();
+      });
     }
 
     // #138 Reminders buttons + #139 bring-items fetch (first paint pulls
