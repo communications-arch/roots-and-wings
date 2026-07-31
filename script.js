@@ -4286,6 +4286,14 @@
     prep: 'You help set up rooms and materials for upcoming classes during this hour.'
   };
 
+  // Capitalize every word of a name for display (data is often lowercased
+  // by its keying) — "leia organa" → "Leia Organa".
+  function rwCapWords(s) {
+    return String(s || '').trim().split(/\s+/).map(function (w) {
+      return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+    }).join(' ');
+  }
+
   function classHourLabel(period, hour) {
     if (period === 'AM') {
       return hour === 'AM1' ? 'Hour 1 · 10:00–10:55' : hour === 'AM2' ? 'Hour 2 · 11:00–11:55' : '10:00–12:00';
@@ -4330,14 +4338,22 @@
         html += '</div>';
         if (c.helpers_needed > 0) html += '<p class="ra-open-note" style="display:inline-block;">needs ' + c.helpers_needed + ' more assistant' + (c.helpers_needed === 1 ? '' : 's') + ' ⚠</p>';
         if (c.class_period === 'AM') {
-          html += '<h4 style="margin:14px 0 4px;">Kids' + (d.kids.length ? ' (' + d.kids.length + ')' : '') + '</h4>';
+          // Erin 2026-07-31: count-first header ("7 Kids"), capitalized
+          // full names, age in parens. Server sends {name, age} objects;
+          // plain strings (older cache) still render.
+          var ciKidsArr = (d.kids || []).map(function (k) {
+            return (typeof k === 'string') ? { name: k, age: null } : k;
+          });
+          html += '<h4 style="margin:14px 0 4px;">' + ciKidsArr.length + ' Kid' + (ciKidsArr.length === 1 ? '' : 's') + '</h4>';
           // Pre-finalize, the group's current kids ARE the expected roster —
           // show them with the pending caveat instead of an empty shrug.
-          if (d.kids.length && d.kids_pending) {
+          if (ciKidsArr.length && d.kids_pending) {
             html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">Placements aren’t finalized yet — these are the kids currently in this group.</p>';
           }
-          html += d.kids.length
-            ? '<p style="margin:0;color:var(--color-text-light);">' + d.kids.map(escapeHtml).join(', ') + '</p>'
+          html += ciKidsArr.length
+            ? '<p style="margin:0;color:var(--color-text-light);">' + ciKidsArr.map(function (k) {
+                return escapeHtml(rwCapWords(k.name)) + (k.age != null ? ' (' + k.age + ')' : '');
+              }).join(', ') + '</p>'
             : '<p style="margin:0;color:var(--color-text-light);">Placements aren’t finalized yet.</p>';
         } else {
           // Afternoon: who has ranked this class so far — 1st choices lead,

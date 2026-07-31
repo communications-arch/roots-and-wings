@@ -1164,16 +1164,43 @@ module.exports = async function handler(req, res) {
         const ci = ciRows[0];
         const ciHelpers = await sql`SELECT person_name, person_email FROM class_assignment_helpers
           WHERE class_submission_id = ${ciId} ORDER BY sort_order`;
+        // Kids come back as { name: 'First Last', age: N|null } (Erin,
+        // 2026-07-31: full names + ages in the class-details popup). The
+        // client capitalizes for display; legacy string arrays still work.
+        const ciAgeOf = (b) => {
+          if (!b) return null;
+          const iso = b instanceof Date ? b.toISOString().slice(0, 10) : String(b).slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}/.test(iso)) return null;
+          const now = new Date().toISOString().slice(0, 10);
+          let a = parseInt(now.slice(0, 4), 10) - parseInt(iso.slice(0, 4), 10);
+          if (now.slice(5) < iso.slice(5)) a--;
+          return a;
+        };
         let ciKids = [];
         let ciKidsPending = false;
         if (ci.class_period === 'AM') {
           const ciGroup = String((ci.age_groups || [])[0] || '');
           if (ciGroup) {
-            const kidRows = await sql`SELECT kid_first_name FROM morning_class_assignments
-              WHERE school_year = ${ci.school_year} AND finalized = TRUE
-                AND LOWER(class_group) = LOWER(${ciGroup})
-              ORDER BY kid_first_name`;
-            ciKids = kidRows.map(r => r.kid_first_name);
+            const kidRows = await sql`
+              SELECT COALESCE(NULLIF(k.nickname, ''), NULLIF(k.first_name, ''), a.kid_first_name) AS display_first,
+                     COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last,
+                     k.birth_date
+              FROM morning_class_assignments a
+              LEFT JOIN LATERAL (
+                SELECT id, nickname, first_name, last_name, birth_date, family_email FROM kids
+                WHERE (a.kid_id IS NOT NULL AND kids.id = a.kid_id)
+                   OR (a.kid_id IS NULL AND LOWER(kids.family_email) = LOWER(a.family_email)
+                       AND LOWER(kids.first_name) = LOWER(a.kid_first_name))
+                LIMIT 1
+              ) k ON TRUE
+              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(a.family_email)
+              WHERE a.school_year = ${ci.school_year} AND a.finalized = TRUE
+                AND LOWER(a.class_group) = LOWER(${ciGroup})
+              ORDER BY 1`;
+            ciKids = kidRows.map(r => ({
+              name: (String(r.display_first || '') + ' ' + String(r.display_last || '')).trim(),
+              age: ciAgeOf(r.birth_date)
+            }));
             // Placements not finalized yet — show the kids currently in the
             // class's age group as the pending roster (Erin, 2026-07-15:
             // "I'm not seeing the kids"). Enrollment-scoped (2026-07-19):
@@ -1181,14 +1208,20 @@ module.exports = async function handler(req, res) {
             // count, mirroring the Morning Builder's kid_enrollments read.
             if (!ciKids.length) {
               const pend = await sql`
-                SELECT COALESCE(NULLIF(k.nickname, ''), k.first_name) AS n
+                SELECT COALESCE(NULLIF(k.nickname, ''), k.first_name) AS n,
+                       COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS ln,
+                       k.birth_date
                 FROM kid_enrollments e
                 JOIN kids k ON k.id = e.kid_id
+                LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)
                 WHERE e.season = ${ci.school_year} AND e.status = 'enrolled'
                   AND e.schedule IN ('all-day', 'morning')
                   AND LOWER(k.class_group) = LOWER(${ciGroup})
                 ORDER BY 1`;
-              ciKids = pend.map(r => r.n);
+              ciKids = pend.map(r => ({
+                name: (String(r.n || '') + ' ' + String(r.ln || '')).trim(),
+                age: ciAgeOf(r.birth_date)
+              }));
               ciKidsPending = ciKids.length > 0;
             }
           }
