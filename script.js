@@ -5157,7 +5157,9 @@
     var card = document.getElementById('classSignupCard');
     if (!card) {
       card = document.createElement('div');
-      card.className = 'mf-card mf-card-full';
+      // Erin (2026-07-31): the card is a compact waiver-style ALERT now —
+      // same gold banner treatment; the full picker opens in a modal.
+      card.className = 'mf-card mf-card-full mf-waiver-banner';
       card.id = 'classSignupCard';
       card.style.display = 'none';
       grid.appendChild(card);
@@ -5266,7 +5268,14 @@
     // to edit). Reviewers manage non-open sessions from the Schedule
     // Builder's "Afternoon Class Sign-Ups" panel under the Approved badge.
     var collapsed = signupAllKidsSaved(s) && !_signupPickerOpen;
-    if (!live || collapsed) { card.style.display = 'none'; return; }
+    if (!live || collapsed) {
+      card.style.display = 'none';
+      // If the picker modal is open when the last kid saves, tell the
+      // parent they're done instead of leaving stale pickers behind.
+      var mbDone = document.getElementById('pm-signup-modal-body');
+      if (mbDone && collapsed) mbDone.innerHTML = '<p class="ws-empty">✓ Every kid’s picks are saved — you’re all set. Edit anytime from the Kid Schedule card.</p>';
+      return;
+    }
     card.style.display = '';
     // While sign-ups are live, the card jumps to the TOP of My Family so
     // parents land on it (Erin, 2026-07-15) — but always BELOW the
@@ -5282,12 +5291,28 @@
     // This card is purely the parent-facing class selection (Erin,
     // 2026-07-15: no session picker / Close / Lock here — window lifecycle
     // lives in the Afternoon Class Builder's sign-ups panel).
-    var h = '<h3 class="mf-card-title" data-help-key="mf-signup">' + brandIconImg('afternoon') + ' Afternoon Class Sign-ups</h3>';
+    // The CARD is now the compact alert (waiver-banner style, Erin
+    // 2026-07-31): status + progress + one button into the modal.
+    var kidsAll = s.kids || [];
+    var savedCount = kidsAll.filter(function (k) { return signupKidHasSaved(s, k); }).length;
+    var alertH = '<h3 class="mf-card-title" data-help-key="mf-signup">' + brandIconImg('afternoon') + ' Afternoon Class Sign-ups</h3>';
+    alertH += '<p>' + (status === 'open'
+      ? 'Session ' + s.session + ' sign-ups are <strong>open</strong> — pick a 1st and 2nd choice for each hour, for each kid.'
+      : status === 'closed'
+        ? 'Session ' + s.session + ' sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.')
+        : 'Session ' + s.session + ' sign-ups are <strong>locked</strong>.')
+      + (kidsAll.length ? ' Saved for <strong>' + savedCount + ' of ' + kidsAll.length + '</strong> kid' + (kidsAll.length === 1 ? '' : 's') + '.' : '') + '</p>';
+    alertH += '<button type="button" class="btn btn-primary" id="pmSignupOpenBtn">' + (status === 'open' ? 'Choose classes' : 'View picks') + '</button>';
+    card.innerHTML = alertH;
+    var pmOpenBtn = card.querySelector('#pmSignupOpenBtn');
+    if (pmOpenBtn) pmOpenBtn.addEventListener('click', function () { showPmSignupModal(); });
 
+    // Everything below paints the FULL picker — only when its modal is open.
+    var modalBody = document.getElementById('pm-signup-modal-body');
+    if (!modalBody) return;
+    var h = '';
     if (!s.session) {
-      h += '<p class="mf-empty">No session is open for sign-ups yet.</p>';
-      card.innerHTML = h;
-      wireSignupCard();
+      modalBody.innerHTML = '<p class="mf-empty">No session is open for sign-ups yet.</p>';
       return;
     }
 
@@ -5373,9 +5398,23 @@
         h += '</div>';
       });
     }
-    card.innerHTML = h;
+    modalBody.innerHTML = h;
     wireSignupCard();
   }
+
+  // Erin (2026-07-31): the full sign-up picker lives here now — the My
+  // Family card is just the doorway alert.
+  function showPmSignupModal() {
+    var body = renderReportModal({
+      title: '🌇 Afternoon Class Sign-ups',
+      subtitle: 'Pick a 1st and 2nd choice for each hour, for each kid — classes matching their age are highlighted.',
+      bodyId: 'pm-signup-modal-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    renderClassSignupCard();
+  }
+  window.showPmSignupModal = showPmSignupModal;
 
   // Human-readable age range for a class: the reviewer's free-text override
   // when present, else the teacher-picked age-group buckets ("Saplings (3–5),
@@ -5554,7 +5593,9 @@
   }
 
   function wireSignupCard() {
-    var card = document.getElementById('classSignupCard');
+    // The picker paints inside its modal now; the legacy card id stays as
+    // a fallback so nothing breaks if the modal shell is missing.
+    var card = document.getElementById('pm-signup-modal-body') || document.getElementById('classSignupCard');
     if (!card) return;
     // Explicit rank pickers (Erin, 2026-07-15: the user selects the order —
     // the chosen number always sticks; a class already holding that number
@@ -5705,9 +5746,10 @@
           _signupPickerOpen = true;
           // Expand THIS kid in the picker (saved kids fold by default).
           _signupKidOpen[kid] = true;
-          renderClassSignupCard();
-          var cardEl = document.getElementById('classSignupCard');
-          if (cardEl) cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // The picker is a modal now (Erin, 2026-07-31) — open it
+          // directly instead of scrolling to the old inline card.
+          if (typeof showPmSignupModal === 'function') showPmSignupModal();
+          else renderClassSignupCard();
         });
       }
     });
