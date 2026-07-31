@@ -34671,6 +34671,8 @@
     html += '<button class="detail-close" id="mcbCloseBtn" aria-label="Close">&times;</button>';
     html += '<div class="sb-header">';
     html += '<h3 style="margin:0;">Morning Class Builder</h3>';
+    // #160 (Lyndsey): shared-facility booking doorway for liaisons.
+    html += '<button type="button" class="sc-btn" id="mcbFacilitiesBtn" style="margin-left:8px;">' + brandIconImg('location', 'ag-icon') + ' Shared Facilities</button>';
     html += '<label class="sb-year-label">School Year ';
     html += '<select id="mcbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
     // Current year is selectable too so AM teaching can be recorded for the
@@ -34693,7 +34695,150 @@
       morningBuilderState.schoolYear = this.value;
       loadMorningClassBuilder();
     });
+    var facBtn = document.getElementById('mcbFacilitiesBtn');
+    if (facBtn) facBtn.addEventListener('click', showFacilityBookingModal);
     loadMorningClassBuilder();
+  }
+
+  // ── #160 shared-facility booking (Kitchen / Kitchen Annex / Pavilion) ──
+  // Liaisons (or the VP) book weeks × hours for their group's morning
+  // class; one class per facility per week-hour, enforced server-side
+  // (supply-closet liaison-facility-* actions). Grid shows every booking;
+  // × releases (server gates to the group's liaison / VP).
+  var _facilityState = { session: null, data: null };
+  var FACILITY_GROUPS = ['Greenhouse', 'Saplings', 'Sassafras', 'Oaks', 'Maples', 'Birch', 'Cedars', 'Willows', 'Pigeons'];
+  function showFacilityBookingModal() {
+    _facilityState.session = _facilityState.session || currentSession || 1;
+    var body = renderReportModal({
+      title: 'Shared Facilities',
+      subtitle: 'Book the Kitchen, Kitchen Annex, or Pavilion for your group’s morning class — pick the session, week(s), and hour(s). One class per facility per week + hour; a booked slot disappears as an option for everyone else.',
+      bodyId: 'facility-book-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!body) return;
+    loadFacilityBookings();
+  }
+  window.showFacilityBookingModal = showFacilityBookingModal;
+  function loadFacilityBookings() {
+    fetch('/api/supply-closet?action=liaison-facilities' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && Array.isArray(d.bookings)) { _facilityState.data = d; paintFacilityBookings(); }
+        else { var b = document.getElementById('facility-book-body'); if (b) b.innerHTML = '<p class="ws-empty">' + escapeHtml((d && d.error) || 'Could not load bookings.') + '</p>'; }
+      })
+      .catch(function () { var b = document.getElementById('facility-book-body'); if (b) b.innerHTML = '<p class="ws-empty">Network error — try again.</p>'; });
+  }
+  function paintFacilityBookings() {
+    var body = document.getElementById('facility-book-body');
+    if (!body || !_facilityState.data) return;
+    var sess = _facilityState.session || 1;
+    var d = _facilityState.data;
+    var facilities = d.facilities || ['Kitchen', 'Kitchen Annex', 'Pavilion'];
+    var mine = (typeof myLiaisonGroups === 'function') ? myLiaisonGroups() : [];
+    var h = '<div class="board-cal-views" role="group" aria-label="Session">';
+    for (var i = 1; i <= 5; i++) {
+      h += '<button type="button" class="board-cal-view-pill fac-sess-pill' + (i === sess ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
+    }
+    h += '</div>';
+
+    // Booking form — group defaults to the viewer's liaison group.
+    h += '<div class="ws-part-panel" style="margin:10px 0;">';
+    h += '<p class="ws-lending-head" style="margin-top:0;">Book for Session ' + sess + '</p>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">';
+    h += '<select class="cl-input" id="facGroupSel" style="width:auto;">';
+    FACILITY_GROUPS.forEach(function (g) {
+      h += '<option value="' + g + '"' + (mine.indexOf(g) !== -1 ? ' selected' : '') + '>' + g + '</option>';
+    });
+    h += '</select>';
+    h += '<select class="cl-input" id="facFacilitySel" style="width:auto;">';
+    facilities.forEach(function (f) { h += '<option value="' + escapeHtml(f) + '">' + escapeHtml(f) + '</option>'; });
+    h += '</select>';
+    h += '<span>Weeks: ';
+    for (var w = 1; w <= 5; w++) h += '<label style="margin-right:6px;"><input type="checkbox" class="fac-week-cb" value="' + w + '"> ' + w + '</label>';
+    h += '</span>';
+    h += '<span>Hours: <label style="margin-right:6px;"><input type="checkbox" class="fac-hour-cb" value="AM1"> Hour 1</label>';
+    h += '<label><input type="checkbox" class="fac-hour-cb" value="AM2"> Hour 2</label></span>';
+    h += '<button type="button" class="btn btn-primary btn-sm" id="facBookBtn">Book</button>';
+    h += '</div><div class="cls-error" id="facBookErr" style="display:none;"></div></div>';
+
+    // Grid per facility: weeks × hours with who holds each slot.
+    var by = {};
+    (d.bookings || []).forEach(function (b) {
+      if (b.session_number !== sess) return;
+      by[b.facility + '|' + b.week_number + '|' + b.hour] = b;
+    });
+    facilities.forEach(function (f) {
+      h += '<p class="ws-lending-head">' + escapeHtml(f) + '</p>';
+      h += '<div style="overflow-x:auto;"><table class="ws-waivers-table" style="min-width:420px;"><thead><tr><th></th>';
+      for (var w2 = 1; w2 <= 5; w2++) h += '<th>Week ' + w2 + '</th>';
+      h += '</tr></thead><tbody>';
+      ['AM1', 'AM2'].forEach(function (hr) {
+        h += '<tr><th style="white-space:nowrap;">' + (hr === 'AM1' ? 'Hour 1' : 'Hour 2') + '</th>';
+        for (var w3 = 1; w3 <= 5; w3++) {
+          var bk = by[f + '|' + w3 + '|' + hr];
+          if (bk) {
+            var releasable = mine.indexOf(bk.class_group) !== -1;
+            h += '<td><span class="ag-name ' + (typeof ageGroupClass === 'function' ? (ageGroupClass(bk.class_group) || '') : '') + '">' + escapeHtml(bk.class_group) + '</span>'
+              + (releasable ? ' <button type="button" class="sc-btn sc-btn-del fac-release" data-id="' + bk.id + '" title="Release this slot">×</button>' : '')
+              + '</td>';
+          } else {
+            h += '<td><span class="ws-srt-actions-empty">open</span></td>';
+          }
+        }
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+    });
+    body.innerHTML = h;
+
+    body.querySelectorAll('.fac-sess-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _facilityState.session = parseInt(btn.getAttribute('data-sess'), 10);
+        paintFacilityBookings();
+      });
+    });
+    var bookBtn = document.getElementById('facBookBtn');
+    if (bookBtn) bookBtn.addEventListener('click', function () {
+      var errEl = document.getElementById('facBookErr');
+      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+      var weeks = [];
+      body.querySelectorAll('.fac-week-cb').forEach(function (cb) { if (cb.checked) weeks.push(parseInt(cb.value, 10)); });
+      var hours = [];
+      body.querySelectorAll('.fac-hour-cb').forEach(function (cb) { if (cb.checked) hours.push(cb.value); });
+      if (!weeks.length || !hours.length) {
+        if (errEl) { errEl.textContent = 'Pick at least one week and one hour.'; errEl.style.display = ''; }
+        return;
+      }
+      bookBtn.disabled = true;
+      fetch('/api/supply-closet?action=liaison-facility-book' + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          group: (document.getElementById('facGroupSel') || {}).value,
+          facility: (document.getElementById('facFacilitySel') || {}).value,
+          session: _facilityState.session, weeks: weeks, hours: hours
+        })
+      }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          bookBtn.disabled = false;
+          if (!res.ok) { if (errEl) { errEl.textContent = (res.data && res.data.error) || 'Could not book.'; errEl.style.display = ''; } return; }
+          loadFacilityBookings();
+        })
+        .catch(function () { bookBtn.disabled = false; if (errEl) { errEl.textContent = 'Network error — try again.'; errEl.style.display = ''; } });
+    });
+    body.querySelectorAll('.fac-release').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'release', function () {
+          fetch('/api/supply-closet?action=liaison-facility-release&id=' + self.getAttribute('data-id') + notifViewAsSuffix(), { method: 'DELETE', headers: rwAuthHeaders() })
+            .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+            .then(function (res) {
+              if (!res.ok) { alert((res.data && res.data.error) || 'Could not release.'); return; }
+              loadFacilityBookings();
+            })
+            .catch(function () { alert('Network error — try again.'); });
+        });
+      });
+    });
   }
 
   function closeMorningClassBuilder() {

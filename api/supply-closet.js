@@ -533,6 +533,67 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
     return res.status(200).json({ sections, signups, me: email, school_year: yr });
   }
 
+  // ── #160 shared-facility bookings (Kitchen / Kitchen Annex / Pavilion) ──
+  // Any signed-in member reads the grid; a group's liaison (or VP/super,
+  // via canManageBringGroup) books weeks × hours for their group. The
+  // facility_bookings UNIQUE constraint enforces one group per facility ×
+  // session × week × hour; conflicts 409 with who holds it.
+  const FACILITIES = ['Kitchen', 'Kitchen Annex', 'Pavilion'];
+  if (req.query.action === 'liaison-facilities') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const rows = await sql`
+      SELECT id, session_number, week_number, hour, facility, class_group
+      FROM facility_bookings WHERE school_year = ${yr}
+      ORDER BY session_number, week_number, hour, facility`;
+    return res.status(200).json({ bookings: rows, facilities: FACILITIES, school_year: yr });
+  }
+  if (req.query.action === 'liaison-facility-book') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const fbGroup = String(body.group || '').trim();
+    const fbFacility = String(body.facility || '').trim();
+    const fbSess = parseInt(body.session, 10);
+    const fbWeeks = (Array.isArray(body.weeks) ? body.weeks : []).map(w => parseInt(w, 10))
+      .filter(w => Number.isFinite(w) && w >= 1 && w <= 5);
+    const fbHours = (Array.isArray(body.hours) ? body.hours : []).filter(h => h === 'AM1' || h === 'AM2');
+    if (BRING_GROUPS.indexOf(fbGroup) === -1) return res.status(400).json({ error: 'Unknown group' });
+    if (FACILITIES.indexOf(fbFacility) === -1) return res.status(400).json({ error: 'Unknown facility' });
+    if (!Number.isFinite(fbSess) || fbSess < 1 || fbSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
+    if (!fbWeeks.length || !fbHours.length) return res.status(400).json({ error: 'Pick at least one week and one hour.' });
+    if (!(await canManageBringGroup(email, fbGroup))) {
+      return res.status(403).json({ error: 'Only the ' + fbGroup + ' Liaison (or VP) can book for that group.' });
+    }
+    // All-or-nothing: report every taken slot before writing anything.
+    const fbTaken = await sql`
+      SELECT week_number, hour, class_group FROM facility_bookings
+      WHERE school_year = ${yr} AND session_number = ${fbSess} AND facility = ${fbFacility}
+        AND week_number = ANY(${fbWeeks}) AND hour = ANY(${fbHours})`;
+    if (fbTaken.length) {
+      const bits = fbTaken.map(t => 'week ' + t.week_number + ' ' + (t.hour === 'AM1' ? 'Hour 1' : 'Hour 2') + ' (' + t.class_group + ')');
+      return res.status(409).json({ error: fbFacility + ' is already booked: ' + bits.join(', ') + '. Adjust your weeks/hours and try again.' });
+    }
+    for (const w of fbWeeks) {
+      for (const h of fbHours) {
+        await sql`
+          INSERT INTO facility_bookings (school_year, session_number, week_number, hour, facility, class_group, booked_by)
+          VALUES (${yr}, ${fbSess}, ${w}, ${h}, ${fbFacility}, ${fbGroup}, ${email})
+          ON CONFLICT DO NOTHING`;
+      }
+    }
+    return res.status(201).json({ ok: true });
+  }
+  if (req.query.action === 'liaison-facility-release') {
+    if (req.method !== 'DELETE') return res.status(405).json({ error: 'Method not allowed' });
+    const fbId = parseInt(req.query.id, 10);
+    if (!Number.isFinite(fbId)) return res.status(400).json({ error: 'id required' });
+    const fbRows = await sql`SELECT id, class_group FROM facility_bookings WHERE id = ${fbId}`;
+    if (!fbRows.length) return res.status(404).json({ error: 'Booking not found.' });
+    if (!(await canManageBringGroup(email, fbRows[0].class_group))) {
+      return res.status(403).json({ error: 'Only the ' + fbRows[0].class_group + ' Liaison (or VP) can release this booking.' });
+    }
+    await sql`DELETE FROM facility_bookings WHERE id = ${fbId}`;
+    return res.status(200).json({ ok: true });
+  }
+
   // ── #140 liaison per-kid notes (My Class card) ──
   // Liaison-only both ways: the notes are the liaison's private working
   // notes for their group, never shown to families.

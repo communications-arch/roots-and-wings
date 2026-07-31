@@ -2329,3 +2329,20 @@ ALTER TABLE merch_orders ADD COLUMN IF NOT EXISTS screen_reason TEXT NOT NULL DE
 -- member-facing rule (assist seat advertised while fewer than 2 assigned),
 -- so nothing changes until the VP raises an event's count.
 ALTER TABLE special_events ADD COLUMN IF NOT EXISTS assistant_slots INTEGER NOT NULL DEFAULT 2;
+
+-- 2026-07-30 (#160, Lyndsey): shared-facility booking for morning classes
+-- (Kitchen / Kitchen Annex / Pavilion). One booking per facility × session
+-- × week × hour — the UNIQUE constraint IS the conflict rule. Liaisons
+-- book for their group from the Morning Class Builder's Facilities panel.
+CREATE TABLE IF NOT EXISTS facility_bookings (
+  id             SERIAL PRIMARY KEY,
+  school_year    TEXT NOT NULL,
+  session_number INTEGER NOT NULL CHECK (session_number BETWEEN 1 AND 5),
+  week_number    INTEGER NOT NULL CHECK (week_number BETWEEN 1 AND 5),
+  hour           TEXT NOT NULL CHECK (hour IN ('AM1','AM2')),
+  facility       TEXT NOT NULL,
+  class_group    TEXT NOT NULL,
+  booked_by      TEXT NOT NULL DEFAULT '',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (school_year, session_number, week_number, hour, facility)
+);
