@@ -240,10 +240,11 @@ console.log('\ncanonical age bands (cross-file)');
     });
 
     t(group + ': members.html Directory pill (pre-JS paint)', () => {
-      const m = membersHtml.match(new RegExp('data-filter="' + group + '"[^>]*>[^<]*<img[^>]*>\\s*' + group + ' \\(([^)]+)\\)'));
-      assert.ok(m, 'pill not found');
-      const band = m[1].replace(/&ndash;/g, '–');
-      assert.ok(new RegExp('^' + tight + '$').test(band), group + ' pill is "' + band + '"');
+      // Erin 2026-07-31: pills are BARE grove names — no range in the
+      // markup, and refreshDirectoryGroupPills keeps them bare (the span
+      // moved to the hover title). Guard the bareness instead.
+      const m = membersHtml.match(new RegExp('data-filter="' + group + '"[^>]*>[^<]*<img[^>]*>\\s*' + group + '\\s*</button>'));
+      assert.ok(m, 'pill should be the bare grove name with no range');
     });
 
     t(group + ': api/curriculum.js prettyAges (reviewer emails)', () => {
