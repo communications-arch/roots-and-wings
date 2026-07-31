@@ -365,17 +365,17 @@ function normalizeSubmission(body) {
   const age_groups_other = isAM ? '' : String(body.age_groups_other || '').trim().slice(0, 200);
   if (isAM) {
     if (age_groups.length !== 1 || age_groups[0] === 'all-ages') {
-      throw new Error('Morning classes are for exactly one age group.');
+      throw new Error('Morning classes are for exactly one grove.');
     }
     if (age_groups[0] === 'greenhouse') {
       throw new Error('No morning programming is offered for the Greenhouse (0–2) group — toddlers stay with their parents.');
     }
   } else {
     if (age_groups.indexOf('greenhouse') !== -1) {
-      throw new Error('Greenhouse is a morning-only age group.');
+      throw new Error('Greenhouse is a morning-only grove.');
     }
     if (age_groups.length === 0 && !age_groups_other) {
-      throw new Error('Pick at least one age group.');
+      throw new Error('Pick at least one grove.');
     }
   }
 
@@ -705,7 +705,7 @@ async function sendSubmissionConfirmation(sub) {
     ['Hour preference',  escapeHtml(prettyHourPrefs(sub.hour_preference, isAM))],
     ['Assistants',       escapeHtml(sub.assistant_count.join(' or ') + ' helper(s)')],
     ['Co-teachers',      escapeHtml(sub.co_teachers || '—')],
-    ['Age groups',       escapeHtml(prettyAges(sub.age_groups, sub.age_groups_other))],
+    ['Groves',           escapeHtml(prettyAges(sub.age_groups, sub.age_groups_other))],
     ['Teen assistant OK', sub.open_to_teen_assistant ? 'Yes — willing to host a Cedars or Pigeons (12+) assistant' : 'No'],
     ['Prerequisites',    escapeHtml(sub.prerequisites || '—')]
   ];
@@ -769,7 +769,7 @@ function normalizeInspirationIdea(body) {
     const hit = INSPIRATION_GROUPS.find(c => c.toLowerCase() === String(g || '').trim().toLowerCase());
     if (hit && groups.indexOf(hit) === -1) groups.push(hit);
   });
-  if (!groups.length) return { error: 'Pick at least one age group.' };
+  if (!groups.length) return { error: 'Pick at least one grove.' };
   const categories = [];
   (Array.isArray(body.categories) ? body.categories : []).forEach(c => {
     const v = String(c || '').trim().toLowerCase();
@@ -2276,7 +2276,7 @@ module.exports = async function handler(req, res) {
         const behalfName = String((req.body || {}).on_behalf_name || '').trim().slice(0, 120);
         const behalfScope = (behalfEmail || behalfName) ? await reviewerScopeReq(user, req) : null;
         if (behalfScope && !scopeAllowsSub(behalfScope, clean)) {
-          return res.status(403).json({ error: 'Your liaison role covers a different age group — you can only add morning classes for your own group.' });
+          return res.status(403).json({ error: 'Your liaison role covers a different grove — you can only add morning classes for your own grove.' });
         }
         if (behalfScope) {
           if (behalfEmail && (behalfEmail.split('@')[1] || '') === ALLOWED_DOMAIN) {
@@ -3238,7 +3238,7 @@ module.exports = async function handler(req, res) {
         const existing = await sql`SELECT * FROM class_submissions WHERE id = ${id}`;
         if (existing.length === 0) return res.status(404).json({ error: 'Not found' });
         if (!scopeAllowsSub(rvScope, existing[0])) {
-          return res.status(403).json({ error: 'Your liaison role covers a different age group — this class isn’t yours to schedule. (You are acting as ' + actingEmailFor(user, req) + (rvScope.all ? '' : ' — ' + rvScope.groups.join('/') + ' only') + '.)' });
+          return res.status(403).json({ error: 'Your liaison role covers a different grove — this class isn’t yours to schedule. (You are acting as ' + actingEmailFor(user, req) + (rvScope.all ? '' : ' — ' + rvScope.groups.join('/') + ' only') + '.)' });
         }
         if (existing[0].status === 'withdrawn') {
           return res.status(409).json({ error: 'Submission was withdrawn by the submitter; contact them before rescheduling.' });

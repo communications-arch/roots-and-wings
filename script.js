@@ -3987,7 +3987,7 @@
         html += '</div>';
       } else if (!_grpLower) {
         // Unplaced kid: no morning group yet, so there's no roster to show.
-        html += '<p class="mf-vol-optional">Not placed in a morning class yet — once the Morning Class Builder assigns a group, classmates will appear here.</p>';
+        html += '<p class="mf-vol-optional">Not placed in a morning class yet — once the Grove Builder assigns a grove, classmates will appear here.</p>';
       }
     }
 
@@ -10071,7 +10071,7 @@
           // Membership owns the morning age-group placement builder (Erin,
           // 2026-07-18). Membership Director passes the morning_builder
           // capability by default; server re-checks (morningBuilderAccess).
-          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span class="ws-link-label">Class Builder <span class="ws-link-sub">Morning Classes</span></span></button></li>';
+          h += '<li><button type="button" class="ws-link-btn" data-resource-action="morning-class-builder"><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span class="ws-link-label">Grove Builder <span class="ws-link-sub">Morning classes &amp; placements</span></span></button></li>';
         }
         // Facilities — rooms admin lives HERE, not inside the Class
         // Builder (Erin, 2026-07-10: the builder just SELECTS rooms).
@@ -17167,7 +17167,7 @@
       return n;
     }
     function ciAgeOptions() {
-      var opts = [{ value: 'all', label: 'All age groups', count: ciCount('all', f.cat) }];
+      var opts = [{ value: 'all', label: 'All groves', count: ciCount('all', f.cat) }];
       ciOrdered.forEach(function (grp) {
         opts.push({ value: grp.name, label: grp.label, count: ciCount(grp.name, f.cat) });
       });
@@ -17199,7 +17199,7 @@
 
     // Filter bar (reuses the builder's chip styles) + the suggest button.
     html += '<div class="sb-palette-filters">';
-    html += '<button type="button" class="sc-btn sb-filter-btn' + (f.age !== 'all' ? ' is-active' : '') + '" id="ciAgeFilterBtn" aria-label="Filter ideas by age group" aria-expanded="false">' + FUNNEL_SVG + ' ' + escapeHtml(ciAgeChipLabel()) + '</button>';
+    html += '<button type="button" class="sc-btn sb-filter-btn' + (f.age !== 'all' ? ' is-active' : '') + '" id="ciAgeFilterBtn" aria-label="Filter ideas by grove" aria-expanded="false">' + FUNNEL_SVG + ' ' + escapeHtml(ciAgeChipLabel()) + '</button>';
     html += '<button type="button" class="sc-btn sb-filter-btn' + (f.cat !== 'all' ? ' is-active' : '') + '" id="ciCatFilterBtn" aria-label="Filter ideas by category" aria-expanded="false">' + FUNNEL_SVG + ' ' + escapeHtml(f.cat === 'all' ? 'Category' : (CI_CATEGORY_LABELS[f.cat] || f.cat)) + '</button>';
     if (ciActive) html += '<button type="button" class="sc-btn" id="ciFilterClear" title="Clear filters">✕ Clear</button>';
     html += '<button type="button" class="sc-btn" id="ciSuggestBtn" style="margin-left:auto;">＋ Suggest an idea</button>';
@@ -17213,7 +17213,7 @@
     html += '<input type="text" class="cl-input" id="ciIdeaInput" maxlength="200" placeholder="e.g. Kitchen chemistry"></div>';
     html += '<div class="cls-field"><label class="cls-label">Note (optional)</label>';
     html += '<input type="text" class="cl-input" id="ciNoteInput" maxlength="300" placeholder="A link, a why, anything helpful"></div>';
-    html += '<div class="cls-field"><label class="cls-label">Age group(s) <span class="cls-req">*</span></label>';
+    html += '<div class="cls-field"><label class="cls-label">Grove(s) <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group cls-cb-inline">';
     CI_CANONICAL.forEach(function (name) {
       html += '<label class="cls-cb-label"><input type="checkbox" class="ci-grp-cb" value="' + escapeHtml(name) + '"> ' + escapeHtml(AGE_GROUP_LABELS[name.toLowerCase()] || name) + '</label>';
@@ -17338,7 +17338,7 @@
       var cats = [];
       personDetailCard.querySelectorAll('.ci-cat-cb:checked').forEach(function (cb) { cats.push(cb.value); });
       if (!idea) return ciFail('Give your idea a name.');
-      if (!grps.length) return ciFail('Pick at least one age group.');
+      if (!grps.length) return ciFail('Pick at least one grove.');
       if (errEl) errEl.style.display = 'none';
       ciSubmitBtn.disabled = true;
       // Member-open add (#33) — no view_as suffix needed; the server
@@ -19624,7 +19624,7 @@
       } else {
         h += '<p class="ws-lending-head">' + kids.length + ' kid' + (kids.length === 1 ? '' : 's') + '</p>';
         if (!kids.length) {
-          h += '<p class="ws-empty">No finalized placements for this group yet — the roster fills in from the Morning Class Builder.</p>';
+          h += '<p class="ws-empty">No finalized placements for this grove yet — the roster fills in from the Grove Builder.</p>';
         }
       }
       // #164 (Lyndsey): condensed rows — the sub-line leads with the
@@ -24862,7 +24862,7 @@
     // exactly ONE via a dropdown (2026-07-06, Erin: single select).
     // Greenhouse is morning-only; "All ages" is afternoon-only.
     html += '<div class="cls-field" id="clsPmAgeField">';
-    html += '<label class="cls-label">Age group(s) the class is designed for <span class="cls-req">*</span></label>';
+    html += '<label class="cls-label">Grove(s) the class is designed for <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
     AGE_GROUP_VALUES.forEach(function (v) {
       if (v === 'greenhouse') return; // morning-only, lives in the dropdown below
@@ -24872,9 +24872,9 @@
     html += '</div>';
     var amGroupCur = (curPeriod === 'AM' && (cur.age_groups || [])[0]) || '';
     html += '<div class="cls-field" id="clsAmGroupField" hidden>';
-    html += '<label class="cls-label">Age group <span class="cls-req">*</span></label>';
+    html += '<label class="cls-label">Grove <span class="cls-req">*</span></label>';
     html += '<select class="cl-input" id="clsAmGroup">';
-    html += '<option value="">— pick the age group —</option>';
+    html += '<option value="">— pick the grove —</option>';
     AGE_GROUP_VALUES.forEach(function (v) {
       if (v === 'all-ages') return; // afternoon-only
       if (v === 'greenhouse') return; // no morning programming for 0–2 (2026-07-10)
@@ -25059,9 +25059,9 @@
       });
       var hint = document.getElementById('clsPeriodHint');
       if (hint) hint.textContent = (p === 'AM')
-        ? 'Morning classes teach ONE age group, as one 2-hour class or a 1-hour slot. No room or class-size picks — rooms are assigned for the year and the group’s roster is the size.'
+        ? 'Morning classes teach ONE grove, as one 2-hour class or a 1-hour slot. No room or class-size picks — rooms are assigned for the year and the grove’s roster is the size.'
         : (p === 'PM')
-          ? 'Afternoon electives pick hour(s), a space request, a class size, and any mix of age groups.'
+          ? 'Afternoon electives pick hour(s), a space request, a class size, and any mix of groves.'
           : 'Pick one to see the rest of the questions — morning and afternoon classes ask for different details.';
       // #175: description is optional for morning classes.
       var descReq = document.getElementById('clsDescReq');
@@ -25101,7 +25101,7 @@
       var amHourSel = overlay.querySelector('input[name="clsAmHour"]:checked');
       var amGroupSel = document.getElementById('clsAmGroup');
       if (period === 'AM' && (!amGroupSel || !amGroupSel.value)) {
-        errEl.textContent = 'Pick the age group for your morning class.'; errEl.style.display = ''; return;
+        errEl.textContent = 'Pick the grove for your morning class.'; errEl.style.display = ''; return;
       }
       var max_students = 0, max_students_other = '';
       if (period === 'PM') {
@@ -27550,7 +27550,7 @@
       raCountPill('ws-wv-resent', open + ' open')
     ];
     var h = raLensHead(pills, _rolesMgrAsgState.reviewer ? { label: 'Open Class Builder', action: 'builder-am' } : null);
-    h += '<p class="ws-body-hint">Each age group’s morning per session — one both-hours class, or an Hour 1 + Hour 2 pair. Placements are managed in the Class Builder.</p>';
+    h += '<p class="ws-body-hint">Each grove’s morning per session — one both-hours class, or an Hour 1 + Hour 2 pair. Placements are managed in the Grove Builder.</p>';
     h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th></th>';
     for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
     h += '</tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -31224,7 +31224,7 @@
     }
     // Morning groups are placed in the Morning Class Builder, so the
     // grid flags the gap but doesn't offer a picker here.
-    return '<span class="st-flag-coral" title="Place them in the Morning Class Builder">not placed</span>';
+    return '<span class="st-flag-coral" title="Place them in the Grove Builder">not placed</span>';
   }
   // A placed class shows its age range next to the name (#31 — before,
   // only the picker options listed ages), reusing the same reviewer-
@@ -34922,10 +34922,10 @@
   function showMorningClassBuilder() {
     if (document.getElementById('mcbOverlay')) return;
     var html = '<div class="sb-overlay" id="mcbOverlay">';
-    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Morning Class Builder">';
+    html += '<div class="sb-panel" role="dialog" aria-modal="true" aria-label="Grove Builder">';
     html += '<button class="detail-close" id="mcbCloseBtn" aria-label="Close">&times;</button>';
     html += '<div class="sb-header">';
-    html += '<h3 style="margin:0;">Morning Class Builder</h3>';
+    html += '<h3 style="margin:0;">Grove Builder</h3>';
     // #160 (Lyndsey): shared-facility booking doorway for liaisons.
     html += '<button type="button" class="sc-btn" id="mcbFacilitiesBtn" style="margin-left:8px;">' + brandIconImg('location', 'ag-icon') + ' Shared Facilities</button>';
     html += '<label class="sb-year-label">School Year ';
@@ -36131,7 +36131,7 @@
         opts.push({ value: 'PM2', label: 'Fits PM2 (last hour)', count: pfCount(dim, 'PM2') });
         opts.push({ value: 'both', label: '2-hour classes', count: pfCount(dim, 'both') });
       } else if (dim === 'age') {
-        opts.push({ value: 'all', label: 'All age groups', count: pfCount(dim, 'all') });
+        opts.push({ value: 'all', label: 'All groves', count: pfCount(dim, 'all') });
         AGE_GROUP_VALUES.forEach(function (v) {
           // Only offer buckets this lens's inbox actually uses.
           if (!paletteAll.some(function (s) { return (s.age_groups || []).indexOf(v) !== -1; })) return;
@@ -36701,7 +36701,7 @@
     if (sbScopeAll()) return true;
     return !!s && s.class_period === 'AM' && sbScopeAllowsGroup(sbAmGroupOf(s));
   }
-  var SB_SCOPE_MSG = 'Your liaison role covers a different age group — you can only place, edit, or decline morning classes for your own group.';
+  var SB_SCOPE_MSG = 'Your liaison role covers a different grove — you can only place, edit, or decline morning classes for your own grove.';
 
   // ── Room occupancy (2026-07-10) ──
   // One class per room per hour. Mirrors the server's assign-room check:

@@ -54,14 +54,14 @@ const CAPABILITIES = [
     key: 'morning_builder',
     area: 'Classes & Scheduling',
     label: 'Morning Class Builder — view',
-    desc: 'Open the Morning Class Builder (kid → age group placement view).',
+    desc: 'Open the Grove Builder (kid → grove placement view).',
     defaultRoles: ['Membership Director', 'Vice President']
   },
   {
     key: 'morning_builder_place',
     area: 'Classes & Scheduling',
     label: 'Morning Class Builder — place kids',
-    desc: 'Move kids between age groups, seed the year, and finalize placements.',
+    desc: 'Move kids between groves, seed the year, and finalize placements.',
     defaultRoles: ['Membership Director']
   },
   {
