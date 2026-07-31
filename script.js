@@ -3976,6 +3976,27 @@
         });
         groupKids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
       }
+      // #185 (Erin): the modal opens from a kid's OWN schedule row — that
+      // kid (and same-grove siblings) must be in the roster and the count.
+      // The season snapshot misses families that haven't registered yet and
+      // the directory fallback misses fresh placements, so the viewing
+      // family's kids merge in by the same resolution the schedule card
+      // uses: finalized placement first, directory group second.
+      (function () {
+        var myEmail = (typeof getActiveEmail === 'function') ? getActiveEmail() : null;
+        var myFam = (myEmail && Array.isArray(FAMILIES)) ? FAMILIES.filter(function (f) { return f.email === myEmail; })[0] : null;
+        if (!myFam) return;
+        (myFam.kids || []).forEach(function (k) {
+          var g = _kidPlacements[String(k.name || '').toLowerCase()] || k.group || '';
+          if (/^teens$/i.test(g)) g = 'Pigeons';
+          if (String(g).toLowerCase() !== _grpLower) return;
+          var key = _kidKey(k.name, myFam.name);
+          if (groupKids.some(function (gk) { return _kidKey(gk.name, gk.family || gk.lastName) === key; })) return;
+          var person = allPeople.filter(function (pp) { return pp.type === 'kid' && _kidKey(pp.name, pp.family || pp.lastName) === key; })[0];
+          groupKids.push(person || { type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: k.lastName || myFam.name, family: myFam.name, nickname: k.nickname, age: k.age });
+        });
+        groupKids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+      })();
       if (groupKids.length > 0) {
         var studentFullNames = groupKids.map(function (kid) { return kid.name + ' ' + (kid.lastName || kid.family); });
         html += '<h4 class="elective-roster-title">' + groupKids.length + ' Kids</h4>';
@@ -7421,9 +7442,11 @@
       }
       if (isClassRow) {
         // #92 (Lyndsey): class rows stack so nothing truncates on phones.
+        // #186 (Erin): the stack left dead space right of the text — the
+        // lines now FLOW inline across the row, wrapping when tight.
         // AM: Leading/Assisting <age level> → class name → room → Plan.
         // PM: Leading/Assisting <class name> → room → Plan (no age chips).
-        h += '<div class="mf-duty-info">';
+        h += '<div class="mf-duty-info mf-duty-info-class">';
         if (isAmRow) {
           var ageBit = d.groupTag ? '<span class="mf-duty-grp">' + d.groupTag + '</span>'
             : (dutyGroup ? '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + dutyGroup[1] + '</span>' : '');
@@ -7557,9 +7580,9 @@
         // the line doesn't claim history that doesn't exist.
         var placedGroup = _kidPlacements[String(kid.name || '').toLowerCase()];
         if (placedGroup) {
-          html += '<span class="mf-sched-class" style="font-size:0.9rem;">' + ageGroupIconHtml(placedGroup) + ' <span class="ag-name ' + ageGroupClass(placedGroup) + '">' + groupWithAge(placedGroup) + '</span> <span style="color:var(--color-teal);font-weight:600;">(placed for ' + ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || 'next year') + ')</span></span>';
+          html += '<span class="mf-sched-class" style="font-size:0.9rem;">' + ageGroupIconHtml(placedGroup) + ' <span class="ag-name ' + ageGroupClass(placedGroup) + '">' + escapeHtml(placedGroup) + '</span> <span style="color:var(--color-teal);font-weight:600;">(placed for ' + ((typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || 'next year') + ')</span></span>';
         } else if (kid.group) {
-          html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + ageGroupIconHtml(kid.group) + ' ' + groupWithAge(kid.group) + ' (this past year)</span>';
+          html += '<span class="mf-sched-class" style="color:var(--color-text-light);font-size:0.9rem;">' + ageGroupIconHtml(kid.group) + ' ' + escapeHtml(kid.group) + ' (this past year)</span>';
         }
         html += '</div>';
         html += '</div>';
@@ -7612,7 +7635,8 @@
         pubAm.forEach(function (c) {
           html += '<div class="mf-sched-row">';
           html += '<span class="mf-sched-time">' + (amHourLabel[c.scheduled_hour] || 'AM') + '</span>';
-          html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (c.class_name ? '<br><em style="font-weight:400;">' + escapeHtml(c.class_name) + '</em>' : '') + '</span>';
+          // #184 (Erin): bare grove name — no age range after the label.
+          html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + escapeHtml(kidGroup) + '</span>' + (c.class_name ? '<br><em style="font-weight:400;">' + escapeHtml(c.class_name) + '</em>' : '') + '</span>';
           html += '<span class="mf-sched-room">' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[kidGroup] || '') + '</span>';
           html += '<span class="mf-sched-teacher">' + escapeHtml(c.teacher || 'TBD') + '</span>';
           html += '</div>';
@@ -7621,7 +7645,8 @@
         html += '<div class="mf-sched-row">';
         html += '<span class="mf-sched-time">AM</span>';
         // Group mark + brand color on the morning row (Erin, 2026-07-11).
-        html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + groupWithAge(kidGroup) + '</span>' + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
+        // #184 (Erin): bare grove name — no age range after the label.
+        html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + escapeHtml(kidGroup) + '</span>' + (topic ? '<br><em style="font-weight:400;">' + topic + '</em>' : '') + '</span>';
         html += '<span class="mf-sched-room">' + room + '</span>';
         html += '<span class="mf-sched-teacher">' + teacher + '</span>';
         html += '</div>';
@@ -35196,8 +35221,8 @@
     html += '<button class="detail-close" id="mcbCloseBtn" aria-label="Close">&times;</button>';
     html += '<div class="sb-header">';
     html += '<h3 style="margin:0;">Grove Builder</h3>';
-    // #160 (Lyndsey): shared-facility booking doorway for liaisons.
-    html += '<button type="button" class="sc-btn" id="mcbFacilitiesBtn" style="margin-left:8px;">' + brandIconImg('location', 'ag-icon') + ' Shared Facilities</button>';
+    // #182 (Lyndsey): Shared Facilities pill removed here — booking lives
+    // on the Schedule Builder header and the liaisons' My Class card (#177).
     html += '<label class="sb-year-label">School Year ';
     html += '<select id="mcbYearSelect" class="cl-input" style="display:inline-block;width:auto;margin-left:6px;">';
     // Current year is selectable too so AM teaching can be recorded for the
@@ -35220,8 +35245,6 @@
       morningBuilderState.schoolYear = this.value;
       loadMorningClassBuilder();
     });
-    var facBtn = document.getElementById('mcbFacilitiesBtn');
-    if (facBtn) facBtn.addEventListener('click', showFacilityBookingModal);
     loadMorningClassBuilder();
   }
 
