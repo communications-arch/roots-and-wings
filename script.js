@@ -23246,27 +23246,24 @@
         h += '<button class="absence-date-btn' + (isActive ? ' active' : '') + '" data-date="' + d + '">' + formatDateLabel(d) + '</button>';
       });
       h += '</div></div>';
+      // #179 second pass (Colleen: "still isn't allowing... to choose
+      // which member will be covering them"): the block checkboxes AND
+      // the coverage preview (which carries the replacement dropdowns +
+      // generic spots) only rendered when duties were on file \u2014 a family
+      // with none got hidden auto-checked blocks and NO picker at all.
+      // Blocks and preview now always render; no-duty blocks become
+      // general claimable spots (effectiveSlots).
       h += '<div class="absence-field"><label>What will you miss?</label><div class="absence-blocks">';
-      if (hasAnyDuties) {
-        h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
-        allBlocks.forEach(function (blk) {
-          if (activeBlocks[blk]) {
-            var checked = initialChecked.indexOf(blk) !== -1;
-            h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
-          }
-        });
-      } else {
-        h += '<em class="absence-no-slots">No session-specific duties on file for either parent yet \u2014 this absence is recorded as a whole-day out. If you pick up responsibilities for this session later, coverage requests will be created automatically.</em>';
-        // Recorded as whole-day so the later slot backfill can reconcile
-        // against every block once responsibilities exist.
-        allBlocks.forEach(function (blk) {
-          h += '<input type="checkbox" class="absence-block-cb" value="' + blk + '" checked style="display:none;">';
-        });
+      h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked || !hasAnyDuties ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
+      allBlocks.forEach(function (blk) {
+        var checked = hasAnyDuties ? (initialChecked.indexOf(blk) !== -1) : true;
+        h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
+      });
+      if (!hasAnyDuties) {
+        h += '<em class="absence-no-slots" style="display:block;">No session-specific duties on file for either parent yet \u2014 each block you pick becomes a general coverage spot. Duties you sign up for later create their own coverage requests automatically.</em>';
       }
       h += '</div></div>';
-      if (hasAnyDuties) {
-        h += '<div class="absence-field"><label>Responsibilities needing coverage:</label><div class="absence-preview" id="absencePreview"></div></div>';
-      }
+      h += '<div class="absence-field"><label>Coverage for what you\u2019ll miss:</label><div class="absence-preview" id="absencePreview"></div></div>';
       dyn.innerHTML = h;
 
       selectedDate = null;
