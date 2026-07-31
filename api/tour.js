@@ -1526,6 +1526,34 @@ async function handleList(req, res) {
       ORDER BY r.created_at DESC
     `;
 
+    // #172 (Colleen): the Track column read registrations.track, which the
+    // Edit-My-Info sync only reaches for registrations carrying
+    // family_email (populated 2026-07-17 onward) — older families (the
+    // Richters/Sudmees) showed their registration-day track forever.
+    // Derive the LIVE track from the family's current member_profiles kid
+    // schedules whenever a profile matches; stored value stays as the
+    // fallback, and 'Other' (custom text) stays authoritative.
+    try {
+      const profRows = await sql`SELECT family_email, additional_emails, kids FROM member_profiles`;
+      const profByEmail = {};
+      profRows.forEach(p => {
+        const regP = e => { if (e) profByEmail[String(e).toLowerCase()] = p; };
+        regP(p.family_email);
+        (p.additional_emails || []).forEach(regP);
+      });
+      rows.forEach(r => {
+        if (r.track === 'Other') return;
+        const p = profByEmail[String(r.family_email || '').toLowerCase()]
+          || profByEmail[String(r.email || '').toLowerCase()];
+        if (!p || !Array.isArray(p.kids) || !p.kids.length) return;
+        const schedOf = k => String((k && k.schedule) || '').toLowerCase();
+        const hasAM = p.kids.some(k => schedOf(k) === 'all-day' || schedOf(k) === 'morning');
+        const hasPM = p.kids.some(k => schedOf(k) === 'all-day' || schedOf(k) === 'afternoon');
+        const live = (hasAM && hasPM) ? 'Both' : hasAM ? 'Morning Only' : hasPM ? 'Afternoon Only' : '';
+        if (live) r.track = live;
+      });
+    } catch (tErr) { console.error('live-track derive (non-fatal):', tErr); }
+
     // Auto-reconcile pending registrations against the billing sheet's
     // Fall Deposit (Next Year) column. When the Treasurer marks a row
     // "Paid" in the sheet for cash/check receipts, this lights up the
@@ -4478,9 +4506,12 @@ async function handleProfileUpdate(body, req, res) {
       const hasPM = kids.some(k => sched(k) === 'all-day' || sched(k) === 'afternoon');
       const newTrack = (hasAM && hasPM) ? 'Both' : hasAM ? 'Morning Only' : hasPM ? 'Afternoon Only' : '';
       if (newTrack) {
+        // #172: pre-2026-07-17 registrations have no family_email — fall
+        // back to the typed registration email so their track syncs too.
         await sql`
           UPDATE registrations SET track = ${newTrack}, updated_at = NOW()
-          WHERE LOWER(family_email) = LOWER(${familyEmail}) AND declined_at IS NULL
+          WHERE declined_at IS NULL
+            AND (LOWER(family_email) = LOWER(${familyEmail}) OR LOWER(email) = LOWER(${familyEmail}))
         `;
       }
     } catch (trkErr) {

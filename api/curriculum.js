@@ -3497,8 +3497,9 @@ module.exports = async function handler(req, res) {
           await sql`DELETE FROM class_submissions WHERE id = ${id}`;
           return res.status(200).json({ ok: true, id, deleted: true });
         }
-        // Owner soft-withdraw — only before VP/PMA places it.
-        if (row.status !== 'submitted') {
+        // Owner soft-withdraw — before VP/PMA places it, or after it was
+        // DECLINED (#173: members clear denied classes off their tab).
+        if (row.status !== 'submitted' && row.status !== 'declined') {
           return res.status(409).json({ error: 'This submission has already been drafted. Contact the VP to cancel.' });
         }
         await sql`UPDATE class_submissions SET status = 'withdrawn', updated_at = NOW() WHERE id = ${id}`;

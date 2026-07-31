@@ -24297,7 +24297,9 @@
         // saving sends the class back to 'submitted' for re-approval
         // (server clears the placement). Withdraw stays pre-approval only.
         var canEdit = s.status === 'submitted' || s.status === 'drafted' || s.status === 'scheduled';
-        var canWithdraw = s.status === 'submitted';
+        // #173 (Lyndsey): a DECLINED class can be removed from the tab too
+        // (same soft-withdraw as pre-approval — nothing is deleted).
+        var canWithdraw = s.status === 'submitted' || s.status === 'declined';
         var periodTag = s.class_period === 'AM' ? brandIconImg('morning', 'ag-icon') + ' Morning' : brandIconImg('afternoon', 'ag-icon') + ' Afternoon';
         html += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
         html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
@@ -24312,7 +24314,7 @@
           html += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
         }
         if (canWithdraw) {
-          html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">Withdraw</button>';
+          html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">' + (s.status === 'declined' ? 'Remove' : 'Withdraw') + '</button>';
         }
         // Build a lesson plan straight from the idea (2026-07-11, Erin) —
         // opens the Curriculum Library editor prefilled with this class.
