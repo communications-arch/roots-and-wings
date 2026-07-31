@@ -5133,6 +5133,17 @@
     return widenRangeToSpan(rangeText, ageGroupSpanOf(groupName));
   }
 
+  // Erin 2026-07-31 (Session tab): show the ACTUAL ages of the grove's
+  // kids — the pure roster span, not the band widened to cover it. Falls
+  // back to the band text when no kids have birthdays on file.
+  function groupActualAgesHtml(fallbackRange, groupName) {
+    var span = ageGroupSpanOf(groupName);
+    if (span) {
+      return escapeHtml(span.lo === span.hi ? String(span.lo) : span.lo + '–' + span.hi);
+    }
+    return groupRangeHtml(fallbackRange, groupName);
+  }
+
   // Escaped cell/label HTML. When the range had to stretch, it gets a
   // dotted underline + a tooltip naming the typical band, so nobody
   // mistakes the wider number for a change to the program itself.
@@ -8551,7 +8562,7 @@
       gs.forEach(function (g) {
         t += '<tr class="session-class-row" data-group="' + g.name + '">';
         t += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
-        t += '<td class="am-ages-col">' + groupRangeHtml(g.range || '', g.name) + '</td>';
+        t += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
         t += '<td>' + amLiaisonHtml(g.name) + '</td>';
         t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
         t += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
@@ -8592,7 +8603,7 @@
           // Group mark beside the colored name (Erin, 2026-07-11).
           html += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
           html += '<td class="am-ages-col">' + (meta
-            ? groupRangeHtml(meta.g.range, meta.g.name)
+            ? groupActualAgesHtml(meta.g.range, meta.g.name)
             : escapeHtml(c.scheduled_age_range || '')) + '</td>';
           html += '<td>' + amLiaisonHtml(groupName) + '</td>';
           html += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
@@ -8615,7 +8626,7 @@
         var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
         html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
         html += '<td class="am-group-col"><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
-        html += '<td class="am-ages-col">' + groupRangeHtml(cls.ages, groupName) + '</td>';
+        html += '<td class="am-ages-col">' + groupActualAgesHtml(cls.ages, groupName) + '</td>';
         html += '<td>' + amLiaisonHtml(groupName, cls.liaison) + '</td>';
         html += '<td>' + s.topic + '</td>';
         html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
