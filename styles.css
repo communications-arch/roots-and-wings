@@ -8756,6 +8756,11 @@ ul[id="ws-todo-list"] .ws-link-icon,
   background: rgba(var(--color-accent-light-rgb), 0.25);
   border-left: 4px solid var(--color-accent);
 }
+/* Erin 2026-07-31: the sign-ups alert inserts at the grid's TOP after the
+   live data lands — browser scroll anchoring then held the viewport on the
+   content below it, leaving the new card clipped above the fold ("cut off
+   at the top"). No anchoring: insertions push content down instead. */
+#myFamilyGrid { overflow-anchor: none; }
 .mf-waiver-banner .btn { margin-top: 4px; }
 
 /* Enrollment Requests queue: pending rows are ACTION cards — same gold
