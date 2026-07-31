@@ -15635,3 +15635,21 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 0;
   font-size: 0.85rem;
 }
+
+/* #193 (Erin): iOS Safari measures vh with its toolbars HIDDEN, so a
+   90vh modal runs under the bottom toolbar and buries its action
+   buttons (repro: Edit My Info on a phone). dvh tracks the VISIBLE
+   viewport — cap every vh-limited modal container with it. Browsers
+   without dvh keep the vh values above. */
+@supports (max-height: 100dvh) {
+  .person-detail-card,
+  .age-group-modal,
+  .tour-modal,
+  .cls-modal,
+  .absence-modal {
+    max-height: 88dvh;
+  }
+  .sb-panel {
+    max-height: 92dvh;
+  }
+}
