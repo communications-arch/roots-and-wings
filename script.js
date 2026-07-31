@@ -8134,9 +8134,22 @@
   // inside Edit My Info wasn't visible enough — Membership's Approve
   // stays locked until this is done, so it can't hide). Best-effort:
   // a fetch failure just leaves the banner hidden.
+  // Snapshot (Erin, 2026-07-31: "My Family flickers a bit for Alice
+  // Anderson" — she has a pending waiver): every grid rebuild blanked
+  // the banner until this fetch came back, a visible blink for any
+  // family WITH one. Repaint the last-known state immediately; the
+  // fetch then corrects it if anything actually changed. Same pattern
+  // as the To Do card's snapshotTodoState (2026-07-02).
+  var _waiverBannerSnap = null;
+  var _waiverBannerSnapEmail = null;
   function loadMyFamilyWaiverBanner(fam) {
     var el = document.getElementById('mfWaiverBanner');
     if (!el || !fam || !fam.email) return;
+    var snapEm = String(fam.email).toLowerCase();
+    if (_waiverBannerSnapEmail === snapEm && _waiverBannerSnap) {
+      el.innerHTML = _waiverBannerSnap.html;
+      el.style.display = _waiverBannerSnap.visible ? '' : 'none';
+    }
     fetch('/api/tour?list=enrollment_requests&family_email=' + encodeURIComponent(fam.email), { headers: rwAuthHeaders() })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
@@ -8162,7 +8175,12 @@
         // the BLC signs personally (their link was emailed), but the
         // family should see it's outstanding and can open it for them.
         var blcNeeds = ((d && d.pending_blc_waivers) || []).filter(function (w) { return w.waiver_token; });
-        if (!needs.length && !blcNeeds.length) { el2.style.display = 'none'; return; }
+        if (!needs.length && !blcNeeds.length) {
+          el2.style.display = 'none';
+          _waiverBannerSnapEmail = snapEm;
+          _waiverBannerSnap = { html: '', visible: false };
+          return;
+        }
         var h = '<h3 class="mf-card-title">' + brandIconImg('waivers') + ' Waiver needed</h3>';
         needs.forEach(function (rq) {
           var kidFirst = escapeHtml(String(rq.kid_first_name || '').trim() || 'Your new kid');
@@ -8176,8 +8194,10 @@
         });
         el2.innerHTML = h;
         el2.style.display = '';
+        _waiverBannerSnapEmail = snapEm;
+        _waiverBannerSnap = { html: h, visible: true };
       })
-      .catch(function () { /* banner just stays hidden */ });
+      .catch(function () { /* banner just stays hidden (snapshot already painted) */ });
   }
 
   // Elective detail popup (enhanced)
