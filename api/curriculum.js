@@ -860,7 +860,7 @@ module.exports = async function handler(req, res) {
           // session so the builder can surface the "Open Sign-Ups" date
           // panel inline. Both maps keyed by `${school_year}|${session_number}`
           // to keep the payload tiny even across multiple years.
-          const [rows, approvalRows, windowRows, helperRows, memberRows] = await Promise.all([
+          const [rows, approvalRows, windowRows, helperRows, memberRows, pickAgeRows, yearBoundRows] = await Promise.all([
             sql`SELECT * FROM class_submissions ORDER BY created_at DESC`,
             sql`SELECT school_year, session_number, approved_at, approved_by,
                        am_approved_at, am_approved_by
@@ -873,8 +873,45 @@ module.exports = async function handler(req, res) {
                 FROM class_assignment_helpers ORDER BY class_submission_id, sort_order`,
             sql`SELECT email, personal_email, first_name, last_name
                 FROM people WHERE COALESCE(role, '') <> 'blc'
-                ORDER BY first_name, last_name`
+                ORDER BY first_name, last_name`,
+            // #166 (Lyndsey): enrolled kids' birth dates per class (rank-1
+            // picks are the kid's actual class — same rule as the
+            // Schedules report) — feeds the computed enrolled age range.
+            sql`SELECT p.class_submission_id AS cid, k.birth_date
+                FROM class_signup_picks p
+                JOIN kids k ON LOWER(k.family_email) = LOWER(p.family_email)
+                          AND LOWER(k.first_name) = LOWER(p.kid_first_name)
+                WHERE p.rank = 1 AND k.birth_date IS NOT NULL`,
+            sql`SELECT school_year, MIN(start_date) AS ystart, MAX(end_date) AS yend
+                FROM co_op_sessions GROUP BY school_year`
           ]);
+          // #166: 'lowest age at year start – highest age at year end', so
+          // the range covers kids aging up mid-year.
+          const isoD = v => v instanceof Date ? v.toISOString().slice(0, 10) : String(v || '').slice(0, 10);
+          const ageOn = (birth, on) => {
+            const b = isoD(birth), o = isoD(on);
+            if (!b || !o) return null;
+            let a = parseInt(o.slice(0, 4), 10) - parseInt(b.slice(0, 4), 10);
+            if (o.slice(5) < b.slice(5)) a--;
+            return a;
+          };
+          const yearBounds = {};
+          yearBoundRows.forEach(r => { yearBounds[r.school_year] = { s: isoD(r.ystart), e: isoD(r.yend) }; });
+          const birthsByCid = {};
+          pickAgeRows.forEach(pr => { (birthsByCid[pr.cid] || (birthsByCid[pr.cid] = [])).push(pr.birth_date); });
+          const enrolledRangeFor = (r) => {
+            const births = birthsByCid[r.id];
+            const yb = yearBounds[r.school_year];
+            if (!births || !births.length || !yb || !yb.s) return '';
+            let lo = Infinity, hi = -Infinity;
+            births.forEach(bd => {
+              const a1 = ageOn(bd, yb.s), a2 = ageOn(bd, yb.e || yb.s);
+              if (a1 != null) lo = Math.min(lo, a1);
+              if (a2 != null) hi = Math.max(hi, a2);
+            });
+            if (!isFinite(lo) || !isFinite(hi)) return '';
+            return lo === hi ? String(lo) : lo + '–' + hi;
+          };
           // PM helpers per scheduled class (Phase B2) + a member picker list.
           const helpersBySub = {};
           helperRows.forEach(h => {
@@ -917,7 +954,10 @@ module.exports = async function handler(req, res) {
             };
           });
           return res.status(200).json({
-            submissions: rows.map(r => serializeSubmission(r, helpersBySub[r.id] || [])),
+            submissions: rows.map(r => Object.assign(serializeSubmission(r, helpersBySub[r.id] || []), {
+              enrolled_age_range: enrolledRangeFor(r),
+              enrolled_kid_count: (birthsByCid[r.id] || []).length
+            })),
             session_approvals,
             signup_windows,
             members,

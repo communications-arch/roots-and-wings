@@ -10131,6 +10131,15 @@
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">' + brandIconImg('classes', 'ag-icon') + '</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
+          // #163 (Lyndsey): session-week planning reminders for the NEXT
+          // session's afternoon classes (request → troubleshoot → open →
+          // close). Windows + labels computed by loadPmPlanningTodos off
+          // SESSION_DATES; ✓ Done stamps todo_confirmations
+          // (kind 'pmplan-sN-<step>') so each reminder is one-and-done.
+          ['request', 'trouble', 'open', 'close'].forEach(function (stepK) {
+            h += '<li id="ws-todo-pmplan-' + stepK + '-item" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-icon">' + brandIconImg('afternoon', 'ag-icon') + '</span><span id="ws-pmplan-' + stepK + '-label"></span></button>'
+              + '<button type="button" class="sc-btn ws-pmplan-done" data-step="' + stepK + '" title="Mark done — the reminder disappears">✓ Done</button></li>';
+          });
         }
         if (role === 'Afternoon Class Liaison') {
           // Post-close resolution (Erin, 2026-07-15): first clear over-full
@@ -10301,6 +10310,7 @@
         if (typeof loadWelcomeTodoCount === 'function') loadWelcomeTodoCount();
         if (typeof loadWelcomeOutreachTodo === 'function') loadWelcomeOutreachTodo();
         if (typeof loadHandbookReviewTodo === 'function') loadHandbookReviewTodo();
+        if (typeof loadPmPlanningTodos === 'function') loadPmPlanningTodos();
         if (typeof loadRemoveMembersTodo === 'function') loadRemoveMembersTodo();
         if (typeof loadWithdrawnAccountsTodo === 'function') loadWithdrawnAccountsTodo();
         if (typeof loadDrBinderTodo === 'function') loadDrBinderTodo();
@@ -29159,6 +29169,90 @@
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 
+  // #163 (Lyndsey): VP + Afternoon Class Liaison planning reminders. Each
+  // upcoming session T gets four steps, windowed off SESSION_DATES:
+  //   T = 1 (pre-season, anchored to S1's start): request at −6wks,
+  //   troubleshoot −5..−4wks, open −3wks, close −2wks.
+  //   T = 2..5 (during session T−1, anchored to its start): request in
+  //   week 2, troubleshoot weeks 2–3, open week 4, close week 5.
+  // Session 5 is the last target — nothing fires during S5 itself.
+  // A step shows from its window start until ✓ Done (todo_confirmations
+  // kind 'pmplan-sT-<step>') or until session T starts, whichever first.
+  var PMPLAN_STEPS = ['request', 'trouble', 'open', 'close'];
+  function pmPlanLabel(step, t) {
+    return step === 'request' ? 'Request Session ' + t + ' afternoon class submissions'
+      : step === 'trouble' ? 'Troubleshoot Session ' + t + ' afternoon sign-ups'
+      : step === 'open' ? 'Open Session ' + t + ' afternoon class sign-ups'
+      : 'Close Session ' + t + ' afternoon class sign-ups';
+  }
+  function pmPlanWindowStart(step, t) {
+    var anchor = (t === 1)
+      ? (SESSION_DATES[1] && SESSION_DATES[1].start)
+      : (SESSION_DATES[t - 1] && SESSION_DATES[t - 1].start);
+    if (!anchor) return '';
+    var off = (t === 1)
+      ? { request: -42, trouble: -35, open: -21, close: -14 }[step]
+      : { request: 7, trouble: 7, open: 21, close: 28 }[step];
+    return welcomeDaysBefore(anchor, -off);
+  }
+  function loadPmPlanningTodos() {
+    if (!document.getElementById('ws-todo-pmplan-request-item')) return; // not a VP/ACL tab
+    var today = (typeof rwTodayIndyStr === 'function') ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10);
+    var activeYr = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '';
+    fetch('/api/cleaning?action=todo-confirm', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var done = {};
+        ((d && d.confirmations) || []).forEach(function (c) {
+          if (c.school_year === activeYr) done[c.kind] = true;
+        });
+        PMPLAN_STEPS.forEach(function (step) {
+          var item = document.getElementById('ws-todo-pmplan-' + step + '-item');
+          if (!item) return;
+          var showT = 0;
+          for (var t = 1; t <= 5; t++) {
+            var ws = pmPlanWindowStart(step, t);
+            var tStart = SESSION_DATES[t] && SESSION_DATES[t].start;
+            if (!ws || !tStart) continue;
+            if (today >= ws && today < tStart && !done['pmplan-s' + t + '-' + step]) { showT = t; break; }
+          }
+          item.hidden = !showT;
+          if (showT) {
+            var lbl = document.getElementById('ws-pmplan-' + step + '-label');
+            if (lbl) lbl.textContent = pmPlanLabel(step, showT);
+            var doneBtn = item.querySelector('.ws-pmplan-done');
+            if (doneBtn && !doneBtn._rwWired) {
+              doneBtn._rwWired = true;
+              doneBtn.addEventListener('click', function () {
+                var tNow = 0;
+                // Re-derive the target at click time (label may have moved on).
+                for (var t2 = 1; t2 <= 5; t2++) {
+                  var ws2 = pmPlanWindowStart(step, t2);
+                  var tStart2 = SESSION_DATES[t2] && SESSION_DATES[t2].start;
+                  if (ws2 && tStart2 && today >= ws2 && today < tStart2) { tNow = t2; break; }
+                }
+                if (!tNow) { item.hidden = true; return; }
+                doneBtn.disabled = true;
+                fetch('/api/cleaning?action=todo-confirm', {
+                  method: 'POST', headers: rwAuthHeaders(true),
+                  body: JSON.stringify({ kind: 'pmplan-s' + tNow + '-' + step, school_year: activeYr })
+                }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+                  .then(function (res) {
+                    doneBtn.disabled = false;
+                    if (!res.ok) { alert((res.data && res.data.error) || 'Could not mark it done.'); return; }
+                    item.hidden = true;
+                    if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+                  })
+                  .catch(function () { doneBtn.disabled = false; alert('Network error — try again.'); });
+              });
+            }
+          }
+        });
+        if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
+      })
+      .catch(function () { /* items stay hidden */ });
+  }
+
   // Comms Director: "Review & update the Membership Handbook" — appears a
   // week before the FIRST board meeting of the year (3rd Wednesday of July,
   // same anchor as the Admin Calendar's derived Board Meeting row) and
@@ -35413,7 +35507,12 @@
     function sbTileHtml(c, showRoom) {
       // Scheduled age range can be a VP override (scheduled_age_range);
       // fall back to the teacher's submitted age_groups when not set.
-      var schedAges = c.scheduled_age_range || prettyAgesClient(c.age_groups, c.age_groups_other);
+      // #166 (Lyndsey): once kids are actually signed up, the REAL range
+      // wins — lowest age at year start through highest at year end,
+      // computed server-side from rank-1 picks' birth dates.
+      var schedAges = c.enrolled_age_range
+        ? 'Ages ' + c.enrolled_age_range + ' (' + (c.enrolled_kid_count || 0) + ' enrolled)'
+        : (c.scheduled_age_range || prettyAgesClient(c.age_groups, c.age_groups_other));
       var prefAges = prettyAgesClient(c.age_groups, c.age_groups_other);
       // Preference summary: session prefs + hour pref. Used to flag
       // mismatches at a glance so the VP can spot off-preference placements.
@@ -36065,6 +36164,9 @@
       .map(function (hp) { return hp.name || hp.email; }).filter(Boolean);
     if (detHelpers.length) html += '<div><strong>Helper' + (detHelpers.length === 1 ? '' : 's') + ':</strong> ' + escClsHtml(detHelpers.join(', ')) + '</div>';
     if (ages) html += '<div><strong>Ages:</strong> ' + escClsHtml(ages) + '</div>';
+    // #166: real enrolled range (year-start → year-end ages) once kids
+    // have signed up.
+    if (s.enrolled_age_range) html += '<div><strong>Enrolled ages:</strong> ' + escClsHtml(s.enrolled_age_range) + ' <span class="sb-subdetail-dim">(' + (s.enrolled_kid_count || 0) + ' kid' + (s.enrolled_kid_count === 1 ? '' : 's') + ', start→end of year)</span></div>';
     var amPref0 = (s.hour_preference || [])[0];
     var amPrefWord = amPref0 === 'first' ? '1st hour (10:00–10:55)' : amPref0 === 'last' ? '2nd hour (11:00–11:55)' : amPref0 === 'either' ? 'One hour — either works' : 'Both hours (10:00–12:00)';
     html += '<div><strong>Sessions:</strong> ' + escClsHtml(pmrepFormatSessions(s.session_preferences))

@@ -1338,9 +1338,17 @@ module.exports = async function handler(req, res) {
       // number and the (kind, school_year) PK still keys each cadence point.
       const tcOwner = TODO_CONFIRM_OWNERS[tcKind]
         || (/^drbinder-s[1-5]$/.test(tcKind) ? 'Communications Director' : null);
-      if (!tcOwner) return res.status(400).json({ error: 'Unknown to-do kind.' });
+      // #163: 'pmplan-sN-<step>' planning reminders belong to EITHER the
+      // VP or the Afternoon Class Liaison — dual-owner, so it can't ride
+      // the single-role tcOwner map.
+      const tcIsPmPlan = /^pmplan-s[1-5]-(request|trouble|open|close)$/.test(tcKind);
+      if (!tcOwner && !tcIsPmPlan) return res.status(400).json({ error: 'Unknown to-do kind.' });
       if (!/^\d{4}-\d{4}$/.test(tcYear)) return res.status(400).json({ error: 'school_year must be "YYYY-YYYY".' });
-      if (!(await canEditAsRole(user.email, tcOwner))) {
+      if (tcIsPmPlan) {
+        const pmOk = (await canEditAsRole(user.email, 'Vice President'))
+          || (await canEditAsRole(user.email, 'Afternoon Class Liaison'));
+        if (!pmOk) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can mark this done.' });
+      } else if (!(await canEditAsRole(user.email, tcOwner))) {
         return res.status(403).json({ error: 'Only the ' + tcOwner + ' can mark this done.' });
       }
       if (req.method === 'POST') {
