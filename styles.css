@@ -15655,6 +15655,18 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   font-size: 0.85rem;
 }
 
+/* Grove chips (groupTagHtml): icon + name pairs get real spacing so a
+   long grove list doesn't read as one run-together string (Erin,
+   2026-08-01 — elective detail cards). */
+.ag-grouptag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.ag-grouptag:last-child { margin-right: 0; }
+
 /* #193 (Erin): iOS Safari measures vh with its toolbars HIDDEN, so a
    90vh modal runs under the bottom toolbar and buries its action
    buttons (repro: Edit My Info on a phone). dvh tracks the VISIBLE

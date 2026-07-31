@@ -2649,6 +2649,8 @@
   document.querySelectorAll('[data-view]').forEach(function (el) {
     el.addEventListener('click', function (e) {
       var mode = this.getAttribute('data-view');
+      // Deliberate navigation supersedes a pending collab-jump Back entry.
+      if (typeof _collabBackPushed !== 'undefined') _collabBackPushed = false;
       showViewMode(mode);
       // Both view-mode pills land at the TOP of the page — My Family's top is
       // the greeting, and the Workspace panel renders from the top too. The
@@ -6135,9 +6137,11 @@
   // Group tag for class rows (Erin, 2026-07-11): group mark + colored
   // name(s), shown between the class title and its room.
   function groupTagHtml(groups) {
+    // Erin 2026-08-01: each grove is its own chip with breathing room —
+    // the bare join read as one run-together string on detail cards.
     return (groups || []).filter(function (g) { return g && g !== 'all-ages'; }).map(function (g) {
       var G = String(g).charAt(0).toUpperCase() + String(g).slice(1);
-      return ageGroupIconHtml(G) + '<span class="ag-name ' + ageGroupClass(G) + '">' + G + '</span>';
+      return '<span class="ag-grouptag">' + ageGroupIconHtml(G) + '<span class="ag-name ' + ageGroupClass(G) + '">' + G + '</span></span>';
     }).join(' ');
   }
 
@@ -8572,8 +8576,8 @@
     // #190 (Erin): shared tab anatomy — every Coordination tab opens with
     // the same serif title + an org-summary count strip (the Volunteers
     // tab's pattern), so the four tabs read the same way at a glance.
-    var stYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? String(ACTIVE_SESSION_YEAR).replace('-', '–') : '';
-    var html = '<h3>Session Schedule' + (stYear ? ' &mdash; ' + escapeHtml(stYear) : '') + '</h3>';
+    // Erin 2026-08-01: no year in the tab titles.
+    var html = '<h3>Session Schedule</h3>';
     html += buildSessionPager(viewSess, 'session');
     var stBits = [];
     if (sess && sess.start && sess.end) stBits.push(formatDateLabel(sess.start) + ' – ' + formatDateLabel(sess.end));
@@ -9183,14 +9187,19 @@
         || floaterFams.some(isMineFamTab);
       html += '<div class="cleaning-floor-card">';
       html += '<h4>Floater</h4>';
-      html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">';
-      html += floaterFams.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
-      var relFl = isMyFloater ? myAssignmentId('Floater', 'Floater') : null;
-      if (relFl) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relFl + '" title="Release this spot">×</button>';
-      if (floaterOpen && !isMyFloater) {
-        html += (floaterFams.length ? ' ' : '') + '<button type="button" class="volunteer-cta clean-tab-claim" data-id="' + floaterOpen.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
+      if (floaterFams.length) {
+        html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">';
+        html += floaterFams.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
+        var relFl = isMyFloater ? myAssignmentId('Floater', 'Floater') : null;
+        if (relFl) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relFl + '" title="Release this spot">×</button>';
+        html += '</span></div>';
       }
-      html += '</span></div>';
+      // Erin 2026-08-01: the Sign up button sits on its OWN row below the
+      // family list, not squeezed beside it.
+      if (floaterOpen && !isMyFloater) {
+        html += '<div class="cleaning-role" style="border-bottom:none;"><span class="cleaning-area">Join as a floater</span>'
+          + '<span class="cleaning-families"><button type="button" class="volunteer-cta clean-tab-claim" data-id="' + floaterOpen.id + '">' + DUTY_ICONS.volunteer + ' Sign up</button></span></div>';
+      }
       if (floaterOpen) html += '<p style="color:var(--color-text-light);font-size:0.82rem;margin:4px 0 0;">Floaters welcome — more than one family can join.</p>';
       html += '</div>';
     }
@@ -9563,7 +9572,8 @@
     function finish(y, roles, holders, note) {
       _volTabState.loading = false;
       _volTabState.year = year;
-      _volTabState.html = '<h3>Volunteer Roles &mdash; ' + escapeHtml(y) + '</h3>' + buildOrgTreeHtml(y, roles, holders, note);
+      // Erin 2026-08-01: no year in the title — the summary strip has it.
+      _volTabState.html = '<h3>Volunteer Roles</h3>' + buildOrgTreeHtml(y, roles, holders, note);
       container.innerHTML = _volTabState.html;
       wireOrgRowToggles(container);
     }
@@ -9622,8 +9632,8 @@
       return !!(person && myEmailLc && String(person.email || '').toLowerCase() === myEmailLc);
     }
 
-    var seYear = (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) ? ACTIVE_SESSION_YEAR : '';
-    var html = '<h3>Special Events' + (seYear ? ' &mdash; ' + escapeHtml(String(seYear).replace('-', '–')) : '') + '</h3>';
+    // Erin 2026-08-01: no year in the tab titles.
+    var html = '<h3>Special Events</h3>';
     // #190 (Erin): org-summary count strip in the shared tab anatomy.
     if (SPECIAL_EVENTS_DB.length) {
       var seNeeds = 0, seDone = 0;
@@ -26237,10 +26247,30 @@
   // modal (To Do rows, My Responsibilities Manage, the roles lens "Open
   // space") lands on the page with that event's pill selected. The old
   // name stays so all call sites keep working.
+  // Erin 2026-08-01: jumping into a Collaboration space pushes ONE history
+  // entry, so the browser Back button returns to the Special Events tab
+  // instead of leaving the portal. Manual pill navigation clears the flag —
+  // Back only rewinds a jump the user hasn't already navigated away from.
+  var _collabBackPushed = false;
+  var _collabBackMode = 'info';
+  var _collabBackScrollY = 0;
+  window.addEventListener('popstate', function () {
+    if (!_collabBackPushed) return;
+    _collabBackPushed = false;
+    showViewMode(_collabBackMode);
+    window.scrollTo(0, _collabBackScrollY);
+  });
   function showEventSpaceModal(eventId) {
     _eventSpaceState.id = eventId;
     _eventSpaceState.data = null;
     if (typeof closeDetail === 'function') { try { closeDetail(); } catch (e) { /* no modal open */ } }
+    if (history.pushState && !_collabBackPushed) {
+      var wsEl = document.getElementById('page-workspace');
+      _collabBackMode = (wsEl && wsEl.style.display !== 'none') ? 'workspace' : 'info';
+      _collabBackScrollY = window.scrollY || 0;
+      history.pushState({ rwCollabJump: true }, '');
+      _collabBackPushed = true;
+    }
     showViewMode('collab');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -29119,9 +29149,13 @@
       var i = '<div class="org-item' + (isOpen ? ' org-item-open' : '') + '">';
       i += '<button type="button" class="' + cls + '" data-org-role="' + r.id + '" aria-expanded="false">';
       // Board-member header rows keep their icon; nested roles stay lean.
+      // Erin 2026-08-01: use the brand accent marks (same as the Directory
+      // badge + Board of Directors cards) — emoji only as last resort.
       var titleInner = escapeHtml(r.title);
       if (kind === 'head') {
-        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + (r.icon_emoji || '\u{1F333}') + '</span> ' + titleInner;
+        var headMark = (typeof boardRoleAccentImg === 'function'
+          ? boardRoleAccentImg(String(r.title || '').replace(/-/g, ' ')) : '') || (r.icon_emoji || '\u{1F333}');
+        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + headMark + '</span> ' + titleInner;
       }
       i += '<span class="org-item-title">' + titleInner + '</span>';
       i += '<span class="org-item-holders">' + holdersHtml + '</span>';
