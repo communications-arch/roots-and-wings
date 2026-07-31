@@ -3999,7 +3999,7 @@
       })();
       if (groupKids.length > 0) {
         var studentFullNames = groupKids.map(function (kid) { return kid.name + ' ' + (kid.lastName || kid.family); });
-        html += '<h4 class="elective-roster-title">' + groupKids.length + ' Kids</h4>';
+        html += '<h4 class="elective-roster-title">' + groupKids.length + ' Kid' + (groupKids.length === 1 ? '' : 's') + '</h4>';
         // Allergy / medical alerts surface BEFORE the roster so they're visible
         // without scrolling on smaller modals.
         html += studentAllergyCallout(studentFullNames);
@@ -8328,7 +8328,7 @@
 
     // Student roster (Erin 2026-07-31: count-first "N Kids", capitalized
     // full names, age in parens)
-    html += '<h4 class="elective-roster-title">' + elec.students.length + ' Kids</h4>';
+    html += '<h4 class="elective-roster-title">' + elec.students.length + ' Kid' + (elec.students.length === 1 ? '' : 's') + '</h4>';
     // Allergy / medical alerts surface BEFORE the roster so they're visible
     // without scrolling on smaller modals.
     html += studentAllergyCallout(elec.students);
