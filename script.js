@@ -8448,7 +8448,7 @@
         return g.name !== 'Greenhouse' && counts[g.name.toLowerCase()];
       });
       if (!gs.length) return '';
-      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
       var tbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
       gs.forEach(function (g) {
         t += '<tr class="session-class-row" data-group="' + g.name + '">';
@@ -8478,7 +8478,7 @@
           if (ai !== bi) return ai - bi;
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
         amRows.forEach(function (c) {
           var key = String((c.age_groups || [])[0] || '').toLowerCase();
           var meta = groupIdx[key];
@@ -8507,7 +8507,7 @@
         html += '</tbody></table></div>';
       }
     } else if (Object.keys(AM_CLASSES).length > 0) {
-      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Group</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
+      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
       var groups = Object.keys(AM_CLASSES);
       groups.forEach(function (groupName) {
         var cls = AM_CLASSES[groupName];
@@ -27990,7 +27990,7 @@
       if (loading.am) {
         doc += stillLoading('the class submissions');
       } else {
-        doc += '<table><thead><tr><th>Group</th>';
+        doc += '<table><thead><tr><th>Grove</th>';
         for (var ai = 1; ai <= 5; ai++) doc += '<th>S' + ai + '</th>';
         doc += '</tr></thead><tbody>';
         (d.amRows || []).forEach(function (row) {
@@ -35313,8 +35313,8 @@
   function renderAmTeachingGridHtml() {
     var map = amTeachingMap();
     var canEdit = !!morningBuilderState.viewerCanTeach;
-    var h = '<p class="mcb-legend">Assign the <strong>teacher (lead)</strong> and assistants for each morning group, per session — this feeds each family’s participation. Year: <strong>' + escapeHtmlWs(morningBuilderState.schoolYear) + '</strong>.' + (canEdit ? ' Tap a cell to edit.' : '') + '</p>';
-    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Group</th>';
+    var h = '<p class="mcb-legend">Assign the <strong>teacher (lead)</strong> and assistants for each grove, per session — this feeds each family’s participation. Year: <strong>' + escapeHtmlWs(morningBuilderState.schoolYear) + '</strong>.' + (canEdit ? ' Tap a cell to edit.' : '') + '</p>';
+    h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Grove</th>';
     for (var s = 1; s <= 5; s++) h += '<th>S' + s + '</th>';
     h += '</tr></thead><tbody>';
     MORNING_PROGRAM_GROUPS.forEach(function (g) {

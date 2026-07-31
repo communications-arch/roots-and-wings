@@ -6017,6 +6017,20 @@ async function handleMorningAssign(body, req, res) {
         updated_by  = EXCLUDED.updated_by,
         updated_at  = NOW()
     `;
+    // Once the year's plan is FINAL, the Directory (and every other
+    // kids.class_group reader) should see Grove Builder edits LIVE —
+    // draft-phase placements stay builder-only until Finalize, but a
+    // finalized year's late placements/moves used to sit unsynced until
+    // someone ran another Finalize sweep (Erin, 2026-07-31: "the
+    // Membership Directory does not reflect the changes").
+    if (planRows[0] && planRows[0].status === 'final') {
+      try {
+        await sql`
+          UPDATE kids SET class_group = ${group}, updated_at = NOW()
+          WHERE LOWER(family_email) = LOWER(${familyEmail}) AND LOWER(first_name) = LOWER(${firstName})
+        `;
+      } catch (syncErr) { console.error('morning-assign kids sync (non-fatal):', syncErr); }
+    }
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('morning-assign error:', err);
