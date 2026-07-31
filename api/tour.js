@@ -6200,7 +6200,7 @@ async function handleSpecialEventsGet(req, res) {
       `;
     }
     const events = await sql`
-      SELECT id, name, event_date, date_status, sort_order, notes
+      SELECT id, name, event_date, date_status, sort_order, notes, assistant_slots
       FROM special_events WHERE school_year = ${schoolYear}
       ORDER BY sort_order, name
     `;
@@ -6243,6 +6243,8 @@ async function handleSpecialEventsGet(req, res) {
         lead: leads[0] || null,
         leads,
         assists,
+        // #157: VP-set assistant spots (0–6); pre-migration rows read 2.
+        assistant_slots: e.assistant_slots == null ? 2 : e.assistant_slots,
         // Hands raised for the lead seat, minus anyone already assigned.
         lead_interest: leadHands
           .filter(h => h.event_id === e.id && leadEmails.indexOf(h.person_email) === -1)
@@ -7107,7 +7109,7 @@ async function handleEventOpeningsGet(req, res) {
   try {
     const sql = getSql();
     const events = await sql`
-      SELECT id, name, school_year, event_date, end_date, date_status, start_time, end_time
+      SELECT id, name, school_year, event_date, end_date, date_status, start_time, end_time, assistant_slots
       FROM special_events WHERE school_year = ${schoolYear}
       ORDER BY event_date NULLS LAST, sort_order, id
     `;
@@ -7152,11 +7154,12 @@ async function handleEventOpeningsGet(req, res) {
       const assistCount = evPeople.filter(p => p.role === 'assist').length;
       const openSeats = [];
       // Lead seat: direct sign-up, up to TWO co-leads (Erin, 2026-07-25 —
-      // no approval step). Assistant seats: show while fewer than 2
-      // helpers are assigned (spreadsheet-era events ran with 1–2; the
-      // grid itself caps at 4).
+      // no approval step). Assistant seats (#157): advertised while fewer
+      // than the event's VP-set assistant_slots are assigned (0–6;
+      // pre-migration rows read 2, matching the old hardcoded rule).
+      const assistSlots = ev.assistant_slots == null ? 2 : ev.assistant_slots;
       if (leadCount < 2) openSeats.push('lead');
-      if (assistCount < 2) openSeats.push('assist');
+      if (assistCount < assistSlots) openSeats.push('assist');
       // "Mine" reads the REAL grid rows only — a legacy approval-era
       // hand-raise (interest row without a people row) shows as NOT
       // signed up, so the member can tap again and land on the event.
@@ -7180,6 +7183,7 @@ async function handleEventOpeningsGet(req, res) {
         lead_filled: leadCount >= 2,
         lead_count: leadCount,
         assist_count: assistCount,
+        assist_slots: assistSlots,
         my_seat_interest: mine,
         // #79: who already holds each seat — the Jump In modal shows
         // the names so members see who they'd be teaming up with.
@@ -7338,11 +7342,18 @@ async function handleSpecialEventSave(body, req, res) {
     ? { email: String(p.email || '').trim().toLowerCase(), name: String(p.name || '').trim() }
     : null;
   const leads = (Array.isArray(body.leads) ? body.leads : [body.lead]).map(clean).filter(Boolean).slice(0, 2);
-  const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean).slice(0, 4);
+  // #157: hard ceiling 6 — the per-event assistant_slots setting governs
+  // how many seats are advertised; extra names beyond it are still kept.
+  const assists = (Array.isArray(body.assists) ? body.assists : []).map(clean).filter(Boolean).slice(0, 6);
+  const slotsRaw = parseInt(body.assistant_slots, 10);
+  const assistantSlots = Number.isFinite(slotsRaw) ? Math.max(0, Math.min(6, slotsRaw)) : null;
   try {
     const sql = getSql();
     const owns = await sql`SELECT id FROM special_events WHERE id = ${eventId}`;
     if (!owns.length) return res.status(404).json({ error: 'Event not found' });
+    if (assistantSlots !== null) {
+      await sql`UPDATE special_events SET assistant_slots = ${assistantSlots}, updated_by = ${auth.realEmail}, updated_at = NOW() WHERE id = ${eventId}`;
+    }
     await sql`DELETE FROM special_event_people WHERE event_id = ${eventId}`;
     for (let i = 0; i < leads.length; i++) {
       await sql`

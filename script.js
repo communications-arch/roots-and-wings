@@ -19366,7 +19366,7 @@
       });
       if (hit) return hit;
       var famName = famNameByEmail[fe] || r.kid_last_name || '';
-      return { type: 'kid', name: first, lastName: r.kid_last_name || famName, family: famName };
+      return { type: 'kid', name: first, lastName: r.kid_last_name || famName, family: famName, email: fe };
     });
     kids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
     return kids;
@@ -19462,15 +19462,39 @@
           h += '<p class="ws-empty">No finalized placements for this group yet — the roster fills in from the Morning Class Builder.</p>';
         }
       }
+      // #164 (Lyndsey): condensed rows — the sub-line leads with the
+      // family's Main Learning Coach (not "X family"), and the Note
+      // button sits to the RIGHT of the info as a proper actions sibling
+      // (it was nested inside .ws-lending-main, stacking the row taller).
+      var mlcByEmail = {}, mlcByFamName = {};
+      (Array.isArray(FAMILIES) ? FAMILIES : []).forEach(function (f) {
+        if (!f) return;
+        var nm = '';
+        if (Array.isArray(f.people)) {
+          for (var pi = 0; pi < f.people.length; pi++) {
+            var pp = f.people[pi];
+            if (pp && pp.role === 'mlc') { nm = ((pp.first_name || '') + ' ' + (pp.last_name || f.name || '')).trim(); break; }
+          }
+        }
+        if (!nm && f.parents) nm = (String(f.parents).split(/[,&]/)[0].trim().split(/\s+/)[0] + ' ' + (f.name || '')).trim();
+        if (!nm) return;
+        var logins = Array.isArray(f.loginEmails) && f.loginEmails.length ? f.loginEmails : [f.email];
+        logins.forEach(function (e) { if (e) mlcByEmail[String(e).toLowerCase()] = nm; });
+        if (f.name) mlcByFamName[String(f.name).toLowerCase()] = nm;
+      });
       kids.forEach(function (kid) {
         var key = myClassKidKey(kid.name, kid.family || kid.lastName);
         var editKey = group + '|' + key;
         var note = notes[key] || '';
-        var famLabel = kid.familyDisplay || kid.family || kid.lastName || '';
         var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+        var mlcName = mlcByEmail[String(kid.email || '').toLowerCase()]
+          || mlcByFamName[String(kid.family || kid.lastName || '').toLowerCase()] || '';
         var subBits = [];
-        var parents = Array.isArray(kid.parentNames) ? kid.parentNames.filter(Boolean).join(' & ') : '';
-        if (parents) subBits.push(escapeHtml(parents));
+        if (mlcName) subBits.push(escapeHtml(mlcName));
+        else {
+          var parents = Array.isArray(kid.parentNames) ? kid.parentNames.filter(Boolean).join(' & ') : '';
+          if (parents) subBits.push(escapeHtml(parents));
+        }
         if (kid.phone) subBits.push('<a href="tel:' + escapeHtml(kid.phone) + '">' + escapeHtml(kid.phone) + '</a>');
         if (kid.age) subBits.push('age ' + kid.age);
         h += '<div class="ws-lending-row mc-kid-row"><span class="ws-lending-main">'
@@ -19479,11 +19503,10 @@
           + '<span><strong>' + nickOr(kid.nickname, kid.name) + '</strong> <span class="elective-student-last">' + escapeHtml(kid.lastName || kid.family || '') + '</span>' + pronounTag(kid) + noPhoto
           + (subBits.length ? '<span class="ws-lending-sub">' + subBits.join(' · ') + '</span>' : '')
           + (kid.allergies ? '<span class="ws-lending-sub" style="color:var(--color-error);font-weight:600;">⚠ ' + escapeHtml(kid.allergies) + '</span>' : '')
-          + (famLabel ? '<span class="ws-lending-sub">' + escapeHtml(famLabel) + ' family</span>' : '')
           + (note && _myClassEditingKey !== editKey ? '<span class="ws-lending-sub mc-note-text">📝 ' + escapeHtml(note) + '</span>' : '')
-          + '</span></span>'
+          + '</span></span></span>'
           + '<span class="ws-lending-actions"><button type="button" class="sc-btn mc-note-btn" data-key="' + escapeHtml(editKey) + '">' + (note ? 'Edit note' : '+ Note') + '</button></span>'
-          + '</span></div>';
+          + '</div>';
         if (_myClassEditingKey === editKey) {
           h += '<div class="mc-note-editor" data-group="' + escapeHtml(group) + '" data-kid="' + escapeHtml(key) + '" style="margin:4px 0 8px;">'
             + '<textarea class="cl-input mc-note-input" rows="2" maxlength="1000" placeholder="Only you (and the VP) see this note.">' + escapeHtml(note) + '</textarea>'
@@ -25391,7 +25414,7 @@
     ];
     var canEditSE = _rolesMgrEventsState.canEdit !== false;
     var h = raLensHead(pills, canEditSE ? { label: 'Manage Special Events', action: 'special-events' } : null);
-    h += '<p class="ws-body-hint">One lead and up to four assistants per event — this feeds participation points. Event dates are set on the Admin Calendar'
+    h += '<p class="ws-body-hint">One lead per event, each with its own assistant spot count (0–6) — this feeds participation points. Event dates are set on the Admin Calendar'
       + (canEditSE ? '; tap Manage to assign people right here.' : '. Open a planning space to see any event’s checklist.') + '</p>';
     // Global table pattern (Erin, 2026-07-21: "streamline the Roles &
     // Committees tables to match our global table styles") — the shared
@@ -25423,8 +25446,11 @@
       { key: 'assists', label: 'Assistants', type: 'string',
         sortValue: function (r) { return (r.assists || []).length; },
         render: function (r) {
+          // #157: show fill vs the event's spot count.
+          var slots = (typeof r.assistant_slots === 'number') ? r.assistant_slots : 2;
           var assists = (r.assists || []).map(function (a) { return a.name || a.email; }).filter(Boolean);
-          return assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>';
+          var names = assists.length ? assists.map(escapeHtmlWs).join(', ') : '<span class="ws-srt-actions-empty">&mdash;</span>';
+          return names + ' <span class="ws-srt-actions-empty">(' + assists.length + '/' + slots + ')</span>';
         } },
       { key: 'space', label: 'Planning', type: 'string',
         sortValue: function () { return ''; },
@@ -25465,7 +25491,7 @@
     var h = '<datalist id="seMemberList">';
     (_rolesMgrEventsState.members || []).forEach(function (mm) { h += '<option value="' + escapeHtmlWs(mm.name) + '"></option>'; });
     h += '</datalist>';
-    h += '<p class="ws-body-hint">One lead and up to four assistants per event. Saves apply per event.</p>';
+    h += '<p class="ws-body-hint">One lead (plus optional co-lead) per event; pick how many assistant spots each event needs — 0 to 6 (#157). Saves apply per event.</p>';
     h += '<div class="se-list">';
     events.forEach(function (ev) {
       h += '<div class="se-card" data-eid="' + ev.id + '">';
@@ -25478,8 +25504,18 @@
       if ((ev.lead_interest || []).length) {
         h += '<p class="ws-body-hint" style="margin:2px 0 6px;">' + brandIconImg('helper', 'ag-icon') + ' Volunteered to lead (before sign-ups went direct): <strong>' + escapeHtmlWs(ev.lead_interest.map(function (p) { return p.name || p.email; }).join(', ')) + '</strong> — type their name above to place them.</p>';
       }
-      h += '<div class="se-row"><label class="se-lbl">Assistants (up to 4)</label><div class="se-assists">';
-      for (var i = 0; i < 4; i++) {
+      // #157 (Colleen): VP picks 0–6 assistant spots per event; the input
+      // count follows the pick (never fewer inputs than names already
+      // assigned, so nothing silently drops on save).
+      var seSlots = (typeof ev.assistant_slots === 'number') ? ev.assistant_slots : 2;
+      h += '<div class="se-row"><label class="se-lbl">Assistant spots</label><select class="cl-input se-slots" style="max-width:90px;">';
+      for (var sv = 0; sv <= 6; sv++) {
+        h += '<option value="' + sv + '"' + (sv === seSlots ? ' selected' : '') + '>' + sv + '</option>';
+      }
+      h += '</select></div>';
+      var seInputCount = Math.max(seSlots, (ev.assists || []).length);
+      h += '<div class="se-row"' + (seInputCount === 0 ? ' style="display:none;"' : '') + '><label class="se-lbl">Assistants</label><div class="se-assists">';
+      for (var i = 0; i < seInputCount; i++) {
         var a = (ev.assists || [])[i];
         h += '<input type="text" class="cl-input se-assist" list="seMemberList" value="' + escapeHtmlWs(a ? (a.name || a.email) : '') + '" placeholder="Assistant ' + (i + 1) + '…">';
       }
@@ -25495,6 +25531,30 @@
 
     body.querySelectorAll('.se-card').forEach(function (card) {
       var eid = parseInt(card.getAttribute('data-eid'), 10);
+      // #157: changing the spot count adds/removes assistant inputs in
+      // place (a full re-render would eat unsaved typing in other cards).
+      // Filled inputs above the new count survive — the save keeps them.
+      var slotsPick = card.querySelector('.se-slots');
+      if (slotsPick) slotsPick.addEventListener('change', function () {
+        var n = parseInt(slotsPick.value, 10) || 0;
+        var evRow2 = (_rolesMgrEventsState.events || []).filter(function (x) { return x.id === eid; })[0];
+        if (evRow2) evRow2.assistant_slots = n;
+        var box = card.querySelector('.se-assists');
+        if (!box) return;
+        var inputs = box.querySelectorAll('.se-assist');
+        for (var qi = inputs.length - 1; qi >= n; qi--) {
+          if (!String(inputs[qi].value || '').trim()) inputs[qi].remove();
+        }
+        for (var ai = box.querySelectorAll('.se-assist').length; ai < n; ai++) {
+          var inp2 = document.createElement('input');
+          inp2.type = 'text'; inp2.className = 'cl-input se-assist';
+          inp2.setAttribute('list', 'seMemberList');
+          inp2.placeholder = 'Assistant ' + (ai + 1) + '…';
+          box.appendChild(inp2);
+        }
+        var row2 = box.closest('.se-row');
+        if (row2) row2.style.display = box.querySelectorAll('.se-assist').length ? '' : 'none';
+      });
       var peopleSave = card.querySelector('.se-people-save');
       if (peopleSave) peopleSave.addEventListener('click', function () {
         var statusEl = card.querySelector('.se-save-status');
@@ -25506,11 +25566,13 @@
         if (coleadP) leads.push(coleadP);
         var assists = [];
         card.querySelectorAll('.se-assist').forEach(function (inp) { var p = seNameToPerson(inp.value); if (p) assists.push(p); });
+        var slotsSel = card.querySelector('.se-slots');
+        var slotsVal = slotsSel ? parseInt(slotsSel.value, 10) : null;
         peopleSave.disabled = true;
         fetch('/api/tour', {
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/json' }, rwAuthHeaders()),
-          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: leads[0] || null, leads: leads, assists: assists })
+          body: JSON.stringify({ kind: 'special-event-people', event_id: eid, lead: leads[0] || null, leads: leads, assists: assists, assistant_slots: slotsVal })
         })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
@@ -25524,6 +25586,7 @@
               evRow.lead = leads[0] || null;
               evRow.leads = leads;
               evRow.assists = assists;
+              if (slotsVal != null && !isNaN(slotsVal)) evRow.assistant_slots = slotsVal;
               // Anyone just confirmed as (co-)lead is no longer "interested".
               var leadEmailsNow = leads.map(function (l) { return String(l.email || '').toLowerCase(); });
               evRow.lead_interest = (evRow.lead_interest || []).filter(function (p) {

@@ -2323,3 +2323,9 @@ CREATE TABLE IF NOT EXISTS liaison_kid_notes (
 -- screen_reason — hidden in a collapsed "screened" bucket on the Merch
 -- Orders report, rescuable with one click; no emails fire for them.
 ALTER TABLE merch_orders ADD COLUMN IF NOT EXISTS screen_reason TEXT NOT NULL DEFAULT '';
+
+-- 2026-07-30 (#157, Colleen): VP-configurable assistant spots per special
+-- event, 0–6 via the Manage drawer. DEFAULT 2 matches the previous
+-- member-facing rule (assist seat advertised while fewer than 2 assigned),
+-- so nothing changes until the VP raises an event's count.
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS assistant_slots INTEGER NOT NULL DEFAULT 2;
