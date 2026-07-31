@@ -1378,16 +1378,26 @@ module.exports = async function handler(req, res) {
     if (action === 'role-holders') {
       if (req.method === 'GET') {
         const schoolYear = req.query.school_year || '2025-2026';
+        // #178 (Erin): holders matched only by workspace email, and people
+        // rows with an empty last_name, rendered first-name-only on the
+        // Volunteers tab. Match personal emails too (LATERAL keeps it to
+        // one row) and fall back to the family name for the surname.
         const holders = await sql`
           SELECT
             rhv.id, rhv.role_id,
             rhv.person_email AS email,
-            TRIM(CONCAT_WS(' ', p.first_name, p.last_name)) AS person_name,
-            COALESCE(p.last_name, '') AS family_name,
+            TRIM(CONCAT_WS(' ', p.first_name, COALESCE(NULLIF(p.last_name, ''), mp.family_name))) AS person_name,
+            COALESCE(NULLIF(p.last_name, ''), mp.family_name, '') AS family_name,
             rhv.school_year, rhv.started_at,
             rhv.updated_at, rhv.updated_by
           FROM role_holders_v2 rhv
-          LEFT JOIN people p ON LOWER(p.email) = LOWER(rhv.person_email)
+          LEFT JOIN LATERAL (
+            SELECT first_name, last_name, family_email FROM people
+            WHERE LOWER(people.email) = LOWER(rhv.person_email)
+               OR LOWER(people.personal_email) = LOWER(rhv.person_email)
+            LIMIT 1
+          ) p ON TRUE
+          LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE rhv.school_year = ${schoolYear}
             AND rhv.ended_at IS NULL
           ORDER BY rhv.role_id, person_name

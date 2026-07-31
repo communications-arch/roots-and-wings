@@ -34823,6 +34823,10 @@
     html += '<option value="2026-2027">2026–2027</option>';
     html += '<option value="2027-2028">2027–2028</option>';
     html += '</select></label>';
+    // #177 (Lyndsey): the Shared Facilities doorway belongs HERE — the
+    // Class Builder liaisons open to schedule classes — not (only) the
+    // Membership Director's Grove Builder.
+    html += '<button type="button" class="sc-btn" id="sbFacilitiesBtn" style="margin-left:8px;">' + brandIconImg('location', 'ag-icon') + ' Shared Facilities</button>';
     // Print / CSV of every submission for the year — Submissions-Report
     // parity now that the report lives inside the builder.
     html += '<span class="sb-header-tools">';
@@ -34845,6 +34849,10 @@
     });
     document.getElementById('sbPrintBtn').addEventListener('click', sbPrintSubmissions);
     document.getElementById('sbCsvBtn').addEventListener('click', sbExportSubmissionsCSV);
+    var sbFacBtn = document.getElementById('sbFacilitiesBtn');
+    if (sbFacBtn) sbFacBtn.addEventListener('click', function () {
+      if (typeof showFacilityBookingModal === 'function') showFacilityBookingModal();
+    });
     overlay.querySelectorAll('.sb-period-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
         // #81: group liaisons are AM-only (pill also hidden post-load).
