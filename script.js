@@ -40144,8 +40144,9 @@
     } catch (e) { return true; } // when unsure, never yank a legit lock
     return false;
   }
+  // No visibility gate: this touches only local DOM (no requests), and a
+  // background tab's leaked lock should be gone before the user returns.
   setInterval(function () {
-    if (document.visibilityState !== 'visible') return;
     if (document.body.style.overflow !== 'hidden') return;
     if (rwScrollLockHeld()) return;
     document.body.style.overflow = '';
