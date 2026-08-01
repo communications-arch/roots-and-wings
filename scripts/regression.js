@@ -248,6 +248,7 @@ const unitTests = [
   'scripts/test-board-calendar.js',
   'scripts/test-participation-season.js',
   'scripts/test-participation-settings.js',
+  'scripts/test-participation-badges.js',
   'scripts/test-welcome-lifecycle.js',
   'scripts/test-reg-invites.js',
   'scripts/test-billing-parse.js',

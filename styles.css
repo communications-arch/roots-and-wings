@@ -14421,6 +14421,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   text-align: left;
 }
 .ws-pset-caret { font-size: 0.7rem; }
+/* Collapsible activity bands (2026-08-01 expanded point fields) — same
+   affordance as the Exemptions toggle, indented rows while open. */
+.ws-pset-band-toggle { margin: 4px 0 2px; }
+.ws-pset-band-count { font-weight: 400; color: var(--color-text-light); }
+.ws-pset-band-wrap { padding: 2px 0 4px 14px; }
 @media (max-width: 480px) {
   .ws-pset-row {
     flex-wrap: wrap;
@@ -14567,6 +14572,111 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   color: var(--color-text);
   font-style: italic;
 }
+
+/* ── Milestone track (2026-08-01 points redesign) ──
+   Four growth stages, forward-fill only — no deficit/"remaining" visuals.
+   Segments tint with the panel's stage palette like the old meter did. */
+.ws-grow-track {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 6px;
+}
+.ws-grow-seg {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ws-grow-seg-bar {
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(var(--color-primary-rgb), 0.10);
+}
+.ws-grow-seg-filled .ws-grow-seg-bar {
+  background: linear-gradient(90deg, var(--color-chartreuse), var(--color-leaf));
+}
+.ws-part-panel-sprout  .ws-grow-seg-filled .ws-grow-seg-bar { background: linear-gradient(90deg, var(--color-coral), #B84a2a); }
+.ws-part-panel-sapling .ws-grow-seg-filled .ws-grow-seg-bar { background: linear-gradient(90deg, var(--color-accent), var(--color-accent-dark)); }
+.ws-grow-seg-label {
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: var(--color-text-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-grow-seg-filled .ws-grow-seg-label { color: var(--color-text); }
+.ws-grow-seg-current .ws-grow-seg-label { color: var(--color-primary-dark); font-weight: 700; }
+.ws-part-earned {
+  margin: 2px 0 8px;
+  font-size: 0.86rem;
+  color: var(--color-text);
+}
+.ws-part-earned strong { color: var(--color-primary-dark); }
+
+/* ── Growth badges ──
+   Clean row of circular outline icons; tier shows as a colored ring,
+   unearned shows as a dashed "not yet" outline. Description/tier/progress
+   live in a hover- or focus-only tooltip. */
+.ws-grow-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 2px;
+}
+.ws-grow-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-white);
+  border: 2.5px solid transparent;
+  cursor: default;
+  line-height: 0;
+}
+.ws-grow-badge:focus-visible { outline: 2px solid var(--color-primary-light); outline-offset: 2px; }
+.ws-grow-badge-icon { display: inline-flex; }
+.ws-grow-badge-gold     { border-color: var(--color-accent);     color: var(--color-accent-dark); }
+.ws-grow-badge-silver   { border-color: #9AA5B1;                 color: #6E7B8A; }
+.ws-grow-badge-bronze   { border-color: #B07B4F;                 color: #8A5A33; }
+.ws-grow-badge-unearned {
+  border: 2px dashed var(--color-border);
+  background: transparent;
+  color: var(--color-text-light);
+  opacity: 0.6;
+}
+.ws-grow-badge-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 230px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-primary-dark);
+  color: var(--color-white);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+  z-index: 40;
+}
+.ws-grow-badge:hover .ws-grow-badge-tip,
+.ws-grow-badge:focus .ws-grow-badge-tip,
+.ws-grow-badge:focus-visible .ws-grow-badge-tip { opacity: 1; }
+/* First badges hug the card's left edge — keep their tooltips inside it. */
+.ws-grow-badge:first-child .ws-grow-badge-tip { left: 0; transform: none; }
+.ws-grow-badge:last-child  .ws-grow-badge-tip { left: auto; right: 0; transform: none; }
 
 .ws-part-recap {
   list-style: none;

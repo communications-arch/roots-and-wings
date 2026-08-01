@@ -635,6 +635,98 @@ INSERT INTO participation_weights (key, label, value, sort_order, description) V
   ('new_member_grace_sessions','New-member grace sessions', 2,120, 'How many sessions a new member gets the reduced baseline before the full expectation kicks in.')
 ON CONFLICT (key) DO NOTHING;
 
+-- 2026-08-01 (Erin, points-system handoff + Volunteer_Points_Model.xlsx):
+-- expand the flat 9-key weight set to the real role structure. Keys are
+-- grouped by sort_order band — the Settings drawer renders bands as
+-- sections: 200s daily class hours, 300s board, 400-500s liaisons,
+-- 600-700s special events. Role/event keys are 'role_'/'event_' + a slug
+-- of the LIVE roles.title / special_events.name (lowercase, non-alnum →
+-- '_'), which is how the scoring resolves them; a role/event with no
+-- matching key falls back to the old generic board_role / one_year_role /
+-- event_lead / event_assist weights (kept below sort 200, hidden in the
+-- Settings UI). Values = the confirmed defaults from the handoff; all
+-- remain VP-editable.
+INSERT INTO participation_weights (key, label, value, sort_order, description) VALUES
+  -- Daily class hours (per session; a session = 5 meeting days)
+  ('am_hour1_lead',    'AM Hour 1 — Leading',    15, 200, 'Per session leading the first morning hour. A whole-morning AM class earns Hour 1 + Hour 2.'),
+  ('am_hour1_assist',  'AM Hour 1 — Assisting',   5, 210, 'Per session assisting the first morning hour.'),
+  ('am_hour2_lead',    'AM Hour 2 — Leading',    15, 220, 'Per session leading the second morning hour.'),
+  ('am_hour2_assist',  'AM Hour 2 — Assisting',   5, 230, 'Per session assisting the second morning hour.'),
+  ('pm_hour1_lead',    'PM Hour 1 — Leading',    15, 240, 'Per session leading the first afternoon hour (a both-hours elective earns Hour 1 + Hour 2).'),
+  ('pm_hour1_assist',  'PM Hour 1 — Assisting',   5, 250, 'Per session assisting the first afternoon hour.'),
+  ('pm_hour2_lead',    'PM Hour 2 — Leading',    15, 260, 'Per session leading the second afternoon hour.'),
+  ('pm_hour2_assist',  'PM Hour 2 — Assisting',   5, 270, 'Per session assisting the second afternoon hour.'),
+  ('floater_slot',     'Floater (per hour-slot)', 5, 280, 'Per floater pledge, per hour-slot, per session (a legacy whole-morning AM pledge counts as two hour-slots).'),
+  -- Board (year-long). Key = 'role_' + slug of the live roles.title.
+  ('role_president',               'President',            90, 300, 'Year-long board seat.'),
+  ('role_vice_president',          'Vice-President',       90, 310, 'Year-long board seat.'),
+  ('role_treasurer',               'Treasurer',            90, 320, 'Year-long board seat.'),
+  ('role_communications_director', 'Communications',       90, 330, 'Year-long board seat.'),
+  ('role_membership_director',     'Membership',           90, 340, 'Year-long board seat.'),
+  ('role_secretary',               'Secretary',            65, 350, 'Year-long board seat.'),
+  ('role_sustaining_director',     'Sustaining Director',  65, 360, 'Year-long board seat.'),
+  -- Liaisons & coordinators (year-long)
+  ('role_afternoon_class_liaison', 'Afternoon Class Liaison',          65, 400, 'Year-long volunteer role.'),
+  ('role_supply_coordinator',      'Supply Coordinator',               65, 405, 'Year-long volunteer role.'),
+  ('role_special_events_liaison',  'Special Events Liaison',           41, 410, 'Year-long volunteer role.'),
+  ('role_yearbook_coordinator',    'Yearbook Coordinator',             41, 415, 'Year-long volunteer role.'),
+  ('role_building_closer',         'Building Closer',                  30, 420, 'Year-long volunteer role.'),
+  ('role_building_opener',         'Building Opener',                  30, 425, 'Year-long volunteer role.'),
+  ('role_cleaning_crew_liaison',   'Cleaning Crew Liaison',            30, 430, 'Year-long volunteer role.'),
+  ('role_saplings_liaison',        'Saplings Liaison',                 30, 435, 'Year-long volunteer role.'),
+  ('role_sassafras_liaison',       'Sassafras Liaison',                30, 440, 'Year-long volunteer role.'),
+  ('role_oaks_liaison',            'Oaks Liaison',                     30, 445, 'Year-long volunteer role.'),
+  ('role_maples_liaison',          'Maples Liaison',                   30, 450, 'Year-long volunteer role.'),
+  ('role_birch_liaison',           'Birch Liaison',                    30, 455, 'Year-long volunteer role.'),
+  ('role_willows_liaison',         'Willows Liaison',                  30, 460, 'Year-long volunteer role.'),
+  ('role_cedars_liaison',          'Cedars Liaison',                   30, 465, 'Year-long volunteer role.'),
+  ('role_pigeons_liaison',         'Pigeons Liaison',                  30, 470, 'Year-long volunteer role.'),
+  ('role_welcome_coordinator',     'Welcome Coordinator',              30, 475, 'Year-long volunteer role.'),
+  ('role_field_trip_coordinator',  'Field Trip Coordinator',           30, 480, 'Year-long volunteer role.'),
+  ('role_fundraising_coordinator', 'Fundraising Coordinator',          30, 485, 'Year-long volunteer role.'),
+  ('role_merchandise_manager',     'Merchandise Manager',              30, 490, 'Year-long volunteer role.'),
+  ('role_parent_social_events',    'Parent Social Events Coordinator', 30, 495, 'Year-long volunteer role.'),
+  ('role_summer_social_events',    'Summer Social Events Coordinator', 30, 500, 'Year-long volunteer role.'),
+  ('role_safety_coordinator',      'Safety Coordinator',               20, 505, 'Year-long volunteer role (currently archived in the roles directory — scores if re-activated).'),
+  ('role_gratitude_encouragement_leader', 'Gratitude/Encouragement Leader', 20, 510, 'Year-long volunteer role.'),
+  -- Real roles in the directory that the handoff workbook did not price —
+  -- seeded at the 30-point light tier so holders are not stuck on the old
+  -- generic fallback (2). VP-tunable like everything else.
+  ('role_admin_organization',      'Admin/Organization',               30, 515, 'Year-long volunteer role (not in the points workbook — Light-tier default).'),
+  ('role_archives',                'Archives',                         30, 520, 'Year-long volunteer role (not in the points workbook — Light-tier default).'),
+  ('role_public_communications',   'Public Communications',            30, 525, 'Year-long volunteer role (not in the points workbook — Light-tier default).'),
+  ('role_community_liaison',       'Community Liaison',                30, 530, 'Year-long volunteer role (not in the points workbook — Light-tier default).'),
+  -- Special events (per event). Key = 'event_' + slug of special_events.name.
+  ('event_dance_lead',             'Fall Dance — Leading',      30, 600, 'Per event coordinated.'),
+  ('event_dance_assist',           'Fall Dance — Assisting',    10, 605, 'Per event support slot filled.'),
+  ('event_camp_lead',              'Camp — Leading',            30, 610, 'Per event coordinated.'),
+  ('event_camp_assist',            'Camp — Assisting',          10, 615, 'Per event support slot filled.'),
+  ('event_field_day_lead',         'Field Day — Leading',       30, 620, 'Per event coordinated.'),
+  ('event_field_day_assist',       'Field Day — Assisting',     10, 625, 'Per event support slot filled.'),
+  ('event_service_project_lead',   'Service Project — Leading', 20, 630, 'Per event coordinated.'),
+  ('event_service_project_assist', 'Service Project — Assisting', 6.5, 635, 'Per event support slot filled.'),
+  ('event_variety_show_lead',      'Variety Show — Leading',    20, 640, 'Per event coordinated.'),
+  ('event_variety_show_assist',    'Variety Show — Assisting',  6.5, 645, 'Per event support slot filled.'),
+  ('event_ice_cream_social_lead',  'Ice Cream Social — Leading', 15, 650, 'Per event coordinated.'),
+  ('event_ice_cream_social_assist','Ice Cream Social — Assisting', 5, 655, 'Per event support slot filled.'),
+  ('event_maker_s_market_lead',    'Maker''s Market — Leading',  15, 660, 'Per event coordinated.'),
+  ('event_maker_s_market_assist',  'Maker''s Market — Assisting', 5, 665, 'Per event support slot filled.'),
+  ('event_pj_party_lead',          'PJ Party — Leading',         10, 670, 'Per event coordinated.'),
+  ('event_pj_party_assist',        'PJ Party — Assisting',      3.5, 675, 'Per event support slot filled.'),
+  ('event_passion_fair_lead',      'Passion Fair — Leading',     10, 680, 'Per event coordinated.'),
+  ('event_passion_fair_assist',    'Passion Fair — Assisting',  3.5, 685, 'Per event support slot filled.')
+ON CONFLICT (key) DO NOTHING;
+
+-- cleaning_session joins the Daily-class-hours band (sort_order is not
+-- user-editable, so plain re-run-safe UPDATE) and picks up the handoff's
+-- confirmed 3-point default — but ONLY while it still holds the original
+-- placeholder 1, so a VP-tuned value is never overwritten on redeploy.
+UPDATE participation_weights SET sort_order = 290,
+  label = 'Cleaning crew position', description = 'Per session the family holds a cleaning crew position.'
+  WHERE key = 'cleaning_session';
+UPDATE participation_weights SET value = 3
+  WHERE key = 'cleaning_session' AND value = 1;
+
 -- ──────────────────────────────────────────────
 -- PM class submissions
 -- ──────────────────────────────────────────────

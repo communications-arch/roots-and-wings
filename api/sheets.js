@@ -1366,6 +1366,11 @@ function participationResolveName(raw, idx) {
 }
 
 function participationBlankCounts() {
+  // pm_hour1_*/pm_hour2_* split the pm_lead/pm_assist totals by afternoon
+  // hour for the per-hour weights ('both'-hour classes add to both buckets
+  // AND to the total); floater_slot counts volunteer_signups floater
+  // pledges by hour-slot. The legacy totals stay for the report table /
+  // CSV / chips.
   return {
     board_role: 0,
     one_year_role: 0,
@@ -1373,10 +1378,79 @@ function participationBlankCounts() {
     am_assist: 0,
     pm_lead: 0,
     pm_assist: 0,
+    pm_hour1_lead: 0,
+    pm_hour2_lead: 0,
+    pm_hour1_assist: 0,
+    pm_hour2_assist: 0,
+    floater_slot: 0,
     cleaning_session: 0,
     event_lead: 0,
     event_assist: 0
   };
+}
+
+// Slug a live roles.title / special_events.name into a participation_weights
+// key fragment: 'Vice-President' → 'vice_president', "Maker's Market" →
+// 'maker_s_market', 'Gratitude/Encouragement Leader' →
+// 'gratitude_encouragement_leader'. MUST stay in sync with the seeded
+// 'role_*' / 'event_*' keys in migrate.sql and with the client mirror
+// (participationWeightSlug in script.js).
+function participationWeightSlug(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+// One member's weighted point total under a given weights map (2026-08-01
+// points-system handoff). Per-role and per-event values resolve by slugged
+// title ('role_president', 'event_camp_lead'); anything without a dedicated
+// key falls back to the legacy generic weights so a half-seeded DB never
+// zeroes people out. AM classes are whole-morning blocks in the data, so a
+// lead/assist instance earns BOTH morning hour-slots. Mirrored client-side
+// by participationScoreMember in script.js (settings preview) — change both
+// together (tripwire: scripts/test-participation-settings.js).
+function participationScoreMember(m, weights) {
+  function val(key) {
+    var v = weights ? parseFloat(weights[key]) : NaN;
+    return isFinite(v) ? v : null;
+  }
+  function pick(key, fallbackKey) {
+    var v = val(key);
+    if (v !== null) return v;
+    v = val(fallbackKey);
+    return v !== null ? v : 0;
+  }
+  var c = (m && m.counts) || {};
+  var total = 0;
+  // Morning: hour-level keys when seeded (whole morning = hour 1 + hour 2),
+  // else the legacy per-instance am_lead/am_assist weight.
+  var amLead = (val('am_hour1_lead') !== null || val('am_hour2_lead') !== null)
+    ? (val('am_hour1_lead') || 0) + (val('am_hour2_lead') || 0)
+    : (val('am_lead') || 0);
+  var amAssist = (val('am_hour1_assist') !== null || val('am_hour2_assist') !== null)
+    ? (val('am_hour1_assist') || 0) + (val('am_hour2_assist') || 0)
+    : (val('am_assist') || 0);
+  total += (c.am_lead || 0) * amLead;
+  total += (c.am_assist || 0) * amAssist;
+  // Afternoon: per-hour counts × per-hour weights, generic fallback.
+  total += (c.pm_hour1_lead || 0) * pick('pm_hour1_lead', 'pm_lead');
+  total += (c.pm_hour2_lead || 0) * pick('pm_hour2_lead', 'pm_lead');
+  total += (c.pm_hour1_assist || 0) * pick('pm_hour1_assist', 'pm_assist');
+  total += (c.pm_hour2_assist || 0) * pick('pm_hour2_assist', 'pm_assist');
+  total += (c.floater_slot || 0) * (val('floater_slot') || 0);
+  total += (c.cleaning_session || 0) * (val('cleaning_session') || 0);
+  // Year-long roles: per-role value by slug, else the generic tier weight.
+  ((m && m.roleDetail) || []).forEach(function (r) {
+    var v = val('role_' + participationWeightSlug(r.title));
+    if (v !== null) total += v;
+    else total += r.category === 'board' ? (val('board_role') || 0) : (val('one_year_role') || 0);
+  });
+  // Special events: per-event lead/assist by slug, generic fallback.
+  ((m && m.eventDetail) || []).forEach(function (e) {
+    var suffix = e.role === 'lead' ? '_lead' : '_assist';
+    var v = val('event_' + participationWeightSlug(e.name) + suffix);
+    if (v !== null) total += v;
+    else total += e.role === 'lead' ? (val('event_lead') || 0) : (val('event_assist') || 0);
+  });
+  return total;
 }
 
 // Build the families[] shape buildParticipationReport expects — name,
@@ -1545,6 +1619,8 @@ async function buildParticipationReport(sql, data) {
         counts: participationBlankCounts(),
         coverageGiven: 0,
         roles: [],
+        roleDetail: [],
+        eventDetail: [],
         timeline: { 1: [], 2: [], 3: [], 4: [], 5: [] },
         weightedTotal: 0,
         expectedPoints: 0,
@@ -1693,6 +1769,15 @@ async function buildParticipationReport(sql, data) {
       if (!key || !members[key]) return;
       var mult = r.scheduled_hour === 'both' ? 2 : 1;
       members[key].counts.pm_lead += mult;
+      // Hour buckets for the per-hour weights; unknown hour reads as hour 1.
+      if (r.scheduled_hour === 'both') {
+        members[key].counts.pm_hour1_lead += 1;
+        members[key].counts.pm_hour2_lead += 1;
+      } else if (r.scheduled_hour === 'PM2') {
+        members[key].counts.pm_hour2_lead += 1;
+      } else {
+        members[key].counts.pm_hour1_lead += 1;
+      }
       addTimeline(key, r.scheduled_session, { category: 'pm_lead', label: 'Leading PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
     });
   } catch (e) {
@@ -1719,6 +1804,14 @@ async function buildParticipationReport(sql, data) {
       if (!key || !members[key]) return;
       var mult = r.scheduled_hour === 'both' ? 2 : 1;
       members[key].counts.pm_assist += mult;
+      if (r.scheduled_hour === 'both') {
+        members[key].counts.pm_hour1_assist += 1;
+        members[key].counts.pm_hour2_assist += 1;
+      } else if (r.scheduled_hour === 'PM2') {
+        members[key].counts.pm_hour2_assist += 1;
+      } else {
+        members[key].counts.pm_hour1_assist += 1;
+      }
       addTimeline(key, r.scheduled_session, { category: 'pm_assist', label: 'Assisting PM — ' + (r.class_name || '') + (mult === 2 ? ' (2-hr)' : '') });
     });
   }
@@ -1748,6 +1841,27 @@ async function buildParticipationReport(sql, data) {
     });
   } catch (e) {
     console.error('Participation cleaning query failed:', e.message);
+  }
+
+  // Floater pledges — volunteer_signups role='floater' (2026-08-01 points
+  // handoff: "Floater (per hour-slot) | 5"). One count per hour-slot; a
+  // legacy whole-morning 'AM' pledge covers both morning hours so it
+  // counts as two slots.
+  try {
+    var floaterRows = await sql`
+      SELECT session_number, block, person_email, person_name
+      FROM volunteer_signups
+      WHERE role = 'floater' AND school_year = ${seasonLabel}
+    `;
+    floaterRows.forEach(function (r) {
+      var key = resolveMemberByEmail(r.person_email, r.person_name);
+      if (!key || !members[key]) return;
+      var slots = r.block === 'AM' ? 2 : 1;
+      members[key].counts.floater_slot += slots;
+      addTimeline(key, r.session_number, { category: 'floater_slot', label: 'Floater — ' + (r.block === 'AM' ? 'Morning' : r.block) + (slots === 2 ? ' (both hours)' : '') });
+    });
+  } catch (e) {
+    console.error('Participation floater query failed:', e.message);
   }
 
   // Board + committee roles — from the LIVE roles system (roles +
@@ -1783,6 +1897,9 @@ async function buildParticipationReport(sql, data) {
         members[key].counts.one_year_role += 1;
       }
       if (r.title) members[key].roles.push(r.title);
+      // Per-role scoring detail — participationScoreMember resolves each
+      // held role's own weight ('role_' + slug) from this list.
+      members[key].roleDetail.push({ title: String(r.title || ''), category: r.category });
     });
   } catch (e) {
     console.error('Participation roles query failed:', e.message);
@@ -1811,6 +1928,7 @@ async function buildParticipationReport(sql, data) {
       } else {
         members[key].counts.event_assist += 1;
       }
+      members[key].eventDetail.push({ name: String(r.name || ''), role: r.role === 'lead' ? 'lead' : 'assist' });
     });
   }
 
@@ -1930,12 +2048,9 @@ async function buildParticipationReport(sql, data) {
 
   Object.keys(members).forEach(function (k) {
     var m = members[k];
-    var total = 0;
-    ['board_role', 'one_year_role', 'am_lead', 'am_assist', 'pm_lead', 'pm_assist', 'cleaning_session', 'event_lead', 'event_assist'].forEach(function (field) {
-      var cnt = m.counts[field] || 0;
-      var w = Number.isFinite(weights[field]) ? weights[field] : 0;
-      total += cnt * w;
-    });
+    // Per-role/per-event/per-hour scoring (2026-08-01 handoff) — falls back
+    // to the legacy generic weights for anything without a dedicated key.
+    var total = participationScoreMember(m, weights);
     m.weightedTotal = Math.round(total * 100) / 100;
 
     var exp = annualExpected;

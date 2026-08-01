@@ -1838,6 +1838,13 @@
   // is unaffected. Flip to false to restore both surfaces.
   var RW_HIDE_MEMBER_POINTS = true;
 
+  // The hide exempts the super user (and dev hosts, via isCommsUser) so the
+  // 2026-08-01 milestone/badge redesign can be previewed on the live site
+  // before the flag flips for everyone.
+  function rwMemberPointsHidden() {
+    return RW_HIDE_MEMBER_POINTS && !isCommsUser();
+  }
+
   // Per-calendar fallback colors. Used when an event has no colorId set
   // (which is the common case — event-level colors in Google Calendar are
   // rarely used, but shared calendars each have a default background color
@@ -10028,7 +10035,7 @@
       roleGate: null,
       render: function () {
         // Leading hint matches every other card's anatomy (2026-07-05).
-        var h = RW_HIDE_MEMBER_POINTS
+        var h = rwMemberPointsHidden()
           ? '<p class="ws-body-hint">Ways to jump in this year.</p>'
           : '<p class="ws-body-hint">Your participation so far this year, and ways to jump in.</p>';
 
@@ -10037,39 +10044,45 @@
         // (_participationMine). If it hasn't loaded yet we show a
         // placeholder; loadParticipationBadge() re-renders the workspace
         // tab once the fetch completes.
-        var member = !RW_HIDE_MEMBER_POINTS && _participationMine && _participationMine.member;
+        var member = !rwMemberPointsHidden() && _participationMine && _participationMine.member;
         if (member) {
+          // Milestone + badge view (2026-08-01 points handoff): forward
+          // progress only — no "points behind / remaining" language ever
+          // appears on the member-facing panel (the VP tracker keeps its
+          // internal Behind status).
           var tier = deriveParticipationTier(member);
-          var tierHeadline = {
-            sprout:  'Every contribution matters — here’s how to jump in.',
-            sapling: 'You’re well on your way this year.',
-            tree:    'You’re a cornerstone of our co-op this year. Thank you!'
-          }[tier] || '';
           var expected = Number(member.expectedPoints) || 0;
           var total = Number(member.weightedTotal) || 0;
-          var pct = expected > 0 ? Math.min(100, Math.round((total / expected) * 100)) : 100;
+          var stage = participationStageIndex(total, expected);
+          var stageHeadline = [
+            'Every contribution matters — here’s how to jump in.',
+            'You’re sprouting — every contribution matters.',
+            'You’re taking root — well on your way this year.',
+            'You’re flourishing — thank you for all you do!',
+            'Full bloom! You’re a cornerstone of our co-op. Thank you!'
+          ][stage] || '';
           h += '<div class="ws-part-panel ws-part-panel-' + tier + '">';
           h += '<div class="ws-part-panel-head">';
           h += '<span class="ws-part-panel-icon" aria-hidden="true">' + (PLANT_SVGS[tier] || '') + '</span>';
           h += '<div class="ws-part-panel-headings">';
           h += '<h5>Your year so far</h5>';
-          h += '<p>' + escapeHtml(tierHeadline) + '</p>';
+          h += '<p>' + escapeHtml(stageHeadline) + '</p>';
           h += '</div>';
           h += '</div>';
 
-          // Progress meter. For exempt members expected is ~0; we
-          // render a full bar and a "thanks for what you’ve given"
-          // line instead of the usual points readout.
+          // Milestone track. For exempt members expected is ~0; keep the
+          // "thanks for what you've given" line instead of a track.
           if (expected < 0.5 && member.exemption) {
             h += '<p class="ws-part-exempt-note">Thanks for what you’ve given this year — your plan is marked as a break for now.</p>';
           } else {
-            h += '<div class="ws-part-meter" role="img" aria-label="' + total.toFixed(1) + ' of ' + expected.toFixed(1) + ' participation points">';
-            h += '<div class="ws-part-meter-fill" style="width:' + pct + '%;"></div>';
-            h += '</div>';
-            // #149 (Erin): no "New this year" pill after the points — the
-            // reduced new-member goal already speaks for itself.
-            h += '<p class="ws-part-meter-caption"><strong>' + total.toFixed(1) + '</strong> of <strong>' + expected.toFixed(1) + '</strong> participation points</p>';
+            h += renderParticipationTrack(stage);
+            h += '<p class="ws-part-earned">You’ve earned <strong>' + total.toFixed(total % 1 ? 1 : 0) + '</strong> point' + (total === 1 ? '' : 's') + ' this year.</p>';
           }
+
+          // Badge row — six growth badges, tier ring when earned, dashed
+          // "not yet" outline when not. Descriptions live in hover/focus
+          // tooltips so the default view stays a clean row of icons.
+          h += renderParticipationBadgeRow(member);
 
           // Recap: translate counts into sentences.
           var recap = [];
@@ -10093,20 +10106,20 @@
           }
 
           h += '</div>'; // /.ws-part-panel
-        } else if (!RW_HIDE_MEMBER_POINTS && _participationMine && _participationMine.fetchError) {
+        } else if (!rwMemberPointsHidden() && _participationMine && _participationMine.fetchError) {
           // The lookup itself failed (server error / offline) — say so
           // rather than pretending nothing is recorded.
           h += '<div class="ws-part-panel ws-part-panel-empty">';
           h += '<p class="ws-part-meter-caption">Couldn’t load your participation right now — refresh to try again.</p>';
           h += '</div>';
-        } else if (!RW_HIDE_MEMBER_POINTS && _participationMine) {
+        } else if (!rwMemberPointsHidden() && _participationMine) {
           // Fetch completed but you're not on the participation roster yet
           // (e.g. a backup coach, or no AM/PM/cleaning/role activity recorded
           // this year). Don't hang on the loading placeholder.
           h += '<div class="ws-part-panel ws-part-panel-empty">';
           h += '<p class="ws-part-meter-caption">No participation recorded for you yet this year — see the ways to jump in below.</p>';
           h += '</div>';
-        } else if (!RW_HIDE_MEMBER_POINTS && _participationMineEmail && localStorage.getItem('rw_google_credential')) {
+        } else if (!rwMemberPointsHidden() && _participationMineEmail && localStorage.getItem('rw_google_credential')) {
           // Fetch is in flight. Show a gentle placeholder so the card isn't
           // empty on first paint.
           h += '<div class="ws-part-panel ws-part-panel-loading">';
@@ -16254,11 +16267,157 @@
     return 'sprout';
   }
 
+  // ── Milestone track + growth badges (member-facing, 2026-08-01) ──
+  // Four growth-themed stages; "Flourishing" is the one that lines up with
+  // the season goal — deliberately NOT named like a finish line, because the
+  // intent is steady involvement all year. Only forward progress renders:
+  // no "points remaining", no "behind".
+  var PARTICIPATION_STAGES = ['Sprouting', 'Taking root', 'Flourishing', 'Full bloom'];
+
+  // How many stages are filled (0–4) for a points total against the
+  // member's own goal (new-member/exemption pro-rating included upstream).
+  // Sprouting fills on the first point; Taking root at half the goal;
+  // Flourishing at the goal; Full bloom at 130% — kept as a helper so the
+  // thresholds are easy to tune and testable in isolation.
+  function participationStageIndex(total, goal) {
+    if (!(total > 0)) return 0;
+    if (!(goal > 0)) return 1;
+    if (total >= goal * 1.3) return 4;
+    if (total >= goal) return 3;
+    if (total >= goal * 0.5) return 2;
+    return 1;
+  }
+
+  function renderParticipationTrack(stage) {
+    var h = '<div class="ws-grow-track" role="img" aria-label="Participation stage: '
+      + (stage > 0 ? escapeHtml(PARTICIPATION_STAGES[stage - 1]) : 'just getting started') + '">';
+    PARTICIPATION_STAGES.forEach(function (name, i) {
+      var cls = 'ws-grow-seg';
+      if (i < stage) cls += ' ws-grow-seg-filled';
+      if (i === stage - 1) cls += ' ws-grow-seg-current';
+      h += '<div class="' + cls + '"><span class="ws-grow-seg-bar"></span><span class="ws-grow-seg-label">' + escapeHtml(name) + '</span></div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  // Badge icons — same outline idiom as PLANT_SVGS (currentColor strokes)
+  // so the row reads as a native extension of the existing icon set, all
+  // on the nature/growth theme.
+  var GROW_BADGE_SVGS = {
+    leadClass: // tree — you led the way
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 22v-7"/>' +
+      '<path d="M12 15c-5 0-8-3.5-7-8.5 4 0 7 3 7 8.5z"/>' +
+      '<path d="M12 15c5 0 8-3.5 7-8.5-4 0-7 3-7 8.5z"/>' +
+      '</svg>',
+    assist: // paired leaves — growing alongside a lead
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M7 21c0-4 1-7 3-9"/>' +
+      '<path d="M10 12C6 13 3.5 11 3 7c4-.5 6.5 1.5 7 5z"/>' +
+      '<path d="M17 21c0-4-1-7-3-9"/>' +
+      '<path d="M14 12c4 1 6.5-1 7-5-4-.5-6.5 1.5-7 5z"/>' +
+      '</svg>',
+    cleaning: // watering can — tending the space
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M7 10h9v8a1.5 1.5 0 0 1-1.5 1.5H8.5A1.5 1.5 0 0 1 7 18z"/>' +
+      '<path d="M16 12l4-3.5"/>' +
+      '<path d="M7 13H5a2 2 0 0 1 0-4h2"/>' +
+      '<path d="M10 6.5c.5-1 2.5-1 3 0"/>' +
+      '</svg>',
+    eventLead: // flower — you made something bloom for everyone
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="9" r="2.2"/>' +
+      '<path d="M12 6.8V3.5M14 10.2l2.8 1.6M10 10.2l-2.8 1.6M13.9 7.7l2.9-1.5M10.1 7.7L7.2 6.2"/>' +
+      '<path d="M12 22v-8"/>' +
+      '<path d="M12 18c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4z"/>' +
+      '</svg>',
+    oneYear: // acorn — a year-long commitment planted
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 4.5c-4 0-6 1.5-6 4h12c0-2.5-2-4-6-4z"/>' +
+      '<path d="M18 8.5c0 5-3 9-6 11-3-2-6-6-6-11"/>' +
+      '<path d="M12 4.5c0-1 .5-1.8 1.5-2.3"/>' +
+      '</svg>',
+    board: // grove — tending the whole forest
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M6 21v-3M6 18c-2.5 0-4-1.8-3.5-4.5 2 0 3.5 1.5 3.5 4.5z"/>' +
+      '<path d="M18 21v-3M18 18c2.5 0 4-1.8 3.5-4.5-2 0-3.5 1.5-3.5 4.5z"/>' +
+      '<path d="M12 21v-6M12 15c-3.5 0-5.5-2.5-5-6.5 3 0 5 2.5 5 6.5zM12 15c3.5 0 5.5-2.5 5-6.5-3 0-5 2.5-5 6.5z"/>' +
+      '</svg>'
+  };
+
+  // Badge definitions. count() = how many qualifying contributions this
+  // year. Badges with tiers[] step Bronze → Silver → Gold by frequency
+  // (thresholds are first-pass guesses — tune per badge as real data
+  // lands). alwaysGold badges are a full-year commitment, so they are
+  // simply Gold the moment they're earned.
+  var GROW_BADGE_DEFS = [
+    { key: 'leadClass', label: 'Lead a class', svg: 'leadClass',
+      count: function (m) { return (m.counts.am_lead || 0) + (m.counts.pm_lead || 0); },
+      tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class led', 'classes led'],
+      hint: 'Lead a morning class or afternoon elective to earn this badge.' },
+    { key: 'assist', label: 'Assisted a lead', svg: 'assist',
+      count: function (m) { return (m.counts.am_assist || 0) + (m.counts.pm_assist || 0); },
+      tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class assisted', 'classes assisted'],
+      hint: 'Assist a class lead to earn this badge.' },
+    { key: 'cleaning', label: 'Cleaning crew', svg: 'cleaning',
+      count: function (m) { return m.counts.cleaning_session || 0; },
+      tiers: { bronze: 1, silver: 2, gold: 4 }, unit: ['session cleaned', 'sessions cleaned'],
+      hint: 'Take a cleaning crew spot to earn this badge.' },
+    { key: 'eventLead', label: 'Lead an event', svg: 'eventLead',
+      count: function (m) { return m.counts.event_lead || 0; },
+      tiers: { bronze: 1, silver: 2, gold: 3 }, unit: ['event led', 'events led'],
+      hint: 'Coordinate a special event to earn this badge.' },
+    { key: 'oneYear', label: 'Held a 1-year position', svg: 'oneYear',
+      count: function (m) { return m.counts.one_year_role || 0; },
+      alwaysGold: true, hint: 'Hold a year-long volunteer position to earn this badge.' },
+    { key: 'board', label: 'Served on the board', svg: 'board',
+      count: function (m) { return m.isBoard ? 1 : 0; },
+      alwaysGold: true, hint: 'Serve a year on the board to earn this badge.' }
+  ];
+
+  function participationBadgeState(def, member) {
+    var n = def.count(member);
+    if (n <= 0) return { tier: null, n: 0 };
+    if (def.alwaysGold) return { tier: 'gold', n: n };
+    var t = def.tiers;
+    if (n >= t.gold) return { tier: 'gold', n: n };
+    if (n >= t.silver) return { tier: 'silver', n: n };
+    return { tier: 'bronze', n: n };
+  }
+
+  function renderParticipationBadgeRow(member) {
+    var h = '<div class="ws-grow-badges">';
+    GROW_BADGE_DEFS.forEach(function (def) {
+      var s = participationBadgeState(def, member);
+      var tierName = s.tier ? s.tier.charAt(0).toUpperCase() + s.tier.slice(1) : null;
+      // Tooltip: what the badge is, current tier, progress to the next
+      // tier — hover/focus only, so the default view stays clean icons.
+      var tip;
+      if (!s.tier) {
+        tip = def.label + ' — not yet. ' + def.hint;
+      } else if (def.alwaysGold) {
+        tip = def.label + ' — Gold. A full-year commitment earns this outright. Thank you!';
+      } else {
+        tip = def.label + ' — ' + tierName + '. ' + s.n + ' ' + def.unit[s.n === 1 ? 0 : 1] + ' this year';
+        var next = s.tier === 'bronze' ? { name: 'Silver', at: def.tiers.silver }
+                 : s.tier === 'silver' ? { name: 'Gold', at: def.tiers.gold } : null;
+        tip += next ? '; ' + next.at + ' earns ' + next.name + '.' : ' — top tier!';
+      }
+      h += '<span class="ws-grow-badge ws-grow-badge-' + (s.tier || 'unearned') + '" tabindex="0" role="img" aria-label="' + escapeHtml(tip) + '">'
+        + '<span class="ws-grow-badge-icon">' + (GROW_BADGE_SVGS[def.svg] || '') + '</span>'
+        + '<span class="ws-grow-badge-tip">' + escapeHtml(tip) + '</span>'
+        + '</span>';
+    });
+    h += '</div>';
+    return h;
+  }
+
   function renderParticipationBadge() {
     var btn = document.getElementById('qsbPlantBadge');
     var iconEl = document.getElementById('qsbPlantIcon');
     if (!btn || !iconEl) return;
-    if (RW_HIDE_MEMBER_POINTS) { btn.hidden = true; return; }
+    if (rwMemberPointsHidden()) { btn.hidden = true; return; }
     var member = _participationMine && _participationMine.member;
     if (!member) { btn.hidden = true; return; }
     var tier = deriveParticipationTier(member);
@@ -16378,6 +16537,7 @@
     { key: 'pm_lead',          label: 'PM Lead' },
     { key: 'pm_assist',        label: 'PM Assist' },
     { key: 'cleaning_session', label: 'Cleaning' },
+    { key: 'floater_slot',     label: 'Floater' },
     { key: 'event_lead',       label: 'Event Lead' },
     { key: 'event_assist',     label: 'Event Assist' }
   ];
@@ -16679,13 +16839,75 @@
   // POST. new_member_grace_sessions is deliberately NOT rendered — nothing
   // in the scoring reads it, so surfacing it only confuses.
 
-  var PARTICIPATION_SETTINGS_GROUPS = [
-    { title: 'Morning classes',         items: [ { key: 'am_lead', label: 'Leading (per session)' }, { key: 'am_assist', label: 'Assisting (per session)' } ] },
-    { title: 'Afternoon electives',     items: [ { key: 'pm_lead', label: 'Leading (per hour)' },    { key: 'pm_assist', label: 'Assisting (per hour)' } ] },
-    { title: 'Cleaning crew',           items: [ { key: 'cleaning_session', label: 'Per session cleaned' } ] },
-    { title: 'Board & volunteer roles', items: [ { key: 'board_role', label: 'Board role (year)' },  { key: 'one_year_role', label: 'Volunteer role (year)' } ] },
-    { title: 'Special events',          items: [ { key: 'event_lead', label: 'Leading (per event)' }, { key: 'event_assist', label: 'Assisting (per event)' } ] }
+  // Settings drawer sections, keyed by participation_weights sort_order
+  // band (migrate.sql assigns each seeded key a band): 200s = daily class
+  // hours, 300s = board, 400–500s = liaisons, 600s+ = special events. The
+  // drawer renders whatever rows the DB holds, so adding a weight row is a
+  // migration-only change — no client list to keep in sync.
+  var PARTICIPATION_SETTINGS_BANDS = [
+    { min: 200, max: 299, title: 'Daily class hours',
+      desc: 'Per session — each session runs 5 meeting days. A whole-morning AM class counts as both morning hour-slots.' },
+    { min: 300, max: 399, title: 'Board (year-long)', desc: '' },
+    { min: 400, max: 599, title: 'Liaisons & coordinators (year-long)', desc: '' },
+    { min: 600, max: 999, title: 'Special events (per event)', desc: '' }
   ];
+
+  // Legacy generic weights — still used as scoring fallbacks for anything
+  // without a dedicated per-role/per-event key, but hidden from the
+  // Settings drawer so the VP only sees the real role structure.
+  var PARTICIPATION_HIDDEN_KEYS = {
+    board_role: 1, one_year_role: 1, am_lead: 1, am_assist: 1, pm_lead: 1,
+    pm_assist: 1, event_lead: 1, event_assist: 1, new_member_grace_sessions: 1
+  };
+
+  // Client mirrors of the server's slug + scoring helpers (api/sheets.js:
+  // participationWeightSlug / participationScoreMember) so the Settings
+  // preview can recompute totals without a round trip. Change all together
+  // (tripwire: scripts/test-participation-settings.js).
+  function participationWeightSlug(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  }
+
+  function participationScoreMember(m, weights) {
+    function val(key) {
+      var v = weights ? parseFloat(weights[key]) : NaN;
+      return isFinite(v) ? v : null;
+    }
+    function pick(key, fallbackKey) {
+      var v = val(key);
+      if (v !== null) return v;
+      v = val(fallbackKey);
+      return v !== null ? v : 0;
+    }
+    var c = (m && m.counts) || {};
+    var total = 0;
+    var amLead = (val('am_hour1_lead') !== null || val('am_hour2_lead') !== null)
+      ? (val('am_hour1_lead') || 0) + (val('am_hour2_lead') || 0)
+      : (val('am_lead') || 0);
+    var amAssist = (val('am_hour1_assist') !== null || val('am_hour2_assist') !== null)
+      ? (val('am_hour1_assist') || 0) + (val('am_hour2_assist') || 0)
+      : (val('am_assist') || 0);
+    total += (c.am_lead || 0) * amLead;
+    total += (c.am_assist || 0) * amAssist;
+    total += (c.pm_hour1_lead || 0) * pick('pm_hour1_lead', 'pm_lead');
+    total += (c.pm_hour2_lead || 0) * pick('pm_hour2_lead', 'pm_lead');
+    total += (c.pm_hour1_assist || 0) * pick('pm_hour1_assist', 'pm_assist');
+    total += (c.pm_hour2_assist || 0) * pick('pm_hour2_assist', 'pm_assist');
+    total += (c.floater_slot || 0) * (val('floater_slot') || 0);
+    total += (c.cleaning_session || 0) * (val('cleaning_session') || 0);
+    ((m && m.roleDetail) || []).forEach(function (r) {
+      var v = val('role_' + participationWeightSlug(r.title));
+      if (v !== null) total += v;
+      else total += r.category === 'board' ? (val('board_role') || 0) : (val('one_year_role') || 0);
+    });
+    ((m && m.eventDetail) || []).forEach(function (e) {
+      var suffix = e.role === 'lead' ? '_lead' : '_assist';
+      var v = val('event_' + participationWeightSlug(e.name) + suffix);
+      if (v !== null) total += v;
+      else total += e.role === 'lead' ? (val('event_lead') || 0) : (val('event_assist') || 0);
+    });
+    return total;
+  }
 
   // Pure preview of what a settings change does to the report — mirrors the
   // server's buildParticipationReport scoring (api/sheets.js) so the panel
@@ -16695,16 +16917,13 @@
   // exemption always groups under Exempt (so weight changes never move an
   // exempt member, and exemption pro-rating needn't be replicated here).
   function computeParticipationPreview(members, serverWeights, newWeights) {
-    var FIELDS = ['board_role', 'one_year_role', 'am_lead', 'am_assist', 'pm_lead',
-                  'pm_assist', 'cleaning_session', 'event_lead', 'event_assist'];
     function num(w, key, dflt) {
       var v = w ? parseFloat(w[key]) : NaN;
       return isFinite(v) ? v : dflt;
     }
     function bucketFor(m, weights) {
       if (m.exemption) return 'exempt';
-      var total = 0;
-      FIELDS.forEach(function (f) { total += ((m.counts && m.counts[f]) || 0) * num(weights, f, 0); });
+      var total = participationScoreMember(m, weights);
       var exp = num(weights, 'annual_expected_points', 14);
       if (m.isNewMember) exp = exp * num(weights, 'new_member_baseline_pct', 60) / 100;
       if (m.isNewMember && total < exp) return 'new';
@@ -16801,17 +17020,44 @@
     h += '</div>';
 
     // ── Points per Activity ──
+    // Data-driven off the weight rows: each seeded key's sort_order band
+    // picks its section (PARTICIPATION_SETTINGS_BANDS). Bands collapse —
+    // ~60 fields would otherwise bury the preview + save bar. Legacy
+    // generic keys (fallback-only) and the goal keys stay out of the list.
+    var GOAL_KEYS = { annual_expected_points: 1, new_member_baseline_pct: 1 };
+    var activityRows = weightRows.filter(function (w) {
+      return !GOAL_KEYS[w.key] && !PARTICIPATION_HIDDEN_KEYS[w.key];
+    });
+    var banded = activityRows.filter(function (w) { return Number(w.sort_order) >= 200; });
     h += '<div class="ws-pset-section">';
     h += '<h4 class="ws-pset-h">🪙 Points per Activity</h4>';
-    PARTICIPATION_SETTINGS_GROUPS.forEach(function (g) {
-      var rows = g.items.filter(function (it) { return !!byKey[it.key]; });
-      if (rows.length === 0) return;
-      h += '<div class="ws-pset-group"><div class="ws-pset-grouptitle">' + escapeHtmlWs(g.title) + '</div>';
-      rows.forEach(function (it) {
-        h += '<div class="ws-pset-row"><label class="ws-pset-label">' + escapeHtmlWs(it.label) + '</label>' + inputHtml(it.key) + '</div>';
+    if (banded.length === 0) {
+      // DB predates the 2026-08-01 expansion (migration not yet run) —
+      // flat legacy render so the drawer still works.
+      h += '<div class="ws-pset-group">';
+      activityRows.forEach(function (w2) {
+        h += '<div class="ws-pset-row"><label class="ws-pset-label">' + escapeHtmlWs(w2.label) + '</label>' + inputHtml(w2.key) + '</div>';
       });
       h += '</div>';
-    });
+    } else {
+      PARTICIPATION_SETTINGS_BANDS.forEach(function (band, bi) {
+        var rows = banded.filter(function (w2) {
+          var so = Number(w2.sort_order);
+          return so >= band.min && so <= band.max;
+        });
+        if (rows.length === 0) return;
+        h += '<div class="ws-pset-group">';
+        h += '<button type="button" class="ws-pset-exempt-toggle ws-pset-band-toggle" aria-expanded="false" data-band="' + bi + '">'
+          + '<span class="ws-pset-caret">▶</span> ' + escapeHtmlWs(band.title)
+          + ' <span class="ws-pset-band-count">(' + rows.length + ')</span></button>';
+        h += '<div class="ws-pset-band-wrap" data-band-wrap="' + bi + '" hidden>';
+        if (band.desc) h += '<p class="ws-pset-desc">' + escapeHtmlWs(band.desc) + '</p>';
+        rows.forEach(function (w2) {
+          h += '<div class="ws-pset-row"><label class="ws-pset-label">' + escapeHtmlWs(w2.label) + '</label>' + inputHtml(w2.key) + '</div>';
+        });
+        h += '</div></div>';
+      });
+    }
     h += '</div>';
 
     // ── Preview + save bar ──
@@ -16829,6 +17075,19 @@
     h += '</div>';
 
     body.innerHTML = h;
+
+    // Band expand/collapse (same affordance as the Exemptions toggle).
+    body.querySelectorAll('.ws-pset-band-toggle').forEach(function (tog) {
+      tog.addEventListener('click', function () {
+        var wrap = body.querySelector('[data-band-wrap="' + tog.getAttribute('data-band') + '"]');
+        if (!wrap) return;
+        var open = wrap.hidden;
+        wrap.hidden = !open;
+        tog.setAttribute('aria-expanded', open ? 'true' : 'false');
+        var caret = tog.querySelector('.ws-pset-caret');
+        if (caret) caret.textContent = open ? '▼' : '▶';
+      });
+    });
 
     var saveBtn = body.querySelector('.ws-pset-save');
     var statusEl = body.querySelector('.ws-pset-status');
@@ -17132,7 +17391,7 @@
     }
     var members = _participationReport.members;
     var header = ['Member', 'Family', 'Board', 'Volunteer Roles', 'Board (count)', '1-yr Roles',
-      'AM Lead', 'AM Assist', 'PM Lead', 'PM Assist', 'Cleaning',
+      'AM Lead', 'AM Assist', 'PM Lead', 'PM Assist', 'Cleaning', 'Floater Slots',
       'Event Lead', 'Event Assist', 'Weighted Total', 'Expected', 'Coverage Given',
       'Absences', 'New', 'Exempt', 'Status'];
     var rows = [header];
@@ -17149,6 +17408,7 @@
         m.counts.pm_lead || 0,
         m.counts.pm_assist || 0,
         m.counts.cleaning_session || 0,
+        m.counts.floater_slot || 0,
         m.counts.event_lead || 0,
         m.counts.event_assist || 0,
         m.weightedTotal || 0,
@@ -17197,6 +17457,7 @@
         + '<td>' + (c.pm_lead || 0) + '</td>'
         + '<td>' + (c.pm_assist || 0) + '</td>'
         + '<td>' + (c.cleaning_session || 0) + '</td>'
+        + '<td>' + (c.floater_slot || 0) + '</td>'
         + '<td>' + (c.one_year_role || 0) + '</td>'
         + '<td>' + (c.event_lead || 0) + '</td>'
         + '<td>' + (c.event_assist || 0) + '</td>'
@@ -17212,13 +17473,13 @@
       + 'table{width:100%;border-collapse:collapse;}'
       + 'th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;}'
       + 'th{background:#eee;}'
-      + 'td:nth-child(n+2):nth-child(-n+12){text-align:right;}';
+      + 'td:nth-child(n+2):nth-child(-n+13){text-align:right;}';
     var html = '<!doctype html><html><head><meta charset="utf-8"><title>Member Participation — ' + escapeHtmlWs(report.season || '') + '</title><style>' + css + '</style></head><body>';
     html += '<h1>Member Participation Tracker</h1>';
     html += '<p class="sub">Season ' + escapeHtmlWs(report.season || '') + ' · ' + members.length + ' members · printed ' + new Date().toLocaleDateString() + '</p>';
     html += '<table><thead><tr>'
       + '<th>Member</th><th>AM Ld</th><th>AM As</th><th>PM Ld</th><th>PM As</th>'
-      + '<th>Clean</th><th>Roles</th><th>Evt Ld</th><th>Evt As</th>'
+      + '<th>Clean</th><th>Float</th><th>Roles</th><th>Evt Ld</th><th>Evt As</th>'
       + '<th>Wtd</th><th>Exp</th><th>Cov</th><th>Status</th>'
       + '</tr></thead><tbody>' + rows + '</tbody></table>';
     html += '</body></html>';
