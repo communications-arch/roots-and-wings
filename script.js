@@ -24565,18 +24565,24 @@
           if (String(loadedAbsences[i].id) === id) { absence = loadedAbsences[i]; break; }
         }
         if (!absence) return;
-        var claimedCount = 0;
-        (absence.slots || []).forEach(function (s) { if (s.claimed_by_email) claimedCount++; });
-        if (claimedCount > 0) {
-          if (!confirm('Heads up: ' + claimedCount + ' slot' + (claimedCount === 1 ? ' has' : 's have') + ' already been claimed for this absence. Saving changes will replace this absence entirely and those volunteers will be unassigned. Continue?')) return;
-        }
+        // #196: edits keep existing claims now (PATCH edit:true), so the
+        // old "volunteers will be unassigned" confirm() is gone — it was
+        // both false and a hard blocker for automation (native dialogs
+        // freeze the page for the Chrome extension). slots MUST ride the
+        // prefill: they seed the replacement pickers with the current
+        // claimants so saving doesn't read as "cleared".
         showAbsenceModal({
           id: absence.id,
           absent_person: absence.absent_person,
           absence_date: absence.absence_date,
           blocks: absence.blocks,
           notes: absence.notes,
-          session_number: absence.session_number
+          session_number: absence.session_number,
+          slots: absence.slots || [],
+          coverage_needed: absence.coverage_needed,
+          blc_name: absence.blc_name,
+          kids_absent: absence.kids_absent,
+          kids_adult: absence.kids_adult
         });
       });
     });
