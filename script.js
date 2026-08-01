@@ -607,6 +607,12 @@
       select.addEventListener('change', function () {
         if (this.value) sessionStorage.setItem(VIEW_AS_KEY, this.value);
         else sessionStorage.removeItem(VIEW_AS_KEY);
+        // Identity switch closes any open modal — its content belongs to
+        // the PREVIOUS identity, and abandoning it mid-render was the main
+        // way the body scroll lock leaked ("page refuses to scroll" gotcha,
+        // 2026-07-30; the watchdog at the bottom of the file is the
+        // backstop for any path this misses).
+        if (typeof closeDetail === 'function') closeDetail();
         // The previous identity's submissions must never paint into the
         // next family's duties ("Register New" repro, 2026-07-19: a
         // fresh family briefly inherited communications@'s scheduled
@@ -40114,6 +40120,37 @@
       }).catch(function () { /* non-fatal */ });
     }
   }
+
+  // ── Orphaned scroll-lock watchdog ──
+  // ~30 flows set document.body.style.overflow='hidden' while a modal is
+  // up; when a re-render (View-As switch, coverage reload, …) tears the
+  // modal down without its close handler running, the lock leaks and the
+  // page "refuses to scroll" (scrollTop pinned at 0 — the 2026-07-30
+  // gotcha). Every couple of seconds: if the body is locked but NO overlay
+  // is actually visible, release the lock and log which state we were in
+  // so the leaking flow can be identified from the console.
+  function rwScrollLockHeld() {
+    try {
+      if (personDetail && getComputedStyle(personDetail).display !== 'none') return true;
+      if (document.querySelector('.age-group-modal.active')) return true;
+      var kids = document.body.children;
+      for (var i = 0; i < kids.length; i++) {
+        var el = kids[i];
+        var mark = (el.id || '') + ' ' + (typeof el.className === 'string' ? el.className : '');
+        if (!/overlay|modal|lightbox|drawer|panel/i.test(mark)) continue;
+        var cs = getComputedStyle(el);
+        if (cs.display !== 'none' && cs.visibility !== 'hidden') return true;
+      }
+    } catch (e) { return true; } // when unsure, never yank a legit lock
+    return false;
+  }
+  setInterval(function () {
+    if (document.visibilityState !== 'visible') return;
+    if (document.body.style.overflow !== 'hidden') return;
+    if (rwScrollLockHeld()) return;
+    document.body.style.overflow = '';
+    console.warn('[perf] released an orphaned body scroll lock (no visible overlay) — if you saw the page refuse to scroll just before this, note what you last opened/closed');
+  }, 2000);
 
   // ── TEMP perf tracer (re-render freeze hunt, 2026-08-01) ──
   // The portal intermittently pegs the main thread for minutes after a
