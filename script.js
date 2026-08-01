@@ -40115,6 +40115,44 @@
     }
   }
 
+  // ── TEMP perf tracer (re-render freeze hunt, 2026-08-01) ──
+  // The portal intermittently pegs the main thread for minutes after a
+  // heavy re-render (View-As switch, post-absence-save board reload —
+  // session notes 07-29/30). Long-task observer + timing wrappers on the
+  // suspected hot paths attribute the burn; console-only ([perf] prefix),
+  // remove once the freeze is fixed.
+  try {
+    if (window.PerformanceObserver) {
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (e.duration >= 250) console.warn('[perf] longtask ' + Math.round(e.duration) + 'ms @' + Math.round(e.startTime));
+        });
+      }).observe({ entryTypes: ['longtask'] });
+    }
+  } catch (perfObsErr) { /* older browser — wrappers below still report */ }
+  function rwPerfWrap(name, fn) {
+    return function () {
+      var t0 = (window.performance && performance.now) ? performance.now() : 0;
+      try { return fn.apply(this, arguments); }
+      finally {
+        var dt = ((window.performance && performance.now) ? performance.now() : 0) - t0;
+        if (dt >= 50) console.warn('[perf] ' + name + ' ' + Math.round(dt) + 'ms');
+      }
+    };
+  }
+  try {
+    renderMyFamilyNow = rwPerfWrap('renderMyFamilyNow', renderMyFamilyNow);
+    renderDirectory = rwPerfWrap('renderDirectory', renderDirectory);
+    renderCoverageBoard = rwPerfWrap('renderCoverageBoard', renderCoverageBoard);
+    renderMyAbsences = rwPerfWrap('renderMyAbsences', renderMyAbsences);
+    renderWorkspaceTab = rwPerfWrap('renderWorkspaceTab', renderWorkspaceTab);
+    renderCoordinationTabs = rwPerfWrap('renderCoordinationTabs', renderCoordinationTabs);
+    applySheetsData = rwPerfWrap('applySheetsData', applySheetsData);
+    syncMyAbsenceSlots = rwPerfWrap('syncMyAbsenceSlots', syncMyAbsenceSlots);
+    getResponsibilitiesForBlocks = rwPerfWrap('getResponsibilitiesForBlocks', getResponsibilitiesForBlocks);
+    collectOpenSeats = rwPerfWrap('collectOpenSeats', collectOpenSeats);
+  } catch (perfWrapErr) { console.error('[perf] wrap failed:', perfWrapErr); }
+
 })();
 
 // ──────────────────────────────────────────────
