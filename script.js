@@ -23308,8 +23308,12 @@
     var dates = [];
     var d = new Date(sess.start + 'T12:00:00');
     var end = new Date(sess.end + 'T12:00:00');
+    // A session with a missing/garbled date would spin the day-of-week
+    // walk forever (Invalid Date's getDay() is NaN) and hang the whole
+    // portal — treat it as having no dates instead.
+    if (isNaN(d.getTime()) || isNaN(end.getTime())) return [];
     while (d.getDay() !== COOP_DAY_OF_WEEK) d.setDate(d.getDate() + 1);
-    while (d <= end) {
+    while (d <= end && dates.length < 60) {
       dates.push(d.toISOString().slice(0, 10));
       d.setDate(d.getDate() + 7);
     }
