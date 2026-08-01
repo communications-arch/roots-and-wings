@@ -5,6 +5,11 @@
 // POST   /api/absences                 → report an absence (creates coverage slots + notifications)
 // PATCH  /api/absences?id=N            → add missing coverage slots to an existing absence
 //                                        (responsibilities picked after the dates were reported)
+// PATCH  /api/absences?id=N {edit:true}→ full in-place edit (#196, Colleen: the old
+//                                        DELETE+re-POST edit wiped every claim). Updates the
+//                                        absence fields and RECONCILES slots against the sent
+//                                        list — matching slots keep their rows (and claims),
+//                                        removed ones are deleted, new ones inserted.
 // DELETE /api/absences?id=N            → cancel an absence (soft-delete)
 
 const { neon } = require('@neondatabase/serverless');
@@ -57,7 +62,43 @@ function getSql() {
   return neon(process.env.DATABASE_URL);
 }
 
-const VALID_BLOCKS = ['AM', 'PM1', 'PM2', 'Cleaning'];
+// #198 (Colleen): the morning is TWO volunteer slots — AM1 (10:00–10:55)
+// and AM2 (11:00–11:55) — matching My Responsibilities. Legacy 'AM'
+// (whole-morning) stays valid so pre-split absences keep working.
+const VALID_BLOCKS = ['AM', 'AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'];
+
+// Mark a slot covered by the member the reporter named (#179): resolve the
+// name to an email best-effort, stamp the claim, and send them a personal
+// heads-up. Returns true when the slot ended up claimed with an email
+// (false = name didn't resolve; slot stays open for the board).
+async function preassignSlot(sql, user, absence, slotId, role_description, replName) {
+  const pr = await sql`
+    SELECT email, personal_email FROM people
+    WHERE LOWER(TRIM(CONCAT_WS(' ', first_name, last_name))) = ${replName.toLowerCase()}
+    LIMIT 1`;
+  const replEmail = pr.length ? String(pr[0].email || pr[0].personal_email || '').toLowerCase() : '';
+  await sql`
+    UPDATE coverage_slots
+    SET claimed_by_email = ${replEmail}, claimed_by_name = ${replName},
+        claimed_at = NOW(), assigned_by = ${user.realEmail || user.email}
+    WHERE id = ${slotId}`;
+  if (!replEmail) return false;
+  // absence_date is a string on the POST path, a Date when read from the
+  // DB (edit path) — same normalization as notifyCoverageNeeded.
+  const rIso = absence.absence_date instanceof Date
+    ? absence.absence_date.toISOString().slice(0, 10)
+    : String(absence.absence_date || '').slice(0, 10);
+  const rDate = new Date(rIso + 'T12:00:00')
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const rTitle = 'You’re covering — ' + rDate;
+  const rBody = absence.absent_person + ' put you down for: ' + role_description + '. Not able to? Open the Coverage Board to release it.';
+  await sql`
+    INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+    VALUES (${replEmail}, 'slot_reassigned', ${rTitle}, ${rBody}, '#coverage', ${absence.id})`;
+  try { await sendToUser(sql, replEmail, { title: rTitle, body: rBody, tag: 'preassign-' + slotId, url: '/members.html#coverage' }); }
+  catch (pushErr) { console.error('preassign push (non-fatal):', pushErr); }
+  return true;
+}
 
 // #169: bell + push heads-up to the absent family's kids' teachers.
 // Morning teacher = the group's scheduled AM class for this session
@@ -375,27 +416,9 @@ module.exports = async function handler(req, res) {
         const replName = String(slot.replacement_name || '').trim().slice(0, 120);
         if (!replName) { openSlots.push(slotRow); continue; }
         try {
-          const pr = await sql`
-            SELECT email, personal_email FROM people
-            WHERE LOWER(TRIM(CONCAT_WS(' ', first_name, last_name))) = ${replName.toLowerCase()}
-            LIMIT 1`;
-          const replEmail = pr.length ? String(pr[0].email || pr[0].personal_email || '').toLowerCase() : '';
-          await sql`
-            UPDATE coverage_slots
-            SET claimed_by_email = ${replEmail}, claimed_by_name = ${replName},
-                claimed_at = NOW(), assigned_by = ${user.realEmail || user.email}
-            WHERE id = ${ins[0].id}`;
-          if (replEmail) {
-            const rDate = new Date(String(absence_date).slice(0, 10) + 'T12:00:00')
-              .toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const rTitle = 'You’re covering — ' + rDate;
-            const rBody = absent_person + ' put you down for: ' + role_description + '. Not able to? Open the Coverage Board to release it.';
-            await sql`
-              INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
-              VALUES (${replEmail}, 'slot_reassigned', ${rTitle}, ${rBody}, '#coverage', ${absenceId})`;
-            try { await sendToUser(sql, replEmail, { title: rTitle, body: rBody, tag: 'preassign-' + ins[0].id, url: '/members.html#coverage' }); }
-            catch (pushErr) { console.error('preassign push (non-fatal):', pushErr); }
-          }
+          await preassignSlot(sql, user,
+            { id: absenceId, absence_date, absent_person },
+            ins[0].id, role_description, replName);
         } catch (replErr) {
           // Name didn't resolve or the update failed — slot stays open.
           console.error('replacement pre-assign (non-fatal):', replErr);
@@ -426,11 +449,14 @@ module.exports = async function handler(req, res) {
     if (req.method === 'PATCH') {
       const id = parseInt(req.query.id, 10);
       if (!id) return res.status(400).json({ error: 'id query param required' });
-      const slotsData = Array.isArray((req.body || {}).slots) ? req.body.slots : [];
-      if (slotsData.length === 0) return res.status(400).json({ error: 'slots required' });
+      const body = req.body || {};
+      const isEdit = body.edit === true;
+      const slotsData = Array.isArray(body.slots) ? body.slots : [];
+      if (!isEdit && slotsData.length === 0) return res.status(400).json({ error: 'slots required' });
 
       const rows = await sql`
-        SELECT id, family_email, absent_person, absence_date, created_by
+        SELECT id, family_email, family_name, absent_person, session_number, absence_date,
+               blocks, notes, created_by, coverage_needed, blc_name, kids_absent, kids_adult
         FROM absences WHERE id = ${id} AND cancelled_at IS NULL
       `;
       if (rows.length === 0) return res.status(404).json({ error: 'Absence not found' });
@@ -444,6 +470,171 @@ module.exports = async function handler(req, res) {
         || (await canActAs(sql, user.email, absence.family_email));
       if (!isOwner && !(await isVP(user.email))) {
         return res.status(403).json({ error: 'Not authorized to update this absence' });
+      }
+
+      // ── Full edit (#196) ──
+      if (isEdit) {
+        const absent_person = String(body.absent_person || absence.absent_person).trim();
+        const session_number = parseInt(body.session_number, 10) || absence.session_number;
+        const absence_date = String(body.absence_date || '').trim();
+        const blocks = Array.isArray(body.blocks) ? body.blocks.filter(b => VALID_BLOCKS.includes(b)) : [];
+        const notes = String(body.notes || '').trim().slice(0, 500);
+        const coverageNeeded = body.coverage_needed !== false;
+        const blcName = String(body.blc_name || '').trim().slice(0, 120);
+        const kidsAbsent = typeof body.kids_absent === 'boolean' ? body.kids_absent : null;
+        const kidsAdult = String(body.kids_adult || '').trim().slice(0, 120);
+        if (!absence_date || blocks.length === 0) {
+          return res.status(400).json({ error: 'absence_date and blocks required' });
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(absence_date)) {
+          return res.status(400).json({ error: 'Invalid date format' });
+        }
+        if (new Date(absence_date + 'T12:00:00').getDay() !== 3) {
+          return res.status(400).json({ error: 'absence_date must be a Wednesday' });
+        }
+
+        await sql`
+          UPDATE absences
+          SET absent_person = ${absent_person}, session_number = ${session_number},
+              absence_date = ${absence_date}, blocks = ${blocks}, notes = ${notes},
+              coverage_needed = ${coverageNeeded}, blc_name = ${coverageNeeded ? '' : blcName},
+              kids_absent = ${kidsAbsent}, kids_adult = ${kidsAbsent === false ? kidsAdult : ''}
+          WHERE id = ${id}
+        `;
+
+        // Kids' teachers hear about it when the answer FLIPS to yes —
+        // an unchanged yes was already announced at POST time.
+        if (kidsAbsent === true && absence.kids_absent !== true) {
+          try {
+            await notifyKidTeachers(sql, {
+              familyEmail: String(absence.family_email || '').toLowerCase(),
+              familyName: absence.family_name,
+              sessionNumber: session_number,
+              absenceDate: absence_date,
+              absenceId: id
+            });
+          } catch (ntErr) { console.error('kid-teacher notify (non-fatal):', ntErr); }
+        }
+
+        const existingSlots = await sql`
+          SELECT id, block, role_type, role_description, claimed_by_email, claimed_by_name
+          FROM coverage_slots WHERE absence_id = ${id} ORDER BY id
+        `;
+
+        // No coverage needed → this absence carries no slots at all, and
+        // any Coverage-Needed bells for it are stale.
+        if (!coverageNeeded) {
+          for (const s of existingSlots) {
+            if (s.claimed_by_email) {
+              try {
+                await sql`
+                  INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+                  VALUES (${s.claimed_by_email}, 'slot_reassigned', 'Coverage no longer needed',
+                          ${absent_person + ' updated their absence — you no longer need to cover: ' + s.role_description},
+                          '#coverage', ${id})`;
+              } catch (nErr) { console.error('release notify (non-fatal):', nErr); }
+            }
+          }
+          await sql`DELETE FROM coverage_slots WHERE absence_id = ${id}`;
+          await sql`DELETE FROM notifications WHERE type = 'coverage_needed' AND related_absence_id = ${id}`;
+          const noneLeft = await sql`SELECT * FROM absences WHERE id = ${id}`;
+          const outAbs0 = noneLeft[0]; outAbs0.slots = [];
+          return res.status(200).json({ ok: true, id, absence: outAbs0 });
+        }
+
+        // Reconcile slots. Match sent slots to existing rows so claims
+        // survive: exact block|type|description first, then a legacy
+        // whole-morning row ('AM') matches its AM1/AM2 successor with the
+        // same type+description (the first one to ask gets it).
+        const unmatched = existingSlots.slice();
+        function takeMatch(block, role_type, role_description) {
+          let idx = unmatched.findIndex(s => s.block === block && s.role_type === role_type && s.role_description === role_description);
+          if (idx === -1 && (block === 'AM1' || block === 'AM2')) {
+            idx = unmatched.findIndex(s => s.block === 'AM' && s.role_type === role_type && s.role_description === role_description);
+          }
+          if (idx === -1) return null;
+          return unmatched.splice(idx, 1)[0];
+        }
+        const openNew = [];
+        const seenKeys = new Set();
+        for (const slot of slotsData) {
+          const block = String(slot.block || '').trim();
+          const role_type = String(slot.role_type || '').trim();
+          const role_description = String(slot.role_description || '').trim();
+          const group_or_class = String(slot.group_or_class || '').trim();
+          const replName = String(slot.replacement_name || '').trim().slice(0, 120);
+          if (!block || !role_type || !role_description) continue;
+          if (!VALID_BLOCKS.includes(block)) continue;
+          const key = block + '|' + role_type + '|' + role_description;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          const match = takeMatch(block, role_type, role_description);
+          if (match) {
+            if (match.block !== block) {
+              await sql`UPDATE coverage_slots SET block = ${block} WHERE id = ${match.id}`;
+            }
+            if (match.claimed_by_email || match.claimed_by_name) {
+              if (!replName) {
+                // Picker actively cleared — release the claim back to open.
+                await sql`
+                  UPDATE coverage_slots
+                  SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
+                  WHERE id = ${match.id}`;
+                openNew.push({ block, role_type, role_description });
+              } else if (replName !== match.claimed_by_name) {
+                try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, role_description, replName); }
+                catch (replErr) { console.error('edit reassign (non-fatal):', replErr); }
+              }
+              // Same name → untouched; the claim (and its email) survives.
+            } else if (replName) {
+              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, role_description, replName); }
+              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); }
+            }
+          } else {
+            const ins = await sql`
+              INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
+              VALUES (${id}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
+              RETURNING id
+            `;
+            if (replName) {
+              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, ins[0].id, role_description, replName); }
+              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); openNew.push({ block, role_type, role_description }); }
+            } else {
+              openNew.push({ block, role_type, role_description });
+            }
+          }
+        }
+        // Whatever the edit no longer covers goes away; a claimant who had
+        // stepped up gets told they're off the hook.
+        for (const s of unmatched) {
+          if (s.claimed_by_email) {
+            try {
+              await sql`
+                INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
+                VALUES (${s.claimed_by_email}, 'slot_reassigned', 'Coverage no longer needed',
+                        ${absent_person + ' updated their absence — you no longer need to cover: ' + s.role_description},
+                        '#coverage', ${id})`;
+            } catch (nErr) { console.error('release notify (non-fatal):', nErr); }
+          }
+          await sql`DELETE FROM coverage_slots WHERE id = ${s.id}`;
+        }
+        // Broadcast only when a previously silent absence first gains open
+        // slots — same rule as the add-slots path below.
+        if (existingSlots.length === 0 && openNew.length > 0) {
+          await notifyCoverageNeeded(sql, { id, absence_date, absent_person, family_email: absence.family_email }, openNew);
+        }
+        const fullAbs = await sql`SELECT * FROM absences WHERE id = ${id}`;
+        const outSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
+        const outAbs = fullAbs[0]; outAbs.slots = outSlots;
+        return res.status(200).json({ ok: true, id, absence: outAbs });
+      }
+
+      // ── Add-missing-slots (reconciler) ──
+      // #197 (Colleen): a backup-coach-covered absence needs NO coverage —
+      // the client reconciler used to see its zero slots and "helpfully"
+      // re-add them, putting the absence back on the board.
+      if (absence.coverage_needed === false) {
+        return res.status(409).json({ error: 'This absence is covered by a backup learning coach — no coverage slots needed' });
       }
 
       const existing = await sql`

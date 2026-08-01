@@ -3092,6 +3092,25 @@
     return y + '-' + m + '-' + day;
   }
 
+  // The next day co-op actually MEETS per the session calendar — unlike
+  // getNextCoopDate (naive next-Wednesday), this skips break weeks and
+  // the summer gap. Falls back to next-Wednesday when SESSION_DATES has
+  // nothing upcoming (#199 — scopes the My Responsibilities coverage rows).
+  function getNextCoopCalendarDate() {
+    var today = new Date().toISOString().slice(0, 10);
+    try {
+      var sessions = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; });
+      for (var i = 0; i < sessions.length; i++) {
+        if (sessions[i] < currentSession) continue;
+        var dates = getCoopDatesInSession(sessions[i]);
+        for (var j = 0; j < dates.length; j++) {
+          if (dates[j] >= today) return dates[j];
+        }
+      }
+    } catch (e) { /* fall through */ }
+    return getNextCoopDate();
+  }
+
   // Printable Allergies & Medical list (DR binder / co-op day paper copy).
   // One row per person with something recorded: name, kid/adult + group,
   // family, phone, and the full allergy/medical text. openPrintIframe per
@@ -7195,6 +7214,11 @@
     // Coverage Board renders the same way.
     try {
       var todayIsoCov = new Date().toISOString().slice(0, 10);
+      // #199 (Colleen): the block rows describe the NEXT co-op day — a
+      // claim for a later date shouldn't sit in AM1/AM2 as if it were this
+      // week's duty. Claims dated past the next co-op day collect in their
+      // own "Later" section instead (still cancellable from there).
+      var nextCoopIsoCov = (typeof getNextCoopCalendarDate === 'function') ? getNextCoopCalendarDate() : todayIsoCov;
       (loadedAbsences || []).forEach(function (a) {
         var absDate = String(a.absence_date || '').slice(0, 10);
         if (!absDate || absDate < todayIsoCov) return;
@@ -7210,7 +7234,8 @@
             ? String(s.claimed_by_email).toLowerCase() === String(email || '').toLowerCase()
             : parentFullNames.some(function (full) { return nameMatch(s.claimed_by_name, full); });
           if (!mine) return;
-          var blk = (s.block === 'AM' || s.block === 'PM1' || s.block === 'PM2' || s.block === 'Cleaning') ? s.block : 'AM';
+          var blk = (['AM', 'AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'].indexOf(s.block) !== -1) ? s.block : 'AM';
+          if (absDate > nextCoopIsoCov) blk = 'covLater';
           var icon = s.role_type === 'teacher' ? 'teach' : s.role_type === 'cleaning' ? 'clean' : 'assist';
           var absentPerson = a.absent_person || 'a member';
           var dateLbl = formatDateLabel(absDate).replace(/^\w+,\s*/, '');
@@ -7429,11 +7454,14 @@
     // ── Render by section ──
     // One flow in day order (Erin, 2026-07-11): Morning, both Afternoon
     // hours, Cleaning Crew, Annual Roles, then the 2-year board roles.
-    var blockOrder = ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning', 'annual', 'twoyear'];
+    // covLater = coverage claims for dates past the next co-op day (#199) \u2014
+    // they get their own section instead of masquerading as this week's
+    // block duties.
+    var blockOrder = ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning', 'covLater', 'annual', 'twoyear'];
 
     // Short gutter labels (design pass 2026-07-11): name + start time
     // only \u2014 full time ranges already live in the duty subtitles.
-    var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Clean', annual: 'Annual', twoyear: '2-Yr' };
+    var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Clean', covLater: 'Later', annual: 'Annual', twoyear: '2-Yr' };
 
     // Helper to render a single duty row
     function renderDutyRow(d, globalIdx) {
@@ -23322,6 +23350,46 @@
     return titles;
   }
 
+  // #198 (Colleen): the Absence Alert works in HOUR blocks — AM1
+  // (10:00–10:55) and AM2 (11:00–11:55) are two separate volunteer slots,
+  // matching My Responsibilities. getResponsibilitiesForBlocks still
+  // returns whole-morning 'AM' slots (the sheet/DB duty sources are
+  // morning-scoped); this maps them onto the hour blocks the caller
+  // selected. Hour-specific duties (floaters, preps, AM1/AM2-scheduled
+  // submissions) land in their own hour via the time range in their
+  // description; everything else spans the whole morning, so it becomes
+  // one slot PER selected hour. Callers still working in whole-morning
+  // terms (legacy absences whose blocks contain 'AM') get slots passed
+  // through untouched. Pure — extracted by scripts/test-absence-blocks.js.
+  function absExpandMorningSlots(slots, blocks) {
+    function hasRange(desc, a, b) {
+      return new RegExp('(^|[^0-9])' + a + '(:[0-5][0-9])?\\s*[\\u2013\\u2014-]\\s*' + b + '(:[0-5][0-9])?').test(desc);
+    }
+    var wantAM = blocks.indexOf('AM') !== -1;
+    var out = [];
+    (slots || []).forEach(function (s) {
+      if (s.block !== 'AM') {
+        if (blocks.indexOf(s.block) !== -1) out.push(s);
+        return;
+      }
+      if (wantAM) { out.push(s); return; }
+      var d = String(s.role_description || '');
+      var h1 = hasRange(d, '10', '11');
+      var h2 = hasRange(d, '11', '12');
+      // Building Opener is an unlock-and-set-up duty — first hour only.
+      if (s.role_type === 'opener') { h1 = true; h2 = false; }
+      var hours = (h1 && !h2) ? ['AM1'] : (h2 && !h1) ? ['AM2'] : ['AM1', 'AM2'];
+      hours.forEach(function (hb) {
+        if (blocks.indexOf(hb) === -1) return;
+        var copy = {};
+        Object.keys(s).forEach(function (k) { copy[k] = s[k]; });
+        copy.block = hb;
+        out.push(copy);
+      });
+    });
+    return out;
+  }
+
   function getResponsibilitiesForBlocks(parentFullNames, session, blocks, familyName, fam) {
     var slots = [];
     function has(b) { return blocks.indexOf(b) !== -1; }
@@ -23482,8 +23550,20 @@
     var selectedSession = (prefillSession && sessionChoices.indexOf(prefillSession) !== -1) ? prefillSession : sessionChoices[0];
 
     var parentNames = me.parents.split(' & ').map(function (p) { return p.trim() + ' ' + me.name; });
-    var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
-    var blockLabelsModal = { AM: 'AM (10:00\u201312:00)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
+    // #198 (Colleen): AM1 and AM2 are two separate volunteer slots, same as
+    // My Responsibilities. Legacy absences saved with a whole-morning 'AM'
+    // block map onto both hours when edited (mapLegacyBlocks below).
+    var allBlocks = ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'];
+    var blockLabelsModal = { AM1: 'AM1 (10:00\u201310:55)', AM2: 'AM2 (11:00\u201311:55)', PM1: 'PM1 (1:00\u20131:55)', PM2: 'PM2 (2:00\u20132:55)', Cleaning: 'Cleaning' };
+    function mapLegacyBlocks(bs) {
+      var out = [];
+      (bs || []).forEach(function (b) {
+        (b === 'AM' ? ['AM1', 'AM2'] : [b]).forEach(function (x) {
+          if (allBlocks.indexOf(x) !== -1 && out.indexOf(x) === -1) out.push(x);
+        });
+      });
+      return out;
+    }
 
     function escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -23555,14 +23635,23 @@
     // Selections keyed by block|description so they survive re-renders.
     var _absRepl = {};
     (prefill && Array.isArray(prefill.slots) ? prefill.slots : []).forEach(function (s) {
-      if (s && s.claimed_by_name) _absRepl[s.block + '|' + s.role_description] = s.claimed_by_name;
+      if (!s || !s.claimed_by_name) return;
+      _absRepl[s.block + '|' + s.role_description] = s.claimed_by_name;
+      // Legacy whole-morning slots re-render as AM1/AM2 rows — seed both
+      // hour keys so the claim survives the split.
+      if (s.block === 'AM') {
+        _absRepl['AM1|' + s.role_description] = s.claimed_by_name;
+        _absRepl['AM2|' + s.role_description] = s.claimed_by_name;
+      }
     });
-    var ABS_GENERIC_LABEL = { AM: 'Morning (10:00–12:00)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning' };
+    var ABS_GENERIC_LABEL = { AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning' };
     // Volunteer sign-ups (assists, floater, board, prep — Erin 2026-07-31,
     // Alice/PM1 Prep Period) live in the DB matrix, keyed to the ACTIVE
     // person + session; fetched per session and merged into effectiveSlots.
-    var VOL_ABS_BLOCK = { AM1: 'AM', AM2: 'AM', PM1: 'PM1', PM2: 'PM2' };
-    var VOL_ABS_TIME = { AM1: '10:00–11:00', AM2: '11:00–12:00', PM1: '1:00–1:55', PM2: '2:00–2:55' };
+    // Matrix hour keys map straight onto the modal's hour blocks now
+    // (#198); a legacy whole-morning 'AM' pledge covers both hours.
+    var VOL_ABS_BLOCK = { AM1: ['AM1'], AM2: ['AM2'], PM1: ['PM1'], PM2: ['PM2'], AM: ['AM1', 'AM2'] };
+    var VOL_ABS_TIME = { AM1: '10:00–10:55', AM2: '11:00–11:55', PM1: '1:00–1:55', PM2: '2:00–2:55' };
     var _absActiveP = getActivePerson(me);
     var _absActiveFull = _absActiveP ? personFullName(_absActiveP, me) : '';
     var _absVolMine = null, _absVolSession = null, _absTouched = false;
@@ -23594,26 +23683,50 @@
       Object.keys(_absVolMine).forEach(function (bk) {
         var m = _absVolMine[bk];
         if (!m) return;
-        var ab = VOL_ABS_BLOCK[bk] || bk;
-        if (blocks.indexOf(ab) === -1) return;
-        var cls = (String(m.label || '').match(/“(.+)”/) || [])[1] || '';
-        out.push({
-          block: ab,
-          role_type: m.kind === 'lead' ? 'teacher' : m.kind === 'assist' ? 'assistant' : m.kind,
-          role_description: String(m.label || '') + ' ' + (VOL_ABS_TIME[bk] || ''),
-          group_or_class: cls
+        (VOL_ABS_BLOCK[bk] || [bk]).forEach(function (ab) {
+          if (blocks.indexOf(ab) === -1) return;
+          var cls = (String(m.label || '').match(/“(.+)”/) || [])[1] || '';
+          out.push({
+            block: ab,
+            role_type: m.kind === 'lead' ? 'teacher' : m.kind === 'assist' ? 'assistant' : m.kind,
+            role_description: String(m.label || '') + ' ' + (VOL_ABS_TIME[bk] || VOL_ABS_TIME[ab] || ''),
+            group_or_class: cls
+          });
         });
       });
       return out;
     }
     function effectiveSlots() {
       var blocks = getSelectedBlocks();
-      var slots = getResponsibilitiesForBlocks([selectedPerson], selectedSession, blocks, me.name, me);
+      // The duty sources work in whole-morning terms — look up with 'AM'
+      // whenever either morning hour is selected, then split the results
+      // onto the selected hour blocks (#198).
+      var rawBlocks = [];
+      blocks.forEach(function (b) {
+        var rb = (b === 'AM1' || b === 'AM2') ? 'AM' : b;
+        if (rawBlocks.indexOf(rb) === -1) rawBlocks.push(rb);
+      });
+      var slots = absExpandMorningSlots(
+        getResponsibilitiesForBlocks([selectedPerson], selectedSession, rawBlocks, me.name, me), blocks);
       // DB sign-ups ride along; class rows the scan already found (sheet or
       // submission) win over the matrix's lead/assist duplicate.
       volMineSlots(blocks).forEach(function (v) {
-        if (v.group_or_class && slots.some(function (s) { return s.group_or_class === v.group_or_class; })) return;
+        if (v.group_or_class && slots.some(function (s) { return s.block === v.block && s.group_or_class === v.group_or_class; })) return;
         slots.push(v);
+      });
+      // Editing: the SAVED slots are the source of truth for what's already
+      // on the board (claims included) — merge any the scan didn't
+      // regenerate so nothing silently disappears on save (#196). Legacy
+      // whole-morning rows display under the first selected morning hour.
+      (editingAbsenceId && prefill && Array.isArray(prefill.slots) ? prefill.slots : []).forEach(function (ps) {
+        if (!ps || !ps.role_description) return;
+        var pb = ps.block;
+        if (pb === 'AM') {
+          pb = blocks.indexOf('AM1') !== -1 ? 'AM1' : (blocks.indexOf('AM2') !== -1 ? 'AM2' : null);
+        }
+        if (!pb || blocks.indexOf(pb) === -1) return;
+        if (slots.some(function (s) { return s.role_type === ps.role_type && s.role_description === ps.role_description && s.block === pb; })) return;
+        slots.push({ block: pb, role_type: ps.role_type, role_description: ps.role_description, group_or_class: ps.group_or_class || '' });
       });
       // #187 (Erin): Prep Periods don't need coverage — drop their slots,
       // but remember the block HAD a real duty so it doesn't grow a
@@ -23687,17 +23800,15 @@
       // (legacy non-Wednesday dates) \u2014 surface it at the top.
       if (prefillDate && isPrefillSession && coopDates.indexOf(prefillDate) === -1) coopDates.unshift(prefillDate);
 
-      // Which blocks does this family have duties in, for THIS session?
-      var allSlots = getResponsibilitiesForBlocks(parentNames, selectedSession, allBlocks, me.name, me);
-      var activeBlocks = {};
-      allSlots.forEach(function (s) { activeBlocks[s.block] = true; });
-      volMineSlots(allBlocks, true).forEach(function (s) { activeBlocks[s.block] = true; });
-      var hasAnyDuties = Object.keys(activeBlocks).length > 0;
-      var activeBlockList = allBlocks.filter(function (b) { return activeBlocks[b]; });
-      var initialChecked = (prefillBlocks && isPrefillSession)
-        ? prefillBlocks.filter(function (b) { return activeBlocks[b]; })
-        : activeBlockList.slice();
-      var wholeDayChecked = activeBlockList.length > 0 && activeBlockList.every(function (b) { return initialChecked.indexOf(b) !== -1; });
+      // #195 (Colleen): NOTHING pre-checks from the schedule — absences are
+      // often filed far ahead, before classes/jobs exist, so pre-marking
+      // "what's scheduled today" misleads. The member ticks what they'll
+      // miss; each ticked block then shows its scheduled duty if one is on
+      // file, or a general spot if not. Editing restores the saved blocks.
+      var hasAnyDuties = getResponsibilitiesForBlocks(parentNames, selectedSession, ['AM', 'PM1', 'PM2', 'Cleaning'], me.name, me).length > 0
+        || volMineSlots(allBlocks, true).length > 0;
+      var initialChecked = (prefillBlocks && isPrefillSession) ? mapLegacyBlocks(prefillBlocks) : [];
+      var wholeDayChecked = allBlocks.every(function (b) { return initialChecked.indexOf(b) !== -1; });
 
       var h = '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
       if (coopDates.length === 0) {
@@ -23720,9 +23831,9 @@
       // the hint teaches that flow; the Alert is the formal tracking.
       h += '<p class="ws-body-hint" id="absenceReplHint" style="margin:2px 0 4px;">Most coverage is arranged ahead of time in Chat \u2014 often an adult whose class can spare them clears it with their lead, then offers to cover you. Pick them below to make it official (they\u2019ll get a heads-up). Spots left blank go to the Coverage Board for anyone to claim.</p>';
       h += '<div class="absence-blocks">';
-      h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked || !hasAnyDuties ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
+      h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
       allBlocks.forEach(function (blk) {
-        var checked = hasAnyDuties ? (initialChecked.indexOf(blk) !== -1) : true;
+        var checked = initialChecked.indexOf(blk) !== -1;
         h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
         // Erin 2026-07-31: this block's coverage rows paint here, inline
         // under its own checkbox (updatePreview fills it).
@@ -23822,27 +23933,23 @@
       var notesVal = (document.getElementById('absenceNotes') || {}).value || '';
       var originalLabel = editingAbsenceId ? 'Save Changes' : 'Submit \u2014 I\'m Out';
 
-      function doPost() {
-        return fetch('/api/absences', {
-          method: 'POST',
-          // rwAuthHeaders carries X-View-As (#171): a tester/super user
-          // acting as a family files under that family's identity — the
-          // plain Bearer header alone 403'd the ownership gate.
-          headers: rwAuthHeaders(true),
-          body: JSON.stringify({ absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal, coverage_needed: covNeeded, blc_name: covNeeded ? '' : blcName, kids_absent: kidsAbsent, kids_adult: kidsAbsent ? '' : kidsAdult })
-        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
-      }
-
-      var chain;
-      if (editingAbsenceId) {
-        chain = fetch('/api/absences?id=' + encodeURIComponent(editingAbsenceId), {
-          method: 'DELETE',
-          headers: rwAuthHeaders()
-        }).then(function (r) { return r.json().catch(function () { return {}; }); })
-          .then(function () { return doPost(); });
-      } else {
-        chain = doPost();
-      }
+      var payload = { absent_person: selectedPerson, family_email: me.email, family_name: me.name, session_number: selectedSession, absence_date: selectedDate, blocks: blocks, slots: slotsToSend, notes: notesVal, coverage_needed: covNeeded, blc_name: covNeeded ? '' : blcName, kids_absent: kidsAbsent, kids_adult: kidsAbsent ? '' : kidsAdult };
+      // rwAuthHeaders carries X-View-As (#171): a tester/super user acting
+      // as a family files under that family's identity — the plain Bearer
+      // header alone 403'd the ownership gate.
+      // #196 (Colleen): edits PATCH the absence IN PLACE — the old
+      // DELETE + re-POST wiped every claim members had already arranged.
+      var chain = editingAbsenceId
+        ? fetch('/api/absences?id=' + encodeURIComponent(editingAbsenceId), {
+            method: 'PATCH',
+            headers: rwAuthHeaders(true),
+            body: JSON.stringify(Object.assign({ edit: true }, payload))
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); })
+        : fetch('/api/absences', {
+            method: 'POST',
+            headers: rwAuthHeaders(true),
+            body: JSON.stringify(payload)
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
 
       chain.then(function (res) {
         if (!res.ok) {
@@ -24379,6 +24486,10 @@
       var totalSlots = (a.slots || []).length;
       (a.slots || []).forEach(function (s) { if (s.claimed_by_email) coveredCount++; });
       var statusText = totalSlots === 0 ? '' : coveredCount === totalSlots ? ' \u2014 all covered' : ' \u2014 ' + (totalSlots - coveredCount) + ' slot' + ((totalSlots - coveredCount) === 1 ? '' : 's') + ' open';
+      // #197: say out loud that a BLC-covered absence needs nothing.
+      if (a.coverage_needed === false) {
+        statusText = ' \u2014 backup coach' + (a.blc_name ? ' ' + a.blc_name : '') + ' covering, no coverage needed';
+      }
 
       html += '<div class="my-absence-row">';
       html += '<div class="my-absence-info">';
@@ -24489,24 +24600,40 @@
       var cred = localStorage.getItem('rw_google_credential');
       if (!cred) return;
       var todayIso = new Date().toISOString().slice(0, 10);
-      var allBlocks = ['AM', 'PM1', 'PM2', 'Cleaning'];
       function slotKey(s) { return s.block + '|' + s.role_type + '|' + s.role_description; }
 
       var pending = [];
       loadedAbsences.forEach(function (a) {
         if (a.cancelled_at || a.family_email !== me.email) return;
+        // #197 (Colleen): a backup-learning-coach-covered absence needs NO
+        // coverage — never backfill slots onto it (the server refuses too).
+        if (a.coverage_needed === false) return;
         var absDate = String(a.absence_date || '').slice(0, 10);
         if (!absDate || absDate < todayIso) return;
-        // Zero-slot absences were recorded as informational whole-day outs,
-        // so reconcile them against every block; absences that already have
-        // slots stick to the blocks the member actually picked.
-        var blocks = (a.slots && a.slots.length > 0) ? (a.blocks || []) : allBlocks;
-        var expected = getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, blocks, me.name, me)
+        // Zero-slot absences stick to the blocks the member picked in the
+        // modal (blocks are always saved); legacy rows with no blocks at
+        // all reconcile against every hour block.
+        var blocks = (a.blocks && a.blocks.length > 0) ? a.blocks : ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'];
+        var rawBlocks = [];
+        blocks.forEach(function (b) {
+          var rb = (b === 'AM1' || b === 'AM2') ? 'AM' : b;
+          if (rawBlocks.indexOf(rb) === -1) rawBlocks.push(rb);
+        });
+        var expected = absExpandMorningSlots(
+          getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, rawBlocks, me.name, me), blocks)
           // #187: Prep Periods don't need coverage — never sync them in.
           .filter(function (s) { return s.role_type !== 'prep'; });
         if (expected.length === 0) return;
         var have = {};
-        (a.slots || []).forEach(function (s) { have[slotKey(s)] = true; });
+        (a.slots || []).forEach(function (s) {
+          have[slotKey(s)] = true;
+          // A legacy whole-morning row already covers both hour twins —
+          // don't re-add them as AM1/AM2 duplicates.
+          if (s.block === 'AM') {
+            have['AM1|' + s.role_type + '|' + s.role_description] = true;
+            have['AM2|' + s.role_type + '|' + s.role_description] = true;
+          }
+        });
         var missing = expected.filter(function (s) { return !have[slotKey(s)]; });
         if (missing.length === 0) return;
         // One attempt per absence+diff; stops retry loops if the server
