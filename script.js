@@ -16399,26 +16399,26 @@
     { key: 'leadClass', label: 'Lead a class', brand: 'lead',
       count: function (m) { return (m.counts.am_lead || 0) + (m.counts.pm_lead || 0); },
       tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class led', 'classes led'],
-      hint: 'Lead a morning class or afternoon elective to earn this badge.' },
+      hint: 'Submit a class' },
     { key: 'assist', label: 'Assisted a lead', brand: 'assist',
       count: function (m) { return (m.counts.am_assist || 0) + (m.counts.pm_assist || 0); },
       tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class assisted', 'classes assisted'],
-      hint: 'Assist a class lead to earn this badge.' },
+      hint: 'Assist a class' },
     { key: 'cleaning', label: 'Cleaning crew', brand: 'cleaning',
       count: function (m) { return m.counts.cleaning_session || 0; },
       tiers: { bronze: 1, silver: 2, gold: 4 }, unit: ['session cleaned', 'sessions cleaned'],
-      hint: 'Take a cleaning crew spot to earn this badge.' },
+      hint: 'Join the Cleaning Crew' },
     { key: 'eventLead', label: 'Lead an event', brand: 'specialEvents',
       count: function (m) { return m.counts.event_lead || 0; },
       tiers: { bronze: 1, silver: 2, gold: 3 }, unit: ['event led', 'events led'],
-      hint: 'Coordinate a special event to earn this badge.' },
+      hint: 'Lead a Special Event' },
     { key: 'oneYear', label: 'Held a 1-year position', brand: 'waysToHelp',
       count: function (m) { return m.counts.one_year_role || 0; },
-      alwaysGold: true, hint: 'Hold a year-long volunteer position to earn this badge.' },
+      alwaysGold: true, hint: 'Take a Committee Seat' },
     // Board badge wears the Board Notes card's mark (Erin 2026-08-02).
     { key: 'board', label: 'Served on the board', brand: 'notes',
       count: function (m) { return m.isBoard ? 1 : 0; },
-      alwaysGold: true, hint: 'Serve a year on the board to earn this badge.' }
+      alwaysGold: true, hint: 'Serve on the Board' }
   ];
 
   function participationBadgeState(def, member) {
@@ -16438,16 +16438,17 @@
       var tierName = s.tier ? s.tier.charAt(0).toUpperCase() + s.tier.slice(1) : null;
       // Tooltip: what the badge is, current tier, progress to the next
       // tier — hover/focus only, so the default view stays clean icons.
+      // Erin 2026-08-02: short lines, verbs matching the buttons below.
       var tip;
       if (!s.tier) {
-        tip = def.label + ' — not yet. ' + def.hint;
+        tip = def.label + ' — not yet · ' + def.hint;
       } else if (def.alwaysGold) {
-        tip = def.label + ' — Gold. A full-year commitment earns this outright. Thank you!';
+        tip = def.label + ' — Gold · thank you!';
       } else {
-        tip = def.label + ' — ' + tierName + '. ' + s.n + ' ' + def.unit[s.n === 1 ? 0 : 1] + ' this year';
         var next = s.tier === 'bronze' ? { name: 'Silver', at: def.tiers.silver }
                  : s.tier === 'silver' ? { name: 'Gold', at: def.tiers.gold } : null;
-        tip += next ? '; ' + next.at + ' earns ' + next.name + '.' : ' — top tier!';
+        tip = def.label + ' — ' + tierName + ' · ' + s.n + '×'
+          + (next ? ' · ' + next.name + ' at ' + next.at + '×' : ' · top tier');
       }
       h += '<span class="ws-grow-badge ws-grow-badge-' + (s.tier || 'unearned') + '" tabindex="0" role="img" aria-label="' + escapeHtml(tip) + '">'
         + '<span class="ws-grow-badge-icon">' + brandIconImg(def.brand, 'ws-grow-badge-img') + '</span>'

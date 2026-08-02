@@ -14604,8 +14604,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   animation: wsGrowFill 1.2s ease;
 }
 .ws-grow-seg:nth-child(2) .ws-grow-seg-fill { background: #85A634; animation-duration: 1.5s; }
-.ws-grow-seg:nth-child(3) .ws-grow-seg-fill { background: #708936; animation-duration: 1.8s; }
-.ws-grow-seg:nth-child(4) .ws-grow-seg-fill { background: var(--color-leaf); animation-duration: 2.1s; }
+.ws-grow-seg:nth-child(3) .ws-grow-seg-fill { background: var(--color-leaf); animation-duration: 1.8s; }
+/* Full bloom fills PURPLE — above and beyond the goal wears the brand
+   color (Erin 2026-08-02). */
+.ws-grow-seg:nth-child(4) .ws-grow-seg-fill { background: var(--color-primary-light); animation-duration: 2.1s; }
 @keyframes wsGrowFill { from { width: 0; } }
 /* Stage tooltip — same opaque dark panel as the badge tips. */
 .ws-grow-seg-tip {
@@ -14689,6 +14691,12 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
    be transparent). */
 .ws-grow-badge-unearned .ws-grow-badge-icon { opacity: 0.55; }
 .ws-grow-badge-unearned .ws-grow-badge-img { filter: grayscale(1); }
+/* Erin 2026-08-02: badges wake up in color on hover — a peek at what
+   earning them looks like. */
+.ws-grow-badge-unearned:hover .ws-grow-badge-icon,
+.ws-grow-badge-unearned:focus-visible .ws-grow-badge-icon { opacity: 1; }
+.ws-grow-badge-unearned:hover .ws-grow-badge-img,
+.ws-grow-badge-unearned:focus-visible .ws-grow-badge-img { filter: none; }
 .ws-grow-badge-tip {
   position: absolute;
   bottom: calc(100% + 8px);
