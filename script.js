@@ -6975,7 +6975,7 @@
     // EXCEPT when upcoming absences already exist (next season's rows get
     // entered over the summer): real data always outranks the season gate.
     if (!isSummerBreak || (loadedAbsences || []).length > 0) {
-      html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;" open>';
+      html += '<details class="mf-card mf-card-full mf-coverage-details" id="coverageBoardCard" style="display:none;"' + (_coverageCardUserOpen ? ' open' : '') + '>';
       // #169 + Erin 2026-07-31: the doorway lives in the card HEADER (like
       // My Responsibilities' I'll Be Out) and reads "Absence Alert". The
       // click handler stops propagation so it doesn't toggle the details.
@@ -24012,6 +24012,10 @@
   // Store loaded absences so responsibilities card can reference them.
   // Holds the current session and everything after it (see loadCoverageBoard).
   var loadedAbsences = [];
+  // Whether the member has the Coverage Board card expanded — collapsed by
+  // default (Erin 2026-08-02); their toggle survives re-renders, which
+  // rebuild the card's DOM.
+  var _coverageCardUserOpen = false;
   // Which session the Coverage Board is showing; null = follow currentSession.
   var coverageViewSession = null;
 
@@ -24059,10 +24063,17 @@
       summaryBadge.textContent = totalOpenAll > 0 ? totalOpenAll + ' open' : 'All covered';
       summaryBadge.className = 'coverage-summary-badge ' + (totalOpenAll > 0 ? 'coverage-summary-open' : 'coverage-summary-ok');
     }
-    // Fully covered board starts collapsed (Erin, 2026-07-19) — the "All
-    // covered" badge in the summary row says everything; open slots pop
-    // the card open so they can't be missed. Users can still toggle.
-    if (card) card.open = totalOpenAll > 0;
+    // Erin 2026-08-02: the board starts COLLAPSED regardless of open
+    // slots (supersedes 2026-07-19's pop-open) — the "N open" badge in
+    // the summary row carries the signal. The user's own toggle survives
+    // re-renders via _coverageCardUserOpen.
+    if (card) {
+      card.open = _coverageCardUserOpen;
+      if (!card._rwToggleWired) {
+        card.addEventListener('toggle', function () { _coverageCardUserOpen = card.open; });
+        card._rwToggleWired = true;
+      }
+    }
 
     var email = getActiveEmail();
     var me = null;
