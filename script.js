@@ -7508,11 +7508,14 @@
       else if (roleKind) dutyIconHtml = volRoleIconImg(roleKind);
       else if (d.icon === 'clean') dutyIconHtml = brandIconImg('cleaning', 'ag-icon');
       else if (d.icon === 'board') {
-        // Board seats wear their role's own mark (#129 accents), same as
-        // the board cards / org chart / Roles & Committees tree; the old
-        // briefcase outline stays as the fallback for unmapped titles.
+        // Board seats wear their role's own mark (#129 accents); Board
+        // Duties pledge rows wear the Board Notes mark (Erin 2026-08-02 —
+        // one board identity everywhere). Briefcase outline only as the
+        // last-resort fallback.
         dutyIconHtml = (typeof boardRoleAccentImg === 'function'
-          ? boardRoleAccentImg(String(d.text || '').replace(/-/g, ' ')) : '') || DUTY_ICONS.board;
+          ? boardRoleAccentImg(String(d.text || '').replace(/-/g, ' ')) : '')
+          || (/^Board Duties/.test(String(d.text || '')) ? brandIconImg('notes', 'ag-icon') : '')
+          || DUTY_ICONS.board;
       }
       else if (d.isCoverage && d.icon === 'teach') dutyIconHtml = volRoleIconImg('lead');
       else if (d.isCoverage && d.icon === 'assist') dutyIconHtml = volRoleIconImg('assist');
