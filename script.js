@@ -26766,13 +26766,15 @@
       });
   }
 
-  // Standard card nav (Erin, 2026-07-25): tap a card's header to
-  // collapse/expand it, same ws-card-toggle idiom as My Workspace.
-  // In-memory per visit, keyed per card.
+  // Standard card nav — Erin 2026-08-02: cards collapse IN PLACE with the
+  // Coverage Tracker's left rotating caret (replaces the minimize-to-chip
+  // idiom + right-side ▾). In-memory per visit, keyed per card.
   var _collabCollapsed = {};
   function collabCardHead(key, innerHtml) {
-    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="true" title="Minimize">'
-      + innerHtml + '<span class="ws-min-caret" aria-hidden="true">▾</span></div>';
+    var collapsed = !!_collabCollapsed[key];
+    return '<div class="workspace-card-header ws-card-toggle collab-toggle" data-collab-card="' + key + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" title="' + (collapsed ? 'Expand' : 'Collapse') + '">'
+      + '<span class="collab-caret' + (collapsed ? ' collab-caret-closed' : '') + '" aria-hidden="true">▾</span>'
+      + innerHtml + '</div>';
   }
 
   function renderEventSpaceBody() {
@@ -26789,28 +26791,15 @@
     // header card spans the grid, then the checklist and each section
     // render as their own card. Brand accents follow WS_ACCENTS usage
     // (special-events / todos marks).
-    // Minimized cards live as ▸ chips at the TOP of the page (Erin,
-    // 2026-07-25 — was below the grid), same ws-min-strip idiom as
-    // My Workspace. Computed up front so the strip renders first.
-    var collabChips = [];
-    if (_collabCollapsed['checklist']) collabChips.push({ key: 'checklist', title: 'Checklist' });
-    (d.sections || []).forEach(function (sx) {
-      if (_collabCollapsed['sec-' + sx.id]) collabChips.push({ key: 'sec-' + sx.id, title: String(evsSectionTitle(sx)) });
-    });
+    // Collapsed cards stay in place showing just their header (Erin
+    // 2026-08-02 — the old minimize-to-chip strip is gone).
     var h = '';
-    if (collabChips.length) {
-      h += '<div class="ws-min-strip" style="margin:0 0 12px;">';
-      collabChips.forEach(function (c) {
-        h += '<button type="button" class="ws-min-chip" data-collab-chip="' + c.key + '" aria-label="Expand ' + escapeAttr(c.title) + '">▸ ' + escapeHtmlWs(c.title) + '</button>';
-      });
-      h += '</div>';
-    }
     h += '<div class="workspace-grid collab-cards">';
     h += '<div class="mf-card workspace-card evs-section collab-card-head">';
     h += '<div class="workspace-card-header"><h4>' + brandIconImg('specialEvents') + ' ' + escapeHtmlWs(d.event.name) + '</h4></div>';
     h += '<div class="workspace-card-body">';
     h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
-      + (d.event.event_date ? ' · ' + brandIconImg('calendar', 'ag-icon') + ' ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
+      + (d.event.event_date ? ' · <span class="evs-date-ico">' + DUTY_ICONS.event + '</span> ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
       + (d.event.location ? ' · ' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(d.event.location) : '') + '</p>';
     h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
@@ -26861,7 +26850,7 @@
     // section cards — committee-only checklists don't render at all for
     // regular members (server already withholds the tasks).
     var tasksPub = d.tasks_public !== false;
-    if (!_collabCollapsed['checklist'] && !(d.tasks_hidden && !d.can_edit)) {
+    if (!(d.tasks_hidden && !d.can_edit)) {
     h += '<div class="mf-card workspace-card evs-section' + (!tasksPub ? ' evs-private' : '') + '">';
     var tHeadIcons = '';
     if (d.can_edit) {
@@ -26870,6 +26859,9 @@
     }
     h += collabCardHead('checklist', '<h4>' + brandIconImg('todo') + ' Checklist</h4>'
       + (tHeadIcons ? '<span class="evs-head-icons">' + tHeadIcons + '</span>' : ''));
+    if (_collabCollapsed['checklist']) {
+      h += '</div>'; // collapsed: header only
+    } else {
     h += '<div class="workspace-card-body">';
     if (tasks.length === 0) {
       h += '<p class="ws-empty">No tasks yet' + (d.can_edit ? (d.template_count > 0 ? ' — start from the template or add the first one.' : ' — add the first one.') : '.') + '</p>';
@@ -26884,7 +26876,7 @@
         var meta = [];
         if (t.assigned_name || t.assigned_email) meta.push(brandIconImg('person', 'ag-icon') + ' ' + escapeHtmlWs(t.assigned_name || t.assigned_email) + (isMine ? ' (you)' : ''));
         else if (!t.done_at) meta.push('<span class="ra-open-note" style="display:inline;">unassigned</span>');
-        if (t.due_date) meta.push(brandIconImg('calendar', 'ag-icon') + ' due ' + escapeHtmlWs(boardCalFmtDate(t.due_date)));
+        if (t.due_date) meta.push('<span class="evs-date-ico">' + DUTY_ICONS.event + '</span> due ' + escapeHtmlWs(boardCalFmtDate(t.due_date)));
         if (t.done_at) meta.push('✓ done' + (t.done_by ? ' by ' + escapeHtmlWs(t.done_by) : ''));
         if (meta.length) h += '<span class="evs-meta">' + meta.join(' · ') + '</span>';
         h += '</span>';
@@ -26902,6 +26894,7 @@
       h += '<p style="margin:10px 0 0;"><button type="button" class="btn btn-outline-dark btn-sm" id="evs-add-task">+ Add task</button></p>';
     }
     h += '</div></div>'; // /body, /checklist card
+    }
     }
     h += renderEventSections(d);
     h += '</div>'; // /.workspace-grid
@@ -26921,18 +26914,13 @@
     body.querySelectorAll('.collab-toggle').forEach(function (hd) {
       function flip(e) {
         if (e.target.closest('button:not(.collab-toggle)') || e.target.closest('.sc-btn')) return;
-        _collabCollapsed[hd.getAttribute('data-collab-card')] = true;
+        var k = hd.getAttribute('data-collab-card');
+        _collabCollapsed[k] = !_collabCollapsed[k];
         renderEventSpaceBody();
       }
       hd.addEventListener('click', flip);
       hd.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(e); }
-      });
-    });
-    body.querySelectorAll('.ws-min-chip[data-collab-chip]').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        _collabCollapsed[chip.getAttribute('data-collab-chip')] = false;
-        renderEventSpaceBody();
       });
     });
     body.querySelectorAll('.evs-sec-pub').forEach(function (btn) {
@@ -27370,10 +27358,6 @@
     var SEC_ACCENTS = { timeline: BRAND_ICONS.timeline, signup: BRAND_ICONS.waysToHelp, info: BRAND_ICONS.resources, notes: BRAND_ICONS.notes, board: BRAND_ICONS.reports };
     secs.forEach(function (s) {
       var secKey = 'sec-' + s.id;
-      if (_collabCollapsed[secKey]) {
-        if (chips) chips.push({ key: secKey, title: String(evsSectionTitle(s)) });
-        return;
-      }
       // Committee-only cards wear a light grey tint (Erin, 2026-07-25).
       // #143: editors can drag cards to reorder — order saves for everyone.
       h += '<div class="mf-card workspace-card evs-section' + (s.is_public === false ? ' evs-private' : '')
@@ -27395,6 +27379,8 @@
       h += collabCardHead(secKey,
         '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || BRAND_ICONS.classes) + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>'
         + (headIcons ? '<span class="evs-head-icons">' + headIcons + '</span>' : ''));
+      // Collapsed: header-only card, body skipped (in-place toggle).
+      if (_collabCollapsed[secKey]) { h += '</div>'; return; }
       h += '<div class="workspace-card-body">';
       if (s.type === 'info') {
         var items = Array.isArray(s.content) ? s.content : [];
@@ -29563,6 +29549,16 @@
         var headMark = (typeof boardRoleAccentImg === 'function'
           ? boardRoleAccentImg(String(r.title || '').replace(/-/g, ' ')) : '') || (r.icon_emoji || '\u{1F333}');
         titleInner = '<span class="org-col-emoji" aria-hidden="true">' + headMark + '</span> ' + titleInner;
+      } else {
+        // Erin 2026-08-02: nested rows with an established mark wear it —
+        // each grove liaison gets its grove, Cleaning Crew Liaison the
+        // rocks, Special Events Liaison the butterfly. Others stay lean.
+        var miniMark = '';
+        var gm = String(r.title || '').match(/^(Greenhouse|Saplings|Sassafras|Oaks|Maples|Birch|Willows|Cedars|Pigeons|Teens)\s+Liaison$/i);
+        if (gm && typeof ageGroupIconHtml === 'function') miniMark = ageGroupIconHtml(gm[1]);
+        else if (/^cleaning crew liaison$/i.test(r.title)) miniMark = brandIconImg('cleaning', 'ag-icon');
+        else if (/^special events liaison$/i.test(r.title)) miniMark = brandIconImg('specialEvents', 'ag-icon');
+        if (miniMark) titleInner = '<span class="org-col-emoji" aria-hidden="true">' + miniMark + '</span> ' + titleInner;
       }
       i += '<span class="org-item-title">' + titleInner + '</span>';
       i += '<span class="org-item-holders">' + holdersHtml + '</span>';

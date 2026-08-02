@@ -14652,8 +14652,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .ws-grow-badge-unearned {
   border: 2px dashed var(--color-border);
   background: transparent;
-  opacity: 0.6;
 }
+/* Mute only the ART on unearned badges — opacity on the whole badge made
+   the hover tooltip translucent too (Erin 2026-08-02: tooltips must never
+   be transparent). */
+.ws-grow-badge-unearned .ws-grow-badge-icon { opacity: 0.55; }
 .ws-grow-badge-unearned .ws-grow-badge-img { filter: grayscale(1); }
 .ws-grow-badge-tip {
   position: absolute;
@@ -14680,6 +14683,21 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .ws-grow-badge:hover .ws-grow-badge-tip,
 .ws-grow-badge:focus .ws-grow-badge-tip,
 .ws-grow-badge:focus-visible .ws-grow-badge-tip { opacity: 1; }
+
+/* Collaboration cards collapse in place with the Coverage Tracker's left
+   rotating caret (Erin 2026-08-02 — replaces the right ▾ + chip strip). */
+.collab-caret {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-text);
+  transition: transform 0.15s;
+  margin-right: 2px;
+}
+.collab-caret-closed { transform: rotate(-90deg); }
+/* Outline calendar beside collaboration dates (Erin 2026-08-02 — replaces
+   the aster brand mark for date rows). */
+.evs-date-ico { display: inline-flex; vertical-align: -3px; color: var(--color-text-light); }
+.evs-date-ico svg { width: 15px; height: 15px; }
 /* First badges hug the card's left edge — keep their tooltips inside it. */
 .ws-grow-badge:first-child .ws-grow-badge-tip { left: 0; transform: none; }
 .ws-grow-badge:last-child  .ws-grow-badge-tip { left: auto; right: 0; transform: none; }
