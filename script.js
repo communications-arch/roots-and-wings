@@ -23808,7 +23808,16 @@
       var hasAnyDuties = getResponsibilitiesForBlocks(parentNames, selectedSession, ['AM', 'PM1', 'PM2', 'Cleaning'], me.name, me).length > 0
         || volMineSlots(allBlocks, true).length > 0;
       var initialChecked = (prefillBlocks && isPrefillSession) ? mapLegacyBlocks(prefillBlocks) : [];
-      var wholeDayChecked = allBlocks.every(function (b) { return initialChecked.indexOf(b) !== -1; });
+      // Erin 2026-08-02: Cleaning only offers itself when the family
+      // actually holds a cleaning assignment for the viewed session
+      // (cleaning crew is session-scoped, so this covers every day of
+      // it) — or when the absence being edited already recorded one.
+      var hasCleaningDuty = getResponsibilitiesForBlocks(parentNames, selectedSession, ['Cleaning'], me.name, me)
+        .some(function (s) { return s.block === 'Cleaning'; });
+      var visibleBlocks = allBlocks.filter(function (b) {
+        return b !== 'Cleaning' || hasCleaningDuty || initialChecked.indexOf('Cleaning') !== -1;
+      });
+      var wholeDayChecked = visibleBlocks.every(function (b) { return initialChecked.indexOf(b) !== -1; });
 
       var h = '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
       if (coopDates.length === 0) {
@@ -23832,7 +23841,7 @@
       h += '<p class="ws-body-hint" id="absenceReplHint" style="margin:2px 0 4px;">Most coverage is arranged ahead of time in Chat \u2014 often an adult whose class can spare them clears it with their lead, then offers to cover you. Pick them below to make it official (they\u2019ll get a heads-up). Spots left blank go to the Coverage Board for anyone to claim.</p>';
       h += '<div class="absence-blocks">';
       h += '<label class="absence-block-label"><input type="checkbox" id="absenceWholeDay"' + (wholeDayChecked ? ' checked' : '') + '> <strong>Whole Day</strong></label>';
-      allBlocks.forEach(function (blk) {
+      visibleBlocks.forEach(function (blk) {
         var checked = initialChecked.indexOf(blk) !== -1;
         h += '<label class="absence-block-label"><input type="checkbox" class="absence-block-cb" value="' + blk + '"' + (checked ? ' checked' : '') + '> ' + blockLabelsModal[blk] + '</label>';
         // Erin 2026-07-31: this block's coverage rows paint here, inline
