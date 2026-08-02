@@ -13669,6 +13669,17 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 0.3rem 0.9rem;
   font-size: 0.78rem;
 }
+/* Erin 2026-08-02 (mobile): Coverage Board header flows like My
+   Responsibilities — title + badge + help stay on the top row, the
+   Absence Alert button rolls to its own second row. */
+@media (max-width: 600px) {
+  .mf-coverage-summary { flex-wrap: wrap; }
+  .mf-coverage-summary .btn-absence-header {
+    flex-basis: 100%;
+    width: max-content;
+    margin-left: 0;
+  }
+}
 /* Placement rows in the VP's sign-up To Do modals. */
 .st-place-row {
   display: flex;

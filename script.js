@@ -6466,10 +6466,9 @@
       if (inNagWindow) {
         h += '<p class="mf-vol-nudge">⚠ You still need to sign up for <strong>' + openLabels
           + '</strong> this session — pick a spot in each hour below.</p>';
-      } else {
-        h += '<p class="mf-vol-optional" style="margin:4px 0;">Open for you in Session ' + sess + ': '
-          + openLabels + ' — grab spots below whenever you’re ready.</p>';
       }
+      // Erin 2026-08-02: outside the nag window, no "Open for you…" note —
+      // the empty sign-up dropdowns below say it themselves.
     } else if (openBlocks.length === 0 && unavailNotes.length === 0) {
       h += '<p class="mf-vol-optional" style="margin:4px 0;">✓ All your hours are covered for Session ' + sess + '.</p>';
     } else if (!isCurrent && openBlocks.length > 0) {
@@ -8729,6 +8728,29 @@
           html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
           html += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
           html += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
+          html += '</tr>';
+        });
+        // Erin 2026-08-02 (prod): every grove with kids assigned shows a
+        // row even before its class/lead/liaison exists — TBD rows for
+        // the groves the published schedule hasn't covered yet.
+        var amKidCounts = {};
+        (FAMILIES || []).forEach(function (f) {
+          (f.kids || []).forEach(function (k) {
+            if (k.group) amKidCounts[String(k.group).toLowerCase()] = (amKidCounts[String(k.group).toLowerCase()] || 0) + 1;
+          });
+        });
+        var amScheduledKeys = {};
+        amRows.forEach(function (c) { amScheduledKeys[String((c.age_groups || [])[0] || '').toLowerCase()] = true; });
+        var amTbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
+        MORNING_GROUP_ORDER.forEach(function (g) {
+          var k = g.name.toLowerCase();
+          if (g.name === 'Greenhouse' || !amKidCounts[k] || amScheduledKeys[k]) return;
+          html += '<tr class="session-class-row" data-group="' + g.name + '">';
+          html += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
+          html += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
+          html += '<td>' + amLiaisonHtml(g.name) + '</td>';
+          html += '<td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td>';
+          html += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
           html += '</tr>';
         });
         html += '</tbody></table></div>';
@@ -23796,7 +23818,7 @@
           ph += '<div class="absence-slot-row">'
             + '<span class="absence-slot-desc">'
             + (s.role_type === 'general'
-              ? '<em>general spot — no specific duty on file</em>'
+              ? '<em>no duty on file — name who’s stepping in, or leave blank</em>'
               : escapeHtml(s.role_description))
             + '</span>'
             + '<select class="cl-input absence-repl" data-key="' + escAttr(key) + '">'
@@ -23959,9 +23981,14 @@
       var kidsAbsent = !kidsSel || kidsSel.value === 'yes';
       var kidsAdult = String((document.getElementById('absKidsAdult') || {}).value || '').trim();
       if (!kidsAbsent && !kidsAdult) { alert('Pick which adult is responsible for your kids that day.'); return; }
-      // #179: slots ride with their chosen replacements (blank = open);
-      // blocks with no duty on file still send a general claimable spot.
-      var slotsToSend = covNeeded ? effectiveSlots().map(function (s) {
+      // #179: slots ride with their chosen replacements (blank = open).
+      // Erin 2026-08-02 (prod): a no-duty "general spot" left blank sends
+      // NOTHING — the board only lists real needs. Naming someone still
+      // records them as covering; duty-derived spots go to the board
+      // blank or not.
+      var slotsToSend = covNeeded ? effectiveSlots().filter(function (s) {
+        return s.role_type !== 'general' || !!_absRepl[s.block + '|' + s.role_description];
+      }).map(function (s) {
         var key = s.block + '|' + s.role_description;
         return { block: s.block, role_type: s.role_type, role_description: s.role_description, group_or_class: s.group_or_class || '', replacement_name: _absRepl[key] || '' };
       }) : [];
@@ -26839,9 +26866,12 @@
     h += '<div class="mf-card workspace-card evs-section collab-card-head">';
     h += '<div class="workspace-card-header"><h4>' + brandIconImg('specialEvents') + ' ' + escapeHtmlWs(d.event.name) + '</h4></div>';
     h += '<div class="workspace-card-body">';
-    h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + escapeHtmlWs(d.event.school_year)
-      + (d.event.event_date ? ' · <span class="evs-date-ico">' + DUTY_ICONS.event + '</span> ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)) : '')
-      + (d.event.location ? ' · ' + brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(d.event.location) : '') + '</p>';
+    // Erin 2026-08-02: no school-year on the header card — just date and
+    // place.
+    var evMetaBits = [];
+    if (d.event.event_date) evMetaBits.push('<span class="evs-date-ico">' + DUTY_ICONS.event + '</span> ' + escapeHtmlWs(boardCalFmtDate(d.event.event_date)));
+    if (d.event.location) evMetaBits.push(brandIconImg('location', 'ag-icon') + ' ' + escapeHtmlWs(d.event.location));
+    if (evMetaBits.length) h += '<p class="ws-body-hint" style="margin:0 0 10px;">' + evMetaBits.join(' · ') + '</p>';
     h += '<div class="rd-counts">';
     h += raCountPill('ws-wv-ok', doneCount + ' done');
     h += raCountPill(openCount > 0 ? 'ws-wv-resent' : 'ws-wv-ok', openCount + ' open');
@@ -26852,9 +26882,13 @@
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
     var assists = (d.people || []).filter(function (p) { return p.role === 'assist'; })
       .map(function (p) { return p.name || p.email; }).filter(Boolean);
-    h += '<p class="ws-body-hint">' + volRoleIconImg('lead') + ' Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong>'
-      + (assists.length ? ' · Assisting: ' + assists.map(escapeHtmlWs).join(', ') : '')
-      + (d.can_edit ? '' : ' · <em>read-only — the event’s people and the SEL/VP can edit</em>') + '</p>';
+    // Erin 2026-08-02: Assisting gets its own line under Lead, wearing the
+    // Assisting mark; the read-only note is gone (the missing edit
+    // affordances say it).
+    h += '<p class="ws-body-hint">' + volRoleIconImg('lead') + ' Lead' + (spaceLeads.length > 1 ? 's' : '') + ': <strong>' + escapeHtmlWs(spaceLeads.length ? spaceLeads.join(' & ') : 'not set') + '</strong></p>';
+    if (assists.length) {
+      h += '<p class="ws-body-hint" style="margin:2px 0 0;">' + volRoleIconImg('assist') + ' Assisting: ' + assists.map(escapeHtmlWs).join(', ') + '</p>';
+    }
     if (d.can_edit) {
       // Legend for the per-card hearts (Erin, 2026-07-25).
       h += '<p class="ws-body-hint" style="margin:6px 0 0;display:flex;gap:8px;align-items:flex-start;">'
