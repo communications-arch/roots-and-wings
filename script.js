@@ -7491,6 +7491,13 @@
       if (dutyGroup) dutyIconHtml = ageGroupIconHtml(dutyGroup[1]);
       else if (roleKind) dutyIconHtml = volRoleIconImg(roleKind);
       else if (d.icon === 'clean') dutyIconHtml = brandIconImg('cleaning', 'ag-icon');
+      else if (d.icon === 'board') {
+        // Board seats wear their role's own mark (#129 accents), same as
+        // the board cards / org chart / Roles & Committees tree; the old
+        // briefcase outline stays as the fallback for unmapped titles.
+        dutyIconHtml = (typeof boardRoleAccentImg === 'function'
+          ? boardRoleAccentImg(String(d.text || '').replace(/-/g, ' ')) : '') || DUTY_ICONS.board;
+      }
       else if (d.isCoverage && d.icon === 'teach') dutyIconHtml = volRoleIconImg('lead');
       else if (d.isCoverage && d.icon === 'assist') dutyIconHtml = volRoleIconImg('assist');
       else dutyIconHtml = DUTY_ICONS[d.icon] || '';
