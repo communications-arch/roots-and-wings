@@ -10173,18 +10173,10 @@
         // modal that the My Family "+ Submit an Afternoon Class" card uses.
         // #154 (Erin): rows keep counts only — the explanatory copy moved
         // into each modal so the card stays short.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('classes', 'ag-icon') + ' Submit a Class</button></p>';
-        if (open.length === 0) {
-          h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
-        } else {
-          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">' + brandIconImg('waysToHelp', 'ag-icon') + ' Committee Seats</button>'
-            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's') + '</span></p>';
-        }
-        // Special events (#53/#73/#75): one summary line — the seats and
-        // sign-up lists live in the Jump In modal, mirroring the
-        // committee-seats line above (the inline list made the card long
-        // again; Erin 2026-07-21 evening).
-        h += renderWthEventsSummary();
+        // Erin 2026-08-02: rows run in the SAME order as the badge circles
+        // above (lead → cleaning → events → committee), and Submit a Class
+        // wears the same Leading mark as its badge.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('lead', 'ag-icon') + ' Submit a Class</button></p>';
         // #133 (Colleen): Cleaning Crew joins the same row idiom; #159
         // (Colleen): the hint shows the LIVE count of open spots for the
         // rest of the year (painted async by loadCleaningOpenCount).
@@ -10195,6 +10187,16 @@
             : '<strong>' + _cleaningOpenCount + '</strong> spot' + (_cleaningOpenCount === 1 ? '' : 's') + ' open this year');
         h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="cleaning-signup-modal">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning Crew</button>'
           + '<span class="ws-part-submit-hint" id="ws-clean-open-hint">' + cleanHint + '</span></p>';
+        // Special events (#53/#73/#75): one summary line — the seats and
+        // sign-up lists live in the Jump In modal (the inline list made the
+        // card long again; Erin 2026-07-21 evening).
+        h += renderWthEventsSummary();
+        if (open.length === 0) {
+          h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
+        } else {
+          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">' + brandIconImg('waysToHelp', 'ag-icon') + ' Committee Seats</button>'
+            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's') + '</span></p>';
+        }
         return h;
       },
       afterRender: function () {
