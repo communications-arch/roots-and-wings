@@ -16390,7 +16390,8 @@
     { key: 'oneYear', label: 'Held a 1-year position', brand: 'waysToHelp',
       count: function (m) { return m.counts.one_year_role || 0; },
       alwaysGold: true, hint: 'Hold a year-long volunteer position to earn this badge.' },
-    { key: 'board', label: 'Served on the board', brand: 'boardTask',
+    // Board badge wears the Board Notes card's mark (Erin 2026-08-02).
+    { key: 'board', label: 'Served on the board', brand: 'notes',
       count: function (m) { return m.isBoard ? 1 : 0; },
       alwaysGold: true, hint: 'Serve a year on the board to earn this badge.' }
   ];
