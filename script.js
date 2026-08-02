@@ -7972,7 +7972,9 @@
     // fills `myClassSubmissions` (same data the teaching duty rows use, so
     // "my family's classes" resolves identically in both places).
     html += '<div class="mf-card mf-myclasses-card" id="mfMyClassesCard">';
-    html += '<h3 class="mf-card-title" data-help-key="mf-my-classes">' + brandIconImg('classes') + ' My Classes</h3>';
+    // Erin 2026-08-02: wears the Leading mark — this card is the classes
+    // your family TEACHES, same meaning as the lead badge / Submit a Class.
+    html += '<h3 class="mf-card-title" data-help-key="mf-my-classes">' + brandIconImg('lead') + ' My Classes</h3>';
     html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
     html += 'Classes your family is teaching once the VP or Afternoon Class Liaison schedules them — with each class’s supply list and lesson plan.';
     html += '</p>';
