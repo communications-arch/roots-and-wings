@@ -16335,77 +16335,37 @@
     return h;
   }
 
-  // Badge icons — same outline idiom as PLANT_SVGS (currentColor strokes)
-  // so the row reads as a native extension of the existing icon set, all
-  // on the nature/growth theme.
-  var GROW_BADGE_SVGS = {
-    leadClass: // tree — you led the way
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M12 22v-7"/>' +
-      '<path d="M12 15c-5 0-8-3.5-7-8.5 4 0 7 3 7 8.5z"/>' +
-      '<path d="M12 15c5 0 8-3.5 7-8.5-4 0-7 3-7 8.5z"/>' +
-      '</svg>',
-    assist: // paired leaves — growing alongside a lead
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M7 21c0-4 1-7 3-9"/>' +
-      '<path d="M10 12C6 13 3.5 11 3 7c4-.5 6.5 1.5 7 5z"/>' +
-      '<path d="M17 21c0-4-1-7-3-9"/>' +
-      '<path d="M14 12c4 1 6.5-1 7-5-4-.5-6.5 1.5-7 5z"/>' +
-      '</svg>',
-    cleaning: // broom (#200, Colleen)
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M19.5 4.5l-7 7"/>' +
-      '<path d="M12.5 11.5c-3.2 0-6.2 1.7-7.7 4.7l5 5c3-1.5 4.7-4.5 4.7-7.7z"/>' +
-      '<path d="M8.2 14.2l1.8 1.8M6.2 16.4l1.4 1.4"/>' +
-      '</svg>',
-    eventLead: // confetti popper (#200, Colleen)
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M7 10.5L3 21l10.5-4z"/>' +
-      '<path d="M8.5 12l3.5 3.5"/>' +
-      '<path d="M12.5 8c0-2 1.2-3 3-3"/>' +
-      '<path d="M16 11.5c2 0 3-1.2 3-3"/>' +
-      '<path d="M11 3.5h.01M20 5h.01M20.5 14h.01M15 15.5h.01"/>' +
-      '</svg>',
-    oneYear: // just a "1" (#200, Colleen)
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M9 8.5L13 5.5v13"/>' +
-      '<path d="M9 18.5h8"/>' +
-      '</svg>',
-    board: // butterfly (#200, Colleen — matches the co-op logo accents)
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M12 8.5v10"/>' +
-      '<path d="M12 8.5c-.8-1.4-2-2.8-3.5-3.5M12 8.5c.8-1.4 2-2.8 3.5-3.5"/>' +
-      '<path d="M11.5 10.5C9.5 7.5 5 7 4 9.5s1 5.5 4.5 5.5c-2.3 1-2.8 3.2-1 4.2s4-.7 4-3.2"/>' +
-      '<path d="M12.5 10.5c2-3 6.5-3.5 7.5-1s-1 5.5-4.5 5.5c2.3 1 2.8 3.2 1 4.2s-4-.7-4-3.2"/>' +
-      '</svg>'
-  };
-
   // Badge definitions. count() = how many qualifying contributions this
   // year. Badges with tiers[] step Bronze → Silver → Gold by frequency
   // (thresholds are first-pass guesses — tune per badge as real data
   // lands). alwaysGold badges are a full-year commitment, so they are
   // simply Gold the moment they're earned.
+  // Icons (#200, Erin 2026-08-02): the STANDARD colored brand marks, not
+  // bespoke outlines — same art as the surfaces each badge mirrors:
+  // lead/assist duty marks, the cleaning rocks (Cleaning Crew button), the
+  // Special Events butterfly, the Committee Seats mark for year-long
+  // positions, and the board-task mark for board service.
   var GROW_BADGE_DEFS = [
-    { key: 'leadClass', label: 'Lead a class', svg: 'leadClass',
+    { key: 'leadClass', label: 'Lead a class', brand: 'lead',
       count: function (m) { return (m.counts.am_lead || 0) + (m.counts.pm_lead || 0); },
       tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class led', 'classes led'],
       hint: 'Lead a morning class or afternoon elective to earn this badge.' },
-    { key: 'assist', label: 'Assisted a lead', svg: 'assist',
+    { key: 'assist', label: 'Assisted a lead', brand: 'assist',
       count: function (m) { return (m.counts.am_assist || 0) + (m.counts.pm_assist || 0); },
       tiers: { bronze: 1, silver: 3, gold: 5 }, unit: ['class assisted', 'classes assisted'],
       hint: 'Assist a class lead to earn this badge.' },
-    { key: 'cleaning', label: 'Cleaning crew', svg: 'cleaning',
+    { key: 'cleaning', label: 'Cleaning crew', brand: 'cleaning',
       count: function (m) { return m.counts.cleaning_session || 0; },
       tiers: { bronze: 1, silver: 2, gold: 4 }, unit: ['session cleaned', 'sessions cleaned'],
       hint: 'Take a cleaning crew spot to earn this badge.' },
-    { key: 'eventLead', label: 'Lead an event', svg: 'eventLead',
+    { key: 'eventLead', label: 'Lead an event', brand: 'specialEvents',
       count: function (m) { return m.counts.event_lead || 0; },
       tiers: { bronze: 1, silver: 2, gold: 3 }, unit: ['event led', 'events led'],
       hint: 'Coordinate a special event to earn this badge.' },
-    { key: 'oneYear', label: 'Held a 1-year position', svg: 'oneYear',
+    { key: 'oneYear', label: 'Held a 1-year position', brand: 'waysToHelp',
       count: function (m) { return m.counts.one_year_role || 0; },
       alwaysGold: true, hint: 'Hold a year-long volunteer position to earn this badge.' },
-    { key: 'board', label: 'Served on the board', svg: 'board',
+    { key: 'board', label: 'Served on the board', brand: 'boardTask',
       count: function (m) { return m.isBoard ? 1 : 0; },
       alwaysGold: true, hint: 'Serve a year on the board to earn this badge.' }
   ];
@@ -16439,7 +16399,7 @@
         tip += next ? '; ' + next.at + ' earns ' + next.name + '.' : ' — top tier!';
       }
       h += '<span class="ws-grow-badge ws-grow-badge-' + (s.tier || 'unearned') + '" tabindex="0" role="img" aria-label="' + escapeHtml(tip) + '">'
-        + '<span class="ws-grow-badge-icon">' + (GROW_BADGE_SVGS[def.svg] || '') + '</span>'
+        + '<span class="ws-grow-badge-icon">' + brandIconImg(def.brand, 'ws-grow-badge-img') + '</span>'
         + '<span class="ws-grow-badge-tip">' + escapeHtml(tip) + '</span>'
         + '</span>';
     });

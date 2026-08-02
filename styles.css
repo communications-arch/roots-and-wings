@@ -14640,15 +14640,18 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 .ws-grow-badge:focus-visible { outline: 2px solid var(--color-primary-light); outline-offset: 2px; }
 .ws-grow-badge-icon { display: inline-flex; }
-.ws-grow-badge-gold     { border-color: var(--color-accent);     color: var(--color-accent-dark); }
-.ws-grow-badge-silver   { border-color: #9AA5B1;                 color: #6E7B8A; }
-.ws-grow-badge-bronze   { border-color: #B07B4F;                 color: #8A5A33; }
+/* #200 (Erin): badges wear the standard COLORED brand marks — the tier
+   ring alone carries bronze/silver/gold; unearned mutes the art. */
+.ws-grow-badge-img { width: 22px; height: 22px; display: block; object-fit: contain; }
+.ws-grow-badge-gold     { border-color: var(--color-accent); }
+.ws-grow-badge-silver   { border-color: #9AA5B1; }
+.ws-grow-badge-bronze   { border-color: #B07B4F; }
 .ws-grow-badge-unearned {
   border: 2px dashed var(--color-border);
   background: transparent;
-  color: var(--color-text-light);
   opacity: 0.6;
 }
+.ws-grow-badge-unearned .ws-grow-badge-img { filter: grayscale(1); }
 .ws-grow-badge-tip {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -14716,9 +14719,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 .ws-part-submit-link {
   appearance: none;
-  background: var(--color-primary);
-  color: var(--color-white);
-  border: 0;
+  /* Erin 2026-08-02: light face instead of solid purple so the colored
+     brand mark inside each button reads clearly. */
+  background: var(--color-white);
+  color: var(--color-primary-dark);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 8px 14px;
   font-family: var(--font-body);
@@ -14729,7 +14734,8 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   box-shadow: var(--shadow-sm);
 }
 .ws-part-submit-link:hover {
-  background: var(--color-primary-dark);
+  background: var(--color-cream);
+  border-color: var(--color-primary-light);
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
 }
