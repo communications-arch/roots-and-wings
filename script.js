@@ -6304,7 +6304,7 @@
     // CURRENT session — the chips below just preview other sessions.
     // #114: brand marks; the sheet groups floater + prep as ONE meaning,
     // so both pledge kinds wear the same accent (labels tell them apart).
-    var VOL_ICONS = { floater: brandIconImg('floaterPrep', 'ag-icon'), board: brandIconImg('boardTask', 'ag-icon'), prep: brandIconImg('floaterPrep', 'ag-icon') };
+    var VOL_ICONS = { floater: brandIconImg('floaterPrep', 'ag-icon'), board: brandIconImg('notes', 'ag-icon'), prep: brandIconImg('floaterPrep', 'ag-icon') };
     document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
     // Sign-up slots only open once there is something to sign up FOR
     // (Erin, 2026-07-11): morning hours need placed AM classes, the
@@ -6398,6 +6398,19 @@
         var f = String(c.family || '').toLowerCase();
         return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
       });
+      // Erin 2026-08-02 (prod, "shows up twice"): the duty scanner also
+      // lists this same assignment as a "Cleaning: <area>" row — the
+      // picker's row (with its release ✕) is the interactive one, so
+      // drop the scanner's duplicate. Coverage claims stay.
+      if (myClean.length) {
+        var cleanSec = document.querySelector('.mf-block-section[data-block="Cleaning"]');
+        if (cleanSec) {
+          cleanSec.querySelectorAll('.mf-duty').forEach(function (row) {
+            var t = row.textContent || '';
+            if (t.indexOf('Covering:') === -1 && /Cleaning(:|\sFloater)/.test(t) && !row.querySelector('.mf-vol-remove')) row.remove();
+          });
+        }
+      }
       // A family may take MORE than one area (Erin, 2026-07-15): every
       // spot gets its own row + release ✕, and the picker below stays
       // available while open areas remain. Cleaning stays optional.
@@ -6841,14 +6854,14 @@
           + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
       }
       var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0) + ' · '
-        + pledgeBit(brandIconImg('boardTask', 'ag-icon'), 'Board', b.board, 2) + ' · '
+        + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2) + ' · '
         + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2);
       h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
         var isAmBk = bk.indexOf('AM') === 0;
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Group' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
         // Sections are per hour (Erin, 2026-07-11) — a both-hours class
         // appears in each hour's section, so no extra stacking is needed;
         // morning rows sort in age-group order.
@@ -6861,8 +6874,11 @@
           });
         }
         gridClasses.forEach(function (c) {
+          // Erin 2026-08-02: morning rows show the GROVE, not the class
+          // name — the grove is the identity members scan for.
+          var amGroveName = c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '';
           var first = isAmBk
-            ? ageGroupIconHtml(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + ' <span class="ag-name ' + ageGroupClass(c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '') + '">' + escapeHtmlWs(c.class_name) + '</span>'
+            ? ageGroupIconHtml(amGroveName) + ' <span class="ag-name ' + ageGroupClass(amGroveName) + '">' + escapeHtmlWs(amGroveName || c.class_name) + '</span>'
             : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           if (c.co_teachers) helpers = brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
