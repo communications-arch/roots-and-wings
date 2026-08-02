@@ -57,13 +57,15 @@ t('zero points → nothing filled; first point → Sprouting', () => {
   assert.strictEqual(participationStageIndex(0.5, 14), 1);
 });
 
-t('half the goal → Taking root; goal → Flourishing; 130% → Full bloom', () => {
-  assert.strictEqual(participationStageIndex(6.9, 14), 1);
-  assert.strictEqual(participationStageIndex(7, 14), 2);
-  assert.strictEqual(participationStageIndex(13.9, 14), 2);
-  assert.strictEqual(participationStageIndex(14, 14), 3);   // goal = Flourishing
-  assert.strictEqual(participationStageIndex(18.1, 14), 3);
-  assert.strictEqual(participationStageIndex(18.2, 14), 4); // 14 × 1.3
+t('#202 thirds-of-goal stages: ⅓ → Taking root; ⅔ → Flourishing; goal → Full bloom', () => {
+  // Goal 15 for clean thirds: 5 and 10.
+  assert.strictEqual(participationStageIndex(4.9, 15), 1);
+  assert.strictEqual(participationStageIndex(5, 15), 2);
+  assert.strictEqual(participationStageIndex(9.9, 15), 2);
+  assert.strictEqual(participationStageIndex(10, 15), 3);  // Flourishing bar filling
+  assert.strictEqual(participationStageIndex(14.9, 15), 3);
+  assert.strictEqual(participationStageIndex(15, 15), 4);  // goal reached = Full bloom territory
+  assert.strictEqual(participationStageIndex(40, 15), 4);
 });
 
 t('no goal (0/undefined) → any activity reads as Sprouting, never crashes', () => {

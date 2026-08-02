@@ -16341,17 +16341,17 @@
   // #201 (Colleen): encouragement lines shown when hovering each stage.
   var PARTICIPATION_STAGE_TIPS = ['Thanks for jumping in!', 'You’re on your way!', 'You did it!', 'Overachiever! Thanks!'];
 
-  // How many stages are filled (0–4) for a points total against the
+  // Which stage is currently filling (0–4) for a points total against the
   // member's own goal (new-member/exemption pro-rating included upstream).
-  // Sprouting fills on the first point; Taking root at half the goal;
-  // Flourishing at the goal; Full bloom at 130% — kept as a helper so the
-  // thresholds are easy to tune and testable in isolation.
+  // #202 (Colleen): the first three bars TOGETHER span 0 → goal, so the
+  // Flourishing bar completes exactly AT the goal; Full bloom is
+  // everything beyond it (its bar tops out at 130%).
   function participationStageIndex(total, goal) {
     if (!(total > 0)) return 0;
     if (!(goal > 0)) return 1;
-    if (total >= goal * 1.3) return 4;
-    if (total >= goal) return 3;
-    if (total >= goal * 0.5) return 2;
+    if (total >= goal) return 4;
+    if (total >= goal * (2 / 3)) return 3;
+    if (total >= goal * (1 / 3)) return 2;
     return 1;
   }
 
@@ -16361,7 +16361,8 @@
   // stage shows its encouragement line.
   function renderParticipationTrack(total, goal) {
     var stage = participationStageIndex(total, goal);
-    var spans = goal > 0 ? [[0, 0.5], [0.5, 1], [1, 1.3], [1.3, 1.6]] : null;
+    // #202: thirds of the goal, then the beyond-goal bar (caps at 130%).
+    var spans = goal > 0 ? [[0, 1 / 3], [1 / 3, 2 / 3], [2 / 3, 1], [1, 1.3]] : null;
     var h = '<div class="ws-grow-track" role="img" aria-label="Participation stage: '
       + (stage > 0 ? escapeHtml(PARTICIPATION_STAGES[stage - 1]) : 'just getting started') + '">';
     PARTICIPATION_STAGES.forEach(function (name, i) {
@@ -23839,7 +23840,8 @@
       var visibleBlocks = allBlocks.filter(function (b) {
         return b !== 'Cleaning' || hasCleaningDuty || initialChecked.indexOf('Cleaning') !== -1;
       });
-      var wholeDayChecked = visibleBlocks.every(function (b) { return initialChecked.indexOf(b) !== -1; });
+      var wholeDayChecked = visibleBlocks.filter(function (b) { return b !== 'Cleaning'; })
+        .every(function (b) { return initialChecked.indexOf(b) !== -1; });
 
       var h = '<div class="absence-field"><label>Which day?</label><div class="absence-dates" id="absenceDates">';
       if (coopDates.length === 0) {
@@ -23893,7 +23895,10 @@
       if (wholeDayCb) {
         wholeDayCb.addEventListener('change', function () {
           _absTouched = true;
-          dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) { cb.checked = wholeDayCb.checked; });
+          // #204 (Colleen): Whole Day means the four class hours — the
+          // Cleaning box (only present when the family holds the duty)
+          // stays whatever the member set it to.
+          dyn.querySelectorAll('.absence-block-cb').forEach(function (cb) { if (cb.value !== 'Cleaning') cb.checked = wholeDayCb.checked; });
           updatePreview();
         });
       }
@@ -23902,7 +23907,7 @@
           _absTouched = true;
           if (wholeDayCb) {
             var allChecked = true;
-            dyn.querySelectorAll('.absence-block-cb').forEach(function (c) { if (!c.checked) allChecked = false; });
+            dyn.querySelectorAll('.absence-block-cb').forEach(function (c) { if (c.value !== 'Cleaning' && !c.checked) allChecked = false; });
             wholeDayCb.checked = allChecked;
           }
           updatePreview();
@@ -24214,7 +24219,9 @@
       var coveredSlots = [];
       var allSlotsByPerson = [];
       dateAbsences.forEach(function (a) {
-        var personSlots = { person: a.absent_person, notes: a.notes, slots: [] };
+        // #203 (Colleen): a backup-coach-covered absence names the coach.
+        var personSlots = { person: a.absent_person, notes: a.notes,
+          blc: (a.coverage_needed === false ? (a.blc_name || 'their backup coach') : ''), slots: [] };
         (a.slots || []).forEach(function (slot) {
           slot._person = a.absent_person;
           slot._familyEmail = a.family_email;
@@ -24284,7 +24291,9 @@
       html += '<details class="coverage-details">';
       html += '<summary class="coverage-details-toggle">See all absences &amp; coverage (' + dateAbsences.length + ' out)</summary>';
       allSlotsByPerson.forEach(function (p) {
-        html += '<div class="coverage-absence"><div class="coverage-person"><strong>' + p.person + '</strong> <span class="coverage-person-note">is out' + (p.notes ? ' \u2014 ' + p.notes : '') + '</span></div>';
+        html += '<div class="coverage-absence"><div class="coverage-person"><strong>' + p.person + '</strong> <span class="coverage-person-note">is out'
+          + (p.blc ? ' \u2014 backup coach <strong>' + escapeHtmlWs(p.blc) + '</strong> covering' : '')
+          + (p.notes ? ' \u2014 ' + p.notes : '') + '</span></div>';
         p.slots.forEach(function (slot) {
           var isClaimed = !!slot.claimed_by_email;
           html += '<div class="coverage-slot ' + (isClaimed ? 'coverage-slot-covered' : 'coverage-slot-open') + '">';
