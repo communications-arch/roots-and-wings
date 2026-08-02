@@ -1838,11 +1838,12 @@
   // The R&W Special Events shared calendar (Field Day, Talent Show, …).
   var SPECIAL_EVENTS_CAL_ID = 'c_f7e599c566fa32ba8da0c20bf51c82967e9d8aedffa8f775673db5146646b1b2@group.calendar.google.com';
 
-  // Temporary (Erin, 2026-07-30): hide each member's OWN participation
-  // points (Ways to Help panel + greeting plant badge) until the VP has
-  // explained the system to everyone. The VP/tracker Participation report
-  // is unaffected. Flip to false to restore both surfaces.
-  var RW_HIDE_MEMBER_POINTS = true;
+  // Member-facing participation surfaces (Ways to Help panel + greeting
+  // plant badge). Hidden 2026-07-30 → 08-02 while the milestone/badge
+  // redesign landed and the VP set the season goal; UNVEILED 2026-08-02
+  // (Erin). Flip back to true to hide from members again (super users
+  // always see them via rwMemberPointsHidden).
+  var RW_HIDE_MEMBER_POINTS = false;
 
   // The hide exempts the super user (and dev hosts, via isCommsUser) so the
   // 2026-08-01 milestone/badge redesign can be previewed on the live site
