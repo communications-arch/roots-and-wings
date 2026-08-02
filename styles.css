@@ -14743,6 +14743,52 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   box-shadow: var(--shadow-md);
 }
 .ws-part-submit-link:active { transform: translateY(0); }
+/* Erin 2026-08-02: "Ways to get more involved" condensed into a 2×2 tile
+   grid — icon-forward, live count underneath, half the height of the old
+   stacked button rows. */
+.ws-part-jump-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.ws-part-jump-tile {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 8px 9px;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+.ws-part-jump-tile:hover {
+  background: var(--color-cream);
+  border-color: var(--color-primary-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.ws-part-jump-tile:active { transform: translateY(0); }
+.ws-jump-tile-icon { width: 26px; height: 26px; object-fit: contain; }
+.ws-jump-tile-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  line-height: 1.2;
+}
+.ws-jump-tile-hint {
+  font-size: 0.74rem;
+  color: var(--color-text-light);
+  line-height: 1.25;
+}
+.ws-jump-tile-hint strong { color: var(--color-text); }
+
 .ws-part-submit-hint {
   color: var(--color-text-light);
   font-size: 0.84rem;

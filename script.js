@@ -6593,8 +6593,8 @@
         _cleaningOpenCount = d.open;
         var el = document.getElementById('ws-clean-open-hint');
         if (el) el.innerHTML = d.open === 0
-          ? 'All spots covered for the year — thank you!'
-          : '<strong>' + d.open + '</strong> spot' + (d.open === 1 ? '' : 's') + ' open this year';
+          ? 'all covered — thank you!'
+          : '<strong>' + d.open + '</strong> spot' + (d.open === 1 ? '' : 's') + ' open';
       })
       .catch(function () { /* keep the static copy */ });
   }
@@ -7484,7 +7484,17 @@
       var roleKind = /—\s*Leading$/.test(String(d.text || '')) ? 'lead'
         : /—\s*Assisting$/.test(String(d.text || '')) ? 'assist'
         : /co-?lead/i.test(String(d.text || '')) ? 'colead' : '';
-      h += '<div class="mf-duty-icon">' + (dutyGroup ? ageGroupIconHtml(dutyGroup[1]) : (roleKind ? volRoleIconImg(roleKind) : (DUTY_ICONS[d.icon] || ''))) + '</div>';
+      // Erin 2026-08-02: cleaning rows wear the rocks brand mark, and
+      // coverage claims wear the Leading/Assisting marks — same meaning,
+      // same icon as the growth badges + Ways-to-Help buttons.
+      var dutyIconHtml;
+      if (dutyGroup) dutyIconHtml = ageGroupIconHtml(dutyGroup[1]);
+      else if (roleKind) dutyIconHtml = volRoleIconImg(roleKind);
+      else if (d.icon === 'clean') dutyIconHtml = brandIconImg('cleaning', 'ag-icon');
+      else if (d.isCoverage && d.icon === 'teach') dutyIconHtml = volRoleIconImg('lead');
+      else if (d.isCoverage && d.icon === 'assist') dutyIconHtml = volRoleIconImg('assist');
+      else dutyIconHtml = DUTY_ICONS[d.icon] || '';
+      h += '<div class="mf-duty-icon">' + dutyIconHtml + '</div>';
       var roleSplit = String(d.text || '').match(/^(.*?)\s*—\s*(Leading|Co-leading|Assisting)$/);
       var titleCore = roleSplit ? roleSplit[1] : d.text;
       if (dutyGroup) titleCore = '<span class="ag-name ' + ageGroupClass(dutyGroup[1]) + '">' + titleCore + '</span>';
@@ -10168,35 +10178,37 @@
         // in the Open Committee Seats modal (showOpenSeatsModal).
         var open = collectOpenSeats();
         h += '<h5 class="ws-part-subhead">Ways to get more involved</h5>';
-        // A PM class proposal is always a welcome way to contribute, whether
-        // or not committee seats are open. Button opens the same submission
-        // modal that the My Family "+ Submit an Afternoon Class" card uses.
-        // #154 (Erin): rows keep counts only — the explanatory copy moved
-        // into each modal so the card stays short.
-        // Erin 2026-08-02: rows run in the SAME order as the badge circles
-        // above (lead → cleaning → events → committee), and Submit a Class
-        // wears the same Leading mark as its badge.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="submit-pm-class">' + brandIconImg('lead', 'ag-icon') + ' Submit a Class</button></p>';
-        // #133 (Colleen): Cleaning Crew joins the same row idiom; #159
-        // (Colleen): the hint shows the LIVE count of open spots for the
-        // rest of the year (painted async by loadCleaningOpenCount).
-        var cleanHint = (_cleaningOpenCount === null)
-          ? 'Grab one or two spaces for the year.'
-          : (_cleaningOpenCount === 0
-            ? 'All spots covered for the year — thank you!'
-            : '<strong>' + _cleaningOpenCount + '</strong> spot' + (_cleaningOpenCount === 1 ? '' : 's') + ' open this year');
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="cleaning-signup-modal">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning Crew</button>'
-          + '<span class="ws-part-submit-hint" id="ws-clean-open-hint">' + cleanHint + '</span></p>';
-        // Special events (#53/#73/#75): one summary line — the seats and
-        // sign-up lists live in the Jump In modal (the inline list made the
-        // card long again; Erin 2026-07-21 evening).
-        h += renderWthEventsSummary();
-        if (open.length === 0) {
-          h += '<p class="ws-empty">See open roles and how the co-op is organized in <button type="button" class="ws-inline-link" data-resource-action="org-structure">Organization &amp; Roles</button>. Have an idea for something new? Pitch it in <a href="https://chat.google.com/" target="_blank" rel="noopener">Google Chat</a>.</p>';
-        } else {
-          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="open-seats-modal">' + brandIconImg('waysToHelp', 'ag-icon') + ' Committee Seats</button>'
-            + '<span class="ws-part-submit-hint"><strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's') + '</span></p>';
+        // Erin 2026-08-02: a compact 2×2 tile grid instead of four stacked
+        // button rows — icon on top, live count underneath, same order as
+        // the badge circles above (lead → cleaning → events → committee).
+        // Each tile keeps its old data-resource-action, so the shared
+        // click wiring is untouched.
+        function jumpTile(action, iconKey, label, hintHtml, hintId) {
+          return '<button type="button" class="ws-part-jump-tile" data-resource-action="' + action + '">'
+            + brandIconImg(iconKey, 'ws-jump-tile-icon')
+            + '<span class="ws-jump-tile-label">' + label + '</span>'
+            + '<span class="ws-jump-tile-hint"' + (hintId ? ' id="' + hintId + '"' : '') + '>' + hintHtml + '</span>'
+            + '</button>';
         }
+        var cleanHint = (_cleaningOpenCount === null)
+          ? 'grab a spot for the year'
+          : (_cleaningOpenCount === 0
+            ? 'all covered — thank you!'
+            : '<strong>' + _cleaningOpenCount + '</strong> spot' + (_cleaningOpenCount === 1 ? '' : 's') + ' open');
+        h += '<div class="ws-part-jump-grid">';
+        h += jumpTile('submit-pm-class', 'lead', 'Submit a Class', 'propose yours');
+        // #133/#159 (Colleen): live open-spot count, painted async by
+        // loadCleaningOpenCount into #ws-clean-open-hint.
+        h += jumpTile('cleaning-signup-modal', 'cleaning', 'Cleaning Crew', cleanHint, 'ws-clean-open-hint');
+        // Special events (#53/#73/#75): seats + sign-up lists live in the
+        // Jump In modal; the tile carries only the counts.
+        h += renderWthEventsSummary();
+        // No open committee seats → the tile points at Organization &
+        // Roles instead (the old prose fallback's destination).
+        h += (open.length === 0)
+          ? jumpTile('org-structure', 'waysToHelp', 'Committee Seats', 'none open — explore roles')
+          : jumpTile('open-seats-modal', 'waysToHelp', 'Committee Seats', '<strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's'));
+        h += '</div>';
         return h;
       },
       afterRender: function () {
@@ -10965,9 +10977,10 @@
     'Welcome Coordinator': ['todos', 'upcoming-events', 'ways-to-help', 'resources'],
     // 'class-ideas' joined the universal set 2026-07-20 (#38 — moved
     // from My Family, whose old slot now hosts the My Classes card).
-    // #152 (Erin): Shared order — row 1: Members, Ways to Help, Class
-    // Development; row 2: Special Events (To Do), Lending, Resources.
-    '*': ['members-summary', 'ways-to-help', 'class-ideas', 'shared-todos', 'lending', 'resources']
+    // Erin 2026-08-02 (supersedes #152's order): Special Events To Do
+    // leads the Shared section — row 1: Special Events (To Do), Members,
+    // Ways to Help; row 2: Class Development, Lending, Resources.
+    '*': ['shared-todos', 'members-summary', 'ways-to-help', 'class-ideas', 'lending', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -27584,13 +27597,15 @@
     var c = wthEventOpenCounts();
     if (!c || !c.any) return '';
     var bits = [];
-    if (c.spots) bits.push('<strong>' + c.spots + '</strong> open event seat' + (c.spots === 1 ? '' : 's'));
-    if (c.lists) bits.push('<strong>' + c.lists + '</strong> sign-up list' + (c.lists === 1 ? '' : 's') + ' open');
-    // #79: same prominent treatment as Submit a Class (was a one-line
-    // text link members scrolled past).
-    // #154 (Erin): counts only — the how-to copy lives in the modal.
-    return '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-jump-in">' + brandIconImg('specialEvents', 'ag-icon') + ' Special Events</button>'
-      + '<span class="ws-part-submit-hint">' + bits.join(' · ') + '</span></p>';
+    if (c.spots) bits.push('<strong>' + c.spots + '</strong> seat' + (c.spots === 1 ? '' : 's'));
+    if (c.lists) bits.push('<strong>' + c.lists + '</strong> list' + (c.lists === 1 ? '' : 's'));
+    // #79/#154: counts only — the how-to copy lives in the Jump In modal.
+    // Erin 2026-08-02: renders as a tile in the Ways-to-Help jump grid.
+    return '<button type="button" class="ws-part-jump-tile" data-resource-action="event-jump-in">'
+      + brandIconImg('specialEvents', 'ws-jump-tile-icon')
+      + '<span class="ws-jump-tile-label">Special Events</span>'
+      + '<span class="ws-jump-tile-hint">' + bits.join(' · ') + ' open</span>'
+      + '</button>';
   }
 
   // The Jump In modal — every event's open seats (direct sign-up, #75)
@@ -34235,11 +34250,16 @@
       var inScope = !!scopedIds[r.id];
       var canManageThisRow = inScope && (!isBoardRow || (typeof getWorkspaceRoles === 'function' && getWorkspaceRoles().indexOf('Communications Director') !== -1));
 
-      // Board rows head their column with the same emoji the Org & Roles
-      // chart uses - one visual language across both surfaces.
+      // Board rows head their column with the same per-role brand mark
+      // the Org & Roles chart uses (#129 marks; Erin 2026-08-02 — this
+      // tree was still on the old DB emoji). Title normalizes
+      // "Vice-President" → "Vice President" for the accents map; emoji
+      // stays as the fallback for any unmapped role.
       var titleInner = escapeHtml(r.title);
       if (depth === 0 && isBoardRow) {
-        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + (r.icon_emoji || '\u{1F333}') + '</span> ' + titleInner;
+        var boardMark = (typeof boardRoleAccentImg === 'function'
+          ? boardRoleAccentImg(String(r.title || '').replace(/-/g, ' ')) : '') || (r.icon_emoji || '\u{1F333}');
+        titleInner = '<span class="org-col-emoji" aria-hidden="true">' + boardMark + '</span> ' + titleInner;
       }
 
       // Condensed by default (Erin 2026-07-06): the visible row is just
