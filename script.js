@@ -16352,31 +16352,31 @@
       '<path d="M17 21c0-4-1-7-3-9"/>' +
       '<path d="M14 12c4 1 6.5-1 7-5-4-.5-6.5 1.5-7 5z"/>' +
       '</svg>',
-    cleaning: // watering can — tending the space
+    cleaning: // broom (#200, Colleen)
       '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M7 10h9v8a1.5 1.5 0 0 1-1.5 1.5H8.5A1.5 1.5 0 0 1 7 18z"/>' +
-      '<path d="M16 12l4-3.5"/>' +
-      '<path d="M7 13H5a2 2 0 0 1 0-4h2"/>' +
-      '<path d="M10 6.5c.5-1 2.5-1 3 0"/>' +
+      '<path d="M19.5 4.5l-7 7"/>' +
+      '<path d="M12.5 11.5c-3.2 0-6.2 1.7-7.7 4.7l5 5c3-1.5 4.7-4.5 4.7-7.7z"/>' +
+      '<path d="M8.2 14.2l1.8 1.8M6.2 16.4l1.4 1.4"/>' +
       '</svg>',
-    eventLead: // flower — you made something bloom for everyone
+    eventLead: // confetti popper (#200, Colleen)
       '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<circle cx="12" cy="9" r="2.2"/>' +
-      '<path d="M12 6.8V3.5M14 10.2l2.8 1.6M10 10.2l-2.8 1.6M13.9 7.7l2.9-1.5M10.1 7.7L7.2 6.2"/>' +
-      '<path d="M12 22v-8"/>' +
-      '<path d="M12 18c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4z"/>' +
+      '<path d="M7 10.5L3 21l10.5-4z"/>' +
+      '<path d="M8.5 12l3.5 3.5"/>' +
+      '<path d="M12.5 8c0-2 1.2-3 3-3"/>' +
+      '<path d="M16 11.5c2 0 3-1.2 3-3"/>' +
+      '<path d="M11 3.5h.01M20 5h.01M20.5 14h.01M15 15.5h.01"/>' +
       '</svg>',
-    oneYear: // acorn — a year-long commitment planted
+    oneYear: // just a "1" (#200, Colleen)
       '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M12 4.5c-4 0-6 1.5-6 4h12c0-2.5-2-4-6-4z"/>' +
-      '<path d="M18 8.5c0 5-3 9-6 11-3-2-6-6-6-11"/>' +
-      '<path d="M12 4.5c0-1 .5-1.8 1.5-2.3"/>' +
+      '<path d="M9 8.5L13 5.5v13"/>' +
+      '<path d="M9 18.5h8"/>' +
       '</svg>',
-    board: // grove — tending the whole forest
+    board: // butterfly (#200, Colleen — matches the co-op logo accents)
       '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M6 21v-3M6 18c-2.5 0-4-1.8-3.5-4.5 2 0 3.5 1.5 3.5 4.5z"/>' +
-      '<path d="M18 21v-3M18 18c2.5 0 4-1.8 3.5-4.5-2 0-3.5 1.5-3.5 4.5z"/>' +
-      '<path d="M12 21v-6M12 15c-3.5 0-5.5-2.5-5-6.5 3 0 5 2.5 5 6.5zM12 15c3.5 0 5.5-2.5 5-6.5-3 0-5 2.5-5 6.5z"/>' +
+      '<path d="M12 8.5v10"/>' +
+      '<path d="M12 8.5c-.8-1.4-2-2.8-3.5-3.5M12 8.5c.8-1.4 2-2.8 3.5-3.5"/>' +
+      '<path d="M11.5 10.5C9.5 7.5 5 7 4 9.5s1 5.5 4.5 5.5c-2.3 1-2.8 3.2-1 4.2s4-.7 4-3.2"/>' +
+      '<path d="M12.5 10.5c2-3 6.5-3.5 7.5-1s-1 5.5-4.5 5.5c2.3 1 2.8 3.2 1 4.2s-4-.7-4-3.2"/>' +
       '</svg>'
   };
 
