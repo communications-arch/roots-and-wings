@@ -14593,11 +14593,14 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: 999px;
   background: rgba(var(--color-primary-rgb), 0.10);
 }
-.ws-grow-seg-filled .ws-grow-seg-bar {
-  background: linear-gradient(90deg, var(--color-chartreuse), var(--color-leaf));
-}
-.ws-part-panel-sprout  .ws-grow-seg-filled .ws-grow-seg-bar { background: linear-gradient(90deg, var(--color-coral), #B84a2a); }
-.ws-part-panel-sapling .ws-grow-seg-filled .ws-grow-seg-bar { background: linear-gradient(90deg, var(--color-accent), var(--color-accent-dark)); }
+/* Erin 2026-08-02: the four stages step through greens — bright
+   chartreuse at Sprouting, deepening to the dark leaf green at Full
+   bloom — regardless of the panel's status tint (growth reads as one
+   green scale, not as status colors). */
+.ws-grow-seg-filled .ws-grow-seg-bar { background: var(--color-chartreuse); }
+.ws-grow-seg:nth-child(2).ws-grow-seg-filled .ws-grow-seg-bar { background: #85A634; }
+.ws-grow-seg:nth-child(3).ws-grow-seg-filled .ws-grow-seg-bar { background: #708936; }
+.ws-grow-seg:nth-child(4).ws-grow-seg-filled .ws-grow-seg-bar { background: var(--color-leaf); }
 .ws-grow-seg-label {
   font-size: 0.7rem;
   line-height: 1.2;
