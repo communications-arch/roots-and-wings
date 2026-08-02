@@ -11643,7 +11643,10 @@
           // Decorative brand accent per card (2026-07-11, Erin's asset
           // set) — purely ornamental, the title carries the meaning.
           // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
-          var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes, 'class-ideas': BRAND_ICONS.classes,
+          var WS_ACCENTS = { 'todos': BRAND_ICONS.todo, 'reports': BRAND_ICONS.reports, 'roles': BRAND_ICONS.roles, 'ways-to-help': BRAND_ICONS.waysToHelp, 'resources': BRAND_ICONS.resources, 'admin-consoles': BRAND_ICONS.adminConsoles, 'special-events': BRAND_ICONS.specialEvents, 'supply-closet-mgmt': BRAND_ICONS.supplyCloset, 'members-summary': BRAND_ICONS.membersSummary, 'upcoming-events': BRAND_ICONS.timeline, 'board-notes': BRAND_ICONS.notes,
+            // Erin 2026-08-02: Class Development wears the Leading mark —
+            // same icon as the lead-a-class badge + Submit a Class button.
+            'class-ideas': BRAND_ICONS.lead,
             'shared-todos': BRAND_ICONS.specialEvents, 'lending': BRAND_ICONS.lending,
             'group-bring': BRAND_ICONS.supplyCloset,
             'my-class': BRAND_ICONS.classes,
