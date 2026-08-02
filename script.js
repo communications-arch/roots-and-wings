@@ -8637,7 +8637,7 @@
     // the same serif title + an org-summary count strip (the Volunteers
     // tab's pattern), so the four tabs read the same way at a glance.
     // Erin 2026-08-01: no year in the tab titles.
-    var html = '<h3>Session Schedule</h3>';
+    var html = '<h3>' + brandIconImg('session') + ' Session Schedule</h3>';
     html += buildSessionPager(viewSess, 'session');
     var stBits = [];
     if (sess && sess.start && sess.end) stBits.push(formatDateLabel(sess.start) + ' – ' + formatDateLabel(sess.end));
@@ -9139,7 +9139,7 @@
 
     // #190 (Erin): shared tab anatomy — serif title + org-summary strip
     // (liaison + coverage counts) matching the other Coordination tabs.
-    var html = '<h3>Cleaning Crew</h3>' + buildSessionPager(viewSess, 'cleaning');
+    var html = '<h3>' + brandIconImg('cleaning') + ' Cleaning Crew</h3>' + buildSessionPager(viewSess, 'cleaning');
     var liaisonLabel = getRoleByKey('cleaning_crew_liaison') ? '<a class="rd-role-link" data-role-key="cleaning_crew_liaison" href="#" onclick="return false;">Liaison</a>' : 'Liaison';
     var liaisonBit = liaisonLabel + ': <strong>' + CLEANING_CREW.liaison + '</strong>';
 
@@ -9633,7 +9633,7 @@
       _volTabState.loading = false;
       _volTabState.year = year;
       // Erin 2026-08-01: no year in the title — the summary strip has it.
-      _volTabState.html = '<h3>Volunteer Roles</h3>' + buildOrgTreeHtml(y, roles, holders, note);
+      _volTabState.html = '<h3>' + brandIconImg('roles') + ' Volunteer Roles</h3>' + buildOrgTreeHtml(y, roles, holders, note);
       container.innerHTML = _volTabState.html;
       wireOrgRowToggles(container);
     }
@@ -9693,7 +9693,7 @@
     }
 
     // Erin 2026-08-01: no year in the tab titles.
-    var html = '<h3>Special Events</h3>';
+    var html = '<h3>' + brandIconImg('specialEvents') + ' Special Events</h3>';
     // #190 (Erin): org-summary count strip in the shared tab anatomy.
     if (SPECIAL_EVENTS_DB.length) {
       var seNeeds = 0, seDone = 0;
@@ -9803,7 +9803,9 @@
       // — lands on the Collaboration page, where the server already
       // filters cards to the ones marked visible to all members.
       if (ev.id) {
-        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '">' + brandIconImg('specialEvents', 'ag-icon') + ' View event details</button></p>';
+        // Erin 2026-08-02: purple outline heart — this button jumps into
+        // the event's Collaboration space, so it wears Collaboration's mark.
+        html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-resource-action="event-space-open" data-eid="' + ev.id + '"><span style="display:inline-flex;vertical-align:-3px;color:var(--color-primary);">' + DUTY_ICONS.volunteer + '</span> View event details</button></p>';
       }
 
       html += '</div></div>';
