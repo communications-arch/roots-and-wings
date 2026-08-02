@@ -14485,16 +14485,16 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 
 /* ---------- Participation panel inside Ways to Help card ---------- */
+/* #201 (Colleen, 2026-08-02): ONE neutral warm panel — light tan/yellow
+   with a gold bar, regardless of status. Progress lives in the green
+   track + badges, not in panel color-coding. */
 .ws-part-panel {
   margin: -4px 0 16px;
   padding: 14px 14px 12px;
   border-radius: var(--radius-md);
-  background: rgba(var(--color-primary-rgb), 0.04);
-  border-left: 4px solid var(--color-primary-light);
+  background: rgba(var(--color-accent-light-rgb), 0.18);
+  border-left: 4px solid var(--color-accent-dark);
 }
-.ws-part-panel-sprout  { background: rgba(var(--color-coral-rgb), 0.08);         border-left-color: var(--color-coral); }
-.ws-part-panel-sapling { background: rgba(var(--color-accent-light-rgb), 0.18);  border-left-color: var(--color-accent-dark); }
-.ws-part-panel-tree    { background: rgba(var(--color-chartreuse-rgb), 0.14);    border-left-color: var(--color-leaf); }
 .ws-part-panel-loading { opacity: 0.7; }
 
 .ws-part-panel-head {
@@ -14513,9 +14513,7 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   background: var(--color-white);
   flex-shrink: 0;
 }
-.ws-part-panel-sprout  .ws-part-panel-icon { color: var(--color-coral); }
-.ws-part-panel-sapling .ws-part-panel-icon { color: var(--color-accent-dark); }
-.ws-part-panel-tree    .ws-part-panel-icon { color: var(--color-leaf); }
+.ws-part-panel-icon { color: var(--color-leaf); }
 
 .ws-part-panel-headings h5 {
   margin: 0 0 2px;
@@ -14582,6 +14580,7 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   margin: 10px 0 6px;
 }
 .ws-grow-seg {
+  position: relative; /* anchors the stage tooltip (#201) */
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -14589,18 +14588,51 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   min-width: 0;
 }
 .ws-grow-seg-bar {
+  display: block;
   height: 9px;
   border-radius: 999px;
   background: rgba(var(--color-primary-rgb), 0.10);
+  overflow: hidden;
 }
-/* Erin 2026-08-02: the four stages step through greens — bright
-   chartreuse at Sprouting, deepening to the dark leaf green at Full
-   bloom — regardless of the panel's status tint (growth reads as one
-   green scale, not as status colors). */
-.ws-grow-seg-filled .ws-grow-seg-bar { background: var(--color-chartreuse); }
-.ws-grow-seg:nth-child(2).ws-grow-seg-filled .ws-grow-seg-bar { background: #85A634; }
-.ws-grow-seg:nth-child(3).ws-grow-seg-filled .ws-grow-seg-bar { background: #708936; }
-.ws-grow-seg:nth-child(4).ws-grow-seg-filled .ws-grow-seg-bar { background: var(--color-leaf); }
+/* #201: each segment fills proportionally to the member's points and
+   animates in from zero. Colors step through greens — chartreuse at
+   Sprouting deepening to the dark leaf green at Full bloom. */
+.ws-grow-seg-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-chartreuse);
+  animation: wsGrowFill 1.2s ease;
+}
+.ws-grow-seg:nth-child(2) .ws-grow-seg-fill { background: #85A634; animation-duration: 1.5s; }
+.ws-grow-seg:nth-child(3) .ws-grow-seg-fill { background: #708936; animation-duration: 1.8s; }
+.ws-grow-seg:nth-child(4) .ws-grow-seg-fill { background: var(--color-leaf); animation-duration: 2.1s; }
+@keyframes wsGrowFill { from { width: 0; } }
+/* Stage tooltip — same opaque dark panel as the badge tips. */
+.ws-grow-seg-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 200px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-primary-dark);
+  color: var(--color-white);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+  z-index: 40;
+}
+.ws-grow-seg:hover .ws-grow-seg-tip { opacity: 1; }
+.ws-grow-seg:first-child .ws-grow-seg-tip { left: 0; transform: none; }
+.ws-grow-seg:last-child  .ws-grow-seg-tip { left: auto; right: 0; transform: none; }
 .ws-grow-seg-label {
   font-size: 0.7rem;
   line-height: 1.2;
@@ -14694,6 +14726,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   margin-right: 2px;
 }
 .collab-caret-closed { transform: rotate(-90deg); }
+/* Erin 2026-08-02: with the caret leading the row, space-between pushed
+   the title to the middle — titles hug the caret on the left instead,
+   and the header icons keep the right edge. */
+.collab-toggle { justify-content: flex-start; }
+.collab-toggle .evs-head-icons { margin-left: auto; }
 /* Outline calendar beside collaboration dates (Erin 2026-08-02 — replaces
    the aster brand mark for date rows). */
 .evs-date-ico { display: inline-flex; vertical-align: -3px; color: var(--color-text-light); }

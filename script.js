@@ -10116,7 +10116,9 @@
             'You’re flourishing — thank you for all you do!',
             'Full bloom! You’re a cornerstone of our co-op. Thank you!'
           ][stage] || '';
-          h += '<div class="ws-part-panel ws-part-panel-' + tier + '">';
+          // #201 (Colleen): one neutral warm panel — no status color-coding
+          // on the background/left bar (the track + badges carry progress).
+          h += '<div class="ws-part-panel">';
           h += '<div class="ws-part-panel-head">';
           h += '<span class="ws-part-panel-icon" aria-hidden="true">' + (PLANT_SVGS[tier] || '') + '</span>';
           h += '<div class="ws-part-panel-headings">';
@@ -10130,7 +10132,7 @@
           if (expected < 0.5 && member.exemption) {
             h += '<p class="ws-part-exempt-note">Thanks for what you’ve given this year — your plan is marked as a break for now.</p>';
           } else {
-            h += renderParticipationTrack(stage);
+            h += renderParticipationTrack(total, expected);
             h += '<p class="ws-part-earned">You’ve earned <strong>' + total.toFixed(total % 1 ? 1 : 0) + '</strong> point' + (total === 1 ? '' : 's') + ' this year.</p>';
           }
 
@@ -16336,6 +16338,8 @@
   // intent is steady involvement all year. Only forward progress renders:
   // no "points remaining", no "behind".
   var PARTICIPATION_STAGES = ['Sprouting', 'Taking root', 'Flourishing', 'Full bloom'];
+  // #201 (Colleen): encouragement lines shown when hovering each stage.
+  var PARTICIPATION_STAGE_TIPS = ['Thanks for jumping in!', 'You’re on your way!', 'You did it!', 'Overachiever! Thanks!'];
 
   // How many stages are filled (0–4) for a points total against the
   // member's own goal (new-member/exemption pro-rating included upstream).
@@ -16351,14 +16355,31 @@
     return 1;
   }
 
-  function renderParticipationTrack(stage) {
+  // #201 (Colleen): segments fill PROPORTIONALLY to the member's actual
+  // points (each stage spans a slice of their goal — 0–50%, 50–100%,
+  // 100–130%, 130–160%, capped) and animate in from zero. Hovering a
+  // stage shows its encouragement line.
+  function renderParticipationTrack(total, goal) {
+    var stage = participationStageIndex(total, goal);
+    var spans = goal > 0 ? [[0, 0.5], [0.5, 1], [1, 1.3], [1.3, 1.6]] : null;
     var h = '<div class="ws-grow-track" role="img" aria-label="Participation stage: '
       + (stage > 0 ? escapeHtml(PARTICIPATION_STAGES[stage - 1]) : 'just getting started') + '">';
     PARTICIPATION_STAGES.forEach(function (name, i) {
+      var fillPct;
+      if (spans) {
+        var lo = spans[i][0] * goal, hi = spans[i][1] * goal;
+        fillPct = Math.round(Math.max(0, Math.min(1, (total - lo) / (hi - lo))) * 100);
+      } else {
+        fillPct = (total > 0 && i === 0) ? 100 : 0;
+      }
       var cls = 'ws-grow-seg';
       if (i < stage) cls += ' ws-grow-seg-filled';
       if (i === stage - 1) cls += ' ws-grow-seg-current';
-      h += '<div class="' + cls + '"><span class="ws-grow-seg-bar"></span><span class="ws-grow-seg-label">' + escapeHtml(name) + '</span></div>';
+      h += '<div class="' + cls + '">'
+        + '<span class="ws-grow-seg-bar"><span class="ws-grow-seg-fill" style="width:' + fillPct + '%"></span></span>'
+        + '<span class="ws-grow-seg-label">' + escapeHtml(name) + '</span>'
+        + '<span class="ws-grow-seg-tip">' + escapeHtml(PARTICIPATION_STAGE_TIPS[i]) + '</span>'
+        + '</div>';
     });
     h += '</div>';
     return h;
