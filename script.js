@@ -6134,8 +6134,8 @@
     boardMembership: 'accent-21',     // 💚 heart-leaf = welcoming families
     boardSustaining: 'accent-61',     // seed cluster = sustaining next year
     boardCommunications: 'accent-66', // 💬 dashes = messages in flight
-    boardCleaningLiaison: 'accent-49',// 🧹 upright tuft reads like a little broom
-    boardEventsLiaison: 'accent-39'   // 🐞 ladybug = the fun guest star
+    boardCleaningLiaison: 'accent-52',// stacked rocks — same mark as every other cleaning surface (Erin 2026-08-02; was accent-49 tuft)
+    boardEventsLiaison: 'accent-28'   // butterfly — same mark as every other Special Events surface (Erin 2026-08-02; was accent-39 ladybug)
   };
   // Role title → board mark, for surfaces keyed by title (Directory badge).
   var BOARD_ROLE_ACCENTS = {
