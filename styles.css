@@ -14493,7 +14493,6 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 14px 14px 12px;
   border-radius: var(--radius-md);
   background: rgba(var(--color-accent-light-rgb), 0.18);
-  border-left: 4px solid var(--color-accent-dark);
 }
 .ws-part-panel-loading { opacity: 0.7; }
 
