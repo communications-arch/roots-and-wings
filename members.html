@@ -386,10 +386,13 @@
             Address
           </h4>
           <p>First Mennonite Church<br>4601 Knollton Rd<br>Indianapolis, IN 46228</p>
-          <a href="https://maps.google.com/?q=4601+Knollton+Rd+Indianapolis+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
+          <a href="https://www.google.com/maps/search/?api=1&amp;query=First+Mennonite+Church%2C+4601+Knollton+Rd%2C+Indianapolis%2C+IN+46228" target="_blank" rel="noopener noreferrer" class="info-link">Get Directions &rarr;</a>
         </div>
+        <!-- Plain query embed drops a real pin on the address — the old
+             hand-built pb= blob carried a fake place id (0x0:0x0) and
+             rendered a pinless map nearby (Erin 2026-08-02). -->
         <iframe
-          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3056.8!2d-86.19!3d39.83!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zFirst+Mennonite+Church+Indianapolis!5e0!3m2!1sen!2sus!4v1"
+          src="https://maps.google.com/maps?q=First+Mennonite+Church%2C+4601+Knollton+Rd%2C+Indianapolis%2C+IN+46228&amp;output=embed"
           width="100%" height="320" style="border:0;border-radius:var(--radius-md);" allowfullscreen loading="lazy"
           referrerpolicy="no-referrer-when-downgrade"
           title="First Mennonite Church location"></iframe>
