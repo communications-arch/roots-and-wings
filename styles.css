@@ -13669,16 +13669,15 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   padding: 0.3rem 0.9rem;
   font-size: 0.78rem;
 }
-/* Erin 2026-08-02 (mobile): Coverage Board header flows like My
-   Responsibilities — title + badge + help stay on the top row, the
-   Absence Alert button rolls to its own second row. */
+/* Erin 2026-08-02 (mobile): Coverage Board header wraps into two rows —
+   title + help on top, then the "N open" badge and Absence Alert button
+   TOGETHER on the second row (badge left, button right). On desktop the
+   title span doesn't grow, so everything stays on one line. */
+.mf-cov-titlewrap { display: inline-flex; align-items: center; gap: 0.4rem; }
 @media (max-width: 600px) {
   .mf-coverage-summary { flex-wrap: wrap; }
-  .mf-coverage-summary .btn-absence-header {
-    flex-basis: 100%;
-    width: max-content;
-    margin-left: 0;
-  }
+  .mf-cov-titlewrap { flex: 1 1 auto; }
+  .mf-coverage-summary .coverage-summary-badge { margin-left: 0; }
 }
 /* Placement rows in the VP's sign-up To Do modals. */
 .st-place-row {

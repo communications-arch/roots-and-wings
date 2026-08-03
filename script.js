@@ -6997,7 +6997,13 @@
       // #169 + Erin 2026-07-31: the doorway lives in the card HEADER (like
       // My Responsibilities' I'll Be Out) and reads "Absence Alert". The
       // click handler stops propagation so it doesn't toggle the details.
-      html += '<summary class="mf-card-title mf-coverage-summary" data-help-key="mf-coverage">' + brandIconImg('coverage') + ' Coverage Board <span class="coverage-summary-badge" id="coverageSummaryBadge"></span>'
+      // Erin 2026-08-02 (global pattern): the help "?" sits right beside
+      // the card title (inside the title span), not at the far edge —
+      // rendered inline like My Responsibilities, so injectMyFamilyHelp's
+      // append-at-end path is skipped (no data-help-key here).
+      html += '<summary class="mf-card-title mf-coverage-summary">'
+        + '<span class="mf-cov-titlewrap">' + brandIconImg('coverage') + ' Coverage Board ' + (hasHelp('mf-coverage') ? renderHelpIcon('mf-coverage') : '') + '</span>'
+        + '<span class="coverage-summary-badge" id="coverageSummaryBadge"></span>'
         + (!isSummerBreak ? '<button class="btn btn-absence btn-absence-header" id="reportAbsenceBtn2" style="margin-left:auto;">Absence Alert</button>' : '')
         + '</summary>';
       html += '<p class="coverage-intro">See who needs coverage and volunteer to help.</p>';
