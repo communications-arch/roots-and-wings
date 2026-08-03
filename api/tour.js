@@ -7642,11 +7642,14 @@ function iceCreamSocialForYear(sessions, schoolYear) {
 // Surfaced only while the event has no saved date — the SEL's saved value
 // always wins, and until then the suggestion tracks session-date edits.
 // Anchors (sessions end on Wednesdays):
-//   PJ Party + Maker's Market — the "mini session", two weeks after
-//     Session 2 ends.
+//   PJ Party + Maker's Market + Service Project — the "mini session",
+//     two weeks after Session 2 ends (Erin 2026-08-02: Service Project
+//     shares PJ Party's day).
 //   Passion Fair — the Wednesday after Session 3 ends.
 //   Camp — TBD; the week right after Session 4 (Monday following its
 //     end — historically "week of Mar 29" vs "week of Apr 5").
+//   Variety Show — Field Day's own date (Erin 2026-08-02: same day;
+//     Variety Show runs 10–12, Field Day 12–2).
 function specialEventDefaultDate(name, sessions, schoolYear) {
   const rows = calSessionsForYear(sessions, schoolYear);
   const endOf = n => {
@@ -7656,11 +7659,14 @@ function specialEventDefaultDate(name, sessions, schoolYear) {
   switch (name) {
     case 'PJ Party':
     case "Maker's Market":
+    case 'Service Project':
       return calAddDays(endOf(2), 14);
     case 'Passion Fair':
       return calAddDays(endOf(3), 7);
     case 'Camp':
       return calAddDays(endOf(4), 5); // Wed end + 5 days = following Monday
+    case 'Variety Show':
+      return fieldDayForYear(sessions, schoolYear);
     default:
       return '';
   }

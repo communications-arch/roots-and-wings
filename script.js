@@ -34378,12 +34378,21 @@
       // the Org & Roles chart uses (#129 marks; Erin 2026-08-02 — this
       // tree was still on the old DB emoji). Title normalizes
       // "Vice-President" → "Vice President" for the accents map; emoji
-      // stays as the fallback for any unmapped role.
+      // stays as the fallback for any unmapped role. Nested rows with an
+      // established mark wear it too (grove liaisons / cleaning / special
+      // events — Erin 2026-08-02, mirrors the org chart's orgItem).
       var titleInner = escapeHtml(r.title);
       if (depth === 0 && isBoardRow) {
         var boardMark = (typeof boardRoleAccentImg === 'function'
           ? boardRoleAccentImg(String(r.title || '').replace(/-/g, ' ')) : '') || (r.icon_emoji || '\u{1F333}');
         titleInner = '<span class="org-col-emoji" aria-hidden="true">' + boardMark + '</span> ' + titleInner;
+      } else {
+        var rmMark = '';
+        var rmGrove = String(r.title || '').match(/^(Greenhouse|Saplings|Sassafras|Oaks|Maples|Birch|Willows|Cedars|Pigeons|Teens)\s+Liaison$/i);
+        if (rmGrove && typeof ageGroupIconHtml === 'function') rmMark = ageGroupIconHtml(rmGrove[1]);
+        else if (/^cleaning crew liaison$/i.test(r.title)) rmMark = brandIconImg('cleaning', 'ag-icon');
+        else if (/^special events liaison$/i.test(r.title)) rmMark = brandIconImg('specialEvents', 'ag-icon');
+        if (rmMark) titleInner = '<span class="org-col-emoji" aria-hidden="true">' + rmMark + '</span> ' + titleInner;
       }
 
       // Condensed by default (Erin 2026-07-06): the visible row is just
