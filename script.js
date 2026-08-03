@@ -37134,8 +37134,11 @@
         // Acknowledge without committing (Erin's testers, 2026-07-16):
         // "Mark reviewed" moves submitted → drafted, which drops it from
         // every awaiting-review count but keeps the card in the palette
-        // to place later. Only submitted cards need it.
-        if (s.status === 'submitted') {
+        // to place later. Only submitted cards need it — and only
+        // full-scope reviewers (VP / ACL) see it: a grove liaison read the
+        // ✓ as "select this class" on her phone, and liaisons have no
+        // review counts to clear anyway (Erin, 2026-08-03).
+        if (s.status === 'submitted' && sbScopeAll()) {
           paletteHtml += '<button type="button" class="sb-palette-ack" draggable="false" data-sub-id="' + s.id + '" title="Mark reviewed — clears it from the review counts but keeps it here to place later" aria-label="Mark ' + escClsHtml(s.class_name) + ' reviewed">✓</button>';
         }
         // Lead with ages as colored words. Status chip omitted — palette =
@@ -38158,8 +38161,12 @@
     // offering other groups' classes just to deny the click with a scope
     // error confused testers (Erin, 2026-07-19: Cedars Liaison picked from
     // "Other submissions" and got "not allowed").
+    // Drafted (✓ mark-reviewed) stays placeable here — the picker is the
+    // only placement path on touch screens, and a liaison whose class got
+    // acked would otherwise see "no submissions" while the desktop palette
+    // still drags it fine (Erin's liaison report, 2026-08-03).
     var pool = scheduleBuilderState.submissions.filter(function (s) {
-      return s.status === 'submitted'
+      return (s.status === 'submitted' || s.status === 'drafted')
         && ((s.class_period === 'AM' ? 'AM' : 'PM') === pickerPeriod)
         && sbCanTouchSub(s);
     });
