@@ -14,7 +14,21 @@
   <!-- Page-render stamp for the public forms' bot screening (see botScreen
        in api/tour.js): humans take seconds between load and submit; bots
        posting straight at the API never carry it. -->
-  <script>window.__rwPageTs = Date.now();</script>
+  <script>
+    window.__rwPageTs = Date.now();
+    // #207: the public forms (tour / contact / merch) must carry a
+    // server-signed token — posts without one are screened as junk.
+    // Fetched at render so the fill-time window starts now; re-fetched
+    // after a successful send (tokens are single-use server-side).
+    window.__rwFormToken = '';
+    window.__rwFetchFormToken = function () {
+      return fetch('/api/tour?form_token=1')
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.token) window.__rwFormToken = d.token; })
+        .catch(function () {});
+    };
+    window.__rwFetchFormToken();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Brand fonts (2026 guide): Playfair Display Black for display
@@ -826,6 +840,7 @@
           btn.disabled = true;
           btn.textContent = 'Sending…';
           try {
+            if (!window.__rwFormToken) await window.__rwFetchFormToken();
             var pickedDate = document.getElementById('tour-pref-date').value;
             var pickedTime = document.getElementById('tour-pref-time').value;
             // If the family picked a date but no time (or vice versa),
@@ -843,7 +858,8 @@
                 preferred_date: pickedDate || null,
                 preferred_time: pickedTime || null,
                 website: document.getElementById('tour-website').value,
-                form_ts: window.__rwPageTs || 0
+                form_ts: window.__rwPageTs || 0,
+                form_token: window.__rwFormToken || ''
               })
             });
             if (!res.ok) {
@@ -909,6 +925,7 @@
           btn.disabled = true;
           btn.textContent = 'Sending…';
           try {
+            if (!window.__rwFormToken) await window.__rwFetchFormToken();
             var res = await fetch('/api/tour', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -919,7 +936,8 @@
                 phone: document.getElementById('contact-phone').value,
                 message: document.getElementById('contact-message').value,
                 website: document.getElementById('contact-website').value,
-                form_ts: window.__rwPageTs || 0
+                form_ts: window.__rwPageTs || 0,
+                form_token: window.__rwFormToken || ''
               })
             });
             if (!res.ok) {
@@ -931,6 +949,7 @@
             // second genuine message from this page load isn't screened
             // as a replay.
             window.__rwPageTs = Date.now();
+            window.__rwFormToken = ''; window.__rwFetchFormToken();
             var modal = document.querySelector('#contact-modal .tour-modal');
             modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'contact-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
               + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
@@ -1090,6 +1109,7 @@
             submitBtn.disabled = true;
             submitBtn.textContent = 'Submitting…';
             try {
+              if (!window.__rwFormToken) await window.__rwFetchFormToken();
               var res = await fetch('/api/tour', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1104,7 +1124,8 @@
                   qty:   parseInt(document.getElementById('merch-qty').value, 10) || 1,
                   notes: document.getElementById('merch-notes').value,
                   website: document.getElementById('merch-website').value,
-                  form_ts: window.__rwPageTs || 0
+                  form_ts: window.__rwPageTs || 0,
+                  form_token: window.__rwFormToken || ''
                 })
               });
               if (!res.ok) {
@@ -1112,6 +1133,10 @@
                 try { data = await res.json(); } catch (_) {}
                 throw new Error((data && data.error) || 'request failed');
               }
+              // Tokens are single-use server-side — grab a fresh one so a
+              // second order from this page load isn't screened as a replay.
+              window.__rwPageTs = Date.now();
+              window.__rwFormToken = ''; window.__rwFetchFormToken();
               titleEl.style.display = 'none';
               subtitleEl.style.display = 'none';
               formEl.style.display = 'none';

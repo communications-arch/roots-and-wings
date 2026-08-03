@@ -435,6 +435,48 @@ function botScreen(body) {
   return null;
 }
 
+// ── #207: server-signed form tokens ─────────────────────────────────────
+// form_ts alone stopped drive-by bots but is CLIENT-stamped — a bot that
+// posts form_ts = Date.now()-60000 sails through timing AND reuse (every
+// post carries a fresh fake stamp). The token closes that: the page must
+// fetch GET ?form_token=1 at render, and the server only trusts the
+// timestamp IT signed. Layered on top of (not replacing) the honeypot,
+// content heuristics, reuse and per-IP rate caps.
+// Secret: FORM_TOKEN_SECRET env if set; otherwise derived from
+// DATABASE_URL (stable per environment, zero setup). Never used raw.
+function formTokenSecret() {
+  const base = process.env.FORM_TOKEN_SECRET || process.env.DATABASE_URL || 'rw-form-token-dev-fallback';
+  return crypto.createHash('sha256').update('rw-public-form-token:' + base).digest();
+}
+function issueFormToken(now) {
+  const ts = String(now || Date.now());
+  const sig = crypto.createHmac('sha256', formTokenSecret()).update(ts).digest('base64url');
+  return ts + '.' + sig;
+}
+// → integer ts when the signature checks out, null otherwise.
+function parseFormToken(token) {
+  const m = String(token || '').match(/^(\d{10,16})\.([A-Za-z0-9_-]{20,})$/);
+  if (!m) return null;
+  const expect = crypto.createHmac('sha256', formTokenSecret()).update(m[1]).digest('base64url');
+  const got = Buffer.from(m[2]);
+  const want = Buffer.from(expect);
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return null;
+  return parseInt(m[1], 10);
+}
+// Screen a submission's token: presence, signature, and the same
+// fill-time windows the form_ts layers use — but on a timestamp bots
+// can't forge. Returns a junk reason or null.
+function formTokenScreen(token, minMs, maxMs, now) {
+  if (!String(token || '').trim()) return 'missing form_token (direct API post)';
+  const ts = parseFormToken(token);
+  if (ts === null) return 'invalid form_token signature';
+  const age = (now || Date.now()) - ts;
+  if (age < 0) return 'future form_token';
+  if (age < minMs) return 'submitted ' + age + 'ms after token issue';
+  if (age > maxMs) return 'stale form_token (' + Math.round(age / 60000) + ' min old)';
+  return null;
+}
+
 // ── #45: layered inquiry screening (Contact Us form only) ────────────
 // The Contact form is where the spam lands (Erin: tour requests are
 // clean), so the inquiry endpoint gets the hardened stack: honeypot +
@@ -512,11 +554,27 @@ const INQUIRY_RATE = {
   dayMax: 10, dayHardCap: 25
 };
 
-async function handleTour(body, res) {
-  const botReason = botScreen(body);
+async function handleTour(body, res, req) {
+  // #207: signed token first (unforgeable timing), then the legacy
+  // honeypot/content layers. Trips stay a SILENT 200 discard.
+  const botReason = formTokenScreen(body.form_token, 4000, 24 * 3600 * 1000) || botScreen(body);
   if (botReason) {
     console.warn('tour-request bot screen tripped:', botReason);
     return res.status(200).json({ success: true });
+  }
+  // Token single-use (replay) — same public_form_hits ledger the contact
+  // and merch forms use. Non-fatal: the ledger must never block a family.
+  try {
+    const sql = getSql();
+    const tokTs = parseFormToken(body.form_token);
+    const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'tour' AND form_ts = ${tokTs} LIMIT 1`;
+    if (reused.length) {
+      console.warn('tour-request bot screen tripped: form_token reused');
+      return res.status(200).json({ success: true });
+    }
+    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${req ? clientIp(req) : ''}, 'tour', ${tokTs})`;
+  } catch (ledgerErr) {
+    console.error('tour token-ledger check error (non-fatal):', ledgerErr);
   }
   const { name, email, phone, numKids, ages } = body;
   const preferredDate = body.preferred_date ? String(body.preferred_date).trim() : null;
@@ -704,11 +762,18 @@ async function handleContact(body, req, res) {
   // status='junk' pipeline row Membership can rescue, no emails fire,
   // and the caller still sees a plain 200.
   let junkReason = String(body.website || '').trim() ? 'honeypot filled' : null;
+  // #207: the signed token carries the only timestamp we trust — the
+  // client-stamped form_ts screen stays as a cheap first tripwire but a
+  // forged form_ts no longer helps without a matching token.
+  if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
   if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
   if (!junkReason) junkReason = inquiryContentScreen({ name, email, message });
 
   const ip = clientIp(req);
-  const formTs = parseInt(body.form_ts, 10) || 0;
+  // Single-use stamp = the token's server-issued ts when present (bots
+  // can't mint fresh ones); legacy client form_ts only as a fallback so
+  // junked rows still record something.
+  const formTs = parseFormToken(body.form_token) || parseInt(body.form_ts, 10) || 0;
   let hardDrop = false;
   try {
     const sql = getSql();
@@ -4993,11 +5058,13 @@ async function handleMerchOrder(body, req, res) {
   // screen_reason, rescuable from the Merch Orders report), fires no
   // emails, and answers a plain 200 so bots get no signal to adapt.
   let junkReason = String(body.website || '').trim() ? 'honeypot filled' : null;
+  // #207: signed-token screen — see handleContact. Same windows.
+  if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
   if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
   if (!junkReason) junkReason = inquiryContentScreen({ name, email, message: notes });
 
   const ip = clientIp(req);
-  const formTs = parseInt(body.form_ts, 10) || 0;
+  const formTs = parseFormToken(body.form_token) || parseInt(body.form_ts, 10) || 0;
   let hardDrop = false;
   try {
     const sql = getSql();
@@ -10231,6 +10298,10 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
+    // #207: public — the index-page forms fetch a signed single-use token
+    // at render; POSTs without one are screened as junk. Issuing is
+    // stateless and cheap (one HMAC), so no auth or rate concern here.
+    if (req.query.form_token === '1') return res.status(200).json({ token: issueFormToken() });
     if (req.query.list === 'registrations') return handleList(req, res);
     if (req.query.list === 'tours') return handleTourList(req, res);
     if (req.query.list === 'registration-invites') return handleRegistrationInvitesList(req, res);
@@ -10265,7 +10336,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const body = req.body || {};
     const kind = String(body.kind || 'tour').toLowerCase();
-    if (kind === 'tour') return handleTour(body, res);
+    if (kind === 'tour') return handleTour(body, res, req);
     if (kind === 'contact') return handleContact(body, req, res);
     if (kind === 'merch-order') return handleMerchOrder(body, req, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
@@ -10364,3 +10435,7 @@ module.exports.deleteGoogleCalendarEvent = deleteGoogleCalendarEvent;
 module.exports.botScreen = botScreen;
 module.exports.inquiryTimingScreen = inquiryTimingScreen;
 module.exports.inquiryContentScreen = inquiryContentScreen;
+// #207 signed form tokens — pure helpers exported for the unit suite.
+module.exports.issueFormToken = issueFormToken;
+module.exports.parseFormToken = parseFormToken;
+module.exports.formTokenScreen = formTokenScreen;
