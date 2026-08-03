@@ -801,7 +801,7 @@
               });
             });
           });
-          allPeople.sort(function(a, b) { return a.name.localeCompare(b.name); });
+          allPeople.sort(function(a, b) { return nickOr(a.nickname, a.name).localeCompare(nickOr(b.nickname, b.name)); });
         }
 
         // ── AM Classes ──
@@ -2967,9 +2967,11 @@
     });
   });
 
-  // Sort everyone alphabetically by first name so board members aren't grouped separately
+  // Sort everyone alphabetically by the name SHOWN on the card — nickname
+  // when one exists (Erin 2026-08-02) — so board members aren't grouped
+  // separately and "Buzz" files under B, not under his legal name.
   allPeople.sort(function(a, b) {
-    return a.name.localeCompare(b.name);
+    return nickOr(a.nickname, a.name).localeCompare(nickOr(b.nickname, b.name));
   });
 
   var directoryGrid = document.getElementById('directoryGrid');
