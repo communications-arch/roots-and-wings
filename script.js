@@ -8735,9 +8735,12 @@
             return l === String(c.teacher || '').trim().toLowerCase()
               || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
           });
-          html += '<tr class="' + (isMyRow ? 'coord-my-row' : '') + '">';
+          // Erin 2026-08-02: scheduled rows stay tappable (grove kid list)
+          // just like the TBD rows — they lost the class when the DB
+          // branch was added.
+          html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + escapeHtml(groupName) + '">';
           // Group mark beside the colored name (Erin, 2026-07-11).
-          html += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
+          html += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
           html += '<td class="am-ages-col">' + (meta
             ? groupActualAgesHtml(meta.g.range, meta.g.name)
             : escapeHtml(c.scheduled_age_range || '')) + '</td>';
