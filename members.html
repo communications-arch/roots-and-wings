@@ -372,6 +372,20 @@
             <p style="margin:8px 0 0;">Once subscribed on the computer, the calendar shows up in the Google Calendar phone app too. If it doesn&rsquo;t appear there, open the app&rsquo;s <strong>Settings</strong>, tap the Roots &amp; Wings calendar, and turn on <strong>Sync</strong>.</p>
           </div>
         </details>
+        <details style="max-width:560px; margin:8px auto 0; font-size:0.85rem; color:var(--color-text-muted);">
+          <summary style="cursor:pointer; text-align:center; color:var(--color-text-light);">Using a personal Google, Apple, or Outlook calendar? Subscribe by link</summary>
+          <div style="margin-top:8px; background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:12px 14px;">
+            <p style="margin:0 0 8px;">The button above needs your <strong>@rootsandwingsindy.com</strong> account. Any other calendar app can follow the co-op calendar with this link instead — copy it, then:</p>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+              <input id="calIcsInput" type="text" readonly value="" placeholder="Loading link…" aria-label="Co-op calendar subscription link (iCal)" style="flex:1; min-width:0; font-size:0.78rem; padding:6px 8px; border:1px solid var(--color-border); border-radius:6px; color:var(--color-text-muted); background:var(--color-bg);">
+              <button type="button" id="calIcsCopy" class="btn btn-outline btn-sm">Copy</button>
+            </div>
+            <p style="margin:0 0 4px;"><strong>Personal Google Calendar</strong> (computer): at <a href="https://calendar.google.com" target="_blank" rel="noopener">calendar.google.com</a>, next to <strong>Other calendars</strong> click <strong>+</strong> &rarr; <strong>From URL</strong>, paste the link.</p>
+            <p style="margin:0 0 4px;"><strong>iPhone / Apple Calendar</strong>: Settings &rarr; Apps &rarr; Calendar &rarr; Accounts &rarr; Add Account &rarr; Other &rarr; <strong>Add Subscribed Calendar</strong>, paste the link. (Mac: Calendar &rarr; File &rarr; New Calendar Subscription.)</p>
+            <p style="margin:0 0 4px;"><strong>Outlook</strong>: Calendar &rarr; Add calendar &rarr; <strong>Subscribe from web</strong>, paste the link.</p>
+            <p style="margin:8px 0 0;">Updates flow in automatically (apps refresh on their own schedule, usually within a day). This link is for co-op families &mdash; please don&rsquo;t post it publicly.</p>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -534,7 +548,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260803b"></script>
+  <script src="script.js?v=20260803c"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board

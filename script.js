@@ -2133,6 +2133,13 @@
           try { localStorage.setItem(CACHE_CALENDAR_KEY, JSON.stringify(data.events)); } catch (e) { /* quota */ }
           renderCalendar(data.events);
         }
+        // #206: the feed carries the member-only iCal subscribe URL for
+        // the Calendar modal's "subscribe by link" box (personal Google /
+        // Apple / Outlook — the domain calendar itself isn't public).
+        if (data.ics_url) {
+          var icsInput = document.getElementById('calIcsInput');
+          if (icsInput) icsInput.value = data.ics_url;
+        }
       })
       .catch(function(err) {
         console.warn('Failed to load calendar:', err);
@@ -4682,6 +4689,24 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(addr).then(done, fallback);
       } else { fallback(); }
+    });
+    // #206: subscribe-by-URL (iCal) copy — same self-contained pattern as
+    // the address copy above. The input's value arrives with the calendar
+    // feed (loadCalendar fills #calIcsInput from ics_url).
+    var calIcsCopy = document.getElementById('calIcsCopy');
+    if (calIcsCopy) calIcsCopy.addEventListener('click', function () {
+      var input = document.getElementById('calIcsInput');
+      var addr = input ? input.value : '';
+      var self = this;
+      function done2() { self.textContent = '✓ Copied'; setTimeout(function () { self.textContent = 'Copy'; }, 1600); }
+      function fallback2() {
+        try { input.focus(); input.select(); document.execCommand('copy'); done2(); }
+        catch (e) { if (input) input.select(); }
+      }
+      if (!addr) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(addr).then(done2, fallback2);
+      } else { fallback2(); }
     });
     var calClose = calendarOverlay.querySelector('.calendar-close');
     if (calClose) calClose.addEventListener('click', function () {

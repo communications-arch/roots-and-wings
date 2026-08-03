@@ -2,6 +2,7 @@ const { google } = require('googleapis');
 const { neon } = require('@neondatabase/serverless');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { OAuth2Client } = require('google-auth-library');
+const crypto = require('crypto');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -34,6 +35,80 @@ const CALENDAR_IDS = [
   'c_f7e599c566fa32ba8da0c20bf51c82967e9d8aedffa8f775673db5146646b1b2@group.calendar.google.com'
 ];
 
+// ── #206: iCal (ICS) subscription feed ──────────────────────────────────
+// The co-op Google Calendar is domain-internal by decision (2026-07-30),
+// so personal Gmail / Apple / Outlook can't subscribe to it directly.
+// This feed serves the same merged events as ICS, gated by a signed key
+// in the URL — the "secret address" model — because calendar apps fetch
+// subscriptions with no auth headers. The key is stable per environment
+// (derived from ICS_FEED_KEY env or DATABASE_URL); rotating either env
+// var invalidates every previously shared URL.
+function icsFeedKey() {
+  const base = process.env.ICS_FEED_KEY || process.env.DATABASE_URL || 'rw-ics-dev-fallback';
+  return crypto.createHmac('sha256', 'rw-coop-ics-feed-v1').update(base).digest('base64url').slice(0, 32);
+}
+function icsKeyOk(candidate) {
+  const want = Buffer.from(icsFeedKey());
+  const got = Buffer.from(String(candidate || ''));
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+// RFC 5545 text escaping + 75-octet-ish line folding.
+function icsEscape(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+function icsFold(line) {
+  var out = '';
+  while (line.length > 74) {
+    out += line.slice(0, 74) + '\r\n ';
+    line = line.slice(74);
+  }
+  return out + line;
+}
+function icsUtc(iso) {
+  return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+function icsFromEvents(items) {
+  var lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Roots & Wings Indy//Co-op Calendar//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:Roots & Wings Indy',
+    'X-WR-TIMEZONE:America/Indianapolis',
+    'REFRESH-INTERVAL;VALUE=DURATION:PT12H',
+    'X-PUBLISHED-TTL:PT12H'
+  ];
+  var stamp = icsUtc(new Date().toISOString());
+  items.forEach(function (ev) {
+    var allDay = !(ev.start && ev.start.dateTime);
+    var startStr = ev.start && (ev.start.dateTime || ev.start.date);
+    var endStr = ev.end && (ev.end.dateTime || ev.end.date);
+    if (!startStr) return;
+    lines.push('BEGIN:VEVENT');
+    lines.push(icsFold('UID:' + icsEscape((ev.id || crypto.randomUUID()) + '@rootsandwingsindy.com')));
+    lines.push('DTSTAMP:' + stamp);
+    if (allDay) {
+      // Google's all-day end date is already exclusive, matching RFC 5545.
+      lines.push('DTSTART;VALUE=DATE:' + String(startStr).replace(/-/g, ''));
+      if (endStr) lines.push('DTEND;VALUE=DATE:' + String(endStr).replace(/-/g, ''));
+    } else {
+      lines.push('DTSTART:' + icsUtc(startStr));
+      if (endStr) lines.push('DTEND:' + icsUtc(endStr));
+    }
+    lines.push(icsFold('SUMMARY:' + icsEscape(ev.summary || 'Co-op event')));
+    if (ev.location) lines.push(icsFold('LOCATION:' + icsEscape(ev.location)));
+    if (ev.description) lines.push(icsFold('DESCRIPTION:' + icsEscape(ev.description)));
+    lines.push('END:VEVENT');
+  });
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n') + '\r\n';
+}
+
 module.exports = async function handler(req, res) {
   var origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
@@ -44,8 +119,12 @@ module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'public, max-age=300');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // Require authenticated @rootsandwingsindy.com Google account
-  if (!(await verifyGoogleAuth(req))) {
+  // #206: ICS mode authenticates by signed URL key (calendar apps can't
+  // send headers); everything else requires a signed-in co-op account.
+  var isIcs = !!(req.query && req.query.ics === '1');
+  if (isIcs) {
+    if (!icsKeyOk(req.query.key)) return res.status(404).send('Not found');
+  } else if (!(await verifyGoogleAuth(req))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -58,6 +137,15 @@ module.exports = async function handler(req, res) {
     var timeMax = new Date(now);
     timeMax.setMonth(timeMax.getMonth() + 3);
     var maxResults = 50;
+
+    if (isIcs) {
+      // Rolling window for subscriptions: recent past for context, the
+      // next ~13 months ahead — refreshing clients stay current across
+      // the school-year boundary without ever re-subscribing.
+      timeMin = new Date(now.getTime() - 60 * 24 * 3600 * 1000);
+      timeMax = new Date(now.getTime() + 400 * 24 * 3600 * 1000);
+      maxResults = 500;
+    }
 
     // ?range=year — the entire school calendar (Aug 1 → Jul 31),
     // including past events. July counts toward the UPCOMING school year
@@ -102,6 +190,13 @@ module.exports = async function handler(req, res) {
       return new Date(aStart) - new Date(bStart);
     });
 
+    if (isIcs) {
+      res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+      res.setHeader('Content-Disposition', 'inline; filename="roots-and-wings-indy.ics"');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.status(200).send(icsFromEvents(allEvents));
+    }
+
     // Board-calendar rows remember which Google event they created
     // (gcal_event_id) and what kind it is. Google events carry no colorId
     // or type of their own, so this lookup is what lets the client's
@@ -141,9 +236,21 @@ module.exports = async function handler(req, res) {
       };
     });
 
-    res.status(200).json({ events: events });
+    // #206: hand signed-in members their subscribe-by-URL address — the
+    // client shows it in the Calendar modal for personal Google / Apple /
+    // Outlook. Built from the request host so dev serves dev URLs.
+    var host = String(req.headers['x-forwarded-host'] || req.headers.host || 'www.rootsandwingsindy.com').split(',')[0].trim();
+    var icsUrl = 'https://' + host + '/api/calendar?ics=1&key=' + icsFeedKey();
+
+    res.status(200).json({ events: events, ics_url: icsUrl });
   } catch (err) {
     console.error('Calendar API error:', err);
     res.status(500).json({ error: 'Failed to fetch calendar' });
   }
 };
+
+// #206 ICS helpers — pure, exported for the unit suite.
+module.exports.icsFromEvents = icsFromEvents;
+module.exports.icsEscape = icsEscape;
+module.exports.icsFeedKey = icsFeedKey;
+module.exports.icsKeyOk = icsKeyOk;

@@ -265,6 +265,7 @@ const unitTests = [
   'scripts/test-open-seats.js',
   'scripts/test-inquiry-screen.js',
   'scripts/test-form-token.js',
+  'scripts/test-ics-feed.js',
   'scripts/test-dr-backup.js',
 ];
 
