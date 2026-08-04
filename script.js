@@ -23176,7 +23176,7 @@
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="elective-detail" style="max-width:640px;">';
     html += '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 6px;">Video Tutorials</h2>';
-    html += '<p style="color:#555;margin:0 0 18px;">Short walkthroughs of common portal tasks. More are on the way — tell us what you\'d like covered!</p>';
+    html += '<p style="color:#555;margin:0 0 18px;">Short walkthroughs of common portal tasks. More are on the way — <a href="mailto:communications@rootsandwingsindy.com?subject=Video%20tutorial%20idea" style="color:var(--color-primary,#523A79);font-weight:600;">tell us what you\'d like covered!</a></p>';
     TUTORIAL_VIDEOS.forEach(function (v) {
       html += '<div style="margin-bottom:22px;">';
       html += '<p style="font-weight:700;color:var(--color-primary-dark,#3d2a5c);margin:0 0 8px;">' + escapeHtml(v.title) + '</p>';
