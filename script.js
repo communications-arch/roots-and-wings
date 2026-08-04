@@ -8757,6 +8757,10 @@
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
         html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        // #209 (Lyndsey): scheduled and TBD grove rows must interleave in
+        // MORNING_GROUP_ORDER (youngest→oldest). TBD rows used to be
+        // appended after the scheduled block, scrambling the table.
+        var amRowPieces = [];
         amRows.forEach(function (c) {
           var key = String((c.age_groups || [])[0] || '').toLowerCase();
           var meta = groupIdx[key];
@@ -8771,19 +8775,20 @@
           // Erin 2026-08-02: scheduled rows stay tappable (grove kid list)
           // just like the TBD rows — they lost the class when the DB
           // branch was added.
-          html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + escapeHtml(groupName) + '">';
+          var row = '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + escapeHtml(groupName) + '">';
           // Group mark beside the colored name (Erin, 2026-07-11).
-          html += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
-          html += '<td class="am-ages-col">' + (meta
+          row += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
+          row += '<td class="am-ages-col">' + (meta
             ? groupActualAgesHtml(meta.g.range, meta.g.name)
             : escapeHtml(c.scheduled_age_range || '')) + '</td>';
-          html += '<td>' + amLiaisonHtml(groupName) + '</td>';
-          html += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
-          html += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
-          html += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
-          html += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
-          html += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
-          html += '</tr>';
+          row += '<td>' + amLiaisonHtml(groupName) + '</td>';
+          row += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
+          row += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
+          row += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
+          row += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
+          row += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
+          row += '</tr>';
+          amRowPieces.push({ i: meta ? meta.i : 99, html: row });
         });
         // Erin 2026-08-02 (prod): every grove with kids assigned shows a
         // row even before its class/lead/liaison exists — TBD rows for
@@ -8797,22 +8802,34 @@
         var amScheduledKeys = {};
         amRows.forEach(function (c) { amScheduledKeys[String((c.age_groups || [])[0] || '').toLowerCase()] = true; });
         var amTbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
-        MORNING_GROUP_ORDER.forEach(function (g) {
+        MORNING_GROUP_ORDER.forEach(function (g, gi) {
           var k = g.name.toLowerCase();
           if (g.name === 'Greenhouse' || !amKidCounts[k] || amScheduledKeys[k]) return;
-          html += '<tr class="session-class-row" data-group="' + g.name + '">';
-          html += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
-          html += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
-          html += '<td>' + amLiaisonHtml(g.name) + '</td>';
-          html += '<td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td>';
-          html += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
-          html += '</tr>';
+          var row = '<tr class="session-class-row" data-group="' + g.name + '">';
+          row += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
+          row += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
+          row += '<td>' + amLiaisonHtml(g.name) + '</td>';
+          row += '<td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td>';
+          row += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
+          row += '</tr>';
+          amRowPieces.push({ i: gi, html: row });
         });
+        // Stable sort keeps AM1-before-AM2 within a grove (amRows was
+        // pre-sorted that way).
+        amRowPieces.sort(function (a, b) { return a.i - b.i; });
+        amRowPieces.forEach(function (p) { html += p.html; });
         html += '</tbody></table></div>';
       }
     } else if (Object.keys(AM_CLASSES).length > 0) {
       html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
-      var groups = Object.keys(AM_CLASSES);
+      // #209: sheet-era fallback sorts by grove age order too.
+      var sheetGroupIdx = {};
+      MORNING_GROUP_ORDER.forEach(function (g, i) { sheetGroupIdx[g.name.toLowerCase()] = i; });
+      var groups = Object.keys(AM_CLASSES).sort(function (a, b) {
+        var ai = sheetGroupIdx[a.toLowerCase()]; if (ai === undefined) ai = 99;
+        var bi = sheetGroupIdx[b.toLowerCase()]; if (bi === undefined) bi = 99;
+        return ai - bi;
+      });
       groups.forEach(function (groupName) {
         var cls = AM_CLASSES[groupName];
         var s = cls.sessions[viewSess];
@@ -9304,7 +9321,8 @@
           || families.some(isMineFamTab);
         html += '<div class="cleaning-role' + (isMyArea ? ' coord-my-row' : '') + '">';
         html += areaNameHtml(floor.key, area);
-        html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
+        // #212 (Lyndsey): plain names — no " family" suffix clutter.
+        html += '<span class="cleaning-families">' + families.map(function (f) { return highlightFamilyIfMe(f, myNames); }).join(', ');
         var relId = isMyArea ? myAssignmentId(floor.label, area) : null;
         if (relId) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relId + '" title="Release this spot">×</button>';
         html += '</span></div>';
@@ -9327,7 +9345,7 @@
       html += '<h4>Floater</h4>';
       if (floaterFams.length) {
         html += '<div class="cleaning-role' + (isMyFloater ? ' coord-my-row' : '') + '"><span class="cleaning-families">';
-        html += floaterFams.map(function (f) { return highlightFamilyIfMe(f, myNames) + ' family'; }).join(', ');
+        html += floaterFams.map(function (f) { return highlightFamilyIfMe(f, myNames); }).join(', ');
         var relFl = isMyFloater ? myAssignmentId('Floater', 'Floater') : null;
         if (relFl) html += ' <button type="button" class="sc-btn sc-btn-del clean-tab-release" data-id="' + relFl + '" title="Release this spot">×</button>';
         html += '</span></div>';
@@ -25195,6 +25213,93 @@
     // still undefined on that first paint (IIFE load-order gotcha).
     var activeSubs = (myClassSubmissions || []).filter(function (s) { return s.status !== 'withdrawn'; });
 
+    // Ordered by session (a placed class uses its scheduled session,
+    // otherwise the earliest preferred; flexible-only sinks last), then
+    // Morning before Afternoon (Erin, 2026-07-05). Small headers mark
+    // each session bucket.
+    function subSessionKey(s) {
+      if (s.scheduled_session) return s.scheduled_session;
+      var nums = (s.session_preferences || [])
+        .filter(function (x) { return x !== 'flexible'; })
+        .map(function (x) { return parseInt(x, 10); })
+        .filter(function (n) { return Number.isFinite(n); });
+      return nums.length ? Math.min.apply(null, nums) : 99;
+    }
+    // #211 (Lyndsey): submissions from finished sessions (and other
+    // school years) tuck into a collapsed "Past sessions" section so
+    // the tab doesn't accumulate all year. Flexible rows never age out.
+    function subIsPast(s) {
+      if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR
+          && s.school_year && s.school_year !== ACTIVE_SESSION_YEAR) return true;
+      var sk = subSessionKey(s);
+      return sk !== 99 && typeof currentSession === 'number' && sk < currentSession;
+    }
+    var pastSubs = activeSubs.filter(subIsPast);
+    var currentSubs = activeSubs.filter(function (s) { return !subIsPast(s); });
+
+    function subSort(list) {
+      list.sort(function (a, b) {
+        var ya = String(a.school_year || ''), yb = String(b.school_year || '');
+        if (ya !== yb) return ya < yb ? -1 : 1;
+        var d = subSessionKey(a) - subSessionKey(b);
+        if (d) return d;
+        var pa = a.class_period === 'AM' ? 0 : 1;
+        var pb = b.class_period === 'AM' ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return String(a.class_name || '').localeCompare(String(b.class_name || ''));
+      });
+    }
+
+    function buildSubList(subs, isPast) {
+      var out = '';
+      var lastSessKey = null;
+      out += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
+      subs.forEach(function (s) {
+        var sk = subSessionKey(s);
+        var hdrKey = sk + '|' + String(s.school_year || '');
+        if (hdrKey !== lastSessKey) {
+          lastSessKey = hdrKey;
+          var yearBit = (isPast && s.school_year && typeof ACTIVE_SESSION_YEAR !== 'undefined'
+            && s.school_year !== ACTIVE_SESSION_YEAR) ? ' · ' + escClsHtml(s.school_year) : '';
+          out += '<li style="margin:10px 0 4px;font-size:0.75rem;font-weight:700;color:var(--color-text-light);text-transform:uppercase;letter-spacing:0.04em;">'
+            + (sk === 99 ? 'Flexible — any session' : 'Session ' + sk) + yearBit + '</li>';
+        }
+        var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
+        // #42 (Colleen): owners can edit drafted/scheduled classes too —
+        // saving sends the class back to 'submitted' for re-approval
+        // (server clears the placement). Withdraw stays pre-approval only.
+        // #211: past rows are read-only history — no Edit (re-approval on
+        // a finished session makes no sense).
+        var canEdit = !isPast && (s.status === 'submitted' || s.status === 'drafted' || s.status === 'scheduled');
+        // #173 (Lyndsey): a DECLINED class can be removed from the tab too
+        // (same soft-withdraw as pre-approval — nothing is deleted).
+        var canWithdraw = s.status === 'submitted' || s.status === 'declined';
+        var periodTag = s.class_period === 'AM' ? brandIconImg('morning', 'ag-icon') + ' Morning' : brandIconImg('afternoon', 'ag-icon') + ' Afternoon';
+        out += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
+        out += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
+        out += '<strong style="font-size:1rem;">' + escClsHtml(s.class_name) + '</strong>';
+        out += statusBadge(s.status);
+        out += '</div>';
+        out += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
+        out += periodTag + ' · For: ' + escClsHtml(sessText);
+        out += '</div>';
+        out += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
+        if (canEdit) {
+          out += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
+        }
+        if (canWithdraw) {
+          out += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">' + (s.status === 'declined' ? 'Remove' : 'Withdraw') + '</button>';
+        }
+        // Build a lesson plan straight from the idea (2026-07-11, Erin) —
+        // opens the Curriculum Library editor prefilled with this class.
+        out += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson Plan</button>';
+        out += '</div>';
+        out += '</li>';
+      });
+      out += '</ul>';
+      return out;
+    }
+
     // #54: the submit button leads the card instead of trailing the list.
     html += '<button class="btn btn-primary mf-classsubs-new-btn" id="mfSubmitClassBtn" style="padding:10px 22px;font-size:0.95rem;margin-bottom:0.75rem;">';
     html += (activeSubs.length === 0 ? '+ Submit a Class' : '+ Submit Another Class');
@@ -25204,75 +25309,25 @@
       html += '<p style="margin:0 0 0.75rem;color:var(--color-text-light);font-size:0.9rem;">';
       html += 'You haven\'t proposed a class yet.';
       html += '</p>';
-    } else {
-      // Ordered by session (a placed class uses its scheduled session,
-      // otherwise the earliest preferred; flexible-only sinks last), then
-      // Morning before Afternoon (Erin, 2026-07-05). Small headers mark
-      // each session bucket.
-      function subSessionKey(s) {
-        if (s.scheduled_session) return s.scheduled_session;
-        var nums = (s.session_preferences || [])
-          .filter(function (x) { return x !== 'flexible'; })
-          .map(function (x) { return parseInt(x, 10); })
-          .filter(function (n) { return Number.isFinite(n); });
-        return nums.length ? Math.min.apply(null, nums) : 99;
-      }
-      activeSubs.sort(function (a, b) {
-        var d = subSessionKey(a) - subSessionKey(b);
-        if (d) return d;
-        var pa = a.class_period === 'AM' ? 0 : 1;
-        var pb = b.class_period === 'AM' ? 0 : 1;
-        if (pa !== pb) return pa - pb;
-        return String(a.class_name || '').localeCompare(String(b.class_name || ''));
-      });
+    }
+    if (currentSubs.length > 0) {
+      subSort(currentSubs);
       // #55: the re-approval warning applies to every drafted/scheduled
       // row, so it's shown once above the list instead of once per row.
-      var anyEditWarns = activeSubs.some(function (s) { return s.status === 'drafted' || s.status === 'scheduled'; });
+      var anyEditWarns = currentSubs.some(function (s) { return s.status === 'drafted' || s.status === 'scheduled'; });
       if (anyEditWarns) {
         html += '<p style="margin:0 0 0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
         html += 'Editing an approved or scheduled class sends it back to the VP / Afternoon Class Liaison for re-approval — it comes off the schedule until it’s re-placed.';
         html += '</p>';
       }
-      var lastSessKey = null;
-      html += '<ul class="mf-classsubs-list" style="list-style:none;padding:0;margin:0 0 1rem;">';
-      activeSubs.forEach(function (s) {
-        var sk = subSessionKey(s);
-        if (sk !== lastSessKey) {
-          lastSessKey = sk;
-          html += '<li style="margin:10px 0 4px;font-size:0.75rem;font-weight:700;color:var(--color-text-light);text-transform:uppercase;letter-spacing:0.04em;">'
-            + (sk === 99 ? 'Flexible — any session' : 'Session ' + sk) + '</li>';
-        }
-        var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
-        // #42 (Colleen): owners can edit drafted/scheduled classes too —
-        // saving sends the class back to 'submitted' for re-approval
-        // (server clears the placement). Withdraw stays pre-approval only.
-        var canEdit = s.status === 'submitted' || s.status === 'drafted' || s.status === 'scheduled';
-        // #173 (Lyndsey): a DECLINED class can be removed from the tab too
-        // (same soft-withdraw as pre-approval — nothing is deleted).
-        var canWithdraw = s.status === 'submitted' || s.status === 'declined';
-        var periodTag = s.class_period === 'AM' ? brandIconImg('morning', 'ag-icon') + ' Morning' : brandIconImg('afternoon', 'ag-icon') + ' Afternoon';
-        html += '<li class="mf-classsubs-row" style="border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;margin-bottom:0.5rem;">';
-        html += '<div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;justify-content:space-between;">';
-        html += '<strong style="font-size:1rem;">' + escClsHtml(s.class_name) + '</strong>';
-        html += statusBadge(s.status);
-        html += '</div>';
-        html += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
-        html += periodTag + ' · For: ' + escClsHtml(sessText);
-        html += '</div>';
-        html += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
-        if (canEdit) {
-          html += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
-        }
-        if (canWithdraw) {
-          html += '<button class="sc-btn sc-btn-del mf-classsubs-withdraw" data-id="' + s.id + '">' + (s.status === 'declined' ? 'Remove' : 'Withdraw') + '</button>';
-        }
-        // Build a lesson plan straight from the idea (2026-07-11, Erin) —
-        // opens the Curriculum Library editor prefilled with this class.
-        html += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson Plan</button>';
-        html += '</div>';
-        html += '</li>';
-      });
-      html += '</ul>';
+      html += buildSubList(currentSubs, false);
+    }
+    if (pastSubs.length > 0) {
+      subSort(pastSubs);
+      html += '<details class="mf-classsubs-past" style="margin:0 0 1rem;">';
+      html += '<summary style="cursor:pointer;font-size:0.85rem;font-weight:700;color:var(--color-text-light);">Past sessions (' + pastSubs.length + ')</summary>';
+      html += buildSubList(pastSubs, true);
+      html += '</details>';
     }
 
     body.innerHTML = html;

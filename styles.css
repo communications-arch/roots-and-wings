@@ -4756,11 +4756,14 @@ button.staff-role:hover {
 
 /* #91 (Lyndsey): on phones the View Classmates pill squeezed kid names
    into a one-letter-wide column. Stack it on its own row under the
-   name, aligned past the avatar. */
+   name, aligned past the avatar.
+   #213 (Lyndsey): basis 100% + the 42px indent overflowed the card and
+   clipped the pill's right edge — the basis must subtract the indent
+   (width:fit-content never applied; flex-basis wins the main size). */
 @media (max-width: 640px) {
   .mf-kid-bar { flex-wrap: wrap; }
   .mf-kid-bar .mf-kid-name { flex: 1 1 auto; min-width: 0; }
-  .mf-kid-bar .mf-class-link { flex-basis: 100%; align-self: flex-start; width: fit-content; margin-left: 42px; }
+  .mf-kid-bar .mf-class-link { flex-basis: calc(100% - 42px); align-self: flex-start; margin-left: 42px; }
 }
 
 /* Schedule table */
