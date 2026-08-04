@@ -37181,7 +37181,12 @@
       // class here (topic can stay TBD until right before the session).
       + ((period === 'AM' || sbScopeAll()) ? '<button type="button" class="sc-btn" id="sbNewClassBtn" style="font-size:0.8rem;">+ New Class</button>' : '')
       + '</div>';
-    paletteHtml += '<div class="sb-palette-hint">Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.</div>';
+    // #214 follow-up (Erin): the morning hint leads with the Place button —
+    // it's the touch path now; drag stays the desktop shortcut. Afternoon
+    // keeps drag/+ Add (placing there needs an hour choice).
+    paletteHtml += '<div class="sb-palette-hint">' + (period === 'AM'
+      ? 'Tap “Place” on a card to schedule it into its grove’s slot · tap the card itself for full details · drag works too (drag a placed class back here to unschedule) · ✗ declines.'
+      : 'Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.') + '</div>';
     paletteHtml += pfBar;
     if (paletteAll.length === 0) {
       paletteHtml += '<p class="sb-palette-empty">' + brandIconImg('timeline') + ' No submissions waiting — they’ll appear here as members submit classes.</p>';

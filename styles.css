@@ -9317,10 +9317,12 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   color: var(--color-leaf);
 }
 /* #214: tap-friendly Place button on morning inbox cards — the touch
-   path liaisons expected the ✓ to be (#208). */
+   path liaisons expected the ✓ to be (#208). Right-aligned so it stands
+   apart from the card text (Erin, 08-04). */
 .sb-palette-place {
   display: block;
   margin-top: 6px;
+  margin-left: auto;
   font-size: 0.72rem;
   padding: 4px 10px;
 }
