@@ -9316,6 +9316,14 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   background: #e3efd8;
   color: var(--color-leaf);
 }
+/* #214: tap-friendly Place button on morning inbox cards — the touch
+   path liaisons expected the ✓ to be (#208). */
+.sb-palette-place {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  padding: 4px 10px;
+}
 .sb-palette-card:active { cursor: grabbing; }
 .sb-palette-card strong { font-size: 0.86rem; color: var(--color-text); }
 .sb-palette-card-meta { font-size: 0.74rem; color: var(--color-text-light); margin-top: 2px; }

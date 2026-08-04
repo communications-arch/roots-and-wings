@@ -37239,6 +37239,14 @@
           if (s.max_students) paletteHtml += '<div class="sb-coleader">' + brandIconImg('person', 'ag-icon') + ' Up to ' + escClsHtml(String(s.max_students)) + ' kids</div>';
         }
         paletteHtml += '<div class="sb-palette-card-sessions">' + sessChips + '</div>';
+        // #214 (Erin): tap-friendly Place button on morning inbox cards —
+        // the affordance liaisons thought the ✓ was (#208). Drag stays the
+        // desktop path; this is the touch path straight from the card.
+        // AM only: the class's group IS the slot, so one tap can place it;
+        // PM placement needs an hour choice and keeps its per-cell picker.
+        if (s.class_period === 'AM' && sbCanTouchSub(s)) {
+          paletteHtml += '<button type="button" class="sc-btn sb-palette-place" draggable="false" data-sub-id="' + s.id + '" title="Place this class into its grove’s Session ' + escClsHtml(String(sess)) + ' morning slot">Place in S' + escClsHtml(String(sess)) + '</button>';
+        }
         paletteHtml += '</div>';
       });
       paletteHtml += '</div>';
@@ -37456,12 +37464,20 @@
         sbMarkReviewedSubmission(parseInt(this.getAttribute('data-sub-id'), 10));
       });
     });
+    // #214: Place straight from the card (touch path — same assign the
+    // slot picker's Select runs).
+    body.querySelectorAll('.sb-palette-place').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        sbPlaceFromPalette(parseInt(this.getAttribute('data-sub-id'), 10), this);
+      });
+    });
 
     // Tap a palette card → full submission details (description, prefs,
     // max students, …) with the review actions inline.
     body.querySelectorAll('.sb-palette-card').forEach(function (el) {
       el.addEventListener('click', function (e) {
-        if (e.target.closest('.sb-palette-decline') || e.target.closest('.sb-palette-ack')) return;
+        if (e.target.closest('.sb-palette-decline') || e.target.closest('.sb-palette-ack') || e.target.closest('.sb-palette-place')) return;
         var cardSubId = parseInt(el.getAttribute('data-sub-id'), 10);
         // Tapping an inbox card opens the PREFILLED, EDITABLE class form
         // for every reviewer (Erin, 2026-07-10) — one surface, not a
@@ -37752,6 +37768,44 @@
   function sbAmHourFor(sub) {
     var p = ((sub && sub.hour_preference) || [])[0];
     return p === 'first' || p === 'either' ? 'AM1' : p === 'last' ? 'AM2' : 'AM';
+  }
+
+  // #214 (Erin): one-tap Place from a morning palette card — the touch
+  // affordance liaisons expected the ✓ to be (#208). Mirrors the slot
+  // picker's Select: hour from the submitted preference, same conflict
+  // check, same PATCH. A confirm guards the single tap (the #208 lesson:
+  // one stray tap on a phone shouldn't silently move a class).
+  function sbPlaceFromPalette(subId, btn) {
+    var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
+    if (!sub) return;
+    if (!sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
+    var sess = scheduleBuilderState.session;
+    if (sbIsSessionApproved(sess, 'AM')) {
+      alert('Session ' + sess + '’s morning side is approved. Reopen it for editing first.');
+      return;
+    }
+    var grp = sbAmGroupOf(sub);
+    var hour = sbAmHourFor(sub);
+    var occ = sbAmSlotConflict(grp, sess, hour, subId);
+    if (occ) {
+      alert('The ' + grp + ' morning for Session ' + sess + ' already has “' + occ.class_name + '” (' + sbAmHourLabel(occ.scheduled_hour || 'AM') + '), which blocks placing this class as ' + sbAmHourLabel(hour) + '.\nSend that one back to the inbox first if you want to swap, or change its hour in the class editor.');
+      return;
+    }
+    if (!confirm('Place “' + sub.class_name + '” in the ' + grp + ' morning for Session ' + sess + ' (' + sbAmHourLabel(hour) + ')?')) return;
+    btn.disabled = true; btn.textContent = 'Placing…';
+    patchReviewAction(subId, {
+      status: 'scheduled',
+      scheduled_session: sess,
+      scheduled_hour: hour,
+      scheduled_age_range: prettyAgesClient(sub.age_groups, sub.age_groups_other) || '',
+      scheduled_room: sub.scheduled_room || '',
+      reviewer_notes: sub.reviewer_notes || ''
+    }).then(function () {
+      loadScheduleBuilder();
+    }).catch(function (err) {
+      btn.disabled = false; btn.textContent = 'Place in S' + sess;
+      alert('Could not place: ' + (err.message || 'unknown error'));
+    });
   }
 
   function sbAmHourLabel(h) {
