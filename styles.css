@@ -9318,9 +9318,13 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 }
 /* #214: tap-friendly Place button on morning inbox cards — the touch
    path liaisons expected the ✓ to be (#208). Right-aligned so it stands
-   apart from the card text (Erin, 08-04). */
+   apart from the card text (Erin, 08-04). width:fit-content is required
+   for the auto margin: Chrome shrink-to-fits a block button, but mobile
+   Safari stretches it full width, which zeroes the auto margin. */
 .sb-palette-place {
   display: block;
+  width: -moz-fit-content;
+  width: fit-content;
   margin-top: 6px;
   margin-left: auto;
   font-size: 0.72rem;
