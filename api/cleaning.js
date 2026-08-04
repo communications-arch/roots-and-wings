@@ -234,7 +234,7 @@ module.exports = async function handler(req, res) {
     // their own handlers below. Without this guard, GET ?action=role-holders
     // falls into this branch and returns cleaning data with no `holders`
     // field, which silently parses as an empty list on the client.
-    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'role-interest' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms' && action !== 'cleaning-open-count') {
+    if (req.method === 'GET' && action !== 'roles' && action !== 'role-holders' && action !== 'role-interest' && action !== 'sessions' && action !== 'role-confirm' && action !== 'todo-confirm' && action !== 'permissions' && action !== 'capabilities' && action !== 'rooms' && action !== 'cleaning-open-count' && action !== 'video-likes') {
       const areas = await sql`
         SELECT id, floor_key, area_name, tasks, sort_order
         FROM cleaning_areas ORDER BY sort_order, id
@@ -1364,6 +1364,46 @@ module.exports = async function handler(req, res) {
       if (req.method === 'DELETE') {
         await sql`DELETE FROM todo_confirmations WHERE kind = ${tcKind} AND school_year = ${tcYear}`;
         return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // ── Video Tutorials hearts (2026-08-04) ──
+    // One heart per member per video (POST toggles it); the modal shows
+    // the rolling count. Any signed-in member can read and toggle.
+    if (action === 'video-likes') {
+      if (req.method === 'GET') {
+        const likeRows = await sql`
+          SELECT video_id, COUNT(*)::int AS count
+          FROM tutorial_video_likes GROUP BY video_id
+        `;
+        const myLikes = await sql`
+          SELECT video_id FROM tutorial_video_likes
+          WHERE member_email = ${user.email.toLowerCase()}
+        `;
+        const counts = {};
+        likeRows.forEach(r => { counts[r.video_id] = r.count; });
+        return res.status(200).json({ counts, mine: myLikes.map(r => r.video_id) });
+      }
+      if (req.method === 'POST') {
+        const videoId = String((req.body || {}).video_id || '').trim();
+        if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+          return res.status(400).json({ error: 'video_id is required.' });
+        }
+        const likeEmail = user.email.toLowerCase();
+        const inserted = await sql`
+          INSERT INTO tutorial_video_likes (video_id, member_email)
+          VALUES (${videoId}, ${likeEmail})
+          ON CONFLICT (video_id, member_email) DO NOTHING
+          RETURNING video_id
+        `;
+        if (inserted.length === 0) {
+          await sql`DELETE FROM tutorial_video_likes WHERE video_id = ${videoId} AND member_email = ${likeEmail}`;
+        }
+        const likeCount = await sql`
+          SELECT COUNT(*)::int AS count FROM tutorial_video_likes WHERE video_id = ${videoId}
+        `;
+        return res.status(200).json({ liked: inserted.length > 0, count: likeCount[0].count });
       }
       return res.status(405).json({ error: 'Method not allowed' });
     }

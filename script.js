@@ -23184,6 +23184,11 @@
       html += '<div style="position:relative;width:100%;padding-top:56.25%;border-radius:8px;overflow:hidden;background:#000;">'
         + '<iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '" title="' + escapeAttr(v.title) + '" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe>'
         + '</div>';
+      html += '<p style="margin:8px 0 0;"><button type="button" class="ws-inline-link" data-vt-like="' + escapeAttr(v.id) + '" aria-pressed="false" title="Send the maker a little love" style="display:inline-flex;align-items:center;gap:6px;color:var(--color-primary,#523A79);font-weight:600;">'
+        + '<span class="vt-like-icon" style="display:inline-flex;">' + DUTY_ICONS.volunteer + '</span>'
+        + '<span>Loved it</span>'
+        + '<span class="vt-like-count" style="color:#777;font-weight:400;"></span>'
+        + '</button></p>';
       html += '</div>';
     });
     html += '</div>';
@@ -23192,6 +23197,45 @@
     document.body.style.overflow = 'hidden';
     personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
     personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+
+    // Hearts: paint saved counts + my likes, then wire the toggles.
+    // Optimistic flip; the server answer (authoritative rolling count)
+    // repaints on arrival. Errors leave the optimistic state — a stray
+    // heart is harmless and self-corrects next open.
+    function vtPaint(btn, liked, count) {
+      btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
+      var svg = btn.querySelector('.vt-like-icon svg');
+      if (svg) svg.setAttribute('fill', liked ? 'currentColor' : 'none');
+      var cnt = btn.querySelector('.vt-like-count');
+      if (cnt) cnt.textContent = count > 0 ? '· ' + count : '';
+    }
+    var vtBtns = personDetailCard.querySelectorAll('[data-vt-like]');
+    var vtCounts = {};
+    fetch('/api/cleaning?action=video-likes', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        vtCounts = data.counts || {};
+        vtBtns.forEach(function (btn) {
+          var id = btn.getAttribute('data-vt-like');
+          vtPaint(btn, (data.mine || []).indexOf(id) !== -1, vtCounts[id] || 0);
+        });
+      })
+      .catch(function () {});
+    vtBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-vt-like');
+        var was = btn.getAttribute('aria-pressed') === 'true';
+        vtCounts[id] = Math.max(0, (vtCounts[id] || 0) + (was ? -1 : 1));
+        vtPaint(btn, !was, vtCounts[id]);
+        fetch('/api/cleaning?action=video-likes', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ video_id: id })
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { if (d) { vtCounts[id] = d.count; vtPaint(btn, d.liked, d.count); } })
+          .catch(function () {});
+      });
+    });
   }
   window.showVideoTutorialsModal = showVideoTutorialsModal;
 

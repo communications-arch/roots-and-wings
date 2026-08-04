@@ -2486,3 +2486,13 @@ CREATE TABLE IF NOT EXISTS facility_bookings (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (school_year, session_number, week_number, hour, facility)
 );
+
+-- 2026-08-04: Video Tutorials hearts — one heart per member per video
+-- (toggle), rolling count shown in the Video Tutorials modal (Resources
+-- card). member_email is stored lowercased by the API.
+CREATE TABLE IF NOT EXISTS tutorial_video_likes (
+  video_id     TEXT NOT NULL,
+  member_email TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (video_id, member_email)
+);
