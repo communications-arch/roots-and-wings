@@ -10066,6 +10066,7 @@
         h += '<ul class="ws-link-list">';
         h += '<li><a href="/handbook.pdf?v=20260801a" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('guide', 'ag-icon') + '</span>Member Handbook</a></li>';
         h += '<li><a href="/quickstart.html" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('newFamily', 'ag-icon') + '</span>New Member Quick Start</a></li>';
+        h += '<li><button type="button" class="ws-link-btn" data-resource-action="video-tutorials"><span class="ws-link-icon">' + brandIconImg('help', 'ag-icon') + '</span>Video Tutorials</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="org-structure"><span class="ws-link-icon">' + brandIconImg('roles', 'ag-icon') + '</span>Organization &amp; Roles</button></li>';
         h += '<li><button type="button" class="ws-link-btn" data-resource-action="waiver"><span class="ws-link-icon">' + brandIconImg('waivers', 'ag-icon') + '</span>Member Agreement &amp; Waivers</button></li>';
         h += '<li><a href="https://docs.google.com/document/d/1y3Ru6dCnKnfejb2kwHmNh42jUI8D6Q4D4f_APSGnpz0/edit?usp=drive_link" target="_blank" rel="noopener"><span class="ws-link-icon">' + brandIconImg('chat', 'ag-icon') + '</span>Google Chat Guide</a></li>';
@@ -22683,6 +22684,7 @@
     var action = btn.getAttribute('data-resource-action');
     if (action === 'waiver') showWaiverModal();
     else if (action === 'install-app' && typeof showInstallHelpModal === 'function') showInstallHelpModal();
+    else if (action === 'video-tutorials' && typeof showVideoTutorialsModal === 'function') showVideoTutorialsModal();
     else if (action === 'brand-kit' && typeof showBrandKitModal === 'function') showBrandKitModal();
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
@@ -23159,6 +23161,39 @@
   }
   // Expose for the delegated Resources-widget handler.
   window.showInstallHelpModal = showInstallHelpModal;
+
+  // Video Tutorials (2026-08-04) — short screen recordings of key portal
+  // tasks, hosted unlisted on the Roots & Wings Indy YouTube channel
+  // (communications@). To add a video: upload in studio.youtube.com (upload
+  // defaults are already Unlisted), then append { id, title, blurb } here —
+  // id is the youtu.be short-link tail.
+  var TUTORIAL_VIDEOS = [
+    { id: 'PIxyQxblPB8', title: 'How to Report an Absence',
+      blurb: 'Where to find the absence form, and what happens after you submit it.' }
+  ];
+  function showVideoTutorialsModal() {
+    if (!personDetail || !personDetailCard) return;
+    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
+    html += '<div class="elective-detail" style="max-width:640px;">';
+    html += '<h2 style="font-family:\'Playfair Display\',serif;color:var(--color-primary-dark);margin:0 0 6px;">Video Tutorials</h2>';
+    html += '<p style="color:#555;margin:0 0 18px;">Short walkthroughs of common portal tasks. More are on the way — tell us what you\'d like covered!</p>';
+    TUTORIAL_VIDEOS.forEach(function (v) {
+      html += '<div style="margin-bottom:22px;">';
+      html += '<p style="font-weight:700;color:var(--color-primary-dark,#3d2a5c);margin:0 0 8px;">' + escapeHtml(v.title) + '</p>';
+      if (v.blurb) html += '<p style="color:#666;font-size:0.92em;margin:0 0 8px;">' + escapeHtml(v.blurb) + '</p>';
+      html += '<div style="position:relative;width:100%;padding-top:56.25%;border-radius:8px;overflow:hidden;background:#000;">'
+        + '<iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '" title="' + escapeAttr(v.title) + '" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="position:absolute;inset:0;width:100%;height:100%;border:0;"></iframe>'
+        + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    personDetailCard.innerHTML = html;
+    personDetail.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
+    personDetail.onclick = function (ev) { if (ev.target === personDetail) closeDetail(); };
+  }
+  window.showVideoTutorialsModal = showVideoTutorialsModal;
 
   // Brand & Logo Kit (2026-07-27) — the 2026 brand style guide, palette,
   // logo files, and artwork, downloadable from the Resources card so
