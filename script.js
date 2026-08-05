@@ -6333,12 +6333,23 @@
     // so both pledge kinds wear the same accent (labels tell them apart).
     var VOL_ICONS = { floater: brandIconImg('floaterPrep', 'ag-icon'), board: brandIconImg('notes', 'ag-icon'), prep: brandIconImg('floaterPrep', 'ag-icon') };
     document.querySelectorAll('.mf-vol-inline').forEach(function (el) { el.remove(); });
+    // A family only owes duty for the half-day their kids actually attend
+    // (Erin, 2026-08-05 prod: an afternoons-only family was asked to pick
+    // morning tasks). Same source as the Membership Report's live-track
+    // derive (#172): kids[].schedule, where 'all-day' counts for both
+    // halves. Pending-approval and not-returning kids don't count; a
+    // family with no kids sees no hour sign-ups at all. Held sign-ups
+    // (d.mine) still render above regardless, so an existing commitment
+    // can always be released.
+    var famKids = ((fam && fam.kids) || []).filter(function (k) { return !k.pending_approval && k.not_returning !== true; });
+    var famHasAM = famKids.some(function (k) { var s = String(k.schedule || 'all-day'); return s === 'all-day' || s === 'morning'; });
+    var famHasPM = famKids.some(function (k) { var s = String(k.schedule || 'all-day'); return s === 'all-day' || s === 'afternoon'; });
     // Sign-up slots only open once there is something to sign up FOR
     // (Erin, 2026-07-11): morning hours need placed AM classes, the
     // afternoon hours need the session's PM schedule approved.
     function blockAvailable(key) {
-      if (key.indexOf('AM') === 0) return ((((d.blocks || {})[key] || {}).classes) || []).length > 0;
-      return !!d.pm_approved;
+      if (key.indexOf('AM') === 0) return famHasAM && ((((d.blocks || {})[key] || {}).classes) || []).length > 0;
+      return famHasPM && !!d.pm_approved;
     }
     var openBlocks = [];
     VOL_BLOCKS.forEach(function (blk) {
@@ -6489,8 +6500,10 @@
     h += '<button type="button" class="ws-inline-link" id="mfVolGridBtn" style="margin-left:auto;white-space:nowrap;font-size:0.78rem;">' + brandIconImg('person', 'ag-icon') + ' Everyone’s sign-ups</button>';
     h += '</div>';
     var unavailNotes = [];
-    if (!blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
-    if (!d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the schedule is approved.');
+    // "Opens later" notes only for a half-day this family attends — a
+    // PM-only family must not be told morning sign-ups are coming.
+    if (famHasAM && !blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
+    if (famHasPM && !d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the schedule is approved.');
     if (isCurrent && openBlocks.length > 0) {
       // #170 (Colleen): the ⚠ nag only inside the 2 weeks before the
       // session starts — further out it reads as a soft note instead.
