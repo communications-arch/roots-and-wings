@@ -5,11 +5,14 @@
 // PATCH /api/notifications?mark_all_read=true → mark all as read
 // DELETE /api/notifications?id=N               → remove one (own only) — #83
 // DELETE /api/notifications?clear_read=true    → remove all READ ones — #83
+// POST  /api/notifications?test_push=1        → send the CALLER a test push,
+//                                               return per-device results
 
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { isSuperUser } = require('./_permissions');
+const { sendToUser } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -50,7 +53,7 @@ function getSql() {
 module.exports = async function handler(req, res) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -123,6 +126,32 @@ module.exports = async function handler(req, res) {
         WHERE id = ${delId} AND recipient_email = ${recipient}
       `;
       return res.status(200).json({ ok: true });
+    }
+
+    // Push self-test (2026-08-05, "notifications aren't working for most
+    // people"): sends a real push to the CALLER's own devices — never the
+    // View-As target — and reports per-device results so a member (or Erin
+    // helping one) can see exactly why nothing arrives. Non-prod deploys
+    // have no VAPID keys (Production-scoped env), so name that state
+    // instead of returning a silent no-op.
+    if (req.method === 'POST' && req.query.test_push === '1') {
+      if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+        return res.status(200).json({ ok: false, reason: 'no_vapid', message: 'Push is not configured on this deployment (dev/preview has no VAPID keys).' });
+      }
+      const results = await sendToUser(sql, user.email, {
+        title: 'Test notification',
+        body: 'If you can read this, push notifications are working on this device.',
+        tag: 'push-self-test',
+        url: '/members.html'
+      }) || [];
+      const delivered = results.filter(r => r.ok).length;
+      return res.status(200).json({
+        ok: delivered > 0,
+        devices: results.length,
+        delivered,
+        removed_dead: results.filter(r => r.removed).length,
+        failures: results.filter(r => !r.ok).map(r => ({ statusCode: r.statusCode, removed: !!r.removed }))
+      });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

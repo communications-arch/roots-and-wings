@@ -50,10 +50,13 @@ async function handleSubscription(req, res) {
       const auth = String((body.keys && body.keys.auth) || '').trim();
       if (!endpoint || !p256dh || !auth) return res.status(400).json({ error: 'Missing subscription fields' });
 
+      // Lowercased so sendToUser's per-email lookup can't miss on case
+      // (JWT emails have surfaced with mixed case).
+      const emailLc = user.email.toLowerCase();
       await sql`
         INSERT INTO push_subscriptions (user_email, endpoint, p256dh, auth)
-        VALUES (${user.email}, ${endpoint}, ${p256dh}, ${auth})
-        ON CONFLICT (endpoint) DO UPDATE SET user_email = ${user.email}, p256dh = ${p256dh}, auth = ${auth}
+        VALUES (${emailLc}, ${endpoint}, ${p256dh}, ${auth})
+        ON CONFLICT (endpoint) DO UPDATE SET user_email = ${emailLc}, p256dh = ${p256dh}, auth = ${auth}
       `;
       return res.status(201).json({ ok: true });
     }

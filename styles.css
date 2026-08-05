@@ -8010,6 +8010,22 @@ ul[id="ws-todo-list"] .ws-link-icon,
 .notif-item-body { font-size: 0.72rem; color: var(--color-text-light); line-height: 1.35; }
 .notif-item-time { font-size: 0.65rem; color: var(--color-text-light); margin-top: 0.2rem; }
 
+/* Push status footer at the bottom of the bell dropdown — the enable /
+   repair / test affordance lives with the list itself (2026-08-05). */
+.notif-push-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0.6rem 0.8rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.78rem;
+}
+.notif-push-footer:empty { display: none; }
+.notif-push-ok { color: var(--color-primary); font-weight: 600; }
+.notif-push-note { color: var(--color-text-light); line-height: 1.4; }
+.notif-push-footer .btn { width: 100%; }
+
 /* Push notification alert — fixed above navbar */
 .push-banner {
   position: fixed;

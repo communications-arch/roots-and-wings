@@ -24976,6 +24976,10 @@
     html += '</div>';
     if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
     else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '" style="position:relative;"><button type="button" class="notif-item-del" data-notif-del="' + escapeHtmlWs(String(n.id)) + '" aria-label="Remove this notification" title="Remove" style="position:absolute;top:6px;right:8px;border:none;background:none;color:var(--color-text-light);cursor:pointer;font-size:14px;line-height:1;padding:2px;">×</button><div class="notif-item-title" style="padding-right:18px;">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
+    // Push status footer (2026-08-05): the list is where people look when
+    // notifications feel broken, so the enable/repair path lives here too —
+    // including for anyone who dismissed the top banner long ago.
+    html += '<div class="notif-push-footer" id="notifPushFooter"></div>';
     html += '</div>';
     // #94 (Lyndsey, live mobile): the dropdown used to be inserted NEXT
     // TO the bell inside the fixed portal header — the header's stacking
@@ -25020,7 +25024,69 @@
       });
     });
     dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function (e) { if (e.target.closest('.notif-item-del')) return; var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
+    fillNotifPushFooter();
     setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
+  }
+
+  // Paint the dropdown's push-status footer for this device's state, with
+  // the matching action: enable (off), unblock instructions (denied),
+  // install-first guidance (iOS Safari outside the installed app), or a
+  // self-test that sends a real push and reports what happened (subscribed).
+  function fillNotifPushFooter() {
+    var el = document.getElementById('notifPushFooter');
+    if (!el) return;
+    function paint() {
+      getPushState().then(function (st) {
+        if (st.state === 'subscribed') {
+          el.innerHTML = '<span class="notif-push-ok">✓ Notifications are on for this device</span>'
+            + '<button type="button" class="ws-inline-link" id="notifPushTestBtn">Send a test</button>';
+          var t = document.getElementById('notifPushTestBtn');
+          if (t) t.addEventListener('click', function (e) {
+            e.stopPropagation();
+            t.disabled = true; t.textContent = 'Sending…';
+            var cred = localStorage.getItem('rw_google_credential');
+            fetch('/api/notifications?test_push=1', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred } })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (d && d.reason === 'no_vapid') { t.textContent = 'Not available on the dev site'; return; }
+                if (d && d.ok) { t.textContent = 'Sent ✓ — it should pop up now'; return; }
+                // The server had no working subscription for this account —
+                // most likely a pruned row. Re-upload this device's sub and
+                // invite a retry.
+                t.textContent = 'Repairing…';
+                ensurePushSubscription()
+                  .then(function () { t.disabled = false; t.textContent = 'Repaired — send the test again'; })
+                  .catch(function () { t.disabled = false; t.textContent = 'Failed — try again'; });
+              })
+              .catch(function () { t.disabled = false; t.textContent = 'Send a test'; });
+          });
+        } else if (st.state === 'off') {
+          el.innerHTML = '<button type="button" class="btn btn-primary btn-sm" id="notifPushEnableBtn">Enable notifications on this device</button>';
+          var b = document.getElementById('notifPushEnableBtn');
+          if (b) b.addEventListener('click', function (e) {
+            e.stopPropagation();
+            b.disabled = true; b.textContent = 'Enabling…';
+            localStorage.removeItem('rw_push_dismissed');
+            ensurePushSubscription()
+              .then(function () { localStorage.setItem('rw_push_synced_at', String(Date.now())); paint(); })
+              .catch(function (err) {
+                console.error('Push enable error:', err);
+                if (('Notification' in window) && Notification.permission === 'denied') { paint(); return; }
+                b.disabled = false; b.textContent = 'Enable notifications on this device';
+              });
+          });
+        } else if (st.state === 'denied') {
+          el.innerHTML = '<span class="notif-push-note">Notifications are blocked for this site in your browser. Allow them in your browser’s site settings (look for Notifications under the padlock/ⓘ by the address bar), then reopen this list.</span>';
+        } else {
+          // iPadOS masquerades as MacIntel with touch — treat it as iOS.
+          var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          el.innerHTML = isIOS
+            ? '<span class="notif-push-note">On iPhone/iPad, notifications only work from the installed app: <a href="/install" target="_blank" rel="noopener">add the portal to your Home Screen</a>, open it from there, and enable notifications inside.</span>'
+            : '<span class="notif-push-note">This browser doesn’t support push notifications.</span>';
+        }
+      });
+    }
+    paint();
   }
 
   function closeNotifOnOutsideClick(e) {
@@ -25037,22 +25103,107 @@
   function closeNotifDropdown() { var dropdown = document.getElementById('notifDropdown'); if (dropdown) dropdown.remove(); notifState.dropdownOpen = false; document.removeEventListener('click', closeNotifOnOutsideClick); }
   function timeAgo(isoStr) { var diff = (Date.now() - new Date(isoStr).getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; }
 
+  // \u2500\u2500 Push subscription plumbing \u2500\u2500
+  // Shared by the enable banner, the bell-dropdown footer, and the silent
+  // on-load self-heal (2026-08-05, "notifications aren't working for most
+  // people"): subscriptions rot \u2014 browsers rotate endpoints, the server
+  // prunes rows whose endpoint died \u2014 and nothing ever repaired them, while
+  // dismissing the banner removed the only enable affordance forever.
+
+  function pushSupported() {
+    return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+  }
+
+  function pushMetaKey() {
+    var m = document.querySelector('meta[name="vapid-public-key"]');
+    return m ? m.content : '';
+  }
+
+  // False only on a PROVEN key mismatch. Browsers that don't expose
+  // options.applicationServerKey count as matching \u2014 our server key has
+  // never rotated, so an unverifiable sub is almost certainly fine, and
+  // keeping it beats churning the endpoint.
+  function pushKeyMatches(sub) {
+    try {
+      var have = sub.options && sub.options.applicationServerKey;
+      if (!have) return true;
+      var a = new Uint8Array(have);
+      var b = urlBase64ToUint8Array(pushMetaKey());
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return false; }
+      return true;
+    } catch (e) { return true; }
+  }
+
+  // Device push state: 'unsupported' | 'denied' | 'subscribed' | 'off'.
+  // 'unsupported' on an iPhone means "portal not installed to the Home
+  // Screen" \u2014 iOS only exposes the Push API inside installed web apps.
+  function getPushState() {
+    if (!pushSupported()) return Promise.resolve({ state: 'unsupported' });
+    if (Notification.permission === 'denied') return Promise.resolve({ state: 'denied' });
+    return navigator.serviceWorker.register('/sw.js')
+      .then(function (reg) { return reg.pushManager.getSubscription(); })
+      .then(function (sub) { return { state: sub ? 'subscribed' : 'off', sub: sub }; })
+      .catch(function () { return { state: 'off' }; });
+  }
+
+  // Subscribe (or heal) this device, then upload the subscription. Replaces
+  // a sub whose key doesn't match ours; re-uploads an existing good sub so
+  // a server row lost to dead-endpoint pruning comes back.
+  function ensurePushSubscription() {
+    return navigator.serviceWorker.register('/sw.js').then(function (reg) {
+      return reg.pushManager.getSubscription().then(function (existing) {
+        if (existing && pushKeyMatches(existing)) return existing;
+        var drop = existing ? existing.unsubscribe().catch(function () {}) : Promise.resolve();
+        return drop.then(function () {
+          if (!pushMetaKey()) throw new Error('VAPID key not found');
+          return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pushMetaKey()) });
+        });
+      });
+    }).then(function (sub) {
+      var cred = localStorage.getItem('rw_google_credential');
+      var subJson = sub.toJSON();
+      return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Subscribe failed (' + r.status + ')');
+          localStorage.removeItem('rw_push_dismissed');
+          return sub;
+        });
+    });
+  }
+
+  // Silent self-heal, at most ~daily. Permission is already granted, so
+  // resubscribing (browser dropped the sub) and re-uploading (server
+  // pruned the row) both happen without any prompt. This is what quietly
+  // un-breaks members who enabled notifications months ago.
+  function healPushSubscription() {
+    if (!pushSupported() || Notification.permission !== 'granted') return;
+    var last = parseInt(localStorage.getItem('rw_push_synced_at') || '0', 10);
+    if (last && Date.now() - last < 20 * 60 * 60 * 1000) return;
+    ensurePushSubscription()
+      .then(function () { localStorage.setItem('rw_push_synced_at', String(Date.now())); })
+      .catch(function (err) { console.warn('[push] self-heal failed:', err && err.message); });
+  }
+
   function initPushSubscription() {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!pushSupported()) return;
+    healPushSubscription();
     var banner = document.getElementById('pushBanner');
     var enableBtn = document.getElementById('pushBannerEnableBtn');
     var dismissBtn = document.getElementById('pushBannerDismiss');
     if (!banner || !enableBtn) return;
     if (localStorage.getItem('rw_push_dismissed')) return;
+    // A blocked permission makes the banner's Enable a dead end \u2014 the bell
+    // dropdown's footer explains how to unblock instead.
+    if (Notification.permission === 'denied') return;
     function showBanner() { banner.style.display = ''; var dash = document.getElementById('dashboard'); if (dash) dash.classList.add('has-push-banner'); }
     function hideBanner() { banner.style.display = 'none'; var dash = document.getElementById('dashboard'); if (dash) dash.classList.remove('has-push-banner'); }
     navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription(); }).then(function (sub) { if (sub) return; showBanner(); }).catch(function () { showBanner(); });
     if (dismissBtn) { dismissBtn.addEventListener('click', function () { hideBanner(); localStorage.setItem('rw_push_dismissed', '1'); }); }
     enableBtn.addEventListener('click', function () {
       enableBtn.disabled = true; enableBtn.textContent = 'Enabling\u2026';
-      navigator.serviceWorker.register('/sw.js').then(function (reg) { return reg.pushManager.getSubscription().then(function (existing) { if (existing) return existing; var vapidKey = document.querySelector('meta[name="vapid-public-key"]'); if (!vapidKey) throw new Error('VAPID key not found'); return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey.content) }); }); })
-      .then(function (sub) { var cred = localStorage.getItem('rw_google_credential'); var subJson = sub.toJSON(); return fetch('/api/push-subscribe', { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: subJson.endpoint, keys: subJson.keys }) }); })
-      .then(function (r) { if (!r.ok) throw new Error('Subscribe failed'); banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { hideBanner(); }, 3000); })
+      ensurePushSubscription()
+      .then(function () { banner.innerHTML = '<div class="container push-banner-inner" style="justify-content:center;color:var(--color-primary);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> <strong>Notifications enabled!</strong></div>'; setTimeout(function () { hideBanner(); }, 3000); })
       .catch(function (err) { console.error('Push subscription error:', err); enableBtn.disabled = false; enableBtn.textContent = 'Enable'; if (Notification.permission === 'denied') alert('Notifications are blocked. Please enable them in your browser settings.'); });
     });
   }

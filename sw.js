@@ -27,6 +27,21 @@ self.addEventListener('push', function (event) {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// Browsers occasionally rotate/expire a push subscription on their own.
+// Without this handler the device silently stops receiving forever.
+// Re-subscribe with the same key here; the page's daily re-sync uploads
+// the fresh endpoint on the next portal visit (the SW itself has no auth
+// token, so it can't POST to /api/push-subscribe directly).
+self.addEventListener('pushsubscriptionchange', function (event) {
+  var oldKey = event.oldSubscription && event.oldSubscription.options
+    ? event.oldSubscription.options.applicationServerKey : null;
+  if (!oldKey) return;
+  event.waitUntil(
+    self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: oldKey })
+      .catch(function () { /* page-side heal will retry */ })
+  );
+});
+
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
   var url = (event.notification.data && event.notification.data.url)
