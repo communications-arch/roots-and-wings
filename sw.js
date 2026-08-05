@@ -1,5 +1,12 @@
 // Service Worker for Roots & Wings push notifications + PWA installability
 
+// Updates take over immediately. Without this, a new SW waits until every
+// portal window closes — PWAs people keep open ran week-old push handlers
+// (Erin, 2026-08-05: badge-refresh fix "didn't work" because the old
+// worker was still active). No caches here, so instant takeover is safe.
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (event) { event.waitUntil(clients.claim()); });
+
 // Chrome on Android requires a non-trivial fetch handler to qualify the site
 // as an installable PWA (real WebAPK in the app drawer). An empty handler
 // gets detected as no-op by Chrome's "skippable fetch handler" optimization

@@ -138,6 +138,13 @@ module.exports = async function handler(req, res) {
       if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
         return res.status(200).json({ ok: false, reason: 'no_vapid', message: 'Push is not configured on this deployment (dev/preview has no VAPID keys).' });
       }
+      // Also drop a real row in the bell list: when the app is foregrounded
+      // Android delivers the push tray-only, so the list entry (and its
+      // badge bump) is the visible proof the test arrived.
+      await sql`
+        INSERT INTO notifications (recipient_email, type, title, body, link_url)
+        VALUES (${user.email}, 'push_test', 'Test notification', 'If you can read this, push notifications are working.', '')
+      `;
       const results = await sendToUser(sql, user.email, {
         title: 'Test notification',
         body: 'If you can read this, push notifications are working on this device.',

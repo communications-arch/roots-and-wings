@@ -25049,7 +25049,11 @@
               .then(function (r) { return r.json(); })
               .then(function (d) {
                 if (d && d.reason === 'no_vapid') { t.textContent = 'Not available on the dev site'; return; }
-                if (d && d.ok) { t.textContent = 'Sent ✓ — it should pop up now'; return; }
+                // The test also inserted a bell-list row — refresh so the
+                // badge/list reflect it even when Android keeps the push
+                // banner in the tray (foregrounded PWA).
+                loadNotifications();
+                if (d && d.ok) { t.textContent = 'Sent ✓ — check the bell and your tray'; return; }
                 // The server had no working subscription for this account —
                 // most likely a pruned row. Re-upload this device's sub and
                 // invite a retry.
