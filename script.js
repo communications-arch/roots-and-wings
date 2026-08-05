@@ -25188,6 +25188,15 @@
   function initPushSubscription() {
     if (!pushSupported()) return;
     healPushSubscription();
+    // A push landing while the portal is foregrounded may only buzz the
+    // tray (no heads-up over a focused app on Android) — refresh the bell
+    // immediately so the badge is the visible signal (Erin, 2026-08-05).
+    if (!window._rwPushMsgWired) {
+      window._rwPushMsgWired = true;
+      navigator.serviceWorker.addEventListener('message', function (e) {
+        if (e.data && e.data.type === 'rw-push-received') loadNotifications();
+      });
+    }
     var banner = document.getElementById('pushBanner');
     var enableBtn = document.getElementById('pushBannerEnableBtn');
     var dismissBtn = document.getElementById('pushBannerDismiss');

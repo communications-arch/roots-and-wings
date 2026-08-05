@@ -24,7 +24,16 @@ self.addEventListener('push', function (event) {
     data: { url: data.url || '/members.html#coverage' },
     requireInteraction: true
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  // Also nudge any open portal windows so the in-app bell updates live.
+  // With the app foregrounded, Android tends to drop the notification
+  // straight into the tray (no heads-up over the focused app — Erin,
+  // 2026-08-05), so the bell badge is what the user actually sees.
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      list.forEach(function (c) { c.postMessage({ type: 'rw-push-received' }); });
+    })
+  ]));
 });
 
 // Browsers occasionally rotate/expire a push subscription on their own.
