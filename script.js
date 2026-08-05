@@ -24978,11 +24978,17 @@
     // live to its right), so anchoring the panel's right edge to the
     // bell pushed its left edge off-screen on phones. Clamp the anchor
     // so the whole panel stays inside the viewport.
-    var ddRight = Math.max(8, Math.round(window.innerWidth - bellRect.right));
+    // bug log #97: right-edge alignment left almost no clamp slack on
+    // phones (panel width is most of the viewport), so it landed at the
+    // left clamp bound regardless of where on the toolbar the bell sat —
+    // reading as "stuck too far left". Center the panel on the bell
+    // instead, still clamped to stay fully on screen.
     var ddWidth = dropdown.getBoundingClientRect().width || 320;
-    ddRight = Math.min(ddRight, Math.max(8, Math.round(window.innerWidth - ddWidth - 8)));
-    dropdown.style.right = ddRight + 'px';
-    dropdown.style.left = 'auto';
+    var bellCenter = bellRect.left + bellRect.width / 2;
+    var ddLeft = Math.round(bellCenter - ddWidth / 2);
+    ddLeft = Math.max(8, Math.min(ddLeft, Math.round(window.innerWidth - ddWidth - 8)));
+    dropdown.style.left = ddLeft + 'px';
+    dropdown.style.right = 'auto';
     dropdown.style.maxHeight = Math.max(160, window.innerHeight - ddTop - 12) + 'px';
     dropdown.style.zIndex = '10001';
     var markAllBtn = document.getElementById('notifMarkAllBtn');
