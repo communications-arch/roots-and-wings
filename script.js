@@ -36881,19 +36881,25 @@
     var sess = scheduleBuilderState.session;
 
     // Session pager local to the builder so it doesn't collide with
-    // sessionTabView / cleaningTabView used elsewhere.
-    var html = '<div class="session-pager" style="margin:0 0 14px;">';
-    html += sess > 1
+    // sessionTabView / cleaningTabView used elsewhere. Kept OUT of the
+    // sb-main column: on stacked (phone) layouts the palette renders
+    // first, and a pager inside sb-main sat below the whole inbox — a
+    // liaison never saw it, so everything got placed in Session 1
+    // (Erin's tester, 2026-08-05). Prepended above .sb-layout instead.
+    var pagerHtml = '<div class="session-pager" style="margin:0 0 14px;">';
+    pagerHtml += sess > 1
       ? '<button class="session-pager-btn sb-sess-btn" data-sess="' + (sess - 1) + '">&laquo; Session ' + (sess - 1) + '</button>'
       : '<span class="session-pager-btn session-pager-disabled">&laquo;</span>';
-    html += '<span class="session-pager-current' + (sess === currentSession ? ' session-pager-active' : '') + '">';
-    html += 'Session ' + sess;
-    if (sess === currentSession) html += ' <span class="session-pager-now">Current</span>';
-    html += '</span>';
-    html += sess < 5
+    pagerHtml += '<span class="session-pager-current' + (sess === currentSession ? ' session-pager-active' : '') + '">';
+    pagerHtml += 'Session ' + sess;
+    if (sess === currentSession) pagerHtml += ' <span class="session-pager-now">Current</span>';
+    pagerHtml += '</span>';
+    pagerHtml += sess < 5
       ? '<button class="session-pager-btn sb-sess-btn" data-sess="' + (sess + 1) + '">Session ' + (sess + 1) + ' &raquo;</button>'
       : '<span class="session-pager-btn session-pager-disabled">&raquo;</span>';
-    html += '</div>';
+    pagerHtml += '</div>';
+
+    var html = '';
 
     // Active lens: AM (morning) or PM (afternoon). Legacy rows without
     // class_period count as PM.
@@ -37270,7 +37276,7 @@
     // it's the touch path now; drag stays the desktop shortcut. Afternoon
     // keeps drag/+ Add (placing there needs an hour choice).
     paletteHtml += '<div class="sb-palette-hint">' + (period === 'AM'
-      ? 'Tap “Place” on a card to schedule it into its grove’s slot · tap the card itself for full details · drag works too (drag a placed class back here to unschedule) · ✗ declines.'
+      ? 'Tap “Place” on a card to schedule it into its grove’s slot for the session shown above — use the Session arrows to build a different one · tap the card itself for full details · drag works too (drag a placed class back here to unschedule) · ✗ declines.'
       : 'Tap a card for full details · drag onto a slot · drag a placed class here to unschedule · ✗ declines · or use “+ Add”.') + '</div>';
     paletteHtml += pfBar;
     if (paletteAll.length === 0) {
@@ -37364,7 +37370,7 @@
 
     // Docked side palette (left) + grid (right) so the available classes stay
     // in view while dragging onto slots. Stacks on narrow screens.
-    body.innerHTML = '<div class="sb-layout">' +
+    body.innerHTML = pagerHtml + '<div class="sb-layout">' +
       '<aside class="sb-side">' + paletteHtml + '</aside>' +
       '<div class="sb-main">' + html + '</div>' +
       '</div>';
