@@ -8511,7 +8511,11 @@ async function handleWelcomeMark(body, req, res) {
 // is readable by ANY signed-in @rootsandwingsindy.com member (no role gate) and
 // returns ONLY non-sensitive fields — family name, the coach + kids' first
 // names, and the family's track — the same directory-level info members already
-// see. No email / phone / address / payment / waiver data is exposed.
+// see. No personal email / phone / address / payment / waiver data is exposed.
+// familyEmail is the derived @rootsandwingsindy.com alias (directory-visible
+// already) — the grove roster dedupes kids by it, because family NAMES drift
+// when a returning member re-registers with different info (2026-08-06, Erin:
+// one member's kids doubled on her grove list).
 function communityTrack(track, trackOther) {
   switch (String(track || '')) {
     case 'Morning Only':   return { key: 'am',   label: 'AM only' };
@@ -8588,6 +8592,7 @@ async function handleCommunitySnapshot(req, res) {
         id: r.id,
         name: surname,
         coach: coach,
+        familyEmail: familyEmail || '',
         kids: kids,
         track: t.key,
         trackLabel: t.label,

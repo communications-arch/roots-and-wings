@@ -4004,22 +4004,33 @@
       };
       var snapshotReady = Array.isArray(_communityRoster) && _communityRoster.length > 0;
       if (!snapshotReady && typeof loadMembersSummary === 'function') loadMembersSummary();
-      var seasonKids = {};
+      // Kids are matched by family EMAIL first, family name second
+      // (2026-08-06, Erin): a returning member who re-registers with
+      // different personal info derives a different family name than her
+      // directory record, and every name-keyed dedupe below then saw her
+      // kids as two different children. The R&W alias survives that drift.
+      var seasonKids = {}, seasonKidsEmail = {};
       if (snapshotReady) {
         _communityRoster.forEach(function (fam) {
           (fam.kids || []).forEach(function (k) {
-            if (k.class) seasonKids[_kidKey(k.name, fam.name)] = String(k.class).toLowerCase();
+            if (!k.class) return;
+            seasonKids[_kidKey(k.name, fam.name)] = String(k.class).toLowerCase();
+            if (fam.familyEmail) seasonKidsEmail[_kidKey(k.name, fam.familyEmail)] = String(k.class).toLowerCase();
           });
         });
       }
       var groupKids = allPeople.filter(function (person) {
         if (person.type !== 'kid') return false;
         if (!snapshotReady) return person.group === p.group;
+        if (person.email && seasonKidsEmail[_kidKey(person.name, person.email)] === _grpLower) return true;
         return seasonKids[_kidKey(person.name, person.family || person.lastName)] === _grpLower;
       });
       if (snapshotReady) {
-        var haveKid = {};
-        groupKids.forEach(function (k) { haveKid[_kidKey(k.name, k.family || k.lastName)] = true; });
+        var haveKid = {}, haveKidEmail = {};
+        groupKids.forEach(function (k) {
+          haveKid[_kidKey(k.name, k.family || k.lastName)] = true;
+          if (k.email) haveKidEmail[_kidKey(k.name, k.email)] = true;
+        });
         _communityRoster.forEach(function (fam) {
           (fam.kids || []).forEach(function (k) {
             // A blank group ('') is "not placed yet", NOT a bucket — skip it
@@ -4027,7 +4038,8 @@
             // (the "everyone sees Baby Test + Juni Bogan" bug, 2026-07-17).
             if (!_grpLower || String(k.class || '').toLowerCase() !== _grpLower) return;
             if (haveKid[_kidKey(k.name, fam.name)]) return;
-            groupKids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name });
+            if (fam.familyEmail && haveKidEmail[_kidKey(k.name, fam.familyEmail)]) return;
+            groupKids.push({ type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: fam.name, family: fam.name, email: fam.familyEmail || '' });
           });
         });
         groupKids.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
@@ -4047,7 +4059,15 @@
           if (/^teens$/i.test(g)) g = 'Pigeons';
           if (String(g).toLowerCase() !== _grpLower) return;
           var key = _kidKey(k.name, myFam.name);
-          if (groupKids.some(function (gk) { return _kidKey(gk.name, gk.family || gk.lastName) === key; })) return;
+          // Email-aware dedupe (2026-08-06): the snapshot may already hold
+          // this kid under a DIFFERENT family name (re-registration drift) —
+          // matching the R&W alias too keeps the kid from doubling in the
+          // viewing family's own grove list.
+          var emailKey = myFam.email ? _kidKey(k.name, myFam.email) : '';
+          if (groupKids.some(function (gk) {
+            if (_kidKey(gk.name, gk.family || gk.lastName) === key) return true;
+            return !!(emailKey && gk.email && _kidKey(gk.name, gk.email) === emailKey);
+          })) return;
           var person = allPeople.filter(function (pp) { return pp.type === 'kid' && _kidKey(pp.name, pp.family || pp.lastName) === key; })[0];
           groupKids.push(person || { type: 'kid', name: String(k.name || '').trim().split(/\s+/)[0], lastName: k.lastName || myFam.name, family: myFam.name, nickname: k.nickname, age: k.age });
         });
