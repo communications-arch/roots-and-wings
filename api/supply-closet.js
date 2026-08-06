@@ -773,6 +773,28 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
     return res.status(200).json({ ok: true });
   }
 
+  // #225 (Colleen): edit a bring-mode sign-up in place — own, or the
+  // group's liaison. Slot claims have nothing to edit.
+  if (req.query.action === 'bring-update') {
+    const suId = parseInt(body.id, 10);
+    if (!Number.isInteger(suId) || suId < 1) return res.status(400).json({ error: 'id required' });
+    const item_text = String(body.item_text || '').trim().slice(0, 200);
+    if (!item_text) return res.status(400).json({ error: 'Say what you’ll bring.' });
+    const note = String(body.note || '').trim().slice(0, 300);
+    const rows = await sql`
+      SELECT s.id, LOWER(s.person_email) AS em, s.item_text, g.class_group
+      FROM group_section_signups s JOIN group_sections g ON g.id = s.section_id
+      WHERE s.id = ${suId}
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Sign-up not found.' });
+    if (!rows[0].item_text) return res.status(400).json({ error: 'Slot sign-ups have nothing to edit.' });
+    if (rows[0].em !== email && !(await canManageBringGroup(email, rows[0].class_group))) {
+      return res.status(403).json({ error: 'You can only edit your own sign-up.' });
+    }
+    await sql`UPDATE group_section_signups SET item_text = ${item_text}, note = ${note} WHERE id = ${suId}`;
+    return res.status(200).json({ ok: true });
+  }
+
   return res.status(400).json({ error: 'Unknown action' });
 }
 

@@ -980,8 +980,8 @@
     }
     // Check for "Class Liaison" in group liaison duties
     if (dutyText.indexOf('Class Liaison') !== -1) return 'morning_class_liaison';
-    // Check for Leading/Assisting patterns
-    if (dutyText.indexOf('Leading') !== -1) return 'classroom_instructor';
+    // Check for Leading/Assisting patterns (#232: co-leads lead too)
+    if (dutyText.indexOf('Leading') !== -1 || dutyText.indexOf('Co-leading') !== -1) return 'classroom_instructor';
     if (dutyText.indexOf('Assisting') !== -1) return 'classroom_assistant';
     // Fallback: match the duty text against a loaded role-description
     // title (case-insensitive, exact). This lets committee roles assigned
@@ -3153,6 +3153,41 @@
     });
     doc += '</tbody></table></body></html>';
     openPrintIframe(doc);
+  }
+
+  // #222 (Colleen): the collab space's "View the allergies & medical list"
+  // link went STRAIGHT to the print iframe — on phones the print preview
+  // shows the portal page, not the list, so the info never appeared. This
+  // shows the same list in a normal report modal; Print stays as the icon.
+  function showAllergiesModal() {
+    var people = allPeople.filter(function (p) { return p.allergies; })
+      .slice().sort(function (a, b) { return (a.family + a.name).localeCompare(b.family + b.name); });
+    var body = renderReportModal({
+      title: 'Allergies & Medical',
+      subtitle: 'Everyone with recorded allergy or medical notes — safety-critical: check again whenever profiles change.',
+      meta: '',
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print this list', action: function () { printAllergiesList(); } }
+      ],
+      bodyId: 'allergies-modal-body',
+      bodyPlaceholder: ''
+    });
+    if (!body) return;
+    if (!people.length) {
+      body.innerHTML = '<p class="ws-empty">No allergies or medical notes recorded.</p>';
+      return;
+    }
+    var h = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Name</th><th>Who</th><th>Family</th><th>Allergies / medical notes</th></tr></thead><tbody>';
+    people.forEach(function (p) {
+      var who = p.type === 'kid' ? ('Kid' + (p.group ? ' · ' + p.group : '')) : 'Adult';
+      var displayName = nickOr(p.nickname, p.name) + ' ' + (p.lastName || p.family || '');
+      h += '<tr><td><strong>' + escapeHtml(displayName.trim()) + '</strong></td>'
+        + '<td>' + escapeHtml(who) + '</td>'
+        + '<td>' + escapeHtml((p.familyDisplay || p.family || '') + ' Family') + '</td>'
+        + '<td>' + escapeHtml(p.allergies) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    body.innerHTML = h;
   }
 
   // The Directory's group filter pills are static markup in members.html.
@@ -6390,7 +6425,8 @@
         : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
       // Class rows render as title + role tag with the room underneath
       // (Erin, 2026-07-11); pledge rows keep their plain label.
-      var lblM = String(mine.label).match(/^(Leading|Assisting)\s+“(.+)”$/);
+      // #232: co-leads come back as 'Co-leading “X”' — same row treatment.
+      var lblM = String(mine.label).match(/^(Leading|Co-leading|Assisting)\s+“(.+)”$/);
       var mc = lblM ? (((d.blocks || {})[blk.key] || {}).classes || []).filter(function (c) { return c.id === mine.class_id; })[0] : null;
       var mcRoom = mc ? (mc.room || (mc.group ? (AM_GROUP_ROOMS[mc.group.charAt(0).toUpperCase() + mc.group.slice(1)] || '') : '')) : '';
       var mcTag = mc ? groupTagHtml((mc.groups && mc.groups.length) ? mc.groups : (mc.group ? [mc.group] : [])) : '';
@@ -6863,9 +6899,9 @@
           var first = (bk.indexOf('AM') === 0 && c.group) ? (c.group.charAt(0).toUpperCase() + c.group.slice(1) + ' — ' + (c.class_name || '')) : (c.class_name || '');
           if (c.room) first += ' (' + c.room + ')';
           var helpers = (c.helpers || []).join(', ');
-          if (c.co_teachers) helpers = c.co_teachers + (helpers ? ', ' + helpers : '');
           if (c.helpers_needed > 0) helpers += (helpers ? ', ' : '') + 'needs ' + c.helpers_needed + ' more';
-          doc += '<tr><td>' + escapeHtml(first) + '</td><td>' + escapeHtml(c.teacher || '') + '</td><td>' + escapeHtml(helpers || '—') + '</td></tr>';
+          var printLead = (c.teacher || '') + (c.co_teachers ? ' & ' + c.co_teachers : '');
+          doc += '<tr><td>' + escapeHtml(first) + '</td><td>' + escapeHtml(printLead) + '</td><td>' + escapeHtml(helpers || '—') + '</td></tr>';
         });
         doc += '</tbody></table>';
       }
@@ -6940,9 +6976,12 @@
           var first = isAmBk
             ? ageGroupIconHtml(amGroveName) + ' <span class="ag-name ' + ageGroupClass(amGroveName) + '">' + escapeHtmlWs(amGroveName || c.class_name) + '</span>'
             : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
+          // #233 (Colleen): co-leads render in the Leader cell — both
+          // people lead the class; Helpers holds only assistants.
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
-          if (c.co_teachers) helpers = brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) + (helpers ? ', ' + helpers : '');
-          h += '<tr><td>' + first + '</td><td>' + escapeHtmlWs(c.teacher) + '</td><td>' + (helpers || '—')
+          var gridLead = escapeHtmlWs(c.teacher)
+            + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
+          h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
             + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
         });
         h += '</tbody></table></div>';
@@ -8774,7 +8813,12 @@
       t += '<p style="color:var(--color-text-light);font-size:0.9rem;"><em>Groups are set \u2014 tap one to see its kids. Teachers and topics fill in once the morning schedule is posted.</em></p>';
       return t;
     }
-    html += '<h4 class="session-section-title">Morning Classes &mdash; 10:00\u201312:00</h4>';
+    // #218 (Colleen): same "Everyone's sign-ups" grid link the My
+    // Responsibilities card carries, on the far right of the heading.
+    html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'
+      + '<h4 class="session-section-title" style="margin-right:auto;">Morning Classes &mdash; 10:00\u201312:00</h4>'
+      + '<button type="button" class="ws-inline-link" id="sessSchedVolGridBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('person', 'ag-icon') + ' Everyone\u2019s sign-ups</button>'
+      + '</div>';
     if (dbSess && dbSess.am) {
       if (dbSess.am.length === 0) {
         html += buildAmTbdTable()
@@ -8798,12 +8842,14 @@
           var key = String((c.age_groups || [])[0] || '').toLowerCase();
           var meta = groupIdx[key];
           var groupName = meta ? meta.g.name : (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
+          // #233 (Colleen): co-leads belong in the Leader cell, not among
+          // the helpers — both names lead the class.
           var helperNames = (c.helpers || []).slice();
-          if (c.co_teachers) helperNames.unshift(c.co_teachers);
+          var rowNames = helperNames.concat(c.co_teachers ? [c.co_teachers] : []);
           var isMyRow = myNames.fullNames.some(function (fn) {
             var l = fn.toLowerCase();
             return l === String(c.teacher || '').trim().toLowerCase()
-              || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
+              || rowNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
           });
           // Erin 2026-08-02: scheduled rows stay tappable (grove kid list)
           // just like the TBD rows — they lost the class when the DB
@@ -8817,8 +8863,13 @@
           row += '<td>' + amLiaisonHtml(groupName) + '</td>';
           row += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
           row += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
-          row += '<td>' + highlightIfMe(c.teacher || '', myNames) + '</td>';
-          row += '<td>' + (helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014') + '</td>';
+          row += '<td>' + highlightIfMe(c.teacher || '', myNames)
+            + (c.co_teachers ? ' &amp; ' + highlightIfMe(c.co_teachers, myNames) : '') + '</td>';
+          // #231: open assistant spots are visible here now \u2014 an edited
+          // assistant count shows up without opening the sign-up picker.
+          var amHelpersCell = helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
+          if (c.helpers_needed > 0) amHelpersCell += (amHelpersCell ? ', ' : '') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more</span>';
+          row += '<td>' + (amHelpersCell || '\u2014') + '</td>';
           row += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
           row += '</tr>';
           amRowPieces.push({ i: meta ? meta.i : 99, html: row });
@@ -8937,6 +8988,9 @@
         showDutyDetail({ popup: { type: 'amClass', group: group, session: currentSession } });
       };
     });
+    // #218: Everyone's sign-ups grid, opened at the session being viewed.
+    var sessGridBtn = container.querySelector('#sessSchedVolGridBtn');
+    if (sessGridBtn) sessGridBtn.addEventListener('click', function () { showVolunteerGridModal(viewSess); });
   }
 
   // Published-DB elective card: same look as the sheet-era card, but no
@@ -19960,7 +20014,7 @@
     });
   }
   function bringDateStr(d) { return String(d || '').slice(0, 10); }
-  var GROUP_BRING_ACTS = { claimAction: 'group-slot-claim', removeAction: 'group-signup-remove', addAction: 'group-bring-add', formPrefix: 'g' };
+  var GROUP_BRING_ACTS = { claimAction: 'group-slot-claim', removeAction: 'group-signup-remove', addAction: 'group-bring-add', editAction: 'group-signup-edit', formPrefix: 'g' };
 
   // The block under a kid's morning class row on Kid Schedule (#139 —
   // Erin: sections modeled on the Collaboration "Add Section" sign-ups,
@@ -22728,6 +22782,7 @@
     else if (action === 'group-slot-claim' && typeof claimGroupSlot === 'function') claimGroupSlot(btn);
     else if (action === 'group-signup-remove' && typeof removeGroupSignup === 'function') removeGroupSignup(btn);
     else if (action === 'group-bring-add' && typeof toggleGroupBringForm === 'function') toggleGroupBringForm(btn);
+    else if (action === 'group-signup-edit' && typeof openBringEditForm === 'function') openBringEditForm(btn, true);
     else if (action === 'org-structure' && typeof showOrgStructureModal === 'function') showOrgStructureModal();
     else if (action === 'curriculum' && typeof showCurriculumLibrary === 'function') showCurriculumLibrary();
     else if (action === 'class-ideas' && typeof showClassIdeasPopup === 'function') showClassIdeasPopup();
@@ -22813,6 +22868,7 @@
     else if (action === 'event-space-open' && typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(btn.getAttribute('data-eid'), 10));
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
+    else if (action === 'event-signup-edit' && typeof openBringEditForm === 'function') openBringEditForm(btn, false);
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
     else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
     else if (action === 'event-jump-in' && typeof showEventJumpInModal === 'function') showEventJumpInModal();
@@ -24995,7 +25051,7 @@
     }
     html += '</div>';
     if (notifState.notifications.length === 0) { html += '<div class="notif-empty">No notifications yet.</div>'; }
-    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '" style="position:relative;"><button type="button" class="notif-item-del" data-notif-del="' + escapeHtmlWs(String(n.id)) + '" aria-label="Remove this notification" title="Remove" style="position:absolute;top:6px;right:8px;border:none;background:none;color:var(--color-text-light);cursor:pointer;font-size:14px;line-height:1;padding:2px;">×</button><div class="notif-item-title" style="padding-right:18px;">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
+    else { notifState.notifications.forEach(function (n) { html += '<div class="notif-item' + (n.is_read ? '' : ' notif-unread') + '" data-notif-id="' + escapeHtmlWs(String(n.id)) + '" data-notif-type="' + escapeAttr(n.type || '') + '" data-notif-link="' + escapeAttr(n.link_url || '') + '" style="position:relative;"><button type="button" class="notif-item-del" data-notif-del="' + escapeHtmlWs(String(n.id)) + '" aria-label="Remove this notification" title="Remove" style="position:absolute;top:6px;right:8px;border:none;background:none;color:var(--color-text-light);cursor:pointer;font-size:14px;line-height:1;padding:2px;">×</button><div class="notif-item-title" style="padding-right:18px;">' + escapeHtmlWs(n.title) + '</div><div class="notif-item-body">' + escapeHtmlWs(n.body) + '</div><div class="notif-item-time">' + escapeHtmlWs(timeAgo(n.created_at)) + '</div></div>'; }); }
     // Push status footer (2026-08-05): the list is where people look when
     // notifications feel broken, so the enable/repair path lives here too —
     // including for anyone who dismissed the top banner long ago.
@@ -25043,7 +25099,29 @@
         if (row) row.remove();
       });
     });
-    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function (e) { if (e.target.closest('.notif-item-del')) return; var id = item.getAttribute('data-notif-id'); var cred = localStorage.getItem('rw_google_credential'); fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); }); var cov = document.getElementById('coverage'); if (cov) cov.scrollIntoView({ behavior: 'smooth' }); closeNotifDropdown(); }); });
+    // #235 (Colleen): clicking a notification opens what it's ABOUT —
+    // coverage types scroll to the Coverage Board (the old behavior for
+    // everything), lending requests open the requests modal, and
+    // sign-ups-open notifications jump into that event's collab space
+    // (link_url carries 'evspace:<id>'; older rows without it just mark
+    // read). The × keeps deleting without navigating.
+    dropdown.querySelectorAll('.notif-item').forEach(function (item) { item.addEventListener('click', function (e) {
+      if (e.target.closest('.notif-item-del')) return;
+      var id = item.getAttribute('data-notif-id');
+      var nType = item.getAttribute('data-notif-type') || '';
+      var nLink = item.getAttribute('data-notif-link') || '';
+      var cred = localStorage.getItem('rw_google_credential');
+      fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); });
+      closeNotifDropdown();
+      if (nType === 'lending_request') {
+        if (typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
+      } else if (nType === 'event_signups_open' && /^evspace:\d+$/.test(nLink)) {
+        if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
+      } else if (['coverage_needed', 'slot_claimed', 'slot_reassigned', 'kids_absent'].indexOf(nType) !== -1 || !nType) {
+        var cov = document.getElementById('coverage');
+        if (cov) cov.scrollIntoView({ behavior: 'smooth' });
+      }
+    }); });
     fillNotifPushFooter();
     setTimeout(function () { document.addEventListener('click', closeNotifOnOutsideClick); }, 10);
   }
@@ -25355,6 +25433,23 @@
     '2hr-required':'Both PM1 & PM2 — kids commit to both',
     '2hr-optional':'Both PM1 & PM2 — kids can take one or both'
   };
+  // #220 (Colleen): morning submissions store the same first/last/either
+  // vocabulary but mean AM hours — rendering them through the PM labels
+  // made one-hour morning classes read as afternoon ("PM2 — Last hour
+  // before we leave"). Period-aware text for every place that prints a
+  // submission's hour preference.
+  var AM_HOUR_PREF_LABELS = {
+    'both':'Both hours (10:00–12:00)',
+    'first':'AM1 — 1st hour (10:00–10:55)',
+    'last':'AM2 — 2nd hour (11:00–11:55)',
+    'either':'One hour — either works'
+  };
+  function hourPrefText(sub) {
+    var isAM = sub && sub.class_period === 'AM';
+    return ((sub && sub.hour_preference) || []).map(function (h) {
+      return isAM ? (AM_HOUR_PREF_LABELS[h] || h) : (HOUR_PREF_LABELS[h] || h);
+    }).join(', ');
+  }
   var ASSISTANT_COUNT_VALUES = [1, 2, 3];
   var SPACE_REQ_VALUES = ['any','pavilion','outside','larger-open','kitchen','dirty','noisy','quiet'];
   var SPACE_REQ_LABELS = {
@@ -27530,12 +27625,14 @@
       });
     }
 
-    // #142: allergies list from the header card — same printable list
-    // the Directory's allergies filter uses (openPrintIframe, no popup).
+    // #142: allergies list from the header card. #222 (Colleen): the link
+    // says VIEW, so open the modal — phones printed the wrong document
+    // when this jumped straight to the print iframe. Print is the modal's
+    // icon action.
     var allergiesLink = body.querySelector('#evs-allergies-link');
     if (allergiesLink) allergiesLink.addEventListener('click', function (e) {
       e.preventDefault();
-      printAllergiesList();
+      showAllergiesModal();
     });
 
     // Save as next year's template (#115): two-step confirm — it
@@ -27751,6 +27848,8 @@
     var ACT_CLAIM = opts.claimAction || 'event-slot-claim';
     var ACT_REMOVE = opts.removeAction || 'event-signup-remove';
     var ACT_ADD = opts.addAction || 'event-bring-add';
+    // #225 (Colleen): bring-mode entries are editable in place.
+    var ACT_EDIT = opts.editAction || 'event-signup-edit';
     var FORM_KEY = (opts.formPrefix || '') + s.id;
     var cfg = s.config || {};
     var h = '';
@@ -27771,7 +27870,8 @@
         var cap = parseInt(slot.capacity, 10) || 0;
         var mineClaim = claims.filter(function (x) { return x.email === viewerEmail; })[0];
         var full = cap > 0 && claims.length >= cap;
-        h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
+        // #229 (Colleen): the spot's details also ride a hover tooltip.
+        h += '<li class="ws-opp-seat"' + (slot.note ? ' title="' + escapeAttr(slot.note) + '"' : '') + '><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
         // #125-6: per-spot details so members know what the action involves.
         if (slot.note) h += '<span class="ws-opp-slotnote">' + escapeHtmlWs(slot.note) + '</span>';
         var meta = cap > 0 ? (claims.length + ' of ' + cap + ' filled') : (claims.length + ' signed up');
@@ -27798,7 +27898,13 @@
             : escapeHtmlWs(c.item_text);
           h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
-          if (canEdit || c.email === viewerEmail) h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
+          if (canEdit || c.email === viewerEmail) {
+            h += ' <button type="button" class="sc-btn" data-resource-action="' + ACT_EDIT + '" data-signup-id="' + c.id
+              + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '')
+              + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '" data-item="' + escapeAttr(c.item_text || '')
+              + '" data-note="' + escapeAttr(c.note || '') + '" aria-label="Edit" title="Edit">✎</button>';
+            h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
+          }
           h += '</li>';
         });
         h += '</ul>';
@@ -28392,6 +28498,60 @@
           if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
           loadEventOpenings();
           evsMaybeRefreshSpace();
+        })
+        .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // #225 (Colleen): edit a bring-mode sign-up in place. Reuses the section's
+  // bring-form container, prefilled; saves via event-signup-update (event
+  // sections) or supply-closet bring-update (group Things-to-Bring).
+  function openBringEditForm(btn, isGroup) {
+    var formKey = btn.getAttribute('data-form-key') || '';
+    var form = document.querySelector('[data-bring-form="' + formKey + '"]');
+    if (!form) return;
+    var suId = parseInt(btn.getAttribute('data-signup-id'), 10);
+    var isBoard = btn.getAttribute('data-sec-type') === 'board';
+    var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
+    form.hidden = false;
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">' + (isBoard ? 'Edit note or link' : 'Edit what you’ll bring') + '</label><input class="cl-input evs-bring-item" type="text" maxlength="200"></div>'
+      + (isBoard ? '' : '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Save changes</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
+    var itemInp = form.querySelector('.evs-bring-item');
+    itemInp.value = btn.getAttribute('data-item') || '';
+    var noteInp = form.querySelector('.evs-bring-note');
+    if (noteInp) noteInp.value = btn.getAttribute('data-note') || '';
+    itemInp.focus();
+    form.querySelector('.evs-bring-save').addEventListener('click', function () {
+      var st = form.querySelector('.evs-bring-status');
+      var item = itemInp.value.trim();
+      if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = isBoard ? 'Type a note or link first' : 'Say what you’ll bring'; return; }
+      var note = noteInp ? noteInp.value.trim() : '';
+      var saveBtn = this;
+      saveBtn.disabled = true;
+      var req;
+      if (isGroup) {
+        var payload = { id: suId, item_text: item, note: note };
+        var vaEmail = supplyViewAsEmail();
+        if (vaEmail) payload.view_as = vaEmail;
+        req = fetch('/api/supply-closet?action=bring-update', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        req = fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-update', id: suId, item_text: item, note: note }) });
+      }
+      req.then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          if (isGroup) {
+            loadGroupBringItems(true);
+            if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
+          } else {
+            loadEventOpenings();
+            evsMaybeRefreshSpace();
+          }
         })
         .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Network error'; });
     });
@@ -37484,7 +37644,7 @@
       paletteHtml += '<div class="sb-palette-cards">';
       palette.forEach(function (s) {
         var ages = prettyAgesClient(s.age_groups, s.age_groups_other);
-        var hourPrefs = (s.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ');
+        var hourPrefs = hourPrefText(s);
         // Requested-session chips; the session currently being built is
         // highlighted so its fit is obvious at a glance.
         var sessChips = (s.session_preferences || []).map(function (x) {
@@ -38617,7 +38777,7 @@
 
     function renderSubRow(s) {
       var ages = prettyAgesClient(s.age_groups, s.age_groups_other);
-      var hourPrefs = (s.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ');
+      var hourPrefs = hourPrefText(s);
       var sessionPrefs = (s.session_preferences || []).map(function (x) { return x === 'flexible' ? 'flexible' : 'S' + x; }).join(', ');
       return '<li class="sb-pick-row" data-sub-id="' + s.id + '">'
         + '<div class="sb-pick-row-main">'
@@ -38867,7 +39027,7 @@
     var prefSessText = (sub.session_preferences || []).map(function (x) {
       return x === 'flexible' ? 'Flexible' : 'S' + x;
     }).join(', ') || '—';
-    var prefHourText = (sub.hour_preference || []).map(function (h) { return HOUR_PREF_LABELS[h] || h; }).join(', ') || '—';
+    var prefHourText = hourPrefText(sub) || '—';
 
     // Morning classes have no hour or room to schedule (rooms are assigned
     // for the year) — those controls only render for afternoon rows.

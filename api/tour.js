@@ -6993,7 +6993,7 @@ async function handleEventSignupsOpen(body, req, res) {
                'event_signups_open',
                ${'🎉 ' + evName + ' — sign-ups are open!'},
                ${'Helpers and contributions are needed for the ' + evName + '. See “Ways to Help” in your Workspace to claim a spot.'},
-               ''
+               ${'evspace:' + eventId}
         FROM people
         WHERE COALESCE(role, '') <> 'blc'
           AND COALESCE(NULLIF(email, ''), personal_email, '') <> ''
@@ -7092,6 +7092,38 @@ async function handleEventSignupUnclaim(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-signup-unclaim error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-signup-update — #225 (Colleen): edit a bring-mode sign-up's
+// item/note in place instead of remove + re-add. Your own, or any if you
+// can edit the event's space. Slot claims have nothing to edit.
+async function handleEventSignupUpdate(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  const itemText = String(body.item_text || '').trim().slice(0, 200);
+  if (!itemText) return res.status(400).json({ error: 'Say what you’ll bring.' });
+  const note = String(body.note || '').trim().slice(0, 300);
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT su.id, su.person_email, su.item_text, s.special_event_id
+      FROM event_section_signups su JOIN event_sections s ON s.id = su.section_id
+      WHERE su.id = ${id}
+    `;
+    if (rows.length === 0) return res.status(404).json({ error: 'Sign-up not found.' });
+    if (!rows[0].item_text) return res.status(400).json({ error: 'Slot sign-ups have nothing to edit — remove and pick another spot instead.' });
+    const isMine = String(rows[0].person_email || '').toLowerCase() === String(auth.email || '').toLowerCase();
+    if (!isMine && !(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'You can only edit your own sign-up.' });
+    }
+    await sql`UPDATE event_section_signups SET item_text = ${itemText}, note = ${note} WHERE id = ${id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-signup-update error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -10402,6 +10434,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signups-open') return handleEventSignupsOpen(body, req, res);
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
+    if (kind === 'event-signup-update') return handleEventSignupUpdate(body, req, res);
     if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
     if (kind === 'event-template-snapshot') return handleEventTemplateSnapshot(body, req, res);
     if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);

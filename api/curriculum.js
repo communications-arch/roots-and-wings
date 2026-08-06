@@ -1045,7 +1045,7 @@ module.exports = async function handler(req, res) {
               FROM co_op_sessions WHERE school_year = ${year}`,
           sql`SELECT c.id, c.class_period, c.class_name, c.description,
                      c.submitted_by_name, c.submitted_by_email, c.co_teachers,
-                     c.age_groups, c.age_groups_other, c.max_students,
+                     c.age_groups, c.age_groups_other, c.max_students, c.assistant_count,
                      c.scheduled_session, c.scheduled_hour, c.scheduled_age_range, c.scheduled_room,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
                        WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
@@ -1054,14 +1054,41 @@ module.exports = async function handler(req, res) {
               FROM class_submissions c
               WHERE c.status = 'scheduled' AND c.school_year = ${year}
                 AND c.scheduled_session IS NOT NULL`,
-          sql`SELECT class_submission_id, person_name
+          sql`SELECT class_submission_id, person_name, block
               FROM class_assignment_helpers ORDER BY class_submission_id, sort_order`
         ]);
+        // #217 (Colleen): a whole-morning class stores one helper row PER
+        // HOUR — the same person assisting AM1 and AM2 showed twice in the
+        // Session schedule's Helpers cell. This view has no per-hour
+        // breakdown, so distinct names per class is what it should list.
+        // Raw rows (with block) are kept separately for the open-spot math.
         const helpersBySub = {};
+        const helperRowsBySub = {};
         helperRows.forEach(h => {
-          (helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []))
-            .push(h.person_name || '');
+          (helperRowsBySub[h.class_submission_id] || (helperRowsBySub[h.class_submission_id] = []))
+            .push({ name: h.person_name || '', block: h.block || '' });
+          const list = helpersBySub[h.class_submission_id] || (helpersBySub[h.class_submission_id] = []);
+          const nm = h.person_name || '';
+          if (nm && list.some(x => x.trim().toLowerCase() === nm.trim().toLowerCase())) return;
+          list.push(nm);
         });
+        // #231 (Colleen): assistant-count changes were invisible on the
+        // Session schedule — it never showed open spots. Same per-hour
+        // needs math the volunteer matrix uses: MIN(assistant_count)
+        // wanted per hour; whole-class helper rows ('' block) count in
+        // every hour, hour rows only in their own.
+        const psBlocksOf = r => r.class_period === 'AM'
+          ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
+          : (r.scheduled_hour === 'both' ? ['PM1', 'PM2'] : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1']);
+        const psNeeded = r => {
+          const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+          const hs = helperRowsBySub[r.id] || [];
+          let needed = 0;
+          psBlocksOf(r).forEach(b => {
+            needed += Math.max(0, wants - hs.filter(h => !h.block || h.block === b).length);
+          });
+          return needed;
+        };
         const approved = {};
         approvalRows.forEach(r => {
           approved[r.session_number] = { pm: !!r.approved_at };
@@ -1089,6 +1116,7 @@ module.exports = async function handler(req, res) {
             teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
             co_teachers: r.co_teachers || '',
             helpers: (helpersBySub[r.id] || []).filter(Boolean),
+            helpers_needed: psNeeded(r),
             age_groups: r.age_groups || [],
             age_groups_other: r.age_groups_other || '',
             max_students: r.max_students || 0,
@@ -1934,6 +1962,15 @@ module.exports = async function handler(req, res) {
               + Math.max(wants, hsB.length);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
               mine[b] = { kind: 'lead', label: 'Leading “' + r.class_name + '”', class_id: r.id };
+            }
+            // #232 (Colleen, prod): a co-lead named on the submission form
+            // is a LEAD of the class — the responsibilities card showed
+            // co-leads as nothing (or assistant, when a helper row also
+            // existed). co_teachers is name-only text, so match by name.
+            if (!mine[b] && meNameLc) {
+              const coLeadHit = String(r.co_teachers || '').split(/[,;]+/)
+                .some(nm => nm.trim().toLowerCase() === meNameLc);
+              if (coLeadHit) mine[b] = { kind: 'lead', label: 'Co-leading “' + r.class_name + '”', class_id: r.id };
             }
             if (!mine[b]) {
               const hit = hsB.find(h => (h.email && h.email === actingEmail) || (meNameLc && h.name && h.name.trim().toLowerCase() === meNameLc));
