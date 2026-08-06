@@ -481,13 +481,17 @@ module.exports = async function handler(req, res) {
         if (!roomName) return res.status(400).json({ error: 'A room name is required.' });
         const note = String(b.builder_note || '').trim().slice(0, 200);
         const details = String(b.details || '').trim().slice(0, 2000);
-        const sort = Number.isFinite(parseInt(b.sort_order, 10)) ? parseInt(b.sort_order, 10) : 0;
+        // #215: rooms carry a curated sort_order (building order, not
+        // alphabetical). The edit drawer doesn't send sort_order, so an
+        // omitted value must PRESERVE the row's current order (COALESCE),
+        // and a brand-new room lands at the bottom (900), not the top.
+        const sort = Number.isFinite(parseInt(b.sort_order, 10)) ? parseInt(b.sort_order, 10) : null;
         const roomId = b.id ? parseInt(b.id, 10) : null;
         if (roomId) {
           const updated = await sql`
             UPDATE rooms
             SET name = ${roomName}, builder_note = ${note}, details = ${details},
-                sort_order = ${sort}, is_outdoor = ${!!b.is_outdoor}, status = ${b.status === 'archived' ? 'archived' : 'active'},
+                sort_order = COALESCE(${sort}, sort_order), is_outdoor = ${!!b.is_outdoor}, status = ${b.status === 'archived' ? 'archived' : 'active'},
                 updated_by = ${realUser.email}, updated_at = NOW()
             WHERE id = ${roomId}
             RETURNING id, name, builder_note, details, sort_order, status, is_outdoor`;
@@ -496,7 +500,7 @@ module.exports = async function handler(req, res) {
         }
         const inserted = await sql`
           INSERT INTO rooms (name, builder_note, details, sort_order, is_outdoor, updated_by)
-          VALUES (${roomName}, ${note}, ${details}, ${sort}, ${!!b.is_outdoor}, ${realUser.email})
+          VALUES (${roomName}, ${note}, ${details}, ${sort === null ? 900 : sort}, ${!!b.is_outdoor}, ${realUser.email})
           RETURNING id, name, builder_note, details, sort_order, status, is_outdoor`;
         return res.status(201).json({ room: inserted[0] });
       }

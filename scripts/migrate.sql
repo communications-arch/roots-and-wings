@@ -2496,3 +2496,28 @@ CREATE TABLE IF NOT EXISTS tutorial_video_likes (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (video_id, member_email)
 );
+
+-- 2026-08-06 (#215, Lyndsey): afternoon Class Builder rooms in building
+-- order, not alphabetical. The rooms API already serves
+-- ORDER BY sort_order, LOWER(name) — nothing had ever set sort_order, so
+-- every room sat at 0. One-time seed of Lyndsey's requested order,
+-- guarded on "no room has been ordered yet" so redeploys never clobber
+-- a later manual reorder. Rooms outside her list (Nursery today, any
+-- unmatched prod spelling) fall to 900 — bottom of the list, visible
+-- and correctable, never an error.
+UPDATE rooms SET sort_order = CASE LOWER(name)
+    WHEN 'myf'                THEN 10
+    WHEN 'jyf'                THEN 20
+    WHEN 'goodness'           THEN 30
+    WHEN 'multi-purpose room' THEN 40
+    WHEN 'faithfulness'       THEN 50
+    WHEN 'patience'           THEN 60
+    WHEN 'trust'              THEN 70
+    WHEN 'love'               THEN 80
+    WHEN 'kitchen annex'      THEN 90
+    WHEN 'kitchen'            THEN 100
+    WHEN 'pavilion'           THEN 110
+    WHEN 'east lawn'          THEN 120
+    WHEN 'west lawn'          THEN 130
+    ELSE 900 END
+WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE sort_order <> 0);
