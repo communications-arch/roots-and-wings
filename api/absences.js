@@ -152,37 +152,54 @@ const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
 // PROD INCIDENT 2026-08-06 (Erin's phantom "Assisting Free Art Club" rows):
 // coverage slots are posted BY THE CLIENT, derived from whatever schedule
 // its page had painted — and a browser that had cached another database's
-// schedule wrote that database's duties into this one, verbatim. Every
-// class/group/area/role-shaped slot must now name something that exists in
-// THIS database; unknown duties are dropped and logged, never inserted.
-// Support roles (floater/board/prep/general) carry no class reference and
-// stay exempt.
-const DUTY_EXEMPT_ROLE_TYPES = ['general', 'floater', 'board', 'prep'];
-const AM_GROVE_NAMES = ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples', 'birch', 'willows', 'cedars', 'pigeons'];
+// schedule wrote that database's duties into this one, verbatim.
+//
+// Follow-up (Erin, same night): the server is now the AUTHORITY, not a
+// name filter. teacher/assistant slots must match a duty the server
+// derives for THIS PERSON from this database (api/_duties.js) — a
+// phantom naming a real grove ("Leading Willows") dies here too, which
+// pure name-validation could never catch. Cleaning slots must name one
+// of this database's areas (or the floater). Support/role duties
+// (general, floater, prep, board, opener, closer, supply_closet) carry
+// no class reference and pass through, as before the incident.
+const { deriveClassDutyKeys, norm } = require('./_duties');
+const DUTY_EXEMPT_ROLE_TYPES = ['general', 'floater', 'board', 'prep', 'opener', 'closer', 'supply_closet'];
 async function knownDutyTargets(sql) {
+  // Cleaning areas only — class duties are person-level now.
   const names = new Set();
-  const add = v => { const s = String(v || '').trim().toLowerCase(); if (s) names.add(s); };
-  AM_GROVE_NAMES.forEach(add);
-  const cls = await sql`SELECT class_name FROM class_submissions WHERE status = 'scheduled'`;
-  cls.forEach(r => add(r.class_name));
   const areas = await sql`SELECT area_name FROM cleaning_areas`;
-  areas.forEach(r => add(r.area_name));
-  try {
-    const roles = await sql`SELECT title FROM roles`;
-    roles.forEach(r => add(r.title));
-  } catch (e) { console.error('knownDutyTargets roles lookup failed (roles just won\'t validate):', e); }
+  areas.forEach(r => { const s = String(r.area_name || '').trim().toLowerCase(); if (s) names.add(s); });
   return names;
 }
-function slotDutyIsKnown(names, slot) {
-  const rt = String(slot.role_type || '').trim().toLowerCase();
-  if (DUTY_EXEMPT_ROLE_TYPES.indexOf(rt) !== -1) return true;
-  const goc = String(slot.group_or_class || '').trim().toLowerCase();
-  if (goc && names.has(goc)) return true;
-  const desc = String(slot.role_description || '').toLowerCase();
-  for (const n of names) {
-    if (n.length >= 4 && desc.indexOf(n) !== -1) return true;
-  }
-  return false;
+// One validator per request: builds the person's derived duty set once.
+async function makeSlotValidator(sql, { schoolYear, session, absentPerson, familyEmail }) {
+  const areaNames = await knownDutyTargets(sql);
+  let duties = null;
+  try {
+    duties = await deriveClassDutyKeys(sql, { schoolYear, session, absentPerson, familyEmail });
+  } catch (e) { console.error('makeSlotValidator derivation failed:', e); }
+  return function slotAllowed(slot) {
+    const rt = String(slot.role_type || '').trim().toLowerCase();
+    if (DUTY_EXEMPT_ROLE_TYPES.indexOf(rt) !== -1) return true;
+    const goc = String(slot.group_or_class || '').trim().toLowerCase();
+    if (rt === 'cleaning') {
+      if (goc === 'floater') return true;
+      if (goc && areaNames.has(goc)) return true;
+      const desc = String(slot.role_description || '').toLowerCase();
+      for (const n of areaNames) { if (n.length >= 4 && desc.indexOf(n) !== -1) return true; }
+      return false;
+    }
+    // teacher / assistant (and anything class-shaped): person-level.
+    if (!duties) return false; // derivation failed — refuse rather than trust
+    if (duties.has(String(slot.block || '').trim(), rt, goc)) return true;
+    if (!goc) {
+      // Legacy slots without group_or_class: accept when the description
+      // names one of THIS PERSON's derived classes.
+      const desc = String(slot.role_description || '').toLowerCase();
+      for (const n of duties.classNames) { if (n.length >= 4 && desc.indexOf(n) !== -1) return true; }
+    }
+    return false;
+  };
 }
 
 // Current board members' emails: every canonical board mailbox plus the
@@ -303,14 +320,33 @@ module.exports = async function handler(req, res) {
     // runs through an authenticated super-user session instead.
     if (req.query.action === 'phantom-scan' || req.query.action === 'phantom-clean') {
       if (!isSuperUser(user.realEmail || user.email)) return res.status(403).json({ error: 'Super user only.' });
-      const dutyNames = await knownDutyTargets(sql);
       const all = await sql`
         SELECT cs.id, cs.absence_id, cs.block, cs.role_type, cs.role_description, cs.group_or_class,
                cs.claimed_by_email, cs.claimed_by_name,
-               a.family_email, a.absent_person, a.absence_date, a.cancelled_at
+               a.family_email, a.absent_person, a.absence_date, a.cancelled_at, a.session_number
         FROM coverage_slots cs JOIN absences a ON a.id = cs.absence_id
         ORDER BY cs.absence_id, cs.id`;
-      const phantoms = all.filter(r => !slotDutyIsKnown(dutyNames, r));
+      // Person-level scan: one validator per absence (person × session),
+      // so a phantom naming a REAL grove ("Leading Willows") is caught
+      // when this person doesn't hold that duty.
+      const scanYear = activeSchoolYear(new Date());
+      const validators = {};
+      async function validatorFor(r) {
+        const vKey = norm(r.absent_person) + '|' + norm(r.family_email) + '|' + r.session_number;
+        if (!validators[vKey]) {
+          validators[vKey] = await makeSlotValidator(sql, {
+            schoolYear: scanYear, session: r.session_number,
+            absentPerson: r.absent_person, familyEmail: r.family_email
+          });
+        }
+        return validators[vKey];
+      }
+      const phantoms = [];
+      for (const r of all) {
+        const allowed = (await validatorFor(r))(r);
+        if (!allowed) phantoms.push(r);
+      }
+      const phantomIds = new Set(phantoms.map(r => r.id));
       const claimed = phantoms.filter(r => r.claimed_by_email || r.claimed_by_name);
       const deletable = phantoms.filter(r => !r.claimed_by_email && !r.claimed_by_name);
       if (req.query.action === 'phantom-scan') {
@@ -335,7 +371,7 @@ module.exports = async function handler(req, res) {
       }
       for (const aid of Object.keys(byAbsence)) {
         const slots = byAbsence[aid];
-        const allPhantomUnclaimed = slots.every(r => !slotDutyIsKnown(dutyNames, r) && !r.claimed_by_email && !r.claimed_by_name);
+        const allPhantomUnclaimed = slots.every(r => phantomIds.has(r.id) && !r.claimed_by_email && !r.claimed_by_name);
         if (!allPhantomUnclaimed) continue;
         const gone = await sql`DELETE FROM notifications WHERE type = 'coverage_needed' AND related_absence_id = ${parseInt(aid, 10)} RETURNING id`;
         removedNotifs += gone.length;
@@ -487,7 +523,10 @@ module.exports = async function handler(req, res) {
       // the still-open slots go into the Coverage Needed broadcast.
       const createdSlots = [];
       const openSlots = [];
-      const dutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
+      const slotAllowed = slotsData.length ? await makeSlotValidator(sql, {
+        schoolYear: activeSchoolYear(new Date()), session: session_number,
+        absentPerson: absent_person, familyEmail: family_email
+      }) : null;
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -495,8 +534,8 @@ module.exports = async function handler(req, res) {
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
         if (!VALID_BLOCKS.includes(block)) continue;
-        if (!slotDutyIsKnown(dutyNames, slot)) {
-          console.error('[absence-guard] dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+        if (!slotAllowed(slot)) {
+          console.error('[absence-guard] dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
           continue;
         }
         const ins = await sql`
@@ -650,7 +689,10 @@ module.exports = async function handler(req, res) {
         }
         const openNew = [];
         const seenKeys = new Set();
-        const editDutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
+        const editSlotAllowed = slotsData.length ? await makeSlotValidator(sql, {
+          schoolYear: activeSchoolYear(new Date()), session: session_number,
+          absentPerson: absent_person, familyEmail: absence.family_email
+        }) : null;
         for (const slot of slotsData) {
           const block = String(slot.block || '').trim();
           const role_type = String(slot.role_type || '').trim();
@@ -663,8 +705,8 @@ module.exports = async function handler(req, res) {
           // the client re-sent falls into `unmatched` below and is deleted
           // — editing an absence now flushes phantoms instead of keeping
           // them alive.
-          if (!slotDutyIsKnown(editDutyNames, slot)) {
-            console.error('[absence-guard] edit dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+          if (!editSlotAllowed(slot)) {
+            console.error('[absence-guard] edit dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
             continue;
           }
           const key = block + '|' + role_type + '|' + role_description;
@@ -744,7 +786,10 @@ module.exports = async function handler(req, res) {
       `;
       const seen = new Set(existing.map(s => s.block + '|' + s.role_type + '|' + s.role_description));
       const addedSlots = [];
-      const reconDutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
+      const reconSlotAllowed = slotsData.length ? await makeSlotValidator(sql, {
+        schoolYear: activeSchoolYear(new Date()), session: absence.session_number,
+        absentPerson: absence.absent_person, familyEmail: absence.family_email
+      }) : null;
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -752,8 +797,8 @@ module.exports = async function handler(req, res) {
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
         if (!VALID_BLOCKS.includes(block)) continue;
-        if (!slotDutyIsKnown(reconDutyNames, slot)) {
-          console.error('[absence-guard] reconciler dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+        if (!reconSlotAllowed(slot)) {
+          console.error('[absence-guard] reconciler dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
           continue;
         }
         const key = block + '|' + role_type + '|' + role_description;
