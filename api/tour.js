@@ -6440,10 +6440,12 @@ function eventSectionShape(s, signups) {
     signups: (signups || []).filter(x => x.section_id === s.id).map(x => ({
       id: x.id,
       slot_index: x.slot_index,
+      shift_index: x.shift_index == null ? null : x.shift_index,
       email: (x.person_email || '').toLowerCase(),
       name: x.person_name || x.person_email || '',
       item_text: x.item_text || '',
-      note: x.note || ''
+      note: x.note || '',
+      created_at: x.created_at || null
     }))
   };
 }
@@ -6497,7 +6499,7 @@ async function handleEventSpaceGet(req, res) {
     `;
     const sectionIds = sections.map(s => s.id);
     const sectionSignups = sectionIds.length ? await sql`
-      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, created_at
       FROM event_section_signups WHERE section_id = ANY(${sectionIds})
       ORDER BY created_at, id
     ` : [];
@@ -7036,32 +7038,96 @@ async function handleEventSignupClaim(body, req, res) {
       if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= slots.length) {
         return res.status(400).json({ error: 'That spot no longer exists.' });
       }
-      const mine = await sql`
-        SELECT id FROM event_section_signups
-        WHERE section_id = ${sectionId} AND slot_index = ${slotIndex} AND LOWER(person_email) = ${email}
-      `;
+      const slot = slots[slotIndex] || {};
+      // #227 (Mock A): a slot may carry timed shifts — a claim then names
+      // its shift_index and the capacity/duplicate checks scope to that
+      // shift. Plain slots keep the whole-slot behavior (shift_index NULL).
+      const shifts = Array.isArray(slot.shifts) ? slot.shifts : [];
+      let shiftIndex = null;
+      if (shifts.length) {
+        shiftIndex = parseInt(body.shift_index, 10);
+        if (!Number.isInteger(shiftIndex) || shiftIndex < 0 || shiftIndex >= shifts.length) {
+          return res.status(400).json({ error: 'Pick which shift you can cover.' });
+        }
+      }
+      const mine = shiftIndex === null
+        ? await sql`SELECT id FROM event_section_signups
+            WHERE section_id = ${sectionId} AND slot_index = ${slotIndex} AND LOWER(person_email) = ${email}`
+        : await sql`SELECT id FROM event_section_signups
+            WHERE section_id = ${sectionId} AND slot_index = ${slotIndex} AND shift_index = ${shiftIndex} AND LOWER(person_email) = ${email}`;
       if (mine.length > 0) return res.status(200).json({ ok: true, already: true });
-      const cap = parseInt(slots[slotIndex] && slots[slotIndex].capacity, 10) || 0;
+      const cap = shiftIndex === null
+        ? (parseInt(slot.capacity, 10) || 0)
+        : (parseInt(shifts[shiftIndex] && shifts[shiftIndex].capacity, 10) || 0);
       if (cap > 0) {
-        const n = await sql`
-          SELECT COUNT(*)::int AS n FROM event_section_signups
-          WHERE section_id = ${sectionId} AND slot_index = ${slotIndex}
-        `;
+        const n = shiftIndex === null
+          ? await sql`SELECT COUNT(*)::int AS n FROM event_section_signups
+              WHERE section_id = ${sectionId} AND slot_index = ${slotIndex}`
+          : await sql`SELECT COUNT(*)::int AS n FROM event_section_signups
+              WHERE section_id = ${sectionId} AND slot_index = ${slotIndex} AND shift_index = ${shiftIndex}`;
         if (n[0].n >= cap) return res.status(409).json({ error: 'That spot just filled up — thank you anyway!' });
       }
       await sql`
-        INSERT INTO event_section_signups (section_id, slot_index, person_email, person_name)
-        VALUES (${sectionId}, ${slotIndex}, ${email}, ${who.name})
+        INSERT INTO event_section_signups (section_id, slot_index, shift_index, person_email, person_name)
+        VALUES (${sectionId}, ${slotIndex}, ${shiftIndex}, ${email}, ${who.name})
       `;
       return res.status(200).json({ ok: true });
     }
-    const itemText = String(body.item_text || '').trim().slice(0, 200);
-    if (!itemText) return res.status(400).json({ error: 'Say what you’ll bring.' });
+    // Discussion posts (#226) run longer than bring items.
+    const itemText = String(body.item_text || '').trim().slice(0, sec.type === 'board' ? 1000 : 200);
+    if (!itemText) return res.status(400).json({ error: sec.type === 'board' ? 'Type a message first.' : 'Say what you’ll bring.' });
     const note = String(body.note || '').trim().slice(0, 300);
     await sql`
       INSERT INTO event_section_signups (section_id, person_email, person_name, item_text, note)
       VALUES (${sectionId}, ${email}, ${who.name}, ${itemText}, ${note})
     `;
+    // #226: a Discussion post pings the event committee + everyone who has
+    // posted in this Discussion — COALESCED to one unread bell row per
+    // person per Discussion ("N new messages"), never the whole
+    // membership. Best-effort: a notification hiccup never fails the post.
+    if (sec.type === 'board') {
+      try {
+        const evRows = await sql`SELECT name FROM special_events WHERE id = ${sec.special_event_id}`;
+        const evName = (evRows[0] && evRows[0].name) || 'Special event';
+        const committee = await sql`
+          SELECT LOWER(person_email) AS em FROM special_event_people
+          WHERE event_id = ${sec.special_event_id} AND COALESCE(person_email, '') <> ''
+        `;
+        const posters = await sql`
+          SELECT DISTINCT LOWER(person_email) AS em FROM event_section_signups
+          WHERE section_id = ${sectionId} AND COALESCE(person_email, '') <> ''
+        `;
+        const recipients = {};
+        committee.concat(posters).forEach(r => { if (r.em && r.em !== email) recipients[r.em] = true; });
+        const secTitle = sec.title || 'Discussion';
+        const nTitle = '💬 ' + evName + ' — ' + secTitle;
+        const nLink = 'evspace:' + sec.special_event_id;
+        for (const rcpt of Object.keys(recipients)) {
+          const openRow = await sql`
+            SELECT id, body FROM notifications
+            WHERE recipient_email = ${rcpt} AND type = 'discussion_post'
+              AND title = ${nTitle} AND link_url = ${nLink} AND is_read = FALSE
+            ORDER BY id DESC LIMIT 1
+          `;
+          if (openRow.length) {
+            const m = String(openRow[0].body || '').match(/^(\d+) new/);
+            const count = (m ? parseInt(m[1], 10) : 1) + 1;
+            await sql`
+              UPDATE notifications
+              SET body = ${count + ' new messages — latest from ' + who.name}, created_at = NOW()
+              WHERE id = ${openRow[0].id}
+            `;
+          } else {
+            await sql`
+              INSERT INTO notifications (recipient_email, type, title, body, link_url)
+              VALUES (${rcpt}, 'discussion_post', ${nTitle}, ${'1 new message from ' + who.name}, ${nLink})
+            `;
+          }
+        }
+      } catch (discErr) {
+        console.error('discussion notify failed (non-fatal):', discErr);
+      }
+    }
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-signup-claim error:', err);
@@ -7286,7 +7352,7 @@ async function handleEventOpeningsGet(req, res) {
     ` : [];
     const sectionIds = sections.map(s => s.id);
     const signups = sectionIds.length ? await sql`
-      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, created_at
       FROM event_section_signups WHERE section_id = ANY(${sectionIds})
       ORDER BY created_at, id
     ` : [];

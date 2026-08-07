@@ -527,7 +527,7 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
     `;
     const ids = sections.map(s => s.id);
     const signups = ids.length ? await sql`
-      SELECT id, section_id, slot_index, person_email, person_name, item_text, note
+      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note
       FROM group_section_signups WHERE section_id = ANY(${ids})
       ORDER BY created_at, id
     ` : [];
@@ -740,12 +740,23 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
       const slots = Array.isArray(secs[0].content) ? secs[0].content : [];
       if (!Number.isInteger(idx) || idx < 0 || idx >= slots.length) return res.status(400).json({ error: 'slot_index required' });
       if (slots[idx] && slots[idx].everyone) return res.status(400).json({ error: 'Everyone brings that one — no sign-up needed.' });
-      const claims = await sql`SELECT LOWER(person_email) AS em FROM group_section_signups WHERE section_id = ${sid} AND slot_index = ${idx}`;
+      // #227 (Mock A): timed shifts scope the duplicate/capacity checks.
+      const gShifts = Array.isArray(slots[idx] && slots[idx].shifts) ? slots[idx].shifts : [];
+      let shIdx = null;
+      if (gShifts.length) {
+        shIdx = parseInt(body.shift_index, 10);
+        if (!Number.isInteger(shIdx) || shIdx < 0 || shIdx >= gShifts.length) return res.status(400).json({ error: 'Pick which shift you can cover.' });
+      }
+      const claims = shIdx === null
+        ? await sql`SELECT LOWER(person_email) AS em FROM group_section_signups WHERE section_id = ${sid} AND slot_index = ${idx}`
+        : await sql`SELECT LOWER(person_email) AS em FROM group_section_signups WHERE section_id = ${sid} AND slot_index = ${idx} AND shift_index = ${shIdx}`;
       if (claims.some(c => c.em === email)) return res.status(200).json({ ok: true, already: true });
-      const cap = parseInt(slots[idx] && slots[idx].capacity, 10) || 0;
+      const cap = shIdx === null
+        ? (parseInt(slots[idx] && slots[idx].capacity, 10) || 0)
+        : (parseInt(gShifts[shIdx] && gShifts[shIdx].capacity, 10) || 0);
       if (cap > 0 && claims.length >= cap) return res.status(409).json({ error: 'That spot just filled — thank you though!' });
-      await sql`INSERT INTO group_section_signups (section_id, slot_index, person_email, person_name)
-                VALUES (${sid}, ${idx}, ${email}, ${name})`;
+      await sql`INSERT INTO group_section_signups (section_id, slot_index, shift_index, person_email, person_name)
+                VALUES (${sid}, ${idx}, ${shIdx}, ${email}, ${name})`;
     } else {
       const item_text = String(body.item_text || '').trim().slice(0, 200);
       if (!item_text) return res.status(400).json({ error: 'Say what you’ll bring.' });

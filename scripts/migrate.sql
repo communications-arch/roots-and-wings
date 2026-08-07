@@ -2497,6 +2497,13 @@ CREATE TABLE IF NOT EXISTS tutorial_video_likes (
   PRIMARY KEY (video_id, member_email)
 );
 
+-- 2026-08-06 (#227, Colleen / Erin picked Mock A): sign-up slots can be
+-- SPLIT into timed shifts (shifts live in the section content JSONB; no
+-- schema there). A claim may target one shift of a slot — nullable so
+-- every existing claim and plain slot keeps meaning "the whole slot".
+ALTER TABLE event_section_signups ADD COLUMN IF NOT EXISTS shift_index INTEGER;
+ALTER TABLE group_section_signups ADD COLUMN IF NOT EXISTS shift_index INTEGER;
+
 -- 2026-08-06 (#215, Lyndsey): afternoon Class Builder rooms in building
 -- order, not alphabetical. The rooms API already serves
 -- ORDER BY sort_order, LOWER(name) — nothing had ever set sort_order, so

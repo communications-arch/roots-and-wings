@@ -19972,6 +19972,7 @@
       (d.signups || []).forEach(function (su) {
         (byShaped[su.section_id] = byShaped[su.section_id] || []).push({
           id: su.id, slot_index: su.slot_index,
+          shift_index: su.shift_index == null ? null : su.shift_index,
           email: String(su.person_email || '').toLowerCase(),
           name: su.person_name || '', item_text: su.item_text || '', note: su.note || ''
         });
@@ -20072,6 +20073,9 @@
       slot_index: parseInt(btn.getAttribute('data-slot-index'), 10),
       person_name: lendingDisplayNameFor(getActiveEmail())
     };
+    // #227: split jobs claim one SHIFT of the slot.
+    var gShiftAttr = btn.getAttribute('data-shift-index');
+    if (gShiftAttr !== null && gShiftAttr !== '') payload.shift_index = parseInt(gShiftAttr, 10);
     var vaEmail = supplyViewAsEmail();
     if (vaEmail) payload.view_as = vaEmail;
     fetch('/api/supply-closet?action=bring-claim', {
@@ -22869,6 +22873,11 @@
     else if (action === 'event-slot-claim' && typeof claimEventSlot === 'function') claimEventSlot(btn);
     else if (action === 'event-signup-remove' && typeof removeEventSignup === 'function') removeEventSignup(btn);
     else if (action === 'event-signup-edit' && typeof openBringEditForm === 'function') openBringEditForm(btn, false);
+    else if (action === 'discussion-post' && typeof postDiscussionMessage === 'function') postDiscussionMessage(btn);
+    else if (action === 'discussion-expand') {
+      _discussionExpanded[parseInt(btn.getAttribute('data-section-id'), 10)] = true;
+      if (typeof renderEventSpaceBody === 'function') renderEventSpaceBody();
+    }
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
     else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
     else if (action === 'event-jump-in' && typeof showEventJumpInModal === 'function') showEventJumpInModal();
@@ -25115,7 +25124,7 @@
       closeNotifDropdown();
       if (nType === 'lending_request') {
         if (typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
-      } else if (nType === 'event_signups_open' && /^evspace:\d+$/.test(nLink)) {
+      } else if ((nType === 'event_signups_open' || nType === 'discussion_post') && /^evspace:\d+$/.test(nLink)) {
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
       } else if (['coverage_needed', 'slot_claimed', 'slot_reassigned', 'kids_absent'].indexOf(nType) !== -1 || !nType) {
         var cov = document.getElementById('coverage');
@@ -27838,7 +27847,32 @@
   // member's Ways to Help card once the lead hits "Request volunteers".
   function evsSectionTitle(s) {
     if (s.title) return s.title;
-    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Notes & Links' }[s.type] || 'Section';
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Discussion' }[s.type] || 'Section';
+  }
+
+  // #227 (Mock A): the slots grammar, shared by save and live preview.
+  // `label @ time | capacity | details`, plus indented `- time | capacity`
+  // shift lines that attach to the job line above. Lines without dashes
+  // or @ parse byte-for-byte as before.
+  function parseSlotLines(lines) {
+    var out = [];
+    String(lines || '').split('\n').forEach(function (raw) {
+      if (!raw.trim()) return;
+      var isShift = /^(\s*-\s+|\s{2,})/.test(raw);
+      if (isShift && out.length) {
+        var sp = raw.replace(/^\s*-?\s*/, '').split('|');
+        var host = out[out.length - 1];
+        (host.shifts = host.shifts || []).push({ time: (sp[0] || '').trim(), capacity: parseInt(sp[1], 10) || 1 });
+        return;
+      }
+      var p = raw.trim().split('|');
+      var head = (p[0] || '').trim();
+      var time = '';
+      var at = head.split(/\s@\s/);
+      if (at.length > 1) { head = at[0].trim(); time = at.slice(1).join(' @ ').trim(); }
+      out.push({ label: head, time: time, capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() });
+    });
+    return out;
   }
 
   // Shared signup-section body — same markup in the Event Space, on
@@ -27858,39 +27892,98 @@
     if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
     var canAct = s.is_open || canEdit || s.type === 'board';
     if (cfg.mode === 'slots') {
-      h += '<ul class="ws-opportunities">';
+      // #227 (Mock A, Erin 2026-08-06): slots render as JOB CARDS — name +
+      // time + count pill, visible details note, seat-pips instead of
+      // bare "0 of N" text, and (when the job is split) its timed shifts
+      // threaded on an olive stem. Names show as pills; your own claim
+      // offers "Can't make it".
+      var sjPips = function (taken, cap) {
+        if (!cap) return '';
+        var p = '<span class="sj-pips" aria-hidden="true">';
+        for (var pi = 0; pi < Math.min(cap, 12); pi++) p += '<span class="sj-pip' + (pi < taken ? ' on' : '') + '"></span>';
+        return p + '</span>';
+      };
+      var sjNames = function (claims2, extraClass) {
+        if (!claims2.length) return '';
+        var nh = '<div class="sj-names' + (extraClass || '') + '">';
+        claims2.forEach(function (c) {
+          var isYou = c.email === viewerEmail;
+          nh += '<span class="sj-name-pill' + (isYou ? ' is-you' : '') + '">' + escapeHtmlWs(c.name) + (isYou ? ' (you)' : '')
+            + ((canEdit && !isYou) ? ' <button type="button" class="sj-name-x" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove ' + escapeAttr(c.name) + '" title="Remove">×</button>' : '')
+            + '</span>';
+        });
+        return nh + '</div>';
+      };
+      var heartSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+      var checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
       (Array.isArray(s.content) ? s.content : []).forEach(function (slot, idx) {
-        // "Everyone brings this" rows (class Things to Bring — white
-        // t-shirt for tie-dye day): an announcement, not a sign-up.
+        // "Everyone brings this" rows: an announcement, not a sign-up.
         if (slot.everyone) {
-          h += '<li class="ws-opp-seat"><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
-          if (slot.note) h += '<span class="ws-opp-slotnote">' + escapeHtmlWs(slot.note) + '</span>';
-          h += '</span><span class="ws-opp-committee">Everyone brings this</span></li>';
+          h += '<div class="sj-job"><div class="sj-top"><h5 class="sj-name">' + escapeHtmlWs(slot.label || '') + '</h5>'
+            + '<span class="sj-count">Everyone brings this</span></div>';
+          if (slot.note) h += '<p class="sj-note">' + escapeHtmlWs(slot.note) + '</p>';
+          h += '</div>';
           return;
         }
-        var claims = (s.signups || []).filter(function (x) { return x.slot_index === idx; });
-        var cap = parseInt(slot.capacity, 10) || 0;
-        var mineClaim = claims.filter(function (x) { return x.email === viewerEmail; })[0];
-        var full = cap > 0 && claims.length >= cap;
-        // #229 (Colleen): the spot's details also ride a hover tooltip.
-        h += '<li class="ws-opp-seat"' + (slot.note ? ' title="' + escapeAttr(slot.note) + '"' : '') + '><span class="ws-opp-main"><strong>' + escapeHtmlWs(slot.label || '') + '</strong>';
-        // #125-6: per-spot details so members know what the action involves.
-        if (slot.note) h += '<span class="ws-opp-slotnote">' + escapeHtmlWs(slot.note) + '</span>';
-        var meta = cap > 0 ? (claims.length + ' of ' + cap + ' filled') : (claims.length + ' signed up');
-        if (claims.length) {
-          meta += ' · ' + claims.map(function (c) {
-            var nm = escapeHtmlWs(c.name);
-            if (canEdit || c.email === viewerEmail) nm += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove sign-up" title="Remove">×</button>';
-            return nm;
-          }).join(', ');
+        var shifts = Array.isArray(slot.shifts) ? slot.shifts : [];
+        var slotClaims = (s.signups || []).filter(function (x) { return x.slot_index === idx; });
+        var totalCap = shifts.length
+          ? shifts.reduce(function (a, sh) { return a + (parseInt(sh.capacity, 10) || 0); }, 0)
+          : (parseInt(slot.capacity, 10) || 0);
+        h += '<div class="sj-job">';
+        h += '<div class="sj-top"><h5 class="sj-name">' + escapeHtmlWs(slot.label || '') + '</h5>'
+          + (slot.time ? '<span class="sj-time">' + escapeHtmlWs(slot.time) + '</span>' : '')
+          + '<span class="sj-count' + (totalCap > 0 && slotClaims.length >= totalCap ? ' is-full' : '') + '">'
+          + (totalCap > 0 ? slotClaims.length + ' of ' + totalCap + ' filled' : slotClaims.length + ' signed up') + '</span></div>';
+        if (slot.note) h += '<p class="sj-note">' + brandIconImg('waysToHelp', 'sj-note-icon') + escapeHtmlWs(slot.note) + '</p>';
+        if (!shifts.length) {
+          // Plain job — current behavior in the new anatomy.
+          var cap = parseInt(slot.capacity, 10) || 0;
+          var mineClaim = slotClaims.filter(function (x) { return x.email === viewerEmail; })[0];
+          var full = cap > 0 && slotClaims.length >= cap;
+          var openN = cap > 0 ? Math.max(0, cap - slotClaims.length) : 0;
+          h += '<div class="sj-capline">' + sjPips(slotClaims.length, cap)
+            + (full ? '<span class="sj-tag-full">Full</span>'
+              : cap > 0 ? '<span>' + openN + ' spot' + (openN === 1 ? '' : 's') + ' open' + (slotClaims.length === 0 ? ' — be the first!' : '') + '</span>' : '') + '</div>';
+          h += sjNames(slotClaims);
+          if (mineClaim) {
+            h += '<div class="sj-mine-row"><span class="sj-tag-mine">' + checkSvg + ' You’re signed up</span>'
+              + '<button type="button" class="sc-btn" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + mineClaim.id + '">Can’t make it</button></div>';
+          } else if (canAct && !full) {
+            h += '<button type="button" class="volunteer-cta sj-cta" data-resource-action="' + ACT_CLAIM + '" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + heartSvg + ' Sign up</button>';
+          }
+        } else {
+          // Split job (#227): shifts on the stem.
+          h += '<ol class="sj-shifts">';
+          shifts.forEach(function (sh, shIdx) {
+            var shClaims = slotClaims.filter(function (x) { return x.shift_index === shIdx; });
+            var shCap = parseInt(sh.capacity, 10) || 0;
+            var shMine = shClaims.filter(function (x) { return x.email === viewerEmail; })[0];
+            var shFull = shCap > 0 && shClaims.length >= shCap;
+            var shOpen = shCap > 0 ? Math.max(0, shCap - shClaims.length) : 0;
+            h += '<li class="sj-shift' + (shMine ? ' is-mine' : shFull ? ' is-full' : '') + '">';
+            h += '<div class="sj-shift-row"><span class="sj-shift-time">' + escapeHtmlWs(sh.time || '') + '</span>'
+              + '<span class="sj-shift-cap">' + sjPips(shClaims.length, shCap)
+              + (shFull ? '' : shCap > 0 ? '<span>' + shOpen + ' open</span>' : '') + '</span>';
+            h += '<span class="sj-shift-action">';
+            if (shMine) {
+              h += '<span class="sj-tag-mine">' + checkSvg + ' You’re in</span> '
+                + '<button type="button" class="sc-btn" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + shMine.id + '">Can’t make it</button>';
+            } else if (shFull) {
+              h += '<span class="sj-tag-full">Full</span>';
+            } else if (canAct) {
+              h += '<button type="button" class="sj-cta-sm" data-resource-action="' + ACT_CLAIM + '" data-section-id="' + s.id + '" data-slot-index="' + idx + '" data-shift-index="' + shIdx + '">' + heartSvg + ' Sign up</button>';
+            }
+            h += '</span></div>';
+            h += sjNames(shClaims, ' sj-shift-names');
+            h += '</li>';
+          });
+          h += '</ol>';
         }
-        h += '<span class="ws-opp-committee">' + meta + '</span></span>';
-        if (mineClaim) h += '<span class="ws-opp-committee">✓ You’re signed up</span>';
-        else if (canAct && !full) h += '<button type="button" class="volunteer-cta" data-resource-action="' + ACT_CLAIM + '" data-section-id="' + s.id + '" data-slot-index="' + idx + '">' + DUTY_ICONS.volunteer + ' Sign up</button>';
-        else if (full) h += '<span class="ws-opp-committee">Full — thank you!</span>';
-        h += '</li>';
+        h += '</div>';
       });
-      h += '</ul>';
+    } else if (s.type === 'board') {
+      h += renderDiscussionBody(s, viewerEmail, canEdit, ACT_REMOVE, FORM_KEY);
     } else {
       if ((s.signups || []).length) {
         h += '<ul class="ws-part-recap">';
@@ -27922,6 +28015,99 @@
       }
     }
     return h;
+  }
+
+  // ── Discussion sections (#226, Erin 2026-08-06) ───────────────────
+  // The 'board' type, grown up: always-visible composer, newest-first
+  // messages with author + timestamp, a "new since your last visit"
+  // marker (localStorage), and an optional pinned link to an external
+  // chat space (cfg.chat_url + cfg.chat_note — Erin's ask). Entries still
+  // live in the section signups table; posting rides the claim kind.
+  var _discussionExpanded = {};
+  function renderDiscussionBody(s, viewerEmail, canEdit, ACT_REMOVE, FORM_KEY) {
+    var cfg = s.config || {};
+    var h = '';
+    // Pinned external chat-space link + note.
+    if (cfg.chat_url) {
+      h += '<p class="disc-chatlink">' + brandIconImg('resources', 'ag-icon')
+        + '<a href="' + escapeAttr(cfg.chat_url) + '" target="_blank" rel="noopener">'
+        + escapeHtmlWs(cfg.chat_note || 'Join the team chat space') + '</a></p>';
+    } else if (canEdit) {
+      h += '<p class="disc-chatlink disc-chatlink-empty">Tip: add a chat-space link in this card’s ✎ settings and it pins here for the team.</p>';
+    }
+    // Composer — always visible, no reveal step.
+    h += '<div class="disc-composer"><textarea class="cl-input disc-input" id="disc-input-' + FORM_KEY + '" rows="2" maxlength="1000" placeholder="Message the team…"></textarea>'
+      + '<div class="disc-composer-row"><button type="button" class="btn btn-primary btn-sm" data-resource-action="discussion-post" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '">Post</button>'
+      + '<span class="perm-status disc-status" id="disc-status-' + FORM_KEY + '" aria-live="polite"></span></div></div>';
+    var msgs = (s.signups || []).slice().sort(function (a, b) {
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+    if (!msgs.length) {
+      h += '<p class="ws-empty">Nothing here yet — start the conversation.</p>';
+    } else {
+      var seenKey = 'rw_disc_seen_' + s.id;
+      var lastSeen = '';
+      try { lastSeen = localStorage.getItem(seenKey) || ''; } catch (e) { /* private mode */ }
+      var expanded = !!_discussionExpanded[s.id];
+      var show = expanded ? msgs : msgs.slice(0, 8);
+      var newCount = lastSeen ? msgs.filter(function (m) { return String(m.created_at || '') > lastSeen; }).length : 0;
+      h += '<ul class="disc-list">';
+      var dividerDone = false;
+      show.forEach(function (m, mi) {
+        // The divider sits under the LAST new message (list is newest-
+        // first, so "new since your last visit" is everything above it).
+        var isNew = lastSeen && String(m.created_at || '') > lastSeen;
+        var mine = m.email === viewerEmail;
+        h += '<li class="disc-msg' + (mine ? ' is-mine' : '') + '">';
+        h += '<div class="disc-meta"><strong>' + escapeHtmlWs(m.name) + '</strong>'
+          + (m._rolePill ? '<span class="disc-role">' + escapeHtmlWs(m._rolePill) + '</span>' : '')
+          + '<span class="disc-when" title="' + escapeAttr(m.created_at ? new Date(m.created_at).toLocaleString() : '') + '">' + escapeHtmlWs(m.created_at ? timeAgo(m.created_at) : '') + '</span>'
+          + ((mine || canEdit) ? '<button type="button" class="sc-btn disc-edit" data-resource-action="event-signup-edit" data-signup-id="' + m.id + '" data-form-key="' + FORM_KEY + '" data-sec-type="board" data-item="' + escapeAttr(m.item_text || '') + '" data-note="" aria-label="Edit or remove" title="Edit or remove">✎</button>' : '')
+          + '</div>';
+        var bodyHtml = escapeHtmlWs(m.item_text || '').replace(/\n/g, '<br>')
+          .replace(/(https?:\/\/[^\s<]+)/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u.replace(/^https?:\/\//, '').slice(0, 50) + '</a>'; });
+        h += '<div class="disc-body">' + bodyHtml + '</div>';
+        h += '</li>';
+        if (isNew && !dividerDone) {
+          var next = show[mi + 1];
+          if (!next || !(lastSeen && String(next.created_at || '') > lastSeen)) {
+            if (newCount > 0 && (mi < show.length - 1 || msgs.length > show.length)) {
+              h += '<li class="disc-newline" aria-label="New since your last visit">new since your last visit</li>';
+            }
+            dividerDone = true;
+          }
+        }
+      });
+      h += '</ul>';
+      if (!expanded && msgs.length > show.length) {
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="discussion-expand" data-section-id="' + s.id + '">Show earlier messages (' + (msgs.length - show.length) + ')</button></p>';
+      }
+      // This render counts as "seen".
+      try { if (msgs[0] && msgs[0].created_at) localStorage.setItem(seenKey, String(msgs[0].created_at)); } catch (e) { /* private mode */ }
+    }
+    h += '<div class="evs-bring-form" data-bring-form="' + FORM_KEY + '" hidden></div>';
+    return h;
+  }
+
+  function postDiscussionMessage(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var formKey = btn.getAttribute('data-form-key') || '';
+    var inp = document.getElementById('disc-input-' + formKey);
+    var st = document.getElementById('disc-status-' + formKey);
+    if (!inp) return;
+    var text = inp.value.trim();
+    if (!text) { if (st) { st.className = 'perm-status disc-status ws-wv-err'; st.textContent = 'Type a message first'; } return; }
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, item_text: text }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) { if (st) { st.className = 'perm-status disc-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Could not post'; } return; }
+        inp.value = '';
+        loadEventOpenings();
+        evsMaybeRefreshSpace();
+      })
+      .catch(function () { btn.disabled = false; if (st) { st.className = 'perm-status disc-status ws-wv-err'; st.textContent = 'Network error'; } });
   }
 
   function renderEventSections(d, chips) {
@@ -27993,6 +28179,16 @@
         }
         // 'board' (Erin, 2026-07-25): shared notes & links — the bring-list
         // mechanics (attributed entries, own-entry ×) with adding always on.
+        // #226: Discussion messages carry a Lead/Assistant pill when the
+        // author sits on this event's committee.
+        if (s.type === 'board' && Array.isArray(d.people)) {
+          var roleByEmail = {};
+          d.people.forEach(function (p) {
+            var em = String(p.person_email || '').toLowerCase();
+            if (em) roleByEmail[em] = p.role === 'lead' ? 'Lead' : 'Assistant';
+          });
+          (s.signups || []).forEach(function (m) { m._rolePill = roleByEmail[m.email] || ''; });
+        }
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
       }
       h += '</div></div>'; // /body, /card
@@ -28012,7 +28208,7 @@
     if (!el) return;
     function fieldsFor(t, s) {
       var cfg = (s && s.config) || {};
-      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year', board: 'Shared notes & links' }[t] || '') + '"></div>';
+      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year', board: 'Discussion' }[t] || '') + '"></div>';
       if (t === 'info') {
         var lines = Array.isArray(s && s.content) ? s.content.join('\n') : '';
         fh += '<div class="cls-field"><label class="cls-label">Items — one per line</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Dairy ice cream — chocolate and vanilla\nNon-dairy vegan ice cream\nAll paper goods">' + escapeHtmlWs(lines) + '</textarea></div>';
@@ -28035,20 +28231,43 @@
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
         // #125-6 (Erin, 07-28): spots carry an optional third field — a
         // details note shown under the spot so members know what the
-        // action involves.
+        // action involves. #227 (Mock A): a job splits into timed shifts
+        // with indented dash lines; `label @ time` pins a time on a
+        // plain spot. Round-trips both ways.
         var sl = (Array.isArray(s && s.content) ? s.content : []).map(function (r) {
-          var parts = [r.label || ''];
+          var head = (r.label || '') + (r.time ? ' @ ' + r.time : '');
+          var parts = [head];
           if (r.capacity || r.note) parts.push(r.capacity || '');
           if (r.note) parts.push(r.note);
-          return parts.join(' | ');
+          var out = parts.join(' | ');
+          (Array.isArray(r.shifts) ? r.shifts : []).forEach(function (sh) {
+            out += '\n- ' + (sh.time || '') + ' | ' + (sh.capacity || 1);
+          });
+          return out;
         }).join('\n');
-        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label | how many people | details (one per line, details optional)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Set Up — 11:30 am | 4 | Tables, chairs &amp; coolers from the kitchen\nServing — 12:30 pm | 3 | Scoop &amp; hand out; gloves provided\nClean Up — 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label @ time | how many people | details (time &amp; details optional). Split a job into shifts with indented dash lines.</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Set Up @ 11:30 am | 4 | Tables, chairs &amp; coolers from the kitchen\nScooping ice cream | | Aprons provided — pick your hour\n- 12:00–1:00 pm | 1\n- 1:00–2:00 pm | 1\nClean Up @ 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+        // The splitter generator (#227): a tiny form that writes the dash
+        // lines so nobody types eight shifts by hand.
+        fh += '<div class="cls-field evs-sd-slots-only"><button type="button" class="ws-inline-link" id="evsSplitToggle">⚡ Split a job into time slots</button>'
+          + '<div id="evsSplitForm" hidden style="margin-top:8px;display:grid;gap:6px;grid-template-columns:1fr 1fr;">'
+          + '<input class="cl-input" id="evsSplitJob" type="text" maxlength="120" placeholder="Job name — e.g. Scooping" style="grid-column:1/-1;">'
+          + '<input class="cl-input" id="evsSplitStart" type="text" maxlength="10" placeholder="Starts — 12:00 pm">'
+          + '<input class="cl-input" id="evsSplitEnd" type="text" maxlength="10" placeholder="Ends — 3:00 pm">'
+          + '<input class="cl-input" id="evsSplitLen" type="number" min="15" step="15" value="60" title="Minutes per shift">'
+          + '<input class="cl-input" id="evsSplitCap" type="number" min="1" value="1" title="People per shift">'
+          + '<button type="button" class="btn btn-primary btn-sm" id="evsSplitAdd" style="grid-column:1/-1;">Add shifts to the list</button>'
+          + '<span class="perm-status" id="evsSplitStatus" aria-live="polite" style="grid-column:1/-1;"></span>'
+          + '</div></div>';
+        // Live preview — exactly what members will see, as you type.
+        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Preview</label><div class="evs-sd-preview" id="evsSdPreview"></div></div>';
       } else if (t === 'board') {
         // #123 (Colleen): board sections get an EDITABLE hint like signup
-        // sections do — no bring machinery in the drawer. New sections
-        // start from a friendly default; clearing it is fine.
-        var bHint = s ? (cfg.hint || '') : 'Share notes, links, and ideas with the team.';
-        fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(bHint) + '" placeholder="Share notes, links, and ideas with the team."></div>';
+        // sections do. #226 (Erin): board = Discussion now, and it can pin
+        // a link to an external chat space (e.g. the team's Google Chat).
+        var bHint = s ? (cfg.hint || '') : 'Talk through plans here — everyone on the team sees it.';
+        fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(bHint) + '" placeholder="Talk through plans here — everyone on the team sees it."></div>';
+        fh += '<div class="cls-field"><label class="cls-label">Chat-space link (optional) — pins at the top of the Discussion</label><input class="cl-input evs-sd-chaturl" type="url" maxlength="500" value="' + escapeAttr(cfg.chat_url || '') + '" placeholder="https://chat.google.com/room/…"></div>';
+        fh += '<div class="cls-field"><label class="cls-label">Chat-space note (optional)</label><input class="cl-input evs-sd-chatnote" type="text" maxlength="200" value="' + escapeAttr(cfg.chat_note || '') + '" placeholder="Day-of quick messages happen in our Google Chat space"></div>';
       }
       return fh;
     }
@@ -28059,7 +28278,7 @@
         + '<option value="signup">Sign-up list — toppings, supplies, volunteer spots</option>'
         + '<option value="timeline">Timeline — the day-of schedule</option>'
         + '<option value="notes">Notes for next year</option>'
-        + '<option value="board">Shared notes & links — anyone can add</option>'
+        + '<option value="board">Discussion — team messages & links</option>'
         + '</select></div>';
     }
     h += '<div id="evs-sd-fields">' + fieldsFor(type, section) + '</div>';
@@ -28075,6 +28294,68 @@
       var ms = el.querySelector('.evs-sd-mode');
       if (ms) ms.addEventListener('change', syncModeVis);
       syncModeVis();
+      wireSignupExtras();
+    }
+    // #227: splitter generator + live preview for the slots editor.
+    function wireSignupExtras() {
+      var linesTa = el.querySelector('.evs-sd-lines');
+      var preview = el.querySelector('#evsSdPreview');
+      var previewTimer = null;
+      function paintPreview() {
+        if (!preview || !linesTa) return;
+        var fake = { id: 0, type: 'signup', title: '', config: { mode: 'slots' }, content: parseSlotLines(linesTa.value), is_open: true, signups: [] };
+        // Preview is inert: disarm the action buttons so a tap can't
+        // fire a real claim from inside the drawer.
+        preview.innerHTML = renderSignupSectionBody(fake, '', false).split('data-resource-action').join('data-preview-action')
+          || '<p class="ws-empty">Type a spot line above to preview it.</p>';
+      }
+      if (preview && linesTa && type === 'signup') {
+        linesTa.addEventListener('input', function () {
+          clearTimeout(previewTimer);
+          previewTimer = setTimeout(paintPreview, 250);
+        });
+        paintPreview();
+      }
+      var tog = el.querySelector('#evsSplitToggle');
+      if (tog) tog.addEventListener('click', function () {
+        var f = el.querySelector('#evsSplitForm');
+        if (f) f.hidden = !f.hidden;
+      });
+      var addBtn = el.querySelector('#evsSplitAdd');
+      if (addBtn) addBtn.addEventListener('click', function () {
+        var st2 = el.querySelector('#evsSplitStatus');
+        function toMin(str) {
+          var m = String(str || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+          if (!m) return null;
+          var hh = parseInt(m[1], 10) % 12;
+          if (/pm/i.test(m[3])) hh += 12;
+          return hh * 60 + (parseInt(m[2], 10) || 0);
+        }
+        function fmt(min) {
+          var hh = Math.floor(min / 60), mm = min % 60;
+          var ap = hh >= 12 ? 'pm' : 'am';
+          var h12 = hh % 12 || 12;
+          return h12 + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ap;
+        }
+        var job = (el.querySelector('#evsSplitJob').value || '').trim();
+        var start = toMin(el.querySelector('#evsSplitStart').value);
+        var end = toMin(el.querySelector('#evsSplitEnd').value);
+        var len = parseInt(el.querySelector('#evsSplitLen').value, 10) || 60;
+        var cap = parseInt(el.querySelector('#evsSplitCap').value, 10) || 1;
+        if (!job || start === null || end === null || end <= start) {
+          if (st2) { st2.className = 'perm-status ws-wv-err'; st2.textContent = 'Need a job name plus start and end times like “12:00 pm”.'; }
+          return;
+        }
+        var out = job + ' | |';
+        for (var t0 = start; t0 < end; t0 += len) {
+          out += '\n- ' + fmt(t0) + '–' + fmt(Math.min(t0 + len, end)) + ' | ' + cap;
+        }
+        if (linesTa) {
+          linesTa.value = (linesTa.value.replace(/\s+$/, '') + '\n' + out).replace(/^\n/, '');
+          paintPreview();
+        }
+        if (st2) { st2.className = 'perm-status ws-wv-ok'; st2.textContent = 'Shifts added below — adjust any line by hand.'; }
+      });
     }
     var typeSel = el.querySelector('.evs-sd-type');
     if (typeSel) typeSel.addEventListener('change', function () {
@@ -28109,19 +28390,24 @@
         var hintEl = el.querySelector('.evs-sd-hint');
         if (hintEl && hintEl.value.trim()) config.hint = hintEl.value.trim();
         if (config.mode === 'slots') {
-          content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (ln) {
-            var p = ln.split('|');
-            // #125-6: third field = optional details note (pipes inside
-            // the note survive via the re-join).
-            return { label: (p[0] || '').trim(), capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() };
-          });
+          // #227: shared grammar — labels, optional @ time, optional
+          // indented shift lines (see parseSlotLines).
+          content = parseSlotLines(lines);
           if (!content.length) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Add at least one spot'; return; }
+          var badShift = content.filter(function (r) { return Array.isArray(r.shifts) && r.shifts.some(function (sh) { return !sh.time; }); })[0];
+          if (badShift) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Every shift line under “' + badShift.label + '” needs a time.'; return; }
         }
       } else if (type === 'board') {
-        // #123: board entries live in signups; content stays [] — only the
-        // hint rides config.
+        // #123: board entries live in signups; content stays [] — hint
+        // and (#226) the pinned chat-space link ride config.
         var bHintEl = el.querySelector('.evs-sd-hint');
         if (bHintEl && bHintEl.value.trim()) config.hint = bHintEl.value.trim();
+        var chatUrlEl = el.querySelector('.evs-sd-chaturl');
+        var chatUrl = chatUrlEl ? chatUrlEl.value.trim() : '';
+        if (chatUrl && !/^https?:\/\//i.test(chatUrl)) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'The chat link needs to start with https://'; return; }
+        if (chatUrl) config.chat_url = chatUrl;
+        var chatNoteEl = el.querySelector('.evs-sd-chatnote');
+        if (chatNoteEl && chatNoteEl.value.trim()) config.chat_note = chatNoteEl.value.trim();
       }
       var payload = { kind: 'event-section-save', event_id: _eventSpaceState.id, title: title, config: config, content: content };
       if (isEdit) payload.id = section.id; else payload.type = type;
@@ -28441,8 +28727,12 @@
     if (btn.disabled) return;
     var sid = parseInt(btn.getAttribute('data-section-id'), 10);
     var idx = parseInt(btn.getAttribute('data-slot-index'), 10);
+    // #227: split jobs claim one SHIFT of the slot.
+    var payload = { kind: 'event-signup-claim', section_id: sid, slot_index: idx };
+    var shiftAttr = btn.getAttribute('data-shift-index');
+    if (shiftAttr !== null && shiftAttr !== '') payload.shift_index = parseInt(shiftAttr, 10);
     btn.disabled = true;
-    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, slot_index: idx }) })
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not sign you up.'); }

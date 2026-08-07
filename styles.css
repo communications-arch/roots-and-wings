@@ -15954,3 +15954,147 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
     max-height: 92dvh;
   }
 }
+
+/* ══ #227 Sign-up job cards (Mock A, Erin 2026-08-06) ══════════════════
+   Slots render as JOB CARDS: serif name + time + count pill, visible
+   details note, seat-pips capacity meter, and (split jobs) timed shifts
+   threaded on an olive stem. Shared by event collab spaces, Ways to
+   Help, and group Things-to-Bring — one renderer, one look. */
+.sj-job {
+  background: rgba(var(--color-primary-rgb), .05);
+  border-radius: 12px;
+  padding: 14px 14px 16px;
+  margin-bottom: 12px;
+}
+.sj-top { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
+.sj-name {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--color-primary-dark);
+  line-height: 1.25;
+  margin: 0;
+}
+.sj-time { font-size: .85rem; font-weight: 700; color: var(--color-primary); white-space: nowrap; }
+.sj-count {
+  margin-left: auto;
+  font-size: .7rem; font-weight: 700; letter-spacing: .5px;
+  color: var(--color-primary-dark);
+  background: #fff; border: 1.5px solid var(--color-border);
+  border-radius: 50px; padding: 3px 10px; white-space: nowrap;
+}
+.sj-count.is-full { color: #fff; background: var(--color-leaf); border-color: var(--color-leaf); }
+.sj-note {
+  display: flex; gap: 7px; align-items: flex-start;
+  font-size: .82rem; color: var(--color-text-light); margin: 7px 0 0;
+}
+.sj-note-icon { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 2px; }
+.sj-pips { display: inline-flex; gap: 4px; vertical-align: middle; }
+.sj-pip {
+  width: 11px; height: 11px; border-radius: 4px;
+  background: #fff; border: 1.5px solid var(--color-primary-light);
+}
+.sj-pip.on { background: var(--color-leaf); border-color: var(--color-leaf); }
+.sj-capline {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  font-size: .82rem; color: var(--color-text-light);
+}
+.sj-names { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.sj-name-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .76rem; font-weight: 700; color: var(--color-primary-dark);
+  background: #fff; border: 1px solid var(--color-border);
+  border-radius: 50px; padding: 2px 11px;
+}
+.sj-name-pill.is-you { color: #fff; background: var(--color-primary); border-color: var(--color-primary); }
+.sj-name-x {
+  border: none; background: none; cursor: pointer; color: inherit;
+  font-size: .85rem; line-height: 1; padding: 0 0 0 2px;
+}
+.sj-mine-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.sj-tag-mine {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .78rem; font-weight: 700; color: var(--color-leaf);
+}
+.sj-tag-full {
+  font-size: .68rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--color-text-light); background: var(--color-cream-dark);
+  border-radius: 50px; padding: 5px 12px;
+}
+.sj-cta { width: 100%; justify-content: center; margin-top: 12px; }
+.sj-cta-sm {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-weight: 700; font-size: .8rem; line-height: 1;
+  color: #fff; background: var(--color-accent); border: 2px solid var(--color-accent);
+  border-radius: 50px; padding: 8px 14px; cursor: pointer;
+  transition: background .2s ease;
+}
+.sj-cta-sm:hover { background: var(--color-accent-dark); border-color: var(--color-accent-dark); }
+.sj-shifts { list-style: none; margin: 12px 0 0; position: relative; padding-left: 20px; }
+.sj-shifts::before {
+  content: ""; position: absolute; left: 5px; top: 10px; bottom: 12px;
+  width: 2px; background: var(--color-leaf); border-radius: 2px; opacity: .55;
+}
+.sj-shift { position: relative; padding: 9px 0 11px; }
+.sj-shift + .sj-shift { border-top: 1px dashed var(--color-border); }
+.sj-shift::before {
+  content: ""; position: absolute; left: -19px; top: 16px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--color-leaf);
+}
+.sj-shift.is-mine::before, .sj-shift.is-full::before { background: var(--color-leaf); }
+.sj-shift-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sj-shift-time { font-weight: 700; font-size: .82rem; color: var(--color-primary-dark); min-width: 64px; }
+.sj-shift-cap { display: flex; align-items: center; gap: 7px; font-size: .78rem; color: var(--color-text-light); }
+.sj-shift-action { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.sj-shift-names { margin-top: 5px; }
+.evs-sd-preview {
+  border: 1px dashed var(--color-border); border-radius: 10px;
+  padding: 10px; max-height: 320px; overflow-y: auto; background: #fff;
+}
+
+/* ══ #226 Discussion sections (Erin 2026-08-06) ═══════════════════════
+   Async team talk in the board-type card: pinned chat-space link,
+   always-visible composer, note-card messages newest-first, and the
+   chartreuse "new since your last visit" rule. */
+.disc-chatlink {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(var(--color-accent-light-rgb), .25);
+  border: 1px solid var(--color-accent-light);
+  border-radius: 8px; padding: 8px 12px; margin: 0 0 12px;
+  font-size: .88rem; font-weight: 600;
+}
+.disc-chatlink a { color: var(--color-primary-dark); }
+.disc-chatlink-empty {
+  background: transparent; border-style: dashed; font-weight: 400;
+  color: var(--color-text-light); font-size: .8rem;
+}
+.disc-composer { margin-bottom: 14px; }
+.disc-input { resize: vertical; min-height: 52px; }
+.disc-composer-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.disc-list { list-style: none; margin: 0; padding: 0; }
+.disc-msg {
+  background: #fff; border: 1px solid var(--color-border);
+  border-radius: 10px 10px 10px 3px;
+  padding: 9px 12px; margin-bottom: 8px;
+}
+.disc-msg.is-mine { background: var(--color-cream); }
+.disc-meta { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: .8rem; }
+.disc-meta strong { color: var(--color-primary-dark); }
+.disc-role {
+  font-size: .64rem; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--color-teal, #1A7A7A); border: 1px solid currentColor;
+  border-radius: 50px; padding: 1px 7px;
+}
+.disc-when { color: var(--color-text-light); font-size: .74rem; }
+.disc-edit { margin-left: auto; }
+.disc-body { font-size: .9rem; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+.disc-newline {
+  list-style: none; text-align: center;
+  font-size: .68rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--color-leaf); margin: 4px 0 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+.disc-newline::before, .disc-newline::after {
+  content: ""; flex: 1; height: 1px; background: #9BC431; opacity: .7;
+}
