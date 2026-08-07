@@ -16117,3 +16117,6 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 
 /* #265 (Erin): event description in the pinned collab header. */
 .evs-head-desc { margin: 10px 0 0; color: var(--color-text); font-size: .95rem; max-width: 68ch; }
+
+/* #260 r2 (Erin): room chip + Plan aligned on one horizontal row. */
+.mf-duty-btnrow { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }

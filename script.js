@@ -4560,7 +4560,7 @@
           if (link) html += '<button type="button" class="sc-btn" id="dbClassViewPlanBtn" data-curriculum-id="' + link.curriculum_id + '">' + brandIconImg('guide', 'ag-icon') + ' View Lesson Plan</button>';
           else if (roleWord === 'Leading' || mySub) html += '<button type="button" class="sc-btn" id="dbClassBuildPlanBtn">' + brandIconImg('guide', 'ag-icon') + ' Build a Lesson Plan</button>';
           if (mySub) {
-            html += '<button type="button" class="sc-btn" id="dbClassBringBtn">' + brandIconImg('lending', 'ag-icon') + ' Things to Bring</button>';
+            html += '<button type="button" class="sc-btn" id="dbClassBringBtn">' + brandIconImg('supplyCloset', 'ag-icon') + ' Things to Bring</button>';
             html += '<button type="button" class="evs-ico-btn" id="dbClassEditBtn" aria-label="Edit class" title="Edit this class">' + ICON_SVG.pencil + '</button>';
           }
           html += '</div>';
@@ -7698,7 +7698,7 @@
         // #260 (Erin): the room is a location-marked chip on the Plan row
         // (it becomes the facilities-map doorway once the map exists).
         var roomChipHtml = d.detail ? '<span class="sc-btn mf-room-chip" title="Facilities map — coming soon">' + brandIconImg('location', 'ag-icon') + ' ' + d.detail + '</span>' : '';
-        if (roomChipHtml || planBtnHtml) h += '<span class="mf-duty-line">' + roomChipHtml + (roomChipHtml && planBtnHtml ? ' ' : '') + planBtnHtml + '</span>';
+        if (roomChipHtml || planBtnHtml) h += '<span class="mf-duty-line mf-duty-btnrow">' + roomChipHtml + planBtnHtml + '</span>';
         planBtnHtml = ''; // consumed — keep it out of the actions column
         if (classKey) {
           h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
@@ -20052,7 +20052,7 @@
     var h = '';
     secs.forEach(function (s) {
       h += '<div class="mf-bring-block">';
-      h += '<div class="mf-bring-head">' + brandIconImg('lending', 'ag-icon') + ' ' // #256: one supplies icon (= Lending)
+      h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' ' // #256 r2: = Packing List icon
         + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(group)
         + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
       h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
@@ -20075,7 +20075,7 @@
     var h = '';
     secs.forEach(function (s) {
       h += '<div class="mf-bring-block">';
-      h += '<div class="mf-bring-head">' + brandIconImg('lending', 'ag-icon') + ' ' // #256: one supplies icon (= Lending)
+      h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' ' // #256 r2: = Packing List icon
         + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(className)
         + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
       h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
@@ -28030,7 +28030,7 @@
     var h = '';
     // Pinned external chat-space link + note.
     if (cfg.chat_url) {
-      h += '<p class="disc-chatlink">' + brandIconImg('chat', 'ag-icon') // #248: chat mark = chat meaning
+      h += '<p class="disc-chatlink"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' // #248 r2: SAME icon as the header's Google Chat
         + '<a href="' + escapeAttr(cfg.chat_url) + '" target="_blank" rel="noopener">'
         + escapeHtmlWs(cfg.chat_note || 'Join the team chat space') + '</a></p>';
     } else if (canEdit) {
