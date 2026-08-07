@@ -883,16 +883,33 @@
     return true;
   }
 
+  // PROD INCIDENT 2026-08-06 (Erin's phantom coverage rows): schedule data
+  // painted from the localStorage cache must NEVER drive writes. A window
+  // where www briefly served dev-DB data poisoned the cache; on the next
+  // visit the cached paint fed syncMyAbsenceSlots, which wrote dev duties
+  // ("Assisting Free Art Club") into prod coverage_slots. This flag is set
+  // ONLY by the network path; write-side reconcilers check it.
+  var liveScheduleFresh = false;
+
   function loadLiveData() {
     if (liveDataLoaded) return;
     liveDataLoaded = true;
 
-    // Apply cached data immediately for instant load
+    // Apply cached data immediately for instant load — but only a cache
+    // this signed-in account wrote (stale-cache hardening: an unstamped
+    // or foreign-owner cache is dropped, not painted).
     try {
       var cached = localStorage.getItem(CACHE_KEY);
       if (cached) {
         var cachedData = JSON.parse(cached);
-        applySheetsData(cachedData);
+        var meNow = String((typeof getActiveEmail === 'function' && getActiveEmail()) || '').toLowerCase();
+        var stamp = String(cachedData._cacheOwner || '').toLowerCase();
+        if (!stamp || (meNow && stamp === meNow)) {
+          applySheetsData(cachedData);
+        } else {
+          console.warn('[cache-guard] dropping rw_sheets_cache owned by another account');
+          localStorage.removeItem(CACHE_KEY);
+        }
       }
     } catch (e) { /* ignore cache errors */ }
 
@@ -907,9 +924,13 @@
           console.warn('Sheets API error, using static/cached data:', data.message);
           return;
         }
-        // Cache the fresh response
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
+        // Cache the fresh response, stamped with its owner.
+        try {
+          data._cacheOwner = String((typeof getActiveEmail === 'function' && getActiveEmail()) || '').toLowerCase();
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        } catch (e) { /* quota */ }
         // Apply fresh data (re-renders everything)
+        liveScheduleFresh = true;
         applySheetsData(data);
         // Pull live billing status (per-family Paid/Pending + semester rates).
         loadBillingStatus(function () {
@@ -24926,6 +24947,11 @@
   var _absenceSyncTried = {};
   function syncMyAbsenceSlots() {
     try {
+      // PROD INCIDENT 2026-08-06: this reconciler WRITES slots derived from
+      // whatever schedule is painted. It must never run off cached/stale
+      // data — only after this session fetched the live schedule from THIS
+      // server (a poisoned cache once wrote dev-class duties into prod).
+      if (typeof liveScheduleFresh !== 'undefined' && !liveScheduleFresh) return;
       if (isSummerBreak || !loadedAbsences || loadedAbsences.length === 0) return;
       var email = getActiveEmail();
       if (!email || !FAMILIES) return;

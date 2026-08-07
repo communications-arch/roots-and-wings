@@ -149,6 +149,42 @@ async function notifyKidTeachers(sql, a) {
 // not the whole membership. Mirrors BOARD_ONLY_ROLE_TYPES in coverage.js.
 const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
 
+// PROD INCIDENT 2026-08-06 (Erin's phantom "Assisting Free Art Club" rows):
+// coverage slots are posted BY THE CLIENT, derived from whatever schedule
+// its page had painted — and a browser that had cached another database's
+// schedule wrote that database's duties into this one, verbatim. Every
+// class/group/area/role-shaped slot must now name something that exists in
+// THIS database; unknown duties are dropped and logged, never inserted.
+// Support roles (floater/board/prep/general) carry no class reference and
+// stay exempt.
+const DUTY_EXEMPT_ROLE_TYPES = ['general', 'floater', 'board', 'prep'];
+const AM_GROVE_NAMES = ['greenhouse', 'saplings', 'sassafras', 'oaks', 'maples', 'birch', 'willows', 'cedars', 'pigeons'];
+async function knownDutyTargets(sql) {
+  const names = new Set();
+  const add = v => { const s = String(v || '').trim().toLowerCase(); if (s) names.add(s); };
+  AM_GROVE_NAMES.forEach(add);
+  const cls = await sql`SELECT class_name FROM class_submissions WHERE status = 'scheduled'`;
+  cls.forEach(r => add(r.class_name));
+  const areas = await sql`SELECT area_name FROM cleaning_areas`;
+  areas.forEach(r => add(r.area_name));
+  try {
+    const roles = await sql`SELECT title FROM roles`;
+    roles.forEach(r => add(r.title));
+  } catch (e) { console.error('knownDutyTargets roles lookup failed (roles just won\'t validate):', e); }
+  return names;
+}
+function slotDutyIsKnown(names, slot) {
+  const rt = String(slot.role_type || '').trim().toLowerCase();
+  if (DUTY_EXEMPT_ROLE_TYPES.indexOf(rt) !== -1) return true;
+  const goc = String(slot.group_or_class || '').trim().toLowerCase();
+  if (goc && names.has(goc)) return true;
+  const desc = String(slot.role_description || '').toLowerCase();
+  for (const n of names) {
+    if (n.length >= 4 && desc.indexOf(n) !== -1) return true;
+  }
+  return false;
+}
+
 // Current board members' emails: every canonical board mailbox plus the
 // holders' personal logins from role_holders_v2 (category 'board', the
 // year that actually has data — same MAX() convention as _permissions).
@@ -400,12 +436,18 @@ module.exports = async function handler(req, res) {
       // the still-open slots go into the Coverage Needed broadcast.
       const createdSlots = [];
       const openSlots = [];
+      const dutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
         const role_description = String(slot.role_description || '').trim();
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
+        if (!VALID_BLOCKS.includes(block)) continue;
+        if (!slotDutyIsKnown(dutyNames, slot)) {
+          console.error('[absence-guard] dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+          continue;
+        }
         const ins = await sql`
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
           VALUES (${absenceId}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
@@ -557,6 +599,7 @@ module.exports = async function handler(req, res) {
         }
         const openNew = [];
         const seenKeys = new Set();
+        const editDutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
         for (const slot of slotsData) {
           const block = String(slot.block || '').trim();
           const role_type = String(slot.role_type || '').trim();
@@ -565,6 +608,14 @@ module.exports = async function handler(req, res) {
           const replName = String(slot.replacement_name || '').trim().slice(0, 120);
           if (!block || !role_type || !role_description) continue;
           if (!VALID_BLOCKS.includes(block)) continue;
+          // Guard skips unknown duties BEFORE matching, so a phantom slot
+          // the client re-sent falls into `unmatched` below and is deleted
+          // — editing an absence now flushes phantoms instead of keeping
+          // them alive.
+          if (!slotDutyIsKnown(editDutyNames, slot)) {
+            console.error('[absence-guard] edit dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+            continue;
+          }
           const key = block + '|' + role_type + '|' + role_description;
           if (seenKeys.has(key)) continue;
           seenKeys.add(key);
@@ -642,6 +693,7 @@ module.exports = async function handler(req, res) {
       `;
       const seen = new Set(existing.map(s => s.block + '|' + s.role_type + '|' + s.role_description));
       const addedSlots = [];
+      const reconDutyNames = slotsData.length ? await knownDutyTargets(sql) : null;
       for (const slot of slotsData) {
         const block = String(slot.block || '').trim();
         const role_type = String(slot.role_type || '').trim();
@@ -649,6 +701,10 @@ module.exports = async function handler(req, res) {
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
         if (!VALID_BLOCKS.includes(block)) continue;
+        if (!slotDutyIsKnown(reconDutyNames, slot)) {
+          console.error('[absence-guard] reconciler dropped unknown duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
+          continue;
+        }
         const key = block + '|' + role_type + '|' + role_description;
         if (seen.has(key)) continue;
         seen.add(key);
