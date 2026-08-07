@@ -18120,7 +18120,9 @@
       html += '<h3>Report a bug — or share an idea</h3>';
       html += '<p style="font-size:0.85rem;color:var(--color-text-light);margin-bottom:1rem;">Email the Communications Director at<br><strong style="word-break:break-all;">' + addr + '</strong></p>';
       html += '<div style="display:flex;justify-content:center;gap:0.6rem;flex-wrap:wrap;">';
-      html += '<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(addr) + '&su=' + encodeURIComponent(subj) + '">Open in Gmail</a>';
+      // #266 (Erin, iPhone): the Gmail WEB compose URL drops its params on
+      // iOS — try the Gmail APP scheme first, web compose as the fallback.
+      html += '<button type="button" class="btn btn-primary btn-sm" id="fireflyGmailBtn">Open in Gmail</button>';
       html += '<a class="btn btn-outline-dark btn-sm" href="mailto:' + addr + '?subject=' + encodeURIComponent(subj) + '">Use my mail app</a>';
       html += '<button type="button" class="btn btn-outline-dark btn-sm" id="fireflyCopyBtn">Copy address</button>';
       html += '</div>';
@@ -18131,6 +18133,18 @@
       personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
       personDetail.addEventListener('click', function (ev) {
         if (ev.target === personDetail) closeDetail();
+      });
+      var gmailBtn = personDetailCard.querySelector('#fireflyGmailBtn');
+      if (gmailBtn) gmailBtn.addEventListener('click', function () {
+        var webUrl = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(addr) + '&su=' + encodeURIComponent(subj);
+        var isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        if (isiOS) {
+          var t = setTimeout(function () { window.open(webUrl, '_blank'); }, 900);
+          window.addEventListener('pagehide', function () { clearTimeout(t); }, { once: true });
+          window.location.href = 'googlegmail://co?to=' + encodeURIComponent(addr) + '&subject=' + encodeURIComponent(subj);
+        } else {
+          window.open(webUrl, '_blank');
+        }
       });
       var copyBtn = personDetailCard.querySelector('#fireflyCopyBtn');
       if (copyBtn) copyBtn.addEventListener('click', function () {
@@ -27358,6 +27372,16 @@
     }
     // #142 (Erin): allergies list one tap away on every event's header
     // card — food shows up at nearly every event.
+    // #265 (Erin): the pinned header carries the event's description and
+    // the "Roots & Wings will provide" list; those info sections skip the
+    // card grid below (renderEventSections filters the same test).
+    if (d.event.notes) h += '<p class="evs-head-desc">' + escapeHtmlWs(d.event.notes) + '</p>';
+    ((d.sections || []).filter(function (ps) { return ps.type === 'info' && /provide/i.test(ps.title || ''); })).forEach(function (ps) {
+      var items = Array.isArray(ps.content) ? ps.content : [];
+      if (!items.length) return;
+      h += '<p class="ws-lending-head" style="margin-top:10px;">' + escapeHtmlWs(ps.title) + '</p>';
+      h += '<ul class="ws-part-recap">' + items.map(function (t) { return '<li>' + escapeHtmlWs(String(t)) + '</li>'; }).join('') + '</ul>';
+    });
     h += '<p class="ws-body-hint" style="margin:10px 0 0;"><a href="#" class="ws-inline-link" id="evs-allergies-link">⚠ View the allergies &amp; medical list</a>'
       + ((d.can_edit && d.event && d.event.checklist_hidden === true) ? ' · <a href="#" class="ws-inline-link" id="evs-checklist-restore">Restore the checklist</a>' : '') + '</p>';
     h += '</div></div>'; // /body, /header card
@@ -27537,9 +27561,22 @@
     // their original slots) on dragend. Editors only; everyone sees it.
     if (d && d.can_edit) {
       var _dragCard = null;
+      // #228 re-report (Colleen): the page must scroll itself while a card
+      // is held near the viewport edge — one document-level helper, armed
+      // only during a card drag.
+      if (!window._evsDragScrollArmed) {
+        window._evsDragScrollArmed = true;
+        document.addEventListener('dragover', function (e) {
+          if (!window._evsDraggingNow) return;
+          var edge = 90;
+          if (e.clientY < edge) window.scrollBy(0, -16);
+          else if (window.innerHeight - e.clientY < edge) window.scrollBy(0, 16);
+        });
+      }
       body.querySelectorAll('.evs-draggable').forEach(function (card) {
         card.addEventListener('dragstart', function (e) {
           _dragCard = card;
+          window._evsDraggingNow = true;
           card.classList.add('evs-dragging');
           try { e.dataTransfer.setData('text/plain', card.getAttribute('data-sec-id')); e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
         });
@@ -27552,6 +27589,7 @@
         });
         card.addEventListener('dragend', function () {
           card.classList.remove('evs-dragging');
+          window._evsDraggingNow = false;
           if (!_dragCard) return;
           _dragCard = null;
           var all = (_eventSpaceState.data && _eventSpaceState.data.sections) || [];
@@ -27950,16 +27988,19 @@
           var itemHtml = /^https?:\/\/\S+$/i.test(String(c.item_text || '').trim())
             ? '<a href="' + escapeAttr(String(c.item_text).trim()) + '" target="_blank" rel="noopener">' + escapeHtmlWs(String(c.item_text).trim().replace(/^https?:\/\//i, '').slice(0, 60)) + '</a>'
             : escapeHtmlWs(c.item_text);
-          h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
-            + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
-          // #237 (Colleen): ONE button — the form it opens carries both
-          // Save changes and Remove sign-up.
-          if (canEdit || c.email === viewerEmail) {
-            h += ' <button type="button" class="sc-btn" data-resource-action="' + ACT_EDIT + '" data-signup-id="' + c.id
+          // #267 (Colleen): the row TEXT is the edit doorway — tapping your
+          // own entry opens the edit/remove form (#237's single surface).
+          var canTouch = canEdit || c.email === viewerEmail;
+          if (canTouch) {
+            h += '<li class="evs-bring-rowlink" role="button" tabindex="0" data-resource-action="' + ACT_EDIT + '" data-signup-id="' + c.id
               + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '')
               + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '" data-item="' + escapeAttr(c.item_text || '')
-              + '" data-note="' + escapeAttr(c.note || '') + '" aria-label="Edit or remove" title="Edit or remove">✎</button>';
+              + '" data-note="' + escapeAttr(c.note || '') + '" title="Edit or remove your sign-up">';
+          } else {
+            h += '<li>';
           }
+          h += escapeHtmlWs(c.name) + ' — ' + itemHtml
+            + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
           h += '</li>';
         });
         h += '</ul>';
@@ -28070,7 +28111,10 @@
   }
 
   function renderEventSections(d, chips) {
-    var secs = d.sections || [];
+    var secs = (d.sections || []).filter(function (ps) {
+      // #265: "…will provide" info sections render pinned in the header.
+      return !(ps.type === 'info' && /provide/i.test(ps.title || ''));
+    });
     if (!secs.length) return '';
     var h = '';
     // Brand accents mirror the workspace cards that host the same kind
@@ -28214,12 +28258,12 @@
         // The splitter generator (#227): a tiny form that writes the dash
         // lines so nobody types eight shifts by hand.
         fh += '<div class="cls-field evs-sd-slots-only"><button type="button" class="btn btn-outline-dark btn-sm" id="evsSplitToggle">⏱ Split a job into timed shifts…</button>'
-          + '<div id="evsSplitForm" hidden style="margin-top:8px;display:grid;gap:6px;grid-template-columns:1fr 1fr;">'
-          + '<input class="cl-input" id="evsSplitJob" type="text" maxlength="120" placeholder="Job name — e.g. Scooping" style="grid-column:1/-1;">'
-          + '<input class="cl-input" id="evsSplitStart" type="text" maxlength="10" placeholder="Starts — 12:00 pm">'
-          + '<input class="cl-input" id="evsSplitEnd" type="text" maxlength="10" placeholder="Ends — 3:00 pm">'
-          + '<input class="cl-input" id="evsSplitLen" type="number" min="15" step="15" value="60" title="Minutes per shift">'
-          + '<input class="cl-input" id="evsSplitCap" type="number" min="1" value="1" title="People per shift">'
+          + '<div id="evsSplitForm" hidden style="margin-top:8px;display:grid;gap:6px 10px;grid-template-columns:1fr 1fr;">'
+          + '<label class="cls-label" style="grid-column:1/-1;margin:0;">Job name<input class="cl-input" id="evsSplitJob" type="text" maxlength="120" placeholder="Scooping ice cream"></label>'
+          + '<label class="cls-label" style="margin:0;">First shift starts<input class="cl-input" id="evsSplitStart" type="text" maxlength="10" placeholder="12:00 pm"></label>'
+          + '<label class="cls-label" style="margin:0;">Last shift ends<input class="cl-input" id="evsSplitEnd" type="text" maxlength="10" placeholder="3:00 pm"></label>'
+          + '<label class="cls-label" style="margin:0;">Minutes per shift<input class="cl-input" id="evsSplitLen" type="number" min="15" step="15" value="60"></label>'
+          + '<label class="cls-label" style="margin:0;">People per shift<input class="cl-input" id="evsSplitCap" type="number" min="1" value="1"></label>'
           + '<button type="button" class="btn btn-primary btn-sm" id="evsSplitAdd" style="grid-column:1/-1;">Add shifts to the list</button>'
           + '<span class="perm-status" id="evsSplitStatus" aria-live="polite" style="grid-column:1/-1;"></span>'
           + '</div></div>';

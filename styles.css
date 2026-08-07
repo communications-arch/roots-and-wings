@@ -16110,3 +16110,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 
 /* #260 (Erin): room chip on the duty rows' Plan line. */
 .mf-room-chip { cursor: default; display: inline-flex; align-items: center; gap: 4px; }
+
+/* #267 (Colleen): your own bring-list rows open their edit form on tap. */
+.evs-bring-rowlink { cursor: pointer; border-radius: 6px; }
+.evs-bring-rowlink:hover, .evs-bring-rowlink:focus-visible { background: rgba(var(--color-primary-rgb), .07); }
+
+/* #265 (Erin): event description in the pinned collab header. */
+.evs-head-desc { margin: 10px 0 0; color: var(--color-text); font-size: .95rem; max-width: 68ch; }
