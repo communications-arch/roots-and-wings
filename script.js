@@ -27344,10 +27344,11 @@
       h += '<p class="ws-body-hint" style="margin:2px 0 0;">' + volRoleIconImg('assist') + ' Assisting: ' + assists.map(escapeHtmlWs).join(', ') + '</p>';
     }
     if (d.can_edit) {
-      // Legend for the per-card hearts (Erin, 2026-07-25).
-      h += '<p class="ws-body-hint" style="margin:6px 0 0;display:flex;gap:8px;align-items:flex-start;">'
-        + '<img src="brand/secondary/' + BRAND_ICONS.visibility + '.png" alt="" style="height:16px;width:auto;flex-shrink:0;margin-top:2px;">'
-        + '<span><strong>Binoculars</strong> on a card mean every member can see it; <strong>greyed-out binoculars</strong> keep it to the event committee, the Special Events Liaison, and the Sustaining Director. New cards start committee-only.</span></p>';
+      // Erin 2026-08-07: the binoculars legend lives as HOVER text on a
+      // small mark instead of body copy on the card.
+      h += '<p class="ws-body-hint" style="margin:6px 0 0;">'
+        + '<img src="brand/secondary/' + BRAND_ICONS.visibility + '.png" alt="Card visibility" style="height:16px;width:auto;vertical-align:middle;cursor:help;" '
+        + 'title="Binoculars on a card mean every member can see it; greyed-out binoculars keep it to the event committee, the Special Events Liaison, and the Sustaining Director. New cards start committee-only."></p>';
     }
 
     if (d.can_edit) {
