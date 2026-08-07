@@ -779,6 +779,47 @@ function normalizeInspirationIdea(body) {
 // Safe public shape for sending submissions back to the client. No reviewer-only
 // fields are ever stripped here — reviewer notes etc. are fine for the submitter
 // to see as well.
+// #240 (Colleen): merge an edit form's helper NAME list into the roster
+// without clobbering per-hour rows. The forms prefill one input per DB row
+// (a both-hours assist = two rows), so a blind delete-and-reinsert doubled
+// every name as whole-class rows and the duplicates swallowed the class's
+// open assistant spots. Rules: dedupe the incoming list by person; keep
+// every existing row (block intact) whose person is still listed; delete
+// rows for people removed; insert genuinely new people as whole-class rows.
+async function mergeHelperRoster(sql, id, rawHelpers, updatedBy) {
+  const incoming = [];
+  const seen = new Set();
+  (rawHelpers || []).filter(h => h && (h.name || h.email)).forEach(h => {
+    const email = String(h.email || '').trim().toLowerCase();
+    const name = String(h.name || '').trim();
+    const key = email || name.toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    incoming.push({ email, name });
+  });
+  const existing = await sql`
+    SELECT id, person_email, person_name, block FROM class_assignment_helpers
+    WHERE class_submission_id = ${id} ORDER BY sort_order, id`;
+  const matches = (row, h) => {
+    const rowEmail = String(row.person_email || '').trim().toLowerCase();
+    if (h.email && rowEmail) return h.email === rowEmail;
+    return !!h.name && String(row.person_name || '').trim().toLowerCase() === h.name.toLowerCase();
+  };
+  const removeIds = existing.filter(r => !incoming.some(h => matches(r, h))).map(r => r.id);
+  for (const rid of removeIds) {
+    await sql`DELETE FROM class_assignment_helpers WHERE id = ${rid}`;
+  }
+  let next = existing.length;
+  for (const h of incoming) {
+    if (existing.some(r => matches(r, h))) continue;
+    await sql`
+      INSERT INTO class_assignment_helpers
+        (class_submission_id, person_email, person_name, sort_order, updated_by)
+      VALUES (${id}, ${h.email}, ${h.name}, ${next++}, ${updatedBy})`;
+  }
+  return incoming;
+}
+
 function serializeSubmission(r, helpers) {
   return {
     id: r.id,
@@ -3330,22 +3371,15 @@ module.exports = async function handler(req, res) {
           WHERE id = ${id}
           RETURNING *
         `;
-        // PM helpers (Phase B2): when the editor sends a helpers array, replace
-        // this class's helper roster. Feeds participation pm_assist.
+        // PM helpers (Phase B2): when the editor sends a helpers array,
+        // MERGE it into this class's roster (#240, Colleen): the old
+        // delete-and-reinsert wrote one whole-class row per FORM INPUT —
+        // but per-hour sign-ups legitimately hold two rows per person, so
+        // the form (which prefills one input per row) doubled everyone on
+        // save and the duplicate rows swallowed the open assistant spots.
         let helpersOut;
         if (Array.isArray(req.body.helpers)) {
-          await sql`DELETE FROM class_assignment_helpers WHERE class_submission_id = ${id}`;
-          const hs = req.body.helpers
-            .filter(h => h && (h.name || h.email))
-            .map(h => ({ email: String(h.email || '').trim().toLowerCase(), name: String(h.name || '').trim() }));
-          for (let i = 0; i < hs.length; i++) {
-            await sql`
-              INSERT INTO class_assignment_helpers
-                (class_submission_id, person_email, person_name, sort_order, updated_by)
-              VALUES (${id}, ${hs[i].email}, ${hs[i].name}, ${i}, ${user.email})
-            `;
-          }
-          helpersOut = hs;
+          helpersOut = await mergeHelperRoster(sql, id, req.body.helpers, user.email);
         }
         return res.status(200).json({ submission: serializeSubmission(updated[0], helpersOut) });
       }
@@ -3412,20 +3446,11 @@ module.exports = async function handler(req, res) {
           RETURNING *
         `;
         // Assistants field (2026-07-10): the form sends helpers alongside
-        // the 13 columns — replace the roster like the review PATCH does.
+        // the 13 columns — merged like the review PATCH (#240: replacing
+        // wholesale doubled per-hour rows and dropped their blocks).
         let editHelpers;
         if (Array.isArray(req.body.helpers)) {
-          await sql`DELETE FROM class_assignment_helpers WHERE class_submission_id = ${id}`;
-          const ehs = req.body.helpers
-            .filter(h => h && (h.name || h.email))
-            .map(h => ({ email: String(h.email || '').trim().toLowerCase(), name: String(h.name || '').trim() }));
-          for (let i = 0; i < ehs.length; i++) {
-            await sql`
-              INSERT INTO class_assignment_helpers
-                (class_submission_id, person_email, person_name, sort_order, updated_by)
-              VALUES (${id}, ${ehs[i].email}, ${ehs[i].name}, ${i}, ${user.email})`;
-          }
-          editHelpers = ehs;
+          editHelpers = await mergeHelperRoster(sql, id, req.body.helpers, user.email);
         }
         let finalRow = updated[0];
         if (ownerRevert) {

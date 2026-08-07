@@ -26152,8 +26152,15 @@
     html += '<label class="cls-label">Assistants already identified?</label>';
     html += '<p class="cls-help">Every class runs with at least one assistant — add anyone you’ve already lined up (more can be assigned later).</p>';
     html += '<div id="clsAssistList">';
+    // #240 (Colleen): helpers arrive one ROW per hour block — show each
+    // PERSON once, or saving writes everyone twice.
+    var _seenAssist = {};
     (Array.isArray(cur.helpers) ? cur.helpers : []).forEach(function (hp) {
-      html += '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="' + escClsAttr(hp.name || hp.email || '') + '" placeholder="Assistant name…">';
+      var label = hp.name || hp.email || '';
+      var k = label.trim().toLowerCase();
+      if (!k || _seenAssist[k]) return;
+      _seenAssist[k] = true;
+      html += '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="' + escClsAttr(label) + '" placeholder="Assistant name…">';
     });
     html += '<input type="text" class="cl-input clsAssistInput" maxlength="120" list="clsAssistNames" value="" placeholder="Assistant name…">';
     html += '</div>';
@@ -27596,19 +27603,14 @@
           if (!_dragCard) return;
           _dragCard = null;
           var all = (_eventSpaceState.data && _eventSpaceState.data.sections) || [];
-          var domIds = Array.prototype.map.call(body.querySelectorAll('.evs-draggable'), function (c) {
+          // #228 (Colleen, Erin 2026-08-06): DOM order IS the order — every
+          // card, collapsed ones included, can move anywhere in the grid
+          // (rows are just how the grid wraps). The old rule pinned
+          // collapsed cards to their original slots, so cards couldn't be
+          // rearranged past them.
+          var newOrder = Array.prototype.map.call(body.querySelectorAll('.evs-draggable'), function (c) {
             return parseInt(c.getAttribute('data-sec-id'), 10);
-          });
-          // Full order: collapsed (chip-only) sections hold their original
-          // index; the dragged/expanded cards fill the remaining slots in
-          // DOM order.
-          var result = new Array(all.length);
-          all.forEach(function (s, i) { if (_collabCollapsed['sec-' + s.id]) result[i] = s.id; });
-          var di = 0;
-          for (var ri = 0; ri < result.length; ri++) {
-            if (result[ri] == null && di < domIds.length) result[ri] = domIds[di++];
-          }
-          var newOrder = result.filter(function (x) { return x != null; });
+          }).filter(function (x) { return !isNaN(x); });
           var curOrder = all.map(function (s) { return s.id; });
           if (newOrder.join(',') === curOrder.join(',')) return;
           var byId = {};
@@ -27898,12 +27900,13 @@
             : escapeHtmlWs(c.item_text);
           h += '<li>' + escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
+          // #237 (Colleen): ONE button — the form it opens carries both
+          // Save changes and Remove sign-up.
           if (canEdit || c.email === viewerEmail) {
             h += ' <button type="button" class="sc-btn" data-resource-action="' + ACT_EDIT + '" data-signup-id="' + c.id
               + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '')
               + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '" data-item="' + escapeAttr(c.item_text || '')
-              + '" data-note="' + escapeAttr(c.note || '') + '" aria-label="Edit" title="Edit">✎</button>';
-            h += ' <button type="button" class="sc-btn sc-btn-del" data-resource-action="' + ACT_REMOVE + '" data-signup-id="' + c.id + '" aria-label="Remove" title="Remove">×</button>';
+              + '" data-note="' + escapeAttr(c.note || '') + '" aria-label="Edit or remove" title="Edit or remove">✎</button>';
           }
           h += '</li>';
         });
@@ -28516,12 +28519,45 @@
     form.hidden = false;
     form.innerHTML = '<div class="cls-field"><label class="cls-label">' + (isBoard ? 'Edit note or link' : 'Edit what you’ll bring') + '</label><input class="cl-input evs-bring-item" type="text" maxlength="200"></div>'
       + (isBoard ? '' : '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
-      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Save changes</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Save changes</button>'
+      + '<button type="button" class="btn btn-outline-dark btn-sm evs-bring-remove">Remove sign-up</button>'
+      + '<span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
     var itemInp = form.querySelector('.evs-bring-item');
     itemInp.value = btn.getAttribute('data-item') || '';
     var noteInp = form.querySelector('.evs-bring-note');
     if (noteInp) noteInp.value = btn.getAttribute('data-note') || '';
     itemInp.focus();
+    // #237: the same form offers Remove — one entry point for both.
+    form.querySelector('.evs-bring-remove').addEventListener('click', function () {
+      if (!confirm('Remove this sign-up?')) return;
+      var rmBtn = this;
+      rmBtn.disabled = true;
+      var rmReq;
+      if (isGroup) {
+        var rmPayload = { id: suId };
+        var rmVa = supplyViewAsEmail();
+        if (rmVa) rmPayload.view_as = rmVa;
+        rmReq = fetch('/api/supply-closet?action=bring-unclaim', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential'), 'Content-Type': 'application/json' },
+          body: JSON.stringify(rmPayload)
+        });
+      } else {
+        rmReq = fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-unclaim', id: suId }) });
+      }
+      rmReq.then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { rmBtn.disabled = false; alert((res.data && res.data.error) || 'Could not remove it.'); return; }
+          if (isGroup) {
+            loadGroupBringItems(true);
+            if (typeof loadGroupBringCard === 'function') loadGroupBringCard();
+          } else {
+            loadEventOpenings();
+            evsMaybeRefreshSpace();
+          }
+        })
+        .catch(function () { rmBtn.disabled = false; alert('Network error — try again.'); });
+    });
     form.querySelector('.evs-bring-save').addEventListener('click', function () {
       var st = form.querySelector('.evs-bring-status');
       var item = itemInp.value.trim();
