@@ -293,6 +293,57 @@ module.exports = async function handler(req, res) {
   try {
     const sql = getSql();
 
+    // ── Phantom coverage repair (prod incident 2026-08-06) ──
+    // Super-user only. GET ?action=phantom-scan lists every coverage slot
+    // whose duty names nothing in THIS database (same rule as the posting
+    // guard). POST ?action=phantom-clean deletes the UNCLAIMED phantoms
+    // and the ghost coverage_needed notifications of absences left fully
+    // phantom-free-and-empty. Exists as an API action because the prod
+    // connection string is sensitive-scoped (not pullable) — the repair
+    // runs through an authenticated super-user session instead.
+    if (req.query.action === 'phantom-scan' || req.query.action === 'phantom-clean') {
+      if (!isSuperUser(user.realEmail || user.email)) return res.status(403).json({ error: 'Super user only.' });
+      const dutyNames = await knownDutyTargets(sql);
+      const all = await sql`
+        SELECT cs.id, cs.absence_id, cs.block, cs.role_type, cs.role_description, cs.group_or_class,
+               cs.claimed_by_email, cs.claimed_by_name,
+               a.family_email, a.absent_person, a.absence_date, a.cancelled_at
+        FROM coverage_slots cs JOIN absences a ON a.id = cs.absence_id
+        ORDER BY cs.absence_id, cs.id`;
+      const phantoms = all.filter(r => !slotDutyIsKnown(dutyNames, r));
+      const claimed = phantoms.filter(r => r.claimed_by_email || r.claimed_by_name);
+      const deletable = phantoms.filter(r => !r.claimed_by_email && !r.claimed_by_name);
+      if (req.query.action === 'phantom-scan') {
+        return res.status(200).json({
+          scanned: all.length,
+          phantoms: phantoms.map(r => ({
+            slot_id: r.id, absence_id: r.absence_id, family_email: r.family_email,
+            absent_person: r.absent_person, absence_date: r.absence_date, block: r.block,
+            role_type: r.role_type, role_description: r.role_description,
+            claimed_by: r.claimed_by_name || null, absence_cancelled: !!r.cancelled_at
+          })),
+          claimed_count: claimed.length, deletable_count: deletable.length
+        });
+      }
+      if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
+      const byAbsence = {};
+      all.forEach(r => { (byAbsence[r.absence_id] = byAbsence[r.absence_id] || []).push(r); });
+      let removedSlots = 0, removedNotifs = 0;
+      for (const r of deletable) {
+        await sql`DELETE FROM coverage_slots WHERE id = ${r.id}`;
+        removedSlots++;
+      }
+      for (const aid of Object.keys(byAbsence)) {
+        const slots = byAbsence[aid];
+        const allPhantomUnclaimed = slots.every(r => !slotDutyIsKnown(dutyNames, r) && !r.claimed_by_email && !r.claimed_by_name);
+        if (!allPhantomUnclaimed) continue;
+        const gone = await sql`DELETE FROM notifications WHERE type = 'coverage_needed' AND related_absence_id = ${parseInt(aid, 10)} RETURNING id`;
+        removedNotifs += gone.length;
+      }
+      console.error('[absence-guard] phantom-clean by', user.realEmail || user.email, '— slots:', removedSlots, 'notifs:', removedNotifs);
+      return res.status(200).json({ ok: true, removed_slots: removedSlots, removed_notifications: removedNotifs, claimed_left: claimed.length });
+    }
+
     // ── GET: list absences for a session (or a session + all later ones) ──
     if (req.method === 'GET') {
       const fromSession = parseInt(req.query.from_session, 10);
