@@ -4560,7 +4560,7 @@
           if (link) html += '<button type="button" class="sc-btn" id="dbClassViewPlanBtn" data-curriculum-id="' + link.curriculum_id + '">' + brandIconImg('guide', 'ag-icon') + ' View Lesson Plan</button>';
           else if (roleWord === 'Leading' || mySub) html += '<button type="button" class="sc-btn" id="dbClassBuildPlanBtn">' + brandIconImg('guide', 'ag-icon') + ' Build a Lesson Plan</button>';
           if (mySub) {
-            html += '<button type="button" class="sc-btn" id="dbClassBringBtn">' + brandIconImg('waysToHelp', 'ag-icon') + ' Things to Bring</button>';
+            html += '<button type="button" class="sc-btn" id="dbClassBringBtn">' + brandIconImg('lending', 'ag-icon') + ' Things to Bring</button>';
             html += '<button type="button" class="evs-ico-btn" id="dbClassEditBtn" aria-label="Edit class" title="Edit this class">' + ICON_SVG.pencil + '</button>';
           }
           html += '</div>';
@@ -6899,8 +6899,9 @@
   // Everyone's sign-ups for a session — the spreadsheet view, live.
   function showVolunteerGridModal(session) {
     var body = renderReportModal({
-      title: 'Session Sign-Ups',
-      subtitle: 'Who’s where each hour — classes, floaters, board duties, prep, and cleaning. Pick a session below.',
+      // #264 (Erin): titled as the VIEW it is — nobody signs up here.
+      title: 'Who’s Where Each Hour',
+      subtitle: 'Classes, floaters, board duties, prep, and cleaning for the session — pick a session below.',
       meta: '',
       icons: [
         { label: 'Print', icon: ICON_SVG.print, aria: 'Print the selected session’s sign-ups', action: function () { printVolunteerGrid(); } }
@@ -6919,9 +6920,9 @@
     var d = _volGridLast;
     if (!d) return;
     var BLOCK_TITLES = { AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)' };
-    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Session Sign-Ups</title>';
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Who’s Where Each Hour</title>';
     doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}h2{font-size:14px;margin:18px 0 6px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}p.pledges{color:#444;margin:0 0 6px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
-    doc += '</head><body><h1>Session ' + escapeHtml(String(d.session || '')) + ' Sign-Ups</h1>';
+    doc += '</head><body><h1>Session ' + escapeHtml(String(d.session || '')) + ' — Who’s Where Each Hour</h1>';
     doc += '<p class="meta">printed ' + new Date().toLocaleDateString() + '</p>';
     ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
@@ -6934,7 +6935,7 @@
       if (!(b.classes || []).length) {
         doc += '<p class="pledges"><em>No classes placed yet.</em></p>';
       } else {
-        doc += '<table><thead><tr><th>' + (bk.indexOf('AM') === 0 ? 'Group / Class' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        doc += '<table><thead><tr><th>' + (bk.indexOf('AM') === 0 ? 'Group / Class' : 'Class') + '</th><th>Leader</th><th>Assistants</th></tr></thead><tbody>';
         b.classes.forEach(function (c) {
           var first = (bk.indexOf('AM') === 0 && c.group) ? (c.group.charAt(0).toUpperCase() + c.group.slice(1) + ' — ' + (c.class_name || '')) : (c.class_name || '');
           if (c.room) first += ' (' + c.room + ')';
@@ -6974,7 +6975,7 @@
     var h = '<div class="vol-grid">';
     h += '<div class="board-cal-views">';
     for (var i = 1; i <= 5; i++) {
-      h += '<button type="button" class="board-cal-view-pill vol-grid-sess' + (i === d.session ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
+      h += '<button type="button" class="board-cal-view-pill vol-grid-sess' + (i === d.session ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
     }
     h += '</div>';
     // Brand marks for the time-of-day headings (Erin, 2026-07-11):
@@ -6997,7 +6998,7 @@
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
         var isAmBk = bk.indexOf('AM') === 0;
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Helpers</th></tr></thead><tbody>';
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th></tr></thead><tbody>';
         // Sections are per hour (Erin, 2026-07-11) — a both-hours class
         // appears in each hour's section, so no extra stacking is needed;
         // morning rows sort in age-group order.
@@ -7694,8 +7695,10 @@
         } else {
           h += '<span class="mf-duty-line"><span class="mf-role-tag">' + roleSplit[2] + '</span><strong>' + titleCore + '</strong></span>';
         }
-        if (d.detail) h += '<span class="mf-duty-line mf-duty-sub" style="margin:0;">' + d.detail + '</span>';
-        if (planBtnHtml) h += '<span class="mf-duty-line">' + planBtnHtml + '</span>';
+        // #260 (Erin): the room is a location-marked chip on the Plan row
+        // (it becomes the facilities-map doorway once the map exists).
+        var roomChipHtml = d.detail ? '<span class="sc-btn mf-room-chip" title="Facilities map — coming soon">' + brandIconImg('location', 'ag-icon') + ' ' + d.detail + '</span>' : '';
+        if (roomChipHtml || planBtnHtml) h += '<span class="mf-duty-line">' + roomChipHtml + (roomChipHtml && planBtnHtml ? ' ' : '') + planBtnHtml + '</span>';
         planBtnHtml = ''; // consumed — keep it out of the actions column
         if (classKey) {
           h += '<div class="mf-duty-link-area" data-class-key="' + classKey + '" data-is-teacher="' + (isTeacher ? '1' : '0') + '"></div>';
@@ -7850,7 +7853,8 @@
       html += '<div class="mf-kid-bar">';
       html += '<div class="mf-kid-photo" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, fam.email, fam.name) + '</div>';
       html += '<strong class="mf-kid-name">' + nickOr(kid.nickname, kid.name) + '</strong>';
-      html += '<button class="mf-class-link" data-group="' + kidGroup + '">View Classmates &rarr;</button>';
+      // #255 (Erin): View Classmates button retired — the class ROW is the
+      // doorway now (see mf-sched-rowlink below).
       html += '</div>';
 
       // Schedule table
@@ -7871,7 +7875,7 @@
       } else if (pubAm.length > 0) {
         var amHourLabel = { AM: 'AM', AM1: 'AM 1', AM2: 'AM 2' };
         pubAm.forEach(function (c) {
-          html += '<div class="mf-sched-row">';
+          html += '<div class="mf-sched-row mf-sched-rowlink" role="button" tabindex="0" data-group="' + escapeHtml(kidGroup) + '" title="See this class and its kids">';
           html += '<span class="mf-sched-time">' + (amHourLabel[c.scheduled_hour] || 'AM') + '</span>';
           // #184 (Erin): bare grove name — no age range after the label.
           html += '<span class="mf-sched-class">' + ageGroupIconHtml(kidGroup) + ' <span class="ag-name ' + ageGroupClass(kidGroup) + '">' + escapeHtml(kidGroup) + '</span>' + (c.class_name ? '<br><em style="font-weight:400;">' + escapeHtml(c.class_name) + '</em>' : '') + '</span>';
@@ -8270,13 +8274,16 @@
     // teacher, topic, and students rather than dumping the user into
     // the full Directory filtered view. Normalize "Teens" → "Pigeons"
     // because AM_CLASSES is keyed by the canonical name.
-    grid.querySelectorAll('.mf-class-link').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var group = this.getAttribute('data-group');
+    // #255: the schedule ROW opens the class/classmates popup.
+    grid.querySelectorAll('.mf-sched-rowlink').forEach(function (row) {
+      function openRowClass(e) {
+        if (e.target.closest('button, a')) return; // inner actions win
+        var group = row.getAttribute('data-group');
         var lookup = group === 'Teens' ? 'Pigeons' : group;
         showDutyDetail({ popup: { type: 'amClass', group: lookup, session: currentSession } });
-      });
+      }
+      row.addEventListener('click', openRowClass);
+      row.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRowClass(e); } });
     });
 
     // Wire up elective detail links
@@ -8622,32 +8629,12 @@
   var sessionTabView = currentSession;
   var cleaningTabView = currentSession;
 
-  // Build session pager: « Session 3 | ● Session 4 | Session 5 »
+  // #261 (Erin): the coordination pager is the same S1–S5 pill strip used
+  // everywhere else (My Grove card, Session Sign-Ups) — no more prev/next.
   function buildSessionPager(viewSess, renderFnName) {
-    var sessInfo = SESSION_DATES[viewSess];
-    var label = sessInfo ? sessInfo.name : 'Session ' + viewSess;
-    var isCurrent = viewSess === currentSession;
-
-    var html = '<div class="session-pager">';
-    if (viewSess > 1) {
-      html += '<button class="session-pager-btn session-pager-prev" data-sess="' + (viewSess - 1) + '" data-render="' + renderFnName + '">';
-      html += '&laquo; Session ' + (viewSess - 1);
-      html += '</button>';
-    } else {
-      html += '<span class="session-pager-btn session-pager-disabled">&laquo;</span>';
-    }
-
-    html += '<span class="session-pager-current' + (isCurrent ? ' session-pager-active' : '') + '">';
-    html += label;
-    if (isCurrent) html += ' <span class="session-pager-now">Current</span>';
-    html += '</span>';
-
-    if (viewSess < 5) {
-      html += '<button class="session-pager-btn session-pager-next" data-sess="' + (viewSess + 1) + '" data-render="' + renderFnName + '">';
-      html += 'Session ' + (viewSess + 1) + ' &raquo;';
-      html += '</button>';
-    } else {
-      html += '<span class="session-pager-btn session-pager-disabled">&raquo;</span>';
+    var html = '<div class="board-cal-views session-pager" role="group" aria-label="Session">';
+    for (var i = 1; i <= 5; i++) {
+      html += '<button type="button" class="board-cal-view-pill session-pager-btn' + (i === viewSess ? ' is-active' : '') + '" data-sess="' + i + '" data-render="' + renderFnName + '">S' + i + '</button>';
     }
     html += '</div>';
     return html;
@@ -8797,12 +8784,9 @@
     // the same serif title + an org-summary count strip (the Volunteers
     // tab's pattern), so the four tabs read the same way at a glance.
     // Erin 2026-08-01: no year in the tab titles.
-    var html = '<h3>' + brandIconImg('session') + ' Session Schedule</h3>';
-    html += buildSessionPager(viewSess, 'session');
-    var stBits = [];
-    if (sess && sess.start && sess.end) stBits.push(formatDateLabel(sess.start) + ' – ' + formatDateLabel(sess.end));
-    if (electives.length) stBits.push(electives.length + ' afternoon elective' + (electives.length === 1 ? '' : 's'));
-    if (stBits.length) html += '<div class="org-summary">Session <strong>' + viewSess + '</strong> &middot; ' + stBits.join(' &middot; ') + '</div>';
+    // #262/#263 (Erin): no in-tab header (the tab button carries the name
+    // + icon) and no purple session-info strip — just the pills.
+    var html = buildSessionPager(viewSess, 'session');
 
     // Morning classes table \u2014 DB-first: an approved morning side renders
     // from the published Class Builder schedule; otherwise fall back to
@@ -9357,12 +9341,12 @@
 
     // #190 (Erin): shared tab anatomy — serif title + org-summary strip
     // (liaison + coverage counts) matching the other Coordination tabs.
-    var html = '<h3>' + brandIconImg('cleaning') + ' Cleaning Crew</h3>' + buildSessionPager(viewSess, 'cleaning');
+    // #261/#263: pills only — no in-tab header, no purple strip.
+    var html = buildSessionPager(viewSess, 'cleaning');
     var liaisonLabel = getRoleByKey('cleaning_crew_liaison') ? '<a class="rd-role-link" data-role-key="cleaning_crew_liaison" href="#" onclick="return false;">Liaison</a>' : 'Liaison';
     var liaisonBit = liaisonLabel + ': <strong>' + CLEANING_CREW.liaison + '</strong>';
 
     if (!sessClean) {
-      html += '<div class="org-summary">' + liaisonBit + '</div>';
       html += '<p style="color:var(--color-text-light);"><em>Cleaning assignments not yet available for this session.</em></p>';
       container.innerHTML = html;
       wirePager(container);
@@ -9426,8 +9410,6 @@
       covCovered += assigned.length;
       covOpen += (openByFloor[fl.key] || []).filter(function (a) { return assigned.indexOf(a.area) === -1; }).length;
     });
-    html += '<div class="org-summary">' + liaisonBit + ' &middot; ' + covCovered + ' area' + (covCovered === 1 ? '' : 's') + ' covered'
-      + (covOpen > 0 ? ' &middot; <span class="org-open-count">' + covOpen + ' open</span>' : '') + '</div>';
 
     html += '<div class="cleaning-grid">';
     floors.forEach(function (floor) {
@@ -9852,7 +9834,7 @@
       _volTabState.loading = false;
       _volTabState.year = year;
       // Erin 2026-08-01: no year in the title — the summary strip has it.
-      _volTabState.html = '<h3>' + brandIconImg('roles') + ' Volunteer Roles</h3>' + buildOrgTreeHtml(y, roles, holders, note);
+      _volTabState.html = buildOrgTreeHtml(y, roles, holders, note); // #263: no in-tab header
       container.innerHTML = _volTabState.html;
       wireOrgRowToggles(container);
     }
@@ -9912,7 +9894,7 @@
     }
 
     // Erin 2026-08-01: no year in the tab titles.
-    var html = '<h3>' + brandIconImg('specialEvents') + ' Special Events</h3>';
+    var html = ''; // #263: no in-tab header (tab button carries name + icon)
     // #190 (Erin): org-summary count strip in the shared tab anatomy.
     if (SPECIAL_EVENTS_DB.length) {
       var seNeeds = 0, seDone = 0;
@@ -9922,10 +9904,6 @@
         var cs = ev.coordinators || (ev.coordinator ? [ev.coordinator] : []);
         if (!(cs.length >= 1 && (ev.support || []).length >= 2)) seNeeds++;
       });
-      html += '<div class="org-summary"><strong>' + SPECIAL_EVENTS_DB.length + '</strong> event' + (SPECIAL_EVENTS_DB.length === 1 ? '' : 's')
-        + ' &middot; ' + (SPECIAL_EVENTS_DB.length - seDone) + ' upcoming'
-        + (seNeeds > 0 ? ' &middot; <span class="org-open-count">' + seNeeds + ' need' + (seNeeds === 1 ? 's' : '') + ' volunteers</span>' : '')
-        + (seDone > 0 ? ' &middot; ' + seDone + ' complete' : '') + '</div>';
     }
     if (!SPECIAL_EVENTS_DB.length) {
       html += '<p style="color:var(--color-text-light);">The board is lining up this year’s special events now. Approved dates appear here and on the <strong>Co-op Calendar</strong>, and volunteer roles for each event show up in My Responsibilities once assigned.</p>';
@@ -10206,13 +10184,21 @@
       }
     },
     'my-class': {
-      // #140 (Erin): the liaison's quick view of their class — roster
+      // #140 (Erin): the liaison's quick view of their grove — roster
       // with directory info + allergies, teacher/assistants per session,
-      // topic + lesson plan, and private per-kid notes.
-      title: 'My Class',
-      roleGate: ['*'],
+      // topic + lesson plan, and per-kid notes.
+      // #252: renamed My Class → My Grove (grove language site-wide).
+      // #251: roleGate is a sentinel, NOT '*' — the no-defaults fallback
+      // in widgetListFor pulled every '*'-gated widget into ANY custom
+      // role section (Eleanor's Yearbook Coordinator rendered a second
+      // card whose duplicate #ws-myclass-body sat on "Loading…" forever).
+      // Only widgetListFor's liaison special-case lists this widget.
+      title: 'My Grove',
+      roleGate: ['__liaison__'],
       render: function () {
-        var h = '<p class="ws-body-hint">Key info for your group at a glance — kids, parents, phones, allergies, and who’s teaching each session. Notes are visible only to you (and the VP).</p>';
+        // #252/#253 (Erin): grove language; notes-visibility sentence
+        // dropped (visibility is widening to liaisons + leads + assistants).
+        var h = '<p class="ws-body-hint">Key info for your grove at a glance — kids, parents, phones, allergies, and who’s teaching each session.</p>';
         h += '<div id="ws-myclass-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
         return h;
       },
@@ -10228,7 +10214,7 @@
       // Schedule; claims feed the Packing List (#138). roleGate '*' —
       // widgetListFor's liaison special-case is the only list with this.
       title: 'Snack List',
-      roleGate: ['*'],
+      roleGate: ['__liaison__'], // #251: see my-class — never via the '*' fallback
       render: function () {
         var h = '<p class="ws-body-hint">You’re in charge of snacks! Post sign-ups — one family per snack day works well — and families claim spots from their Kid Schedule. Claims land on their Packing List.</p>';
         h += '<div id="ws-bring-body" aria-live="polite"><p class="ws-part-meter-caption">Loading…</p></div>';
@@ -10274,8 +10260,10 @@
           + '<span class="ws-part-submit-hint">Have supplies others could use? <button type="button" class="ws-inline-link" data-resource-action="lending-offer">Offer something to lend or give away</button>.</span></p>';
         // #161 (Lyndsey): ask for something the library doesn't have —
         // every member gets a heads-up, and pledges can split quantities.
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-requests">Request Items</button>'
-          + '<span class="ws-part-submit-hint">Need something that isn’t listed? Ask everyone at once.</span></p>';
+        // #243 (Erin): "Request Items" read as ask-only — members couldn't
+        // find where to ANSWER a request. One doorway, both directions.
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="lending-requests">Item Requests</button>'
+          + '<span class="ws-part-submit-hint">Ask for something that isn’t listed — or open the list to offer what someone else needs.</span></p>';
         return h;
       },
       afterRender: function () {
@@ -20050,7 +20038,7 @@
     var h = '';
     secs.forEach(function (s) {
       h += '<div class="mf-bring-block">';
-      h += '<div class="mf-bring-head">' + brandIconImg('supplyCloset', 'ag-icon') + ' '
+      h += '<div class="mf-bring-head">' + brandIconImg('lending', 'ag-icon') + ' ' // #256: one supplies icon (= Lending)
         + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(group)
         + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
       h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
@@ -20073,7 +20061,7 @@
     var h = '';
     secs.forEach(function (s) {
       h += '<div class="mf-bring-block">';
-      h += '<div class="mf-bring-head">' + brandIconImg('waysToHelp', 'ag-icon') + ' '
+      h += '<div class="mf-bring-head">' + brandIconImg('lending', 'ag-icon') + ' ' // #256: one supplies icon (= Lending)
         + escapeHtml(s.title || 'Things to Bring') + ' — ' + escapeHtml(className)
         + ((s.config || {}).bring_date ? ' · bring ' + fmtLendDate(s.config.bring_date) : '') + '</div>';
       h += renderSignupSectionBody(s, _groupBring.me, false, GROUP_BRING_ACTS);
@@ -20206,6 +20194,7 @@
   // null while the fetch is in flight.
   var _myClassRoster = {};        // group -> [{kid_name, kid_last_name, family_email}]
   var _myClassRosterLoaded = {};  // group -> true once fetch fired
+  var _myClassRosterPending = {}; // group -> true = pre-finalize directory fallback (#250)
 
   function ensureMyClassRoster(group) {
     if (_myClassRosterLoaded[group]) return;
@@ -20215,6 +20204,8 @@
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d && Array.isArray(d.roster)) {
         _myClassRoster[group] = d.roster;
+        // #250: pre-finalize, the server sends the grove's current kids.
+        _myClassRosterPending[group] = d.placements_pending === true;
         renderMyClassCardBody();
       }
     }).catch(function () { _myClassRosterLoaded[group] = false; });
@@ -20341,6 +20332,11 @@
         h += '<p class="ws-lending-head">Kids</p><p class="ws-empty">Loading the roster…</p>';
         kids = [];
       } else {
+        // #250: pre-finalize fallback roster — say so instead of implying
+        // these placements are final.
+        if (_myClassRosterPending[group] && kids.length) {
+          h += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">Placements aren’t finalized yet — these are the kids currently in this grove.</p>';
+        }
         // Erin 2026-07-31: header carries the roster's actual age span.
         var mcAges = kids.map(function (k) { return k.age; }).filter(function (a) { return a != null && a !== ''; });
         var mcSpan = '';
@@ -24046,10 +24042,11 @@
       });
       // #187 (Erin): Prep Periods don't need coverage — drop their slots,
       // but remember the block HAD a real duty so it doesn't grow a
-      // generic filler spot below.
+      // generic filler spot below. #259 (Erin): Board Duties don't get
+      // coverage either — same treatment.
       var prepBlocks = {};
       slots = slots.filter(function (s) {
-        if (s.role_type !== 'prep') return true;
+        if (s.role_type !== 'prep' && s.role_type !== 'board') return true;
         prepBlocks[s.block] = true;
         return false;
       });
@@ -24981,8 +24978,8 @@
         });
         var expected = absExpandMorningSlots(
           getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, rawBlocks, me.name, me), blocks)
-          // #187: Prep Periods don't need coverage — never sync them in.
-          .filter(function (s) { return s.role_type !== 'prep'; });
+          // #187 prep + #259 board: neither needs coverage — never sync in.
+          .filter(function (s) { return s.role_type !== 'prep' && s.role_type !== 'board'; });
         if (expected.length === 0) return;
         var have = {};
         (a.slots || []).forEach(function (s) {
@@ -27361,21 +27358,27 @@
     }
     // #142 (Erin): allergies list one tap away on every event's header
     // card — food shows up at nearly every event.
-    h += '<p class="ws-body-hint" style="margin:10px 0 0;"><a href="#" class="ws-inline-link" id="evs-allergies-link">⚠ View the allergies &amp; medical list</a></p>';
+    h += '<p class="ws-body-hint" style="margin:10px 0 0;"><a href="#" class="ws-inline-link" id="evs-allergies-link">⚠ View the allergies &amp; medical list</a>'
+      + ((d.can_edit && d.event && d.event.checklist_hidden === true) ? ' · <a href="#" class="ws-inline-link" id="evs-checklist-restore">Restore the checklist</a>' : '') + '</p>';
     h += '</div></div>'; // /body, /header card
 
     // #131 (Lyndsey): the checklist card carries the same binoculars as
     // section cards — committee-only checklists don't render at all for
     // regular members (server already withholds the tasks).
     var tasksPub = d.tasks_public !== false;
-    if (!(d.tasks_hidden && !d.can_edit)) {
+    // #245 (Erin): a deleted (hidden) checklist renders for NOBODY; editors
+    // get a restore link on the header card instead.
+    var checklistGone = d.event && d.event.checklist_hidden === true;
+    if (!checklistGone && !(d.tasks_hidden && !d.can_edit)) {
     h += '<div class="mf-card workspace-card evs-section' + (!tasksPub ? ' evs-private' : '') + '">';
     var tHeadIcons = '';
     if (d.can_edit) {
+      tHeadIcons += '<button type="button" class="evs-ico-btn evs-tasks-del" aria-label="Delete checklist" title="Delete this checklist card (tasks are kept; you can restore it)">×</button>';
       tHeadIcons += '<button type="button" class="evs-ico-btn evs-tasks-pub' + (tasksPub ? '' : ' evs-vis-off') + '" data-pub="' + (tasksPub ? '1' : '0') + '" aria-label="' + (tasksPub ? 'Visible to all members' : 'Committee only') + '" title="' + (tasksPub ? 'Every member can see the checklist. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see the checklist. Tap to show every member.') + '">'
         + '<img src="brand/secondary/' + BRAND_ICONS.visibility + '.png" alt=""></button>';
     }
-    h += collabCardHead('checklist', '<h4>' + brandIconImg('todo') + ' Checklist</h4>'
+    h += collabCardHead('checklist', '<h4>Checklist</h4>' // #249: no card icons below the header card
+      
       + (tHeadIcons ? '<span class="evs-head-icons">' + tHeadIcons + '</span>' : ''));
     if (_collabCollapsed['checklist']) {
       h += '</div>'; // collapsed: header only
@@ -27585,6 +27588,22 @@
       e.preventDefault();
       showAllergiesModal();
     });
+    // #245: delete (two-step) / restore the checklist card.
+    function evsChecklistToggle(hidden) {
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-checklist-toggle', event_id: _eventSpaceState.id, hidden: hidden }) })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the checklist.'); return; }
+          loadEventSpace();
+        })
+        .catch(function () { alert('Network error — try again.'); });
+    }
+    var tDelBtn = body.querySelector('.evs-tasks-del');
+    if (tDelBtn) tDelBtn.addEventListener('click', function () {
+      rwArmTwoStep(tDelBtn, 'delete', function () { evsChecklistToggle(true); });
+    });
+    var tRestore = body.querySelector('#evs-checklist-restore');
+    if (tRestore) tRestore.addEventListener('click', function (e) { e.preventDefault(); evsChecklistToggle(false); });
 
     // Save as next year's template (#115): two-step confirm — it
     // replaces the previous snapshot for this event name.
@@ -27875,7 +27894,7 @@
           + (slot.time ? '<span class="sj-time">' + escapeHtmlWs(slot.time) + '</span>' : '')
           + '<span class="sj-count' + (totalCap > 0 && slotClaims.length >= totalCap ? ' is-full' : '') + '">'
           + (totalCap > 0 ? slotClaims.length + ' of ' + totalCap + ' filled' : slotClaims.length + ' signed up') + '</span></div>';
-        if (slot.note) h += '<p class="sj-note">' + brandIconImg('waysToHelp', 'sj-note-icon') + escapeHtmlWs(slot.note) + '</p>';
+        if (slot.note) h += '<p class="sj-note">' + escapeHtmlWs(slot.note) + '</p>'; // #257: no decorative icon
         if (!shifts.length) {
           // Plain job — current behavior in the new anatomy.
           var cap = parseInt(slot.capacity, 10) || 0;
@@ -27969,7 +27988,7 @@
     var h = '';
     // Pinned external chat-space link + note.
     if (cfg.chat_url) {
-      h += '<p class="disc-chatlink">' + brandIconImg('resources', 'ag-icon')
+      h += '<p class="disc-chatlink">' + brandIconImg('chat', 'ag-icon') // #248: chat mark = chat meaning
         + '<a href="' + escapeAttr(cfg.chat_url) + '" target="_blank" rel="noopener">'
         + escapeHtmlWs(cfg.chat_note || 'Join the team chat space') + '</a></p>';
     } else if (canEdit) {
@@ -28079,7 +28098,9 @@
         headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
       }
       h += collabCardHead(secKey,
-        '<h4><img class="brand-accent" src="brand/secondary/' + (SEC_ACCENTS[s.type] || BRAND_ICONS.classes) + '.png" alt=""> ' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>'
+        // #249 (Erin): section cards drop their title icons — only the
+        // event header card at the top keeps its mark.
+        '<h4>' + escapeHtmlWs(evsSectionTitle(s)) + '</h4>'
         + (headIcons ? '<span class="evs-head-icons">' + headIcons + '</span>' : ''));
       // Collapsed: header-only card, body skipped (in-place toggle).
       if (_collabCollapsed[secKey]) { h += '</div>'; return; }
@@ -28185,10 +28206,14 @@
           });
           return out;
         }).join('\n');
-        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Spots — label @ time | how many people | details (time &amp; details optional). Split a job into shifts with indented dash lines.</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Set Up @ 11:30 am | 4 | Tables, chairs &amp; coolers from the kitchen\nScooping ice cream | | Aprons provided — pick your hour\n- 12:00–1:00 pm | 1\n- 1:00–2:00 pm | 1\nClean Up @ 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea></div>';
+        // #246/#247 (Erin): plain-words authoring — the label teaches the
+        // simple case; the splitter (promoted button below) writes timed
+        // shift lines so nobody learns the dash syntax by hand.
+        fh += '<div class="cls-field evs-sd-slots-only"><label class="cls-label">Volunteer spots — one per line: <strong>job | how many people | details</strong> (details optional)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Set Up @ 11:30 am | 4 | Tables, chairs &amp; coolers from the kitchen\nClean Up @ 2:30 pm | 4">' + escapeHtmlWs(sl) + '</textarea>'
+          + '<p class="ws-body-hint" style="margin:4px 0 0;">Add “@ a time” after a job name to show when it happens. Need one job covered in hourly shifts? Use the splitter below — it writes the lines for you.</p></div>';
         // The splitter generator (#227): a tiny form that writes the dash
         // lines so nobody types eight shifts by hand.
-        fh += '<div class="cls-field evs-sd-slots-only"><button type="button" class="ws-inline-link" id="evsSplitToggle">⚡ Split a job into time slots</button>'
+        fh += '<div class="cls-field evs-sd-slots-only"><button type="button" class="btn btn-outline-dark btn-sm" id="evsSplitToggle">⏱ Split a job into timed shifts…</button>'
           + '<div id="evsSplitForm" hidden style="margin-top:8px;display:grid;gap:6px;grid-template-columns:1fr 1fr;">'
           + '<input class="cl-input" id="evsSplitJob" type="text" maxlength="120" placeholder="Job name — e.g. Scooping" style="grid-column:1/-1;">'
           + '<input class="cl-input" id="evsSplitStart" type="text" maxlength="10" placeholder="Starts — 12:00 pm">'

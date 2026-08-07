@@ -16098,3 +16098,15 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .disc-newline::before, .disc-newline::after {
   content: ""; flex: 1; height: 1px; background: #9BC431; opacity: .7;
 }
+
+/* #264 (Erin): breathing room between the hour sections of the
+   Who's-Where grid so the blocks read separately. */
+.vol-grid .roles-mgr-se-head { margin-top: 26px; }
+.vol-grid .roles-mgr-se-head:first-of-type { margin-top: 10px; }
+
+/* #255 (Erin): Kid Schedule class rows are the classmates doorway now. */
+.mf-sched-rowlink { cursor: pointer; }
+.mf-sched-rowlink:hover, .mf-sched-rowlink:focus-visible { background: rgba(var(--color-primary-rgb), .06); }
+
+/* #260 (Erin): room chip on the duty rows' Plan line. */
+.mf-room-chip { cursor: default; display: inline-flex; align-items: center; gap: 4px; }

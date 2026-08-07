@@ -6470,7 +6470,7 @@ async function handleEventSpaceGet(req, res) {
   try {
     const sql = getSql();
     const evRows = await sql`
-      SELECT id, school_year, name, event_date, date_status, location, notes, tasks_public
+      SELECT id, school_year, name, event_date, date_status, location, notes, tasks_public, checklist_hidden
       FROM special_events WHERE id = ${eventId}
     `;
     if (evRows.length === 0) return res.status(404).json({ error: 'Event not found.' });
@@ -6530,6 +6530,7 @@ async function handleEventSpaceGet(req, res) {
       },
       tasks: tasksHidden ? [] : tasks.map(eventTaskShape),
       tasks_public: ev.tasks_public !== false,
+      checklist_hidden: ev.checklist_hidden === true,
       tasks_hidden: tasksHidden,
       sections: sections.map(s => eventSectionShape(s, sectionSignups)),
       people: people.map(p => ({ role: p.role, email: p.person_email || '', name: p.person_name || '' })),
@@ -6858,6 +6859,7 @@ async function handleEventTasksPublic(body, req, res) {
       return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can change visibility.' });
     }
     await sql`UPDATE special_events SET tasks_public = ${!!body.public} WHERE id = ${eventId}`;
+    // fallthrough shared with checklist visibility below
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-tasks-public error:', err);
@@ -6961,6 +6963,27 @@ async function handleEventSectionDelete(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-section-delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-checklist-toggle — #245 (Erin): editors can delete (hide)
+// the event's checklist card; restore puts it back. Tasks themselves are
+// never touched.
+async function handleEventChecklistToggle(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const eventId = parseInt(body.event_id, 10);
+  if (!Number.isInteger(eventId) || eventId < 1) return res.status(400).json({ error: 'event_id required' });
+  try {
+    const sql = getSql();
+    if (!(await canEditEventSpace(sql, auth, eventId))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can change this.' });
+    }
+    await sql`UPDATE special_events SET checklist_hidden = ${body.hidden === true} WHERE id = ${eventId}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-checklist-toggle error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -10501,6 +10524,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
     if (kind === 'event-signup-update') return handleEventSignupUpdate(body, req, res);
+    if (kind === 'event-checklist-toggle') return handleEventChecklistToggle(body, req, res);
     if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
     if (kind === 'event-template-snapshot') return handleEventTemplateSnapshot(body, req, res);
     if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);

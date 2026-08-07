@@ -634,6 +634,19 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
         AND a.finalized = TRUE
       ORDER BY 1
     `;
+    // #250 (Erin): before the Grove Builder finalizes placements, the
+    // grove's CURRENT kids are the expected roster — same fallback the
+    // Co-op Coordination tables and the classmates modal already use, so
+    // the liaison card can't show "no kids" while coordination shows some.
+    if (rows.length === 0) {
+      const fallback = await sql`
+        SELECT first_name AS kid_name, COALESCE(last_name, '') AS kid_last_name,
+               LOWER(family_email) AS family_email
+        FROM kids WHERE LOWER(class_group) = LOWER(${group})
+        ORDER BY 1
+      `;
+      return res.status(200).json({ roster: fallback, school_year: yr, placements_pending: true });
+    }
     return res.status(200).json({ roster: rows, school_year: yr });
   }
 

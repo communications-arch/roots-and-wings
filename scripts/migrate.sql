@@ -2497,6 +2497,10 @@ CREATE TABLE IF NOT EXISTS tutorial_video_likes (
   PRIMARY KEY (video_id, member_email)
 );
 
+-- 2026-08-07 (#245, Erin): the collab checklist card can be deleted
+-- (hidden) per event by its editors; restorable from the header card.
+ALTER TABLE special_events ADD COLUMN IF NOT EXISTS checklist_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- 2026-08-06 (#227, Colleen / Erin picked Mock A): sign-up slots can be
 -- SPLIT into timed shifts (shifts live in the section content JSONB; no
 -- schema there). A claim may target one shift of a slot — nullable so

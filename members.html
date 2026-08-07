@@ -427,16 +427,15 @@
     <section class="portal-coordination" id="coordination">
       <div class="container">
         <h2 class="text-center fade-in">Co-op Coordination</h2>
-        <p class="section-subtitle text-center fade-in">
-          Schedules, volunteer assignments, and planning — all in one place.
-        </p>
-
+        <!-- #262/#263 (Erin): sub-header removed; tabs carry the brand
+             icons their old in-tab headers wore, and "Current Session"
+             reads "Session Schedule". -->
         <div class="portal-tabs fade-in">
           <div class="portal-tab-nav" role="tablist">
-            <button class="portal-tab active" role="tab" data-tab="session">Current Session</button>
-            <button class="portal-tab" role="tab" data-tab="cleaning">Cleaning Crew</button>
-            <button class="portal-tab" role="tab" data-tab="volunteers">Volunteers</button>
-            <button class="portal-tab" role="tab" data-tab="events">Special Events</button>
+            <button class="portal-tab active" role="tab" data-tab="session"><img class="ag-icon" src="brand/secondary/accent-48.png" alt=""> Session Schedule</button>
+            <button class="portal-tab" role="tab" data-tab="cleaning"><img class="ag-icon" src="brand/secondary/accent-52.png" alt=""> Cleaning Crew</button>
+            <button class="portal-tab" role="tab" data-tab="volunteers"><img class="ag-icon" src="brand/secondary/accent-15.png" alt=""> Volunteers</button>
+            <button class="portal-tab" role="tab" data-tab="events"><img class="ag-icon" src="brand/secondary/accent-28.png" alt=""> Special Events</button>
           </div>
 
           <!-- Current Session (JS-rendered) -->
@@ -548,7 +547,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260807a"></script>
+  <script src="script.js?v=20260807b"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
