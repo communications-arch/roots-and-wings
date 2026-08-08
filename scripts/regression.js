@@ -183,16 +183,27 @@ function jsFilesIn(dir) {
 // commit (so a script.js touch always rides with a cache-bust bump).
 section('Tier 1d — cache-bust freshness');
 try {
-  const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  const mem = fs.readFileSync(path.join(ROOT, 'members.html'), 'utf8');
-  const idxV = (idx.match(/script\.js\?v=([A-Za-z0-9._-]+)/) || [])[1];
-  const memV = (mem.match(/script\.js\?v=([A-Za-z0-9._-]+)/) || [])[1];
-  if (!idxV || !memV) {
-    fail('cache-bust present in both index.html and members.html', 'missing ?v= in one or both');
-  } else if (idxV !== memV) {
-    fail('index.html and members.html share the same script.js ?v=', `index=${idxV}, members=${memV}`);
+  // Codebase review 2026-08-08: this only checked index + members, so
+  // bugs.html and support.html — which ALSO load script.js — drifted
+  // months stale unnoticed. Every HTML that loads script.js must share
+  // the same ?v=.
+  const scriptPages = ['index.html', 'members.html', 'quickstart.html', 'bugs.html', 'support.html'];
+  const pageVers = {};
+  scriptPages.forEach(function (pg) {
+    try {
+      const body = fs.readFileSync(path.join(ROOT, pg), 'utf8');
+      const m = body.match(/script\.js\?v=([A-Za-z0-9._-]+)/);
+      if (m) pageVers[pg] = m[1];
+    } catch (e) { /* page may not exist */ }
+  });
+  const idxV = pageVers['index.html'];
+  const distinct = Array.from(new Set(Object.values(pageVers)));
+  if (!idxV || Object.keys(pageVers).length < 2) {
+    fail('cache-bust present in the script.js pages', 'missing ?v= on one or more');
+  } else if (distinct.length !== 1) {
+    fail('all script.js pages share one ?v=', JSON.stringify(pageVers));
   } else {
-    ok('index.html and members.html share script.js?v=' + idxV);
+    ok('all ' + Object.keys(pageVers).length + ' script.js pages share ?v=' + idxV);
   }
   const dateMatch = (idxV || '').match(/^(\d{8})/);
   if (dateMatch) {

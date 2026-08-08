@@ -98,11 +98,18 @@ module.exports = async function handler(req, res) {
 
       const claimerName = String((req.body || {}).claimer_name || user.name || '').trim();
 
-      await sql`
+      // Codebase review 2026-08-08: the pre-check + unconditional UPDATE
+      // let two simultaneous claims both win, the second silently
+      // overwriting the first claimant (who still thinks they're covering).
+      // The WHERE now includes claimed_by_email IS NULL, so the race loser
+      // updates zero rows and gets the 409 — the DB is the arbiter.
+      const claimed = await sql`
         UPDATE coverage_slots
         SET claimed_by_email = ${user.email}, claimed_by_name = ${claimerName}, claimed_at = NOW()
-        WHERE id = ${slotId}
+        WHERE id = ${slotId} AND claimed_by_email IS NULL
+        RETURNING id
       `;
+      if (claimed.length === 0) return res.status(409).json({ error: 'Slot already claimed' });
 
       // Notify the absent person
       const dateLabel = new Date(isoDay(slot[0].absence_date) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

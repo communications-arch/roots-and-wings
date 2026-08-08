@@ -395,7 +395,7 @@ function activeSchoolYearLabel(now) {
   return fallYear + '-' + (fallYear + 1);
 }
 
-async function handleBillingGet(req, res, sheets) {
+async function handleBillingGet(req, res, sheets, authResult) {
   var billingSheetId = process.env.BILLING_SHEET_ID;
   if (!billingSheetId) {
     return res.status(200).json({
@@ -494,6 +494,30 @@ async function handleBillingGet(req, res, sheets) {
     // fall through with sheet-only data
   }
 
+  // Codebase review 2026-08-08: this GET returned EVERY family's payment
+  // standing to any signed-in member (no scope, no role gate). Now a plain
+  // member sees only families they can act as; the Treasurer (billing
+  // capability) and super users still get the full reconcile view.
+  try {
+    var viewer = authResult && authResult.email ? authResult.email : '';
+    var seesAll = viewer && (isSuperUser(viewer)
+      || await hasCapability(viewer, 'registration_mark_paid')
+      || await canEditAsRole(viewer, 'Treasurer'));
+    if (!seesAll) {
+      var sqlF = getDb();
+      var scoped = {};
+      for (var fk in parsed.families) {
+        var fem = String(parsed.families[fk].email || '').toLowerCase();
+        if (fem && viewer && await canActAs(sqlF, viewer, fem)) scoped[fk] = parsed.families[fk];
+      }
+      parsed.families = scoped;
+    }
+  } catch (scopeErr) {
+    // If the scope check itself fails, fail CLOSED — never leak the full map.
+    console.error('Billing scope check failed, returning empty families:', scopeErr.message);
+    parsed.families = {};
+  }
+
   return res.status(200).json(parsed);
 }
 
@@ -526,8 +550,16 @@ async function handleBillingPost(req, res, authResult) {
     // (or a super user recording on their behalf) may post.
     var billingActor = authResult && authResult.email ? authResult.email : '';
     if (!billingActor) return res.status(401).json({ error: 'Unauthorized' });
-    if (familyEmail && !isSuperUser(billingActor) && !(await canActAs(sql, billingActor, familyEmail))) {
-      return res.status(403).json({ error: 'You can only record a payment for your own family.' });
+    // Codebase review 2026-08-08: the gate only fired when family_email was
+    // present, so a POST with family_name ONLY skipped it entirely and any
+    // member could fabricate a Pending payment for any family. Now a
+    // non-super-user MUST supply a family_email they can act as — no
+    // name-only posts, no other-family posts.
+    if (!isSuperUser(billingActor)) {
+      if (!familyEmail) return res.status(403).json({ error: 'A family_email you belong to is required to record a payment.' });
+      if (!(await canActAs(sql, billingActor, familyEmail))) {
+        return res.status(403).json({ error: 'You can only record a payment for your own family.' });
+      }
     }
     var rows = await sql`
       INSERT INTO payments (
@@ -2353,7 +2385,7 @@ module.exports = async function handler(req, res) {
     try {
       var billingAuth = getAuth();
       var billingSheets = google.sheets({ version: 'v4', auth: billingAuth });
-      if (req.method === 'GET') return handleBillingGet(req, res, billingSheets);
+      if (req.method === 'GET') return handleBillingGet(req, res, billingSheets, authResult);
       if (req.method === 'POST') return handleBillingPost(req, res, authResult);
       return res.status(405).json({ error: 'Method not allowed' });
     } catch (err) {

@@ -83,12 +83,19 @@ async function handleCron(req, res) {
   // `User-Agent: vercel-cron/...` (works even when CRON_SECRET isn't set)
   // OR an explicit bearer secret for manual runs. A plain anonymous curl
   // has neither → 401.
+  // Codebase review 2026-08-08: the User-Agent is trivially spoofable, so
+  // `vercel-cron` alone let anyone curl a broadcast. When CRON_SECRET is
+  // set (Vercel auto-sends it as `Authorization: Bearer $CRON_SECRET` on
+  // cron invocations) the bearer is REQUIRED — the UA is no longer a valid
+  // credential on its own. Only when no secret is configured do we fall
+  // back to the UA check so a not-yet-configured deploy still runs.
   const ua = String(req.headers['user-agent'] || '');
   const isVercelCron = ua.indexOf('vercel-cron') !== -1;
   const cronSecret = process.env.CRON_SECRET || '';
   const authHeader = String(req.headers['authorization'] || '');
   const hasSecret = cronSecret && authHeader === `Bearer ${cronSecret}`;
-  if (!isVercelCron && !hasSecret) {
+  const ok = cronSecret ? hasSecret : isVercelCron;
+  if (!ok) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 

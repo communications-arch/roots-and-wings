@@ -65,9 +65,13 @@ self.addEventListener('notificationclick', function (event) {
     : '/members.html';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
-      // If the app is already open, focus it
+      // If the app is already open, focus it. Codebase review 2026-08-08:
+      // Vercel cleanUrls serves the page at /members (no .html), so
+      // matching only '/members.html' never found the open portal and a
+      // duplicate window opened every time. Match either form.
       for (var i = 0; i < clientList.length; i++) {
-        if (clientList[i].url.indexOf('/members.html') !== -1) {
+        var u = clientList[i].url || '';
+        if (u.indexOf('/members.html') !== -1 || /\/members(\b|[/?#])/.test(u)) {
           clientList[i].focus();
           clientList[i].navigate(url);
           return;

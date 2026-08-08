@@ -24600,14 +24600,14 @@
       html += '<details class="coverage-details">';
       html += '<summary class="coverage-details-toggle">See all absences &amp; coverage (' + dateAbsences.length + ' out)</summary>';
       allSlotsByPerson.forEach(function (p) {
-        html += '<div class="coverage-absence"><div class="coverage-person"><strong>' + p.person + '</strong> <span class="coverage-person-note">is out'
+        html += '<div class="coverage-absence"><div class="coverage-person"><strong>' + escapeHtmlWs(p.person) + '</strong> <span class="coverage-person-note">is out'
           + (p.blc ? ' \u2014 backup coach <strong>' + escapeHtmlWs(p.blc) + '</strong> covering' : '')
-          + (p.notes ? ' \u2014 ' + p.notes : '') + '</span></div>';
+          + (p.notes ? ' \u2014 ' + escapeHtmlWs(p.notes) : '') + '</span></div>';
         p.slots.forEach(function (slot) {
           var isClaimed = !!slot.claimed_by_email;
           html += '<div class="coverage-slot ' + (isClaimed ? 'coverage-slot-covered' : 'coverage-slot-open') + '">';
-          html += '<span class="coverage-slot-block">' + slot.block + '</span><span class="coverage-slot-desc">' + slot.role_description + '</span>';
-          html += isClaimed ? '<span class="coverage-slot-claimer">Covered by ' + (slot.claimed_by_name || slot.claimed_by_email) + '</span>' : '<span class="coverage-slot-uncovered">Uncovered</span>';
+          html += '<span class="coverage-slot-block">' + slot.block + '</span><span class="coverage-slot-desc">' + escapeHtmlWs(slot.role_description) + '</span>';
+          html += isClaimed ? '<span class="coverage-slot-claimer">Covered by ' + escapeHtmlWs(slot.claimed_by_name || slot.claimed_by_email) + '</span>' : '<span class="coverage-slot-uncovered">Uncovered</span>';
           html += '</div>';
         });
         html += '</div>';
@@ -24717,12 +24717,12 @@
     var html = '<div class="absence-overlay" id="assignCoverageOverlay"><div class="absence-modal">';
     html += '<button class="detail-close absence-close" id="assignCoverageCloseBtn" aria-label="Close">&times;</button>';
     html += '<h3>Assign Coverage</h3>';
-    html += '<p class="assign-coverage-slot"><strong>' + slotDesc + '</strong>' + (dateLabel ? ' \u00b7 ' + dateLabel : '') + '</p>';
+    html += '<p class="assign-coverage-slot"><strong>' + escapeHtmlWs(slotDesc) + '</strong>' + (dateLabel ? ' \u00b7 ' + dateLabel : '') + '</p>';
     html += '<div class="absence-field"><label>Who will cover this?</label>';
     html += '<select class="cl-input" id="assignCoveragePerson">';
     html += '<option value="">\u2014 Pick a person \u2014</option>';
     people.forEach(function (p) {
-      html += '<option value="' + p.email + '|' + p.displayName.replace(/\|/g, '') + '">' + p.displayName + '</option>';
+      html += '<option value="' + escapeAttr(p.email + '|' + p.displayName.replace(/\|/g, '')) + '">' + escapeHtmlWs(p.displayName) + '</option>';
     });
     html += '</select></div>';
     html += '<button class="btn btn-primary absence-submit" id="assignCoverageSubmitBtn">Assign</button>';
@@ -24815,9 +24815,9 @@
         if (!match) return;
         var dateLabel = formatDateLabel(a.absence_date);
         if (slot.claimed_by_email) {
-          notes.push('<span class="cov-note cov-note-ok">' + dateLabel + ': ' + a.absent_person + ' is out from ' + slot.group_or_class + ' \u2014 covered by <strong>' + (slot.claimed_by_name || slot.claimed_by_email) + '</strong></span>');
+          notes.push('<span class="cov-note cov-note-ok">' + dateLabel + ': ' + escapeHtmlWs(a.absent_person) + ' is out from ' + escapeHtmlWs(slot.group_or_class) + ' \u2014 covered by <strong>' + escapeHtmlWs(slot.claimed_by_name || slot.claimed_by_email) + '</strong></span>');
         } else {
-          notes.push('<span class="cov-note cov-note-open">' + dateLabel + ': ' + a.absent_person + ' is out from ' + slot.group_or_class + ' \u2014 <strong>needs coverage</strong></span>');
+          notes.push('<span class="cov-note cov-note-open">' + dateLabel + ': ' + escapeHtmlWs(a.absent_person) + ' is out from ' + escapeHtmlWs(slot.group_or_class) + ' \u2014 <strong>needs coverage</strong></span>');
         }
       });
     });
@@ -24853,7 +24853,7 @@
 
       html += '<div class="my-absence-row">';
       html += '<div class="my-absence-info">';
-      html += '<strong>' + dateLabel + '</strong> \u00b7 ' + a.absent_person;
+      html += '<strong>' + dateLabel + '</strong> \u00b7 ' + escapeHtmlWs(a.absent_person);
       var sessLbl = a.session_number ? 'Session ' + a.session_number + ' \u00b7 ' : '';
       html += '<div class="my-absence-detail">' + sessLbl + blocks + statusText + '</div>';
       html += '</div>';
@@ -24867,9 +24867,9 @@
       if (totalSlots > 0) {
         html += '<ul class="my-absence-slots">';
         (a.slots || []).forEach(function (s) {
-          var label = (s.role_description || s.group_or_class || 'Slot') + ' (' + s.block + ')';
+          var label = escapeHtmlWs((s.role_description || s.group_or_class || 'Slot') + ' (' + s.block + ')');
           if (s.claimed_by_email) {
-            html += '<li class="my-absence-slot my-absence-slot-ok">' + label + ' \u2014 covered by <strong>' + (s.claimed_by_name || s.claimed_by_email) + '</strong></li>';
+            html += '<li class="my-absence-slot my-absence-slot-ok">' + label + ' \u2014 covered by <strong>' + escapeHtmlWs(s.claimed_by_name || s.claimed_by_email) + '</strong></li>';
           } else {
             html += '<li class="my-absence-slot my-absence-slot-open">' + label + ' \u2014 <strong>needs coverage</strong></li>';
           }
@@ -25163,8 +25163,11 @@
       } else if ((nType === 'event_signups_open' || nType === 'discussion_post') && /^evspace:\d+$/.test(nLink)) {
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
       } else if (['coverage_needed', 'slot_claimed', 'slot_reassigned', 'kids_absent'].indexOf(nType) !== -1 || !nType) {
-        var cov = document.getElementById('coverage');
-        if (cov) cov.scrollIntoView({ behavior: 'smooth' });
+        // Codebase review 2026-08-08: this targeted #coverage, which
+        // doesn't exist — the real card is #coverageBoardCard (a collapsed
+        // <details>). Open it and scroll to it.
+        var cov = document.getElementById('coverageBoardCard');
+        if (cov) { try { cov.open = true; } catch (e) {} cov.scrollIntoView({ behavior: 'smooth' }); }
       }
     }); });
     fillNotifPushFooter();
@@ -27384,7 +27387,7 @@
       h += '<ul class="ws-part-recap">' + items.map(function (t) { return '<li>' + escapeHtmlWs(String(t)) + '</li>'; }).join('') + '</ul>';
     });
     h += '<p class="ws-body-hint" style="margin:10px 0 0;"><a href="#" class="ws-inline-link" id="evs-allergies-link">⚠ View the allergies &amp; medical list</a>'
-      + ((d.can_edit && d.event && d.event.checklist_hidden === true) ? ' · <a href="#" class="ws-inline-link" id="evs-checklist-restore">Restore the checklist</a>' : '') + '</p>';
+      + ((d.can_edit && d.checklist_hidden === true) ? ' · <a href="#" class="ws-inline-link" id="evs-checklist-restore">Restore the checklist</a>' : '') + '</p>';
     h += '</div></div>'; // /body, /header card
 
     // #131 (Lyndsey): the checklist card carries the same binoculars as
@@ -27393,7 +27396,7 @@
     var tasksPub = d.tasks_public !== false;
     // #245 (Erin): a deleted (hidden) checklist renders for NOBODY; editors
     // get a restore link on the header card instead.
-    var checklistGone = d.event && d.event.checklist_hidden === true;
+    var checklistGone = d.checklist_hidden === true;
     if (!checklistGone && !(d.tasks_hidden && !d.can_edit)) {
     h += '<div class="mf-card workspace-card evs-section' + (!tasksPub ? ' evs-private' : '') + '">';
     var tHeadIcons = '';
@@ -28028,10 +28031,13 @@
   function renderDiscussionBody(s, viewerEmail, canEdit, ACT_REMOVE, FORM_KEY) {
     var cfg = s.config || {};
     var h = '';
-    // Pinned external chat-space link + note.
-    if (cfg.chat_url) {
+    // Pinned external chat-space link + note. Only http(s) URLs become a
+    // live link — a javascript:/data: URI (which a crafted POST could
+    // store) renders as plain text, never a clickable script sink.
+    var chatUrlSafe = /^https?:\/\//i.test(String(cfg.chat_url || '')) ? cfg.chat_url : '';
+    if (chatUrlSafe) {
       h += '<p class="disc-chatlink"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' // #248 r2: SAME icon as the header's Google Chat
-        + '<a href="' + escapeAttr(cfg.chat_url) + '" target="_blank" rel="noopener">'
+        + '<a href="' + escapeAttr(chatUrlSafe) + '" target="_blank" rel="noopener">'
         + escapeHtmlWs(cfg.chat_note || 'Join the team chat space') + '</a></p>';
     } else if (canEdit) {
       h += '<p class="disc-chatlink disc-chatlink-empty">Tip: add a chat-space link in this card’s ✎ settings and it pins here for the team.</p>';
@@ -28112,9 +28118,15 @@
   }
 
   function renderEventSections(d, chips) {
+    // #265: "…will provide" sections ALSO pin (read-only) in the header, but
+    // codebase review 2026-08-08 caught that filtering them OUT of the grid
+    // stranded their only edit/delete controls (and an empty one vanished
+    // everywhere). For editors we keep them in the grid so they stay
+    // manageable; for plain members we hide the grid copy since the header
+    // already shows it.
     var secs = (d.sections || []).filter(function (ps) {
-      // #265: "…will provide" info sections render pinned in the header.
-      return !(ps.type === 'info' && /provide/i.test(ps.title || ''));
+      if (ps.type === 'info' && /provide/i.test(ps.title || '')) return !!d.can_edit;
+      return true;
     });
     if (!secs.length) return '';
     var h = '';
@@ -28817,7 +28829,13 @@
     var isBoard = btn.getAttribute('data-sec-type') === 'board';
     var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
     form.hidden = false;
-    form.innerHTML = '<div class="cls-field"><label class="cls-label">' + (isBoard ? 'Edit note or link' : 'Edit what you’ll bring') + '</label><input class="cl-input evs-bring-item" type="text" maxlength="200"></div>'
+    // Codebase review 2026-08-08: a Discussion (board) message is multi-line
+    // up to 1000 chars — edit it in a TEXTAREA, not a single-line input that
+    // drops newlines and caps at 200 (which silently truncated long posts).
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">' + (isBoard ? 'Edit message' : 'Edit what you’ll bring') + '</label>'
+      + (isBoard
+        ? '<textarea class="cl-input evs-bring-item" rows="3" maxlength="1000"></textarea>'
+        : '<input class="cl-input evs-bring-item" type="text" maxlength="200">') + '</div>'
       + (isBoard ? '' : '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
       + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Save changes</button>'
       + '<button type="button" class="btn btn-outline-dark btn-sm evs-bring-remove">Remove sign-up</button>'

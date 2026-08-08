@@ -1280,12 +1280,12 @@ SELECT
   ARRAY['Fulfills orders', 'Tracks Paid / Delivered', 'Reports to Communications Director'],
   '',
   'migrate.sql'
-ON CONFLICT (role_key) DO UPDATE SET
-  committee_id   = EXCLUDED.committee_id,
-  parent_role_id = EXCLUDED.parent_role_id,
-  display_order  = EXCLUDED.display_order,
-  category       = EXCLUDED.category,
-  updated_at     = NOW();
+-- Codebase review 2026-08-08: this DO UPDATE re-forced the role's
+-- committee / parent / display_order / category on EVERY prod build,
+-- silently reverting any re-parent or reorder an admin made in the Roles
+-- UI. Seed on first insert only; leave existing rows (and their admin
+-- edits) untouched.
+ON CONFLICT (role_key) DO NOTHING;
 
 -- ──────────────────────────────────────────────
 -- Merchandise inventory

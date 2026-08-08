@@ -1767,12 +1767,14 @@ async function handleList(req, res) {
 // header; we accept those plus an optional CRON_SECRET bearer token for
 // manual invocations / testing.
 async function handleReconcileCron(req, res) {
+  // Codebase review 2026-08-08: UA is spoofable — require the bearer when
+  // CRON_SECRET is set; UA fallback only when it isn't. See push-send.js.
   const ua = String(req.headers['user-agent'] || '');
   const isVercelCron = ua.indexOf('vercel-cron') !== -1;
   const cronSecret = process.env.CRON_SECRET || '';
   const authHeader = String(req.headers['authorization'] || '');
   const hasSecret = cronSecret && authHeader === `Bearer ${cronSecret}`;
-  if (!isVercelCron && !hasSecret) {
+  if (!(cronSecret ? hasSecret : isVercelCron)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -7193,18 +7195,22 @@ async function handleEventSignupUpdate(body, req, res) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
   const id = parseInt(body.id, 10);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
-  const itemText = String(body.item_text || '').trim().slice(0, 200);
-  if (!itemText) return res.status(400).json({ error: 'Say what you’ll bring.' });
   const note = String(body.note || '').trim().slice(0, 300);
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT su.id, su.person_email, su.item_text, s.special_event_id
+      SELECT su.id, su.person_email, su.item_text, s.special_event_id, s.type AS section_type
       FROM event_section_signups su JOIN event_sections s ON s.id = su.section_id
       WHERE su.id = ${id}
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Sign-up not found.' });
     if (!rows[0].item_text) return res.status(400).json({ error: 'Slot sign-ups have nothing to edit — remove and pick another spot instead.' });
+    // Codebase review 2026-08-08: a Discussion (board) message can be up to
+    // 1000 chars and multi-line (the composer allows it), but this edit
+    // path hard-sliced to 200 and dropped it — so editing a long post
+    // silently truncated it. Match the claim path's type-aware cap.
+    const itemText = String(body.item_text || '').trim().slice(0, rows[0].section_type === 'board' ? 1000 : 200);
+    if (!itemText) return res.status(400).json({ error: rows[0].section_type === 'board' ? 'Type a message first.' : 'Say what you’ll bring.' });
     const isMine = String(rows[0].person_email || '').toLowerCase() === String(auth.email || '').toLowerCase();
     if (!isMine && !(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
       return res.status(403).json({ error: 'You can only edit your own sign-up.' });

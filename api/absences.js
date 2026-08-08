@@ -172,12 +172,20 @@ async function knownDutyTargets(sql) {
   return names;
 }
 // One validator per request: builds the person's derived duty set once.
+// Codebase review 2026-08-08: returns null when duty derivation THROWS (a
+// transient DB blip) so callers can fail SAFE — the edit/reconcile paths
+// must never interpret "derivation unavailable" as "every class slot is a
+// phantom" and delete legitimate, even claimed, coverage. A null validator
+// means "skip validation this time", not "reject everything".
 async function makeSlotValidator(sql, { schoolYear, session, absentPerson, familyEmail }) {
   const areaNames = await knownDutyTargets(sql);
   let duties = null;
   try {
     duties = await deriveClassDutyKeys(sql, { schoolYear, session, absentPerson, familyEmail });
-  } catch (e) { console.error('makeSlotValidator derivation failed:', e); }
+  } catch (e) {
+    console.error('makeSlotValidator derivation failed — validation skipped this request:', e);
+    return null;
+  }
   return function slotAllowed(slot) {
     const rt = String(slot.role_type || '').trim().toLowerCase();
     if (DUTY_EXEMPT_ROLE_TYPES.indexOf(rt) !== -1) return true;
@@ -326,16 +334,20 @@ module.exports = async function handler(req, res) {
                a.family_email, a.absent_person, a.absence_date, a.cancelled_at, a.session_number
         FROM coverage_slots cs JOIN absences a ON a.id = cs.absence_id
         ORDER BY cs.absence_id, cs.id`;
-      // Person-level scan: one validator per absence (person × session),
-      // so a phantom naming a REAL grove ("Leading Willows") is caught
-      // when this person doesn't hold that duty.
-      const scanYear = activeSchoolYear(new Date());
+      // Person-level scan: one validator per absence (person × session ×
+      // YEAR), so a phantom naming a REAL grove ("Leading Willows") is
+      // caught when this person doesn't hold that duty. Codebase review
+      // 2026-08-08: the school year is derived from EACH absence's own
+      // date, not today's — otherwise every prior-year slot validates
+      // against this year's (different) schedule and gets flagged phantom,
+      // which after the April-1 pivot would delete a whole year of slots.
       const validators = {};
       async function validatorFor(r) {
-        const vKey = norm(r.absent_person) + '|' + norm(r.family_email) + '|' + r.session_number;
-        if (!validators[vKey]) {
+        const rowYear = activeSchoolYear(new Date(String(r.absence_date).slice(0, 10) + 'T12:00:00'));
+        const vKey = rowYear + '|' + norm(r.absent_person) + '|' + norm(r.family_email) + '|' + r.session_number;
+        if (!(vKey in validators)) {
           validators[vKey] = await makeSlotValidator(sql, {
-            schoolYear: scanYear, session: r.session_number,
+            schoolYear: rowYear, session: r.session_number,
             absentPerson: r.absent_person, familyEmail: r.family_email
           });
         }
@@ -343,8 +355,10 @@ module.exports = async function handler(req, res) {
       }
       const phantoms = [];
       for (const r of all) {
-        const allowed = (await validatorFor(r))(r);
-        if (!allowed) phantoms.push(r);
+        const v = await validatorFor(r);
+        // A null validator (derivation failed) means "can't judge" — never
+        // classify as phantom, never delete. Only a real reject counts.
+        if (v && !v(r)) phantoms.push(r);
       }
       const phantomIds = new Set(phantoms.map(r => r.id));
       const claimed = phantoms.filter(r => r.claimed_by_email || r.claimed_by_name);
@@ -534,7 +548,7 @@ module.exports = async function handler(req, res) {
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
         if (!VALID_BLOCKS.includes(block)) continue;
-        if (!slotAllowed(slot)) {
+        if (slotAllowed && !slotAllowed(slot)) {
           console.error('[absence-guard] dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
           continue;
         }
@@ -705,7 +719,7 @@ module.exports = async function handler(req, res) {
           // the client re-sent falls into `unmatched` below and is deleted
           // — editing an absence now flushes phantoms instead of keeping
           // them alive.
-          if (!editSlotAllowed(slot)) {
+          if (editSlotAllowed && !editSlotAllowed(slot)) {
             console.error('[absence-guard] edit dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
             continue;
           }
@@ -797,7 +811,7 @@ module.exports = async function handler(req, res) {
         const group_or_class = String(slot.group_or_class || '').trim();
         if (!block || !role_type || !role_description) continue;
         if (!VALID_BLOCKS.includes(block)) continue;
-        if (!reconSlotAllowed(slot)) {
+        if (reconSlotAllowed && !reconSlotAllowed(slot)) {
           console.error('[absence-guard] reconciler dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
           continue;
         }
