@@ -40421,7 +40421,7 @@
       var pOptOut = p.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (pOptOut ? ' checked' : '') + '>' +
-           '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use my photo, video, or quote in any co-op material.</span>' +
+           '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use my photo, video, or quote in any <strong>external</strong> co-op material (public website or social media). Internal use — yearbook, printed rosters, the members’ website — still applies.</span>' +
            '</label>';
       h += '</div>';
       h += '<button type="button" class="sc-btn sc-btn-del emi-remove" data-role="remove-parent" data-idx="' + idx + '" aria-label="Remove adult">&times;</button>';
@@ -40504,7 +40504,7 @@
       var optOut = k.photo_consent === false;
       h += '<label class="emi-inline-label emi-full emi-photo-optout">' +
            '<input type="checkbox" data-field="photo_consent_optout"' + (optOut ? ' checked' : '') + '>' +
-           '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use this child\'s photo, video, or quote in any co-op material.</span>' +
+           '<span><strong>Opt out of photo and film.</strong> Roots and Wings will not use this child\'s photo, video, or quote in any <strong>external</strong> co-op material (public website or social media). Internal use — yearbook, printed rosters, the members’ website — still applies.</span>' +
            '</label>';
       // Pending Membership-approval chip (Option B). Adds also carry the
       // waiver link until it's signed.
