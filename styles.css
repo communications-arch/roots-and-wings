@@ -16120,3 +16120,11 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 
 /* #260 r2 (Erin): room chip + Plan aligned on one horizontal row. */
 .mf-duty-btnrow { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* #221 (Colleen): booked-facilities strip in the Class Builder header. */
+.sb-fac-strip {
+  background: rgba(var(--color-accent-light-rgb), .22);
+  border: 1px solid var(--color-accent-light);
+  border-radius: 8px; padding: 6px 12px; margin: 8px 16px 0;
+  font-size: .82rem; color: var(--color-text);
+}

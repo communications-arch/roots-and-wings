@@ -36614,6 +36614,9 @@
     html += '<button type="button" class="rd-icon" id="sbCsvBtn" aria-label="Download all submissions as CSV" title="Export CSV">' + ICON_SVG.download + '</button>';
     html += '</span>';
     html += '</div>';
+    // #221 (Colleen): booked shared facilities at a glance, right in the
+    // builder — no more opening the requests modal to check.
+    html += '<div class="sb-fac-strip" id="sbFacStrip" hidden></div>';
     html += '<div class="sb-body" id="sbBody"><em style="color:var(--color-text-light);">Loading submissions…</em></div>';
     html += '</div></div>';
 
@@ -36633,6 +36636,27 @@
     if (sbFacBtn) sbFacBtn.addEventListener('click', function () {
       if (typeof showFacilityBookingModal === 'function') showFacilityBookingModal();
     });
+    // #221: paint the bookings strip from the same feed the booking modal
+    // uses. Grouped by session so every hour being built is covered.
+    fetch('/api/supply-closet?action=liaison-facilities', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var strip = document.getElementById('sbFacStrip');
+        if (!strip || !d || !Array.isArray(d.bookings) || !d.bookings.length) return;
+        var bySess = {};
+        d.bookings.forEach(function (b) {
+          (bySess[b.session_number] = bySess[b.session_number] || []).push(b);
+        });
+        var h2 = '<strong>' + brandIconImg('location', 'ag-icon') + ' Facilities booked:</strong> ';
+        h2 += Object.keys(bySess).sort().map(function (sn) {
+          return 'S' + sn + ' — ' + bySess[sn].map(function (b) {
+            return escapeHtmlWs(b.facility) + ' · W' + b.week_number + ' ' + escapeHtmlWs(b.hour) + ' (' + escapeHtmlWs(b.class_group) + ')';
+          }).join(', ');
+        }).join(' &nbsp;·&nbsp; ');
+        strip.innerHTML = h2;
+        strip.hidden = false;
+      })
+      .catch(function () { /* strip stays hidden */ });
     overlay.querySelectorAll('.sb-period-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
         // #81: group liaisons are AM-only (pill also hidden post-load).
