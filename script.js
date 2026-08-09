@@ -36662,16 +36662,40 @@
       .then(function (d) {
         var strip = document.getElementById('sbFacStrip');
         if (!strip || !d || !Array.isArray(d.bookings) || !d.bookings.length) return;
-        var bySess = {};
+        // #272 (Lyndsey): the old strip was one long run-on line per session.
+        // Table form instead — facilities as columns, week/hour as rows —
+        // so a whole session's bookings are scannable at a glance.
+        var facilities = (Array.isArray(d.facilities) && d.facilities.length)
+          ? d.facilities
+          : d.bookings.map(function (b) { return b.facility; }).filter(function (f, i, arr) { return f && arr.indexOf(f) === i; });
+        var byRow = {};
+        var rowOrder = [];
         d.bookings.forEach(function (b) {
-          (bySess[b.session_number] = bySess[b.session_number] || []).push(b);
+          var rowKey = 'S' + b.session_number + '-W' + b.week_number + '-' + b.hour;
+          if (!byRow[rowKey]) {
+            byRow[rowKey] = { session: b.session_number, week: b.week_number, hour: b.hour, byFacility: {} };
+            rowOrder.push(rowKey);
+          }
+          (byRow[rowKey].byFacility[b.facility] = byRow[rowKey].byFacility[b.facility] || []).push(b.class_group);
         });
-        var h2 = '<strong>' + brandIconImg('location', 'ag-icon') + ' Facilities booked:</strong> ';
-        h2 += Object.keys(bySess).sort().map(function (sn) {
-          return 'S' + sn + ' — ' + bySess[sn].map(function (b) {
-            return escapeHtmlWs(b.facility) + ' · W' + b.week_number + ' ' + escapeHtmlWs(b.hour) + ' (' + escapeHtmlWs(b.class_group) + ')';
-          }).join(', ');
-        }).join(' &nbsp;·&nbsp; ');
+        rowOrder.sort(function (ka, kb) {
+          var a = byRow[ka], b = byRow[kb];
+          return (a.session - b.session) || (a.week - b.week) || String(a.hour).localeCompare(String(b.hour));
+        });
+        var h2 = '<strong>' + brandIconImg('location', 'ag-icon') + ' Facilities booked:</strong>';
+        h2 += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Session</th><th>Week</th><th>Hour</th>';
+        facilities.forEach(function (f) { h2 += '<th>' + escapeHtmlWs(f) + '</th>'; });
+        h2 += '</tr></thead><tbody>';
+        rowOrder.forEach(function (rowKey) {
+          var row = byRow[rowKey];
+          h2 += '<tr><td>S' + row.session + '</td><td>W' + row.week + '</td><td>' + escapeHtmlWs(row.hour) + '</td>';
+          facilities.forEach(function (f) {
+            var groups = row.byFacility[f];
+            h2 += '<td>' + (groups ? escapeHtmlWs(groups.join(', ')) : '') + '</td>';
+          });
+          h2 += '</tr>';
+        });
+        h2 += '</tbody></table></div>';
         strip.innerHTML = h2;
         strip.hidden = false;
       })
