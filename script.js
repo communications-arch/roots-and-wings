@@ -5499,10 +5499,16 @@
     var collapsed = signupAllKidsSaved(s) && !_signupPickerOpen;
     if (!live || collapsed) {
       card.style.display = 'none';
-      // If the picker modal is open when the last kid saves, tell the
-      // parent they're done instead of leaving stale pickers behind.
+      // If the picker modal is open when the window state changes (last
+      // kid saves, or sign-ups close/aren't open), tell the parent instead
+      // of leaving the modal stuck on its initial "Loading…" placeholder
+      // (bug log #273).
       var mbDone = document.getElementById('pm-signup-modal-body');
-      if (mbDone && collapsed) mbDone.innerHTML = '<p class="ws-empty">✓ Every kid’s picks are saved — you’re all set. Edit anytime from the Kid Schedule card.</p>';
+      if (mbDone) {
+        mbDone.innerHTML = collapsed
+          ? '<p class="ws-empty">✓ Every kid’s picks are saved — you’re all set. Edit anytime from the Kid Schedule card.</p>'
+          : '<p class="ws-empty">Sign-ups aren’t currently open for Session ' + escapeHtml(String((s && s.session) || '')) + '.</p>';
+      }
       return;
     }
     card.style.display = '';
