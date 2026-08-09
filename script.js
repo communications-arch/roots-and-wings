@@ -9032,6 +9032,7 @@
     if (ages) html += '<span class="elective-age-pill">' + escapeHtml(ages) + '</span>';
     html += '</div>';
     if (e.scheduled_hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
+    if (e.open_to_teen_assistant) html += '<span class="elective-both-badge">Cedars/Pigeons helper OK</span>';
     if (e.description && e.description !== 'TBD') html += '<p class="elective-card-desc">' + escapeHtml(e.description) + '</p>';
     var leaderHtml = highlightIfMe(e.teacher || '', myNames);
     var assistHtml = helperNames.length ? ' + ' + helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') : '';

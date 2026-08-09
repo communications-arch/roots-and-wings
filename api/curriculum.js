@@ -1088,6 +1088,7 @@ module.exports = async function handler(req, res) {
                      c.submitted_by_name, c.submitted_by_email, c.co_teachers,
                      c.age_groups, c.age_groups_other, c.max_students, c.assistant_count,
                      c.scheduled_session, c.scheduled_hour, c.scheduled_age_range, c.scheduled_room,
+                     c.open_to_teen_assistant,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
                        WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
                           OR LOWER(p.personal_email) = LOWER(c.submitted_by_email)
@@ -1163,7 +1164,8 @@ module.exports = async function handler(req, res) {
             max_students: r.max_students || 0,
             scheduled_hour: r.scheduled_hour || (isAM ? 'AM' : ''),
             scheduled_age_range: r.scheduled_age_range || '',
-            scheduled_room: r.scheduled_room || ''
+            scheduled_room: r.scheduled_room || '',
+            open_to_teen_assistant: !!r.open_to_teen_assistant
           });
         });
         approvalRows.forEach(r => {
