@@ -2152,6 +2152,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS role_interest_role_person_idx
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMPTZ;
 ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS withdrawn_by TEXT NOT NULL DEFAULT '';
 
+-- #241 (2026-08-10): Membership "Move to waitlist" — a SOFTER sibling of
+-- withdrawal. A waitlisted family isn't actively enrolled (their kid seats
+-- are freed and kid_enrollments.status = 'waitlisted' for the season) but
+-- is NOT withdrawn — they can be restored or later withdrawn. Mirrors the
+-- #44 withdrawn_at/by stamp exactly. waitlisted_by records which director
+-- applied it. (kid_enrollments.status is free-text — no CHECK to widen.)
+-- NOTE: distinct from the TOURS 'waitlisted' status (prospective families,
+-- tours.status) — this stamps member_profiles; that stamps tours.
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS waitlisted_at TIMESTAMPTZ;
+ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS waitlisted_by TEXT NOT NULL DEFAULT '';
+
 -- #45 (2026-07-20): inquiry-form anti-spam. Screened Contact-Us
 -- submissions land in a hidden, rescuable 'junk' bucket (tours.status =
 -- 'junk' — free-text column, no CHECK) instead of vanishing;

@@ -13432,6 +13432,9 @@
     if (state === 'resent') return '<span class="ws-wv-resent">Resent</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'declined') return '<span class="ws-wv-declined">Declined</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     if (state === 'withdrawn') return '<span class="ws-wv-declined">Withdrawn</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
+    // #241 — waitlisted is a softer "on hold" state; amber pill (the
+    // pending/waiting tone) distinguishes it from the red withdrawn pill.
+    if (state === 'waitlisted') return '<span class="ws-wv-pending">Waitlisted</span>' + (stamp ? ' <span class="ws-wv-stamp">' + escapeHtmlWs(stamp) + '</span>' : '');
     return '<span class="ws-wv-pending">Pending</span>';
   }
 
@@ -15063,10 +15066,11 @@
       render: function (r) { return escapeHtmlWs(r.main_learning_coach); }
     },
     { key: 'payment_status', label: 'Paid', type: 'string',
-      sortValue: function (r) { return (r.declined_at || r.withdrawn_at) ? '0' : (String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'); },
+      sortValue: function (r) { return (r.declined_at || r.withdrawn_at || r.waitlisted_at) ? '0' : (String(r.payment_status || '').toLowerCase() === 'paid' ? 'z' : 'a'); },
       render: function (r) {
         if (r.declined_at) return renderStatusPill('declined', r.declined_at);
         if (r.withdrawn_at) return renderStatusPill('withdrawn', r.withdrawn_at);
+        if (r.waitlisted_at) return renderStatusPill('waitlisted', r.waitlisted_at);
         var ok = String(r.payment_status || '').toLowerCase() === 'paid';
         return renderStatusPill(ok ? 'paid' : 'pending', null);
       }
@@ -15117,9 +15121,13 @@
         // Withdrawn = terminal here (no un-withdraw tool yet) — nothing
         // sensible to offer on the row.
         if (r.withdrawn_at && !r.declined_at) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Waitlisted rows stay actionable (they can still be withdrawn),
+        // but the "Move to waitlist" option itself is hidden once a family
+        // is already waitlisted (#241).
         var opts = r.declined_at
           ? '<option value="undecline">Undo decline&hellip;</option>'
           : '<option value="switch">Switch a kid’s schedule&hellip;</option>'
+            + (r.waitlisted_at ? '' : '<option value="waitlist">Move to waitlist&hellip;</option>')
             + '<option value="withdraw">Withdraw family&hellip;</option>'
             + '<option value="decline">Decline registration&hellip;</option>';
         return '<div class="ws-srt-actions">'
@@ -15139,7 +15147,7 @@
   // Pending row-action state — set when the Membership Director picks an
   // option from a row's Actions dropdown, cleared on confirm/cancel.
   // Drives the fields/confirm UI at the top of that row's expansion.
-  var _membershipPendingAction = null; // { regId, type: 'decline' | 'undecline' | 'switch' | 'withdraw' }
+  var _membershipPendingAction = null; // { regId, type: 'decline' | 'undecline' | 'switch' | 'withdraw' | 'waitlist' }
 
   function showMembershipReportModal(opts) {
     // Preserve the user's filter across closes/reopens unless the
@@ -15206,9 +15214,11 @@
       // because the report showed the registration untouched).
       var declinedCount = regs.filter(function (r) { return !!r.declined_at; }).length;
       var withdrawnCount = regs.filter(function (r) { return !r.declined_at && !!r.withdrawn_at; }).length;
+      var waitlistedCount = regs.filter(function (r) { return !r.declined_at && !r.withdrawn_at && !!r.waitlisted_at; }).length;
       if (_membershipFilter === 'declined' && declinedCount === 0) _membershipFilter = 'all';
       if (_membershipFilter === 'withdrawn' && withdrawnCount === 0) _membershipFilter = 'all';
-      var activeRegs = regs.filter(function (r) { return !r.declined_at && !r.withdrawn_at; });
+      if (_membershipFilter === 'waitlisted' && waitlistedCount === 0) _membershipFilter = 'all';
+      var activeRegs = regs.filter(function (r) { return !r.declined_at && !r.withdrawn_at && !r.waitlisted_at; });
       var total = activeRegs.length;
       var paidCount = activeRegs.filter(function (r) { return String(r.payment_status || '').toLowerCase() === 'paid'; }).length;
       var pendingCount = total - paidCount;
@@ -15227,6 +15237,7 @@
       // Modal meta line \u2014 total registrations (+ declined, when any).
       var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
       if (metaEl) metaEl.textContent = total + ' registration' + (total === 1 ? '' : 's')
+        + (waitlistedCount > 0 ? ' \u00b7 ' + waitlistedCount + ' waitlisted' : '')
         + (withdrawnCount > 0 ? ' \u00b7 ' + withdrawnCount + ' withdrawn' : '')
         + (declinedCount > 0 ? ' \u00b7 ' + declinedCount + ' declined' : '');
 
@@ -15256,7 +15267,10 @@
         h += countPill('am',      _membershipTrackFilter === 'am',   'ws-track-count', kidsAm + ' Kids AM only',    'Show only AM-only families');
         h += countPill('pm',      _membershipTrackFilter === 'pm',   'ws-track-count', kidsPm + ' Kids PM only',    'Show only PM-only families');
         h += countPill('both',    _membershipTrackFilter === 'both', 'ws-track-count', kidsBoth + ' Kids Both',     'Show only AM + PM families');
-        // Withdrawn / Declined pills only exist when something's behind them.
+        // Waitlisted / Withdrawn / Declined pills only exist when something's behind them.
+        if (waitlistedCount > 0) {
+          h += countPill('waitlisted', _membershipFilter === 'waitlisted', 'ws-wv-pending', waitlistedCount + ' Waitlisted', 'Show only waitlisted families');
+        }
         if (withdrawnCount > 0) {
           h += countPill('withdrawn', _membershipFilter === 'withdrawn', 'ws-wv-declined', withdrawnCount + ' Withdrawn', 'Show only withdrawn families');
         }
@@ -15281,7 +15295,7 @@
         var btn = e.target.closest('[data-mfilter]');
         if (!btn) return;
         var f = btn.getAttribute('data-mfilter');
-        if (f === 'paid' || f === 'pending' || f === 'declined' || f === 'withdrawn') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
+        if (f === 'paid' || f === 'pending' || f === 'declined' || f === 'withdrawn' || f === 'waitlisted') _membershipFilter = (_membershipFilter === f) ? 'all' : f;
         else if (f === 'new')               _membershipNewFilter = (_membershipNewFilter === 'new') ? 'all' : 'new';
         else                                _membershipTrackFilter = (_membershipTrackFilter === f) ? 'all' : f;
         renderCounts();
@@ -15303,7 +15317,9 @@
             if (!r.declined_at) return false;
           } else if (_membershipFilter === 'withdrawn') {
             if (!(r.withdrawn_at && !r.declined_at)) return false;
-          } else if (r.declined_at || r.withdrawn_at) {
+          } else if (_membershipFilter === 'waitlisted') {
+            if (!(r.waitlisted_at && !r.declined_at && !r.withdrawn_at)) return false;
+          } else if (r.declined_at || r.withdrawn_at || r.waitlisted_at) {
             if (_membershipFilter !== 'all') return false;
             if (_membershipNewFilter !== 'all' || _membershipTrackFilter !== 'all') return false;
             return true;
@@ -15329,7 +15345,8 @@
                 { value: 'all',     label: 'Any',     count: total },
                 { value: 'paid',    label: 'Paid',    count: paidCount },
                 { value: 'pending', label: 'Pending', count: pendingCount }
-              ].concat(withdrawnCount > 0 ? [{ value: 'withdrawn', label: 'Withdrawn', count: withdrawnCount }] : [])
+              ].concat(waitlistedCount > 0 ? [{ value: 'waitlisted', label: 'Waitlisted', count: waitlistedCount }] : [])
+               .concat(withdrawnCount > 0 ? [{ value: 'withdrawn', label: 'Withdrawn', count: withdrawnCount }] : [])
                .concat(declinedCount > 0 ? [{ value: 'declined', label: 'Declined', count: declinedCount }] : []),
               current: _membershipFilter,
               onChange: function (v) { _membershipFilter = v; renderCounts(); renderTable(); }
@@ -15351,7 +15368,7 @@
           initialSort: { key: 'created_at', dir: 'desc' },
           expandable: true,
           renderDetail: renderMembershipRegDetail,
-          rowClass: function (r) { return (r.declined_at || r.withdrawn_at) ? 'ws-srt-row-declined' : ''; }
+          rowClass: function (r) { return (r.declined_at || r.withdrawn_at || r.waitlisted_at) ? 'ws-srt-row-declined' : ''; }
         });
       }
 
@@ -15382,7 +15399,7 @@
             if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }, 80);
         }
-        if ((actType === 'switch' || actType === 'withdraw') && !_adjustEnrollCache) {
+        if ((actType === 'switch' || actType === 'withdraw' || actType === 'waitlist') && !_adjustEnrollCache) {
           sel.disabled = true;
           fetch('/api/tour?adjust_enroll=1', { headers: rwAuthHeaders() })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -15571,6 +15588,63 @@
                 wdBtn.disabled = false;
                 wdStatus.classList.add('ws-wv-err');
                 wdStatus.textContent = 'Network error — try again.';
+              });
+          });
+          return;
+        }
+        // #241 move-to-waitlist — sibling of the withdrawal handler above
+        // (two-step confirm on the button), POSTing action:'family_waitlist'.
+        var wlBtn = e.target.closest('.ws-adjwaitlist-apply-btn');
+        if (wlBtn) {
+          var wlWrap = wlBtn.closest('.ws-reg-detail-section');
+          var wlFamEmail = wlWrap.getAttribute('data-family-email') || '';
+          var wlFamName = wlBtn.getAttribute('data-family-name') || 'this family';
+          var wlNoteEl = wlWrap.querySelector('.ws-adjwaitlist-note');
+          var wlStatus = wlWrap.querySelector('.ws-memact-status');
+          // Unlinked-registration panel: the picked family is the target
+          // (server stamps the link onto the registration, like withdraw).
+          var wlPick = wlWrap.querySelector('.ws-adjwaitlist-fam');
+          if (wlPick) {
+            if (!wlPick.value) {
+              wlStatus.classList.add('ws-wv-err');
+              wlStatus.textContent = 'Pick the matching family first.';
+              return;
+            }
+            wlFamEmail = wlPick.value;
+            wlFamName = wlPick.options[wlPick.selectedIndex].textContent || wlFamName;
+          }
+          rwArmTwoStep(wlBtn, 'move ' + wlFamName + ' to the waitlist', function () {
+            wlBtn.disabled = true;
+            wlStatus.classList.remove('ws-wv-err');
+            wlStatus.textContent = 'Moving to waitlist…';
+            fetch('/api/tour', {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({
+                kind: 'membership-adjust-enrollment', action: 'family_waitlist',
+                family_email: wlFamEmail, note: (wlNoteEl && wlNoteEl.value) || '',
+                reg_id: parseInt(wlWrap.getAttribute('data-reg-id'), 10) || undefined
+              })
+            }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
+              .then(function (rres) {
+                if (!rres.ok) {
+                  wlBtn.disabled = false;
+                  wlStatus.classList.add('ws-wv-err');
+                  wlStatus.textContent = (rres.data && rres.data.error) || 'Could not move the family to the waitlist.';
+                  return;
+                }
+                var wd2 = rres.data || {};
+                wlStatus.textContent = 'Moved to waitlist: ' + (wd2.waitlisted || wlFamName)
+                  + (wd2.kids && wd2.kids.length ? ' (kids: ' + wd2.kids.join(', ') + ')' : '')
+                  + '. Their class seats were freed and the VP was notified. They are not withdrawn — you can withdraw them later if needed.';
+                _membershipPendingAction = null;
+                _adjustEnrollCache = null;
+                if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
+                setTimeout(function () { closeDetail(); showMembershipReportModal(); }, 1600);
+              })
+              .catch(function () {
+                wlBtn.disabled = false;
+                wlStatus.classList.add('ws-wv-err');
+                wlStatus.textContent = 'Network error — try again.';
               });
           });
           return;
@@ -16432,6 +16506,43 @@
       h += '<p class="ws-decline-status ws-memact-status" aria-live="polite" style="margin-top:8px;"></p></div>';
     }
 
+    // #241 move-to-waitlist panel — sibling of the withdrawal panel above.
+    // Softer: the family isn't withdrawn, seats are freed, they may return.
+    if (_membershipPendingAction && _membershipPendingAction.regId === r.id && _membershipPendingAction.type === 'waitlist') {
+      var wlFam = _adjustFamilyForReg(r);
+      var wlFamEmail = (wlFam && wlFam.family_email) || String(r.family_email || r.email || '').toLowerCase();
+      var wlFamName = (wlFam && wlFam.family_name) || r.main_learning_coach || '';
+      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(wlFamEmail) + '" data-reg-id="' + escapeHtmlWs(String(r.id)) + '">';
+      if (!wlFam) {
+        // Same unlinked-registration path as withdraw: pick the matching
+        // family; confirming waitlists them AND links this registration.
+        var wlPickOpts = '<option value="">Pick the matching family…</option>';
+        (((_adjustEnrollCache && _adjustEnrollCache.families) || [])).forEach(function (f) {
+          if (f.withdrawn || f.waitlisted) return;
+          wlPickOpts += '<option value="' + escapeHtmlWs(f.family_email) + '">' + escapeHtmlWs(f.family_name || f.family_email) + '</option>';
+        });
+        h += '<p class="ws-reg-decline-hint"><strong>Move the ' + escapeHtmlWs(wlFamName) + ' family to the waitlist?</strong> This registration isn’t linked to a family profile by email, so pick the matching family from the directory list below — confirming waitlists them and links this registration to that family for next time. '
+          + 'Moving to the waitlist frees their Morning Builder spots and afternoon picks and marks them not-actively-enrolled, but does NOT withdraw them — they stay in the system and can return. Nothing is deleted.</p>'
+          + '<select class="sc-btn ws-adjwaitlist-fam">' + wlPickOpts + '</select>'
+          + '<input class="rd-input ws-adjwaitlist-note" type="text" maxlength="500" placeholder="Optional note (shared with the board notices)">'
+          + '<div class="rd-btn-row ws-decline-btn-row">'
+          + '<button type="button" class="sc-btn ws-adjwaitlist-apply-btn" data-family-name="' + escapeHtmlWs(wlFamName) + '">Move to waitlist</button>'
+          + '<button type="button" class="sc-btn ws-memact-cancel-btn">Cancel</button>'
+          + '</div>';
+      } else if (wlFam.waitlisted) {
+        h += '<p class="ws-reg-decline-hint">The ' + escapeHtmlWs(wlFamName) + ' family is already on the waitlist.</p>'
+          + '<div class="rd-btn-row ws-decline-btn-row"><button type="button" class="sc-btn ws-memact-cancel-btn">Close</button></div>';
+      } else {
+        h += '<p class="ws-reg-decline-hint"><strong>Move the ' + escapeHtmlWs(wlFamName) + ' family to the waitlist?</strong> A softer alternative to withdrawing: it frees their Morning Builder spots and afternoon picks and marks them not-actively-enrolled for the season, and notifies the VP of the freed coverage. It does NOT withdraw them — they stay in the system, keep their account, and can return or be withdrawn later. Nothing is deleted — data is retained.</p>'
+          + '<input class="rd-input ws-adjwaitlist-note" type="text" maxlength="500" placeholder="Optional note (shared with the board notices)">'
+          + '<div class="rd-btn-row ws-decline-btn-row">'
+          + '<button type="button" class="sc-btn ws-adjwaitlist-apply-btn" data-family-name="' + escapeHtmlWs(wlFamName) + '">Move to waitlist</button>'
+          + '<button type="button" class="sc-btn ws-memact-cancel-btn">Cancel</button>'
+          + '</div>';
+      }
+      h += '<p class="ws-decline-status ws-memact-status" aria-live="polite" style="margin-top:8px;"></p></div>';
+    }
+
     // Withdrawn banner (Erin, 2026-07-23) — who applied it and when.
     // The registration row is retained for records; the family is gone
     // from the directory and member surfaces.
@@ -16440,6 +16551,15 @@
         '<strong>Withdrawn</strong> ' + escapeHtmlWs(new Date(r.withdrawn_at).toLocaleString()) +
         (r.withdrawn_by ? ' by ' + escapeHtmlWs(r.withdrawn_by) : '') +
         '<br><em>The family left mid-season. This registration stays for the records; they no longer appear in the directory or member surfaces.</em>' +
+        '</div>';
+    }
+
+    // #241 waitlisted banner — mirror of the withdrawn banner, softer copy.
+    if (r.waitlisted_at && !r.declined_at && !r.withdrawn_at) {
+      h += '<div class="ws-reg-detail-section ws-reg-declined-banner">' +
+        '<strong>Waitlisted</strong> ' + escapeHtmlWs(new Date(r.waitlisted_at).toLocaleString()) +
+        (r.waitlisted_by ? ' by ' + escapeHtmlWs(r.waitlisted_by) : '') +
+        '<br><em>Moved to the waitlist — not actively enrolled, class seats freed — but not withdrawn. They can return this season or be withdrawn later.</em>' +
         '</div>';
     }
 

@@ -119,6 +119,19 @@ console.log('\nrenderStatusPill');
     const html = renderStatusPill('whatever', null);
     assert.ok(html.indexOf('Pending') !== -1);
   });
+  t('withdrawn renders Withdrawn pill (declined tone)', () => {
+    const html = renderStatusPill('withdrawn', '2026-04-27');
+    assert.ok(html.indexOf('ws-wv-declined') !== -1);
+    assert.ok(html.indexOf('Withdrawn') !== -1);
+    assert.ok(html.indexOf('Apr 27') !== -1);
+  });
+  t('#241 waitlisted renders Waitlisted pill (pending/amber tone) + stamp', () => {
+    const html = renderStatusPill('waitlisted', '2026-04-27');
+    assert.ok(html.indexOf('ws-wv-pending') !== -1, 'amber/pending tone');
+    assert.ok(html.indexOf('Waitlisted') !== -1);
+    assert.ok(html.indexOf('Apr 27') !== -1, 'stamp renders');
+    assert.ok(html.indexOf('Withdrawn') === -1, 'not the withdrawn pill');
+  });
 }
 
 // ── deriveWorkspaceEmail ─────────────────────────────────────────────────

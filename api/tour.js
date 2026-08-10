@@ -1748,6 +1748,47 @@ async function handleList(req, res) {
       console.error('Withdrawn overlay failed (non-fatal):', wErr);
     }
 
+    // Waitlisted overlay (#241, 2026-08-10): exact mirror of the withdrawn
+    // overlay above. Moving a family to the waitlist stamps
+    // member_profiles.waitlisted_at, never the registration — so without
+    // this the report would look untouched. Mark each row whose family is
+    // waitlisted (matched by family key OR any adult email, since old rows'
+    // emails don't always line up) so the client can badge + filter them
+    // like withdrawn rows. Degrades silently.
+    try {
+      const wlRows = await sql`
+        SELECT family_email, waitlisted_at, waitlisted_by FROM member_profiles
+        WHERE waitlisted_at IS NOT NULL
+      `;
+      if (wlRows.length) {
+        const wlKeys = wlRows.map(w => String(w.family_email || '').toLowerCase());
+        const wlAdults = await sql`
+          SELECT family_email, email, personal_email FROM people
+          WHERE LOWER(family_email) = ANY(${wlKeys})
+        `;
+        const waitlistedByEmail = {};
+        wlRows.forEach(w => {
+          const key = String(w.family_email || '').toLowerCase();
+          const stamp = { at: w.waitlisted_at, by: w.waitlisted_by || '' };
+          waitlistedByEmail[key] = stamp;
+          wlAdults.forEach(p => {
+            if (String(p.family_email || '').toLowerCase() !== key) return;
+            [p.email, p.personal_email].forEach(e => {
+              const le = String(e || '').toLowerCase().trim();
+              if (le) waitlistedByEmail[le] = stamp;
+            });
+          });
+        });
+        rows.forEach(r => {
+          const wl = waitlistedByEmail[String(r.family_email || '').toLowerCase()]
+            || waitlistedByEmail[String(r.email || '').toLowerCase()] || null;
+          if (wl) { r.waitlisted_at = wl.at; r.waitlisted_by = wl.by; }
+        });
+      }
+    } catch (wlErr) {
+      console.error('Waitlisted overlay failed (non-fatal):', wlErr);
+    }
+
     return res.status(200).json({ registrations: rows, comms_director_name: commsDirectorName, viewerCanAct });
   } catch (err) {
     console.error('Registration list error:', err);
@@ -9415,7 +9456,7 @@ async function handleAdjustEnrollmentGet(req, res) {
   try {
     const sql = getSql();
     const fams = await sql`
-      SELECT family_email, family_name, withdrawn_at FROM member_profiles
+      SELECT family_email, family_name, withdrawn_at, waitlisted_at FROM member_profiles
       ORDER BY LOWER(family_name)
     `;
     const kids = await sql`
@@ -9463,6 +9504,7 @@ async function handleAdjustEnrollmentGet(req, res) {
           family_email: key,
           family_name: f.family_name || '',
           withdrawn: !!f.withdrawn_at,
+          waitlisted: !!f.waitlisted_at,
           emails: emailsByFam[key] || [],
           kids: kidsByFam[key] || []
         };
@@ -9491,7 +9533,7 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   if (!fam) return res.status(400).json({ error: 'family_email required' });
   const sql = getSql();
   let profRows = await sql`
-    SELECT family_email, family_name, withdrawn_at FROM member_profiles
+    SELECT family_email, family_name, withdrawn_at, waitlisted_at FROM member_profiles
     WHERE LOWER(family_email) = ${fam} LIMIT 1
   `;
   if (!profRows.length) {
@@ -9500,7 +9542,7 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
     // family key (registrations.family_email is newer than many prod
     // rows). Resolve through people to the real family profile.
     profRows = await sql`
-      SELECT mp.family_email, mp.family_name, mp.withdrawn_at
+      SELECT mp.family_email, mp.family_name, mp.withdrawn_at, mp.waitlisted_at
       FROM people p
       JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
       WHERE LOWER(p.email) = ${fam} OR LOWER(p.personal_email) = ${fam}
@@ -9527,12 +9569,12 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
       }
       for (const c of cands) {
         profRows = await sql`
-          SELECT family_email, family_name, withdrawn_at FROM member_profiles
+          SELECT family_email, family_name, withdrawn_at, waitlisted_at FROM member_profiles
           WHERE LOWER(family_email) = ${c} LIMIT 1
         `;
         if (!profRows.length) {
           profRows = await sql`
-            SELECT mp.family_email, mp.family_name, mp.withdrawn_at
+            SELECT mp.family_email, mp.family_name, mp.withdrawn_at, mp.waitlisted_at
             FROM people p
             JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE LOWER(p.email) = ${c} OR LOWER(p.personal_email) = ${c}
@@ -9761,8 +9803,14 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
         UPDATE kid_enrollments SET status = 'withdrawn', updated_at = NOW(), updated_by = ${real}
         WHERE season = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
       `;
+      // Withdrawal is the harder/terminal state — it supersedes any
+      // lingering waitlist stamp so the two never both sit on the family
+      // (#241: a family moved to the waitlist and then withdrawn should
+      // read as withdrawn only).
       await sql`
-        UPDATE member_profiles SET withdrawn_at = NOW(), withdrawn_by = ${real}, updated_at = NOW(), updated_by = ${real}
+        UPDATE member_profiles SET withdrawn_at = NOW(), withdrawn_by = ${real},
+               waitlisted_at = NULL, waitlisted_by = '',
+               updated_at = NOW(), updated_by = ${real}
         WHERE LOWER(family_email) = ${fam}
       `;
       // Kid placements go now (seats freed) — data-bearing tables above
@@ -9873,6 +9921,102 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
     } catch (err) {
       console.error('adjust family_withdrawal error:', err);
       return res.status(500).json({ error: 'Could not apply the withdrawal.' });
+    }
+  }
+
+  // #241: Move a family to the waitlist — a SOFTER sibling of withdrawal.
+  // Same family resolution + role gate above; a waitlisted family isn't
+  // actively enrolled (kid seats freed, kid_enrollments.status =
+  // 'waitlisted') but is NOT withdrawn — they can return, be restored, or
+  // be withdrawn later. Notifications are lighter than withdrawal (no
+  // Google-account offboarding / billing chase — nobody is leaving yet);
+  // the VP just needs the freed-coverage heads-up.
+  if (action === 'family_waitlist') {
+    if (prof.waitlisted_at) return res.status(409).json({ error: 'This family is already on the waitlist.' });
+    try {
+      const kids = await sql`
+        SELECT id, first_name FROM kids WHERE LOWER(family_email) = ${fam} ORDER BY sort_order, id
+      `;
+      const kidIds = kids.map(k => k.id);
+      const kidNames = kids.map(k => k.first_name).filter(Boolean);
+      // Freed-coverage snapshot for the VP note (seats are freed below).
+      const morningPlacements = kidIds.length ? await sql`
+        SELECT kid_first_name, class_group FROM morning_class_assignments
+        WHERE school_year = ${DEFAULT_SEASON}
+          AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+      ` : await sql`
+        SELECT kid_first_name, class_group FROM morning_class_assignments
+        WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+      const pickRows = kidIds.length ? await sql`
+        SELECT kid_first_name FROM class_signup_picks
+        WHERE school_year = ${DEFAULT_SEASON}
+          AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+      ` : await sql`
+        SELECT kid_first_name FROM class_signup_picks
+        WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+
+      // ── Apply ──
+      await sql`
+        UPDATE kid_enrollments SET status = 'waitlisted', updated_at = NOW(), updated_by = ${real}
+        WHERE season = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}
+      `;
+      // The waitlist stamp supersedes any lingering withdrawal stamp — a
+      // family can't be both, so clear withdrawn_at as we set waitlisted_at
+      // (mirror of how withdrawal clears the waitlist stamp above).
+      await sql`
+        UPDATE member_profiles SET waitlisted_at = NOW(), waitlisted_by = ${real},
+               withdrawn_at = NULL, withdrawn_by = '',
+               updated_at = NOW(), updated_by = ${real}
+        WHERE LOWER(family_email) = ${fam}
+      `;
+      // A waitlisted family isn't actively enrolled — free their seats the
+      // same way withdrawal does (Morning Builder + afternoon picks).
+      if (kidIds.length) {
+        await sql`
+          DELETE FROM morning_class_assignments
+          WHERE school_year = ${DEFAULT_SEASON}
+            AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+        `;
+        await sql`
+          DELETE FROM class_signup_picks
+          WHERE school_year = ${DEFAULT_SEASON}
+            AND (LOWER(family_email) = ${fam} OR kid_id = ANY(${kidIds}))
+        `;
+      } else {
+        await sql`DELETE FROM morning_class_assignments WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}`;
+        await sql`DELETE FROM class_signup_picks WHERE school_year = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam}`;
+      }
+
+      // Audit row (single family-level entry), mirroring withdrawal.
+      await sql`
+        INSERT INTO enrollment_change_requests
+          (kind, family_email, kid_first_name, season, status, requested_by, decided_by, decided_at, decision_note)
+        VALUES ('family_waitlist', ${fam}, '', ${DEFAULT_SEASON},
+                'approved', ${real}, ${real}, NOW(),
+                ${'Family moved to waitlist by Membership' + (kidNames.length ? ' — kids: ' + kidNames.join(', ') : '') + (note ? ' — ' + note : '')})
+      `;
+
+      // ── Notification: VP freed-coverage heads-up (lighter than the
+      // withdrawal fan-out — the family may return this season). ──
+      try {
+        const freedList = []
+          .concat(morningPlacements.map(m => 'Morning group ' + (m.class_group || '?') + ': ' + m.kid_first_name + ' (removed)'))
+          .concat(pickRows.length ? ['Afternoon picks removed: ' + pickRows.length] : []);
+        let vpEmail = 'vicepresident@rootsandwingsindy.com';
+        try { const h = await getRoleHolderEmails(['Vice President']); if (h && h['Vice President']) vpEmail = h['Vice President']; } catch (e) { /* fallback above */ }
+        await notifyEnrollment(sql, vpEmail,
+          'Freed coverage: ' + famName + ' moved to waitlist',
+          (freedList.length ? 'Freed now — ' + freedList.join('; ') + '. ' : 'No kid placements were on the books. ')
+          + 'The ' + famName + ' family was moved to the waitlist (not withdrawn) — they may return this season, so nothing else was changed.'
+          + (note ? ' Note: ' + note : ''));
+      } catch (e) { console.error('waitlist VP notification (non-fatal):', e); }
+
+      return res.status(200).json({ ok: true, waitlisted: famName, kids: kidNames });
+    } catch (err) {
+      console.error('adjust family_waitlist error:', err);
+      return res.status(500).json({ error: 'Could not move the family to the waitlist.' });
     }
   }
 
