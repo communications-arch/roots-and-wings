@@ -2304,10 +2304,16 @@ module.exports = async function handler(req, res) {
           signedUpNames: pickNames[r.id] || [],
           signedUpDetailed: pickDetailed[r.id] || []
         });
-        // A 2-hour ('both') class is ranked under PM1 only and fills both slots.
+        // A REQUIRED 2-hour ('both') class is ranked under PM1 only and fills
+        // both slots (ranking it there reserves/covers PM2). An OPTIONAL
+        // ("one or both hours", hour_preference '2hr-optional') 2-hour class is
+        // selectable in BOTH hours independently (#282, Erin — e.g. Yearbook),
+        // so it appears in each list.
+        const isOptionalBoth = (r) => r.scheduled_hour === 'both'
+          && (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1;
         const classes = {
           PM1: classRows.filter(r => r.scheduled_hour === 'PM1' || r.scheduled_hour === 'both').map(ser),
-          PM2: classRows.filter(r => r.scheduled_hour === 'PM2').map(ser)
+          PM2: classRows.filter(r => r.scheduled_hour === 'PM2' || isOptionalBoth(r)).map(ser)
         };
         const effEmail = resolveSubmitterEmail(user, req.query.view_as);
         const fam = await resolveFamily(sql, effEmail);
