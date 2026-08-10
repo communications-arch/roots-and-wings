@@ -11801,6 +11801,14 @@
       // "same row as the Header... so they are more visible") — tap to
       // expand back into the grid.
       s += '<header class="ws-role-header"><h4>' + escapeHtml(heading) + '</h4>';
+      // #277 (Colleen): surface that private notes exist on the role header
+      // (they lived only at the bottom of the Role Overview card). Tapping
+      // the chip jumps to the notes. NOTE: these notes are stored per-device
+      // in localStorage — a true cross-device fix needs server persistence
+      // (flagged for the feature round).
+      if (opts.showNotes && roleKey && getWorkspaceNotes(roleKey).trim()) {
+        s += '<button type="button" class="ws-notes-chip" data-notes-role="' + escapeAttr(roleKey) + '" title="You have private notes for this role — tap to view">📝 My notes</button>';
+      }
       if (minimized.length > 0) {
         s += '<div class="ws-min-strip">';
         minimized.forEach(function (type) {
@@ -11996,6 +12004,14 @@
     });
     container.querySelectorAll('.ws-min-chip').forEach(function (btn) {
       btn.addEventListener('click', function () { setCardCollapsed(this.getAttribute('data-widget'), false); });
+    });
+    // #277: the header "My notes" chip jumps to (and focuses) the private
+    // notes textarea for that role.
+    container.querySelectorAll('.ws-notes-chip').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var ta = document.getElementById('ws-notes-' + this.getAttribute('data-notes-role'));
+        if (ta) { ta.scrollIntoView({ behavior: 'smooth', block: 'center' }); try { ta.focus({ preventScroll: true }); } catch (e) { ta.focus(); } }
+      });
     });
 
     // My Links: add + delete
@@ -18769,24 +18785,30 @@
     reqs.forEach(function (r) {
       var ps = pledgesByReq[r.id] || [];
       var pledged = 0;
-      ps.forEach(function (p) { pledged += (p.quantity || 0); });
+      // #276 (Colleen): a pledger got no acknowledgment — surface THEIR own
+      // pledge prominently ("✓ You pledged N"), label their own line "You",
+      // and flip the CTA to "Pledge more" so it's obvious it registered.
+      var myPledge = 0;
+      ps.forEach(function (p) { pledged += (p.quantity || 0); if (String(p.person_email || '').toLowerCase() === me) myPledge += (p.quantity || 0); });
       var progress = (r.quantity != null)
         ? pledged + ' of ' + r.quantity + ' pledged'
         : (pledged ? pledged + ' pledged (open-ended)' : 'open-ended');
       h += '<div class="ws-lending-row" style="align-items:flex-start;"><span class="ws-lending-main">'
         + '<strong>' + escapeHtml(r.item_text) + '</strong>'
         + (r.status === 'fulfilled' ? ' <span class="ws-wv-ok" style="font-weight:700;">✓ covered</span>' : '')
+        + (myPledge > 0 ? ' <span class="ws-wv-ok" style="font-weight:700;">✓ You pledged ' + myPledge + '</span>' : '')
         + '<span class="ws-lending-sub">' + escapeHtml(r.requested_by_name || r.requested_by_email) + ' · ' + progress + '</span>'
         + (r.note ? '<span class="ws-lending-sub">' + escapeHtml(r.note) + '</span>' : '');
       ps.forEach(function (p) {
-        h += '<span class="ws-lending-sub">🤝 ' + escapeHtml(p.person_name || p.person_email) + ' — ' + p.quantity
-          + (String(p.person_email || '').toLowerCase() === me ? ' <button type="button" class="sc-btn sc-btn-del lend-req-unpledge" data-id="' + p.id + '" title="Remove your pledge">×</button>' : '')
+        var mine = String(p.person_email || '').toLowerCase() === me;
+        h += '<span class="ws-lending-sub"' + (mine ? ' style="font-weight:600;color:var(--color-primary-dark);"' : '') + '>🤝 ' + (mine ? 'You' : escapeHtml(p.person_name || p.person_email)) + ' — ' + p.quantity
+          + (mine ? ' <button type="button" class="sc-btn sc-btn-del lend-req-unpledge" data-id="' + p.id + '" title="Remove your pledge">×</button>' : '')
           + '</span>';
       });
       h += '</span><span class="ws-lending-actions" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
       if (r.status !== 'fulfilled') {
         h += '<input class="cl-input lend-req-pqty" data-id="' + r.id + '" type="number" min="1" max="999" value="1" style="width:64px;">';
-        h += '<button type="button" class="volunteer-cta lend-req-pledge" data-id="' + r.id + '">' + DUTY_ICONS.volunteer + ' I can help</button>';
+        h += '<button type="button" class="volunteer-cta lend-req-pledge" data-id="' + r.id + '">' + DUTY_ICONS.volunteer + (myPledge > 0 ? ' Pledge more' : ' I can help') + '</button>';
       }
       if (String(r.requested_by_email || '').toLowerCase() === me) {
         h += '<button type="button" class="sc-btn lend-req-close" data-id="' + r.id + '">Close</button>';
@@ -36755,7 +36777,16 @@
           var a = byRow[ka], b = byRow[kb];
           return (a.session - b.session) || (a.week - b.week) || String(a.hour).localeCompare(String(b.hour));
         });
-        var h2 = '<strong>' + brandIconImg('location', 'ag-icon') + ' Facilities booked:</strong>';
+        // #270 (Colleen): the always-open table read as "way too busy"
+        // pinned above the builder. Collapse it behind a one-line summary
+        // that expands on click; Lyndsey's table (#272) is the expanded view.
+        var facCount = facilities.length;
+        var bookingCount = d.bookings.length;
+        var h2 = '<button type="button" class="sb-fac-toggle" id="sbFacToggle" aria-expanded="false">'
+          + brandIconImg('location', 'ag-icon') + ' <strong>' + bookingCount + ' facility booking' + (bookingCount === 1 ? '' : 's') + '</strong>'
+          + ' <span class="sb-fac-toggle-hint">' + escapeHtmlWs(facilities.join(' · ')) + '</span>'
+          + ' <span class="sb-fac-caret">▸</span></button>';
+        h2 += '<div class="sb-fac-detail" id="sbFacDetail" hidden>';
         h2 += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th>Session</th><th>Week</th><th>Hour</th>';
         facilities.forEach(function (f) { h2 += '<th>' + escapeHtmlWs(f) + '</th>'; });
         h2 += '</tr></thead><tbody>';
@@ -36768,9 +36799,19 @@
           });
           h2 += '</tr>';
         });
-        h2 += '</tbody></table></div>';
+        h2 += '</tbody></table></div></div>';
         strip.innerHTML = h2;
         strip.hidden = false;
+        var facToggle = document.getElementById('sbFacToggle');
+        if (facToggle) facToggle.addEventListener('click', function () {
+          var det = document.getElementById('sbFacDetail');
+          if (!det) return;
+          var open = det.hidden;
+          det.hidden = !open;
+          this.setAttribute('aria-expanded', open ? 'true' : 'false');
+          var caret = this.querySelector('.sb-fac-caret');
+          if (caret) caret.textContent = open ? '▾' : '▸';
+        });
       })
       .catch(function () { /* strip stays hidden */ });
     overlay.querySelectorAll('.sb-period-pill').forEach(function (btn) {
