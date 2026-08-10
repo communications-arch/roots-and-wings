@@ -13687,11 +13687,14 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   white-space: nowrap;
   vertical-align: middle;
 }
+/* #287 (Colleen): the 2-hour card backing was teal, too close to the green
+   "in your age range" tint — it read as "all ages". Light yellow instead, so
+   2-hour reads as its own thing (the badge still names it). */
 .signup-class-2hr {
-  border-color: var(--color-teal);
-  background: rgba(var(--color-teal-rgb), 0.07);
+  border-color: var(--color-accent-dark);
+  background: rgba(var(--color-accent-light-rgb), 0.30);
 }
-.signup-class-2hr.signup-class-sel { background: rgba(var(--color-teal-rgb), 0.14); }
+.signup-class-2hr.signup-class-sel { background: rgba(var(--color-accent-light-rgb), 0.5); }
 /* #281 (Colleen): distinguish a "one or both hours" (optional) 2-hour class
    from a "both required" one — olive badge vs the teal required badge. */
 .signup-2hr-tag.signup-2hr-optional { background: var(--color-leaf); }

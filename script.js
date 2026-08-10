@@ -5756,7 +5756,11 @@
         // null = age/range unknown (no judgement); true = fits; false = clearly outside.
         var fit = fitsKid(kidBands, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
-        var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
+        // #290 (Lyndsey): drop the "(ages)" parentheticals after the grove
+        // names in the meta line to de-clutter — the full ageText still drives
+        // the fitsKid highlight above.
+        var ageTextDisplay = String(ageText).replace(/\s*\([^)]*\)/g, '').replace(/\s+,/g, ',').trim();
+        var bits = [ageTextDisplay, c.room, c.leader ? ('led by ' + c.leader) : ''];
         var meta = bits.filter(Boolean).join(' · ');
         // #279/#280 follow-up (Erin): 2-hour classes were easy to miss (only
         // a buried "fills both hours" in the meta line), so a parent could
@@ -5772,8 +5776,9 @@
           h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
+        // #288 (Lyndsey): no ✓ next to in-age-range classes — it read as
+        // "selected". The green card tint alone signals age fit now.
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
-             (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
              escapeHtml(c.name) + '</span>' +
              (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
