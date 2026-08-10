@@ -2121,6 +2121,46 @@ module.exports = async function handler(req, res) {
             WHERE ca.cleaning_area_id = a.id AND ca.session_number = ${vmSess} AND ca.school_year = ${vmYear})
           ORDER BY a.sort_order, a.id`;
         const cleaning_open = openAreas.map(a => ({ id: a.id, area: a.area_name, floor: a.floor_key || '', floater: a.floor_key === 'floater' }));
+        // #289 (Colleen): Everyone's Sign-ups shows, for each AFTERNOON class,
+        // the kids signed up in it (per hour) — the grid was adults-only. Names
+        // are the kid's goes-by + family surname, matching the parent picker;
+        // enrollment-scoped like the picker's demand counts. Best-effort.
+        try {
+          const pmPickRows = await sql`
+            SELECT p.class_submission_id AS cid, p.hour,
+                   COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first_name,
+                   COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS last_name,
+                   MIN(p.rank) AS rnk, BOOL_OR(p.as_assistant) AS asst
+            FROM class_signup_picks p
+            JOIN kids k
+              ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
+              OR (p.kid_id IS NULL AND LOWER(k.family_email) = LOWER(p.family_email)
+                  AND LOWER(k.first_name) = LOWER(p.kid_first_name))
+            LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
+            WHERE p.school_year = ${vmYear} AND p.session_number = ${vmSess}
+              AND p.hour IN ('PM1', 'PM2')
+              AND (p.kid_id IS NULL OR EXISTS (
+                SELECT 1 FROM kid_enrollments e
+                WHERE e.kid_id = p.kid_id AND e.season = ${vmYear} AND e.status = 'enrolled'))
+            GROUP BY p.class_submission_id, p.hour, k.nickname, k.last_name, mp.family_name, p.kid_first_name
+          `;
+          const kidsByClassHour = {};
+          pmPickRows.forEach(r => {
+            const nm = ((r.first_name || '') + ' ' + (r.last_name || '')).trim();
+            if (!nm) return;
+            const key = r.cid + '|' + r.hour;
+            (kidsByClassHour[key] = kidsByClassHour[key] || []).push({ name: nm, rank: parseInt(r.rnk, 10) || 1, assistant: r.asst === true });
+          });
+          ['PM1', 'PM2'].forEach(b => {
+            (blocks[b].classes || []).forEach(entry => {
+              const list = (kidsByClassHour[entry.id + '|' + b] || []).slice()
+                .sort((a, c) => (a.rank - c.rank) || a.name.localeCompare(c.name));
+              entry.kids = list.map(x => x.name + (x.assistant ? ' (assistant)' : ''));
+            });
+          });
+        } catch (pmKidsErr) {
+          console.error('volunteer-matrix PM kids (non-fatal):', pmKidsErr);
+        }
         return res.status(200).json({
           school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open,
           me: { email: actingEmail, name: meName, is_board: await isBoardMember(actingEmail) }

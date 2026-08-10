@@ -7050,7 +7050,10 @@
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
         var isAmBk = bk.indexOf('AM') === 0;
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th></tr></thead><tbody>';
+        // #289 (Colleen): afternoon blocks get a "Kids signed up" column so
+        // Everyone's Sign-ups isn't adults-only (refreshes when the modal is
+        // reopened or the session pill is switched).
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th>' + (isAmBk ? '' : '<th>Kids signed up</th>') + '</tr></thead><tbody>';
         // Sections are per hour (Erin, 2026-07-11) — a both-hours class
         // appears in each hour's section, so no extra stacking is needed;
         // morning rows sort in age-group order.
@@ -7075,7 +7078,9 @@
           var gridLead = escapeHtmlWs(c.teacher)
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
           h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
-            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td></tr>';
+            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td>'
+            + (isAmBk ? '' : '<td>' + ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none yet</span>') + '</td>')
+            + '</tr>';
         });
         h += '</tbody></table></div>';
       }
