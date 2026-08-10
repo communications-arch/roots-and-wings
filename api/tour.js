@@ -5794,15 +5794,22 @@ async function handleMorningBuilderGet(req, res) {
       if (derived && !regMetaByEmail[String(derived).toLowerCase()]) regMetaByEmail[String(derived).toLowerCase()] = meta;
     });
 
+    // #274 fix (2026-08-10): base the roster on the `kids` table with a
+    // LEFT JOIN to kid_enrollments, not an INNER JOIN — kid_enrollments was
+    // never backfilled for existing kids, so the INNER JOIN dropped almost
+    // everyone (the builder showed ~3 kids while the Directory showed 84).
+    // A missing enrollment row degrades to "enrolled, use the kids table's
+    // schedule"; only an EXPLICIT not_returning/withdrawn enrollment hides a
+    // kid. Mirrors the Directory read and the #269 afternoon-picker fix.
     const enrollRows = await sql`
-      SELECT e.kid_id, e.family_email, e.schedule AS enr_schedule,
+      SELECT k.id AS kid_id, LOWER(k.family_email) AS family_email,
+             COALESCE(e.schedule, k.schedule, 'all-day') AS enr_schedule,
              k.first_name, k.last_name, k.nickname, k.birth_date, k.allergies
-      FROM kid_enrollments e
-      JOIN kids k ON k.id = e.kid_id
-      WHERE e.season = ${schoolYear}
-        AND e.status = 'enrolled'
-        AND e.schedule IN ('all-day', 'morning')
-      ORDER BY e.family_email, k.sort_order, k.id
+      FROM kids k
+      LEFT JOIN kid_enrollments e ON e.kid_id = k.id AND e.season = ${schoolYear}
+      WHERE COALESCE(e.status, 'enrolled') = 'enrolled'
+        AND COALESCE(e.schedule, k.schedule, 'all-day') IN ('all-day', 'morning')
+      ORDER BY family_email, k.sort_order, k.id
     `;
     const seenKidIds = new Set();
     enrollRows.forEach(er => {

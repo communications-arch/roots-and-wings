@@ -26145,7 +26145,17 @@
     html += '<div class="cls-field">';
     html += '<label class="cls-label">How many assistants do you need? <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group cls-cb-inline">';
-    ASSISTANT_COUNT_VALUES.forEach(function (n) { html += checkbox('assistant_count', String(n), n + ' Classroom assistant' + (n > 1 ? 's' : '')); });
+    // #271 (Colleen): single-select RADIOS, not checkboxes. The old
+    // checkbox group let a reviewer pick "2" while "1" stayed checked,
+    // saving [1, 2]; every open-spot calc uses MIN(assistant_count), so the
+    // class still wanted only 1 and the added spot never surfaced. A radio
+    // yields exactly [n]. Pre-select the MAX of a legacy multi-value row.
+    var curCounts = (cur.assistant_count || []).map(function (v) { return parseInt(v, 10); }).filter(function (v) { return !isNaN(v); });
+    var curAssist = curCounts.length ? Math.max.apply(null, curCounts) : null;
+    ASSISTANT_COUNT_VALUES.forEach(function (n) {
+      html += '<label class="cls-cb-label"><input type="radio" name="clsAssistCount" value="' + n + '"'
+        + (curAssist === n ? ' checked' : '') + '> ' + n + ' Classroom assistant' + (n > 1 ? 's' : '') + '</label>';
+    });
     html += '</div>';
     html += '<label class="cls-cb-label" style="margin-top:8px;">';
     html += '<input type="checkbox" id="clsTeenAssist"' + (cur.open_to_teen_assistant ? ' checked' : '') + '> ';
@@ -26438,7 +26448,11 @@
         hour_preference: period === 'AM'
           ? [amHourSel ? amHourSel.value : 'both']
           : collectChecked('hour_preference'),
-        assistant_count: collectChecked('assistant_count').map(function (v) { return parseInt(v, 10); }),
+        assistant_count: (function () {
+          // #271: single-select radio → exactly [n].
+          var r = document.querySelector('input[name="clsAssistCount"]:checked');
+          return r ? [parseInt(r.value, 10)] : [];
+        })(),
         co_teachers: (function () {
           // Chips + anything still typed but not yet added.
           var pending = document.getElementById('clsCoTeachers').value.trim();

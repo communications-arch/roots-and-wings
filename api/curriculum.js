@@ -2259,19 +2259,23 @@ module.exports = async function handler(req, res) {
         const pickNotes = {};
         const pickAssists = {};
         if (fam && fam.family_email) {
-          // Afternoon eligibility comes from kid_enrollments (enrollment
-          // re-key phase, 2026-07-19): the family's kids ENROLLED for the
-          // season with an all-day/afternoon schedule — mirroring the
-          // Morning Builder's kid_enrollments read. Pending / not-returning
-          // / morning-only kids no longer surface in the picker; the kids
-          // table supplies age + group metadata.
+          // Afternoon eligibility: the family's kids with an all-day /
+          // afternoon schedule and not explicitly not-returning/withdrawn.
+          // #269 fix (2026-08-10): base this on the `kids` table with a
+          // LEFT JOIN to kid_enrollments (like the Directory), not an INNER
+          // JOIN — kid_enrollments was never backfilled for existing kids,
+          // so the INNER JOIN dropped almost everyone (dev showed 0 kids;
+          // any un-backfilled prod kid would vanish too, mid-sign-up). A
+          // missing enrollment row now degrades to "enrolled, use the kids
+          // table's schedule"; only an EXPLICIT not_returning/withdrawn
+          // enrollment hides a kid.
           const kidRows = await sql`
             SELECT k.first_name, k.birth_date, k.class_group
-            FROM kid_enrollments e
-            JOIN kids k ON k.id = e.kid_id
-            WHERE e.season = ${sy} AND e.status = 'enrolled'
-              AND e.schedule IN ('all-day', 'afternoon')
-              AND LOWER(e.family_email) = LOWER(${fam.family_email})
+            FROM kids k
+            LEFT JOIN kid_enrollments e ON e.kid_id = k.id AND e.season = ${sy}
+            WHERE LOWER(k.family_email) = LOWER(${fam.family_email})
+              AND COALESCE(e.status, 'enrolled') = 'enrolled'
+              AND COALESCE(e.schedule, k.schedule, 'all-day') IN ('all-day', 'afternoon')
             ORDER BY k.sort_order, k.first_name
           `;
           // No programming under 3 (Erin, 2026-07-15): Greenhouse kids stay
