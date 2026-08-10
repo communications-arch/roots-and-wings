@@ -16114,6 +16114,16 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .evs-bring-rowlink { cursor: pointer; border-radius: 6px; }
 .evs-bring-rowlink:hover, .evs-bring-rowlink:focus-visible { background: rgba(var(--color-primary-rgb), .07); }
 
+/* #224 (Erin — diabetic child): serving size + carbs badge under a food
+   sign-up, and the side-by-side add/edit fields. */
+.evs-bring-carbs {
+  display: block; margin-top: 2px;
+  font-size: .8rem; color: var(--color-primary-dark);
+  font-weight: 600; letter-spacing: .01em;
+}
+.evs-food-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.evs-food-row .cls-field { flex: 1 1 140px; margin-bottom: 0; }
+
 /* #265 (Erin): event description in the pinned collab header. */
 .evs-head-desc { margin: 10px 0 0; color: var(--color-text); font-size: .95rem; max-width: 68ch; }
 

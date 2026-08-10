@@ -6454,6 +6454,8 @@ function eventSectionShape(s, signups) {
       name: x.person_name || x.person_email || '',
       item_text: x.item_text || '',
       note: x.note || '',
+      serving_size: x.serving_size || '',
+      carbs_per_serving: x.carbs_per_serving || '',
       created_at: x.created_at || null
     }))
   };
@@ -7109,9 +7111,14 @@ async function handleEventSignupClaim(body, req, res) {
     const itemText = String(body.item_text || '').trim().slice(0, sec.type === 'board' ? 1000 : 200);
     if (!itemText) return res.status(400).json({ error: sec.type === 'board' ? 'Type a message first.' : 'Say what you’ll bring.' });
     const note = String(body.note || '').trim().slice(0, 300);
+    // #224 (Erin): food bring-lists carry serving size + approx carbs per
+    // serving. Free text, short. Empty for non-food lists (client only
+    // shows the fields on food sections) — stored regardless, harmless.
+    const servingSize = String(body.serving_size || '').trim().slice(0, 60);
+    const carbsPer = String(body.carbs_per_serving || '').trim().slice(0, 40);
     await sql`
-      INSERT INTO event_section_signups (section_id, person_email, person_name, item_text, note)
-      VALUES (${sectionId}, ${email}, ${who.name}, ${itemText}, ${note})
+      INSERT INTO event_section_signups (section_id, person_email, person_name, item_text, note, serving_size, carbs_per_serving)
+      VALUES (${sectionId}, ${email}, ${who.name}, ${itemText}, ${note}, ${servingSize}, ${carbsPer})
     `;
     // #226: a Discussion post pings the event committee + everyone who has
     // posted in this Discussion — COALESCED to one unread bell row per
@@ -7203,6 +7210,8 @@ async function handleEventSignupUpdate(body, req, res) {
   const id = parseInt(body.id, 10);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
   const note = String(body.note || '').trim().slice(0, 300);
+  const servingSize = String(body.serving_size || '').trim().slice(0, 60);
+  const carbsPer = String(body.carbs_per_serving || '').trim().slice(0, 40);
   try {
     const sql = getSql();
     const rows = await sql`
@@ -7222,7 +7231,7 @@ async function handleEventSignupUpdate(body, req, res) {
     if (!isMine && !(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
       return res.status(403).json({ error: 'You can only edit your own sign-up.' });
     }
-    await sql`UPDATE event_section_signups SET item_text = ${itemText}, note = ${note} WHERE id = ${id}`;
+    await sql`UPDATE event_section_signups SET item_text = ${itemText}, note = ${note}, serving_size = ${servingSize}, carbs_per_serving = ${carbsPer} WHERE id = ${id}`;
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-signup-update error:', err);

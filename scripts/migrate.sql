@@ -2508,6 +2508,14 @@ ALTER TABLE special_events ADD COLUMN IF NOT EXISTS checklist_hidden BOOLEAN NOT
 ALTER TABLE event_section_signups ADD COLUMN IF NOT EXISTS shift_index INTEGER;
 ALTER TABLE group_section_signups ADD COLUMN IF NOT EXISTS shift_index INTEGER;
 
+-- 2026-08-10 (#224, Erin — diabetic child): food bring-lists carry a
+-- serving size and approximate carbs-per-serving on each sign-up, shown
+-- so families managing carbs can plan. Text (not numeric) — members type
+-- "1 cookie", "½ cup", "~30g" freely. Only surfaced on food-category
+-- lists; harmless/empty elsewhere.
+ALTER TABLE event_section_signups ADD COLUMN IF NOT EXISTS serving_size TEXT DEFAULT '';
+ALTER TABLE event_section_signups ADD COLUMN IF NOT EXISTS carbs_per_serving TEXT DEFAULT '';
+
 -- 2026-08-06 (#215, Lyndsey): afternoon Class Builder rooms in building
 -- order, not alphabetical. The rooms API already serves
 -- ORDER BY sort_order, LOWER(name) — nothing had ever set sort_order, so

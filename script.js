@@ -5609,30 +5609,18 @@
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
-        // A ranked 2-hour ('both') class fills PM Hour 2 as well — pin it
-        // there AND reserve the SAME choice number in Hour 2 (Erin,
-        // 2026-07-15: both-class as 1st choice → Hour 2 offers only the
-        // 2nd-choice slot, and vice versa).
+        // #279/#280 (Colleen, 2026-08-10): a ranked 2-hour ('both') class is
+        // surfaced in PM Hour 2 as a reassurance (it fills that hour if the
+        // child is placed), but PM Hour 2 ranking stays INDEPENDENT — no rank
+        // is reserved/hidden and no PM2 pick is silently shifted. The old
+        // reservation hid choice "1" and collapsed the surviving pick to 1.
         var pm1Map = (s.working[kid] && s.working[kid].PM1) || {};
-        var pm2Map = (s.working[kid] && s.working[kid].PM2) || {};
         var pinnedBoth = [];
-        var bothRankTaken = {};
         (s.classes.PM1 || []).forEach(function (c) {
-          if (c.hour === 'both' && pm1Map[c.id]) {
-            pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
-            bothRankTaken[pm1Map[c.id]] = true;
-          }
-        });
-        // Shift any PM2 pick off a number the 2-hour class now occupies.
-        Object.keys(pm2Map).forEach(function (cid2) {
-          if (bothRankTaken[pm2Map[cid2]]) {
-            var alt = pm2Map[cid2] === 1 ? 2 : 1;
-            var altBusy = bothRankTaken[alt] || Object.keys(pm2Map).some(function (k2) { return k2 !== cid2 && pm2Map[k2] === alt; });
-            if (altBusy) delete pm2Map[cid2]; else pm2Map[cid2] = alt;
-          }
+          if (c.hour === 'both' && pm1Map[c.id]) pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
         });
         h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth, bothRankTaken);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -5702,16 +5690,21 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth, excludeRanks) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
-    // 2-hour classes ranked in PM Hour 1 occupy this hour too — at the
-    // same choice number, so the dropdowns below only offer the other slot.
+    // #279/#280 (Colleen, 2026-08-10): a 2-hour ('both') class is ranked
+    // under PM Hour 1 and — if the child is placed in it — fills PM Hour 2
+    // as well. Show that here as reassurance, but keep PM Hour 2 ranking
+    // INDEPENDENT (its own 1st/2nd choice). The old code RESERVED the same
+    // choice number in this hour: it hid "1" from the dropdown and, because
+    // ranks are stored as array position, the surviving "2" silently
+    // collapsed to choice 1 on save — the exact bug Colleen reported.
     if (pinnedBoth && pinnedBoth.length) {
       pinnedBoth.slice().sort(function (a, b) { return a.rank - b.rank; }).forEach(function (p) {
-        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class: also your choice ' + p.rank + ' for this hour</div>';
+        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class: if your child is placed in it, it covers PM Hour 2 too. Still add a backup below in case they don’t get it.</div>';
       });
     }
     if (classes.length === 0) {
@@ -5734,7 +5727,7 @@
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
         h += '<option value="">–</option>';
         for (var r = 1; r <= maxRank; r++) {
-          if (excludeRanks && excludeRanks[r]) continue; // slot held by a 2-hour class
+          // #279/#280: each hour ranks independently — always offer 1..N.
           h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
@@ -28033,6 +28026,9 @@
     } else if (s.type === 'board') {
       h += renderDiscussionBody(s, viewerEmail, canEdit, ACT_REMOVE, FORM_KEY);
     } else {
+      // #224 (Erin — diabetic child): food bring-lists carry serving size +
+      // approx carbs per serving, shown under each item so families can plan.
+      var isFood = (s.type === 'signup') && (cfg.category === 'food');
       if ((s.signups || []).length) {
         h += '<ul class="ws-part-recap">';
         s.signups.forEach(function (c) {
@@ -28046,12 +28042,20 @@
             h += '<li class="evs-bring-rowlink" role="button" tabindex="0" data-resource-action="' + ACT_EDIT + '" data-signup-id="' + c.id
               + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '')
               + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '" data-item="' + escapeAttr(c.item_text || '')
-              + '" data-note="' + escapeAttr(c.note || '') + '" title="Edit or remove your sign-up">';
+              + '" data-note="' + escapeAttr(c.note || '') + '"'
+              + (isFood ? ' data-food="1" data-serving="' + escapeAttr(c.serving_size || '') + '" data-carbs="' + escapeAttr(c.carbs_per_serving || '') + '"' : '')
+              + ' title="Edit or remove your sign-up">';
           } else {
             h += '<li>';
           }
           h += escapeHtmlWs(c.name) + ' — ' + itemHtml
             + (c.note ? ' <em>(' + escapeHtmlWs(c.note) + ')</em>' : '');
+          if (isFood && (c.serving_size || c.carbs_per_serving)) {
+            var scParts = [];
+            if (c.serving_size) scParts.push('Serving: ' + escapeHtmlWs(c.serving_size));
+            if (c.carbs_per_serving) scParts.push('Carbs/serving: ' + escapeHtmlWs(c.carbs_per_serving));
+            h += '<span class="evs-bring-carbs">' + scParts.join(' · ') + '</span>';
+          }
           h += '</li>';
         });
         h += '</ul>';
@@ -28061,7 +28065,7 @@
         h += '<p class="ws-empty">' + (s.type === 'board' ? 'Nothing shared yet' : 'Nothing claimed yet') + (canAct ? ' — be the first!' : '.') + '</p>';
       }
       if (canAct) {
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="' + ACT_ADD + '" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '') + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '">' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="' + ACT_ADD + '" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '" data-sec-type="' + escapeAttr(s.type || '') + '" data-note-label="' + escapeAttr(cfg.note_label || '') + '"' + (isFood ? ' data-food="1"' : '') + '>' + (s.type === 'board' ? '➕ Add a note or link' : '➕ Sign up to bring something') + '</button></p>';
         h += '<div class="evs-bring-form" data-bring-form="' + FORM_KEY + '" hidden></div>';
       }
     }
@@ -28878,6 +28882,22 @@
   // Inline "what I'll bring" mini-form (bring-mode sign-ups). Lives in a
   // hidden div next to the button — no drawer, works in the card and in
   // the Event Space alike.
+  // #224 (Erin — diabetic child): food bring-lists collect an optional
+  // serving size + approx carbs per serving. Two small side-by-side fields,
+  // shown only on food-category lists. Shared by the add + edit forms.
+  function evsFoodFields(isFood, serving, carbs) {
+    if (!isFood) return '';
+    return '<div class="evs-food-row">'
+      + '<div class="cls-field"><label class="cls-label">Serving size (optional)</label><input class="cl-input evs-bring-serving" type="text" maxlength="60" value="' + escapeAttr(serving || '') + '" placeholder="e.g. 1 cookie, ½ cup"></div>'
+      + '<div class="cls-field"><label class="cls-label">Carbs per serving (optional)</label><input class="cl-input evs-bring-carbs" type="text" maxlength="40" value="' + escapeAttr(carbs || '') + '" placeholder="e.g. ~30g"></div>'
+      + '</div>';
+  }
+  function evsFoodValues(form) {
+    var sEl = form.querySelector('.evs-bring-serving');
+    var cEl = form.querySelector('.evs-bring-carbs');
+    return { serving: sEl ? sEl.value.trim() : '', carbs: cEl ? cEl.value.trim() : '' };
+  }
+
   function toggleEventBringForm(btn) {
     var sid = parseInt(btn.getAttribute('data-section-id'), 10);
     var form = document.querySelector('[data-bring-form="' + sid + '"]');
@@ -28886,12 +28906,14 @@
     // #123 (Colleen): 'board' (shared notes & links) rides the bring
     // machinery but gets its own wording — ONE field, no bring prompt.
     var isBoard = btn.getAttribute('data-sec-type') === 'board';
+    var isFood = btn.getAttribute('data-food') === '1';
     var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
     form.hidden = false;
     form.innerHTML = (isBoard
       ? '<div class="cls-field"><label class="cls-label">Add a note or link</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="A note, idea, or link…"></div>'
       : '<div class="cls-field"><label class="cls-label">What will you bring?</label><input class="cl-input evs-bring-item" type="text" maxlength="200" placeholder="e.g. rainbow sprinkles"></div>'
-        + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
+        + '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>'
+        + evsFoodFields(isFood, '', ''))
       + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">' + (isBoard ? 'Add it' : 'Sign up') + '</button><span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
     var itemInp = form.querySelector('.evs-bring-item');
     if (itemInp) itemInp.focus();
@@ -28901,9 +28923,10 @@
       if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = isBoard ? 'Type a note or link first' : 'Say what you’ll bring'; return; }
       var noteEl = form.querySelector('.evs-bring-note');
       var note = noteEl ? noteEl.value.trim() : '';
+      var sc = evsFoodValues(form);
       var saveBtn = this;
       saveBtn.disabled = true;
-      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, item_text: item, note: note }) })
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-claim', section_id: sid, item_text: item, note: note, serving_size: sc.serving, carbs_per_serving: sc.carbs }) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
           if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
@@ -28923,6 +28946,7 @@
     if (!form) return;
     var suId = parseInt(btn.getAttribute('data-signup-id'), 10);
     var isBoard = btn.getAttribute('data-sec-type') === 'board';
+    var isFood = btn.getAttribute('data-food') === '1';
     var noteLabel = btn.getAttribute('data-note-label') || 'Note (optional)';
     form.hidden = false;
     // Codebase review 2026-08-08: a Discussion (board) message is multi-line
@@ -28933,6 +28957,7 @@
         ? '<textarea class="cl-input evs-bring-item" rows="3" maxlength="1000"></textarea>'
         : '<input class="cl-input evs-bring-item" type="text" maxlength="200">') + '</div>'
       + (isBoard ? '' : '<div class="cls-field"><label class="cls-label">' + escapeHtml(noteLabel) + '</label><input class="cl-input evs-bring-note" type="text" maxlength="300"></div>')
+      + (isBoard ? '' : evsFoodFields(isFood, btn.getAttribute('data-serving') || '', btn.getAttribute('data-carbs') || ''))
       + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-bring-save">Save changes</button>'
       + '<button type="button" class="btn btn-outline-dark btn-sm evs-bring-remove">Remove sign-up</button>'
       + '<span class="perm-status evs-bring-status" aria-live="polite"></span></div>';
@@ -28977,6 +29002,7 @@
       var item = itemInp.value.trim();
       if (!item) { st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = isBoard ? 'Type a note or link first' : 'Say what you’ll bring'; return; }
       var note = noteInp ? noteInp.value.trim() : '';
+      var sc = evsFoodValues(form);
       var saveBtn = this;
       saveBtn.disabled = true;
       var req;
@@ -28990,7 +29016,7 @@
           body: JSON.stringify(payload)
         });
       } else {
-        req = fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-update', id: suId, item_text: item, note: note }) });
+        req = fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-update', id: suId, item_text: item, note: note, serving_size: sc.serving, carbs_per_serving: sc.carbs }) });
       }
       req.then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
