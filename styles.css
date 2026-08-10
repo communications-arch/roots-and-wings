@@ -16127,3 +16127,14 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: 8px; padding: 6px 12px; margin: 8px 16px 0;
   font-size: .82rem; color: var(--color-text);
 }
+
+/* #230 (Erin, Option A): merged Things-to-Bring card — Food / Supplies
+   subsections for members; organizers still manage each list separately. */
+.evs-bring-subsection { margin-bottom: 14px; }
+.evs-bring-subsection:last-child { margin-bottom: 0; }
+.evs-bring-subhead {
+  font-family: var(--font-heading);
+  font-size: 1.02rem; color: var(--color-primary-dark);
+  margin: 0 0 8px; padding-bottom: 4px;
+  border-bottom: 2px solid var(--color-primary-light);
+}

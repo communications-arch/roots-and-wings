@@ -28145,6 +28145,40 @@
     // of content (calendar / ways-to-help / resources / board-notes).
     // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
     var SEC_ACCENTS = { timeline: BRAND_ICONS.timeline, signup: BRAND_ICONS.waysToHelp, info: BRAND_ICONS.resources, notes: BRAND_ICONS.notes, board: BRAND_ICONS.reports };
+
+    // #230 (Colleen/Erin, Option A): for MEMBERS, food + supply bring-lists
+    // merge into ONE "Things to Bring" card with a Food subsection and a
+    // Supplies subsection. Organizers (can_edit) keep each as its own
+    // manageable card. Only public sections merge; committee-only ones
+    // stay in the normal loop.
+    var isBringCat = function (s) {
+      return s.type === 'signup' && (s.config || {}).mode !== 'slots'
+        && ['food', 'supply'].indexOf((s.config || {}).category) !== -1;
+    };
+    if (!d.can_edit) {
+      var mergeSecs = secs.filter(function (s) { return isBringCat(s) && s.is_public !== false; });
+      if (mergeSecs.length) {
+        secs = secs.filter(function (s) { return mergeSecs.indexOf(s) === -1; });
+        h += '<div class="mf-card workspace-card evs-section">';
+        h += collabCardHead('sec-bring-merged', '<h4>' + brandIconImg('lending', 'ag-icon') + ' Things to Bring</h4>');
+        if (!_collabCollapsed['sec-bring-merged']) {
+          h += '<div class="workspace-card-body">';
+          ['food', 'supply'].forEach(function (catKey) {
+            var catSecs = mergeSecs.filter(function (s) { return (s.config || {}).category === catKey; });
+            if (!catSecs.length) return;
+            h += '<div class="evs-bring-subsection"><h5 class="evs-bring-subhead">' + (catKey === 'food' ? 'Food' : 'Supplies') + '</h5>';
+            catSecs.forEach(function (s) {
+              if (s.title) h += '<p class="ws-body-hint" style="margin:0 0 4px;font-weight:600;">' + escapeHtmlWs(s.title) + '</p>';
+              h += renderSignupSectionBody(s, d.viewer_email, false);
+            });
+            h += '</div>';
+          });
+          h += '</div>';
+        }
+        h += '</div>';
+      }
+    }
+
     secs.forEach(function (s) {
       var secKey = 'sec-' + s.id;
       // Committee-only cards wear a light grey tint (Erin, 2026-07-25).
@@ -28255,6 +28289,16 @@
         fh += '<div class="cls-field"><label class="cls-label">Sign-up style</label><select class="cl-input evs-sd-mode">'
           + '<option value="bring"' + (mode === 'bring' ? ' selected' : '') + '>Bring something — members add what they’ll bring</option>'
           + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Volunteer spots — fixed slots with a capacity</option>'
+          + '</select></div>';
+        // #230 (Colleen/Erin): bring-lists carry a category. Food and
+        // Supplies lists MERGE into one "Things to Bring" card for members
+        // (organizers still manage each separately here). "Other" keeps a
+        // list on its own card.
+        var cat = cfg.category === 'food' ? 'food' : cfg.category === 'supply' ? 'supply' : 'other';
+        fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">List type</label><select class="cl-input evs-sd-category">'
+          + '<option value="food"' + (cat === 'food' ? ' selected' : '') + '>Food — combines with Supplies on one member card</option>'
+          + '<option value="supply"' + (cat === 'supply' ? ' selected' : '') + '>Supplies — combines with Food on one member card</option>'
+          + '<option value="other"' + (cat === 'other' ? ' selected' : '') + '>Other — its own card</option>'
           + '</select></div>';
         fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input evs-sd-notelabel" type="text" maxlength="120" value="' + escapeAttr(cfg.note_label || '') + '" placeholder="Allergy info — nut-free facility!"></div>';
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
@@ -28418,6 +28462,11 @@
       } else if (type === 'signup') {
         var modeSel2 = el.querySelector('.evs-sd-mode');
         config.mode = (modeSel2 && modeSel2.value === 'slots') ? 'slots' : 'bring';
+        // #230: bring-list category (food/supply combine for members).
+        if (config.mode === 'bring') {
+          var catSel = el.querySelector('.evs-sd-category');
+          config.category = (catSel && ['food', 'supply', 'other'].indexOf(catSel.value) !== -1) ? catSel.value : 'other';
+        }
         var nl = el.querySelector('.evs-sd-notelabel');
         if (nl && nl.value.trim()) config.note_label = nl.value.trim();
         var hintEl = el.querySelector('.evs-sd-hint');
