@@ -5575,7 +5575,11 @@
     if (kids.length === 0) {
       // Nothing to pick — e.g. a Greenhouse-only family (under-3s are
       // excluded from sign-ups). No card at all beats an empty shell.
+      // If the picker modal is already open (bug log #273 round 2), tell
+      // it too — this return used to leave modalBody on its initial
+      // "Loading…" placeholder forever.
       card.style.display = 'none';
+      if (modalBody) modalBody.innerHTML = '<p class="mf-empty">No kids need afternoon picks this session.</p>';
       return;
     } else {
       kids.forEach(function (kid) {
