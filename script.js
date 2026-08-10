@@ -20019,6 +20019,31 @@
   // Fills #ws-lending-body with three lists scoped to the acting member:
   // requests awaiting THEIR approval, things they're borrowing, and things
   // they've lent out (or promised). Donations use claim/give wording.
+  // #242: open (and expand) the Workspace "Lending Library" card — the
+  // owner's approve/decline surface for borrow requests, plus both parties'
+  // borrowing / lent-out record. A notification about a specific loan
+  // (request, approval, hand-off, return, overdue…) routes here on tap.
+  // Mirrors the participation badge's pill-then-flash navigation, but also
+  // un-minimizes the card first so the target actually exists in the DOM.
+  function openWorkspaceLendingCard() {
+    try {
+      var p = getWorkspacePrefs();
+      if (p && p.collapsed && p.collapsed.lending) { p.collapsed.lending = false; saveWorkspacePrefs(p); }
+    } catch (e) {}
+    var wsPill = document.querySelector('.qsb-pill[data-view="workspace"]');
+    if (wsPill) wsPill.click();
+    else if (typeof renderWorkspaceTab === 'function') { try { renderWorkspaceTab(); } catch (e) {} }
+    setTimeout(function () {
+      var card = document.querySelector('[data-widget-type="lending"]');
+      if (card && card.scrollIntoView) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        card.classList.add('ws-card-flash');
+        setTimeout(function () { card.classList.remove('ws-card-flash'); }, 1600);
+      }
+    }, 140);
+  }
+  window.openWorkspaceLendingCard = openWorkspaceLendingCard;
+
   function loadLendingCard() {
     var target = document.getElementById('ws-lending-body');
     if (!target) return;
@@ -25351,8 +25376,24 @@
       var cred = localStorage.getItem('rw_google_credential');
       fetch('/api/notifications?id=' + id + notifViewAsSuffix(), { method: 'PATCH', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' } }).then(function () { loadNotifications(); });
       closeNotifDropdown();
-      if (nType === 'lending_request') {
-        if (typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
+      if (nType.indexOf('lending') === 0 || /^lending:/.test(nLink)) {
+        // #242: two lending flavours share the 'lending_*' prefix.
+        //  • Community "ask everyone" request (type lending_request, no
+        //    link_url) and its pledges (lending_pledge) → the Requests modal,
+        //    where you answer someone's open ask.
+        //  • An item-loan notification (borrow request to the owner, plus
+        //    approve/decline/hand-off/return/overdue updates) → the Workspace
+        //    Lending card, where the owner responds. These carry link_url
+        //    'lending:<id>' (new rows) or '/members.html' (older notifyMember
+        //    rows), so a non-empty link_url disambiguates them from the
+        //    empty-link community broadcast.
+        var toLendingCard = /^lending:/.test(nLink)
+          || (nType.indexOf('lending_') === 0 && nLink && nType !== 'lending_pledge' && !(nType === 'lending_request' && !nLink));
+        if (!toLendingCard && (nType === 'lending_request' || nType === 'lending_pledge')) {
+          if (typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
+        } else if (typeof openWorkspaceLendingCard === 'function') {
+          openWorkspaceLendingCard();
+        }
       } else if ((nType === 'event_signups_open' || nType === 'discussion_post') && /^evspace:\d+$/.test(nLink)) {
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
       } else if (['coverage_needed', 'slot_claimed', 'slot_reassigned', 'kids_absent'].indexOf(nType) !== -1 || !nType) {

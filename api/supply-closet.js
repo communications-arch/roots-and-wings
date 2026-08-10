@@ -828,12 +828,17 @@ async function handleBringActions(req, res, sql, user, actingEmail) {
 
 // In-app notification + web push, best-effort — a failed notification
 // never blocks the loan action itself (same posture as the restock flag).
-async function notifyMember(sql, email, title, body, type) {
+// #242: linkUrl (optional) drives where the in-app bell click lands. Defaults
+// to '/members.html'; item-loan notifications pass 'lending:<loanId>' so the
+// notification click opens the owner's approve/decline surface (the Workspace
+// Lending card). The web-push url stays '/members.html' — the SW just opens
+// the portal, and the bell handler does the in-app routing.
+async function notifyMember(sql, email, title, body, type, linkUrl) {
   if (!email) return;
   try {
     await sql`
       INSERT INTO notifications (recipient_email, type, title, body, link_url)
-      VALUES (${email}, ${type || 'lending'}, ${title}, ${body}, ${'/members.html'})
+      VALUES (${email}, ${type || 'lending'}, ${title}, ${body}, ${linkUrl || '/members.html'})
     `;
     await sendToUser(sql, email, { title: title, body: body, url: '/members.html' });
   } catch (e) {
@@ -1056,7 +1061,8 @@ async function handleLoanActions(req, res, sql, user, actingEmail, coordAllowed)
     await notifyMember(sql, ownerEmail,
       'Lending request: ' + item.item_name,
       borrower_name + ' ' + what + ' your ' + item.item_name + why + when + '. Approve or decline on My Workspace.',
-      'lending_request');
+      'lending_request',
+      'lending:' + loan.id);
     return res.status(201).json({ loan: loan });
   }
 
