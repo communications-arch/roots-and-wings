@@ -501,6 +501,7 @@
       googleCredential: null,
       prefillFamily: null,
       prefillFamilyEmail: '',
+      prefillEmail: '',
       paypalRendered: false,
       kidIdCounter: 0
     };
@@ -861,6 +862,10 @@
       var changeBtn = document.getElementById('reg-email-change');
       if (!emailEl) return;
       emailEl.setAttribute('readonly', 'readonly');
+      // Remember the email this prefill was built from, so a later edit can
+      // tell "same family, tweaking their address" from "registering someone
+      // else" (#286, Erin).
+      state.prefillEmail = String(emailEl.value || '').trim().toLowerCase();
       if (changeBtn) {
         changeBtn.style.display = '';
         changeBtn.onclick = function () {
@@ -869,6 +874,22 @@
           emailEl.focus();
         };
       }
+      // #286 (Erin): the form freezes a family identity (known_family_email)
+      // from the prefill, and the server trusts it above the typed email. If
+      // the registrant CHANGES the email to a different address, they're
+      // registering a DIFFERENT family — drop the frozen identity so the
+      // server derives a fresh family_email from the new email/name instead of
+      // pinning the registration to the pre-filled family (which collapsed two
+      // families into one and made a waitlist/withdraw hit both).
+      emailEl.addEventListener('input', function () {
+        var now = String(emailEl.value || '').trim().toLowerCase();
+        if (state.prefillEmail && now !== state.prefillEmail) {
+          state.prefillFamilyEmail = '';
+          state.prefillFamily = '';
+          var banner = document.getElementById('reg-prefilled-banner');
+          if (banner) banner.style.display = 'none';
+        }
+      });
     }
 
     function prefillFromEmail(email, name) {
