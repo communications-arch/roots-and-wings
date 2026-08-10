@@ -18299,6 +18299,9 @@
       e.preventDefault();
       var addr = 'communications@rootsandwingsindy.com';
       var subj = 'Bug Report / Idea';
+      // A gentle template so the compose window isn't blank (and so it's
+      // obvious the fields DID populate — the point of this report).
+      var body = 'What happened (or your idea):\n\n\nWhere in the portal:\n\n\nWhat device / browser:\n';
       var html = '<button class="detail-close" aria-label="Close">&times;</button>';
       html += '<div class="elective-detail" style="text-align:center;">';
       html += '<h3>Report a bug — or share an idea</h3>';
@@ -18307,7 +18310,7 @@
       // #266 (Erin, iPhone): the Gmail WEB compose URL drops its params on
       // iOS — try the Gmail APP scheme first, web compose as the fallback.
       html += '<button type="button" class="btn btn-primary btn-sm" id="fireflyGmailBtn">Open in Gmail</button>';
-      html += '<a class="btn btn-outline-dark btn-sm" href="mailto:' + addr + '?subject=' + encodeURIComponent(subj) + '">Use my mail app</a>';
+      html += '<a class="btn btn-outline-dark btn-sm" href="mailto:' + addr + '?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(body) + '">Use my mail app</a>';
       html += '<button type="button" class="btn btn-outline-dark btn-sm" id="fireflyCopyBtn">Copy address</button>';
       html += '</div>';
       html += '</div>';
@@ -18320,12 +18323,16 @@
       });
       var gmailBtn = personDetailCard.querySelector('#fireflyGmailBtn');
       if (gmailBtn) gmailBtn.addEventListener('click', function () {
-        var webUrl = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(addr) + '&su=' + encodeURIComponent(subj);
+        var webUrl = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(addr) + '&su=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(body);
         var isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
         if (isiOS) {
           var t = setTimeout(function () { window.open(webUrl, '_blank'); }, 900);
           window.addEventListener('pagehide', function () { clearTimeout(t); }, { once: true });
-          window.location.href = 'googlegmail://co?to=' + encodeURIComponent(addr) + '&subject=' + encodeURIComponent(subj);
+          // #266 (Erin, iPhone): the Gmail iOS compose scheme needs an EMPTY
+          // authority — 'googlegmail:///co?...' (three slashes). With two
+          // ('googlegmail://co?...') the app reads "co" as the host and drops
+          // the subject/body, so Gmail opened blank. Three slashes populates.
+          window.location.href = 'googlegmail:///co?to=' + encodeURIComponent(addr) + '&subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(body);
         } else {
           window.open(webUrl, '_blank');
         }
@@ -21143,29 +21150,56 @@
       });
     })();
 
-    // ③ Lending hand-offs + returns due that day.
+    // ③ Lending hand-offs + returns due that day, PLUS the items you've
+    // pledged to bring for other members' open requests. #276 (Lyndsey): a
+    // pledge carries no co-op date, so it never surfaced here — but you still
+    // need to pack it. Undated pledges ride on the NEXT co-op day's list
+    // ("bring it next time you're in") until the request is fulfilled/closed.
     (function fillLending() {
-      fetch('/api/supply-closet?action=loans' + notifViewAsSuffix(), {
-        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') }
-      }).then(function (r) { return r.json(); }).then(function (d) {
+      var lendHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rw_google_credential') };
+      var getJson = function (action) {
+        return fetch('/api/supply-closet?action=' + action + notifViewAsSuffix(), { headers: lendHeaders })
+          .then(function (r) { return r.json(); }).catch(function () { return null; });
+      };
+      Promise.all([getJson('loans'), getJson('loan-requests')]).then(function (res) {
         var el = document.getElementById('pl-lending');
-        if (!el || !d || d.error) return;
-        var me = String(d.me || '').toLowerCase();
+        if (!el) return;
         var lines = [];
-        (d.loans || []).forEach(function (l) {
-          var start = bringDateStr(l.start_date), end = bringDateStr(l.end_date);
-          var owner = String(l.owner_email || '').toLowerCase() === me;
-          var borrower = String(l.borrower_email || '').toLowerCase() === me;
-          if (owner && l.status === 'approved' && start && start <= next.date && (!end || end >= next.date)) {
-            lines.push('<li>Hand off: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.borrower_name || l.borrower_email) + '</em></li>');
-          }
-          if (borrower && (l.status === 'approved' || l.status === 'handed_off') && end && end <= next.date) {
-            lines.push('<li>Return: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.owner_name || l.owner_email) + '</em></li>');
-          }
-        });
+        var d = res[0];
+        if (d && !d.error) {
+          var me = String(d.me || '').toLowerCase();
+          (d.loans || []).forEach(function (l) {
+            var start = bringDateStr(l.start_date), end = bringDateStr(l.end_date);
+            var owner = String(l.owner_email || '').toLowerCase() === me;
+            var borrower = String(l.borrower_email || '').toLowerCase() === me;
+            if (owner && l.status === 'approved' && start && start <= next.date && (!end || end >= next.date)) {
+              lines.push('<li>Hand off: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.borrower_name || l.borrower_email) + '</em></li>');
+            }
+            if (borrower && (l.status === 'approved' || l.status === 'handed_off') && end && end <= next.date) {
+              lines.push('<li>Return: ' + escapeHtml(l.item_name) + ' <em>— to ' + escapeHtml(l.owner_name || l.owner_email) + '</em></li>');
+            }
+          });
+        }
+        // #276: items you pledged for still-open member requests (the GET
+        // already excludes closed requests, so a fulfilled pledge drops off).
+        var dr = res[1];
+        if (dr && !dr.error) {
+          var meR = String(dr.me || '').toLowerCase();
+          var reqById = {};
+          (dr.requests || []).forEach(function (rq) { reqById[rq.id] = rq; });
+          (dr.pledges || []).forEach(function (p) {
+            if (String(p.person_email || '').toLowerCase() !== meR) return;
+            var rq = reqById[p.request_id];
+            if (!rq) return;
+            var qty = parseInt(p.quantity, 10);
+            lines.push('<li>Bring: ' + escapeHtml(rq.item_text)
+              + (qty > 0 ? ' <em>×' + qty + '</em>' : '')
+              + ' <em>— you pledged for ' + escapeHtml(rq.requested_by_name || rq.requested_by_email) + '’s request</em></li>');
+          });
+        }
         el.innerHTML = '<h2 class="ws-lending-head">Lending Library</h2>'
-          + (lines.length ? '<ul class="pl-list">' + lines.join('') + '</ul>' : '<p class="ws-empty">No hand-offs or returns due.</p>');
-      }).catch(function () {});
+          + (lines.length ? '<ul class="pl-list">' + lines.join('') + '</ul>' : '<p class="ws-empty">No hand-offs, returns, or pledges due.</p>');
+      });
     })();
   }
 
@@ -28493,38 +28527,12 @@
     // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
     var SEC_ACCENTS = { timeline: BRAND_ICONS.timeline, signup: BRAND_ICONS.waysToHelp, info: BRAND_ICONS.resources, notes: BRAND_ICONS.notes, board: BRAND_ICONS.reports, checklist: BRAND_ICONS.cleaning };
 
-    // #230 (Colleen/Erin, Option A): for MEMBERS, food + supply bring-lists
-    // merge into ONE "Things to Bring" card with a Food subsection and a
-    // Supplies subsection. Organizers (can_edit) keep each as its own
-    // manageable card. Only public sections merge; committee-only ones
-    // stay in the normal loop.
-    var isBringCat = function (s) {
-      return s.type === 'signup' && (s.config || {}).mode !== 'slots'
-        && ['food', 'supply'].indexOf((s.config || {}).category) !== -1;
-    };
-    if (!d.can_edit) {
-      var mergeSecs = secs.filter(function (s) { return isBringCat(s) && s.is_public !== false; });
-      if (mergeSecs.length) {
-        secs = secs.filter(function (s) { return mergeSecs.indexOf(s) === -1; });
-        h += '<div class="mf-card workspace-card evs-section">';
-        h += collabCardHead('sec-bring-merged', '<h4>' + brandIconImg('lending', 'ag-icon') + ' Things to Bring</h4>');
-        if (!_collabCollapsed['sec-bring-merged']) {
-          h += '<div class="workspace-card-body">';
-          ['food', 'supply'].forEach(function (catKey) {
-            var catSecs = mergeSecs.filter(function (s) { return (s.config || {}).category === catKey; });
-            if (!catSecs.length) return;
-            h += '<div class="evs-bring-subsection"><h5 class="evs-bring-subhead">' + (catKey === 'food' ? 'Food' : 'Supplies') + '</h5>';
-            catSecs.forEach(function (s) {
-              if (s.title) h += '<p class="ws-body-hint" style="margin:0 0 4px;font-weight:600;">' + escapeHtmlWs(s.title) + '</p>';
-              h += renderSignupSectionBody(s, d.viewer_email, false);
-            });
-            h += '</div>';
-          });
-          h += '</div>';
-        }
-        h += '</div>';
-      }
-    }
+    // #230 (Erin, 2026-08-10): food + supply bring-lists render as SEPARATE
+    // cards for members too — the earlier "Option A" merge into one combined
+    // "Things to Bring" card was reversed (Colleen wanted them distinct). The
+    // List-type/category (food/supply/other) is kept: it still drives the
+    // #224 food serving-size/carbs fields. Every bring section now just falls
+    // through the normal per-section render loop below.
 
     secs.forEach(function (s) {
       var secKey = 'sec-' + s.id;
@@ -28642,15 +28650,14 @@
           + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Volunteer spots — fixed slots with a capacity</option>'
           + '<option value="rsvp"' + (mode === 'rsvp' ? ' selected' : '') + '>RSVP — members say how many people are coming</option>'
           + '</select></div>';
-        // #230 (Colleen/Erin): bring-lists carry a category. Food and
-        // Supplies lists MERGE into one "Things to Bring" card for members
-        // (organizers still manage each separately here). "Other" keeps a
-        // list on its own card.
+        // #230 (Erin, 2026-08-10): bring-lists carry a List type. Each list is
+        // its own card for members (no merging). "Food" additionally shows the
+        // #224 serving-size / carbs-per-serving fields on each sign-up.
         var cat = cfg.category === 'food' ? 'food' : cfg.category === 'supply' ? 'supply' : 'other';
         fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">List type</label><select class="cl-input evs-sd-category">'
-          + '<option value="food"' + (cat === 'food' ? ' selected' : '') + '>Food — combines with Supplies on one member card</option>'
-          + '<option value="supply"' + (cat === 'supply' ? ' selected' : '') + '>Supplies — combines with Food on one member card</option>'
-          + '<option value="other"' + (cat === 'other' ? ' selected' : '') + '>Other — its own card</option>'
+          + '<option value="food"' + (cat === 'food' ? ' selected' : '') + '>Food — adds serving-size &amp; carbs fields for members</option>'
+          + '<option value="supply"' + (cat === 'supply' ? ' selected' : '') + '>Supplies</option>'
+          + '<option value="other"' + (cat === 'other' ? ' selected' : '') + '>Other</option>'
           + '</select></div>';
         fh += '<div class="cls-field evs-sd-bring-only"><label class="cls-label">Note field label (optional)</label><input class="cl-input evs-sd-notelabel" type="text" maxlength="120" value="' + escapeAttr(cfg.note_label || '') + '" placeholder="Allergy info — nut-free facility!"></div>';
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(cfg.hint || '') + '" placeholder="Sign up to bring a favorite topping. Note if it’s allergy-friendly — co-op is a nut-free facility."></div>';
