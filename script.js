@@ -2229,8 +2229,10 @@
     var famKids = matchFam.kids || [];
     for (var kk = 0; kk < famKids.length; kk++) {
       if (String(famKids[kk].name || '').trim().split(/\s+/)[0].toLowerCase() !== firstNameLower) continue;
-      // Per-child photo opt-out honored here so callers don't need to double-check.
-      if (famKids[kk].photo_consent === false) return null;
+      // Waiver update 2026-08-10 (Erin): opting out now blocks EXTERNAL use
+      // only (public site / social) — the members' portal is internal, so
+      // photos show here for everyone. photo_consent is still recorded and
+      // surfaced (the "no public/social" badge) for whoever posts externally.
       if (famKids[kk].photoUrl) return famKids[kk].photoUrl;
     }
     return null;
@@ -2262,7 +2264,8 @@
         // opted out, return null before we fall through to Workspace photos.
         for (var pc = 0; pc < pInfo.length; pc++) {
           if (String(pInfo[pc].name || '').trim().split(/\s+/)[0].toLowerCase() === firstNameLower) {
-            if (pInfo[pc].photoConsent === false) return null;
+            // Waiver 2026-08-10: opt-out is external-only — internal photos
+            // show for everyone (see getDbPhotoForPerson).
             // Durable photo removal (2026-07-24): the adult deleted their
             // photo in EMI. Return null so we DON'T fall through to their
             // Google Workspace photo — the directory shows initials, matching
@@ -2279,8 +2282,7 @@
         var famKids = matchFam.kids || [];
         for (var kk = 0; kk < famKids.length; kk++) {
           if (String(famKids[kk].name || '').trim().split(/\s+/)[0].toLowerCase() !== firstNameLower) continue;
-          // Per-child photo opt-out honored here so callers don't need to double-check.
-          if (famKids[kk].photo_consent === false) return null;
+          // Waiver 2026-08-10: opt-out is external-only — internal photos show.
           if (famKids[kk].photoUrl) return famKids[kk].photoUrl;
         }
       }
@@ -2374,10 +2376,9 @@
       if (!person) return;
       var photoDiv = card.querySelector('.yb-photo');
       if (!photoDiv) return;
-      // Per-person photo opt-out: never render a photo for anyone (adult or
-      // kid) whose consent is explicitly false. The initial-on-color
-      // placeholder already in the card stays as the fallback.
-      if (person.photoConsent === false) return;
+      // Waiver 2026-08-10 (Erin): opt-out is external-only, so internal
+      // directory photos render for everyone. The "no public/social" badge
+      // still flags external opt-out for board members preparing posts.
       var url;
       if (person.type === 'kid') {
         // Kids don't have Workspace photos; only apply a DB-sourced photo
@@ -3352,7 +3353,7 @@
         if (person.pronouns) extras += '<div class="yb-pronouns">' + escapeHtml(person.pronouns) + '</div>';
         if (person.allergies) extras += '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>';
         if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
-        if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="This child is opted out of photos.">⛔ No Photos</div>';
+        if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</div>';
         if (notReEnrolled) extras += '<div class="yb-inactive-badge" title="This family hasn’t registered for the upcoming year yet.">Not re-enrolled</div>';
 
         html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + escapeHtml(displayName + ' ' + person.family) + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
@@ -3452,7 +3453,7 @@
           : '';
 
         var noPhotoTag = person.photoConsent === false
-          ? '<div class="yb-no-photo" title="Opted out of photos.">⛔ No Photos</div>'
+          ? '<div class="yb-no-photo" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</div>'
           : '';
 
         // Adults' allergies show on their directory cards too (2026-07-20).
@@ -3738,10 +3739,9 @@
 
     var html = '<button class="detail-close" aria-label="Close">&times;</button>';
     html += '<div class="detail-header">';
-    // Opted-out people never resolve a photo URL — the initial placeholder shows instead.
-    var detailPhotoUrl = person.photoConsent === false
-      ? ''
-      : person.type !== 'kid'
+    // Waiver 2026-08-10: opt-out is external-only, so the internal detail
+    // card shows the photo for everyone.
+    var detailPhotoUrl = person.type !== 'kid'
         ? getPhotoUrl(person.name, person.email, person.family)
         : getDbPhotoForPerson(person.name, person.email, person.family);
     // Preferred name ("goes by") for everything the eye reads; person.name
@@ -3793,7 +3793,7 @@
         html += '<p class="detail-schedule">' + (person.schedule === 'morning' ? 'Morning only' : 'Afternoon only') + '</p>';
       }
       if (person.allergies) html += '<p class="detail-allergy-info">Allergies / Medical: ' + escapeHtml(person.allergies) + '</p>';
-      if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — this child is opted out of photos in co-op materials.</p>';
+      if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ Opted out of external use — don’t use this child’s photo, video, or quote on the public website or social media. Internal co-op use is fine.</p>';
       // Parents line prefers each adult's "goes by" name when set.
       var parentsLine = (fam.parentInfo && fam.parentInfo.length)
         ? fam.parentInfo.map(function (pi) { return nickOr(pi.nickname, pi.firstName || String(pi.name || '').split(/\s+/)[0]); }).filter(Boolean).join(' & ')
@@ -3812,7 +3812,7 @@
         html += '<p class="detail-board-role">' + (typeof boardRoleAccentImg === 'function' ? (boardRoleAccentImg(person.boardRole) || '') + ' ' : '') + escapeHtml(person.boardRole) + '</p>';
       }
       if (person.pronouns) html += '<p class="detail-pronouns">' + escapeHtml(person.pronouns) + '</p>';
-      if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ No Photos — opted out of photo and film use.</p>';
+      if (person.photoConsent === false) html += '<p class="detail-no-photo">⛔ Opted out of external use — don’t use this person’s photo, video, or quote on the public website or social media. Internal co-op use is fine.</p>';
       // Kids shown in family grid below
     }
     if (isNewMemberPerson(person)) {
@@ -4137,7 +4137,7 @@
         html += studentAllergyCallout(studentFullNames);
         html += '<div class="elective-roster">';
         groupKids.forEach(function(kid) {
-          var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+          var noPhoto = kid.photoConsent === false ? ' <span class="elective-student-nophoto" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</span>' : '';
           html += '<div class="elective-student' + (kid.photoConsent === false ? ' elective-student-nophoto-card' : '') + '">';
           html += '<div class="elective-student-dot" style="background:' + faceColor(kid.name) + '">' + kidAvatarInnerHtml(kid.name, kid.email, kid.family) + '</div>';
           html += '<div><strong>' + rwCapName(nickOr(kid.nickname, kid.name)) + '</strong> <span class="elective-student-last">' + rwCapName(kid.lastName || kid.family) + '</span>'
@@ -8593,7 +8593,7 @@
       var kidEmail = kidPerson ? kidPerson.email : '';
       var kidFamily = kidPerson ? kidPerson.family : last;
       var optedOut = kidPerson && kidPerson.photoConsent === false;
-      var noPhoto = optedOut ? ' <span class="elective-student-nophoto" title="Opted out of photo and film">⛔ No Photos</span>' : '';
+      var noPhoto = optedOut ? ' <span class="elective-student-nophoto" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</span>' : '';
       html += '<div class="elective-student' + (optedOut ? ' elective-student-nophoto-card' : '') + '">';
       html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '">' + kidAvatarInnerHtml(kidName, kidEmail, kidFamily) + '</div>';
       var kidCap = function (s) {

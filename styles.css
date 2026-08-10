@@ -3715,12 +3715,12 @@ body.rw-booting #myFamilyGrid { min-height: 72vh; }
   margin-top: 5px;
   display: inline-block;
 }
+/* External-opt-out marker (waiver 2026-08-10): the dashed outline flags a
+   member who's opted out of PUBLIC/social use. Internal photos show at
+   full opacity now, so the photo is no longer dimmed. */
 .yb-card.yb-card-no-photo {
   outline: 1.5px dashed rgba(75, 85, 99, 0.45);
   outline-offset: -3px;
-}
-.yb-card.yb-card-no-photo .yb-photo {
-  opacity: 0.82;
 }
 
 /* Not re-enrolled — family has no live registration for the season
@@ -4940,9 +4940,8 @@ button.staff-role:hover {
   margin-left: 4px;
   white-space: nowrap;
 }
-.elective-student-nophoto-card .elective-student-dot {
-  opacity: 0.82;
-}
+/* Waiver 2026-08-10: internal photos show at full opacity now; the badge
+   alone flags external opt-out. */
 
 /* Small italic pronoun tag used inline in class/elective detail modals. */
 .pronoun-inline {
