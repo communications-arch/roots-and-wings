@@ -2221,7 +2221,7 @@ module.exports = async function handler(req, res) {
         const classRows = await sql`
           SELECT id, class_name, scheduled_hour, scheduled_age_range, scheduled_room,
                  submitted_by_name, max_students, age_groups, description,
-                 open_to_teen_assistant
+                 open_to_teen_assistant, hour_preference
           FROM class_submissions
           WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
             AND class_period = 'PM'
@@ -2295,6 +2295,11 @@ module.exports = async function handler(req, res) {
           // Teacher opted in to a Pigeons-age assistant — Pigeon kids may
           // rank this class as its assistant regardless of age range.
           openToTeen: r.open_to_teen_assistant === true,
+          // #281/#282: a scheduled 2-hour ('both') class is EITHER "both hours
+          // required" or "one or both hours" (the teacher's hour_preference).
+          // Only the OPTIONAL kind ranks each hour independently; the required
+          // kind reserves its choice number in the other hour (see the picker).
+          bothOptional: (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1,
           signedUp: pickCounts[r.id] || 0,
           signedUpNames: pickNames[r.id] || [],
           signedUpDetailed: pickDetailed[r.id] || []

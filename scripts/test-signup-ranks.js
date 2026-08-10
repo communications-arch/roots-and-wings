@@ -110,6 +110,16 @@ t('prominence: a 2-hour class in the PM1 list wears the loud badge + tinted card
   assert(!/signup-2hr-tag/.test(plainOnly), 'a 1-hour class must not wear the 2-hour badge');
 });
 
+t('#281: a REQUIRED 2-hour class reads "both hours required"; an OPTIONAL one reads "one or both hours"', function () {
+  const api = makeApi({});
+  const required = api.signupHourHtml('Kid', 'PM1', [{ id: 30, name: 'Epic Play', hour: 'both' }], true, null, false, [], undefined);
+  assert(/both hours required/.test(required), 'required-both must be labeled "both hours required"');
+  assert(!/one or both/.test(required), 'required-both must not read "one or both"');
+  const optional = api.signupHourHtml('Kid', 'PM1', [{ id: 30, name: 'Open Studio', hour: 'both', bothOptional: true }], true, null, false, [], undefined);
+  assert(/one or both hours/.test(optional), 'optional-both must be labeled "one or both hours"');
+  assert(/signup-2hr-optional/.test(optional), 'optional-both must carry the .signup-2hr-optional modifier');
+});
+
 t('prominence: the PM Hour 2 pinned banner explains the single choice number and fronts the badge', function () {
   const api = makeApi({});
   const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH, { 1: true });

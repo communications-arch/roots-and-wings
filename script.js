@@ -5623,7 +5623,11 @@
         // Pigeons may additionally offer to ASSIST any class whose teacher
         // opted in — normal age highlighting still applies (assisting is a
         // last-resort pick, Erin 2026-07-15).
-        var isPigeonKid = String(group).toLowerCase() === 'pigeons' || (age != null && age >= 14);
+        // #283 (Lyndsey): both Pigeons (14+) AND Cedars (12–13) may sign up to
+        // assist a class whose teacher opted in — the flag reads "willing to
+        // host a Cedars or Pigeons (12+) assistant". The gate had allowed only
+        // Pigeons/14+, so Cedars kids never saw the assistant option.
+        var isTeenAssistKid = ['pigeons', 'cedars'].indexOf(String(group).toLowerCase()) !== -1 || (age != null && age >= 12);
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
@@ -5636,7 +5640,11 @@
         var pinnedBoth = [];
         var bothRankTaken = {};
         (s.classes.PM1 || []).forEach(function (c) {
-          if (c.hour === 'both' && pm1Map[c.id]) {
+          // #282 (Colleen): only a REQUIRED-both class reserves its choice
+          // number in the other hour. An OPTIONAL ("one or both") 2-hour class
+          // ranks each hour independently — no reservation — so hour 1 and
+          // hour 2 both offer a full 1st/2nd choice.
+          if (c.hour === 'both' && !c.bothOptional && pm1Map[c.id]) {
             pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
             bothRankTaken[pm1Map[c.id]] = true;
           }
@@ -5649,8 +5657,8 @@
             if (altBusy) delete pm2Map[cid2]; else pm2Map[cid2] = alt;
           }
         });
-        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth, bothRankTaken);
+        h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isTeenAssistKid);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isTeenAssistKid, pinnedBoth, bothRankTaken);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -5720,7 +5728,7 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth, excludeRanks) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isTeenAssist, pinnedBoth, excludeRanks) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
@@ -5767,7 +5775,7 @@
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
              (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
              escapeHtml(c.name) + '</span>' +
-             (c.hour === 'both' ? '<span class="signup-2hr-tag" title="This class runs both PM hours. Ranking it here fills PM Hour 1 AND PM Hour 2.">🔁 2-hour class · fills PM1 + PM2</span>' : '');
+             (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
         // Live demand vs capacity, with the kids' names. "Signed up" = kids
@@ -5779,12 +5787,13 @@
         if (c.max > 0) capBits.push('max ' + c.max + ' kids');
         h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
              (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
-        // Pigeons on a teacher-opted-in class: the assistant option is
-        // ALWAYS visible so it's discoverable (Erin, 2026-07-15 — it was
-        // hidden until the class was ranked and looked missing on Edit).
-        // Checking it on an unranked class auto-takes the next free choice.
+        // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
+        // assistant option is ALWAYS visible so it's discoverable (Erin,
+        // 2026-07-15 — it was hidden until the class was ranked and looked
+        // missing on Edit). Checking it on an unranked class auto-takes the
+        // next free choice.
         var assistChecked = sel && !!kidAssist[c.id];
-        if (isPigeon && c.openToTeen) {
+        if (isTeenAssist && c.openToTeen) {
           h += '<label class="signup-assist-opt"><input type="checkbox" class="signup-assist-cb"' +
                ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' +
                (assistChecked ? ' checked' : '') + (canEdit ? '' : ' disabled') + '> ' + brandIconImg('assist', 'ag-icon') + ' Sign up as the class assistant</label>';
@@ -6096,12 +6105,13 @@
     // Validate: 2 picks required per hour (or as many as the hour offers).
     var kidNotes = (s.workingNotes && s.workingNotes[kid]) || {};
     var kidAssist = (s.workingAssist && s.workingAssist[kid]) || {};
-    // A ranked 2-hour ('both') class occupies PM Hour 2 as well, so it
-    // counts toward Hour 2's required choices. Notes are optional
-    // everywhere (Erin, 2026-07-15).
+    // A ranked REQUIRED 2-hour ('both') class occupies PM Hour 2 as well, so
+    // it counts toward Hour 2's required choices. An OPTIONAL ("one or both")
+    // 2-hour class does NOT (#282 — its hours rank independently). Notes are
+    // optional everywhere (Erin, 2026-07-15).
     var bothCount = 0;
     orderedIds.PM1.forEach(function (cid) {
-      (s.classes && s.classes.PM1 || []).forEach(function (x) { if (x.id === cid && x.hour === 'both') bothCount++; });
+      (s.classes && s.classes.PM1 || []).forEach(function (x) { if (x.id === cid && x.hour === 'both' && !x.bothOptional) bothCount++; });
     });
     var problems = [];
     ['PM1', 'PM2'].forEach(function (hour) {

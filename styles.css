@@ -13560,6 +13560,13 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 }
 .signup-kid-name { font-weight: 700; color: var(--color-primary-dark); margin-bottom: 8px; }
 .signup-hour { margin-bottom: 10px; }
+/* #278 (Colleen): a bold divider between PM Hour 1 and PM Hour 2 so the two
+   hours read as distinct sections in the afternoon sign-up picker. */
+.signup-hour + .signup-hour {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 3px solid var(--color-primary);
+}
 .signup-hour-label {
   font-size: 0.72rem;
   font-weight: 700;
@@ -13685,6 +13692,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   background: rgba(var(--color-teal-rgb), 0.07);
 }
 .signup-class-2hr.signup-class-sel { background: rgba(var(--color-teal-rgb), 0.14); }
+/* #281 (Colleen): distinguish a "one or both hours" (optional) 2-hour class
+   from a "both required" one — olive badge vs the teal required badge. */
+.signup-2hr-tag.signup-2hr-optional { background: var(--color-leaf); }
 .signup-class-pinned .signup-2hr-tag { margin-left: 0; margin-right: 4px; }
 
 /* Detail popup: rank group headings + pending note + assistant tag. */

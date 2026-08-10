@@ -10089,6 +10089,11 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
   // the VP just needs the freed-coverage heads-up.
   if (action === 'family_waitlist') {
     if (prof.waitlisted_at) return res.status(409).json({ error: 'This family is already on the waitlist.' });
+    // Code review L1 (2026-08-10): a withdrawn family must not be moved to the
+    // waitlist through this action — it would silently clear the withdrawn
+    // stamp (a back-door un-withdraw, which isn't a supported flow). Mirror
+    // the withdrawal branch, which likewise refuses an already-withdrawn family.
+    if (prof.withdrawn_at) return res.status(409).json({ error: 'This family is marked withdrawn — undo the withdrawal before waitlisting.' });
     try {
       const kids = await sql`
         SELECT id, first_name FROM kids WHERE LOWER(family_email) = ${fam} ORDER BY sort_order, id
