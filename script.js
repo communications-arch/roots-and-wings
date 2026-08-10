@@ -23089,6 +23089,9 @@
       if (typeof renderEventSpaceBody === 'function') renderEventSpaceBody();
     }
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
+    else if (action === 'event-checklist-toggle' && typeof toggleChecklistItem === 'function') toggleChecklistItem(btn);
+    else if (action === 'event-checklist-additem' && typeof toggleChecklistAddForm === 'function') toggleChecklistAddForm(btn);
+    else if (action === 'event-rsvp-open' && typeof toggleEventRsvpForm === 'function') toggleEventRsvpForm(btn);
     else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
     else if (action === 'event-jump-in' && typeof showEventJumpInModal === 'function') showEventJumpInModal();
     else if (action === 'goto-special-events' && typeof navigateToSpecialEventsGrid === 'function') navigateToSpecialEventsGrid();
@@ -28078,7 +28081,7 @@
   // member's Ways to Help card once the lead hits "Request volunteers".
   function evsSectionTitle(s) {
     if (s.title) return s.title;
-    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Discussion' }[s.type] || 'Section';
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Discussion', checklist: 'Checklist' }[s.type] || 'Section';
   }
 
   // #227 (Mock A): the slots grammar, shared by save and live preview.
@@ -28104,6 +28107,40 @@
       out.push({ label: head, time: time, capacity: parseInt(p[1], 10) || 0, note: p.slice(2).join('|').trim() });
     });
     return out;
+  }
+
+  // #223 (Erin): a generic checklist section — any member ticks items off;
+  // editors manage the item text through the drawer. #238: the built-in
+  // Set-Up / Clean-Up cards render through here too (config.builtin). Items
+  // live in s.content as [{text, done, done_by, done_at}].
+  function renderChecklistSectionBody(s, viewerEmail, canEdit) {
+    var cfg = s.config || {};
+    var checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+    var items = Array.isArray(s.content) ? s.content : [];
+    var h = '';
+    if (cfg.hint) h += '<p class="ws-body-hint">' + escapeHtmlWs(cfg.hint) + '</p>';
+    var doneN = items.filter(function (it) { return it && it.done; }).length;
+    if (items.length) {
+      h += '<p class="evs-chk-progress">' + doneN + ' of ' + items.length + ' done</p>';
+      h += '<ul class="evs-checklist">';
+      items.forEach(function (it, idx) {
+        var done = !!(it && it.done);
+        h += '<li class="evs-chk-item' + (done ? ' is-done' : '') + '">'
+          + '<button type="button" class="evs-chk-box' + (done ? ' on' : '') + '" data-resource-action="event-checklist-toggle" data-section-id="' + s.id + '" data-item-index="' + idx + '" data-done="' + (done ? '1' : '0') + '" aria-pressed="' + (done ? 'true' : 'false') + '" aria-label="' + (done ? 'Mark not done' : 'Mark done') + '">' + (done ? checkSvg : '') + '</button>'
+          + '<span class="evs-chk-text">' + escapeHtmlWs(String((it && it.text) || '')) + '</span>'
+          + (done && it.done_by ? '<span class="evs-chk-by">' + escapeHtmlWs(String(it.done_by)) + '</span>' : '')
+          + '</li>';
+      });
+      h += '</ul>';
+    } else {
+      h += '<p class="ws-empty">No items yet' + (canEdit ? ' — Edit this section to add some, or use “Add an item” below' : '') + '.</p>';
+    }
+    // Any member can add an item (Erin: setup/cleanup items are addable);
+    // editors rename/remove/reorder through the drawer.
+    var FORM_KEY = 'chk' + s.id;
+    h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-checklist-additem" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '">➕ Add an item</button></p>';
+    h += '<div class="evs-chk-addform" data-chk-form="' + FORM_KEY + '" hidden></div>';
+    return h;
   }
 
   // Shared signup-section body — same markup in the Event Space, on
@@ -28213,6 +28250,35 @@
         }
         h += '</div>';
       });
+    } else if (cfg.mode === 'rsvp') {
+      // #234 (Erin): RSVP mode — members enter how many people are coming;
+      // the card shows a running headcount total + who's coming with counts.
+      var rsvpClaims = s.signups || [];
+      var totalHeads = rsvpClaims.reduce(function (a, c) { return a + (parseInt(c.head_count, 10) || 1); }, 0);
+      var fams = rsvpClaims.length;
+      var mineRsvp = rsvpClaims.filter(function (c) { return c.email === viewerEmail; })[0];
+      h += '<p class="evs-rsvp-total"><strong>' + totalHeads + '</strong> ' + (totalHeads === 1 ? 'person' : 'people')
+        + ' across ' + fams + ' ' + (fams === 1 ? 'family' : 'families') + '</p>';
+      if (rsvpClaims.length) {
+        h += '<ul class="ws-part-recap">';
+        rsvpClaims.forEach(function (c) {
+          var n = parseInt(c.head_count, 10) || 1;
+          var isYou = c.email === viewerEmail;
+          h += '<li>' + escapeHtmlWs(c.name) + (isYou ? ' (you)' : '') + ' — ' + n + '</li>';
+        });
+        h += '</ul>';
+      } else {
+        h += '<p class="ws-empty">No RSVPs yet' + (canAct ? ' — be the first!' : '.') + '</p>';
+      }
+      var rsvpKey = 'rsvp' + s.id;
+      if (canAct) {
+        if (mineRsvp) {
+          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-rsvp-open" data-section-id="' + s.id + '" data-signup-id="' + mineRsvp.id + '" data-hc="' + (parseInt(mineRsvp.head_count, 10) || 1) + '" data-form-key="' + rsvpKey + '">✎ Update your RSVP (' + (parseInt(mineRsvp.head_count, 10) || 1) + ')</button></p>';
+        } else {
+          h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-rsvp-open" data-section-id="' + s.id + '" data-form-key="' + rsvpKey + '">➕ RSVP — how many coming?</button></p>';
+        }
+        h += '<div class="evs-rsvp-form" data-rsvp-form="' + rsvpKey + '" hidden></div>';
+      }
     } else if (s.type === 'board') {
       h += renderDiscussionBody(s, viewerEmail, canEdit, ACT_REMOVE, FORM_KEY);
     } else {
@@ -28374,7 +28440,7 @@
     // Brand accents mirror the workspace cards that host the same kind
     // of content (calendar / ways-to-help / resources / board-notes).
     // Thin view over BRAND_ICONS (#114) — add meanings there, not here.
-    var SEC_ACCENTS = { timeline: BRAND_ICONS.timeline, signup: BRAND_ICONS.waysToHelp, info: BRAND_ICONS.resources, notes: BRAND_ICONS.notes, board: BRAND_ICONS.reports };
+    var SEC_ACCENTS = { timeline: BRAND_ICONS.timeline, signup: BRAND_ICONS.waysToHelp, info: BRAND_ICONS.resources, notes: BRAND_ICONS.notes, board: BRAND_ICONS.reports, checklist: BRAND_ICONS.cleaning };
 
     // #230 (Colleen/Erin, Option A): for MEMBERS, food + supply bring-lists
     // merge into ONE "Things to Bring" card with a Food subsection and a
@@ -28427,7 +28493,9 @@
         headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub' + (pub ? '' : ' evs-vis-off') + '" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Every member can see this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'
           + '<img src="brand/secondary/' + BRAND_ICONS.visibility + '.png" alt=""></button>';
         headIcons += '<button type="button" class="evs-ico-btn evs-sec-edit" data-section-id="' + s.id + '" aria-label="Edit section" title="Edit this section">' + ICON_SVG.pencil + '</button>';
-        headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
+        // #238: the built-in Set-Up / Clean-Up cards can't be deleted — their
+        // items stay fully editable, but the card itself is always present.
+        if (!((s.config || {}).builtin)) headIcons += '<button type="button" class="evs-ico-btn evs-ico-del evs-sec-del" data-section-id="' + s.id + '" aria-label="Delete section" title="Delete this section">×</button>';
       }
       h += collabCardHead(secKey,
         // #249 (Erin): section cards drop their title icons — only the
@@ -28483,6 +28551,8 @@
           (s.signups || []).forEach(function (m) { m._rolePill = roleByEmail[m.email] || ''; });
         }
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
+      } else if (s.type === 'checklist') {
+        h += renderChecklistSectionBody(s, d.viewer_email, d.can_edit);
       }
       h += '</div></div>'; // /body, /card
     });
@@ -28515,10 +28585,11 @@
       } else if (t === 'notes') {
         fh += '<div class="cls-field"><label class="cls-label">Notes for next year</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="What ran out? What worked? What should next year’s crew know?">' + escapeHtmlWs(String(((s && s.content) || {}).text || '')) + '</textarea></div>';
       } else if (t === 'signup') {
-        var mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+        var mode = (cfg.mode === 'slots' || cfg.mode === 'rsvp') ? cfg.mode : 'bring';
         fh += '<div class="cls-field"><label class="cls-label">Sign-up style</label><select class="cl-input evs-sd-mode">'
           + '<option value="bring"' + (mode === 'bring' ? ' selected' : '') + '>Bring something — members add what they’ll bring</option>'
           + '<option value="slots"' + (mode === 'slots' ? ' selected' : '') + '>Volunteer spots — fixed slots with a capacity</option>'
+          + '<option value="rsvp"' + (mode === 'rsvp' ? ' selected' : '') + '>RSVP — members say how many people are coming</option>'
           + '</select></div>';
         // #230 (Colleen/Erin): bring-lists carry a category. Food and
         // Supplies lists MERGE into one "Things to Bring" card for members
@@ -28575,6 +28646,13 @@
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(bHint) + '" placeholder="Talk through plans here — everyone on the team sees it."></div>';
         fh += '<div class="cls-field"><label class="cls-label">Chat-space link (optional) — pins at the top of the Discussion</label><input class="cl-input evs-sd-chaturl" type="url" maxlength="500" value="' + escapeAttr(cfg.chat_url || '') + '" placeholder="https://chat.google.com/room/…"></div>';
         fh += '<div class="cls-field"><label class="cls-label">Chat-space note (optional)</label><input class="cl-input evs-sd-chatnote" type="text" maxlength="200" value="' + escapeAttr(cfg.chat_note || '') + '" placeholder="Day-of quick messages happen in our Google Chat space"></div>';
+      } else if (t === 'checklist') {
+        // #223 (Erin): a generic checklist — a custom title + a plain list of
+        // items, one per line. Members tick items off; editors edit the text
+        // here. Existing checked-off state is preserved on save by matching
+        // item text (see the save handler).
+        var chkLines = (Array.isArray(s && s.content) ? s.content : []).map(function (it) { return (it && it.text) || ''; }).filter(Boolean).join('\n');
+        fh += '<div class="cls-field"><label class="cls-label">Items — one per line</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Put all tables and chairs back to their original configurations\nEmpty Bathroom trash\nRemove all garbage to dumpster">' + escapeHtmlWs(chkLines) + '</textarea></div>';
       }
       return fh;
     }
@@ -28582,7 +28660,8 @@
     if (!isEdit) {
       h += '<div class="cls-field"><label class="cls-label">Section type</label><select class="cl-input evs-sd-type">'
         + '<option value="info">Info list — what the co-op provides, what to know</option>'
-        + '<option value="signup">Sign-up list — toppings, supplies, volunteer spots</option>'
+        + '<option value="signup">Sign-up list — bring something, volunteer spots, or RSVP</option>'
+        + '<option value="checklist">Checklist — a named to-do list members tick off</option>'
         + '<option value="timeline">Timeline — the day-of schedule</option>'
         + '<option value="notes">Notes for next year</option>'
         + '<option value="board">Discussion — team messages & links</option>'
@@ -28593,9 +28672,13 @@
     el.innerHTML = h;
     function syncModeVis() {
       var modeSel = el.querySelector('.evs-sd-mode');
-      var isSlots = modeSel && modeSel.value === 'slots';
+      var mv = modeSel ? modeSel.value : 'bring';
+      var isSlots = mv === 'slots';
+      // #234: RSVP mode shows neither the slots editor nor the bring-list
+      // fields — just the title + optional hint.
+      var isBring = mv === 'bring';
       el.querySelectorAll('.evs-sd-slots-only').forEach(function (x) { x.style.display = isSlots ? '' : 'none'; });
-      el.querySelectorAll('.evs-sd-bring-only').forEach(function (x) { x.style.display = isSlots ? 'none' : ''; });
+      el.querySelectorAll('.evs-sd-bring-only').forEach(function (x) { x.style.display = isBring ? '' : 'none'; });
     }
     function wireModeSel() {
       var ms = el.querySelector('.evs-sd-mode');
@@ -28689,9 +28772,18 @@
         var prevC = (isEdit && section.content) || {};
         content = { text: lines };
         if (prevC.prev_text) { content.prev_text = prevC.prev_text; content.prev_year = prevC.prev_year; }
+      } else if (type === 'checklist') {
+        // #223: lines → [{text, done}], preserving any existing checked-off
+        // state by matching the item text (so an editor rewording the list
+        // doesn't wipe members' progress on the unchanged items).
+        var prevItems = (isEdit && Array.isArray(section.content)) ? section.content : [];
+        content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (txt) {
+          var prev = prevItems.filter(function (it) { return it && it.text === txt; })[0];
+          return prev ? { text: txt, done: !!prev.done, done_by: prev.done_by || '', done_at: prev.done_at || null } : { text: txt, done: false };
+        });
       } else if (type === 'signup') {
         var modeSel2 = el.querySelector('.evs-sd-mode');
-        config.mode = (modeSel2 && modeSel2.value === 'slots') ? 'slots' : 'bring';
+        config.mode = (modeSel2 && (modeSel2.value === 'slots' || modeSel2.value === 'rsvp')) ? modeSel2.value : 'bring';
         // #230: bring-list category (food/supply combine for members).
         if (config.mode === 'bring') {
           var catSel = el.querySelector('.evs-sd-category');
@@ -29124,6 +29216,104 @@
           evsMaybeRefreshSpace();
         })
         .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-bring-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // #223 (Erin): any member ticks a checklist item off (or back on). The
+  // dedicated kind flips only that one item's done flag server-side.
+  function toggleChecklistItem(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var idx = parseInt(btn.getAttribute('data-item-index'), 10);
+    var wasDone = btn.getAttribute('data-done') === '1';
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-checklist-toggle-item', section_id: sid, item_index: idx, done: !wasDone }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not update the item.'); return; }
+        evsMaybeRefreshSpace();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+
+  // #223/#238 (Erin): any member adds an item to a checklist section.
+  function toggleChecklistAddForm(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var key = btn.getAttribute('data-form-key');
+    var form = document.querySelector('[data-chk-form="' + key + '"]');
+    if (!form) return;
+    if (!form.hidden) { form.hidden = true; form.innerHTML = ''; return; }
+    form.hidden = false;
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">New item</label><input class="cl-input evs-chk-newitem" type="text" maxlength="200" placeholder="e.g. Wipe down tables"></div>'
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-chk-additem-save">Add item</button><span class="perm-status evs-chk-add-status" aria-live="polite"></span></div>';
+    var inp = form.querySelector('.evs-chk-newitem');
+    if (inp) inp.focus();
+    form.querySelector('.evs-chk-additem-save').addEventListener('click', function () {
+      var st = form.querySelector('.evs-chk-add-status');
+      var text = inp.value.trim();
+      if (!text) { st.className = 'perm-status evs-chk-add-status ws-wv-err'; st.textContent = 'Type the item first'; return; }
+      var b = this;
+      b.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-checklist-add-item', section_id: sid, text: text }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { b.disabled = false; st.className = 'perm-status evs-chk-add-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Add failed'; return; }
+          evsMaybeRefreshSpace();
+        })
+        .catch(function () { b.disabled = false; st.className = 'perm-status evs-chk-add-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+  }
+
+  // #234 (Erin): RSVP form — a member enters a headcount. One form serves
+  // both first RSVP (claim) and change/remove (update / unclaim) via the
+  // data-signup-id on the opener.
+  function toggleEventRsvpForm(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var key = btn.getAttribute('data-form-key');
+    var form = document.querySelector('[data-rsvp-form="' + key + '"]');
+    if (!form) return;
+    if (!form.hidden) { form.hidden = true; form.innerHTML = ''; return; }
+    var suId = parseInt(btn.getAttribute('data-signup-id'), 10);
+    var isEdit = !isNaN(suId) && suId > 0;
+    var curHc = parseInt(btn.getAttribute('data-hc'), 10) || 1;
+    form.hidden = false;
+    form.innerHTML = '<div class="cls-field"><label class="cls-label">How many people are coming?</label><input class="cl-input evs-rsvp-count" type="number" min="1" max="99" value="' + curHc + '" style="max-width:120px;"></div>'
+      + '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm evs-rsvp-save">' + (isEdit ? 'Update RSVP' : 'RSVP') + '</button>'
+      + (isEdit ? '<button type="button" class="btn btn-outline-dark btn-sm evs-rsvp-remove">Remove RSVP</button>' : '')
+      + '<span class="perm-status evs-rsvp-status" aria-live="polite"></span></div>';
+    var cntInp = form.querySelector('.evs-rsvp-count');
+    if (cntInp) cntInp.focus();
+    form.querySelector('.evs-rsvp-save').addEventListener('click', function () {
+      var st = form.querySelector('.evs-rsvp-status');
+      var hc = parseInt(cntInp.value, 10);
+      if (!hc || hc < 1) { st.className = 'perm-status evs-rsvp-status ws-wv-err'; st.textContent = 'Enter at least 1'; return; }
+      if (hc > 99) hc = 99;
+      var saveBtn = this;
+      saveBtn.disabled = true;
+      var payload = isEdit
+        ? { kind: 'event-signup-update', id: suId, head_count: hc }
+        : { kind: 'event-signup-claim', section_id: sid, head_count: hc };
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { saveBtn.disabled = false; st.className = 'perm-status evs-rsvp-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Save failed'; return; }
+          loadEventOpenings();
+          evsMaybeRefreshSpace();
+        })
+        .catch(function () { saveBtn.disabled = false; st.className = 'perm-status evs-rsvp-status ws-wv-err'; st.textContent = 'Network error'; });
+    });
+    var rm = form.querySelector('.evs-rsvp-remove');
+    if (rm) rm.addEventListener('click', function () {
+      if (!confirm('Remove your RSVP?')) return;
+      var rmBtn = this;
+      rmBtn.disabled = true;
+      fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-signup-unclaim', id: suId }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { rmBtn.disabled = false; alert((res.data && res.data.error) || 'Could not remove it.'); return; }
+          loadEventOpenings();
+          evsMaybeRefreshSpace();
+        })
+        .catch(function () { rmBtn.disabled = false; alert('Network error — try again.'); });
     });
   }
 

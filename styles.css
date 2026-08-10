@@ -16174,6 +16174,44 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-bottom: 2px solid var(--color-primary-light);
 }
 
+/* #223 (Erin): generic checklist section — a list members tick off.
+   #238's built-in Set-Up / Clean-Up cards share this look. */
+.evs-chk-progress {
+  font-size: .7rem; font-weight: 700; letter-spacing: .5px;
+  color: var(--color-primary-dark); margin: 0 0 8px;
+}
+.evs-checklist { list-style: none; margin: 0 0 6px; padding: 0; }
+.evs-chk-item {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 6px 0; border-bottom: 1px solid var(--color-border);
+}
+.evs-chk-item:last-child { border-bottom: none; }
+.evs-chk-box {
+  flex: 0 0 auto; width: 22px; height: 22px; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid var(--color-border); border-radius: 6px;
+  background: #fff; color: #fff; cursor: pointer; padding: 0;
+  transition: background .12s, border-color .12s;
+}
+.evs-chk-box:hover { border-color: var(--color-primary); }
+.evs-chk-box.on { background: var(--color-leaf); border-color: var(--color-leaf); }
+.evs-chk-box:disabled { opacity: .55; cursor: default; }
+.evs-chk-text { flex: 1 1 auto; font-size: .92rem; line-height: 1.4; }
+.evs-chk-item.is-done .evs-chk-text { color: var(--color-text-light); text-decoration: line-through; }
+.evs-chk-by {
+  flex: 0 0 auto; font-size: .72rem; font-weight: 600;
+  color: var(--color-leaf); white-space: nowrap; margin-top: 2px;
+}
+.evs-chk-addform:not([hidden]) { margin-top: 10px; }
+
+/* #234 (Erin): RSVP sign-up mode — headcount total + who's coming. */
+.evs-rsvp-total {
+  font-size: 1rem; color: var(--color-primary-dark);
+  margin: 0 0 8px;
+}
+.evs-rsvp-total strong { font-size: 1.25rem; }
+.evs-rsvp-form:not([hidden]) { margin-top: 10px; }
+
 /* #270 (Colleen): collapse the Class-Builder facilities strip to a
    one-line summary that expands to Lyndsey's table (#272). */
 .sb-fac-toggle {

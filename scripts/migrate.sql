@@ -2200,6 +2200,10 @@ ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS offboard_notified_by TEXT N
 --   info:     ["bullet", ...]
 --   notes:    {text, prev_text, prev_year} — prev_* carried from the
 --             previous year's event by template-start
+--   checklist:(#223) [{text, done, done_by, done_at}]; config {} or
+--             {builtin:'setup'|'cleanup'} for the #238 non-deletable pair
+--   signup rsvp mode (#234): config {mode:'rsvp'}; each signup row carries
+--             head_count (headcount for that member's RSVP)
 -- is_open gates member sign-ups (the lead's "Request volunteers").
 CREATE TABLE IF NOT EXISTS event_sections (
   id               SERIAL PRIMARY KEY,
@@ -2273,10 +2277,25 @@ ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_by TEXT NOT
 -- 2026-07-25: 'board' section type — shared Notes & Links in event spaces
 -- (Erin). Existing DBs carry the four-type CHECK; widen it. (Final
 -- drop/add pair for each constraint — see the 2026-07-21 rule.)
+-- 2026-08-10 (#223): 'checklist' section type — a generic named checklist;
+-- items live in content JSONB as [{text, done, done_by, done_at}]. #238's
+-- built-in Set-Up/Clean-Up cards are checklist sections (config.builtin).
 ALTER TABLE event_sections DROP CONSTRAINT IF EXISTS event_sections_type_check;
-ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board'));
+ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist'));
 ALTER TABLE event_template_sections DROP CONSTRAINT IF EXISTS event_template_sections_type_check;
-ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board'));
+ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist'));
+
+-- 2026-08-10 (#234, Erin): RSVP sign-up mode — config {mode:'rsvp'}. Each
+-- member's RSVP carries a headcount (how many people they're bringing).
+ALTER TABLE event_section_signups ADD COLUMN IF NOT EXISTS head_count INTEGER DEFAULT 1;
+
+-- 2026-08-10 (#238): the built-in Set-Up / Clean-Up checklist cards are
+-- ensured-on-read (created lazily on the first event-space load). At most
+-- one card per builtin kind per event — this partial unique index makes the
+-- lazy INSERT ... ON CONFLICT DO NOTHING race-safe under concurrent reads.
+CREATE UNIQUE INDEX IF NOT EXISTS event_sections_builtin_uniq
+  ON event_sections (special_event_id, (config->>'builtin'))
+  WHERE config->>'builtin' IS NOT NULL;
 
 -- 2026-07-25: per-card visibility on event-space sections (Erin). TRUE =
 -- every member sees the card; FALSE = only the event committee, the

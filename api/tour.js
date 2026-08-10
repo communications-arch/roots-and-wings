@@ -6475,7 +6475,11 @@ function eventTaskShape(t) {
 // 'board' (Erin, 2026-07-25): shared notes & links — any member adds/
 // removes their own entries (Pinterest boards etc.); rides the same
 // event_section_signups rows the bring-lists use.
-const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board'];
+// #223 (Erin): 'checklist' — a generic named checklist; members/organizers
+// tick items off. Its items live in the section's own `content` JSONB as
+// [{text, done, done_by, done_at}]. #238: every event auto-gets a built-in
+// Set-Up + Clean-Up checklist pair (config.builtin='setup'|'cleanup').
+const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board', 'checklist'];
 
 function eventSectionShape(s, signups) {
   return {
@@ -6497,6 +6501,7 @@ function eventSectionShape(s, signups) {
       note: x.note || '',
       serving_size: x.serving_size || '',
       carbs_per_serving: x.carbs_per_serving || '',
+      head_count: x.head_count == null ? 1 : x.head_count,
       created_at: x.created_at || null
     }))
   };
@@ -6543,6 +6548,34 @@ async function handleEventSpaceGet(req, res) {
     const tplSecCount = await sql`
       SELECT COUNT(*)::int AS n FROM event_template_sections WHERE event_name = ${ev.name}
     `;
+    // #238 (Erin): every event has a built-in Set-Up + Clean-Up checklist
+    // pair — non-deletable cards, editable items. Ensure-on-read (no data
+    // migration): create either if missing. WHERE NOT EXISTS keeps two
+    // concurrent reads from double-inserting. Clean-Up seeds the three
+    // standing items; Set-Up starts empty. Both are visible to all members.
+    const CLEANUP_ITEMS = [
+      { text: 'Put all tables and chairs back to their original configurations', done: false },
+      { text: 'Empty Bathroom trash', done: false },
+      { text: 'Remove all garbage to dumpster', done: false }
+    ];
+    await sql`
+      INSERT INTO event_sections (special_event_id, type, title, config, content, is_public, is_open, sort_order, updated_by)
+      SELECT ${eventId}, 'checklist', 'Set Up', '{"builtin":"setup"}'::jsonb, '[]'::jsonb, TRUE, FALSE,
+             (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM event_sections WHERE special_event_id = ${eventId}), 'system'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM event_sections WHERE special_event_id = ${eventId} AND config->>'builtin' = 'setup'
+      )
+      ON CONFLICT DO NOTHING
+    `;
+    await sql`
+      INSERT INTO event_sections (special_event_id, type, title, config, content, is_public, is_open, sort_order, updated_by)
+      SELECT ${eventId}, 'checklist', 'Clean Up', '{"builtin":"cleanup"}'::jsonb, ${JSON.stringify(CLEANUP_ITEMS)}::jsonb, TRUE, FALSE,
+             (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM event_sections WHERE special_event_id = ${eventId}), 'system'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM event_sections WHERE special_event_id = ${eventId} AND config->>'builtin' = 'cleanup'
+      )
+      ON CONFLICT DO NOTHING
+    `;
     // Generic sections (Erin, 2026-07-21) + their member sign-ups.
     let sections = await sql`
       SELECT id, type, title, config, content, is_open, is_public, sort_order
@@ -6551,7 +6584,7 @@ async function handleEventSpaceGet(req, res) {
     `;
     const sectionIds = sections.map(s => s.id);
     const sectionSignups = sectionIds.length ? await sql`
-      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, created_at
+      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, serving_size, carbs_per_serving, head_count, created_at
       FROM event_section_signups WHERE section_id = ANY(${sectionIds})
       ORDER BY created_at, id
     ` : [];
@@ -6943,9 +6976,20 @@ async function handleEventSectionSave(body, req, res) {
     }
     const id = body.id != null ? parseInt(body.id, 10) : null;
     if (Number.isInteger(id) && id > 0) {
+      // #238: a built-in Set-Up/Clean-Up card keeps its builtin marker even
+      // when an editor rewrites its items — never let a config swap strip it
+      // (that would make the non-deletable card deletable).
+      const existing = await sql`SELECT config FROM event_sections WHERE id = ${id} AND special_event_id = ${eventId}`;
+      if (existing.length === 0) return res.status(404).json({ error: 'Section not found.' });
+      let saveCfgStr = cfgStr;
+      const exBuiltin = existing[0].config && existing[0].config.builtin;
+      if (exBuiltin) {
+        const merged = Object.assign({}, config, { builtin: exBuiltin });
+        saveCfgStr = JSON.stringify(merged);
+      }
       const upd = await sql`
         UPDATE event_sections
-        SET title = ${title}, config = ${cfgStr}::jsonb, content = ${cntStr}::jsonb,
+        SET title = ${title}, config = ${saveCfgStr}::jsonb, content = ${cntStr}::jsonb,
             updated_by = ${auth.realEmail}, updated_at = NOW()
         WHERE id = ${id} AND special_event_id = ${eventId}
         RETURNING id
@@ -7006,10 +7050,15 @@ async function handleEventSectionDelete(body, req, res) {
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
   try {
     const sql = getSql();
-    const rows = await sql`SELECT special_event_id FROM event_sections WHERE id = ${id}`;
+    const rows = await sql`SELECT special_event_id, config FROM event_sections WHERE id = ${id}`;
     if (rows.length === 0) return res.status(404).json({ error: 'Section not found.' });
     if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
       return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this space.', youAre: auth.realEmail });
+    }
+    // #238: the built-in Set-Up / Clean-Up cards are always present — the
+    // items are fully editable but the card itself can't be removed.
+    if (rows[0].config && rows[0].config.builtin) {
+      return res.status(400).json({ error: 'The Set-Up and Clean-Up cards are built in — you can edit or clear their items, but the card stays.' });
     }
     await sql`DELETE FROM event_sections WHERE id = ${id}`;
     return res.status(200).json({ ok: true });
@@ -7036,6 +7085,73 @@ async function handleEventChecklistToggle(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-checklist-toggle error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-checklist-toggle-item — #223 (Erin): ANY member ticks a
+// checklist-section item off (or back on). A dedicated kind so a member's
+// tick only flips that item's done flag — it never round-trips the whole
+// item array through the editor drawer (which would let a check-off clobber
+// an editor's text edit). Body: {section_id, item_index, done}.
+async function handleEventChecklistToggleItem(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const sectionId = parseInt(body.section_id, 10);
+  if (!Number.isInteger(sectionId) || sectionId < 1) return res.status(400).json({ error: 'section_id required' });
+  const itemIndex = parseInt(body.item_index, 10);
+  if (!Number.isInteger(itemIndex) || itemIndex < 0) return res.status(400).json({ error: 'item_index required' });
+  const done = body.done === true;
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT id, type, content, special_event_id FROM event_sections WHERE id = ${sectionId}`;
+    if (rows.length === 0 || rows[0].type !== 'checklist') return res.status(404).json({ error: 'Checklist not found.' });
+    const items = Array.isArray(rows[0].content) ? rows[0].content : [];
+    if (itemIndex >= items.length) return res.status(400).json({ error: 'That item no longer exists.' });
+    const email = String(auth.email || '').toLowerCase();
+    const who = await eventPersonName(sql, email);
+    items[itemIndex] = Object.assign({}, items[itemIndex], {
+      done: done,
+      done_by: done ? who.name : '',
+      done_at: done ? new Date().toISOString() : null
+    });
+    await sql`
+      UPDATE event_sections SET content = ${JSON.stringify(items)}::jsonb, updated_at = NOW()
+      WHERE id = ${sectionId}
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-checklist-toggle-item error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// kind=event-checklist-add-item — #223/#238 (Erin): ANY member adds an
+// item to a checklist section (e.g. spotting one more clean-up task). Kept
+// separate from the editor drawer so an append never clobbers other edits.
+// Editors still rename/remove/reorder items through the drawer. Body:
+// {section_id, text}.
+async function handleEventChecklistAddItem(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const sectionId = parseInt(body.section_id, 10);
+  if (!Number.isInteger(sectionId) || sectionId < 1) return res.status(400).json({ error: 'section_id required' });
+  const text = String(body.text || '').trim().slice(0, 200);
+  if (!text) return res.status(400).json({ error: 'Type the item first.' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT id, type, content FROM event_sections WHERE id = ${sectionId}`;
+    if (rows.length === 0 || rows[0].type !== 'checklist') return res.status(404).json({ error: 'Checklist not found.' });
+    const items = Array.isArray(rows[0].content) ? rows[0].content : [];
+    if (items.length >= 200) return res.status(400).json({ error: 'This checklist is full.' });
+    items.push({ text: text, done: false });
+    await sql`
+      UPDATE event_sections SET content = ${JSON.stringify(items)}::jsonb, updated_at = NOW()
+      WHERE id = ${sectionId}
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-checklist-add-item error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -7106,7 +7222,24 @@ async function handleEventSignupClaim(body, req, res) {
     const email = String(auth.email || '').toLowerCase();
     const who = await eventPersonName(sql, email);
     const cfg = sec.config || {};
-    const mode = cfg.mode === 'slots' ? 'slots' : 'bring';
+    const mode = (cfg.mode === 'slots' || cfg.mode === 'rsvp') ? cfg.mode : 'bring';
+    if (mode === 'rsvp') {
+      // #234 (Erin): RSVP with a headcount. One RSVP per person — a repeat
+      // claim just updates the count (upsert), so add + change share a path.
+      let hc = parseInt(body.head_count, 10);
+      if (!Number.isInteger(hc) || hc < 1) hc = 1;
+      if (hc > 99) hc = 99;
+      const mine = await sql`SELECT id FROM event_section_signups WHERE section_id = ${sectionId} AND LOWER(person_email) = ${email}`;
+      if (mine.length) {
+        await sql`UPDATE event_section_signups SET head_count = ${hc}, person_name = ${who.name} WHERE id = ${mine[0].id}`;
+        return res.status(200).json({ ok: true, updated: true });
+      }
+      await sql`
+        INSERT INTO event_section_signups (section_id, person_email, person_name, head_count)
+        VALUES (${sectionId}, ${email}, ${who.name}, ${hc})
+      `;
+      return res.status(200).json({ ok: true });
+    }
     if (mode === 'slots') {
       const slotIndex = parseInt(body.slot_index, 10);
       const slots = Array.isArray(sec.content) ? sec.content : [];
@@ -7256,11 +7389,24 @@ async function handleEventSignupUpdate(body, req, res) {
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT su.id, su.person_email, su.item_text, s.special_event_id, s.type AS section_type
+      SELECT su.id, su.person_email, su.item_text, s.special_event_id, s.type AS section_type, s.config AS section_config
       FROM event_section_signups su JOIN event_sections s ON s.id = su.section_id
       WHERE su.id = ${id}
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'Sign-up not found.' });
+    const secCfg = rows[0].section_config || {};
+    // #234: an RSVP has no item_text — its editable field is the headcount.
+    if (secCfg.mode === 'rsvp') {
+      let hc = parseInt(body.head_count, 10);
+      if (!Number.isInteger(hc) || hc < 1) hc = 1;
+      if (hc > 99) hc = 99;
+      const isMineR = String(rows[0].person_email || '').toLowerCase() === String(auth.email || '').toLowerCase();
+      if (!isMineR && !(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+        return res.status(403).json({ error: 'You can only edit your own RSVP.' });
+      }
+      await sql`UPDATE event_section_signups SET head_count = ${hc} WHERE id = ${id}`;
+      return res.status(200).json({ ok: true });
+    }
     if (!rows[0].item_text) return res.status(400).json({ error: 'Slot sign-ups have nothing to edit — remove and pick another spot instead.' });
     // Codebase review 2026-08-08: a Discussion (board) message can be up to
     // 1000 chars and multi-line (the composer allows it), but this edit
@@ -7303,7 +7449,12 @@ async function handleEventTemplateSectionsSave(body, req, res) {
     `;
     await sql`DELETE FROM event_template_sections WHERE event_name = ${eventName}`;
     for (const s of sections) {
-      const content = s.type === 'notes' ? { text: '' } : (s.content == null ? [] : s.content);
+      const content = s.type === 'notes'
+        ? { text: '' }
+        : s.type === 'checklist'
+          // Templates carry the item list, not this year's checked-off state.
+          ? (Array.isArray(s.content) ? s.content.map(it => ({ text: (it && it.text) || '', done: false })) : [])
+          : (s.content == null ? [] : s.content);
       await sql`
         INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
         VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
@@ -7360,7 +7511,12 @@ async function handleEventTemplateSnapshot(body, req, res) {
       `);
     });
     for (const s of sections) {
-      const content = s.type === 'notes' ? { text: '' } : (s.content == null ? [] : s.content);
+      const content = s.type === 'notes'
+        ? { text: '' }
+        : s.type === 'checklist'
+          // Templates carry the item list, not this year's checked-off state.
+          ? (Array.isArray(s.content) ? s.content.map(it => ({ text: (it && it.text) || '', done: false })) : [])
+          : (s.content == null ? [] : s.content);
       stmts.push(sql`
         INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
         VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
@@ -7438,7 +7594,7 @@ async function handleEventOpeningsGet(req, res) {
     ` : [];
     const sectionIds = sections.map(s => s.id);
     const signups = sectionIds.length ? await sql`
-      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, created_at
+      SELECT id, section_id, slot_index, shift_index, person_email, person_name, item_text, note, serving_size, carbs_per_serving, head_count, created_at
       FROM event_section_signups WHERE section_id = ANY(${sectionIds})
       ORDER BY created_at, id
     ` : [];
@@ -10691,6 +10847,8 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
     if (kind === 'event-signup-update') return handleEventSignupUpdate(body, req, res);
     if (kind === 'event-checklist-toggle') return handleEventChecklistToggle(body, req, res);
+    if (kind === 'event-checklist-toggle-item') return handleEventChecklistToggleItem(body, req, res);
+    if (kind === 'event-checklist-add-item') return handleEventChecklistAddItem(body, req, res);
     if (kind === 'event-template-sections-save') return handleEventTemplateSectionsSave(body, req, res);
     if (kind === 'event-template-snapshot') return handleEventTemplateSnapshot(body, req, res);
     if (kind === 'event-seat-interest') return handleEventSeatInterest(body, req, res);
