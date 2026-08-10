@@ -1059,15 +1059,23 @@ module.exports = async function handler(req, res) {
         // submissions instead of the super user's own. Same pattern as
         // /api/notifications resolveRecipient.
         const filterEmail = resolveSubmitterEmail(user, req.query.view_as);
-        const [rows, isReviewer] = await Promise.all([
+        const [rows, isReviewer, mineWinRows] = await Promise.all([
           sql`SELECT * FROM class_submissions
               WHERE LOWER(submitted_by_email) = LOWER(${filterEmail})
               ORDER BY created_at DESC`,
-          isReviewerReq(user, req)
+          isReviewerReq(user, req),
+          // Afternoon sign-up window status per session so the Class
+          // Development card can reveal the "My Class" button only once a
+          // PM class's session sign-up is CLOSED (#239). Small table — read
+          // all and key by year|session.
+          sql`SELECT school_year, session_number, status FROM class_signup_windows`
         ]);
+        const mineSignupWindows = {};
+        mineWinRows.forEach(w => { mineSignupWindows[w.school_year + '|' + w.session_number] = w.status || null; });
         return res.status(200).json({
           submissions: rows.map(serializeSubmission),
-          is_reviewer: !!isReviewer
+          is_reviewer: !!isReviewer,
+          signup_windows: mineSignupWindows
         });
       }
 
@@ -1235,6 +1243,33 @@ module.exports = async function handler(req, res) {
         const ci = ciRows[0];
         const ciHelpers = await sql`SELECT person_name, person_email FROM class_assignment_helpers
           WHERE class_submission_id = ${ciId} ORDER BY sort_order`;
+        // Allergy / medical text (from the kids table) and the grove
+        // liaison's private per-kid notes are sensitive, member-entered
+        // fields (#219/#239/#254). Only surface them to people who can
+        // already see this class's roster in a working capacity: full-scope
+        // reviewers (VP / Afternoon Class Liaison / super), the grove liaison
+        // (AM), board members, the lead (submitted_by), and its assistants.
+        // Everyone else keeps the plain name+age roster — never the
+        // allergy/medical/notes strings. Matches the liaison-card gate.
+        const ciActingEmail = actingEmailFor(user, req);
+        let ciCanSeeSensitive = false;
+        const ciScope = await reviewerScope(ciActingEmail);
+        if (ciScope && ciScope.all) {
+          ciCanSeeSensitive = true;
+        } else if (ciScope && Array.isArray(ciScope.groups) && ci.class_period === 'AM'
+            && ciScope.groups.map(g => String(g).toLowerCase())
+                 .indexOf(String((ci.age_groups || [])[0] || '').toLowerCase()) !== -1) {
+          ciCanSeeSensitive = true;
+        } else if (await isBoardMember(ciActingEmail)) {
+          ciCanSeeSensitive = true;
+        } else {
+          const ciMe = await sql`SELECT LOWER(email) AS e, LOWER(personal_email) AS pe FROM people
+            WHERE LOWER(email) = LOWER(${ciActingEmail}) OR LOWER(personal_email) = LOWER(${ciActingEmail}) LIMIT 1`;
+          const ciMyEmails = new Set([String(ciActingEmail || '').toLowerCase()]);
+          if (ciMe.length) { if (ciMe[0].e) ciMyEmails.add(ciMe[0].e); if (ciMe[0].pe) ciMyEmails.add(ciMe[0].pe); }
+          if (ciMyEmails.has(String(ci.submitted_by_email || '').toLowerCase())) ciCanSeeSensitive = true;
+          else if (ciHelpers.some(h => ciMyEmails.has(String(h.person_email || '').toLowerCase()))) ciCanSeeSensitive = true;
+        }
         // Kids come back as { name: 'First Last', age: N|null } (Erin,
         // 2026-07-31: full names + ages in the class-details popup). The
         // client capitalizes for display; legacy string arrays still work.
@@ -1255,7 +1290,13 @@ module.exports = async function handler(req, res) {
             const kidRows = await sql`
               SELECT COALESCE(NULLIF(k.nickname, ''), NULLIF(k.first_name, ''), a.kid_first_name) AS display_first,
                      COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last,
-                     k.birth_date
+                     k.birth_date, k.allergies AS allergies,
+                     (SELECT lkn.note FROM liaison_kid_notes lkn
+                       WHERE lkn.school_year = a.school_year
+                         AND LOWER(lkn.class_group) = LOWER(${ciGroup})
+                         AND lkn.kid_key = LOWER(SPLIT_PART(TRIM(COALESCE(NULLIF(k.first_name, ''), a.kid_first_name)), ' ', 1))
+                              || '|' || LOWER(COALESCE(NULLIF(mp.family_name, ''), k.last_name, ''))
+                       LIMIT 1) AS liaison_note
               FROM morning_class_assignments a
               LEFT JOIN LATERAL (
                 SELECT id, nickname, first_name, last_name, birth_date, family_email FROM kids
@@ -1270,7 +1311,9 @@ module.exports = async function handler(req, res) {
               ORDER BY 1`;
             ciKids = kidRows.map(r => ({
               name: (String(r.display_first || '') + ' ' + String(r.display_last || '')).trim(),
-              age: ciAgeOf(r.birth_date)
+              age: ciAgeOf(r.birth_date),
+              allergies: ciCanSeeSensitive ? String(r.allergies || '') : '',
+              note: ciCanSeeSensitive ? String(r.liaison_note || '') : ''
             }));
             // Placements not finalized yet — show the kids currently in the
             // class's age group as the pending roster (Erin, 2026-07-15:
@@ -1281,7 +1324,13 @@ module.exports = async function handler(req, res) {
               const pend = await sql`
                 SELECT COALESCE(NULLIF(k.nickname, ''), k.first_name) AS n,
                        COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS ln,
-                       k.birth_date
+                       k.birth_date, k.allergies AS allergies,
+                       (SELECT lkn.note FROM liaison_kid_notes lkn
+                         WHERE lkn.school_year = ${ci.school_year}
+                           AND LOWER(lkn.class_group) = LOWER(${ciGroup})
+                           AND lkn.kid_key = LOWER(SPLIT_PART(TRIM(k.first_name), ' ', 1))
+                                || '|' || LOWER(COALESCE(NULLIF(mp.family_name, ''), k.last_name, ''))
+                         LIMIT 1) AS liaison_note
                 FROM kid_enrollments e
                 JOIN kids k ON k.id = e.kid_id
                 LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)
@@ -1291,7 +1340,9 @@ module.exports = async function handler(req, res) {
                 ORDER BY 1`;
               ciKids = pend.map(r => ({
                 name: (String(r.n || '') + ' ' + String(r.ln || '')).trim(),
-                age: ciAgeOf(r.birth_date)
+                age: ciAgeOf(r.birth_date),
+                allergies: ciCanSeeSensitive ? String(r.allergies || '') : '',
+                note: ciCanSeeSensitive ? String(r.liaison_note || '') : ''
               }));
               ciKidsPending = ciKids.length > 0;
             }
@@ -1308,7 +1359,8 @@ module.exports = async function handler(req, res) {
             SELECT MIN(p.rank) AS pick_rank, BOOL_OR(p.as_assistant) AS as_assistant,
                    COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                    COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last,
-                   MAX(k.class_group) AS class_group
+                   MAX(k.class_group) AS class_group,
+                   MAX(k.allergies) AS allergies
             FROM class_signup_picks p
             JOIN kids k
               ON (p.kid_id IS NOT NULL AND k.id = p.kid_id)
@@ -1329,7 +1381,8 @@ module.exports = async function handler(req, res) {
             name: ((r.display_first || '') + ' ' + (r.display_last || '')).trim(),
             rank: parseInt(r.pick_rank, 10) || 1,
             assistant: r.as_assistant === true,
-            group: r.class_group || ''
+            group: r.class_group || '',
+            allergies: ciCanSeeSensitive ? String(r.allergies || '') : ''
           })).filter(s => s.name)
             .sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name));
         }
@@ -1349,7 +1402,8 @@ module.exports = async function handler(req, res) {
           },
           kids: ciKids,
           kids_pending: ciKidsPending,
-          signups: ciSignups
+          signups: ciSignups,
+          can_see_sensitive: ciCanSeeSensitive
         });
       }
 

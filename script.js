@@ -4509,11 +4509,25 @@
           if (ciKidsArr.length && d.kids_pending) {
             html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">Placements aren’t finalized yet — these are the kids currently in this group.</p>';
           }
-          html += ciKidsArr.length
-            ? '<p style="margin:0;color:var(--color-text-light);">' + ciKidsArr.map(function (k) {
-                return escapeHtml(rwCapWords(k.name)) + (k.age != null ? ' (' + k.age + ')' : '');
-              }).join(', ') + '</p>'
-            : '<p style="margin:0;color:var(--color-text-light);">Placements aren’t finalized yet.</p>';
+          if (!ciKidsArr.length) {
+            html += '<p style="margin:0;color:var(--color-text-light);">Placements aren’t finalized yet.</p>';
+          } else if (d.can_see_sensitive) {
+            // #219/#254: leads / assistants / the grove liaison see the
+            // allergy⚠ + medical line and the liaison's private note per kid,
+            // mirroring the My Class card. Everyone else keeps the name list.
+            html += '<ul class="absence-slot-list signup-detail-list">';
+            ciKidsArr.forEach(function (k) {
+              html += '<li>' + escapeHtml(rwCapWords(k.name)) + (k.age != null ? ' (' + k.age + ')' : '');
+              if (k.allergies) html += '<br><span style="color:var(--color-error);font-weight:600;">⚠ ' + escapeHtmlWs(k.allergies) + '</span>';
+              if (k.note) html += '<br><span style="color:var(--color-text-light);">📝 ' + escapeHtmlWs(k.note) + '</span>';
+              html += '</li>';
+            });
+            html += '</ul>';
+          } else {
+            html += '<p style="margin:0;color:var(--color-text-light);">' + ciKidsArr.map(function (k) {
+              return escapeHtml(rwCapWords(k.name)) + (k.age != null ? ' (' + k.age + ')' : '');
+            }).join(', ') + '</p>';
+          }
         } else {
           // Afternoon: who has ranked this class so far — 1st choices lead,
           // 2nd choices below, assistants tagged; all pending the lottery.
@@ -4524,7 +4538,11 @@
             var suFirst = su.filter(function (s2) { return s2.rank === 1; });
             var suRest = su.filter(function (s2) { return s2.rank !== 1; });
             var suLi = function (s2) {
-              return '<li>' + escapeHtml(s2.name) + (s2.group ? ' ' + kidGroupBadge(s2.group) : '') + (s2.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
+              // #239: afternoon leads (and assistants) see the allergy /
+              // medical line per signed-up kid once sign-ups close.
+              return '<li>' + escapeHtml(s2.name) + (s2.group ? ' ' + kidGroupBadge(s2.group) : '') + (s2.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '')
+                + (d.can_see_sensitive && s2.allergies ? '<br><span style="color:var(--color-error);font-weight:600;">⚠ ' + escapeHtmlWs(s2.allergies) + '</span>' : '')
+                + '</li>';
             };
             if (suFirst.length) {
               html += '<div class="signup-detail-rankhead">1st choice</div>';
@@ -25619,6 +25637,11 @@
   // submitted → drafted (by VP/PMA) → scheduled, or withdrawn / declined.
 
   var myClassSubmissions = [];
+  // Afternoon sign-up window status per "school_year|session" (from the
+  // class-submissions?scope=mine response). Drives #239: the "My Class"
+  // button on a PM lead's Class Development card only appears once that
+  // session's sign-up window is CLOSED (or locked).
+  var _myClassSignupWindows = {};
   // Change signature of the last fetch — guards the duties re-render in
   // loadMyClassSubmissions against a render↔load loop.
   var _myClassSubsSig = '';
@@ -25761,6 +25784,7 @@
     .then(function (r) { return r.json(); })
     .then(function (data) {
       myClassSubmissions = Array.isArray(data.submissions) ? data.submissions : [];
+      _myClassSignupWindows = (data && data.signup_windows) || {};
       classSubmissionReviewer = !!data.is_reviewer;
       // Scheduled classes surface as teaching duties on My Responsibilities.
       // Duties render before this fetch lands, so re-render My Family ONCE
@@ -25836,6 +25860,14 @@
       });
     }
 
+    // #239: has the afternoon sign-up window for this PM class's session
+    // closed (or locked)? Only then does the lead get the "My Class" button.
+    function myClassSignupsClosed(s) {
+      if (!s || s.class_period !== 'PM' || !s.scheduled_session) return false;
+      var st = _myClassSignupWindows[String(s.school_year || '') + '|' + s.scheduled_session];
+      return st === 'closed' || st === 'locked';
+    }
+
     function buildSubList(subs, isPast) {
       var out = '';
       var lastSessKey = null;
@@ -25879,6 +25911,22 @@
         // Build a lesson plan straight from the idea (2026-07-11, Erin) —
         // opens the Curriculum Library editor prefilled with this class.
         out += '<button class="sc-btn mf-classsubs-plan" data-id="' + s.id + '">' + brandIconImg('guide', 'ag-icon') + ' Lesson Plan</button>';
+        // Grove / My Class info button (#219/#254/#239) — opens the shared
+        // class-info modal (roster + allergy/medical + liaison notes) for a
+        // scheduled class the family leads. Morning: grove icon + name,
+        // available as soon as the class is on the schedule. Afternoon:
+        // "My Class", gated until that session's sign-up window has closed.
+        if (s.status === 'scheduled') {
+          if (s.class_period === 'AM') {
+            var amGroupRaw = String((s.age_groups || [])[0] || '');
+            var amGroupDisp = amGroupRaw ? amGroupRaw.charAt(0).toUpperCase() + amGroupRaw.slice(1) : '';
+            out += '<button class="sc-btn mf-classsubs-info" data-id="' + s.id + '">'
+              + (typeof ageGroupIconHtml === 'function' && amGroupRaw ? ageGroupIconHtml(amGroupRaw) + ' ' : '')
+              + (amGroupDisp ? escClsHtml(amGroupDisp) : 'My Grove') + '</button>';
+          } else if (myClassSignupsClosed(s)) {
+            out += '<button class="sc-btn mf-classsubs-info" data-id="' + s.id + '">' + brandIconImg('classes', 'ag-icon') + ' My Class</button>';
+          }
+        }
         out += '</div>';
         out += '</li>';
       });
@@ -25933,6 +25981,12 @@
         var id = parseInt(btn.getAttribute('data-id'), 10);
         if (!confirm('Withdraw this class submission? The VP and PM Assistant will be notified it was cancelled.')) return;
         withdrawClassSubmission(id);
+      });
+    });
+    body.querySelectorAll('.mf-classsubs-info').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        if (id && typeof showDbClassPopup === 'function') showDbClassPopup(id);
       });
     });
     body.querySelectorAll('.mf-classsubs-plan').forEach(function (btn) {
