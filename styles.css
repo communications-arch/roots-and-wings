@@ -13662,6 +13662,31 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   font-size: 0.78rem;
   color: var(--color-text);
 }
+/* #279/#280 follow-up (Erin): make 2-hour classes impossible to miss — a
+   loud badge next to the class name + a tinted, olive-edged card, so a
+   parent can't rank one without seeing it claims both PM hours. The same
+   badge also fronts the PM Hour 2 pinned reminder. */
+.signup-2hr-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-teal);
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.signup-class-2hr {
+  border-color: var(--color-teal);
+  background: rgba(var(--color-teal-rgb), 0.07);
+}
+.signup-class-2hr.signup-class-sel { background: rgba(var(--color-teal-rgb), 0.14); }
+.signup-class-pinned .signup-2hr-tag { margin-left: 0; margin-right: 4px; }
+
 /* Detail popup: rank group headings + pending note + assistant tag. */
 .signup-detail-pendingnote { font-size: 0.76rem; color: var(--color-text-light); margin: 4px 0 6px; font-style: italic; }
 .signup-detail-rankhead {

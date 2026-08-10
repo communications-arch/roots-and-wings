@@ -5609,18 +5609,30 @@
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
-        // #279/#280 (Colleen, 2026-08-10): a ranked 2-hour ('both') class is
-        // surfaced in PM Hour 2 as a reassurance (it fills that hour if the
-        // child is placed), but PM Hour 2 ranking stays INDEPENDENT — no rank
-        // is reserved/hidden and no PM2 pick is silently shifted. The old
-        // reservation hid choice "1" and collapsed the surviving pick to 1.
+        // A ranked 2-hour ('both') class fills PM Hour 2 as well — pin it
+        // there AND reserve the SAME choice number in Hour 2 (Erin,
+        // 2026-07-15: both-class as 1st choice → Hour 2 offers only the
+        // 2nd-choice slot, and vice versa).
         var pm1Map = (s.working[kid] && s.working[kid].PM1) || {};
+        var pm2Map = (s.working[kid] && s.working[kid].PM2) || {};
         var pinnedBoth = [];
+        var bothRankTaken = {};
         (s.classes.PM1 || []).forEach(function (c) {
-          if (c.hour === 'both' && pm1Map[c.id]) pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+          if (c.hour === 'both' && pm1Map[c.id]) {
+            pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+            bothRankTaken[pm1Map[c.id]] = true;
+          }
+        });
+        // Shift any PM2 pick off a number the 2-hour class now occupies.
+        Object.keys(pm2Map).forEach(function (cid2) {
+          if (bothRankTaken[pm2Map[cid2]]) {
+            var alt = pm2Map[cid2] === 1 ? 2 : 1;
+            var altBusy = bothRankTaken[alt] || Object.keys(pm2Map).some(function (k2) { return k2 !== cid2 && pm2Map[k2] === alt; });
+            if (altBusy) delete pm2Map[cid2]; else pm2Map[cid2] = alt;
+          }
         });
         h += signupHourHtml(kid, 'PM1', s.classes.PM1 || [], canEdit, kidBands, isPigeonKid);
-        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth);
+        h += signupHourHtml(kid, 'PM2', s.classes.PM2 || [], canEdit, kidBands, isPigeonKid, pinnedBoth, bothRankTaken);
         if (canEdit) h += '<button type="button" class="btn btn-primary btn-sm signup-save" data-kid="' + escapeHtml(kid) + '">Save ' + escapeHtml(kidDisplay) + '’s picks</button>';
         h += '</div>';
       });
@@ -5690,21 +5702,21 @@
     return map;
   }
 
-  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth) {
+  function signupHourHtml(kid, hour, classes, canEdit, kidBands, isPigeon, pinnedBoth, excludeRanks) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
     var maxRank = Math.min(2, classes.length);
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
-    // #279/#280 (Colleen, 2026-08-10): a 2-hour ('both') class is ranked
-    // under PM Hour 1 and — if the child is placed in it — fills PM Hour 2
-    // as well. Show that here as reassurance, but keep PM Hour 2 ranking
-    // INDEPENDENT (its own 1st/2nd choice). The old code RESERVED the same
-    // choice number in this hour: it hid "1" from the dropdown and, because
-    // ranks are stored as array position, the surviving "2" silently
-    // collapsed to choice 1 on save — the exact bug Colleen reported.
+    // A ranked 2-hour ('both') class occupies THIS hour too, at the same
+    // choice number — so the dropdowns below offer only the other slot
+    // (Erin, 2026-07-15). #279/#280 (Colleen, 2026-08-10) turned out to be
+    // user error: she hadn't noticed her pick was a 2-hour class, so the
+    // reservation stays — but the banner now spells out plainly WHY this
+    // hour shows only one choice number, and 2-hour classes wear a loud
+    // badge in the list above so they can't be missed.
     if (pinnedBoth && pinnedBoth.length) {
       pinnedBoth.slice().sort(function (a, b) { return a.rank - b.rank; }).forEach(function (p) {
-        h += '<div class="signup-class signup-class-pinned">🔁 <strong>' + escapeHtml(p.name) + '</strong> — 2-hour class: if your child is placed in it, it covers PM Hour 2 too. Still add a backup below in case they don’t get it.</div>';
+        h += '<div class="signup-class signup-class-pinned"><span class="signup-2hr-tag">🔁 2-hour class</span> <strong>' + escapeHtml(p.name) + '</strong> is your choice ' + p.rank + ' for <strong>both</strong> hours — it already fills PM Hour 2 as your choice ' + p.rank + ', so here you only add your remaining backup.</div>';
       });
     }
     if (classes.length === 0) {
@@ -5719,21 +5731,25 @@
         var fit = fitsKid(kidBands, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
         var bits = [ageText, c.room, c.leader ? ('led by ' + c.leader) : ''];
-        if (c.hour === 'both') bits.push('fills both hours');
         var meta = bits.filter(Boolean).join(' · ');
-        h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + fitCls + '">';
+        // #279/#280 follow-up (Erin): 2-hour classes were easy to miss (only
+        // a buried "fills both hours" in the meta line), so a parent could
+        // rank one without realizing it also claims the other hour. Now the
+        // whole card is tinted and wears a loud badge next to the name.
+        h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + (c.hour === 'both' ? ' signup-class-2hr' : '') + fitCls + '">';
         // Explicit rank picker — the user chooses 1–4 instead of tap-order.
         h += '<select class="signup-rank-sel" aria-label="Rank for ' + escapeHtml(c.name) + '"' +
              ' data-kid="' + escapeHtml(kid) + '" data-hour="' + hour + '" data-class="' + c.id + '"' + (canEdit ? '' : ' disabled') + '>';
         h += '<option value="">–</option>';
         for (var r = 1; r <= maxRank; r++) {
-          // #279/#280: each hour ranks independently — always offer 1..N.
+          if (excludeRanks && excludeRanks[r]) continue; // slot held by a 2-hour class
           h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
              (fit === true ? '<span class="signup-fit-check" aria-hidden="true">✓</span> ' : '') +
-             escapeHtml(c.name) + '</span>';
+             escapeHtml(c.name) + '</span>' +
+             (c.hour === 'both' ? '<span class="signup-2hr-tag" title="This class runs both PM hours. Ranking it here fills PM Hour 1 AND PM Hour 2.">🔁 2-hour class · fills PM1 + PM2</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
         // Live demand vs capacity, with the kids' names. "Signed up" = kids

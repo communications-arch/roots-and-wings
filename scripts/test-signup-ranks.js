@@ -1,16 +1,18 @@
-// Regression guard for #279/#280 (Colleen, 2026-08-10): afternoon class
-// sign-up rank dropdowns.
+// Regression guard for the afternoon class sign-up rank dropdowns and the
+// 2-hour ('both') class reservation (Erin, 2026-07-15; prominence pass
+// 2026-08-10 after #279/#280).
 //
-//  #279 — PM Hour 2 sometimes offered only "2" and never "1".
-//  #280 — the lone "2" collapsed to choice 1 when the picker was closed.
+// Design: a 2-hour class is ranked under PM Hour 1 and — because it runs
+// both hours — RESERVES the same choice number in PM Hour 2, so that hour's
+// dropdowns offer only the other slot. #279/#280 (Colleen) turned out to be
+// user error: she hadn't noticed her pick was a 2-hour class. So the
+// reservation stays; what changed is that 2-hour classes now wear a loud
+// badge (.signup-2hr-tag) and a tinted card (.signup-class-2hr) so nobody
+// misses them, and the PM Hour 2 pinned banner spells out the "one choice
+// number" reason.
 //
-// Root cause: a 2-hour ('both') class ranked under PM Hour 1 "reserved" its
-// choice number in PM Hour 2 by HIDING that option from the dropdown. But
-// picks are stored as array position (rank = index), and the both-class is
-// never in the PM2 array (the server models it as PM1-only, filling PM2 at
-// lottery) — so hiding "1" left a lone "2" that rankedIdsFrom() collapsed
-// back to rank 1. The fix makes PM Hour 2 rank independently: always offer
-// 1..N regardless of any pinned 2-hour class.
+// These tests lock in BOTH the reservation (so a future refactor can't
+// silently drop it) and the prominence (so the badge can't quietly vanish).
 //
 // Same extraction approach as test-schedules-byclass.js (script.js is a
 // browser IIFE): grep the function out and re-hydrate with light stubs.
@@ -68,40 +70,51 @@ const PM2_CLASSES = [
   { id: 40, name: 'Art', hour: 'PM2' },
   { id: 41, name: 'Clay', hour: 'PM2' },
 ];
+const PM1_WITH_BOTH = [
+  { id: 30, name: 'Epic Play', hour: 'both' },
+  { id: 31, name: 'Woodworking', hour: 'PM1' },
+];
 const PINNED_BOTH = [{ name: 'Epic Play', rank: 1 }];
 
-console.log('  afternoon sign-up rank dropdowns (#279/#280)');
+console.log('  afternoon sign-up rank dropdowns + 2-hour reservation');
 
-t('#279: PM Hour 2 offers BOTH choice 1 and choice 2 even when a 2-hour class is pinned at rank 1', function () {
+t('reservation: a 2-hour class pinned at rank 1 hides choice "1" in PM Hour 2 (offers only "2")', function () {
   const api = makeApi({});
-  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH);
-  // Two PM2 classes → two rank selects; each must offer 1 AND 2.
-  assert(optionCount(html, 1) === 2, 'expected two "1" options (one per class), got ' + optionCount(html, 1));
-  assert(optionCount(html, 2) === 2, 'expected two "2" options (one per class), got ' + optionCount(html, 2));
+  // excludeRanks {1:true} = choice 1 is claimed by the 2-hour class.
+  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH, { 1: true });
+  assert(optionCount(html, 1) === 0, 'choice 1 must be reserved (hidden), got ' + optionCount(html, 1));
+  assert(optionCount(html, 2) === 2, 'choice 2 must be offered on both classes, got ' + optionCount(html, 2));
 });
 
-t('#279: choice 1 is offered with NO pinned 2-hour class too (baseline)', function () {
+t('reservation: a 2-hour class pinned at rank 2 hides choice "2" instead', function () {
   const api = makeApi({});
-  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, []);
+  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, [{ name: 'Epic Play', rank: 2 }], { 2: true });
+  assert(optionCount(html, 2) === 0, 'choice 2 must be reserved, got ' + optionCount(html, 2));
+  assert(optionCount(html, 1) === 2, 'choice 1 must be offered, got ' + optionCount(html, 1));
+});
+
+t('no 2-hour class: PM Hour 2 offers choice 1 and 2 freely (baseline)', function () {
+  const api = makeApi({});
+  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, [], undefined);
   assert(optionCount(html, 1) === 2, 'expected choice 1 offered');
   assert(optionCount(html, 2) === 2, 'expected choice 2 offered');
 });
 
-t('#280: a class picked at rank 2 in PM2 round-trips as rank 2, not collapsed to 1', function () {
-  // The bug was the dropdown hiding "1", so the only pick was "2" and it
-  // collapsed. With independent ranking a real rank-1 pick can coexist, so
-  // rankedIdsFrom keeps a 1-then-2 ordering intact.
+t('prominence: a 2-hour class in the PM1 list wears the loud badge + tinted card', function () {
   const api = makeApi({});
-  // Simulate a saved map where Art is 1st choice and Clay is 2nd.
-  const ordered = api.rankedIdsFrom({ 40: 1, 41: 2 });
-  assert(JSON.stringify(ordered) === JSON.stringify([40, 41]), 'expected [40,41], got ' + JSON.stringify(ordered));
+  const html = api.signupHourHtml('Kid', 'PM1', PM1_WITH_BOTH, true, null, false, [], undefined);
+  assert(/signup-2hr-tag/.test(html), 'the 2-hour class must carry the .signup-2hr-tag badge');
+  assert(/signup-class-2hr/.test(html), 'the 2-hour class card must carry the .signup-class-2hr tint');
+  // The plain PM1 class must NOT get the badge.
+  const plainOnly = api.signupHourHtml('Kid', 'PM1', [{ id: 31, name: 'Woodworking', hour: 'PM1' }], true, null, false, [], undefined);
+  assert(!/signup-2hr-tag/.test(plainOnly), 'a 1-hour class must not wear the 2-hour badge');
 });
 
-t('the pinned 2-hour note reassures without claiming to reserve a choice number', function () {
+t('prominence: the PM Hour 2 pinned banner explains the single choice number and fronts the badge', function () {
   const api = makeApi({});
-  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH);
-  assert(/covers PM Hour 2/.test(html), 'expected reassurance text about covering PM Hour 2');
-  assert(!/also your choice/.test(html), 'the old reservation wording must be gone');
+  const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH, { 1: true });
+  assert(/signup-2hr-tag/.test(html), 'the pinned banner should front the 2-hour badge');
+  assert(/both/.test(html) && /backup/.test(html), 'the banner should explain both-hours + remaining backup');
 });
 
 console.log('\n  ' + passed + ' passed, ' + failed + ' failed');
