@@ -471,7 +471,6 @@ module.exports = async function handler(req, res) {
       const blcName = String(body.blc_name || '').trim().slice(0, 120);
       const kidsAbsent = typeof body.kids_absent === 'boolean' ? body.kids_absent : null;
       const kidsAdult = String(body.kids_adult || '').trim().slice(0, 120);
-      const slotsData = coverageNeeded && Array.isArray(body.slots) ? body.slots : [];
 
       if (!absent_person || !family_email || !family_name) {
         return res.status(400).json({ error: 'absent_person, family_email, and family_name required' });
@@ -546,15 +545,20 @@ module.exports = async function handler(req, res) {
       // derivation throws, we insert nothing rather than trust the client.
       let generatedSlots = [];
       if (coverageNeeded) {
+        // #293 review F3: with the client reconciler retired, a transient
+        // derive failure at POST would otherwise leave the absence permanently
+        // slot-less (no backfill net). One retry covers a momentary DB blip.
+        const deriveOnce = () => deriveCoverageSlots(sql, {
+          // #293 review M5: year from the ABSENCE date, not "now" (April-1
+          // pivot: an absence for last year's session reported after the
+          // rollover would otherwise derive against the wrong year).
+          schoolYear: activeSchoolYear(new Date(absence_date + 'T12:00:00')),
+          session: session_number,
+          absentPerson: absent_person, familyEmail: family_email, blocks
+        });
         try {
-          generatedSlots = await deriveCoverageSlots(sql, {
-            // #293 review M5: year from the ABSENCE date, not "now" (April-1
-            // pivot: an absence for last year's session reported after the
-            // rollover would otherwise derive against the wrong year).
-            schoolYear: activeSchoolYear(new Date(absence_date + 'T12:00:00')),
-            session: session_number,
-            absentPerson: absent_person, familyEmail: family_email, blocks
-          });
+          try { generatedSlots = await deriveOnce(); }
+          catch (firstErr) { console.error('[absence] deriveCoverageSlots retry after:', firstErr); generatedSlots = await deriveOnce(); }
         } catch (derErr) {
           console.error('[absence] deriveCoverageSlots failed — no slots created:', derErr);
           generatedSlots = [];
@@ -734,7 +738,14 @@ module.exports = async function handler(req, res) {
         const unmatched = existingSlots.slice();
         function takeMatch(gen) {
           const k = identityKey(gen);
-          const idx = unmatched.findIndex(s => identityKey(s) === k);
+          let idx = unmatched.findIndex(s => identityKey(s) === k);
+          // #293 review F1: a generated AM1/AM2 slot also matches a legacy
+          // whole-morning 'AM' row (same role_type + group_or_class), so a
+          // CLAIM stored on the old 'AM' row survives the split to hour blocks.
+          if (idx === -1 && (gen.block === 'AM1' || gen.block === 'AM2')) {
+            const legacyK = 'AM|' + String(gen.role_type || '') + '|' + norm(String(gen.group_or_class || ''));
+            idx = unmatched.findIndex(s => identityKey(s) === legacyK);
+          }
           return idx === -1 ? null : unmatched.splice(idx, 1)[0];
         }
         const openNew = [];
@@ -772,18 +783,14 @@ module.exports = async function handler(req, res) {
             }
           }
         }
-        // Whatever the edit no longer covers goes away; a claimant who had
-        // stepped up gets told they're off the hook.
+        // Prune slots the edit no longer covers — but #293 review F1: NEVER
+        // delete a CLAIMED slot here. A member's commitment must survive an
+        // edit/re-derive even if the duty's identity drifted (a class rename
+        // or schedule shift shouldn't silently release someone who stepped up,
+        // as the prior incident did). Only OPEN unmatched slots are pruned;
+        // a genuinely stale claimed slot can be cleared by the VP by hand.
         for (const s of unmatched) {
-          if (s.claimed_by_email) {
-            try {
-              await sql`
-                INSERT INTO notifications (recipient_email, type, title, body, link_url, related_absence_id)
-                VALUES (${s.claimed_by_email}, 'slot_reassigned', 'Coverage no longer needed',
-                        ${absent_person + ' updated their absence — you no longer need to cover: ' + s.role_description},
-                        '#coverage', ${id})`;
-            } catch (nErr) { console.error('release notify (non-fatal):', nErr); }
-          }
+          if (s.claimed_by_email || s.claimed_by_name) continue;
           await sql`DELETE FROM coverage_slots WHERE id = ${s.id}`;
         }
         // Broadcast only when a previously silent absence first gains open
@@ -797,54 +804,15 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, id, absence: outAbs });
       }
 
-      // ── Add-missing-slots (reconciler) ──
-      // #197 (Colleen): a backup-coach-covered absence needs NO coverage —
-      // the client reconciler used to see its zero slots and "helpfully"
-      // re-add them, putting the absence back on the board.
-      if (absence.coverage_needed === false) {
-        return res.status(409).json({ error: 'This absence is covered by a backup learning coach — no coverage slots needed' });
-      }
-
-      const existing = await sql`
-        SELECT block, role_type, role_description FROM coverage_slots WHERE absence_id = ${id}
-      `;
-      const seen = new Set(existing.map(s => s.block + '|' + s.role_type + '|' + s.role_description));
-      const addedSlots = [];
-      const reconSlotAllowed = slotsData.length ? await makeSlotValidator(sql, {
-        schoolYear: activeSchoolYear(new Date()), session: absence.session_number,
-        absentPerson: absence.absent_person, familyEmail: absence.family_email
-      }) : null;
-      for (const slot of slotsData) {
-        const block = String(slot.block || '').trim();
-        const role_type = String(slot.role_type || '').trim();
-        const role_description = String(slot.role_description || '').trim();
-        const group_or_class = String(slot.group_or_class || '').trim();
-        if (!block || !role_type || !role_description) continue;
-        if (!VALID_BLOCKS.includes(block)) continue;
-        if (reconSlotAllowed && !reconSlotAllowed(slot)) {
-          console.error('[absence-guard] reconciler dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
-          continue;
-        }
-        const key = block + '|' + role_type + '|' + role_description;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        await sql`
-          INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
-          VALUES (${id}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
-        `;
-        addedSlots.push({ block, role_type, role_description });
-      }
-
-      // The absence was reported silently (zero slots → no notification at
-      // POST time). Now that it needs coverage for the first time, tell
-      // everyone. Absences that already had slots were announced already —
-      // extra slots just appear on the board without re-pinging members.
-      if (addedSlots.length > 0 && existing.length === 0) {
-        await notifyCoverageNeeded(sql, absence, addedSlots);
-      }
-
-      const fullSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
-      return res.status(200).json({ ok: true, id, added: addedSlots.length, slots: fullSlots });
+      // ── Add-missing-slots (client reconciler) — RETIRED (#293) ──
+      // The server now derives coverage slots on report (POST) and edit; the
+      // client `syncMyAbsenceSlots` reconciler that drove this path is disabled.
+      // This branch used client-proposed slots and the "now" school year (the
+      // pre-#293 M5 bug), so it must not run. A stray call (e.g. a stale cached
+      // client mid-migration) gets a benign no-op — `added: 0` stops the old
+      // reconciler's re-render loop without writing anything.
+      const noOpSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
+      return res.status(200).json({ ok: true, id, added: 0, slots: noOpSlots, retired: true });
     }
 
     // ── DELETE: cancel an absence ──
