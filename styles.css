@@ -13735,9 +13735,27 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-body { display: flex; flex-direction: column; min-width: 0; }
 .signup-class-name { font-weight: 700; font-size: 1.02rem; color: var(--color-text); line-height: 1.25; }
 /* #297: the class name is a details link — reset the button chrome so it reads
-   as the title, underlining on hover to signal it's clickable. */
-button.signup-class-name-link { border: 0; background: none; padding: 0; margin: 0; font: inherit; text-align: left; align-self: flex-start; cursor: pointer; }
+   as the title (keeps .ac-title's weight/size; only font-family is inherited),
+   underlining on hover to signal it's clickable. */
+button.signup-class-name-link { border: 0; background: none; padding: 0; margin: 0; font-family: inherit; color: inherit; text-align: left; align-self: flex-start; cursor: pointer; }
 button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible { text-decoration: underline; }
+
+/* #297: ONE compact afternoon-class card body (Class-Details layout) shared by
+   the Sign-ups picker cards and the Coordination elective cards. The parent
+   container (.signup-class-body / .elective-card) is the flex column; these
+   style its shared children so the two surfaces read identically. */
+.ac-body { gap: 4px; }
+.elective-card.ac-body { padding: 13px 15px; }
+.ac-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
+.ac-title { font-weight: 700; font-size: 1rem; color: var(--color-text); line-height: 1.2; }
+.ac-groves { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ac-groves .ag-name { font-size: 0.7rem; font-weight: 600; }
+.ac-groves .ag-icon { height: 0.95em; }
+.ac-groves .ag-grouptag { margin-right: 4px; gap: 2px; }
+.ac-meta { font-size: 0.72rem; color: var(--color-text-light); }
+.ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; }
+.ac-staff { font-size: 0.74rem; color: var(--color-text-light); }
+.ac-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 2px; }
 /* #297 follow-up (Erin): the class title leads the card; the grove chip is a
    small supporting tag, so shrink its icon + name well below the title. */
 .signup-class-groves { font-size: 0.7rem; }

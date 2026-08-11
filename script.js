@@ -5737,6 +5737,41 @@
     return h;
   }
 
+  // #297 (Erin): ONE compact card body for an afternoon class, modeled on the
+  // Class Details popup (title + grove chips · meta · description · staff ·
+  // requests) — shared by BOTH the Afternoon Class Sign-ups picker cards and
+  // the Co-op Coordination elective cards so they read identically.
+  //   norm = { id, name, ageGroups[], description, room, hour, bothOptional,
+  //            leads[], assists[], max, signedUpDetailed[] }
+  //   opts = { titleLinkId (render title as a details button), myNames (highlight) }
+  function afternoonCardBody(norm, opts) {
+    opts = opts || {};
+    var groveTag = (norm.ageGroups && norm.ageGroups.length) ? groupTagHtml(norm.ageGroups) : '';
+    var title = opts.titleLinkId
+      ? '<button type="button" class="ac-title signup-class-name-link" data-detail-class="' + opts.titleLinkId + '" title="Class details">' + escapeHtml(norm.name) + '</button>'
+      : '<span class="ac-title">' + escapeHtml(norm.name) + '</span>';
+    var h = '<div class="ac-head">' + title + (groveTag ? ' <span class="ac-groves">' + groveTag + '</span>' : '') + '</div>';
+    var hourLabel = norm.hour === 'both' ? 'Both hours · 1:00–2:55' : norm.hour === 'PM2' ? 'Hour 2 · 2:00–2:55' : 'Hour 1 · 1:00–1:55';
+    var metaBits = [hourLabel];
+    if (norm.room) metaBits.push(escapeHtml(norm.room));
+    h += '<div class="ac-meta">' + metaBits.join(' · ') + '</div>';
+    if (norm.hour === 'both') {
+      h += '<span class="signup-2hr-tag' + (norm.bothOptional ? ' signup-2hr-optional' : '') + '" title="'
+        + (norm.bothOptional ? 'Runs both PM hours — your child may take one hour or both.' : 'Runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.')
+        + '">🔁 2-hour class · ' + (norm.bothOptional ? 'one or both hours' : 'both hours required') + '</span>';
+    }
+    if (norm.description && norm.description !== 'TBD') h += '<div class="ac-desc">' + escapeHtml(norm.description) + '</div>';
+    var leads = (norm.leads || []).filter(Boolean);
+    var assists = (norm.assists || []).filter(Boolean);
+    var mark = function (n) { return opts.myNames ? highlightIfMe(n, opts.myNames) : escapeHtml(n); };
+    var staff = '';
+    if (leads.length) staff += 'Led by ' + leads.map(mark).join(' &amp; ');
+    if (assists.length) staff += (staff ? ' · ' : '') + 'Assisted by ' + assists.map(mark).join(', ');
+    if (staff) h += '<div class="ac-staff">' + staff + '</div>';
+    h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max) + '</div>';
+    return h;
+  }
+
   // {classId: rank} from a saved ordered array ([id1, id2] → {id1:1, id2:2}).
   function rankMapFromArray(arr) {
     var m = {};
@@ -5852,16 +5887,8 @@
         // null = age/range unknown (no judgement); true = fits; false = clearly outside.
         var fit = fitsKid(kidBands, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
-        // #297 (Erin): the grove now reads as the class-detail chip (grove icon
-        // + colored name) beside the class name, not as age text in the meta
-        // line — so the meta carries only room + leader. ageText still drives
-        // the fitsKid highlight above.
-        var bits = [c.room, c.leader ? ('led by ' + c.leader) : ''];
-        var meta = bits.filter(Boolean).join(' · ');
-        // #279/#280 follow-up (Erin): 2-hour classes were easy to miss (only
-        // a buried "fills both hours" in the meta line), so a parent could
-        // rank one without realizing it also claims the other hour. Now the
-        // whole card is tinted and wears a loud badge next to the name.
+        // #279/#280 follow-up (Erin): 2-hour classes were easy to miss, so the
+        // whole card is tinted and the shared body wears a loud badge.
         h += '<div class="signup-class' + (sel ? ' signup-class-sel' : '') + (c.hour === 'both' ? ' signup-class-2hr' : '') + fitCls + '">';
         // Explicit rank picker — the user chooses 1–4 instead of tap-order.
         h += '<select class="signup-rank-sel" aria-label="Rank for ' + escapeHtml(c.name) + '"' +
@@ -5872,21 +5899,15 @@
           h += '<option value="' + r + '"' + (myRank === r ? ' selected' : '') + '>' + r + '</option>';
         }
         h += '</select>';
-        // #288 (Lyndsey): no ✓ next to in-age-range classes — it read as
-        // "selected". The green card tint alone signals age fit now.
-        var groveTag = (c.ageGroups && c.ageGroups.length) ? groupTagHtml(c.ageGroups) : '';
-        // #297: the class name opens the shared class-details popup — same one
-        // the Co-op Coordination elective cards use.
-        h += '<span class="signup-class-body"><button type="button" class="signup-class-name signup-class-name-link" data-detail-class="' + c.id + '" title="Class details">' +
-             escapeHtml(c.name) + '</button>' +
-             (groveTag ? ' <span class="signup-class-groves">' + groveTag + '</span>' : '') +
-             (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
-        if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
-        if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
-        // Live demand vs capacity — the SAME "kids signed up so far" block the
-        // Co-op Coordination elective cards use (shared helper): REQUESTS
-        // pending the lottery, first-choice split from backup.
-        h += signupRequestsHtml(c.signedUpDetailed, c.max);
+        // #297: the SHARED compact card body (Class-Details layout) — identical
+        // to the Co-op Coordination elective cards. The rank picker (above) and
+        // the assist/notes (below) are the only picker-specific extras.
+        h += '<span class="signup-class-body ac-body">';
+        h += afternoonCardBody({
+          id: c.id, name: c.name, ageGroups: c.ageGroups, description: c.description,
+          room: c.room, hour: c.hour, bothOptional: c.bothOptional,
+          leads: [c.leader], assists: [], max: c.max, signedUpDetailed: c.signedUpDetailed
+        }, { titleLinkId: c.id });
         // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
         // assistant option is ALWAYS visible so it's discoverable (Erin,
         // 2026-07-15 — it was hidden until the class was ranked and looked
@@ -8934,7 +8955,7 @@
   // "kids signed up so far" as the Afternoon Class Sign-ups. That per-class
   // requests data lives in the class-signup pool (signedUpDetailed), which any
   // authed member may read — cache it per session and repaint when it lands.
-  var _coordPmSignups = { session: null, loading: false, byClass: {} };
+  var _coordPmSignups = { session: null, loading: false, byClass: {}, windowStatus: null };
   function loadCoordPmSignups(session) {
     if (!session || _coordPmSignups.loading) return;
     if (_coordPmSignups.session === session) return; // cached for this session
@@ -8951,7 +8972,7 @@
             (d.classes[hr] || []).forEach(function (c) { byClass[c.id] = c.signedUpDetailed || []; });
           });
         }
-        _coordPmSignups = { session: session, loading: false, byClass: byClass };
+        _coordPmSignups = { session: session, loading: false, byClass: byClass, windowStatus: (d && d.window && d.window.status) || null };
         renderSessionTab();
       })
       .catch(function () { _coordPmSignups.loading = false; });
@@ -9198,7 +9219,13 @@
         // A 2-hour ('both') elective — e.g. Yearbook — runs BOTH hours, so it
         // belongs under Hour 2 as well, not just Hour 1 (Erin, 2026-08-11).
         var dbH2 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM2' || e.scheduled_hour === 'both'; });
-        html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>';
+        // #297 (Erin): sign up for afternoon classes straight from here when the
+        // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
+        var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
+        html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:8px;">'
+          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>'
+          + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
+          + '</div>';
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
@@ -9273,6 +9300,14 @@
     // #218: Everyone's sign-ups grid, opened at the session being viewed.
     var sessGridBtn = container.querySelector('#sessSchedVolGridBtn');
     if (sessGridBtn) sessGridBtn.addEventListener('click', function () { showVolunteerGridModal(viewSess); });
+    // #297: sign up for afternoon classes from here — opens the same per-kid
+    // picker the My Family card uses. Load the family's sign-up data if it
+    // hasn't been fetched yet (the modal repaints when it lands).
+    var coordPmBtn = container.querySelector('#coordPmSignupBtn');
+    if (coordPmBtn) coordPmBtn.addEventListener('click', function () {
+      if (typeof showPmSignupModal === 'function') showPmSignupModal();
+      if (!_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
+    });
   }
 
   // Published-DB elective card: same look as the sheet-era card, but no
@@ -9287,33 +9322,17 @@
       var l = fn.toLowerCase();
       return leadNames.concat(assistNames).some(function (a) { return String(a).trim().toLowerCase() === l; });
     });
-    var ages = e.scheduled_age_range || prettyAgesClient(e.age_groups, e.age_groups_other) || '';
-    // Clickable (Erin, 2026-07-16): opens the full class popup —
-    // description, staff, room, and who has signed up so far.
-    var html = '<button type="button" class="elective-card' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
-    html += '<div class="elective-card-header">';
-    html += '<span class="elective-card-name">' + escapeHtml(e.class_name || 'TBD') + '</span>';
-    if (ages) html += '<span class="elective-age-pill">' + escapeHtml(ages) + '</span>';
-    html += '</div>';
-    if (e.scheduled_hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
-    if (e.open_to_teen_assistant) html += '<span class="elective-both-badge">Cedars/Pigeons helper OK</span>';
-    if (e.description && e.description !== 'TBD') html += '<p class="elective-card-desc">' + escapeHtml(e.description) + '</p>';
-    // Room + capacity on one line; staff on its own labeled line — same
-    // "Led by … / Assisted by …" convention as the detail card, so the two
-    // surfaces read consistently (Erin, 2026-08-11).
-    var metaBits = [];
-    if (e.scheduled_room) metaBits.push(escapeHtml(e.scheduled_room));
-    if (e.max_students) metaBits.push('Up to ' + e.max_students + ' kids');
-    if (metaBits.length) html += '<div class="elective-card-meta">' + metaBits.join(' &middot; ') + '</div>';
-    var staff = '';
-    if (leadNames.length) staff += 'Led by ' + leadNames.map(function (n) { return highlightIfMe(n, myNames); }).join(' &amp; ');
-    if (assistNames.length) staff += (staff ? ' &middot; ' : '') + 'Assisted by ' + assistNames.map(function (n) { return highlightIfMe(n, myNames); }).join(', ');
-    if (staff) html += '<div class="elective-card-meta elective-card-staff">' + staff + '</div>';
-    // #297: the SAME "kids signed up so far" block as the Afternoon Class
-    // Sign-ups cards, from the shared class-signup data (loaded per session).
-    if (_coordPmSignups.session === sessionTabView) {
-      html += '<div class="elective-card-reqs">' + signupRequestsHtml(_coordPmSignups.byClass[e.id], e.max_students) + '</div>';
-    }
+    // #297: the SHARED compact card body (Class-Details layout) — identical to
+    // the Afternoon Class Sign-ups cards. The whole card is a button that opens
+    // the details popup, so the title stays a plain span (no nested button).
+    // Requests come from the same class-signup pool, loaded per session.
+    var html = '<button type="button" class="elective-card ac-body' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
+    html += afternoonCardBody({
+      id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
+      room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: false,
+      leads: leadNames, assists: assistNames, max: e.max_students,
+      signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
+    }, { myNames: myNames });
     html += '</button>';
     return html;
   }

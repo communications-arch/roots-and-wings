@@ -47,6 +47,7 @@ const factory = new Function(
   'escapeHtml', 'signupAgeText', 'fitsKid', 'brandIconImg', '_signup', 'groupTagHtml', '_signupGroveSel',
   extractFn('signupClassPassesGrove') + '\n' +
   extractFn('signupRequestsHtml') + '\n' +
+  extractFn('afternoonCardBody') + '\n' +
   extractFn('signupHourHtml') + '\n' +
   extractFn('rankedIdsFrom') + '\n' +
   'return { signupHourHtml: signupHourHtml, rankedIdsFrom: rankedIdsFrom, signupRequestsHtml: signupRequestsHtml };'
