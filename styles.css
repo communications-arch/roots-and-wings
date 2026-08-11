@@ -8680,6 +8680,25 @@ ul[id="ws-todo-list"] .ws-link-icon,
   font-weight: 700;
   color: #b3381a;
 }
+/* The "needs N more" shortfall doubles as a sign-up control (Erin,
+   2026-08-11): a plain <button> reset to read like the inline warning text,
+   but clearly clickable — underline on hover/focus, inheriting the coral. */
+button.vgrid-need-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #b3381a;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+button.vgrid-need-btn:hover,
+button.vgrid-need-btn:focus-visible { text-decoration: underline; filter: brightness(0.9); }
+button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 .ra-draft-tag { font-size: 0.7rem; color: var(--color-text-light); font-style: italic; font-weight: 400; }
 .ra-row-gap td { background: rgba(var(--color-coral-rgb), 0.05); }
 .ra-floor-head {
@@ -13648,6 +13667,13 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-meta { font-size: 0.74rem; color: var(--color-text-light); }
 .signup-class-desc { font-size: 0.76rem; color: var(--color-text); margin-top: 2px; }
 .signup-class-count { font-size: 0.72rem; font-weight: 600; color: var(--color-teal); margin-top: 2px; }
+/* Tagged request roster on a picker card (Erin, 2026-08-11): who has asked
+   for this class so far, split first-choice vs backup. Requests, not
+   placements — the picker's header note spells out the lottery caveat once. */
+.signup-class-reqs { font-size: 0.72rem; color: var(--color-text-light); margin-top: 1px; line-height: 1.35; }
+.signup-class-reqs-backup { opacity: 0.85; }
+.signup-req-tag { font-weight: 600; color: var(--color-text); }
+.signup-note-requests { font-style: italic; }
 /* Save button right-aligned under the kid's class grid (Erin, 2026-07-15). */
 .signup-save { display: block; margin: 6px 0 0 auto; }
 /* Parent note for an out-of-age-range pick — required before saving. */

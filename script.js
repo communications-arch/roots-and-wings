@@ -4532,9 +4532,9 @@
           // Afternoon: who has ranked this class so far — 1st choices lead,
           // 2nd choices below, assistants tagged; all pending the lottery.
           var su = Array.isArray(d.signups) ? d.signups : [];
-          html += '<h4 style="margin:14px 0 4px;">Kids signed up so far' + (su.length ? ' (' + su.length + ')' : '') + '</h4>';
+          html += '<h4 style="margin:14px 0 4px;">Requests' + (su.length ? ' (' + su.length + ')' : '') + '</h4>';
           if (su.length) {
-            html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">All sign-ups are pending until the class lottery runs.</p>';
+            html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">These are requests so far — placements are decided by the class lottery, not by who signs up first.</p>';
             var suFirst = su.filter(function (s2) { return s2.rank === 1; });
             var suRest = su.filter(function (s2) { return s2.rank !== 1; });
             var suLi = function (s2) {
@@ -4545,15 +4545,15 @@
                 + '</li>';
             };
             if (suFirst.length) {
-              html += '<div class="signup-detail-rankhead">1st choice</div>';
+              html += '<div class="signup-detail-rankhead">First choice</div>';
               html += '<ul class="absence-slot-list signup-detail-list">' + suFirst.map(suLi).join('') + '</ul>';
             }
             if (suRest.length) {
-              html += '<div class="signup-detail-rankhead">2nd choice</div>';
+              html += '<div class="signup-detail-rankhead">Backup</div>';
               html += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + suRest.map(suLi).join('') + '</ul>';
             }
           } else {
-            html += '<p style="margin:0;color:var(--color-text-light);">No sign-ups yet.</p>';
+            html += '<p style="margin:0;color:var(--color-text-light);">No requests yet.</p>';
           }
           if (c.pre_enroll_kids) {
             html += '<h4 style="margin:14px 0 4px;">Pre-enrolled</h4><p style="margin:0;color:var(--color-text-light);">' + escapeHtml(c.pre_enroll_kids) + '</p>';
@@ -5574,6 +5574,11 @@
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
     else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour (both required; a 2-hour class covers Hour 2 too). PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
+    // Requests are visible on each class so families can see who else is
+    // interested — but they're only requests until the lottery runs, so the
+    // caveat lives here ONCE (not repeated on every card). Hidden when locked,
+    // since placements are final by then. (Erin, 2026-08-11.)
+    if (!locked) h += '<p class="signup-note signup-note-requests">The names on each class are <strong>requests so far</strong> — tagged first choice vs. backup. Placements are decided by the class lottery, not by who signs up first.</p>';
 
     var kids = s.kids || [];
     // Preferred names for display — the signup data itself stays keyed by
@@ -5783,15 +5788,20 @@
              (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
-        // Live demand vs capacity, with the kids' names. "Signed up" = kids
-        // with this class in their current picks (any rank) — placement
-        // happens at the lottery.
-        var names = Array.isArray(c.signedUpNames) ? c.signedUpNames : [];
-        var capBits = [];
-        capBits.push(c.signedUp > 0 ? c.signedUp + ' signed up so far' : 'no sign-ups yet');
-        if (c.max > 0) capBits.push('max ' + c.max + ' kids');
-        h += '<span class="signup-class-count">' + escapeHtml(capBits.join(' · ')) +
-             (names.length ? ': ' + escapeHtml(names.join(', ')) : '') + '</span>';
+        // Live demand vs capacity, tagged by choice (Erin, 2026-08-11):
+        // these are REQUESTS pending the lottery — split first-choice from
+        // backup so a long backup list doesn't read as "this class is full,"
+        // and nobody assumes a name here means a placement. Mirrors the
+        // Co-op Coordination class-detail popup.
+        var reqDetailed = Array.isArray(c.signedUpDetailed) ? c.signedUpDetailed : [];
+        var reqFirst = reqDetailed.filter(function (s2) { return s2.rank === 1; });
+        var reqBackup = reqDetailed.filter(function (s2) { return s2.rank !== 1; });
+        var reqName = function (s2) { return escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : '')); };
+        var reqHead = [reqDetailed.length > 0 ? 'Requests (' + reqDetailed.length + ')' : 'No requests yet'];
+        if (c.max > 0) reqHead.push('max ' + c.max + ' kids');
+        h += '<span class="signup-class-count">' + escapeHtml(reqHead.join(' · ')) + '</span>';
+        if (reqFirst.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + reqFirst.map(reqName).join(', ') + '</span>';
+        if (reqBackup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + reqBackup.map(reqName).join(', ') + '</span>';
         // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
         // assistant option is ALWAYS visible so it's discoverable (Erin,
         // 2026-07-15 — it was hidden until the class was ranked and looked
@@ -6062,7 +6072,7 @@
     if (c.leader) metaBits.push('<span>led by ' + escapeHtml(c.leader) + '</span>');
     if (metaBits.length) h += '<div class="signup-detail-meta">' + metaBits.join('') + '</div>';
     if (c.description) h += '<p class="signup-detail-desc">' + escapeHtml(c.description) + '</p>';
-    h += '<div class="signup-detail-sub">Signed up so far' +
+    h += '<div class="signup-detail-sub">Requests' +
          (c.max > 0 ? '<span class="mf-pending-badge">' + c.signedUp + ' of max ' + c.max + '</span>' : '') + '</div>';
     if (c.max > 0) {
       var pct = Math.max(0, Math.min(100, Math.round((c.signedUp / c.max) * 100)));
@@ -6072,24 +6082,24 @@
     // indicator (Erin, 2026-07-15). Everything stays pending the lottery.
     var det = Array.isArray(c.signedUpDetailed) ? c.signedUpDetailed : [];
     if (det.length) {
-      h += '<p class="signup-detail-pendingnote">All sign-ups are pending until the class lottery runs.</p>';
+      h += '<p class="signup-detail-pendingnote">These are requests so far — placements are decided by the class lottery, not by who signs up first.</p>';
       var firsts = det.filter(function (d) { return d.rank === 1; });
       var others = det.filter(function (d) { return d.rank !== 1; });
       var liFor = function (d) {
         return '<li>' + escapeHtml(d.name) + (d.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
       };
       if (firsts.length) {
-        h += '<div class="signup-detail-rankhead">1st choice</div>';
+        h += '<div class="signup-detail-rankhead">First choice</div>';
         h += '<ul class="absence-slot-list signup-detail-list">' + firsts.map(liFor).join('') + '</ul>';
       }
       if (others.length) {
-        h += '<div class="signup-detail-rankhead">2nd choice</div>';
+        h += '<div class="signup-detail-rankhead">Backup</div>';
         h += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + others.map(liFor).join('') + '</ul>';
       }
     } else if (names.length) {
       h += '<ul class="absence-slot-list signup-detail-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>';
     } else {
-      h += '<p class="mf-empty-text signup-detail-none">No sign-ups yet.</p>';
+      h += '<p class="mf-empty-text signup-detail-none">No requests yet.</p>';
     }
     h += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', h);
@@ -6963,9 +6973,10 @@
   // Everyone's sign-ups for a session — the spreadsheet view, live.
   function showVolunteerGridModal(session) {
     var body = renderReportModal({
-      // #264 (Erin): titled as the VIEW it is — nobody signs up here.
-      title: 'Who’s Where Each Hour',
-      subtitle: 'Classes, floaters, board duties, prep, and cleaning for the session — pick a session below.',
+      // #264/#285 (Erin): now you CAN sign up from here (open assist spots +
+      // floater/board/prep), so it's named for what members do, not just view.
+      title: 'Everyone’s sign-ups',
+      subtitle: 'Classes, floaters, board duties, prep, and cleaning for the session — sign up for any open spot. Pick a session below.',
       meta: '',
       icons: [
         { label: 'Print', icon: ICON_SVG.print, aria: 'Print the selected session’s sign-ups', action: function () { printVolunteerGrid(); } }
@@ -6984,9 +6995,9 @@
     var d = _volGridLast;
     if (!d) return;
     var BLOCK_TITLES = { AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)', PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)' };
-    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Who’s Where Each Hour</title>';
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>Everyone’s sign-ups</title>';
     doc += '<style>body{font:13px Georgia,serif;color:#222;padding:24px;}h1{font-size:18px;margin:0 0 4px;}h2{font-size:14px;margin:18px 0 6px;}p.meta{color:#666;margin:0 0 16px;font-size:12px;}p.pledges{color:#444;margin:0 0 6px;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:12px;}th,td{border-bottom:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#f5f0e8;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;}</style>';
-    doc += '</head><body><h1>Session ' + escapeHtml(String(d.session || '')) + ' — Who’s Where Each Hour</h1>';
+    doc += '</head><body><h1>Session ' + escapeHtml(String(d.session || '')) + ' — Everyone’s sign-ups</h1>';
     doc += '<p class="meta">printed ' + new Date().toLocaleDateString() + '</p>';
     ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
@@ -7101,12 +7112,22 @@
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           var gridLead = escapeHtmlWs(c.teacher)
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
-          // Erin (2026-08-11): assist an open class spot straight from here.
-          var assistBtn = (c.helpers_needed > 0 && !meCommitted)
-            ? ' <button type="button" class="sc-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" title="Sign yourself up to assist this class">' + brandIconImg('assist', 'ag-icon') + ' Assist</button>'
-            : '';
+          // Erin (2026-08-11): the "needs N more ⚠" IS the sign-up control —
+          // click it to assist this class (with a confirm first). When you
+          // already hold an hour, or the class is the acting family's own,
+          // it stays a plain read-only flag. Works for morning + afternoon.
+          var needTxt = 'needs ' + c.helpers_needed + ' more ⚠';
+          var needHtml = '';
+          if (c.helpers_needed > 0) {
+            // meCommitted is per-hour and already covers "I lead/assist/pledged
+            // this hour" (incl. this very class) — so it's the whole guard.
+            var canAssist = !meCommitted;
+            needHtml = (helpers ? ', ' : ' ') + (canAssist
+              ? '<button type="button" class="ra-open-note vgrid-need-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + needTxt + ' — sign up</button>'
+              : '<span class="ra-open-note" style="display:inline;">' + needTxt + '</span>');
+          }
           h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
-            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + assistBtn + '</td>'
+            + needHtml + '</td>'
             + (isAmBk ? '' : '<td>' + (!d.pm_signups_finalized
                 ? '<span class="sb-subdetail-dim">after the lottery</span>'
                 : ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none</span>')) + '</td>')
@@ -7140,6 +7161,15 @@
         var self = this;
         var kind = self.getAttribute('data-vg-kind');
         var block = self.getAttribute('data-vg-block');
+        // Confirm before committing (Erin, 2026-08-11) — a sign-up is a real
+        // volunteer commitment, and the "needs N more" link is easy to tap.
+        var VG_BLK = { AM1: 'Morning Hour 1', AM2: 'Morning Hour 2', PM1: 'Afternoon Hour 1', PM2: 'Afternoon Hour 2' };
+        var VG_ROLE = { floater: 'Floater', board: 'Board Duties', prep: 'Prep' };
+        var blkTxt = VG_BLK[block] || block;
+        var confirmMsg = kind === 'assist'
+          ? 'Sign up to assist “' + (self.getAttribute('data-vg-label') || 'this class') + '” during ' + blkTxt + '?'
+          : 'Sign up for ' + (VG_ROLE[self.getAttribute('data-vg-role')] || 'this role') + ' during ' + blkTxt + '?';
+        if (!window.confirm(confirmMsg + '\n\nYou can remove it later from your My Family schedule.')) return;
         var cred = localStorage.getItem('rw_google_credential');
         var url, payload;
         if (kind === 'assist') {
@@ -9010,7 +9040,16 @@
           // #231: open assistant spots are visible here now \u2014 an edited
           // assistant count shows up without opening the sign-up picker.
           var amHelpersCell = helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
-          if (c.helpers_needed > 0) amHelpersCell += (amHelpersCell ? ', ' : '') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more</span>';
+          if (c.helpers_needed > 0) {
+            // Erin (2026-08-11): the "needs N more" shortfall IS the sign-up
+            // control here too \u2014 click to assist this grove's class (with a
+            // confirm first). Hidden on your own class row; the server rejects
+            // any hour you're already committed to.
+            var amNeedTxt = 'needs ' + c.helpers_needed + ' more';
+            amHelpersCell += (amHelpersCell ? ', ' : '') + (!isMyRow
+              ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(c.scheduled_hour || 'AM') + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + amNeedTxt + ' \u2014 sign up \u26a0</button>'
+              : '<span class="ra-open-note" style="display:inline;">' + amNeedTxt + ' \u26a0</span>');
+          }
           row += '<td>' + (amHelpersCell || '\u2014') + '</td>';
           row += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
           row += '</tr>';
@@ -9129,6 +9168,34 @@
         var group = this.getAttribute('data-group');
         showDutyDetail({ popup: { type: 'amClass', group: group, session: currentSession } });
       };
+    });
+    // Erin (2026-08-11): assist an open morning-class spot straight from the
+    // table — same flow as Everyone's sign-ups, with a confirm. stopPropagation
+    // keeps the click off the row's grove-kid-list modal.
+    container.querySelectorAll('.am-assist-signup').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        var rawBlock = self.getAttribute('data-vg-block');
+        var VG_BLK = { AM1: 'Morning Hour 1', AM2: 'Morning Hour 2', AM: 'both morning hours' };
+        var blkTxt = VG_BLK[rawBlock] || 'the morning';
+        if (!window.confirm('Sign up to assist “' + (self.getAttribute('data-vg-label') || 'this class') + '” during ' + blkTxt + '?\n\nYou can remove it later from your My Family schedule.')) return;
+        // A whole-morning ('AM') class assists both hours → send no specific
+        // block; an AM1/AM2 class assists just that hour.
+        var sendBlock = (rawBlock === 'AM1' || rawBlock === 'AM2') ? rawBlock : '';
+        var cred = localStorage.getItem('rw_google_credential');
+        self.disabled = true;
+        fetch('/api/curriculum?action=volunteer-assist' + notifViewAsSuffix(), {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ class_submission_id: parseInt(self.getAttribute('data-vg-class'), 10), block: sendBlock })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast((res.data && res.data.error) || 'Could not sign up.'); return; }
+            publishedSchedule.loaded = false;
+            loadPublishedSchedule(true); // refetch → renderSessionTab repaints
+          })
+          .catch(function () { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast('Network error — try again.'); });
+      });
     });
     // #218: Everyone's sign-ups grid, opened at the session being viewed.
     var sessGridBtn = container.querySelector('#sessSchedVolGridBtn');
