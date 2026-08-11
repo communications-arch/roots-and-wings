@@ -6436,6 +6436,18 @@
   var _mfDutySession = null;
   var _mfDutySessionFam = '';
   var _mfDutyBlocks = { AM1: false, AM2: false, PM1: false, PM2: false }; // set by renderMyFamily
+  // #291 (Colleen): does a My-Family duty OCCUPY an hour block for the purpose
+  // of hiding the volunteer sign-up picker? A real classroom/support duty does;
+  // a COVERAGE duty (isCoverage — filling in for someone one week) does NOT,
+  // because coverage is per-week and a volunteer slot is per-session, so a
+  // member can cover one week AND still hold a session slot in that hour. A
+  // legacy whole-morning 'AM' duty covers both morning twins. Pure — tested.
+  function mfDutyOccupiesBlock(d, blk) {
+    if (!d || d.isCoverage) return false;
+    if (blk === 'AM1') return d.block === 'AM' || d.block === 'AM1';
+    if (blk === 'AM2') return d.block === 'AM' || d.block === 'AM2';
+    return d.block === blk;
+  }
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
     if (!wrap) return;
@@ -8238,11 +8250,14 @@
     // already covered by a duty row above are skipped so the panel only
     // shows pledges + still-open hours.
     _volPanelSession = _mfDutySession;
+    // #291 (Colleen): COVERING for someone one week must NOT mark the hour as
+    // occupied for volunteer sign-up (see mfDutyOccupiesBlock). The "Covering:
+    // …" duty row still renders; it just no longer suppresses the picker.
     _mfDutyBlocks = {
-      AM1: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM1'; }),
-      AM2: duties.some(function (d) { return d.block === 'AM' || d.block === 'AM2'; }),
-      PM1: duties.some(function (d) { return d.block === 'PM1'; }),
-      PM2: duties.some(function (d) { return d.block === 'PM2'; })
+      AM1: duties.some(function (d) { return mfDutyOccupiesBlock(d, 'AM1'); }),
+      AM2: duties.some(function (d) { return mfDutyOccupiesBlock(d, 'AM2'); }),
+      PM1: duties.some(function (d) { return mfDutyOccupiesBlock(d, 'PM1'); }),
+      PM2: duties.some(function (d) { return mfDutyOccupiesBlock(d, 'PM2'); })
     };
     if (typeof loadVolunteerSignupPanel === 'function') loadVolunteerSignupPanel(fam);
 

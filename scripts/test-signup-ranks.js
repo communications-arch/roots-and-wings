@@ -127,5 +127,26 @@ t('prominence: the PM Hour 2 pinned banner explains the single choice number and
   assert(/both/.test(html) && /backup/.test(html), 'the banner should explain both-hours + remaining backup');
 });
 
+// ── #291: coverage duties must not occupy an hour for volunteer sign-up ──
+const mfDutyOccupiesBlock = new Function(extractFn('mfDutyOccupiesBlock') + '\n return mfDutyOccupiesBlock;')();
+
+console.log('\n  coverage vs volunteer-slot occupancy (#291)');
+
+t('#291: a COVERAGE duty (isCoverage) does NOT occupy its hour — the picker stays available', function () {
+  assert(mfDutyOccupiesBlock({ block: 'PM2', isCoverage: true }, 'PM2') === false, 'PM2 coverage must not occupy PM2');
+  assert(mfDutyOccupiesBlock({ block: 'AM', isCoverage: true }, 'AM1') === false, 'AM coverage must not occupy AM1');
+});
+
+t('#291: a real classroom/support duty DOES occupy its hour', function () {
+  assert(mfDutyOccupiesBlock({ block: 'PM2' }, 'PM2') === true, 'a non-coverage PM2 duty occupies PM2');
+  assert(mfDutyOccupiesBlock({ block: 'PM2' }, 'PM1') === false, 'a PM2 duty does not occupy PM1');
+});
+
+t('#291: a legacy whole-morning "AM" duty occupies BOTH morning twins', function () {
+  assert(mfDutyOccupiesBlock({ block: 'AM' }, 'AM1') === true, 'AM occupies AM1');
+  assert(mfDutyOccupiesBlock({ block: 'AM' }, 'AM2') === true, 'AM occupies AM2');
+  assert(mfDutyOccupiesBlock({ block: 'AM' }, 'PM1') === false, 'AM does not occupy PM1');
+});
+
 console.log('\n  ' + passed + ' passed, ' + failed + ' failed');
 if (failed > 0) process.exit(1);
