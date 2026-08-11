@@ -2125,7 +2125,22 @@ module.exports = async function handler(req, res) {
         // the kids signed up in it (per hour) — the grid was adults-only. Names
         // are the kid's goes-by + family surname, matching the parent picker;
         // enrollment-scoped like the picker's demand counts. Best-effort.
+        // #289 follow-up (Erin): a class's picks are just PREFERENCES until the
+        // session's sign-up window is LOCKED (picks finalized + lottery run) —
+        // showing them in the coordination grid before then reads as final
+        // placements when they aren't. So only surface the afternoon roster
+        // once the window is 'locked'; before that the client shows a
+        // "after the lottery" note in the column instead.
+        let pmSignupsFinalized = false;
         try {
+          const vmWinRows = await sql`
+            SELECT status FROM class_signup_windows
+            WHERE school_year = ${vmYear} AND session_number = ${vmSess} LIMIT 1`;
+          pmSignupsFinalized = !!(vmWinRows.length && vmWinRows[0].status === 'locked');
+        } catch (vmWinErr) {
+          console.error('volunteer-matrix window status (non-fatal):', vmWinErr);
+        }
+        if (pmSignupsFinalized) try {
           const pmPickRows = await sql`
             SELECT p.class_submission_id AS cid, p.hour,
                    COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first_name,
@@ -2162,7 +2177,8 @@ module.exports = async function handler(req, res) {
           console.error('volunteer-matrix PM kids (non-fatal):', pmKidsErr);
         }
         return res.status(200).json({
-          school_year: vmYear, session: vmSess, pm_approved: pmApproved, blocks, mine, cleaning, cleaning_open,
+          school_year: vmYear, session: vmSess, pm_approved: pmApproved,
+          pm_signups_finalized: pmSignupsFinalized, blocks, mine, cleaning, cleaning_open,
           me: { email: actingEmail, name: meName, is_board: await isBoardMember(actingEmail) }
         });
       }

@@ -7091,7 +7091,9 @@
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
           h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
             + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td>'
-            + (isAmBk ? '' : '<td>' + ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none yet</span>') + '</td>')
+            + (isAmBk ? '' : '<td>' + (!d.pm_signups_finalized
+                ? '<span class="sb-subdetail-dim">after the lottery</span>'
+                : ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none</span>')) + '</td>')
             + '</tr>';
         });
         h += '</tbody></table></div>';
