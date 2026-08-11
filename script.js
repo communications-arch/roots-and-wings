@@ -9117,7 +9117,7 @@
           if (ai !== bi) return ai - bi;
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
         });
-        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Helpers</th><th>Room</th></tr></thead><tbody>';
+        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
         // #209 (Lyndsey): scheduled and TBD grove rows must interleave in
         // MORNING_GROUP_ORDER (youngest→oldest). TBD rows used to be
         // appended after the scheduled block, scrambling the table.
@@ -9245,7 +9245,7 @@
         // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
         var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
         html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:8px;">'
-          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
+          + '<h4 class="session-section-title" style="margin-right:auto;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
           + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
           + '</div>';
         html += '<div class="elective-card-grid">';
@@ -9279,8 +9279,12 @@
       });
     });
     container.querySelectorAll('.elective-card[data-db-class]').forEach(function (card) {
-      card.addEventListener('click', function () {
-        showDbClassPopup(parseInt(this.getAttribute('data-db-class'), 10));
+      var openDetail = function () { showDbClassPopup(parseInt(card.getAttribute('data-db-class'), 10)); };
+      card.addEventListener('click', openDetail);
+      // The card is a div[role=button] now (so the assist link can nest) —
+      // keep it keyboard-openable like the button it replaced.
+      card.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDetail(); }
       });
     });
 
@@ -9330,6 +9334,30 @@
       if (typeof showPmSignupModal === 'function') showPmSignupModal();
       if (!_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
     });
+    // #297 (Erin): assist an open afternoon-class spot from the card — same
+    // confirm + volunteer-assist flow as the Morning Classes table.
+    container.querySelectorAll('.pm-assist-signup').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var self = this;
+        var rawBlock = self.getAttribute('data-vg-block');
+        var VG_BLK = { PM1: 'Afternoon Hour 1', PM2: 'Afternoon Hour 2' };
+        var blkTxt = VG_BLK[rawBlock] || 'both afternoon hours';
+        if (!window.confirm('Sign up to assist “' + (self.getAttribute('data-vg-label') || 'this class') + '” during ' + blkTxt + '?\n\nYou can remove it later from your My Family schedule.')) return;
+        var cred = localStorage.getItem('rw_google_credential');
+        self.disabled = true;
+        fetch('/api/curriculum?action=volunteer-assist' + notifViewAsSuffix(), {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ class_submission_id: parseInt(self.getAttribute('data-vg-class'), 10), block: rawBlock })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast((res.data && res.data.error) || 'Could not sign up.'); return; }
+            publishedSchedule.loaded = false;
+            loadPublishedSchedule(true); // refetch → renderSessionTab repaints (helpers_needed drops)
+          })
+          .catch(function () { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast('Network error — try again.'); });
+      });
+    });
   }
 
   // Published-DB elective card: same look as the sheet-era card, but no
@@ -9345,17 +9373,24 @@
       return leadNames.concat(assistNames).some(function (a) { return String(a).trim().toLowerCase() === l; });
     });
     // #297: the SHARED compact card body (Class-Details layout) — identical to
-    // the Afternoon Class Sign-ups cards. The whole card is a button that opens
-    // the details popup, so the title stays a plain span (no nested button).
-    // Requests come from the same class-signup pool, loaded per session.
-    var html = '<button type="button" class="elective-card ac-body' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
+    // the Afternoon Class Sign-ups cards. A div (not a button) so the "needs N
+    // more — sign up" assist control can nest inside; clicking the card opens
+    // the details popup (wired below). Requests come from the same class-signup
+    // pool, loaded per session.
+    var html = '<div class="elective-card ac-body' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" role="button" tabindex="0" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
     html += afternoonCardBody({
       id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
     }, { myNames: myNames });
-    html += '</button>';
+    // "needs N more — sign up" assist link, same as the Morning Classes table
+    // (Erin, 2026-08-11). stopPropagation keeps the click off the card's popup.
+    if (e.helpers_needed > 0) {
+      var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
+      html += '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more ⚠ — sign up</button></div>';
+    }
+    html += '</div>';
     return html;
   }
 
