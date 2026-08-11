@@ -272,6 +272,7 @@ const unitTests = [
   'scripts/test-myclasses.js',
   'scripts/test-schedules-byclass.js',
   'scripts/test-signup-ranks.js',
+  'scripts/test-coverage-derivation.js',
   'scripts/test-age-ranges.js',
   'scripts/test-roles-print.js',
   'scripts/test-open-seats.js',

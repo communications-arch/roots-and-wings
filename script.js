@@ -25299,11 +25299,15 @@
   // (claimed or not) are never touched, so this is safe to re-run.
   var _absenceSyncTried = {};
   function syncMyAbsenceSlots() {
+    // #293: DISABLED. The SERVER now derives coverage slots authoritatively on
+    // absence report (POST) and edit — the browser no longer computes or writes
+    // them. This reconciler was the 2026-08-06 phantom-incident's write path
+    // (it wrote slots from whatever schedule the browser had painted, so a
+    // poisoned cache wrote dev duties into prod). Neutered as a no-op so its
+    // callers need no change; the unreachable body below is removed in cleanup.
+    return;
+    // eslint-disable-next-line no-unreachable
     try {
-      // PROD INCIDENT 2026-08-06: this reconciler WRITES slots derived from
-      // whatever schedule is painted. It must never run off cached/stale
-      // data — only after this session fetched the live schedule from THIS
-      // server (a poisoned cache once wrote dev-class duties into prod).
       if (typeof liveScheduleFresh !== 'undefined' && !liveScheduleFresh) return;
       if (isSummerBreak || !loadedAbsences || loadedAbsences.length === 0) return;
       var email = getActiveEmail();

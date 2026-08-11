@@ -162,7 +162,7 @@ const BOARD_ONLY_ROLE_TYPES = ['opener', 'closer'];
 // of this database's areas (or the floater). Support/role duties
 // (general, floater, prep, board, opener, closer, supply_closet) carry
 // no class reference and pass through, as before the incident.
-const { deriveClassDutyKeys, norm } = require('./_duties');
+const { deriveClassDutyKeys, deriveCoverageSlots, norm } = require('./_duties');
 const DUTY_EXEMPT_ROLE_TYPES = ['general', 'floater', 'board', 'prep', 'opener', 'closer', 'supply_closet'];
 async function knownDutyTargets(sql) {
   // Cleaning areas only — class duties are person-level now.
@@ -537,34 +537,50 @@ module.exports = async function handler(req, res) {
       // the still-open slots go into the Coverage Needed broadcast.
       const createdSlots = [];
       const openSlots = [];
-      const slotAllowed = slotsData.length ? await makeSlotValidator(sql, {
-        schoolYear: activeSchoolYear(new Date()), session: session_number,
-        absentPerson: absent_person, familyEmail: family_email
-      }) : null;
-      for (const slot of slotsData) {
-        const block = String(slot.block || '').trim();
-        const role_type = String(slot.role_type || '').trim();
-        const role_description = String(slot.role_description || '').trim();
-        const group_or_class = String(slot.group_or_class || '').trim();
-        if (!block || !role_type || !role_description) continue;
-        if (!VALID_BLOCKS.includes(block)) continue;
-        if (slotAllowed && !slotAllowed(slot)) {
-          console.error('[absence-guard] dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
-          continue;
+      // #293: the SERVER now DERIVES the authoritative slot set from the DB —
+      // the browser no longer decides which duties need covering (the
+      // 2026-08-06 phantom incident's root cause: a poisoned cache wrote dev
+      // duties into prod). The client's `body.slots` is consulted ONLY for
+      // optional per-slot pre-picked replacements (#179), matched to the
+      // generated slots by (block|role_type|group_or_class). Fail-safe: if
+      // derivation throws, we insert nothing rather than trust the client.
+      let generatedSlots = [];
+      if (coverageNeeded) {
+        try {
+          generatedSlots = await deriveCoverageSlots(sql, {
+            // #293 review M5: year from the ABSENCE date, not "now" (April-1
+            // pivot: an absence for last year's session reported after the
+            // rollover would otherwise derive against the wrong year).
+            schoolYear: activeSchoolYear(new Date(absence_date + 'T12:00:00')),
+            session: session_number,
+            absentPerson: absent_person, familyEmail: family_email, blocks
+          });
+        } catch (derErr) {
+          console.error('[absence] deriveCoverageSlots failed — no slots created:', derErr);
+          generatedSlots = [];
         }
+      }
+      const slotKey = s => String(s.block || '') + '|' + String(s.role_type || '') + '|' + norm(String(s.group_or_class || ''));
+      const replByKey = {};
+      (Array.isArray(body.slots) ? body.slots : []).forEach(s => {
+        const rn = String(s.replacement_name || '').trim();
+        if (rn) replByKey[slotKey(s)] = rn.slice(0, 120);
+      });
+      for (const slot of generatedSlots) {
+        if (!VALID_BLOCKS.includes(slot.block)) continue;
         const ins = await sql`
           INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
-          VALUES (${absenceId}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
+          VALUES (${absenceId}, ${slot.block}, ${slot.role_type}, ${slot.role_description}, ${slot.group_or_class})
           RETURNING id
         `;
-        const slotRow = { block, role_type, role_description };
+        const slotRow = { block: slot.block, role_type: slot.role_type, role_description: slot.role_description };
         createdSlots.push(slotRow);
-        const replName = String(slot.replacement_name || '').trim().slice(0, 120);
+        const replName = replByKey[slotKey(slot)] || '';
         if (!replName) { openSlots.push(slotRow); continue; }
         try {
           await preassignSlot(sql, user,
             { id: absenceId, absence_date, absent_person },
-            ins[0].id, role_description, replName);
+            ins[0].id, slot.role_description, replName);
         } catch (replErr) {
           // Name didn't resolve or the update failed — slot stays open.
           console.error('replacement pre-assign (non-fatal):', replErr);
@@ -663,7 +679,7 @@ module.exports = async function handler(req, res) {
         }
 
         const existingSlots = await sql`
-          SELECT id, block, role_type, role_description, claimed_by_email, claimed_by_name
+          SELECT id, block, role_type, role_description, group_or_class, claimed_by_email, claimed_by_name
           FROM coverage_slots WHERE absence_id = ${id} ORDER BY id
         `;
 
@@ -688,77 +704,71 @@ module.exports = async function handler(req, res) {
           return res.status(200).json({ ok: true, id, absence: outAbs0 });
         }
 
-        // Reconcile slots. Match sent slots to existing rows so claims
-        // survive: exact block|type|description first, then a legacy
-        // whole-morning row ('AM') matches its AM1/AM2 successor with the
-        // same type+description (the first one to ask gets it).
+        // #293: the SERVER derives the authoritative slot set on EDIT too, so
+        // report and edit stay consistent. Existing rows are matched by
+        // IDENTITY (block|role_type|group_or_class) — NOT description — so a
+        // member's CLAIM survives even though the server's descriptions differ
+        // from any older client-created ones. body.slots is consulted only for
+        // optional replacements (#179). Fail-safe: if derivation throws, we
+        // leave the existing slots (and their claims) untouched.
+        let editGenerated = [];
+        try {
+          editGenerated = await deriveCoverageSlots(sql, {
+            schoolYear: activeSchoolYear(new Date(absence_date + 'T12:00:00')),
+            session: session_number, absentPerson: absent_person,
+            familyEmail: absence.family_email, blocks
+          });
+        } catch (derErr) {
+          console.error('[absence] edit deriveCoverageSlots failed — slots left as-is:', derErr);
+          const keepAbs = await sql`SELECT * FROM absences WHERE id = ${id}`;
+          const keepSlots = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${id} ORDER BY id`;
+          const outKeep = keepAbs[0]; outKeep.slots = keepSlots;
+          return res.status(200).json({ ok: true, id, absence: outKeep, derive_failed: true });
+        }
+        const identityKey = s => String(s.block || '') + '|' + String(s.role_type || '') + '|' + norm(String(s.group_or_class || ''));
+        const editReplByKey = {};
+        (Array.isArray(body.slots) ? body.slots : []).forEach(s => {
+          const rn = String(s.replacement_name || '').trim();
+          if (rn) editReplByKey[identityKey(s)] = rn.slice(0, 120);
+        });
         const unmatched = existingSlots.slice();
-        function takeMatch(block, role_type, role_description) {
-          let idx = unmatched.findIndex(s => s.block === block && s.role_type === role_type && s.role_description === role_description);
-          if (idx === -1 && (block === 'AM1' || block === 'AM2')) {
-            idx = unmatched.findIndex(s => s.block === 'AM' && s.role_type === role_type && s.role_description === role_description);
-          }
-          if (idx === -1) return null;
-          return unmatched.splice(idx, 1)[0];
+        function takeMatch(gen) {
+          const k = identityKey(gen);
+          const idx = unmatched.findIndex(s => identityKey(s) === k);
+          return idx === -1 ? null : unmatched.splice(idx, 1)[0];
         }
         const openNew = [];
-        const seenKeys = new Set();
-        const editSlotAllowed = slotsData.length ? await makeSlotValidator(sql, {
-          schoolYear: activeSchoolYear(new Date()), session: session_number,
-          absentPerson: absent_person, familyEmail: absence.family_email
-        }) : null;
-        for (const slot of slotsData) {
-          const block = String(slot.block || '').trim();
-          const role_type = String(slot.role_type || '').trim();
-          const role_description = String(slot.role_description || '').trim();
-          const group_or_class = String(slot.group_or_class || '').trim();
-          const replName = String(slot.replacement_name || '').trim().slice(0, 120);
-          if (!block || !role_type || !role_description) continue;
-          if (!VALID_BLOCKS.includes(block)) continue;
-          // Guard skips unknown duties BEFORE matching, so a phantom slot
-          // the client re-sent falls into `unmatched` below and is deleted
-          // — editing an absence now flushes phantoms instead of keeping
-          // them alive.
-          if (editSlotAllowed && !editSlotAllowed(slot)) {
-            console.error('[absence-guard] edit dropped non-derived duty slot:', JSON.stringify({ role_type, role_description, group_or_class, by: user.email }));
-            continue;
-          }
-          const key = block + '|' + role_type + '|' + role_description;
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
-          const match = takeMatch(block, role_type, role_description);
+        for (const gen of editGenerated) {
+          if (!VALID_BLOCKS.includes(gen.block)) continue;
+          const replName = editReplByKey[identityKey(gen)] || '';
+          const match = takeMatch(gen);
           if (match) {
-            if (match.block !== block) {
-              await sql`UPDATE coverage_slots SET block = ${block} WHERE id = ${match.id}`;
+            // Refresh block/description to the derived values (identity is same).
+            if (match.block !== gen.block || match.role_description !== gen.role_description) {
+              await sql`UPDATE coverage_slots SET block = ${gen.block}, role_description = ${gen.role_description} WHERE id = ${match.id}`;
             }
             if (match.claimed_by_email || match.claimed_by_name) {
-              if (!replName) {
-                // Picker actively cleared — release the claim back to open.
-                await sql`
-                  UPDATE coverage_slots
-                  SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
-                  WHERE id = ${match.id}`;
-                openNew.push({ block, role_type, role_description });
-              } else if (replName !== match.claimed_by_name) {
-                try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, role_description, replName); }
+              // Claim survives (this is still a real duty); only a NEW, different
+              // pre-picked replacement reassigns it — never auto-release.
+              if (replName && replName !== match.claimed_by_name) {
+                try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, gen.role_description, replName); }
                 catch (replErr) { console.error('edit reassign (non-fatal):', replErr); }
               }
-              // Same name → untouched; the claim (and its email) survives.
             } else if (replName) {
-              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, role_description, replName); }
+              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, gen.role_description, replName); }
               catch (replErr) { console.error('edit preassign (non-fatal):', replErr); }
             }
           } else {
             const ins = await sql`
               INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
-              VALUES (${id}, ${block}, ${role_type}, ${role_description}, ${group_or_class})
+              VALUES (${id}, ${gen.block}, ${gen.role_type}, ${gen.role_description}, ${gen.group_or_class})
               RETURNING id
             `;
             if (replName) {
-              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, ins[0].id, role_description, replName); }
-              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); openNew.push({ block, role_type, role_description }); }
+              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, ins[0].id, gen.role_description, replName); }
+              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); openNew.push({ block: gen.block, role_type: gen.role_type, role_description: gen.role_description }); }
             } else {
-              openNew.push({ block, role_type, role_description });
+              openNew.push({ block: gen.block, role_type: gen.role_type, role_description: gen.role_description });
             }
           }
         }
