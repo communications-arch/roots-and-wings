@@ -10181,6 +10181,40 @@ async function handleMembershipAdjustEnrollment(body, req, res) {
     }
   }
 
+  // #241 follow-up (Erin): take a family OFF the waitlist → back to active. The
+  // reverse of family_waitlist. Clears the waitlist stamp and re-marks this
+  // season's enrollments 'enrolled'; the registration's payment_status
+  // (pending/paid) is untouched, so the family returns to its prior active
+  // state. Class placements were freed at waitlist time and are NOT restored —
+  // the family re-does class sign-ups. Nothing is deleted.
+  if (action === 'family_unwaitlist') {
+    if (!prof.waitlisted_at) return res.status(409).json({ error: 'This family isn’t on the waitlist.' });
+    try {
+      const kids = await sql`SELECT first_name FROM kids WHERE LOWER(family_email) = ${fam} ORDER BY sort_order, id`;
+      const kidNames = kids.map(k => k.first_name).filter(Boolean);
+      await sql`
+        UPDATE kid_enrollments SET status = 'enrolled', updated_at = NOW(), updated_by = ${real}
+        WHERE season = ${DEFAULT_SEASON} AND LOWER(family_email) = ${fam} AND status = 'waitlisted'
+      `;
+      await sql`
+        UPDATE member_profiles SET waitlisted_at = NULL, waitlisted_by = '',
+               updated_at = NOW(), updated_by = ${real}
+        WHERE LOWER(family_email) = ${fam}
+      `;
+      await sql`
+        INSERT INTO enrollment_change_requests
+          (kind, family_email, kid_first_name, season, status, requested_by, decided_by, decided_at, decision_note)
+        VALUES ('family_unwaitlist', ${fam}, '', ${DEFAULT_SEASON},
+                'approved', ${real}, ${real}, NOW(),
+                ${'Family moved off waitlist (back to active) by Membership' + (kidNames.length ? ' — kids: ' + kidNames.join(', ') : '') + (note ? ' — ' + note : '')})
+      `;
+      return res.status(200).json({ ok: true, activated: famName, kids: kidNames });
+    } catch (err) {
+      console.error('adjust family_unwaitlist error:', err);
+      return res.status(500).json({ error: 'Could not move the family back to active.' });
+    }
+  }
+
   return res.status(400).json({ error: 'Unknown adjust action.' });
 }
 

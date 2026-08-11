@@ -15181,7 +15181,11 @@
         // is already waitlisted (#241).
         var opts = r.declined_at
           ? '<option value="undecline">Undo decline&hellip;</option>'
-          : '<option value="switch">Switch a kid’s schedule&hellip;</option>'
+          // #241 follow-up (Erin): a waitlisted family can be moved back to
+          // active (their prior pending/paid registration state) — the reverse
+          // of Move to waitlist.
+          : (r.waitlisted_at ? '<option value="unwaitlist">Take off waitlist — back to active&hellip;</option>' : '')
+            + '<option value="switch">Switch a kid’s schedule&hellip;</option>'
             + (r.waitlisted_at ? '' : '<option value="waitlist">Move to waitlist&hellip;</option>')
             + '<option value="withdraw">Withdraw family&hellip;</option>'
             + '<option value="decline">Decline registration&hellip;</option>';
@@ -15700,6 +15704,47 @@
                 wlBtn.disabled = false;
                 wlStatus.classList.add('ws-wv-err');
                 wlStatus.textContent = 'Network error — try again.';
+              });
+          });
+          return;
+        }
+        // #241 follow-up: take a family OFF the waitlist → active.
+        var uwBtn = e.target.closest('.ws-adjunwaitlist-apply-btn');
+        if (uwBtn) {
+          var uwWrap = uwBtn.closest('.ws-reg-detail-section');
+          var uwFamEmail = uwWrap.getAttribute('data-family-email') || '';
+          var uwFamName = uwBtn.getAttribute('data-family-name') || 'this family';
+          var uwNoteEl = uwWrap.querySelector('.ws-adjunwaitlist-note');
+          var uwStatus = uwWrap.querySelector('.ws-memact-status');
+          rwArmTwoStep(uwBtn, 'move ' + uwFamName + ' back to active', function () {
+            uwBtn.disabled = true;
+            uwStatus.classList.remove('ws-wv-err');
+            uwStatus.textContent = 'Moving back to active…';
+            fetch('/api/tour', {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({
+                kind: 'membership-adjust-enrollment', action: 'family_unwaitlist',
+                family_email: uwFamEmail, note: (uwNoteEl && uwNoteEl.value) || '',
+                reg_id: parseInt(uwWrap.getAttribute('data-reg-id'), 10) || undefined
+              })
+            }).then(function (rr) { return rr.json().then(function (d) { return { ok: rr.ok, data: d }; }); })
+              .then(function (rres) {
+                if (!rres.ok) {
+                  uwBtn.disabled = false;
+                  uwStatus.classList.add('ws-wv-err');
+                  uwStatus.textContent = (rres.data && rres.data.error) || 'Could not move the family back to active.';
+                  return;
+                }
+                uwStatus.textContent = 'Back to active: ' + ((rres.data && rres.data.activated) || uwFamName) + '. They can sign up for classes again.';
+                _membershipPendingAction = null;
+                _adjustEnrollCache = null;
+                if (typeof loadEnrollmentRequestCount === 'function') loadEnrollmentRequestCount();
+                setTimeout(function () { closeDetail(); showMembershipReportModal(); }, 1500);
+              })
+              .catch(function () {
+                uwBtn.disabled = false;
+                uwStatus.classList.add('ws-wv-err');
+                uwStatus.textContent = 'Network error — try again.';
               });
           });
           return;
@@ -16595,6 +16640,25 @@
           + '<button type="button" class="sc-btn ws-memact-cancel-btn">Cancel</button>'
           + '</div>';
       }
+      h += '<p class="ws-decline-status ws-memact-status" aria-live="polite" style="margin-top:8px;"></p></div>';
+    }
+
+    // #241 follow-up (Erin): take a family back OFF the waitlist → active. The
+    // reverse of the waitlist panel; the family is already waitlisted (so it's
+    // linked — no family picker needed). Re-marks their enrollments 'enrolled';
+    // their registration payment state (pending/paid) is untouched. Class
+    // placements were freed at waitlist time, so they re-do class sign-ups.
+    if (_membershipPendingAction && _membershipPendingAction.regId === r.id && _membershipPendingAction.type === 'unwaitlist') {
+      var uwFam = _adjustFamilyForReg(r);
+      var uwFamEmail = (uwFam && uwFam.family_email) || String(r.family_email || r.email || '').toLowerCase();
+      var uwFamName = (uwFam && uwFam.family_name) || r.main_learning_coach || '';
+      h += '<div class="ws-reg-detail-section ws-reg-decline" data-family-email="' + escapeHtmlWs(uwFamEmail) + '" data-reg-id="' + escapeHtmlWs(String(r.id)) + '">';
+      h += '<p class="ws-reg-decline-hint"><strong>Take the ' + escapeHtmlWs(uwFamName) + ' family off the waitlist?</strong> They go back to active — their registration returns to its prior state (pending or paid), and their kids are marked enrolled again. Their earlier class placements were freed when they were waitlisted, so they’ll re-do class sign-ups. Nothing is deleted.</p>'
+        + '<input class="rd-input ws-adjunwaitlist-note" type="text" maxlength="500" placeholder="Optional note (shared with the board notices)">'
+        + '<div class="rd-btn-row ws-decline-btn-row">'
+        + '<button type="button" class="sc-btn ws-adjunwaitlist-apply-btn" data-family-name="' + escapeHtmlWs(uwFamName) + '">Move back to active</button>'
+        + '<button type="button" class="sc-btn ws-memact-cancel-btn">Cancel</button>'
+        + '</div>';
       h += '<p class="ws-decline-status ws-memact-status" aria-live="polite" style="margin-top:8px;"></p></div>';
     }
 
