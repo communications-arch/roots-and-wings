@@ -2141,6 +2141,12 @@ module.exports = async function handler(req, res) {
           console.error('volunteer-matrix window status (non-fatal):', vmWinErr);
         }
         if (pmSignupsFinalized) try {
+          // #292 (Lyndsey): only a kid's rank-1 pick is their actual
+          // placement — an un-promoted rank-2 (backup) pick just means they
+          // *considered* the class, not that they're in it. Un-bumped kids
+          // keep that backup row in class_signup_picks after lock, so
+          // without this filter their backup class's roster here reads as
+          // if they're signed up for a class they never attend.
           const pmPickRows = await sql`
             SELECT p.class_submission_id AS cid, p.hour,
                    COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS first_name,
@@ -2153,7 +2159,7 @@ module.exports = async function handler(req, res) {
                   AND LOWER(k.first_name) = LOWER(p.kid_first_name))
             LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE p.school_year = ${vmYear} AND p.session_number = ${vmSess}
-              AND p.hour IN ('PM1', 'PM2')
+              AND p.hour IN ('PM1', 'PM2') AND p.rank = 1
               AND (p.kid_id IS NULL OR EXISTS (
                 SELECT 1 FROM kid_enrollments e
                 WHERE e.kid_id = p.kid_id AND e.season = ${vmYear} AND e.status = 'enrolled'))
