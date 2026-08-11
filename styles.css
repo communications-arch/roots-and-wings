@@ -8685,20 +8685,22 @@ ul[id="ws-todo-list"] .ws-link-icon,
    but clearly clickable — underline on hover/focus, inheriting the coral. */
 button.vgrid-need-btn {
   display: inline;
-  padding: 0;
+  padding: 3px 2px;      /* vertical hit area on a phone-first audience */
   border: 0;
   background: none;
   font: inherit;
   font-size: 0.72rem;
   font-weight: 700;
+  line-height: 1.5;
   color: #b3381a;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  border-radius: 4px;
 }
 button.vgrid-need-btn:hover,
-button.vgrid-need-btn:focus-visible { text-decoration: underline; filter: brightness(0.9); }
-button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+button.vgrid-need-btn:focus-visible { color: var(--color-coral); background: rgba(var(--color-coral-rgb), 0.10); }
+button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration: none; background: none; }
 .ra-draft-tag { font-size: 0.7rem; color: var(--color-text-light); font-style: italic; font-weight: 400; }
 .ra-row-gap td { background: rgba(var(--color-coral-rgb), 0.05); }
 .ra-floor-head {
@@ -8937,13 +8939,46 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
 }
 .mf-vol-inline .mf-duty-icon { font-size: 1rem; }
 .mf-vol-pickrow { padding: 4px 0 8px; }
-/* Everyone's sign-ups modal — compact spacing (2026-07-11). */
-.vol-grid .roles-mgr-se-head { margin: 12px 0 4px; padding-top: 6px; }
+/* ── Everyone's sign-ups modal (2026-08-11 layout pass) ──
+   THE single source of truth for this modal's grid. Two reviews (UI + design)
+   flagged: (1) columns jittered because each hour is its own <table> sizing
+   its columns from its own content, and (2) the hour blocks blurred together.
+   NB: an older duplicate of the heading rule at ~line 16167 is now neutralized
+   — do not reintroduce a second .vol-grid .roles-mgr-se-head margin here. */
 .vol-grid .mcb-teach th, .vol-grid .mcb-teach td { padding: 4px 8px; font-size: 0.8rem; }
-.vol-grid .mcb-teach-wrap { margin: 0; }
+/* Shared fixed column template so Grove/Leader/Assistants line up AM1→PM2→
+   Cleaning. Separate <table> elements can't co-size columns, so we pin widths;
+   the afternoon table simply extends one more column (Kids) to the right. */
+.vol-grid .mcb-teach { table-layout: fixed; width: auto; min-width: 0; }
+.vol-grid .mcb-teach th:nth-child(1),
+.vol-grid .mcb-teach td:nth-child(1) { width: 150px; } /* Grove / Class / Floor */
+.vol-grid .mcb-teach th:nth-child(2),
+.vol-grid .mcb-teach td:nth-child(2) { width: 140px; } /* Leader / Area          */
+.vol-grid .mcb-teach th:nth-child(3),
+.vol-grid .mcb-teach td:nth-child(3) { width: 220px; } /* Assistants (+CTA)/Family*/
+.vol-grid .mcb-teach th:nth-child(4),
+.vol-grid .mcb-teach td:nth-child(4) { width: 150px; } /* Kids signed up (PM only)*/
+.vol-grid .mcb-teach td { overflow-wrap: anywhere; } /* long name lists wrap, not clip */
+.vol-grid .mcb-teach thead th { text-align: left; } /* headers sit over left-aligned data */
+/* Faint zebra so long rosters don't smear. */
+.vol-grid .mcb-teach tbody tr:nth-child(even) td { background: rgba(var(--color-primary-rgb), 0.03); }
+/* "Where am I" — reuse the site-wide own-row highlight + a left accent bar. */
+.vol-grid .mcb-teach tr.coord-my-row td { background: rgba(var(--color-primary-rgb), 0.06); }
+.vol-grid .mcb-teach tr.coord-my-row td:first-child { box-shadow: inset 3px 0 0 var(--color-primary); }
+/* Hour headings: one rule, real breathing room, a visible tinted divider so
+   the four hours + cleaning read as separate blocks. */
+.vol-grid .roles-mgr-se-head {
+  margin: 28px 0 8px;
+  padding-top: 16px;
+  border-top: 2px solid rgba(var(--color-primary-rgb), 0.25);
+}
+.vol-grid .roles-mgr-se-head:first-of-type { margin-top: 10px; border-top: 0; padding-top: 0; }
+.vol-grid .mcb-teach-wrap { margin: 0 0 2px; }
 .vol-grid .board-cal-views { margin: 0 0 6px; }
 .vol-grid-pledges { margin: 3px 0 0; font-size: 0.78rem; line-height: 1.5; }
-.vol-grid-pledges-head { display: inline; margin-left: 10px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--color-text-light); }
+/* Pledge line (Floaters/Board/Prep + "➕ me") drops to its own quieter sub-line
+   under the hour title instead of fighting it on the same baseline. */
+.vol-grid-pledges-head { display: block; margin: 6px 0 0; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--color-text-light); font-size: 0.76rem; }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated
@@ -16162,10 +16197,9 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   content: ""; flex: 1; height: 1px; background: #9BC431; opacity: .7;
 }
 
-/* #264 (Erin): breathing room between the hour sections of the
-   Who's-Where grid so the blocks read separately. */
-.vol-grid .roles-mgr-se-head { margin-top: 26px; }
-.vol-grid .roles-mgr-se-head:first-of-type { margin-top: 10px; }
+/* #264 (Erin): breathing room between the hour sections. CONSOLIDATED
+   2026-08-11 into the single .vol-grid block near the .mcb-teach rules —
+   this former override is intentionally left empty to avoid a cascade fight. */
 
 /* #255 (Erin): Kid Schedule class rows are the classmates doorway now. */
 .mf-sched-rowlink { cursor: pointer; }

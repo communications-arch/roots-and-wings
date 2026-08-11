@@ -7126,7 +7126,11 @@
               ? '<button type="button" class="ra-open-note vgrid-need-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + needTxt + ' — sign up</button>'
               : '<span class="ra-open-note" style="display:inline;">' + needTxt + '</span>');
           }
-          h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
+          // "Where am I" — the server already tells us the acting person's own
+          // commitment per hour (d.mine[bk].class_id); light up that row with
+          // the site-wide own-row highlight so it jumps out of the grid.
+          var mineHere = d.mine && d.mine[bk] && d.mine[bk].class_id === c.id;
+          h += '<tr' + (mineHere ? ' class="coord-my-row"' : '') + '><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
             + needHtml + '</td>'
             + (isAmBk ? '' : '<td>' + (!d.pm_signups_finalized
                 ? '<span class="sb-subdetail-dim">after the lottery</span>'
