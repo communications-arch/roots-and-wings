@@ -7049,14 +7049,26 @@
     var BLOCK_TITLES = { AM1: amMark + ' Morning Hour 1 (10:00–10:55)', AM2: amMark + ' Morning Hour 2 (11:00–11:55)', PM1: pmMark + ' Afternoon Hour 1 (1:00–1:55)', PM2: pmMark + ' Afternoon Hour 2 (2:00–2:55)' };
     ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
-      function pledgeBit(icon, label, list, cap) {
+      // Erin (2026-08-11): sign up for OPEN slots straight from this view.
+      // You can't double-book an hour you already hold (d.mine[bk]); Board is
+      // board-members only; support roles honor the hour's remaining capacity.
+      var meCommitted = !!(d.mine && d.mine[bk]);
+      var canBoard = !!(d.me && d.me.is_board);
+      var supportOpen = (typeof b.support_capacity !== 'number') || ((b.support_taken || 0) < b.support_capacity);
+      function pledgeBtn(role, list, cap, eligible) {
+        if (meCommitted || !eligible || !supportOpen) return '';
+        if (cap && list.length >= cap) return '';
+        return ' <button type="button" class="sc-btn vgrid-signup" data-vg-kind="signup" data-vg-role="' + role + '" data-vg-block="' + bk + '" title="Sign yourself up this hour">➕ me</button>';
+      }
+      function pledgeBit(icon, label, list, cap, role, eligible) {
         return icon + ' <strong>' + label + ':</strong> '
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
-          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '');
+          + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '')
+          + pledgeBtn(role, list, cap, eligible);
       }
-      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0) + ' · '
-        + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2) + ' · '
-        + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2);
+      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0, 'floater', true) + ' · '
+        + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2, 'board', canBoard) + ' · '
+        + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2, 'prep', true);
       h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
@@ -7089,8 +7101,12 @@
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           var gridLead = escapeHtmlWs(c.teacher)
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
+          // Erin (2026-08-11): assist an open class spot straight from here.
+          var assistBtn = (c.helpers_needed > 0 && !meCommitted)
+            ? ' <button type="button" class="sc-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" title="Sign yourself up to assist this class">' + brandIconImg('assist', 'ag-icon') + ' Assist</button>'
+            : '';
           h += '<tr><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
-            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + '</td>'
+            + (c.helpers_needed > 0 ? (helpers ? ', ' : ' ') + '<span class="ra-open-note" style="display:inline;">needs ' + c.helpers_needed + ' more ⚠</span>' : '') + assistBtn + '</td>'
             + (isAmBk ? '' : '<td>' + (!d.pm_signups_finalized
                 ? '<span class="sb-subdetail-dim">after the lottery</span>'
                 : ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none</span>')) + '</td>')
@@ -7115,6 +7131,38 @@
     body.innerHTML = h;
     body.querySelectorAll('.vol-grid-sess').forEach(function (btn) {
       btn.addEventListener('click', function () { loadVolunteerGrid(parseInt(this.getAttribute('data-sess'), 10)); });
+    });
+    // Erin (2026-08-11): sign up for an open slot straight from this view.
+    // Reuses the My Family picker's actions (volunteer-assist / volunteer-signup)
+    // — same server-side caps/validation — then refreshes the grid in place.
+    body.querySelectorAll('.vgrid-signup').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        var kind = self.getAttribute('data-vg-kind');
+        var block = self.getAttribute('data-vg-block');
+        var cred = localStorage.getItem('rw_google_credential');
+        var url, payload;
+        if (kind === 'assist') {
+          url = '/api/curriculum?action=volunteer-assist' + notifViewAsSuffix();
+          payload = { class_submission_id: parseInt(self.getAttribute('data-vg-class'), 10), block: block };
+        } else {
+          url = '/api/curriculum?action=volunteer-signup' + notifViewAsSuffix();
+          payload = { school_year: (typeof ACTIVE_SESSION_YEAR !== 'undefined' && ACTIVE_SESSION_YEAR) || '', session: d.session, block: block, role: self.getAttribute('data-vg-role') };
+        }
+        self.disabled = true;
+        fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) {
+              self.disabled = false;
+              if (typeof showSupplyToast === 'function') showSupplyToast((res.data && res.data.error) || 'Could not sign up.');
+              return;
+            }
+            if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false; // helper shows on the schedule
+            loadVolunteerGrid(d.session); // refresh in place → buttons update, your name appears
+          })
+          .catch(function () { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast('Network error — try again.'); });
+      });
     });
   }
 
