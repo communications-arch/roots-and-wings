@@ -5780,8 +5780,9 @@
       var inner = (typeof photoHtml === 'function')
         ? photoHtml(n, n, pRec ? pRec.email : '', pRec ? pRec.family : '')
         : '<span>' + escapeHtml(String(n || '?').charAt(0)) + '</span>';
-      var bg = (typeof faceColor === 'function') ? faceColor(n) : '';
-      return '<span class="ac-staff-chip"><span class="ac-staff-dot"' + (bg ? ' style="background:' + bg + ';"' : '') + '>' + inner + '</span>'
+      // Letter-only avatars stay a soft neutral grey (Erin: a wall of
+      // per-name colored circles was too busy); real photos cover it.
+      return '<span class="ac-staff-chip"><span class="ac-staff-dot">' + inner + '</span>'
         + '<span class="ac-staff-name">' + mark(n) + '</span></span>';
     };
     var staff = '';
