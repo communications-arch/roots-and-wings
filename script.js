@@ -5751,10 +5751,9 @@
       ? '<button type="button" class="ac-title signup-class-name-link" data-detail-class="' + opts.titleLinkId + '" title="Class details">' + escapeHtml(norm.name) + '</button>'
       : '<span class="ac-title">' + escapeHtml(norm.name) + '</span>';
     var h = '<div class="ac-head">' + title + (groveTag ? ' <span class="ac-groves">' + groveTag + '</span>' : '') + '</div>';
-    var hourLabel = norm.hour === 'both' ? 'Both hours · 1:00–2:55' : norm.hour === 'PM2' ? 'Hour 2 · 2:00–2:55' : 'Hour 1 · 1:00–1:55';
-    var metaBits = [hourLabel];
-    if (norm.room) metaBits.push(escapeHtml(norm.room));
-    h += '<div class="ac-meta">' + metaBits.join(' · ') + '</div>';
+    // Time lives in the section header, and the room may not be assigned yet —
+    // so neither shows on the card (Erin, 2026-08-11). The 2-hour badge stays,
+    // since it's the class's shape, not a schedule detail.
     if (norm.hour === 'both') {
       h += '<span class="signup-2hr-tag' + (norm.bothOptional ? ' signup-2hr-optional' : '') + '" title="'
         + (norm.bothOptional ? 'Runs both PM hours — your child may take one hour or both.' : 'Runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.')
@@ -5764,9 +5763,20 @@
     var leads = (norm.leads || []).filter(Boolean);
     var assists = (norm.assists || []).filter(Boolean);
     var mark = function (n) { return opts.myNames ? highlightIfMe(n, opts.myNames) : escapeHtml(n); };
+    // Photo circles for each leader/assistant, same avatars as the Class
+    // Details popup (Erin, 2026-08-11) — falls back to a colored initial.
+    var staffChip = function (n) {
+      var pRec = (typeof lookupPerson === 'function') ? lookupPerson(n) : null;
+      var inner = (typeof photoHtml === 'function')
+        ? photoHtml(n, n, pRec ? pRec.email : '', pRec ? pRec.family : '')
+        : '<span>' + escapeHtml(String(n || '?').charAt(0)) + '</span>';
+      var bg = (typeof faceColor === 'function') ? faceColor(n) : '';
+      return '<span class="ac-staff-chip"><span class="ac-staff-dot"' + (bg ? ' style="background:' + bg + ';"' : '') + '>' + inner + '</span>'
+        + '<span class="ac-staff-name">' + mark(n) + '</span></span>';
+    };
     var staff = '';
-    if (leads.length) staff += 'Led by ' + leads.map(mark).join(' &amp; ');
-    if (assists.length) staff += (staff ? ' · ' : '') + 'Assisted by ' + assists.map(mark).join(', ');
+    if (leads.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Led by</span>' + leads.map(staffChip).join('') + '</span>';
+    if (assists.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Assisted by</span>' + assists.map(staffChip).join('') + '</span>';
     if (staff) h += '<div class="ac-staff">' + staff + '</div>';
     h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max) + '</div>';
     return h;
@@ -5903,10 +5913,12 @@
         // to the Co-op Coordination elective cards. The rank picker (above) and
         // the assist/notes (below) are the only picker-specific extras.
         h += '<span class="signup-class-body ac-body">';
+        var cLeads = (c.leader ? [c.leader] : []).concat(
+          String(c.co_teachers || '').split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean));
         h += afternoonCardBody({
           id: c.id, name: c.name, ageGroups: c.ageGroups, description: c.description,
           room: c.room, hour: c.hour, bothOptional: c.bothOptional,
-          leads: [c.leader], assists: [], max: c.max, signedUpDetailed: c.signedUpDetailed
+          leads: cLeads, assists: (c.helpers || []), max: c.max, signedUpDetailed: c.signedUpDetailed
         }, { titleLinkId: c.id });
         // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
         // assistant option is ALWAYS visible so it's discoverable (Erin,

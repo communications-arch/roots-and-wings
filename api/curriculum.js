@@ -2306,13 +2306,24 @@ module.exports = async function handler(req, res) {
         `;
         const classRows = await sql`
           SELECT id, class_name, scheduled_hour, scheduled_age_range, scheduled_room,
-                 submitted_by_name, max_students, age_groups, description,
+                 submitted_by_name, co_teachers, max_students, age_groups, description,
                  open_to_teen_assistant, hour_preference
           FROM class_submissions
           WHERE status = 'scheduled' AND school_year = ${sy} AND scheduled_session = ${session}
             AND class_period = 'PM'
           ORDER BY class_name
         `;
+        // Assistant helpers per PM class (names), so the sign-up cards can show
+        // the same staff photo circles the Coordination cards do (#297).
+        const csHelpers = await sql`
+          SELECT h.class_submission_id, h.person_name, LOWER(h.person_email) AS email
+          FROM class_assignment_helpers h
+          JOIN class_submissions c ON c.id = h.class_submission_id
+          WHERE c.school_year = ${sy} AND c.scheduled_session = ${session} AND c.class_period = 'PM'`;
+        const csHelpersBySub = {};
+        csHelpers.forEach(h => {
+          (csHelpersBySub[h.class_submission_id] || (csHelpersBySub[h.class_submission_id] = [])).push(h.person_name || h.email || '');
+        });
         // Who has this class in their picks right now (any rank, across all
         // families) — surfaces demand + names next to max_students on the
         // parent card. Distinct per kid so re-ranking doesn't double count.
@@ -2377,7 +2388,9 @@ module.exports = async function handler(req, res) {
           ageGroups: Array.isArray(r.age_groups) ? r.age_groups : [],
           description: r.description || '',
           room: r.scheduled_room || '',
-          leader: r.submitted_by_name || '', max: r.max_students || 0,
+          leader: r.submitted_by_name || '', co_teachers: r.co_teachers || '',
+          helpers: (csHelpersBySub[r.id] || []).filter(Boolean),
+          max: r.max_students || 0,
           // Teacher opted in to a Pigeons-age assistant — Pigeon kids may
           // rank this class as its assistant regardless of age range.
           openToTeen: r.open_to_teen_assistant === true,
