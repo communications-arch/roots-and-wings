@@ -6037,6 +6037,9 @@ button.staff-role:hover {
 /* Staff line under the room/capacity line (Erin, 2026-08-11): "Led by … /
    Assisted by …", matching the detail card. */
 .elective-card-staff { margin-top: 2px; }
+/* #297: the shared "kids signed up so far" block on the elective card — the
+   requests spans (built for the sign-up card's flex column) stack here too. */
+.elective-card-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 6px; text-align: left; }
 
 .elective-card-spots {
   font-size: 0.75rem;
@@ -13731,6 +13734,10 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .signup-class-sel .signup-rank { background: var(--color-primary); color: #fff; }
 .signup-class-body { display: flex; flex-direction: column; min-width: 0; }
 .signup-class-name { font-weight: 700; font-size: 1.02rem; color: var(--color-text); line-height: 1.25; }
+/* #297: the class name is a details link — reset the button chrome so it reads
+   as the title, underlining on hover to signal it's clickable. */
+button.signup-class-name-link { border: 0; background: none; padding: 0; margin: 0; font: inherit; text-align: left; align-self: flex-start; cursor: pointer; }
+button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible { text-decoration: underline; }
 /* #297 follow-up (Erin): the class title leads the card; the grove chip is a
    small supporting tag, so shrink its icon + name well below the title. */
 .signup-class-groves { font-size: 0.7rem; }

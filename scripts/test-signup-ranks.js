@@ -46,9 +46,10 @@ function extractFn(fnName) {
 const factory = new Function(
   'escapeHtml', 'signupAgeText', 'fitsKid', 'brandIconImg', '_signup', 'groupTagHtml', '_signupGroveSel',
   extractFn('signupClassPassesGrove') + '\n' +
+  extractFn('signupRequestsHtml') + '\n' +
   extractFn('signupHourHtml') + '\n' +
   extractFn('rankedIdsFrom') + '\n' +
-  'return { signupHourHtml: signupHourHtml, rankedIdsFrom: rankedIdsFrom };'
+  'return { signupHourHtml: signupHourHtml, rankedIdsFrom: rankedIdsFrom, signupRequestsHtml: signupRequestsHtml };'
 );
 
 // Count <option value="N"> occurrences in the rendered HTML.
@@ -165,6 +166,23 @@ t('#297: a filtered-out class stays visible if it is already ranked', function (
     { id: 61, name: 'Chess', hour: 'PM2', ageGroups: ['sassafras'] }
   ], true, null, false, [], undefined);
   assert(/Chess/.test(html2), 'a ranked class stays visible even when its grove is filtered out');
+});
+
+// ── #297: shared "kids signed up so far" block (both afternoon surfaces) ──
+t('#297: signupRequestsHtml splits first choice from backup, tags assistants', function () {
+  const api = makeApi({});
+  const html = api.signupRequestsHtml(
+    [{ name: 'Ava', rank: 1 }, { name: 'Ben', rank: 1, assistant: true }, { name: 'Cara', rank: 2 }], 12);
+  assert(/Requests \(3\)/.test(html), 'count reflects all requests, got ' + html);
+  assert(/First choice:<\/span> Ava, Ben \(assistant\)/.test(html), 'first choices listed, assistant tagged');
+  assert(/Backup:<\/span> Cara/.test(html), 'backups listed separately');
+  assert(/max 12 kids/.test(html), 'capacity shown');
+});
+t('#297: signupRequestsHtml empty → "No requests yet", no capacity when max 0', function () {
+  const api = makeApi({});
+  const html = api.signupRequestsHtml([], 0);
+  assert(/No requests yet/.test(html), 'empty state');
+  assert(!/max/.test(html), 'no capacity clause when max is 0');
 });
 
 // ── #291: coverage duties must not occupy an hour for volunteer sign-up ──

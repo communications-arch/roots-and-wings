@@ -5719,6 +5719,24 @@
     return groups.map(function (g) { return AGE_GROUP_LABELS[g] || g; }).filter(Boolean).join(', ');
   }
 
+  // Shared "kids signed up so far" block (Erin, 2026-08-11 → unified for #297):
+  // the SAME requests display on the Afternoon Class Sign-ups cards AND the
+  // Co-op Coordination elective cards — they're the same data. REQUESTS, not
+  // placements: first-choice split from backup, pending the lottery. `detailed`
+  // is the class's signedUpDetailed ([{name, rank, assistant}]).
+  function signupRequestsHtml(detailed, max) {
+    detailed = Array.isArray(detailed) ? detailed : [];
+    var first = detailed.filter(function (s2) { return s2.rank === 1; });
+    var backup = detailed.filter(function (s2) { return s2.rank !== 1; });
+    var nm = function (s2) { return escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : '')); };
+    var head = [detailed.length > 0 ? 'Requests (' + detailed.length + ')' : 'No requests yet'];
+    if (max > 0) head.push('max ' + max + ' kids');
+    var h = '<span class="signup-class-count">' + escapeHtml(head.join(' · ')) + '</span>';
+    if (first.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + first.map(nm).join(', ') + '</span>';
+    if (backup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + backup.map(nm).join(', ') + '</span>';
+    return h;
+  }
+
   // {classId: rank} from a saved ordered array ([id1, id2] → {id1:1, id2:2}).
   function rankMapFromArray(arr) {
     var m = {};
@@ -5857,26 +5875,18 @@
         // #288 (Lyndsey): no ✓ next to in-age-range classes — it read as
         // "selected". The green card tint alone signals age fit now.
         var groveTag = (c.ageGroups && c.ageGroups.length) ? groupTagHtml(c.ageGroups) : '';
-        h += '<span class="signup-class-body"><span class="signup-class-name">' +
-             escapeHtml(c.name) + '</span>' +
+        // #297: the class name opens the shared class-details popup — same one
+        // the Co-op Coordination elective cards use.
+        h += '<span class="signup-class-body"><button type="button" class="signup-class-name signup-class-name-link" data-detail-class="' + c.id + '" title="Class details">' +
+             escapeHtml(c.name) + '</button>' +
              (groveTag ? ' <span class="signup-class-groves">' + groveTag + '</span>' : '') +
              (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';
-        // Live demand vs capacity, tagged by choice (Erin, 2026-08-11):
-        // these are REQUESTS pending the lottery — split first-choice from
-        // backup so a long backup list doesn't read as "this class is full,"
-        // and nobody assumes a name here means a placement. Mirrors the
-        // Co-op Coordination class-detail popup.
-        var reqDetailed = Array.isArray(c.signedUpDetailed) ? c.signedUpDetailed : [];
-        var reqFirst = reqDetailed.filter(function (s2) { return s2.rank === 1; });
-        var reqBackup = reqDetailed.filter(function (s2) { return s2.rank !== 1; });
-        var reqName = function (s2) { return escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : '')); };
-        var reqHead = [reqDetailed.length > 0 ? 'Requests (' + reqDetailed.length + ')' : 'No requests yet'];
-        if (c.max > 0) reqHead.push('max ' + c.max + ' kids');
-        h += '<span class="signup-class-count">' + escapeHtml(reqHead.join(' · ')) + '</span>';
-        if (reqFirst.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + reqFirst.map(reqName).join(', ') + '</span>';
-        if (reqBackup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + reqBackup.map(reqName).join(', ') + '</span>';
+        // Live demand vs capacity — the SAME "kids signed up so far" block the
+        // Co-op Coordination elective cards use (shared helper): REQUESTS
+        // pending the lottery, first-choice split from backup.
+        h += signupRequestsHtml(c.signedUpDetailed, c.max);
         // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
         // assistant option is ALWAYS visible so it's discoverable (Erin,
         // 2026-07-15 — it was hidden until the class was ranked and looked
@@ -5962,6 +5972,14 @@
     // a fallback so nothing breaks if the modal shell is missing.
     var card = document.getElementById('pm-signup-modal-body') || document.getElementById('classSignupCard');
     if (!card) return;
+    // #297: the class name opens the shared class-details popup.
+    card.querySelectorAll('.signup-class-name-link').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var id = parseInt(this.getAttribute('data-detail-class'), 10);
+        if (id && typeof showDbClassPopup === 'function') showDbClassPopup(id);
+      });
+    });
     // Explicit rank pickers (Erin, 2026-07-15: the user selects the order —
     // the chosen number always sticks; a class already holding that number
     // swaps to this one's previous rank).
@@ -6102,7 +6120,9 @@
       el.style.display = '';
       el.querySelectorAll('.signup-pick-link').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          showSignupClassDetail(parseInt(this.getAttribute('data-pick-class'), 10));
+          // #297: one class-details popup everywhere — the richer showDbClassPopup
+          // (staff photos, grove tags, requests) replaces the old duplicate.
+          showDbClassPopup(parseInt(this.getAttribute('data-pick-class'), 10));
         });
       });
       var editBtn = el.querySelector('.mf-pending-edit');
@@ -6120,68 +6140,8 @@
     });
   }
 
-  // Detail popup for a pending pick — the same info the picker tile shows
-  // (age range, room, leader, description) plus who has signed up so far.
-  function showSignupClassDetail(cid) {
-    if (!_signup || document.getElementById('signupClassDetailOverlay')) return;
-    var c = null;
-    (['PM1', 'PM2']).forEach(function (hour) {
-      (_signup.classes[hour] || []).forEach(function (x) { if (x.id === cid) c = x; });
-    });
-    if (!c) return;
-    var hourLabel = c.hour === 'both' ? 'Both hours · 1:00–2:55' : c.hour === 'PM2' ? '2:00–2:55' : '1:00–1:55';
-    var names = Array.isArray(c.signedUpNames) ? c.signedUpNames : [];
-    // Group marks (brand icons + colored names); the plain age text only
-    // repeats when it adds something the tags don't (a custom range, or
-    // no tag rendered at all) — same info as the picker tile, structured.
-    var tagHtml = groupTagHtml(c.ageGroups);
-    var ageText = c.ageRange ? c.ageRange : (tagHtml ? '' : signupAgeText(c));
-    var h = '<div class="absence-overlay" id="signupClassDetailOverlay"><div class="absence-modal signup-detail-modal">';
-    h += '<button class="detail-close absence-close" id="signupClassDetailClose" aria-label="Close">&times;</button>';
-    h += '<h3 class="signup-detail-title">' + escapeHtml(c.name) + '</h3>';
-    h += '<div class="signup-detail-pills"><span class="mf-sched-room">' + escapeHtml(hourLabel) + '</span>' +
-         (c.room ? '<span class="mf-sched-room">' + escapeHtml(c.room) + '</span>' : '') + '</div>';
-    var metaBits = [];
-    if (tagHtml) metaBits.push('<span class="signup-detail-groups">' + tagHtml + '</span>');
-    if (ageText) metaBits.push('<span>' + escapeHtml(ageText) + '</span>');
-    if (c.leader) metaBits.push('<span>led by ' + escapeHtml(c.leader) + '</span>');
-    if (metaBits.length) h += '<div class="signup-detail-meta">' + metaBits.join('') + '</div>';
-    if (c.description) h += '<p class="signup-detail-desc">' + escapeHtml(c.description) + '</p>';
-    h += '<div class="signup-detail-sub">Requests' +
-         (c.max > 0 ? '<span class="mf-pending-badge">' + c.signedUp + ' of max ' + c.max + '</span>' : '') + '</div>';
-    if (c.max > 0) {
-      var pct = Math.max(0, Math.min(100, Math.round((c.signedUp / c.max) * 100)));
-      h += '<div class="signup-detail-cap"><span style="width:' + pct + '%"></span></div>';
-    }
-    // Grouped by choice: 1st picks lead, 2nd picks below with their own
-    // indicator (Erin, 2026-07-15). Everything stays pending the lottery.
-    var det = Array.isArray(c.signedUpDetailed) ? c.signedUpDetailed : [];
-    if (det.length) {
-      h += '<p class="signup-detail-pendingnote">These are requests so far — placements are decided by the class lottery, not by who signs up first.</p>';
-      var firsts = det.filter(function (d) { return d.rank === 1; });
-      var others = det.filter(function (d) { return d.rank !== 1; });
-      var liFor = function (d) {
-        return '<li>' + escapeHtml(d.name) + (d.assistant ? ' <span class="signup-detail-tag">assistant</span>' : '') + '</li>';
-      };
-      if (firsts.length) {
-        h += '<div class="signup-detail-rankhead">First choice</div>';
-        h += '<ul class="absence-slot-list signup-detail-list">' + firsts.map(liFor).join('') + '</ul>';
-      }
-      if (others.length) {
-        h += '<div class="signup-detail-rankhead">Backup</div>';
-        h += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + others.map(liFor).join('') + '</ul>';
-      }
-    } else if (names.length) {
-      h += '<ul class="absence-slot-list signup-detail-list">' + names.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>';
-    } else {
-      h += '<p class="mf-empty-text signup-detail-none">No requests yet.</p>';
-    }
-    h += '</div></div>';
-    document.body.insertAdjacentHTML('beforeend', h);
-    var overlay = document.getElementById('signupClassDetailOverlay');
-    document.getElementById('signupClassDetailClose').addEventListener('click', function () { overlay.remove(); });
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
-  }
+  // (showSignupClassDetail retired 2026-08-11, #297 — the richer, shared
+  // showDbClassPopup is the one class-details popup everywhere.)
 
   function saveSignupKid(kid, btn) {
     if (!_signup || !_signup.working[kid]) return;
@@ -8970,6 +8930,33 @@
       .catch(function () { publishedSchedule.loading = false; });
   }
 
+  // #297 (Erin): the Co-op Coordination afternoon electives show the SAME
+  // "kids signed up so far" as the Afternoon Class Sign-ups. That per-class
+  // requests data lives in the class-signup pool (signedUpDetailed), which any
+  // authed member may read — cache it per session and repaint when it lands.
+  var _coordPmSignups = { session: null, loading: false, byClass: {} };
+  function loadCoordPmSignups(session) {
+    if (!session || _coordPmSignups.loading) return;
+    if (_coordPmSignups.session === session) return; // cached for this session
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) return;
+    _coordPmSignups.loading = true;
+    fetch('/api/curriculum?action=class-signup&session=' + session, { headers: { 'Authorization': 'Bearer ' + cred } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        _coordPmSignups.loading = false;
+        var byClass = {};
+        if (d && d.classes) {
+          ['PM1', 'PM2'].forEach(function (hr) {
+            (d.classes[hr] || []).forEach(function (c) { byClass[c.id] = c.signedUpDetailed || []; });
+          });
+        }
+        _coordPmSignups = { session: session, loading: false, byClass: byClass };
+        renderSessionTab();
+      })
+      .catch(function () { _coordPmSignups.loading = false; });
+  }
+
   function renderSessionTab() {
     var container = document.getElementById('sessionTabContent');
     if (!container) return;
@@ -9205,6 +9192,8 @@
       if (dbSess.pm.length === 0) {
         html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon electives posted for this session.</em></p>';
       } else {
+        // Pull the same "kids signed up so far" the Sign-ups view shows (#297).
+        loadCoordPmSignups(sessionTabView);
         var dbH1 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM1' || e.scheduled_hour === 'both'; });
         // A 2-hour ('both') elective — e.g. Yearbook — runs BOTH hours, so it
         // belongs under Hour 2 as well, not just Hour 1 (Erin, 2026-08-11).
@@ -9320,6 +9309,11 @@
     if (leadNames.length) staff += 'Led by ' + leadNames.map(function (n) { return highlightIfMe(n, myNames); }).join(' &amp; ');
     if (assistNames.length) staff += (staff ? ' &middot; ' : '') + 'Assisted by ' + assistNames.map(function (n) { return highlightIfMe(n, myNames); }).join(', ');
     if (staff) html += '<div class="elective-card-meta elective-card-staff">' + staff + '</div>';
+    // #297: the SAME "kids signed up so far" block as the Afternoon Class
+    // Sign-ups cards, from the shared class-signup data (loaded per session).
+    if (_coordPmSignups.session === sessionTabView) {
+      html += '<div class="elective-card-reqs">' + signupRequestsHtml(_coordPmSignups.byClass[e.id], e.max_students) + '</div>';
+    }
     html += '</button>';
     return html;
   }
