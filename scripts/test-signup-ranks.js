@@ -41,8 +41,11 @@ function extractFn(fnName) {
 }
 
 // signupHourHtml + rankedIdsFrom, with the closure deps it touches stubbed.
+// #297 added the grove filter — signupHourHtml now calls signupClassPassesGrove
+// (which reads _signupGroveSel) and groupTagHtml, so both ride along here.
 const factory = new Function(
-  'escapeHtml', 'signupAgeText', 'fitsKid', 'brandIconImg', '_signup',
+  'escapeHtml', 'signupAgeText', 'fitsKid', 'brandIconImg', '_signup', 'groupTagHtml', '_signupGroveSel',
+  extractFn('signupClassPassesGrove') + '\n' +
   extractFn('signupHourHtml') + '\n' +
   extractFn('rankedIdsFrom') + '\n' +
   'return { signupHourHtml: signupHourHtml, rankedIdsFrom: rankedIdsFrom };'
@@ -55,14 +58,16 @@ function optionCount(html, val) {
 }
 
 // A kid with an empty PM2 map, so the rank dropdowns render fresh.
-function makeApi(pm2Map) {
+function makeApi(pm2Map, groveSel) {
   const _signup = { working: { Kid: { PM1: {}, PM2: pm2Map || {} } }, workingAssist: {}, workingNotes: {} };
   return factory(
     function (s) { return String(s == null ? '' : s); },   // escapeHtml
     function () { return ''; },                              // signupAgeText
     function () { return null; },                            // fitsKid (unknown)
     function () { return ''; },                              // brandIconImg
-    _signup
+    _signup,
+    function () { return ''; },                              // groupTagHtml
+    groveSel || []                                           // _signupGroveSel
   );
 }
 
@@ -125,6 +130,41 @@ t('prominence: the PM Hour 2 pinned banner explains the single choice number and
   const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH, { 1: true });
   assert(/signup-2hr-tag/.test(html), 'the pinned banner should front the 2-hour badge');
   assert(/both/.test(html) && /backup/.test(html), 'the banner should explain both-hours + remaining backup');
+});
+
+// ── #297: grove filter narrows the shown cards, but never hides a ranked pick ──
+const GROVE_CLASSES = [
+  { id: 50, name: 'Pottery', hour: 'PM2', ageGroups: ['willows'] },
+  { id: 51, name: 'Chess', hour: 'PM2', ageGroups: ['sassafras'] },
+  { id: 52, name: 'Open Gym', hour: 'PM2', ageGroups: [] } // open to all
+];
+t('#297: no grove selected → every class card shows', function () {
+  const api = makeApi({}, []);
+  const html = api.signupHourHtml('Kid', 'PM2', GROVE_CLASSES, true, null, false, [], undefined);
+  assert(/Pottery/.test(html) && /Chess/.test(html) && /Open Gym/.test(html), 'all classes show with no filter');
+});
+t('#297: selecting a grove shows only its classes (+ open-to-all)', function () {
+  const api = makeApi({}, ['willows']);
+  const html = api.signupHourHtml('Kid', 'PM2', GROVE_CLASSES, true, null, false, [], undefined);
+  assert(/Pottery/.test(html), 'Willows class shows');
+  assert(!/Chess/.test(html), 'a non-Willows class is filtered out');
+  assert(/Open Gym/.test(html), 'a class open to all ages always shows');
+});
+t('#297: a filtered-out class stays visible if it is already ranked', function () {
+  const api = makeApi({}, ['willows']); // filter to Willows, but Chess (sassafras) is ranked
+  const html = api.signupHourHtml('Kid', 'PM2', [
+    { id: 60, name: 'Pottery', hour: 'PM2', ageGroups: ['willows'] },
+    { id: 61, name: 'Chess', hour: 'PM2', ageGroups: ['sassafras'] }
+  ], true, null, false, [], undefined);
+  // With no ranked pick, Chess would be hidden — but PM2 map is empty here, so
+  // it IS hidden; assert the filter is actually active.
+  assert(!/Chess/.test(html), 'baseline: Chess is filtered out when not ranked');
+  const api2 = makeApi({ 61: 1 }, ['willows']); // rank Chess #1
+  const html2 = api2.signupHourHtml('Kid', 'PM2', [
+    { id: 60, name: 'Pottery', hour: 'PM2', ageGroups: ['willows'] },
+    { id: 61, name: 'Chess', hour: 'PM2', ageGroups: ['sassafras'] }
+  ], true, null, false, [], undefined);
+  assert(/Chess/.test(html2), 'a ranked class stays visible even when its grove is filtered out');
 });
 
 // ── #291: coverage duties must not occupy an hour for volunteer sign-up ──

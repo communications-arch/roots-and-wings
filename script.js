@@ -5499,6 +5499,10 @@
   // Within the open picker, kids whose picks are already saved fold to a
   // one-line summary (kid → true = expanded for editing).
   var _signupKidOpen = {};
+  // #297: grove filter pills above the class cards — a set of selected grove
+  // slugs (empty = show all). Lets a parent narrow the class cards to one or
+  // more groves, the same groves the class-detail card shows.
+  var _signupGroveSel = [];
 
   function renderClassSignupCard() {
     var card = document.getElementById('classSignupCard');
@@ -5579,6 +5583,8 @@
     // caveat lives here ONCE (not repeated on every card). Hidden when locked,
     // since placements are final by then. (Erin, 2026-08-11.)
     if (!locked) h += '<p class="signup-note signup-note-requests">The names on each class are <strong>requests so far</strong> — tagged first choice vs. backup. Placements are decided by the class lottery, not by who signs up first.</p>';
+    // #297: grove filter pills above the class cards (multi-select).
+    h += signupGrovePillBar();
 
     var kids = s.kids || [];
     // Preferred names for display — the signup data itself stays keyed by
@@ -5670,6 +5676,22 @@
     }
     modalBody.innerHTML = h;
     wireSignupCard();
+    // #297: grove filter pills — "All" clears; a grove toggles in/out of the
+    // multi-select. Re-render to apply (ranked picks stay visible regardless).
+    var groveBar = modalBody.querySelector('#signupGroveFilter');
+    if (groveBar) {
+      groveBar.addEventListener('click', function (e) {
+        var btn = e.target.closest('.signup-grove-pill');
+        if (!btn) return;
+        var g = btn.getAttribute('data-grove');
+        if (!g) { _signupGroveSel = []; }
+        else {
+          var i = _signupGroveSel.indexOf(g);
+          if (i === -1) _signupGroveSel.push(g); else _signupGroveSel.splice(i, 1);
+        }
+        renderClassSignupCard();
+      });
+    }
   }
 
   // Erin (2026-07-31): the full sign-up picker lives here now — the My
@@ -5733,10 +5755,59 @@
     return map;
   }
 
+  // #297: the distinct groves offered across the whole afternoon class pool,
+  // in grove order (youngest→oldest), feeding the filter pill bar.
+  function signupGrovesInPool() {
+    var seen = {};
+    ['PM1', 'PM2'].forEach(function (hr) {
+      ((_signup && _signup.classes && _signup.classes[hr]) || []).forEach(function (c) {
+        (c.ageGroups || []).forEach(function (g) {
+          var gl = String(g || '').toLowerCase();
+          if (gl && gl !== 'all-ages') seen[gl] = true;
+        });
+      });
+    });
+    var ordered = [];
+    (typeof MORNING_GROUP_ORDER !== 'undefined' ? MORNING_GROUP_ORDER : []).forEach(function (g) {
+      var gl = String(g.name || '').toLowerCase();
+      if (seen[gl]) { ordered.push(gl); delete seen[gl]; }
+    });
+    Object.keys(seen).forEach(function (gl) { ordered.push(gl); }); // any outside the canonical order
+    return ordered;
+  }
+  // A class passes the grove filter if nothing is selected, if it lists no
+  // specific grove (open to all), or if it lists one of the selected groves.
+  function signupClassPassesGrove(c) {
+    if (!_signupGroveSel.length) return true;
+    var groups = (c.ageGroups || []).map(function (g) { return String(g || '').toLowerCase(); })
+      .filter(function (g) { return g && g !== 'all-ages'; });
+    if (!groups.length) return true; // open to all ages → always shown
+    return groups.some(function (g) { return _signupGroveSel.indexOf(g) !== -1; });
+  }
+  // Multi-select grove filter bar above the class cards (empty = All).
+  function signupGrovePillBar() {
+    var groves = signupGrovesInPool();
+    if (groves.length < 2) return ''; // nothing worth filtering
+    var h = '<div class="signup-grove-filter" id="signupGroveFilter"><span class="signup-grove-filter-label">Filter by grove:</span>';
+    h += '<button type="button" class="signup-grove-pill' + (_signupGroveSel.length === 0 ? ' is-active' : '') + '" data-grove="">All</button>';
+    groves.forEach(function (g) {
+      var G = g.charAt(0).toUpperCase() + g.slice(1);
+      var on = _signupGroveSel.indexOf(g) !== -1;
+      h += '<button type="button" class="signup-grove-pill' + (on ? ' is-active' : '') + '" data-grove="' + escapeHtml(g) + '" aria-pressed="' + (on ? 'true' : 'false') + '">'
+        + ageGroupIconHtml(G) + '<span class="ag-name ' + ageGroupClass(G) + '">' + escapeHtml(G) + '</span></button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
   function signupHourHtml(kid, hour, classes, canEdit, kidBands, isTeenAssist, pinnedBoth, excludeRanks) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
+    // Rank options come from the FULL pool; the grove filter only changes which
+    // cards SHOW — an already-ranked class stays visible even when filtered out,
+    // so a parent never loses a pick behind a filter (#297).
     var maxRank = Math.min(2, classes.length);
+    var shownClasses = classes.filter(function (c) { return signupClassPassesGrove(c) || rankMap[c.id]; });
     var h = '<div class="signup-hour"><div class="signup-hour-label">' + (hour === 'PM1' ? 'PM Hour 1' : 'PM Hour 2') + '</div>';
     // A ranked 2-hour ('both') class occupies THIS hour too, at the same
     // choice number — so the dropdowns below offer only the other slot
@@ -5752,20 +5823,22 @@
     }
     if (classes.length === 0) {
       if (!pinnedBoth || !pinnedBoth.length) h += '<p class="signup-empty">No ' + hour + ' classes scheduled.</p>';
+    } else if (shownClasses.length === 0) {
+      h += '<p class="signup-empty">No ' + hour + ' classes match the selected groves.</p>';
     } else {
       h += '<div class="signup-classes">';
-      classes.forEach(function (c) {
+      shownClasses.forEach(function (c) {
         var myRank = rankMap[c.id] || null;
         var sel = !!myRank;
         var ageText = signupAgeText(c);
         // null = age/range unknown (no judgement); true = fits; false = clearly outside.
         var fit = fitsKid(kidBands, ageText);
         var fitCls = fit === true ? ' signup-class-fit' : (fit === false && !sel ? ' signup-class-misfit' : '');
-        // #290 (Lyndsey): drop the "(ages)" parentheticals after the grove
-        // names in the meta line to de-clutter — the full ageText still drives
+        // #297 (Erin): the grove now reads as the class-detail chip (grove icon
+        // + colored name) beside the class name, not as age text in the meta
+        // line — so the meta carries only room + leader. ageText still drives
         // the fitsKid highlight above.
-        var ageTextDisplay = String(ageText).replace(/\s*\([^)]*\)/g, '').replace(/\s+,/g, ',').trim();
-        var bits = [ageTextDisplay, c.room, c.leader ? ('led by ' + c.leader) : ''];
+        var bits = [c.room, c.leader ? ('led by ' + c.leader) : ''];
         var meta = bits.filter(Boolean).join(' · ');
         // #279/#280 follow-up (Erin): 2-hour classes were easy to miss (only
         // a buried "fills both hours" in the meta line), so a parent could
@@ -5783,8 +5856,10 @@
         h += '</select>';
         // #288 (Lyndsey): no ✓ next to in-age-range classes — it read as
         // "selected". The green card tint alone signals age fit now.
+        var groveTag = (c.ageGroups && c.ageGroups.length) ? groupTagHtml(c.ageGroups) : '';
         h += '<span class="signup-class-body"><span class="signup-class-name">' +
              escapeHtml(c.name) + '</span>' +
+             (groveTag ? ' <span class="signup-class-groves">' + groveTag + '</span>' : '') +
              (c.hour === 'both' ? '<span class="signup-2hr-tag' + (c.bothOptional ? ' signup-2hr-optional' : '') + '" title="' + (c.bothOptional ? 'This class runs both PM hours — your child may take just one hour or both. Rank each hour on its own.' : 'This class runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.') + '">🔁 2-hour class · ' + (c.bothOptional ? 'one or both hours' : 'both hours required') + '</span>' : '');
         if (meta) h += '<span class="signup-class-meta">' + escapeHtml(meta) + '</span>';
         if (c.description) h += '<span class="signup-class-desc">' + escapeHtml(c.description) + '</span>';

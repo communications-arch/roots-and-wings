@@ -13656,7 +13656,7 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 @media (max-width: 600px) { .signup-classes { grid-template-columns: 1fr; } }
 .signup-class {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   text-align: left;
   padding: 8px 10px;
@@ -13664,6 +13664,19 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
   border-radius: 8px;
   background: var(--color-white);
 }
+/* #297: grove filter pills above the class cards (multi-select). */
+.signup-grove-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; }
+.signup-grove-filter-label { font-size: 0.78rem; font-weight: 700; color: var(--color-text-light); margin-right: 2px; }
+.signup-grove-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border: 1.5px solid var(--color-border); border-radius: 999px;
+  background: var(--color-white); cursor: pointer; font-family: inherit; font-size: 0.8rem; color: var(--color-text);
+}
+.signup-grove-pill:hover:not(.is-active) { background: rgba(var(--color-primary-rgb), 0.06); }
+.signup-grove-pill.is-active { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.10); font-weight: 700; }
+/* Grove chip beside the class name — grove icon + colored name, same as the
+   class-detail card (#297). */
+.signup-class-groves { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 /* Explicit rank picker (– / 1–4) — replaces the tap-order rank badge. */
 .signup-rank-sel {
   flex-shrink: 0;
