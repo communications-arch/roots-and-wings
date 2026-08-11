@@ -24370,12 +24370,14 @@
     // returns the fetched server slots when fresh; the client computation below
     // is the instant fallback until the fetch lands (and if it fails).
     var _absSrvPreview = { sig: null, slots: null };
+    var _absPreviewInflight = null; // #293 review F3: in-flight sig, de-dup fetches
     function _absPreviewSig() { return selectedPerson + '|' + selectedSession + '|' + getSelectedBlocks().join(','); }
     function fetchAbsServerPreview() {
       var blocks = getSelectedBlocks();
       if (!blocks.length || !selectedPerson) return;
       var sig = _absPreviewSig();
-      if (_absSrvPreview.sig === sig) return; // already have this selection
+      if (_absSrvPreview.sig === sig || _absPreviewInflight === sig) return; // have it / fetching it
+      _absPreviewInflight = sig;
       var qs = '?preview=1&session=' + encodeURIComponent(selectedSession)
         + '&absent_person=' + encodeURIComponent(selectedPerson)
         + '&family_email=' + encodeURIComponent(me.email)
@@ -24385,14 +24387,19 @@
       fetch('/api/absences' + qs, { headers: rwAuthHeaders() })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
+          if (_absPreviewInflight === sig) _absPreviewInflight = null;
           if (!d || !Array.isArray(d.slots)) return;
           if (_absPreviewSig() !== sig || !document.getElementById('absenceOverlay')) return; // moved on / closed
           _absSrvPreview = { sig: sig, slots: d.slots };
           updatePreview();
-        }).catch(function () { /* keep the client fallback */ });
+        }).catch(function () { if (_absPreviewInflight === sig) _absPreviewInflight = null; });
     }
     function effectiveSlots() {
-      if (_absSrvPreview.slots && _absSrvPreview.sig === _absPreviewSig()) return _absSrvPreview.slots;
+      // #293 review F1: only trust a NON-empty server preview. A server derive
+      // ERROR returns {slots:[]} (HTTP 200), indistinguishable from a legit
+      // empty — so on empty, fall through to the client computation below (a
+      // genuinely-empty case still yields [] there; a derive error recovers).
+      if (_absSrvPreview.slots && _absSrvPreview.slots.length && _absSrvPreview.sig === _absPreviewSig()) return _absSrvPreview.slots;
       var blocks = getSelectedBlocks();
       // The duty sources work in whole-morning terms — look up with 'AM'
       // whenever either morning hour is selected, then split the results

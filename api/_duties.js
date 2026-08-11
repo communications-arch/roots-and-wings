@@ -271,7 +271,11 @@ async function deriveCoverageSlots(sql, opts) {
         if (/\bopener\b/i.test(title) && amHours.includes('AM1')) {
           push('AM1', 'opener', 'Building Opener — unlock & morning set-up', '');
         }
-        if (/\bcloser\b/i.test(title) && (wantPM2 || wantClean)) {
+        // #293 review F2: the closer slot lives on the 'Cleaning' block, which
+        // only renders when Cleaning is selected — gate on wantClean so a
+        // PM2-only absence doesn't create an un-showable, un-assignable slot
+        // (matches the client, which drops non-selected-block slots).
+        if (/\bcloser\b/i.test(title) && wantClean) {
           push('Cleaning', 'closer', 'Building Closer / Lost & Found — end of day', '');
         }
         if (/supply\s*closet/i.test(title) && wantPM1) {
