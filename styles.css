@@ -6034,6 +6034,9 @@ button.staff-role:hover {
   font-size: 0.78rem;
   color: var(--color-text-light);
 }
+/* Staff line under the room/capacity line (Erin, 2026-08-11): "Led by … /
+   Assisted by …", matching the detail card. */
+.elective-card-staff { margin-top: 2px; }
 
 .elective-card-spots {
   font-size: 0.75rem;
@@ -6506,6 +6509,13 @@ body > .rd-drawer { z-index: 10002; }
    capping at 96vw on smaller screens. */
 .person-detail-card:has(.rd-report-modal) {
   max-width: min(1100px, 96vw);
+}
+/* Everyone's sign-ups is a fixed-width 660px grid (not a wide many-column
+   report), so it gets a tighter cap than the 1100px reports — no acres of
+   whitespace beside the tables (Erin, 2026-08-11). Must follow the rule above
+   to win the equal-specificity :has() tie. */
+.person-detail-card:has(.vol-grid) {
+  max-width: min(720px, 96vw);
 }
 .wv-modal {
   max-width: 860px;
@@ -8946,18 +8956,23 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
    NB: an older duplicate of the heading rule at ~line 16167 is now neutralized
    — do not reintroduce a second .vol-grid .roles-mgr-se-head margin here. */
 .vol-grid .mcb-teach th, .vol-grid .mcb-teach td { padding: 4px 8px; font-size: 0.8rem; }
-/* Shared fixed column template so Grove/Leader/Assistants line up AM1→PM2→
-   Cleaning. Separate <table> elements can't co-size columns, so we pin widths;
-   the afternoon table simply extends one more column (Kids) to the right. */
-.vol-grid .mcb-teach { table-layout: fixed; width: auto; min-width: 0; }
+/* Shared column template: EVERY hour table is the same 660px width with the
+   same left column edges, so Grove/Leader line up AM1→PM2→Cleaning and no
+   table's right edge is ragged (Erin, 2026-08-11). Cols 1 & 2 are pinned
+   everywhere; the afternoon (--pm) table splits the rest into Assistants (220)
+   + Kids (150); the morning/cleaning (--am) table has no Kids column, so its
+   Assistants/Family column simply absorbs that width. max-width:100% lets the
+   whole thing scale down together (still aligned) on a narrow screen. */
+.vol-grid .mcb-teach { table-layout: fixed; width: 660px; max-width: 100%; min-width: 0; }
 .vol-grid .mcb-teach th:nth-child(1),
 .vol-grid .mcb-teach td:nth-child(1) { width: 150px; } /* Grove / Class / Floor */
 .vol-grid .mcb-teach th:nth-child(2),
 .vol-grid .mcb-teach td:nth-child(2) { width: 140px; } /* Leader / Area          */
-.vol-grid .mcb-teach th:nth-child(3),
-.vol-grid .mcb-teach td:nth-child(3) { width: 220px; } /* Assistants (+CTA)/Family*/
-.vol-grid .mcb-teach th:nth-child(4),
-.vol-grid .mcb-teach td:nth-child(4) { width: 150px; } /* Kids signed up (PM only)*/
+.vol-grid .mcb-teach--pm th:nth-child(3),
+.vol-grid .mcb-teach--pm td:nth-child(3) { width: 220px; } /* Assistants (+CTA)   */
+.vol-grid .mcb-teach--pm th:nth-child(4),
+.vol-grid .mcb-teach--pm td:nth-child(4) { width: 150px; } /* Kids signed up      */
+/* --am col 3 (Assistants / Family) is left unpinned → fills to 660px. */
 .vol-grid .mcb-teach td { overflow-wrap: anywhere; } /* long name lists wrap, not clip */
 .vol-grid .mcb-teach thead th { text-align: left; } /* headers sit over left-aligned data */
 /* Faint zebra so long rosters don't smear. */
@@ -8977,8 +8992,12 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
 .vol-grid .board-cal-views { margin: 0 0 6px; }
 .vol-grid-pledges { margin: 3px 0 0; font-size: 0.78rem; line-height: 1.5; }
 /* Pledge line (Floaters/Board/Prep + "➕ me") drops to its own quieter sub-line
-   under the hour title instead of fighting it on the same baseline. */
+   under the hour title instead of fighting it on the same baseline. Each group
+   is an inline-block unit so the "➕ me" button wraps WITH its label instead of
+   dangling off to the right on its own (Erin, 2026-08-11). */
 .vol-grid-pledges-head { display: block; margin: 6px 0 0; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--color-text-light); font-size: 0.76rem; }
+.vol-grid-pledge-grp { display: inline-block; margin: 2px 18px 2px 0; }
+.vol-grid-pledge-grp .sc-btn { margin-left: 3px; padding: 2px 8px; vertical-align: baseline; }
 
 /* ── Room cards in the PM hour columns (2026-07-10) ──
    Rooms render as drop targets; a class dragged onto one is seated

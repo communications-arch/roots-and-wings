@@ -7071,14 +7071,17 @@
         if (cap && list.length >= cap) return '';
         return ' <button type="button" class="sc-btn vgrid-signup" data-vg-kind="signup" data-vg-role="' + role + '" data-vg-block="' + bk + '" title="Sign yourself up this hour">➕ me</button>';
       }
+      // Each pledge group is one inline-block unit so its "➕ me" button never
+      // detaches and dangles when the line wraps (Erin, 2026-08-11). Groups are
+      // spaced by CSS, not a "·" separator.
       function pledgeBit(icon, label, list, cap, role, eligible) {
-        return icon + ' <strong>' + label + ':</strong> '
+        return '<span class="vol-grid-pledge-grp">' + icon + ' <strong>' + label + ':</strong> '
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
           + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '')
-          + pledgeBtn(role, list, cap, eligible);
+          + pledgeBtn(role, list, cap, eligible) + '</span>';
       }
-      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0, 'floater', true) + ' · '
-        + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2, 'board', canBoard) + ' · '
+      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0, 'floater', true)
+        + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2, 'board', canBoard)
         + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2, 'prep', true);
       h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
       if (b.classes.length === 0) {
@@ -7088,7 +7091,7 @@
         // #289 (Colleen): afternoon blocks get a "Kids signed up" column so
         // Everyone's Sign-ups isn't adults-only (refreshes when the modal is
         // reopened or the session pill is switched).
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th>' + (isAmBk ? '' : '<th>Kids signed up</th>') + '</tr></thead><tbody>';
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach ' + (isAmBk ? 'mcb-teach--am' : 'mcb-teach--pm') + '"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th>' + (isAmBk ? '' : '<th>Kids signed up</th>') + '</tr></thead><tbody>';
         // Sections are per hour (Erin, 2026-07-11) — a both-hours class
         // appears in each hour's section, so no extra stacking is needed;
         // morning rows sort in age-group order.
@@ -7146,7 +7149,7 @@
     } else {
       // #100 (was #85): same table treatment as the hours above — the
       // run-on "Floor · Area — Family" sentence was hard to scan.
-      h += '<div class="mcb-teach-wrap"><table class="mcb-teach"><thead><tr><th>Floor</th><th>Area</th><th>Family</th></tr></thead><tbody>';
+      h += '<div class="mcb-teach-wrap"><table class="mcb-teach mcb-teach--am"><thead><tr><th>Floor</th><th>Area</th><th>Family</th></tr></thead><tbody>';
       d.cleaning.forEach(function (c) {
         h += '<tr><td>' + escapeHtmlWs(c.floor || '—') + '</td><td>' + escapeHtmlWs(c.area) + '</td><td>' + escapeHtmlWs(c.family) + '</td></tr>';
       });
@@ -9128,7 +9131,9 @@
         html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon electives posted for this session.</em></p>';
       } else {
         var dbH1 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM1' || e.scheduled_hour === 'both'; });
-        var dbH2 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM2'; });
+        // A 2-hour ('both') elective — e.g. Yearbook — runs BOTH hours, so it
+        // belongs under Hour 2 as well, not just Hour 1 (Erin, 2026-08-11).
+        var dbH2 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM2' || e.scheduled_hour === 'both'; });
         html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>';
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
@@ -9209,12 +9214,14 @@
   // Published-DB elective card: same look as the sheet-era card, but no
   // roster/capacity bar yet (sign-ups feature will bring enrollment counts).
   function buildDbElectiveCard(e, myNames) {
-    var helperNames = (e.helpers || []).slice();
-    if (e.co_teachers) helperNames.unshift(e.co_teachers);
+    // Leads = teacher + co-leads (co-leads LEAD the class, same as the detail
+    // card and morning table treat them); assistants are separate.
+    var coLeads = String(e.co_teachers || '').split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean);
+    var leadNames = (e.teacher ? [e.teacher] : []).concat(coLeads);
+    var assistNames = (e.helpers || []).slice();
     var isMyCard = myNames && myNames.fullNames.some(function (fn) {
       var l = fn.toLowerCase();
-      return l === String(e.teacher || '').trim().toLowerCase()
-        || helperNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
+      return leadNames.concat(assistNames).some(function (a) { return String(a).trim().toLowerCase() === l; });
     });
     var ages = e.scheduled_age_range || prettyAgesClient(e.age_groups, e.age_groups_other) || '';
     // Clickable (Erin, 2026-07-16): opens the full class popup —
@@ -9227,13 +9234,17 @@
     if (e.scheduled_hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
     if (e.open_to_teen_assistant) html += '<span class="elective-both-badge">Cedars/Pigeons helper OK</span>';
     if (e.description && e.description !== 'TBD') html += '<p class="elective-card-desc">' + escapeHtml(e.description) + '</p>';
-    var leaderHtml = highlightIfMe(e.teacher || '', myNames);
-    var assistHtml = helperNames.length ? ' + ' + helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ') : '';
+    // Room + capacity on one line; staff on its own labeled line — same
+    // "Led by … / Assisted by …" convention as the detail card, so the two
+    // surfaces read consistently (Erin, 2026-08-11).
     var metaBits = [];
     if (e.scheduled_room) metaBits.push(escapeHtml(e.scheduled_room));
-    metaBits.push(leaderHtml + assistHtml);
     if (e.max_students) metaBits.push('Up to ' + e.max_students + ' kids');
-    html += '<div class="elective-card-meta">' + metaBits.join(' &middot; ') + '</div>';
+    if (metaBits.length) html += '<div class="elective-card-meta">' + metaBits.join(' &middot; ') + '</div>';
+    var staff = '';
+    if (leadNames.length) staff += 'Led by ' + leadNames.map(function (n) { return highlightIfMe(n, myNames); }).join(' &amp; ');
+    if (assistNames.length) staff += (staff ? ' &middot; ' : '') + 'Assisted by ' + assistNames.map(function (n) { return highlightIfMe(n, myNames); }).join(', ');
+    if (staff) html += '<div class="elective-card-meta elective-card-staff">' + staff + '</div>';
     html += '</button>';
     return html;
   }
