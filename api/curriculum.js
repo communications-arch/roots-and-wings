@@ -1719,11 +1719,13 @@ module.exports = async function handler(req, res) {
           sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid, class_group, finalized
               FROM morning_class_assignments WHERE school_year = ${srYear}`,
           sql`SELECT LOWER(p.family_email) AS fam, LOWER(p.kid_first_name) AS kid, p.hour,
+                     p.rank, p.as_assistant,
                      c.id AS class_id, c.class_name, c.scheduled_hour,
                      c.age_groups, c.scheduled_age_range
               FROM class_signup_picks p
               JOIN class_submissions c ON c.id = p.class_submission_id
-              WHERE p.school_year = ${srYear} AND p.session_number = ${srSess} AND p.rank = 1`,
+              WHERE p.school_year = ${srYear} AND p.session_number = ${srSess}
+              ORDER BY p.rank`,
           sql`SELECT class_submission_id,
                      COUNT(DISTINCT (LOWER(family_email) || '|' || LOWER(kid_first_name)))::int AS firsts
               FROM class_signup_picks
@@ -1794,8 +1796,26 @@ module.exports = async function handler(req, res) {
         // 'both' class rides under PM1 and fills both).
         const srMorningBy = {};
         srMorning.forEach(r => { srMorningBy[r.fam + '|' + r.kid] = r; });
+        // srPicks now carries ALL ranks (ordered by rank). srPickBy holds each
+        // kid/hour's rank-1 pick (the placement shown in the grid); srChoicesBy
+        // holds every ranked choice per kid/hour so the report can expand the
+        // row + flag a kid who hasn't finished picking (#Schedules kids tab).
         const srPickBy = {};
-        srPicks.forEach(r => { srPickBy[r.fam + '|' + r.kid + '|' + r.hour] = r; });
+        const srChoicesBy = {};
+        srPicks.forEach(r => {
+          const hk = r.fam + '|' + r.kid + '|' + r.hour;
+          if (!srPickBy[hk]) srPickBy[hk] = r; // lowest rank wins → rank 1
+          const ck = r.fam + '|' + r.kid;
+          const bucket = srChoicesBy[ck] || (srChoicesBy[ck] = { PM1: [], PM2: [] });
+          if (bucket[r.hour]) bucket[r.hour].push({
+            rank: parseInt(r.rank, 10) || 1,
+            class_id: r.class_id, class_name: r.class_name,
+            both: r.scheduled_hour === 'both',
+            assistant: r.as_assistant === true,
+            ageRange: r.scheduled_age_range || '',
+            ageGroups: Array.isArray(r.age_groups) ? r.age_groups : []
+          });
+        });
         const srKidRows = srKids.map(k => {
           const kidKey = k.fam + '|' + String(k.first_name || '').toLowerCase();
           const sched = String(k.schedule || '').trim().toLowerCase();
@@ -1814,6 +1834,7 @@ module.exports = async function handler(req, res) {
             // age range via signupAgeText, same as the pickers (#31).
             return p ? {
               class_id: p.class_id, class_name: p.class_name, both: p.scheduled_hour === 'both',
+              assistant: p.as_assistant === true,
               ageRange: p.scheduled_age_range || '',
               ageGroups: Array.isArray(p.age_groups) ? p.age_groups : []
             } : null;
@@ -1828,7 +1849,10 @@ module.exports = async function handler(req, res) {
             pm_eligible: pmEligible,
             am: amApplicable ? am : null,
             pm1: pmEligible ? mkPick('PM1') : null,
-            pm2: pmEligible ? mkPick('PM2') : null
+            pm2: pmEligible ? mkPick('PM2') : null,
+            // Every ranked choice per hour (rank-sorted), for the expand row +
+            // "did they finish picking?" status. Null for non-PM kids.
+            choices: pmEligible ? (srChoicesBy[kidKey] || { PM1: [], PM2: [] }) : null
           };
         }).sort((a, b) => a.name.localeCompare(b.name));
 

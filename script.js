@@ -33328,20 +33328,38 @@
   var _schedEditKey = null;    // row key with the picker panel open
   var _schedEditHour = null;   // #90: only the CLICKED hour renders in the panel (null = all)
   var _schedFilter = 'all';    // 'all' | 'unplaced' | 'placed'
+  var _schedKidStatus = 'all'; // kids Status-column funnel: all | none | partial | no2nd | done
   var SCHED_BLOCK_LABELS = { AM1: 'AM Hour 1', AM2: 'AM Hour 2', PM1: 'PM Hour 1', PM2: 'PM Hour 2' };
+  // Afternoon selection-completeness buckets for the Kids tab (Erin 2026-08-11:
+  // "make sure all the kids have selected their afternoon classes"). Ordered
+  // worst→best so the count strip and sort read left-to-right as a progress bar.
+  var SCHED_KID_STATUS = [
+    { key: 'none',    label: 'No picks',    variant: 'behind' },
+    { key: 'partial', label: 'Missing 1st', variant: 'new' },
+    { key: 'no2nd',   label: 'No 2nd',      variant: 'near' },
+    { key: 'done',    label: 'All set',     variant: 'on_track' }
+  ];
+  function schedKidStatusMeta(key) {
+    for (var i = 0; i < SCHED_KID_STATUS.length; i++) if (SCHED_KID_STATUS[i].key === key) return SCHED_KID_STATUS[i];
+    return null;
+  }
 
   function showSchedulesReportModal(opts) {
     opts = opts || {};
     if (opts.tab === 'adults' || opts.tab === 'kids') _schedTab = opts.tab;
     _schedEditKey = null;
     _schedFilter = 'all';
+    _schedKidStatus = 'all';
     _schedView = 'person'; // #37: each open starts on By person
     if (_schedSession == null) _schedSession = (_signup && _signup.session) || currentSession;
     renderReportModal({
       title: 'Schedules',
       subtitle: 'Who is where each co-op hour — every adult and every kid, one row each. Open cells offer the qualifying spots still available.',
       meta: 'Session ' + _schedSession,
-      icons: [{ label: 'Print', icon: ICON_SVG.print, aria: 'Print the current view', action: function () { schedPrint(); } }],
+      icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the current view', action: function () { schedPrint(); } },
+        { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the current tab as CSV', action: function () { exportSchedulesCSV(); } }
+      ],
       bodyId: 'ws-sched-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -33454,6 +33472,7 @@
         _schedSession = s;
         _schedEditKey = null;
         _schedFilter = 'all';
+        _schedKidStatus = 'all';
         _schedMatrix = null;
         _schedPools = null;
         var tb = document.getElementById('ws-sched-tab-body') || document.getElementById('ws-sched-class-body');
@@ -33481,6 +33500,7 @@
         _schedTab = t;
         _schedEditKey = null;
         _schedFilter = 'all';
+        _schedKidStatus = 'all';
         renderSchedulesBody();
       });
     });
@@ -33661,6 +33681,59 @@
     if (!_schedRep) { alert('Report still loading — try again in a moment.'); return; }
     openPrintIframe(_schedView === 'class' ? buildSchedByClassPrintHtml(_schedRep) : buildSchedByPersonPrintHtml(_schedRep));
   }
+  // Standard CSV export (Erin, 2026-08-11) — the currently-shown tab. The Kids
+  // export carries the placed classes AND every ranked choice, the selection
+  // status, and the assist / out-of-age-range flags so the roster can be
+  // audited offline.
+  function exportSchedulesCSV() {
+    if (!_schedRep) { alert('Report still loading — try again in a moment.'); return; }
+    function esc(v) { var s = v == null ? '' : String(v); if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"'; return s; }
+    var rows = [], fname;
+    if (_schedTab === 'kids') {
+      var pmText = function (r, hour) {
+        var pick = hour === 'PM1' ? r.pm1 : r.pm2;
+        if (!pick && hour === 'PM2' && r.pm1 && r.pm1.both) pick = r.pm1;
+        if (!pick) return 'open';
+        return pick.class_name + (pick.both ? ' (2-hour)' : '') + (pick.assistant ? ' (assist)' : '') + (schedPickOutOfRange(pick, r) ? ' (!age)' : '');
+      };
+      var choiceText = function (r, hour) {
+        var ch = (r.choices || {})[hour] || [];
+        return ch.slice().sort(function (a, b) { return a.rank - b.rank; }).map(function (p) {
+          return (p.rank === 1 ? '1st' : p.rank === 2 ? '2nd' : p.rank + 'th') + ': ' + p.class_name
+            + (p.assistant ? ' (assist)' : '') + (schedPickOutOfRange(p, r) ? ' (!age)' : '');
+        }).join(' | ');
+      };
+      rows.push(['Kid', 'Age', 'Morning', 'PM Hour 1', 'PM Hour 2', 'PM1 all choices', 'PM2 all choices', 'Selections status']);
+      (_schedRep.kids || []).forEach(function (r) {
+        var meta = schedKidStatusMeta(schedKidStatusKey(r));
+        rows.push([
+          r.name,
+          r.age != null ? r.age : '',
+          r.am_applicable ? ((r.am && r.am.group) || 'not placed') : 'n/a',
+          r.pm_eligible ? pmText(r, 'PM1') : 'n/a',
+          r.pm_eligible ? pmText(r, 'PM2') : 'n/a',
+          r.pm_eligible ? choiceText(r, 'PM1') : '',
+          r.pm_eligible ? choiceText(r, 'PM2') : '',
+          r.pm_eligible ? (meta ? meta.label : '') : 'n/a'
+        ]);
+      });
+      fname = 'schedules-kids-session-' + _schedRep.session;
+    } else {
+      var cell = function (r, b) { var c = r.cells[b]; if (!c) return ''; var tag = SCHED_KIND_TAG[c.kind] || c.kind; return c.class_name ? tag + ': ' + c.class_name : tag; };
+      rows.push(['Member', 'AM Hour 1', 'AM Hour 2', 'PM Hour 1', 'PM Hour 2']);
+      (_schedRep.adults || []).forEach(function (r) {
+        rows.push([r.name, cell(r, 'AM1'), cell(r, 'AM2'), cell(r, 'PM1'), cell(r, 'PM2')]);
+      });
+      fname = 'schedules-adults-session-' + _schedRep.session;
+    }
+    var csv = rows.map(function (r) { return r.map(esc).join(','); }).join('\r\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fname + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  }
   function schedPrintShell(title, rep, bodyHtml, css) {
     var sub = 'Session ' + rep.session + ' · ' + rep.school_year + ' · printed ' + new Date().toLocaleDateString();
     return '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title><style>'
@@ -33737,23 +33810,29 @@
     if (!wrap || !_schedRep) return;
     var d = _schedRep;
     var rowsAll = (_schedTab === 'adults' ? d.adults : d.kids) || [];
-    var unplacedN = _schedTab === 'adults' ? schedAdultsUnplacedCount() : schedKidsUnplacedCount();
 
-    // Pills: unplaced people (tap = filter toggle, membership-report
-    // pattern) + open spots (informational, merch-report pattern).
     var pills = '<div class="rd-counts" id="ws-sched-counts">';
-    pills += '<button type="button" class="rd-count-pill ws-wv-pending' + (_schedFilter === 'unplaced' ? ' is-active' : '') + '" data-sched-pill="unplaced" aria-pressed="' + (_schedFilter === 'unplaced' ? 'true' : 'false') + '" title="Show only rows with an open hour">'
-      + unplacedN + ' unplaced</button>';
     if (_schedTab === 'adults') {
+      // Unplaced people (tap = filter toggle) + open spots (informational).
+      var unplacedN = schedAdultsUnplacedCount();
+      pills += '<button type="button" class="rd-count-pill ws-wv-pending' + (_schedFilter === 'unplaced' ? ' is-active' : '') + '" data-sched-pill="unplaced" aria-pressed="' + (_schedFilter === 'unplaced' ? 'true' : 'false') + '" title="Show only rows with an open hour">'
+        + unplacedN + ' unplaced</button>';
       var gapTotal = 0;
       (d.blocks_expected || []).forEach(function (b) { gapTotal += (d.open_assist && d.open_assist[b]) || 0; });
       pills += '<span class="ws-wv-pending">' + gapTotal + ' open assistant spot' + (gapTotal === 1 ? '' : 's') + '</span>';
+      if (!d.pm_approved) pills += '<span class="ws-wv-context">Afternoon hours appear once the session’s PM schedule is approved.</span>';
     } else {
+      // Kids: a colored selection-completeness strip (the "did everyone pick
+      // their afternoon classes?" bar) — each pill filters the table on click,
+      // mirroring the Member Participation status strip. (Erin, 2026-08-11.)
+      var kc = schedKidStatusCounts();
+      SCHED_KID_STATUS.forEach(function (s) {
+        var active = _schedKidStatus === s.key;
+        pills += '<button type="button" class="ws-part-status ws-part-status-' + s.variant + ' sched-status-pill' + (active ? ' is-active' : '') + '" data-sched-status="' + s.key + '" aria-pressed="' + (active ? 'true' : 'false') + '" title="Show only kids: ' + escapeHtml(s.label) + '">'
+          + kc[s.key] + ' ' + escapeHtml(s.label) + '</button>';
+      });
       pills += '<span class="ws-wv-pending">' + ((d.open_seats && d.open_seats.PM1) || 0) + ' seats open PM 1</span>';
       pills += '<span class="ws-wv-pending">' + ((d.open_seats && d.open_seats.PM2) || 0) + ' seats open PM 2</span>';
-    }
-    if (!d.pm_approved && _schedTab === 'adults') {
-      pills += '<span class="ws-wv-context">Afternoon hours appear once the session’s PM schedule is approved.</span>';
     }
     pills += '</div>';
 
@@ -33763,19 +33842,30 @@
     }
     wrap.innerHTML = pills + '<div id="ws-sched-table-target"></div>';
     wrap.querySelector('#ws-sched-counts').addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-sched-pill]');
-      if (!btn) return;
-      _schedFilter = (_schedFilter === 'unplaced') ? 'all' : 'unplaced';
-      renderSchedTabBody();
+      var ub = e.target.closest('[data-sched-pill]');
+      if (ub) { _schedFilter = (_schedFilter === 'unplaced') ? 'all' : 'unplaced'; renderSchedTabBody(); return; }
+      var sb = e.target.closest('[data-sched-status]');
+      if (sb) { var k = sb.getAttribute('data-sched-status'); _schedKidStatus = (_schedKidStatus === k) ? 'all' : k; renderSchedTabBody(); return; }
     });
     renderSchedTable();
   }
 
   function schedRowsForFilter() {
     var rows = ((_schedTab === 'adults' ? _schedRep.adults : _schedRep.kids) || []);
+    // Kids filter on the Selections status funnel (Erin 2026-08-11); adults
+    // keep the placed/unplaced funnel.
+    if (_schedTab === 'kids') {
+      if (_schedKidStatus !== 'all') return rows.filter(function (r) { return schedKidStatusKey(r) === _schedKidStatus; });
+      return rows;
+    }
     if (_schedFilter === 'unplaced') return rows.filter(function (r) { return schedMissingFor(r).length > 0; });
     if (_schedFilter === 'placed') return rows.filter(function (r) { return schedMissingFor(r).length === 0; });
     return rows;
+  }
+  function schedKidStatusCounts() {
+    var c = { none: 0, partial: 0, no2nd: 0, done: 0, na: 0 };
+    ((_schedRep && _schedRep.kids) || []).forEach(function (r) { var k = schedKidStatusKey(r); if (c[k] != null) c[k] += 1; });
+    return c;
   }
 
   function schedCellFillBtn(row, block) {
@@ -33831,16 +33921,94 @@
     var ages = (typeof signupAgeText === 'function' && pick) ? signupAgeText(pick) : '';
     return ages ? ' <span class="ws-wv-context">' + escapeHtml(ages) + '</span>' : '';
   }
+  // Erin (2026-08-11): a caution triangle when a kid picked a class outside
+  // their age range, and the assist mark when they signed up to assist.
+  function schedPickOutOfRange(pick, row) {
+    if (!pick || typeof fitsKid !== 'function' || typeof kidBandsFor !== 'function') return false;
+    var ageText = (typeof signupAgeText === 'function') ? signupAgeText(pick) : '';
+    return fitsKid(kidBandsFor(row.age, row.group), ageText) === false;
+  }
+  function schedPickMarksHtml(pick, row) {
+    if (!pick) return '';
+    var m = '';
+    if (pick.assistant) m += ' <span class="sched-assist-mark" title="Signed up to assist this class">' + brandIconImg('assist', 'ag-icon') + '</span>';
+    if (schedPickOutOfRange(pick, row)) m += ' <span class="sched-warn-mark" title="Selected outside their listed age range">⚠</span>';
+    return m;
+  }
+  // PM classes offered per hour (a 'both' class counts for both) — so "no 2nd
+  // choice" only flags when a second class actually exists to pick.
+  function schedPmClassCounts() {
+    var c = { PM1: 0, PM2: 0 };
+    ((_schedRep && _schedRep.classes) || []).forEach(function (k) {
+      if (k.class_period !== 'PM') return;
+      if (k.scheduled_hour === 'both') { c.PM1 += 1; c.PM2 += 1; }
+      else if (k.scheduled_hour === 'PM2') c.PM2 += 1;
+      else c.PM1 += 1;
+    });
+    return c;
+  }
+  // Selection-completeness for a pm-eligible kid → one of SCHED_KID_STATUS.
+  // A 2-hour ('both') pick fills its rank for BOTH hours.
+  function schedKidStatusKey(row) {
+    if (!row.pm_eligible) return 'na';
+    var ch = row.choices || { PM1: [], PM2: [] };
+    var counts = schedPmClassCounts();
+    var hours = [];
+    if (counts.PM1 > 0) hours.push('PM1');
+    if (counts.PM2 > 0) hours.push('PM2');
+    if (!hours.length) return 'na';
+    function has(hour, rank) {
+      if ((ch[hour] || []).some(function (x) { return x.rank === rank; })) return true;
+      if (hour === 'PM2') return (ch.PM1 || []).some(function (x) { return x.rank === rank && x.both; });
+      return false;
+    }
+    if (((ch.PM1 || []).length + (ch.PM2 || []).length) === 0) return 'none';
+    if (!hours.every(function (h) { return has(h, 1); })) return 'partial';
+    if (!hours.every(function (h) { return counts[h] < 2 || has(h, 2); })) return 'no2nd';
+    return 'done';
+  }
+  function schedKidStatusHtml(row) {
+    var key = schedKidStatusKey(row);
+    if (key === 'na') return '<span class="sb-subdetail-dim">—</span>';
+    var m = schedKidStatusMeta(key);
+    return '<span class="ws-part-status ws-part-status-' + m.variant + '">' + escapeHtml(m.label) + '</span>';
+  }
+  // Expanded row: the kid's full ranked choices per hour, with assist + age
+  // marks — so a coordinator can see the backups behind each placement.
+  function schedKidChoicesDetail(row) {
+    if (!row.pm_eligible) return '<p class="sched-choices-empty">Not in afternoon programming.</p>';
+    var ch = row.choices || { PM1: [], PM2: [] };
+    var out = '<div class="sched-choices">';
+    ['PM1', 'PM2'].forEach(function (hour) {
+      var list = (ch[hour] || []).slice().sort(function (a, b) { return a.rank - b.rank; });
+      out += '<div class="sched-choices-hour"><div class="sched-choices-hourhead">' + SCHED_BLOCK_LABELS[hour] + '</div>';
+      if (!list.length) {
+        out += '<p class="sched-choices-empty">No choices picked.</p>';
+      } else {
+        out += '<ol class="sched-choices-list">';
+        list.forEach(function (pk) {
+          out += '<li><span class="sched-choice-rank">' + (pk.rank === 1 ? '1st' : pk.rank === 2 ? '2nd' : pk.rank + 'th') + '</span> '
+            + escapeHtml(pk.class_name) + (pk.both ? ' <span class="ws-wv-context">2-hour</span>' : '')
+            + schedKidPmAgesHtml(pk) + schedPickMarksHtml(pk, row) + '</li>';
+        });
+        out += '</ol>';
+      }
+      out += '</div>';
+    });
+    out += '</div>';
+    return out;
+  }
   function schedKidPmCellHtml(row, hour) {
     if (!row.pm_eligible) return '<span class="sb-subdetail-dim" title="Not in afternoon programming (Greenhouse, under 3, or morning-only)">—</span>';
     var pick = hour === 'PM1' ? row.pm1 : row.pm2;
     if (!pick && hour === 'PM2' && row.pm1 && row.pm1.both) {
-      return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>' + schedKidPmAgesHtml(row.pm1);
+      return escapeHtml(row.pm1.class_name) + ' <span class="ws-wv-context">2-hour</span>' + schedKidPmAgesHtml(row.pm1) + schedPickMarksHtml(row.pm1, row);
     }
     if (pick) {
       // #57: placed kid cells are editable too — same quiet caret as the
-      // adults tab, opening the row's placement panel.
-      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick)
+      // adults tab, opening the row's placement panel. Assist + out-of-range
+      // marks ride along (Erin, 2026-08-11).
+      return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick) + schedPickMarksHtml(pick, row)
         + (_schedRep.can_place ? ' ' + schedCaretBtn(row, 'Change or remove this class', hour) : '');
     }
     if (_schedRep.can_place) return schedCellFillBtn(row, hour);
@@ -34032,6 +34200,11 @@
         };
       }));
     } else {
+      // Kids filter via the Selections status funnel, not the name column.
+      delete nameCol.filter;
+      var kidStatusIdx = { na: -1, none: 0, partial: 1, no2nd: 2, done: 3 };
+      var kCounts = schedKidStatusCounts();
+      var eligibleN = all.filter(function (r) { return r.pm_eligible; }).length;
       cols = [nameCol,
         { key: 'am', label: 'Morning', type: 'string',
           sortValue: function (r) { return (r.am && r.am.group) || ''; },
@@ -34041,7 +34214,17 @@
           render: function (r) { return schedKidPmCellHtml(r, 'PM1'); } },
         { key: 'pm2', label: 'PM Hour 2', type: 'string',
           sortValue: function (r) { return (r.pm2 && r.pm2.class_name) || (r.pm1 && r.pm1.both && r.pm1.class_name) || ''; },
-          render: function (r) { return schedKidPmCellHtml(r, 'PM2'); } }
+          render: function (r) { return schedKidPmCellHtml(r, 'PM2'); } },
+        { key: 'status', label: 'Selections', type: 'number',
+          sortValue: function (r) { var k = schedKidStatusKey(r); return kidStatusIdx[k] == null ? -1 : kidStatusIdx[k]; },
+          render: schedKidStatusHtml,
+          filter: {
+            options: [{ value: 'all', label: 'Everyone', count: eligibleN }].concat(
+              SCHED_KID_STATUS.map(function (s) { return { value: s.key, label: s.label, count: kCounts[s.key] }; })),
+            current: _schedKidStatus,
+            onChange: function (v) { _schedKidStatus = v; renderSchedTabBody(); }
+          }
+        }
       ];
     }
     renderSortableTable(target, cols, rows, {
@@ -34049,6 +34232,9 @@
       rowKey: schedRowKey,
       editRowKey: _schedEditKey,
       renderEditRow: schedEditRowHtml,
+      // Kids rows expand to show their ranked backup choices (Erin 2026-08-11).
+      expandable: _schedTab === 'kids',
+      renderDetail: _schedTab === 'kids' ? schedKidChoicesDetail : undefined,
       onRender: function () { wireSchedRowActions(target); }
     });
   }

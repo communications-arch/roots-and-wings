@@ -14281,6 +14281,22 @@ button.ws-tour-status.is-active { box-shadow: 0 0 0 2px currentColor inset; }
 .ws-part-status-new      { background: #fff4e0; color: #a85b00; }
 .ws-part-status-exempt   { background: #f3e8fd; color: #5e2c8a; }
 
+/* Schedules Kids tab (Erin, 2026-08-11): the clickable selection-status strip
+   reuses the .ws-part-status colors; the expand shows ranked choices; assist +
+   out-of-age-range marks ride on each pick. */
+button.sched-status-pill { border: 1.5px solid transparent; cursor: pointer; font-family: inherit; }
+button.sched-status-pill.is-active { border-color: currentColor; }
+button.sched-status-pill:hover { filter: brightness(0.97); }
+.sched-warn-mark { color: #b3381a; font-weight: 700; }
+.sched-assist-mark { color: var(--color-text-light); }
+.sched-choices { display: flex; flex-wrap: wrap; gap: 20px; }
+.sched-choices-hour { min-width: 200px; }
+.sched-choices-hourhead { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-light); margin-bottom: 3px; }
+.sched-choices-list { margin: 0; padding-left: 0; list-style: none; }
+.sched-choices-list li { font-size: 0.82rem; margin: 2px 0; }
+.sched-choice-rank { display: inline-block; min-width: 26px; font-weight: 700; color: var(--color-primary-dark); }
+.sched-choices-empty { font-size: 0.82rem; color: var(--color-text-light); margin: 2px 0; font-style: italic; }
+
 .ws-part-timeline {
   display: flex;
   flex-direction: column;
