@@ -24365,7 +24365,34 @@
       });
       return out;
     }
+    // #293: server-derived preview — the modal shows EXACTLY what the server
+    // will create on submit (so preview == coverage board). effectiveSlots()
+    // returns the fetched server slots when fresh; the client computation below
+    // is the instant fallback until the fetch lands (and if it fails).
+    var _absSrvPreview = { sig: null, slots: null };
+    function _absPreviewSig() { return selectedPerson + '|' + selectedSession + '|' + getSelectedBlocks().join(','); }
+    function fetchAbsServerPreview() {
+      var blocks = getSelectedBlocks();
+      if (!blocks.length || !selectedPerson) return;
+      var sig = _absPreviewSig();
+      if (_absSrvPreview.sig === sig) return; // already have this selection
+      var qs = '?preview=1&session=' + encodeURIComponent(selectedSession)
+        + '&absent_person=' + encodeURIComponent(selectedPerson)
+        + '&family_email=' + encodeURIComponent(me.email)
+        + '&family_name=' + encodeURIComponent(me.name)
+        + '&blocks=' + encodeURIComponent(blocks.join(','))
+        + (selectedDate ? '&absence_date=' + encodeURIComponent(selectedDate) : '');
+      fetch('/api/absences' + qs, { headers: rwAuthHeaders() })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !Array.isArray(d.slots)) return;
+          if (_absPreviewSig() !== sig || !document.getElementById('absenceOverlay')) return; // moved on / closed
+          _absSrvPreview = { sig: sig, slots: d.slots };
+          updatePreview();
+        }).catch(function () { /* keep the client fallback */ });
+    }
     function effectiveSlots() {
+      if (_absSrvPreview.slots && _absSrvPreview.sig === _absPreviewSig()) return _absSrvPreview.slots;
       var blocks = getSelectedBlocks();
       // The duty sources work in whole-morning terms — look up with 'AM'
       // whenever either morning hour is selected, then split the results
@@ -24420,6 +24447,9 @@
     // Erin 2026-07-31: each block's coverage rows render INLINE directly
     // under that block's own checkbox, not in one combined box below.
     function updatePreview() {
+      // #293: kick off / refresh the server preview for the current selection;
+      // when it lands it re-renders with the authoritative slots.
+      fetchAbsServerPreview();
       // Erin 2026-07-31: no coverage needed (BLC covering) → no pickers.
       var covSel = overlay.querySelector('input[name="absCov"]:checked');
       var covNeeded = !covSel || covSel.value === 'yes';

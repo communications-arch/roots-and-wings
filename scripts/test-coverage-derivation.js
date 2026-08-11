@@ -48,9 +48,10 @@ t('H2: a whole-morning grove lead splits onto the SELECTED AM hour only', async 
 });
 
 t('H1: a morning floater stored as AM1 IS generated (was missed)', async () => {
-  const sql = mockSql({ people: [{ email: 'me@rw', first_name: 'Sam', last_name: 'Lee' }], floaters: [{ block: 'AM1' }] });
+  const sql = mockSql({ people: [{ email: 'me@rw', first_name: 'Sam', last_name: 'Lee' }], floaters: [{ block: 'AM1', role: 'floater' }] });
   const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Sam Lee', familyEmail: 'fam@rw', blocks: ['AM1'] });
   assert(out.some(s => s.block === 'AM1' && s.role_type === 'floater'), 'AM1 floater must be generated, got ' + JSON.stringify(keys(out)));
+  assert(!out.some(s => s.role_type === 'general'), 'a covered block gets no general filler, got ' + JSON.stringify(keys(out)));
 });
 
 t('M3: a duty keyed to the shared family alias does NOT attach to the other parent', async () => {
@@ -63,7 +64,19 @@ t('M3: a duty keyed to the shared family alias does NOT attach to the other pare
     am: [{ group_name: 'Oaks', role: 'lead', person_email: 'fam@rw', person_name: 'Dad Smith' }]
   });
   const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Mom Smith', familyEmail: 'fam@rw', blocks: ['AM1', 'AM2'] });
-  assert(out.length === 0, 'Mom out must NOT generate Dad’s duty, got ' + JSON.stringify(keys(out)));
+  assert(!out.some(s => s.role_type === 'teacher'), 'Mom out must NOT generate Dad’s teaching duty, got ' + JSON.stringify(keys(out)));
+  // Mom had no specific duty → both morning hours get a general filler.
+  assert(out.filter(s => s.role_type === 'general').length === 2, 'Mom out → 2 general fillers, got ' + JSON.stringify(keys(out)));
+});
+
+t('#179 general filler: a selected block with no specific duty gets a general spot; prep/board suppresses it', async () => {
+  const sql = mockSql({
+    people: [{ email: 'me@rw', first_name: 'Sam', last_name: 'Lee' }],
+    floaters: [{ block: 'PM2', role: 'prep' }] // prep in PM2 → no coverage, no general there
+  });
+  const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Sam Lee', familyEmail: 'fam@rw', blocks: ['PM1', 'PM2'] });
+  assert(out.some(s => s.block === 'PM1' && s.role_type === 'general'), 'PM1 (no duty) → general filler, got ' + JSON.stringify(keys(out)));
+  assert(!out.some(s => s.block === 'PM2'), 'PM2 held a prep duty → NO coverage/general, got ' + JSON.stringify(keys(out)));
 });
 
 t('M4: first+last name match ignores middle names', async () => {
@@ -72,17 +85,19 @@ t('M4: first+last name match ignores middle names', async () => {
   assert(out.some(s => s.role_type === 'assistant' && s.group_or_class === 'Maples'), 'middle name should still match, got ' + JSON.stringify(keys(out)));
 });
 
-t('opener is a first-hour (AM1) duty only, even when out both morning hours', async () => {
+t('opener is a first-hour (AM1) duty only; the other hour gets a general filler', async () => {
   const sql = mockSql({ people: [{ email: 'op@rw', first_name: 'Pat', last_name: 'Kim' }], roles: [{ title: 'Building Opener' }] });
   const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Pat Kim', familyEmail: 'fam@rw', blocks: ['AM1', 'AM2'] });
-  assert(keys(out).join() === 'AM1|opener|', 'opener → AM1 only, got ' + JSON.stringify(keys(out)));
+  assert(out.some(s => s.block === 'AM1' && s.role_type === 'opener'), 'opener in AM1, got ' + JSON.stringify(keys(out)));
+  assert(!out.some(s => s.block === 'AM2' && s.role_type === 'opener'), 'no opener in AM2');
+  assert(out.some(s => s.block === 'AM2' && s.role_type === 'general'), 'AM2 (no duty) → general filler, got ' + JSON.stringify(keys(out)));
 });
 
-t('prep + board never generate coverage (query is floater-only)', async () => {
-  // The floater query filters role='floater'; prep/board rows never come back.
-  const sql = mockSql({ people: [{ email: 'me@rw', first_name: 'Sam', last_name: 'Lee' }], floaters: [] });
-  const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Sam Lee', familyEmail: 'fam@rw', blocks: ['AM1', 'PM1'] });
+t('prep + board never generate a coverage slot (only suppress general)', async () => {
+  const sql = mockSql({ people: [{ email: 'me@rw', first_name: 'Sam', last_name: 'Lee' }], floaters: [{ block: 'PM1', role: 'board' }] });
+  const out = await deriveCoverageSlots(sql, { ...OPTS, absentPerson: 'Sam Lee', familyEmail: 'fam@rw', blocks: ['PM1'] });
   assert(!out.some(s => s.role_type === 'prep' || s.role_type === 'board'), 'no prep/board slots');
+  assert(out.length === 0, 'PM1 held a board duty → no coverage/general, got ' + JSON.stringify(keys(out)));
 });
 
 t('cleaning keyed by family surname; closer lands on Cleaning', async () => {
@@ -96,9 +111,11 @@ t('cleaning keyed by family surname; closer lands on Cleaning', async () => {
   assert(out.some(s => s.role_type === 'closer' && s.block === 'Cleaning'), 'closer slot on Cleaning, got ' + JSON.stringify(keys(out)));
 });
 
-t('empty family / no matches → no slots, no crash', async () => {
+t('no specific duties → every selected block gets a general filler, no crash', async () => {
   const out = await deriveCoverageSlots(mockSql({}), { ...OPTS, absentPerson: 'Nobody Here', familyEmail: '', blocks: ['AM1', 'PM1', 'PM2', 'Cleaning'] });
-  assert(Array.isArray(out) && out.length === 0, 'empty → []');
+  assert(Array.isArray(out), 'returns an array');
+  assert(out.every(s => s.role_type === 'general'), 'all general fillers, got ' + JSON.stringify(keys(out)));
+  assert(keys(out).join() === 'AM1|general|,Cleaning|general|,PM1|general|,PM2|general|', 'one general per selected block, got ' + JSON.stringify(keys(out)));
 });
 
 // Summary (after the microtasks above resolve).

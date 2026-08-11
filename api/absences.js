@@ -396,6 +396,30 @@ module.exports = async function handler(req, res) {
 
     // ── GET: list absences for a session (or a session + all later ones) ──
     if (req.method === 'GET') {
+      // #293: coverage-slot PREVIEW — the absence modal shows EXACTLY the slots
+      // the server will create (no write), so the preview matches the board.
+      // Auth'd + ownership-gated identically to POST.
+      if (req.query.preview === '1' || req.query.preview === 'true') {
+        const pvPerson = String(req.query.absent_person || '').trim();
+        const pvFamEmail = String(req.query.family_email || '').trim();
+        const pvSession = parseInt(req.query.session, 10);
+        const pvDate = String(req.query.absence_date || '').trim();
+        const pvBlocks = String(req.query.blocks || '').split(',').map(s => s.trim()).filter(b => VALID_BLOCKS.includes(b));
+        if (!pvPerson || !pvFamEmail || !pvSession || !pvBlocks.length) {
+          return res.status(400).json({ error: 'preview needs absent_person, family_email, session, blocks' });
+        }
+        const pvOk = pvFamEmail === user.email || isSuperUser(user.email)
+          || (await isVP(user.email)) || (await canActAs(sql, user.email, pvFamEmail));
+        if (!pvOk) return res.status(403).json({ error: 'You can only preview your own family.' });
+        let pvSlots = [];
+        try {
+          pvSlots = await deriveCoverageSlots(sql, {
+            schoolYear: activeSchoolYear(pvDate && /^\d{4}-\d{2}-\d{2}$/.test(pvDate) ? new Date(pvDate + 'T12:00:00') : new Date()),
+            session: pvSession, absentPerson: pvPerson, familyEmail: pvFamEmail, blocks: pvBlocks
+          });
+        } catch (pvErr) { console.error('[absence] preview derive failed:', pvErr); }
+        return res.status(200).json({ slots: pvSlots });
+      }
       const fromSession = parseInt(req.query.from_session, 10);
       const session = parseInt(req.query.session, 10);
       // upcoming=1: every non-cancelled absence dated today-or-later

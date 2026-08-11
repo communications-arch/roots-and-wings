@@ -281,22 +281,47 @@ async function deriveCoverageSlots(sql, opts) {
     }
   } catch (e) { console.error('deriveCoverageSlots committee roles (non-fatal):', e); }
 
-  // ── 4. Floater (self-serve support sign-ups; prep/board never covered) ─
+  // ── 4. Support sign-ups (self-serve): floater needs coverage; a prep/board
+  // duty needs NONE but still means the block "had a duty" (no general filler).
   // #293 review H1: morning floaters are stored per-hour (AM1/AM2), not 'AM'.
+  const dutyOnlyBlocks = new Set(); // held a prep/board duty → suppress general
   try {
     if (emailList.length) {
       const vol = await sql`
-        SELECT block FROM volunteer_signups
+        SELECT block, role FROM volunteer_signups
         WHERE school_year = ${opts.schoolYear} AND session_number = ${opts.session}
-          AND role = 'floater' AND LOWER(person_email) = ANY(${emailList})`;
+          AND LOWER(person_email) = ANY(${emailList})`;
       vol.forEach(v => {
-        if ((v.block === 'AM' || v.block === 'AM1') && amHours.includes('AM1')) push('AM1', 'floater', 'AM Floater ' + amTime('AM1'), '');
-        if ((v.block === 'AM' || v.block === 'AM2') && amHours.includes('AM2')) push('AM2', 'floater', 'AM Floater ' + amTime('AM2'), '');
-        if (v.block === 'PM1' && wantPM1) push('PM1', 'floater', 'PM Floater', '');
-        if (v.block === 'PM2' && wantPM2) push('PM2', 'floater', 'PM Floater', '');
+        const amMatch = h => (v.block === 'AM' || v.block === h) && amHours.includes(h);
+        if (v.role === 'floater') {
+          if (amMatch('AM1')) push('AM1', 'floater', 'AM Floater ' + amTime('AM1'), '');
+          if (amMatch('AM2')) push('AM2', 'floater', 'AM Floater ' + amTime('AM2'), '');
+          if (v.block === 'PM1' && wantPM1) push('PM1', 'floater', 'PM Floater', '');
+          if (v.block === 'PM2' && wantPM2) push('PM2', 'floater', 'PM Floater', '');
+        } else { // board / prep — no coverage, but the block had a duty
+          if (amMatch('AM1')) dutyOnlyBlocks.add('AM1');
+          if (amMatch('AM2')) dutyOnlyBlocks.add('AM2');
+          if (v.block === 'PM1' && wantPM1) dutyOnlyBlocks.add('PM1');
+          if (v.block === 'PM2' && wantPM2) dutyOnlyBlocks.add('PM2');
+        }
       });
     }
-  } catch (e) { console.error('deriveCoverageSlots floater (non-fatal):', e); }
+  } catch (e) { console.error('deriveCoverageSlots support roles (non-fatal):', e); }
+
+  // ── 5. General filler (#179): a selected block with NO specific coverable
+  // duty still needs adult coverage (the absence reduces the ratio) — UNLESS
+  // the person only held a prep/board duty there (that block was already
+  // "theirs" but doesn't need covering). Mirrors the client's effectiveSlots.
+  const GEN_LABEL = {
+    AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)',
+    PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning'
+  };
+  const coverageBlocks = amHours.concat(wantPM1 ? ['PM1'] : [], wantPM2 ? ['PM2'] : [], wantClean ? ['Cleaning'] : []);
+  const hasSpecific = {};
+  slots.forEach(s => { hasSpecific[s.block] = true; });
+  coverageBlocks.forEach(b => {
+    if (!hasSpecific[b] && !dutyOnlyBlocks.has(b)) push(b, 'general', GEN_LABEL[b] || b, '');
+  });
 
   // De-dupe by identity (block|role_type|group_or_class) — a person can match
   // a class under multiple paths (grove map + scheduled submission).
