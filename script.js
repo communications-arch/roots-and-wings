@@ -5577,7 +5577,7 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour (both required; a 2-hour class covers Hour 2 too). PM Hour 1 and PM Hour 2 are ranked separately. Classes that match each child’s age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour for each kid. Classes matching their age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
     // Requests are visible on each class so families can see who else is
     // interested — but they're only requests until the lottery runs, so the
     // caveat lives here ONCE (not repeated on every card). Hidden when locked,
@@ -5746,7 +5746,15 @@
   //   opts = { titleLinkId (render title as a details button), myNames (highlight) }
   function afternoonCardBody(norm, opts) {
     opts = opts || {};
-    var groveTag = (norm.ageGroups && norm.ageGroups.length) ? groupTagHtml(norm.ageGroups) : '';
+    // #306 (Lyndsey): an all-ages class (or one with no specific groves) lists
+    // EVERY grove rather than showing blank. All groves = the morning grove
+    // order minus Greenhouse (under-3s aren't in the afternoon).
+    var normGroups = (norm.ageGroups || []).filter(function (g) { return g && String(g).toLowerCase() !== 'all-ages'; });
+    var isAllAges = !normGroups.length;
+    var groveSource = isAllAges
+      ? ((typeof MORNING_GROUP_ORDER !== 'undefined' ? MORNING_GROUP_ORDER : []).filter(function (g) { return g.name !== 'Greenhouse'; }).map(function (g) { return g.name; }))
+      : normGroups;
+    var groveTag = groveSource.length ? groupTagHtml(groveSource) : '';
     var title = opts.titleLinkId
       ? '<button type="button" class="ac-title signup-class-name-link" data-detail-class="' + opts.titleLinkId + '" title="Class details">' + escapeHtml(norm.name) + '</button>'
       : '<span class="ac-title">' + escapeHtml(norm.name) + '</span>';
@@ -5755,9 +5763,11 @@
     // so neither shows on the card (Erin, 2026-08-11). The 2-hour badge stays,
     // since it's the class's shape, not a schedule detail.
     if (norm.hour === 'both') {
+      // #301 (Colleen): label the 2-hour class (optional) vs (mandatory) per its
+      // submission designation.
       h += '<span class="signup-2hr-tag' + (norm.bothOptional ? ' signup-2hr-optional' : '') + '" title="'
         + (norm.bothOptional ? 'Runs both PM hours — your child may take one hour or both.' : 'Runs BOTH PM hours — ranking it fills PM Hour 1 AND PM Hour 2.')
-        + '">🔁 2-hour class · ' + (norm.bothOptional ? 'one or both hours' : 'both hours required') + '</span>';
+        + '">🔁 2-hour class ' + (norm.bothOptional ? '(optional)' : '(mandatory)') + '</span>';
     }
     if (norm.description && norm.description !== 'TBD') h += '<div class="ac-desc">' + escapeHtml(norm.description) + '</div>';
     var leads = (norm.leads || []).filter(Boolean);
@@ -7090,7 +7100,7 @@
         doc += '</tbody></table>';
       }
     });
-    doc += '<h2>Cleaning (after co-op)</h2>';
+    doc += '<h2>Cleaning Crew (after co-op)</h2>';
     doc += '<p class="pledges">' + ((d.cleaning || []).length
       ? escapeHtml(d.cleaning.map(function (c) { return (c.floor ? c.floor + ' · ' : '') + c.area + ' — ' + c.family; }).join(' · '))
       : '<em>No cleaning assignments yet.</em>') + '</p>';
@@ -7211,7 +7221,7 @@
         h += '</tbody></table></div>';
       }
     });
-    h += '<h4 class="roles-mgr-se-head">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning (after co-op)</h4>';
+    h += '<h4 class="roles-mgr-se-head">' + brandIconImg('cleaning', 'ag-icon') + ' Cleaning Crew (after co-op)</h4>';
     if ((d.cleaning || []).length === 0) {
       h += '<p class="ws-empty">No cleaning assignments for this session yet.</p>';
     } else {
@@ -9223,7 +9233,7 @@
     // approved; sheet-era PM_ELECTIVES otherwise.
     if (dbSess && dbSess.pm) {
       if (dbSess.pm.length === 0) {
-        html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon electives posted for this session.</em></p>';
+        html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon classes posted for this session.</em></p>';
       } else {
         // Pull the same "kids signed up so far" the Sign-ups view shows (#297).
         loadCoordPmSignups(sessionTabView);
@@ -9235,13 +9245,13 @@
         // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
         var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
         html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:8px;">'
-          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Electives &mdash; Hour 1: 1:00\u20131:55</h4>'
+          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
           + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
           + '</div>';
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
-        html += '<h4 class="session-section-title">Afternoon Electives &mdash; Hour 2: 2:00\u20132:55</h4>';
+        html += '<h4 class="session-section-title">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
         html += '<div class="elective-card-grid">';
         dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
@@ -9341,7 +9351,7 @@
     var html = '<button type="button" class="elective-card ac-body' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
     html += afternoonCardBody({
       id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
-      room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: false,
+      room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
     }, { myNames: myNames });
@@ -25475,6 +25485,10 @@
       // Rendered as a direct child of .my-absence-row so it spans the full
       // card width on its own grid row (below info + actions).
       if (totalSlots > 0) {
+        // #304 (Colleen): collapse the coverage list to de-clutter. Opens by
+        // default only while coverage is incomplete, so open slots stay visible.
+        html += '<details class="my-absence-slots-wrap"' + (coveredCount < totalSlots ? ' open' : '') + '>';
+        html += '<summary class="my-absence-slots-summary">Coverage details</summary>';
         html += '<ul class="my-absence-slots">';
         (a.slots || []).forEach(function (s) {
           var label = escapeHtmlWs((s.role_description || s.group_or_class || 'Slot') + ' (' + s.block + ')');
@@ -25485,6 +25499,7 @@
           }
         });
         html += '</ul>';
+        html += '</details>';
       }
       html += '</div>';
     });
@@ -33538,7 +33553,7 @@
     if (!body || !_schedRep) return;
     var h = '<div class="board-cal-views">';
     for (var i = 1; i <= 5; i++) {
-      h += '<button type="button" class="board-cal-view-pill sched-sess' + (i === _schedSession ? ' is-active' : '') + '" data-sess="' + i + '">Session ' + i + '</button>';
+      h += '<button type="button" class="board-cal-view-pill sched-sess' + (i === _schedSession ? ' is-active' : '') + '" data-sess="' + i + '">S' + i + '</button>';
     }
     // #37 — By person / By class toggle beside the session pills. The
     // choice sticks across session switches while the modal is open;
@@ -34279,7 +34294,7 @@
       key: 'name', label: _schedTab === 'adults' ? 'Member' : 'Kid', type: 'string',
       render: function (r) {
         var extra = '';
-        if (_schedTab === 'kids' && r.age != null) extra = ' <span class="ws-wv-context">age ' + r.age + '</span>';
+        if (_schedTab === 'kids' && r.age != null) extra = ' <span class="ws-wv-context">(age ' + r.age + ')</span>';
         return '<strong>' + escapeHtml(r.name) + '</strong>' + extra;
       },
       filter: {

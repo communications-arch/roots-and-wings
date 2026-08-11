@@ -10126,6 +10126,21 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
   background: rgba(var(--color-coral-rgb), 0.1);
   color: var(--color-text);
 }
+/* #304 (Colleen): collapsible coverage list in Upcoming Absences. */
+.my-absence-slots-wrap {
+  grid-area: slots;
+  width: 100%;
+}
+.my-absence-slots-summary {
+  cursor: pointer;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+.my-absence-slots-wrap .my-absence-slots {
+  margin-top: 0.2rem;
+}
 .coverage-absence {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid rgba(0,0,0,0.04);
