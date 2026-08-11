@@ -33694,13 +33694,13 @@
         var pick = hour === 'PM1' ? r.pm1 : r.pm2;
         if (!pick && hour === 'PM2' && r.pm1 && r.pm1.both) pick = r.pm1;
         if (!pick) return 'open';
-        return pick.class_name + (pick.both ? ' (2-hour)' : '') + (pick.assistant ? ' (assist)' : '') + (schedPickOutOfRange(pick, r) ? ' (!age)' : '');
+        return pick.class_name + (pick.both ? ' (2-hour)' : '') + (pick.assistant ? ' (assist)' : (schedPickOutOfRange(pick, r) ? ' (!age)' : ''));
       };
       var choiceText = function (r, hour) {
         var ch = (r.choices || {})[hour] || [];
         return ch.slice().sort(function (a, b) { return a.rank - b.rank; }).map(function (p) {
           return (p.rank === 1 ? '1st' : p.rank === 2 ? '2nd' : p.rank + 'th') + ': ' + p.class_name
-            + (p.assistant ? ' (assist)' : '') + (schedPickOutOfRange(p, r) ? ' (!age)' : '');
+            + (p.assistant ? ' (assist)' : (schedPickOutOfRange(p, r) ? ' (!age)' : ''));
         }).join(' | ');
       };
       rows.push(['Kid', 'Age', 'Morning', 'PM Hour 1', 'PM Hour 2', 'PM1 all choices', 'PM2 all choices', 'Selections status']);
@@ -33930,10 +33930,12 @@
   }
   function schedPickMarksHtml(pick, row) {
     if (!pick) return '';
-    var m = '';
-    if (pick.assistant) m += ' <span class="sched-assist-mark" title="Signed up to assist this class">' + brandIconImg('assist', 'ag-icon') + '</span>';
-    if (schedPickOutOfRange(pick, row)) m += ' <span class="sched-warn-mark" title="Selected outside their listed age range">⚠</span>';
-    return m;
+    // An assistant is EXPECTED to be older than the class's age range, so the
+    // out-of-range caution never applies to them — just the assist mark
+    // (Erin, 2026-08-11).
+    if (pick.assistant) return ' <span class="sched-assist-mark" title="Signed up to assist this class">' + brandIconImg('assist', 'ag-icon') + '</span>';
+    if (schedPickOutOfRange(pick, row)) return ' <span class="sched-warn-mark" title="Selected outside their listed age range">⚠</span>';
+    return '';
   }
   // PM classes offered per hour (a 'both' class counts for both) — so "no 2nd
   // choice" only flags when a second class actually exists to pick.
