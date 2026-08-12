@@ -6138,7 +6138,7 @@
     responsibilities: 'accent-8',
     notes: 'accent-16',
     coverage: 'accent-33',
-    supplyCloset: 'accent-41', // 🐌 gold snail (Erin 2026-08-12 — carries the closet; was accent-7 teal bloom)
+    supplyCloset: 'accent-41', // ✨ gold firefly (Erin 2026-08-12 — carries the closet, its ONLY meaning; was accent-7 teal bloom)
     membersSummary: 'accent-32',
     visibility: 'accent-30',
     newFamily: 'accent-24',
@@ -6180,7 +6180,7 @@
     // ── final pass — provisional picks by art (Erin may reassign) ──
     calendar: 'accent-55',    // 📅/📆 dates & calendar rows (radial aster = day)
     welcome: 'accent-45',     // 👋 orientation / greet new members (petal fan = wave)
-    outreach: 'accent-7',     // 💛 reach out / care (teal bloom; swapped with the gold snail — Erin 2026-08-12)
+    outreach: 'accent-7',     // 💛 reach out / care (teal bloom; swapped with the gold firefly — Erin 2026-08-12)
     departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
     tour: 'accent-50',        // 🏡 tour requests / visits (mushroom = cottage)
     brandKit: 'accent-59',    // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
@@ -23939,10 +23939,10 @@
       ['SVG', '/brand/kit/logo-black.svg', true],
       ['Outlined text SVG', '/brand/kit/logo-black-outlines.svg', true]
     ]);
-    // Gold snail accent (Erin 2026-08-12) — the Supply Closet mark, offered
-    // here so flyers/signs can carry it alongside the logos.
-    html += logoCard('/brand/kit/RW_GoldSnail_Accent.png', false, 'Gold snail — accent art', [
-      ['PNG', '/brand/kit/RW_GoldSnail_Accent.png', true]
+    // Gold firefly accent (Erin 2026-08-12) — the Supply Closet mark,
+    // offered here so flyers/signs can carry it alongside the logos.
+    html += logoCard('/brand/kit/RW_GoldFirefly_Accent.png', false, 'Gold firefly — accent art', [
+      ['PNG', '/brand/kit/RW_GoldFirefly_Accent.png', true]
     ]);
     html += '</div>';
     html += '<p style="color:#777;font-size:0.9em;margin:10px 0 0;">Designer masters: '
