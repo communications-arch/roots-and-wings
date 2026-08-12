@@ -3021,6 +3021,22 @@
     return null;
   }
 
+  // #297 (Erin): open a name's directory card. Handles adults AND kids' display
+  // names (which use the goes-by nickname), tolerating a trailing "(assistant)".
+  function openPersonByDisplayName(displayName) {
+    var name = String(displayName || '').replace(/\s*\(assistant\)\s*$/i, '').trim();
+    if (!name || typeof showPersonDetail !== 'function') return;
+    var found = findPersonByFullName(name);
+    if (!found) {
+      var parts = name.split(' '); var first = parts[0]; var last = parts.slice(1).join(' ');
+      for (var i = 0; i < allPeople.length; i++) {
+        var p = allPeople[i];
+        if (p.family === last && (p.name === first || String(p.nickname || '') === first)) { found = { person: p, idx: i }; break; }
+      }
+    }
+    if (found) showPersonDetail(found.person);
+  }
+
   // Helper: build a clickable staff member chip
   function staffChip(fullName, role) {
     var name = String(fullName || '').trim();
@@ -5724,11 +5740,14 @@
   // Co-op Coordination elective cards — they're the same data. REQUESTS, not
   // placements: first-choice split from backup, pending the lottery. `detailed`
   // is the class's signedUpDetailed ([{name, rank, assistant}]).
-  function signupRequestsHtml(detailed, max) {
+  function signupRequestsHtml(detailed, max, linkNames) {
     detailed = Array.isArray(detailed) ? detailed : [];
     var first = detailed.filter(function (s2) { return s2.rank === 1; });
     var backup = detailed.filter(function (s2) { return s2.rank !== 1; });
-    var nm = function (s2) { return escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : '')); };
+    var nm = function (s2) {
+      var disp = escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : ''));
+      return linkNames ? '<button type="button" class="ac-person-link" data-ac-person="' + escapeHtml(s2.name) + '">' + disp + '</button>' : disp;
+    };
     var head = [detailed.length > 0 ? 'Requests (' + detailed.length + ')' : 'No requests yet'];
     if (max > 0) head.push('max ' + max + ' kids');
     var h = '<span class="signup-class-count">' + escapeHtml(head.join(' · ')) + '</span>';
@@ -5772,7 +5791,12 @@
     if (norm.description && norm.description !== 'TBD') h += '<div class="ac-desc">' + escapeHtml(norm.description) + '</div>';
     var leads = (norm.leads || []).filter(Boolean);
     var assists = (norm.assists || []).filter(Boolean);
-    var mark = function (n) { return opts.myNames ? highlightIfMe(n, opts.myNames) : escapeHtml(n); };
+    // With opts.linkNames, each name links to its directory card (the surface
+    // wires .ac-person-link; the resolver no-ops on an unmatched name).
+    var mark = function (n) {
+      var disp = opts.myNames ? highlightIfMe(n, opts.myNames) : escapeHtml(n);
+      return opts.linkNames ? '<button type="button" class="ac-person-link" data-ac-person="' + escapeHtml(n) + '">' + disp + '</button>' : disp;
+    };
     // Photo circles for each leader/assistant, same avatars as the Class
     // Details popup (Erin, 2026-08-11) — falls back to a colored initial.
     var staffChip = function (n) {
@@ -5792,7 +5816,7 @@
     // Caller-supplied control that belongs right by the staff (e.g. the
     // coordination card's "needs N more — sign up" assist link).
     if (opts.afterStaff) h += opts.afterStaff;
-    h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max) + '</div>';
+    h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max, opts.linkNames) + '</div>';
     return h;
   }
 
@@ -8982,6 +9006,38 @@
   // requests data lives in the class-signup pool (signedUpDetailed), which any
   // authed member may read — cache it per session and repaint when it lands.
   var _coordPmSignups = { session: null, loading: false, byClass: {}, windowStatus: null };
+  // #297 (Erin): grove filter for the coordination Afternoon Classes cards.
+  var _coordGroveSel = [];
+  function coordGrovesInPool(pm) {
+    var seen = {};
+    (pm || []).forEach(function (e) {
+      (e.age_groups || []).forEach(function (g) { var gl = String(g || '').toLowerCase(); if (gl && gl !== 'all-ages') seen[gl] = true; });
+    });
+    var ordered = [];
+    (typeof MORNING_GROUP_ORDER !== 'undefined' ? MORNING_GROUP_ORDER : []).forEach(function (g) { var gl = String(g.name || '').toLowerCase(); if (seen[gl]) { ordered.push(gl); delete seen[gl]; } });
+    Object.keys(seen).forEach(function (gl) { ordered.push(gl); });
+    return ordered;
+  }
+  function coordClassPassesGrove(e) {
+    if (!_coordGroveSel.length) return true;
+    var groups = (e.age_groups || []).map(function (g) { return String(g || '').toLowerCase(); }).filter(function (g) { return g && g !== 'all-ages'; });
+    if (!groups.length) return true; // all-ages always shows
+    return groups.some(function (g) { return _coordGroveSel.indexOf(g) !== -1; });
+  }
+  function coordGrovePillBar(pm) {
+    var groves = coordGrovesInPool(pm);
+    if (groves.length < 2) return '';
+    var h = '<div class="signup-grove-filter" id="coordGroveFilter"><span class="signup-grove-filter-label">Filter by grove:</span>';
+    h += '<button type="button" class="signup-grove-pill' + (_coordGroveSel.length === 0 ? ' is-active' : '') + '" data-grove="">All</button>';
+    groves.forEach(function (g) {
+      var G = g.charAt(0).toUpperCase() + g.slice(1);
+      var on = _coordGroveSel.indexOf(g) !== -1;
+      h += '<button type="button" class="signup-grove-pill' + (on ? ' is-active' : '') + '" data-grove="' + escapeHtml(g) + '" aria-pressed="' + (on ? 'true' : 'false') + '">'
+        + ageGroupIconHtml(G) + '<span class="ag-name ' + ageGroupClass(G) + '">' + escapeHtml(G) + '</span></button>';
+    });
+    h += '</div>';
+    return h;
+  }
   function loadCoordPmSignups(session) {
     if (!session || _coordPmSignups.loading) return;
     if (_coordPmSignups.session === session) return; // cached for this session
@@ -9241,10 +9297,10 @@
       } else {
         // Pull the same "kids signed up so far" the Sign-ups view shows (#297).
         loadCoordPmSignups(sessionTabView);
-        var dbH1 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM1' || e.scheduled_hour === 'both'; });
+        var dbH1 = dbSess.pm.filter(function (e) { return (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'both') && coordClassPassesGrove(e); });
         // A 2-hour ('both') elective — e.g. Yearbook — runs BOTH hours, so it
         // belongs under Hour 2 as well, not just Hour 1 (Erin, 2026-08-11).
-        var dbH2 = dbSess.pm.filter(function (e) { return e.scheduled_hour === 'PM2' || e.scheduled_hour === 'both'; });
+        var dbH2 = dbSess.pm.filter(function (e) { return (e.scheduled_hour === 'PM2' || e.scheduled_hour === 'both') && coordClassPassesGrove(e); });
         // #297 (Erin): sign up for afternoon classes straight from here when the
         // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
         var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
@@ -9252,6 +9308,7 @@
           + '<h4 class="session-section-title" style="margin-right:auto;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
           + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
           + '</div>';
+        html += coordGrovePillBar(dbSess.pm);
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
@@ -9332,6 +9389,24 @@
       if (typeof showPmSignupModal === 'function') showPmSignupModal();
       if (!_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
     });
+    // #297 (Erin): grove filter pills under the Afternoon Classes header.
+    var coordGroveBar = container.querySelector('#coordGroveFilter');
+    if (coordGroveBar) coordGroveBar.addEventListener('click', function (ev) {
+      var pill = ev.target.closest('.signup-grove-pill');
+      if (!pill) return;
+      var g = pill.getAttribute('data-grove');
+      if (!g) { _coordGroveSel = []; }
+      else { var i = _coordGroveSel.indexOf(g); if (i === -1) _coordGroveSel.push(g); else _coordGroveSel.splice(i, 1); }
+      renderSessionTab();
+    });
+    // #297 (Erin): a name on an afternoon card opens its directory card
+    // (leads, assistants, and kids).
+    container.querySelectorAll('.ac-person-link').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openPersonByDisplayName(this.getAttribute('data-ac-person'));
+      });
+    });
     // #297 (Erin): assist an open afternoon-class spot from the card — same
     // confirm + volunteer-assist flow as the Morning Classes table.
     container.querySelectorAll('.pm-assist-signup').forEach(function (btn) {
@@ -9379,7 +9454,7 @@
     var needMore = '';
     if (e.helpers_needed > 0) {
       var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
-      needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more ⚠ — sign up</button></div>';
+      needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
     }
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
@@ -9387,7 +9462,7 @@
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
-    }, { myNames: myNames, afterStaff: needMore });
+    }, { myNames: myNames, afterStaff: needMore, linkNames: true });
     html += '</div>';
     return html;
   }

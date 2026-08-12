@@ -13779,6 +13779,13 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-staff-name { font-size: 0.74rem; color: var(--color-text); }
 .ac-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 2px; }
 .ac-need { margin-top: 2px; }
+/* #297: names on the coordination cards link to the directory card. */
+button.ac-person-link { border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+button.ac-person-link:hover, button.ac-person-link:focus-visible { text-decoration: underline; }
+/* The Afternoon Classes card no longer opens a modal, so drop the clickable
+   hover lift (Erin). Border stays so the "my class" highlight survives. */
+.elective-card.coord-pm-card { cursor: default; }
+.elective-card.coord-pm-card:hover { transform: none; box-shadow: none; }
 /* #297 follow-up (Erin): the class title leads the card; the grove chip is a
    small supporting tag, so shrink its icon + name well below the title. */
 .signup-class-groves { font-size: 0.7rem; }
