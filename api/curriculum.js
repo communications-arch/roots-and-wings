@@ -1166,6 +1166,21 @@ module.exports = async function handler(req, res) {
             teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
             co_teachers: r.co_teachers || '',
             helpers: (helpersBySub[r.id] || []).filter(Boolean),
+            // Per-hour helper names (Erin 2026-08-12: an AM2-only assist on a
+            // whole-morning class was painting onto the AM1 row too — the flat
+            // `helpers` list above has no hour scoping). Whole-class rows
+            // (block='') count in every hour, hour rows in their own.
+            helpers_by_hour: (() => {
+              const hb = {};
+              psBlocksOf(r).forEach(b => {
+                const seenH = new Set();
+                hb[b] = (helperRowsBySub[r.id] || [])
+                  .filter(h => (!h.block || h.block === b || (h.block === 'AM' && b.indexOf('AM') === 0)) && h.name)
+                  .filter(h => { const k = h.name.trim().toLowerCase(); if (seenH.has(k)) return false; seenH.add(k); return true; })
+                  .map(h => h.name);
+              });
+              return hb;
+            })(),
             helpers_needed: psNeeded(r),
             age_groups: r.age_groups || [],
             age_groups_other: r.age_groups_other || '',

@@ -7400,22 +7400,43 @@
       } else {
         var _psAssistSess = publishedSchedule.sessions[String(dutySession)];
         if (_psAssistSess) {
-          (_psAssistSess.am || []).forEach(function (c) {
-            var mineAm = (c.helpers || []).some(function (h) {
+          // Hour-scoped when the payload carries helpers_by_hour (Erin
+          // 2026-08-12: an AM2-only assist on a whole-morning class showed
+          // as a whole-morning duty). A name in BOTH hours of a whole-
+          // morning class collapses to one 'AM' row, as before.
+          var _psMineIn = function (list) {
+            return (list || []).some(function (h) {
               return parentFullNames.some(function (full) { return nameMatch(h, full); });
             });
-            if (!mineAm) return;
-            var amBlk = c.scheduled_hour === 'AM1' ? 'AM1' : c.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
-            var amTxt = c.class_name + ' — Assisting';
-            if (duties.some(function (dd) { return dd.icon === 'assist' && dd.block === amBlk && String(dd.text) === amTxt; })) return;
-            duties.push({ block: amBlk, icon: 'assist', text: amTxt, groupTag: groupTagHtml(c.age_groups), detail: (c.scheduled_room || ''), popup: { type: 'dbClass', id: c.id } });
+          };
+          (_psAssistSess.am || []).forEach(function (c) {
+            var amBlks;
+            if (c.helpers_by_hour) {
+              var inAm1 = _psMineIn(c.helpers_by_hour.AM1);
+              var inAm2 = _psMineIn(c.helpers_by_hour.AM2);
+              amBlks = inAm1 && inAm2 ? ['AM'] : inAm1 ? ['AM1'] : inAm2 ? ['AM2'] : [];
+              // Single-hour classes key their list under their own hour.
+              if (!amBlks.length && _psMineIn(c.helpers_by_hour[c.scheduled_hour])) amBlks = [c.scheduled_hour];
+            } else {
+              amBlks = _psMineIn(c.helpers)
+                ? [c.scheduled_hour === 'AM1' ? 'AM1' : c.scheduled_hour === 'AM2' ? 'AM2' : 'AM']
+                : [];
+            }
+            amBlks.forEach(function (amBlk) {
+              var amTxt = c.class_name + ' — Assisting';
+              if (duties.some(function (dd) { return dd.icon === 'assist' && dd.block === amBlk && String(dd.text) === amTxt; })) return;
+              duties.push({ block: amBlk, icon: 'assist', text: amTxt, groupTag: groupTagHtml(c.age_groups), detail: (c.scheduled_room || ''), popup: { type: 'dbClass', id: c.id } });
+            });
           });
           (_psAssistSess.pm || []).forEach(function (e) {
-            var minePm = (e.helpers || []).some(function (h) {
-              return parentFullNames.some(function (full) { return nameMatch(h, full); });
-            });
-            if (!minePm) return;
-            var pmHours = e.scheduled_hour === 'both' ? ['PM1', 'PM2'] : e.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+            var pmHours;
+            if (e.helpers_by_hour) {
+              pmHours = ['PM1', 'PM2'].filter(function (blk) { return _psMineIn(e.helpers_by_hour[blk]); });
+            } else {
+              pmHours = _psMineIn(e.helpers)
+                ? (e.scheduled_hour === 'both' ? ['PM1', 'PM2'] : e.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'])
+                : [];
+            }
             pmHours.forEach(function (blk) {
               var pmTxt = e.class_name + ' — Assisting';
               if (duties.some(function (dd) { return dd.icon === 'assist' && dd.block === blk && String(dd.text) === pmTxt; })) return;
@@ -9011,10 +9032,14 @@
       // the sign-up control (.am-assist-signup, wired below). withBtn is false
       // for the second row of a whole-morning class so the button isn't shown
       // twice; the server still rejects any hour you already hold.
-      function amCells(groveName, c, withBtn) {
+      function amCells(groveName, c, hourBlk, withBtn) {
         var leader = highlightIfMe(c.teacher || '', myNames)
           + (c.co_teachers ? ' &amp; ' + highlightIfMe(c.co_teachers, myNames) : '');
-        var assists = (c.helpers || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
+        // Hour-scoped helper names when the payload carries them (Erin
+        // 2026-08-12: an AM2-only assist was painting onto AM1 too);
+        // the flat class-wide list stays as the fallback.
+        var hourHelpers = (c.helpers_by_hour && c.helpers_by_hour[hourBlk]) || c.helpers || [];
+        var assists = hourHelpers.map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
         if (c.helpers_needed > 0) {
           var need = 'needs ' + c.helpers_needed + ' more';
           // Erin 2026-08-12: self-serve assist moves end when the session's
@@ -9045,8 +9070,8 @@
           amPlaced++;
           var whole = placed.am1 && placed.am2 && placed.am1 === placed.am2;
           amBlocksHtml += buildMorningGroveBlock(g.name, {
-            am1: placed.am1 ? amCells(g.name, placed.am1, true) : null,
-            am2: placed.am2 ? amCells(g.name, placed.am2, !whole) : null
+            am1: placed.am1 ? amCells(g.name, placed.am1, 'AM1', true) : null,
+            am2: placed.am2 ? amCells(g.name, placed.am2, 'AM2', !whole) : null
           }, {
             ages: ages, liaison: liaison, tappable: true,
             myRow: !!((placed.am1 && amIsMine(placed.am1)) || (placed.am2 && amIsMine(placed.am2)))
