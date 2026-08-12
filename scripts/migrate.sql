@@ -2597,12 +2597,11 @@ ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_by TEXT DEFA
 -- didn't resolve to an emailed people row. Those rows displayed as
 -- uncovered, could never be claimed (claim gate matches IS NULL), and
 -- the board-refresh pruner skipped them (truthy claimed_by_name).
--- 1) Generic hour slots are retired (real duties only): any general row
---    without a WORKING (emailed) claim is noise — remove it.
-DELETE FROM coverage_slots
- WHERE role_type = 'general' AND COALESCE(claimed_by_email, '') = '';
--- 2) Remaining ''-stamped claims on real duty slots never worked —
---    release them so the slot is genuinely open and claimable again.
+-- Release every ''-stamped claim (no DELETE here — the migration runner
+-- rejects destructive statements by design). Released GENERAL rows are
+-- then genuinely unclaimed, so the Coverage Board's ?refresh=1 reconciler
+-- prunes the retired generic slots on the next board load; released duty
+-- slots simply become claimable open asks again.
 UPDATE coverage_slots
    SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
  WHERE claimed_by_email = '';
