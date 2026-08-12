@@ -2590,3 +2590,19 @@ UPDATE class_submissions
 -- changes over, and any reviewer edit/review clears the stamp.
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_at TIMESTAMPTZ;
 ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_by TEXT DEFAULT '';
+
+-- 2026-08-13 (Erin: Coverage Tracker showed Danny Tanner twice — generic
+-- hour rows + real duty rows): repair slots stuck by the pre-fix
+-- preassignSlot, which stamped claimed_by_email='' when a named stand-in
+-- didn't resolve to an emailed people row. Those rows displayed as
+-- uncovered, could never be claimed (claim gate matches IS NULL), and
+-- the board-refresh pruner skipped them (truthy claimed_by_name).
+-- 1) Generic hour slots are retired (real duties only): any general row
+--    without a WORKING (emailed) claim is noise — remove it.
+DELETE FROM coverage_slots
+ WHERE role_type = 'general' AND COALESCE(claimed_by_email, '') = '';
+-- 2) Remaining ''-stamped claims on real duty slots never worked —
+--    release them so the slot is genuinely open and claimable again.
+UPDATE coverage_slots
+   SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
+ WHERE claimed_by_email = '';

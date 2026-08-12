@@ -526,7 +526,9 @@ module.exports = async function handler(req, res) {
             }
             for (const s of unmatched) {
               if (s.claimed_by_email || s.claimed_by_name) continue;
-              await sql`DELETE FROM coverage_slots WHERE id = ${s.id} AND claimed_by_email IS NULL`;
+              // COALESCE: a legacy ''-stamped claim must not block the prune
+              // (the pre-fix preassignSlot wrote '' on resolve failure).
+              await sql`DELETE FROM coverage_slots WHERE id = ${s.id} AND COALESCE(claimed_by_email, '') = ''`;
             }
           } catch (rfErr) {
             console.error('[absences] read-refresh reconcile (non-fatal) for absence ' + a.id + ':', rfErr);
@@ -982,7 +984,7 @@ module.exports = async function handler(req, res) {
         // a genuinely stale claimed slot can be cleared by the VP by hand.
         for (const s of unmatched) {
           if (s.claimed_by_email || s.claimed_by_name) continue;
-          await sql`DELETE FROM coverage_slots WHERE id = ${s.id}`;
+          await sql`DELETE FROM coverage_slots WHERE id = ${s.id} AND COALESCE(claimed_by_email, '') = ''`;
         }
         // Broadcast only when a previously silent absence first gains open
         // slots — same rule as the add-slots path below.
