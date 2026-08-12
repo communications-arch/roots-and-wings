@@ -1461,17 +1461,20 @@ module.exports = async function handler(req, res) {
           sql`SELECT status FROM class_signup_windows
               WHERE school_year = ${stYear} AND session_number = ${stSess} LIMIT 1`,
           // Enrollment = 1st-choice picks (distinct kids) per class.
-          // Enrollment-scoped (2026-07-19): stale picks from kids not
-          // ENROLLED this season don't count toward over-max / confirm
-          // headcounts; NULL-kid_id legacy rows keep counting.
+          // Transition-tolerant (2026-08-12, Colleen): count a pick UNLESS
+          // the kid has an EXPLICIT non-enrolled row this season (withdrawn /
+          // dropped). Kids mid-transition — pending, or no enrollment row yet
+          // during pre-finalization — still count, so over-full classes read
+          // as over-full and the lottery To Do fires. Matches the class-signup
+          // and volunteer-matrix pick filters. NULL-kid_id legacy rows count.
           sql`SELECT p.class_submission_id,
                      COUNT(DISTINCT (LOWER(p.family_email) || '|' || LOWER(p.kid_first_name)))::int AS firsts
               FROM class_signup_picks p
               WHERE p.school_year = ${stYear} AND p.session_number = ${stSess} AND p.rank = 1
-                AND (p.kid_id IS NULL OR EXISTS (
+                AND (p.kid_id IS NULL OR NOT EXISTS (
                   SELECT 1 FROM kid_enrollments e
                   WHERE e.kid_id = p.kid_id AND e.season = ${stYear}
-                    AND e.status = 'enrolled'))
+                    AND e.status <> 'enrolled'))
               GROUP BY p.class_submission_id`
         ]);
         const stPmApproved = !!(stApproval.length && stApproval[0].approved_at);

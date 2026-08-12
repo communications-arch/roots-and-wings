@@ -7209,6 +7209,59 @@
       .catch(function () { body.innerHTML = '<p class="ws-empty">Could not load sign-ups — check your connection.</p>'; });
   }
 
+  // ── Shared morning-class block (#303 / #310) ──────────────────────────
+  // One block per grove in the "old sheet" shape: a grove-colored header
+  // (icon + colored name, ages, liaison) with the two morning hours as rows
+  // beneath, each showing that hour's Topic / Leader / Assistants / Room. A
+  // grove can run a DIFFERENT class each hour, or one whole-morning ('AM')
+  // class filling both rows. Presentation only: callers pass pre-built,
+  // pre-escaped cell HTML (including their own assist buttons), so Co-op
+  // Coordination and Everyone's sign-ups render identically. opts.tappable
+  // makes the whole block open the grove kid list; opts.note renders a single
+  // "not posted yet" line instead of the two hour rows.
+  function mcbHourRow(label, cells) {
+    if (!cells) {
+      return '<tr class="mcb-hour-row"><th class="mcb-hour-col">' + label
+        + '</th><td class="mcb-hour-empty" colspan="3">not scheduled this hour</td></tr>';
+    }
+    // #323 (Erin): the room lives once in the grove header (it's the same all
+    // morning), so the hour rows carry only Topic / Leader / Assistants.
+    return '<tr class="mcb-hour-row"><th class="mcb-hour-col">' + label + '</th>'
+      + '<td>' + (cells.topic || '—') + '</td>'
+      + '<td>' + (cells.leader || '—') + '</td>'
+      + '<td>' + (cells.assistants || '—') + '</td></tr>';
+  }
+  function buildMorningGroveBlock(groveName, hours, opts) {
+    hours = hours || {}; opts = opts || {};
+    var cls = ageGroupClass(groveName);
+    // #323 (Erin): room in the grove header (top row), once — derived from the
+    // hours' cells (both morning hours share a room); a "—" placeholder counts
+    // as none. Header order: title · ages … liaison · room (room far right).
+    var roomTxt = (hours.am1 && hours.am1.room) || (hours.am2 && hours.am2.room) || '';
+    if (roomTxt === '—') roomTxt = '';
+    var head = '<div class="mcb-grove-head">'
+      + '<span class="mcb-grove-title">' + ageGroupIconHtml(groveName)
+      + ' <span class="session-group-link ag-name ' + cls + '">' + escapeHtml(groveName) + '</span></span>'
+      + (opts.ages ? '<span class="mcb-grove-ages">' + opts.ages + '</span>' : '')
+      + (opts.liaison ? '<span class="mcb-grove-liaison"><span class="mcb-grove-lbl">Liaison</span> ' + opts.liaison + '</span>' : '')
+      + (roomTxt ? '<span class="mcb-grove-room"><span class="mcb-grove-lbl">Room</span> ' + roomTxt + '</span>' : '')
+      + '</div>';
+    var inner;
+    if (opts.note) {
+      inner = '<div class="mcb-grove-note">' + opts.note + '</div>';
+    } else {
+      inner = '<table class="mcb-grove-table"><thead><tr>'
+        + '<th class="mcb-hour-col"></th><th>Topic</th><th>Leader</th><th>Assistants</th>'
+        + '</tr></thead><tbody>'
+        + mcbHourRow('10–11 am', hours.am1)
+        + mcbHourRow('11–12 pm', hours.am2)
+        + '</tbody></table>';
+    }
+    return '<div class="mcb-grove-block ' + cls + (opts.tappable ? ' session-class-row' : '') + (opts.myRow ? ' coord-my-row' : '') + '"'
+      + (opts.tappable ? ' data-group="' + escapeHtml(groveName) + '"' : '')
+      + '>' + head + inner + '</div>';
+  }
+
   function renderVolunteerGrid(body, d) {
     var h = '<div class="vol-grid">';
     h += '<div class="board-cal-views">';
@@ -7221,11 +7274,10 @@
     var amMark = brandIconImg('morning', 'ag-icon');
     var pmMark = brandIconImg('afternoon', 'ag-icon');
     var BLOCK_TITLES = { AM1: amMark + ' Morning Hour 1 (10:00–10:55)', AM2: amMark + ' Morning Hour 2 (11:00–11:55)', PM1: pmMark + ' Afternoon Hour 1 (1:00–1:55)', PM2: pmMark + ' Afternoon Hour 2 (2:00–2:55)' };
-    ['AM1', 'AM2', 'PM1', 'PM2'].forEach(function (bk) {
+    // Support-role pledges (Floaters / Board / Prep) for one hour block —
+    // shared by the merged morning section and the afternoon loop.
+    function blockPledges(bk) {
       var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
-      // Erin (2026-08-11): sign up for OPEN slots straight from this view.
-      // You can't double-book an hour you already hold (d.mine[bk]); Board is
-      // board-members only; support roles honor the hour's remaining capacity.
       var meCommitted = !!(d.mine && d.mine[bk]);
       var canBoard = !!(d.me && d.me.is_board);
       var supportOpen = (typeof b.support_capacity !== 'number') || ((b.support_taken || 0) < b.support_capacity);
@@ -7234,73 +7286,99 @@
         if (cap && list.length >= cap) return '';
         return ' <button type="button" class="sc-btn vgrid-signup" data-vg-kind="signup" data-vg-role="' + role + '" data-vg-block="' + bk + '" title="Sign yourself up this hour">➕ me</button>';
       }
-      // Each pledge group is one inline-block unit so its "➕ me" button never
-      // detaches and dangles when the line wraps (Erin, 2026-08-11). Groups are
-      // spaced by CSS, not a "·" separator.
       function pledgeBit(icon, label, list, cap, role, eligible) {
         return '<span class="vol-grid-pledge-grp">' + icon + ' <strong>' + label + ':</strong> '
           + (list.length ? list.map(escapeHtmlWs).join(', ') : '<em>open</em>')
           + (cap ? ' <span class="sb-subdetail-dim">(' + list.length + '/' + cap + ')</span>' : '')
           + pledgeBtn(role, list, cap, eligible) + '</span>';
       }
-      var pledges = pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0, 'floater', true)
+      return pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Floaters', b.floaters, bk.indexOf('AM') === 0 ? 2 : 0, 'floater', true)
         + pledgeBit(brandIconImg('notes', 'ag-icon'), 'Board', b.board, 2, 'board', canBoard)
         + pledgeBit(brandIconImg('floaterPrep', 'ag-icon'), 'Prep', b.prep, 2, 'prep', true);
-      h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + pledges + '</span></h4>';
+    }
+    // One morning hour's grid cells for a grove block — the "needs N more" IS
+    // the assist control (same .vgrid-signup wiring; per-hour meCommitted).
+    function vgAmCells(bk, c) {
+      var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
+      var lead = escapeHtmlWs(c.teacher)
+        + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
+      var meCommitted = !!(d.mine && d.mine[bk]);
+      var assists = helpers;
+      if (c.helpers_needed > 0) {
+        var needTxt = 'needs ' + c.helpers_needed + ' more ⚠';
+        assists += (helpers ? ', ' : '') + (!meCommitted
+          ? '<button type="button" class="ra-open-note vgrid-need-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + needTxt + ' — sign up</button>'
+          : '<span class="ra-open-note" style="display:inline;">' + needTxt + '</span>');
+      }
+      return { topic: escapeHtmlWs(c.class_name || '') || '—', leader: lead || '—', assistants: assists || '—', room: c.room ? escapeHtmlWs(c.room) : '—' };
+    }
+    // ── Morning: one block per grove, both hours as rows (#303 / #310) ──
+    h += '<h4 class="roles-mgr-se-head">' + amMark + ' Morning Classes (10:00–12:00)</h4>';
+    ['AM1', 'AM2'].forEach(function (bk) {
+      h += '<div class="vol-grid-am-pledge-line"><span class="vol-grid-am-hour">'
+        + (bk === 'AM1' ? 'Hour 1 · 10:00–10:55' : 'Hour 2 · 11:00–11:55')
+        + '</span> ' + blockPledges(bk) + '</div>';
+    });
+    (function () {
+      var gOrd = {};
+      MORNING_GROUP_ORDER.forEach(function (g, gi) { gOrd[g.name.toLowerCase()] = gi; });
+      var byGrove = {};
+      ['AM1', 'AM2'].forEach(function (bk) {
+        (((d.blocks || {})[bk]) || { classes: [] }).classes.forEach(function (c) {
+          var key = String(c.group || '').toLowerCase();
+          if (!key) return;
+          if (!byGrove[key]) byGrove[key] = { am1: null, am2: null };
+          byGrove[key][bk === 'AM1' ? 'am1' : 'am2'] = c;
+        });
+      });
+      var keys = Object.keys(byGrove).sort(function (a, b) {
+        return (gOrd[a] == null ? 99 : gOrd[a]) - (gOrd[b] == null ? 99 : gOrd[b]);
+      });
+      if (!keys.length) { h += '<p class="ws-empty">No classes placed yet.</p>'; return; }
+      h += '<div class="mcb-grove-blocks vol-grid-grove-blocks">';
+      keys.forEach(function (key) {
+        var pair = byGrove[key];
+        var ref = pair.am1 || pair.am2;
+        var groveName = ref.group ? ref.group.charAt(0).toUpperCase() + ref.group.slice(1) : (ref.class_name || '');
+        var mine = (pair.am1 && d.mine && d.mine.AM1 && d.mine.AM1.class_id === pair.am1.id)
+          || (pair.am2 && d.mine && d.mine.AM2 && d.mine.AM2.class_id === pair.am2.id);
+        h += buildMorningGroveBlock(groveName, {
+          am1: pair.am1 ? vgAmCells('AM1', pair.am1) : null,
+          am2: pair.am2 ? vgAmCells('AM2', pair.am2) : null
+        }, {
+          ages: groupActualAgesHtml(ref.ages || '', groveName),
+          liaison: '', tappable: false, myRow: !!mine
+        });
+      });
+      h += '</div>';
+    })();
+    // ── Afternoon: two-hour tables (PM unchanged, #310) ──
+    ['PM1', 'PM2'].forEach(function (bk) {
+      var b = (d.blocks || {})[bk] || { classes: [], floaters: [], board: [], prep: [] };
+      h += '<h4 class="roles-mgr-se-head">' + BLOCK_TITLES[bk] + ' <span class="vol-grid-pledges vol-grid-pledges-head">' + blockPledges(bk) + '</span></h4>';
       if (b.classes.length === 0) {
         h += '<p class="ws-empty">No classes placed yet.</p>';
       } else {
-        var isAmBk = bk.indexOf('AM') === 0;
-        // #289 (Colleen): afternoon blocks get a "Kids signed up" column so
-        // Everyone's Sign-ups isn't adults-only (refreshes when the modal is
-        // reopened or the session pill is switched).
-        h += '<div class="mcb-teach-wrap"><table class="mcb-teach ' + (isAmBk ? 'mcb-teach--am' : 'mcb-teach--pm') + '"><thead><tr><th>' + (isAmBk ? 'Grove' : 'Class') + '</th><th>Leader</th><th>Assistants</th>' + (isAmBk ? '' : '<th>Kids signed up</th>') + '</tr></thead><tbody>';
-        // Sections are per hour (Erin, 2026-07-11) — a both-hours class
-        // appears in each hour's section, so no extra stacking is needed;
-        // morning rows sort in age-group order.
-        var gridClasses = b.classes.slice();
-        if (isAmBk) {
-          var gOrd = {};
-          MORNING_GROUP_ORDER.forEach(function (g, gi) { gOrd[g.name.toLowerCase()] = gi; });
-          gridClasses.sort(function (x, y) {
-            return (gOrd[String(x.group || '').toLowerCase()] || 99) - (gOrd[String(y.group || '').toLowerCase()] || 99);
-          });
-        }
-        gridClasses.forEach(function (c) {
-          // Erin 2026-08-02: morning rows show the GROVE, not the class
-          // name — the grove is the identity members scan for.
-          var amGroveName = c.group ? c.group.charAt(0).toUpperCase() + c.group.slice(1) : '';
-          var first = isAmBk
-            ? ageGroupIconHtml(amGroveName) + ' <span class="ag-name ' + ageGroupClass(amGroveName) + '">' + escapeHtmlWs(amGroveName || c.class_name) + '</span>'
-            : escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
-          // #233 (Colleen): co-leads render in the Leader cell — both
-          // people lead the class; Helpers holds only assistants.
+        h += '<div class="mcb-teach-wrap"><table class="mcb-teach mcb-teach--pm"><thead><tr><th>Class</th><th>Leader</th><th>Assistants</th><th>Kids signed up</th></tr></thead><tbody>';
+        var meCommitted = !!(d.mine && d.mine[bk]);
+        b.classes.forEach(function (c) {
+          var first = escapeHtmlWs(c.class_name) + (c.room ? ' <span class="sb-subdetail-dim">· ' + escapeHtmlWs(c.room) + '</span>' : '');
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           var gridLead = escapeHtmlWs(c.teacher)
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
-          // Erin (2026-08-11): the "needs N more ⚠" IS the sign-up control —
-          // click it to assist this class (with a confirm first). When you
-          // already hold an hour, or the class is the acting family's own,
-          // it stays a plain read-only flag. Works for morning + afternoon.
           var needTxt = 'needs ' + c.helpers_needed + ' more ⚠';
           var needHtml = '';
           if (c.helpers_needed > 0) {
-            // meCommitted is per-hour and already covers "I lead/assist/pledged
-            // this hour" (incl. this very class) — so it's the whole guard.
-            var canAssist = !meCommitted;
-            needHtml = (helpers ? ', ' : ' ') + (canAssist
+            needHtml = (helpers ? ', ' : ' ') + (!meCommitted
               ? '<button type="button" class="ra-open-note vgrid-need-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + needTxt + ' — sign up</button>'
               : '<span class="ra-open-note" style="display:inline;">' + needTxt + '</span>');
           }
-          // "Where am I" — the server already tells us the acting person's own
-          // commitment per hour (d.mine[bk].class_id); light up that row with
-          // the site-wide own-row highlight so it jumps out of the grid.
           var mineHere = d.mine && d.mine[bk] && d.mine[bk].class_id === c.id;
           h += '<tr' + (mineHere ? ' class="coord-my-row"' : '') + '><td>' + first + '</td><td>' + gridLead + '</td><td>' + (helpers || '—')
             + needHtml + '</td>'
-            + (isAmBk ? '' : '<td>' + (!d.pm_signups_finalized
+            + '<td>' + (!d.pm_signups_finalized
                 ? '<span class="sb-subdetail-dim">after the lottery</span>'
-                : ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none</span>')) + '</td>')
+                : ((c.kids && c.kids.length) ? c.kids.map(escapeHtmlWs).join(', ') : '<span class="sb-subdetail-dim">none</span>')) + '</td>'
             + '</tr>';
         });
         h += '</tbody></table></div>';
@@ -7360,6 +7438,9 @@
             }
             if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false; // helper shows on the schedule
             loadVolunteerGrid(d.session); // refresh in place → buttons update, your name appears
+            // #315: reload the published schedule so the new assist role
+            // repaints on My Responsibilities (loadPublishedSchedule → renderMyFamily).
+            if (typeof loadPublishedSchedule === 'function') loadPublishedSchedule(true);
           })
           .catch(function () { self.disabled = false; if (typeof showSupplyToast === 'function') showSupplyToast('Network error — try again.'); });
       });
@@ -7621,6 +7702,47 @@
         if (subPM2) duties.push({ block: 'PM2', icon: 'teach', text: s.class_name + ' — Leading', groupTag: groupTagHtml(s.age_groups), detail: (s.scheduled_room || ''), popup: { type: 'dbClass', id: s.id }, planKey: pmPlanKey, planSess: dutySession });
       }
     });
+
+    // ── Class assisting (DB helpers, published schedule) ── (#315, Colleen)
+    // A member who signs up to assist a morning/afternoon class from the
+    // Co-op Coordination cards is written to class_assignment_helpers and
+    // surfaces in the published schedule's per-class `helpers` NAMES.
+    // AM_CLASSES/PM_ELECTIVES no longer carry these (Sheets retired, #25),
+    // so read helpers straight off publishedSchedule here. Matched by name
+    // (the payload has no helper emails) with the same first+last matcher.
+    if (typeof publishedSchedule !== 'undefined') {
+      if (!publishedSchedule.loaded) {
+        // Warm the cache; loadPublishedSchedule re-renders My Family once it
+        // lands, so the assist row appears without an explicit reload.
+        if (typeof loadPublishedSchedule === 'function') loadPublishedSchedule();
+      } else {
+        var _psAssistSess = publishedSchedule.sessions[String(dutySession)];
+        if (_psAssistSess) {
+          (_psAssistSess.am || []).forEach(function (c) {
+            var mineAm = (c.helpers || []).some(function (h) {
+              return parentFullNames.some(function (full) { return nameMatch(h, full); });
+            });
+            if (!mineAm) return;
+            var amBlk = c.scheduled_hour === 'AM1' ? 'AM1' : c.scheduled_hour === 'AM2' ? 'AM2' : 'AM';
+            var amTxt = c.class_name + ' — Assisting';
+            if (duties.some(function (dd) { return dd.icon === 'assist' && dd.block === amBlk && String(dd.text) === amTxt; })) return;
+            duties.push({ block: amBlk, icon: 'assist', text: amTxt, groupTag: groupTagHtml(c.age_groups), detail: (c.scheduled_room || ''), popup: { type: 'dbClass', id: c.id } });
+          });
+          (_psAssistSess.pm || []).forEach(function (e) {
+            var minePm = (e.helpers || []).some(function (h) {
+              return parentFullNames.some(function (full) { return nameMatch(h, full); });
+            });
+            if (!minePm) return;
+            var pmHours = e.scheduled_hour === 'both' ? ['PM1', 'PM2'] : e.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
+            pmHours.forEach(function (blk) {
+              var pmTxt = e.class_name + ' — Assisting';
+              if (duties.some(function (dd) { return dd.icon === 'assist' && dd.block === blk && String(dd.text) === pmTxt; })) return;
+              duties.push({ block: blk, icon: 'assist', text: pmTxt, detail: (blk === 'PM1' ? '1:00–1:55 · ' : '2:00–2:55 · ') + (e.scheduled_room || ''), popup: { type: 'dbClass', id: e.id } });
+            });
+          });
+        }
+      }
+    }
 
     // PM support roles
     var pmSupport = PM_SUPPORT_ROLES[dutySession];
@@ -9302,7 +9424,10 @@
     }
     // Erin (2026-07-22): groups-assigned-but-nothing-posted renders the
     // group line-up with TBDs (built below, used by both empty branches).
-    function buildAmTbdTable() {
+    // #303/#310: TBD groves (kids assigned, no class posted) render as minimal
+    // per-grove blocks \u2014 same shape as the scheduled blocks, a "not posted yet"
+    // note instead of the two hour rows.
+    function buildAmTbdBlocks() {
       var counts = {};
       (FAMILIES || []).forEach(function (f) {
         (f.kids || []).forEach(function (k) {
@@ -9313,18 +9438,16 @@
         return g.name !== 'Greenhouse' && counts[g.name.toLowerCase()];
       });
       if (!gs.length) return '';
-      var t = '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
-      var tbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
+      var t = '<div class="mcb-grove-blocks">';
       gs.forEach(function (g) {
-        t += '<tr class="session-class-row" data-group="' + g.name + '">';
-        t += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
-        t += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
-        t += '<td>' + amLiaisonHtml(g.name) + '</td>';
-        t += '<td>' + tbdCell + '</td><td>' + tbdCell + '</td><td>' + tbdCell + '</td>';
-        t += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
-        t += '</tr>';
+        t += buildMorningGroveBlock(g.name, {}, {
+          ages: groupActualAgesHtml(g.range || '', g.name),
+          liaison: amLiaisonHtml(g.name),
+          tappable: true,
+          note: 'Teachers and topics fill in once the morning schedule is posted.'
+        });
       });
-      t += '</tbody></table></div>';
+      t += '</div>';
       t += '<p style="color:var(--color-text-light);font-size:0.9rem;"><em>Groups are set \u2014 tap one to see its kids. Teachers and topics fill in once the morning schedule is posted.</em></p>';
       return t;
     }
@@ -9335,128 +9458,108 @@
       + '<button type="button" class="ws-inline-link" id="sessSchedVolGridBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('person', 'ag-icon') + ' Everyone\u2019s sign-ups</button>'
       + '</div>';
     if (dbSess && dbSess.am) {
-      if (dbSess.am.length === 0) {
-        html += buildAmTbdTable()
-          || '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
+      // #303/#310: one block per grove, the two morning hours as rows inside.
+      // A grove can run a different class each hour, or one whole-morning ('AM')
+      // class that fills both rows.
+      var amByGrove = {};
+      (dbSess.am || []).forEach(function (c) {
+        var key = String((c.age_groups || [])[0] || '').toLowerCase();
+        if (!key) return;
+        if (!amByGrove[key]) amByGrove[key] = { am1: null, am2: null };
+        if (c.scheduled_hour === 'AM1') amByGrove[key].am1 = c;
+        else if (c.scheduled_hour === 'AM2') amByGrove[key].am2 = c;
+        else { amByGrove[key].am1 = c; amByGrove[key].am2 = c; } // 'AM' = both hours
+      });
+      var amKidCounts = {};
+      (FAMILIES || []).forEach(function (f) {
+        (f.kids || []).forEach(function (k) {
+          if (k.group) amKidCounts[String(k.group).toLowerCase()] = (amKidCounts[String(k.group).toLowerCase()] || 0) + 1;
+        });
+      });
+      // "This is my class" match (teacher / co-lead / assistant), by name.
+      function amIsMine(c) {
+        var names = (c.helpers || []).slice().concat(c.co_teachers ? [c.co_teachers] : []);
+        return myNames.fullNames.some(function (fn) {
+          var l = fn.toLowerCase();
+          return l === String(c.teacher || '').trim().toLowerCase()
+            || names.some(function (a) { return String(a).trim().toLowerCase() === l; });
+        });
+      }
+      // One hour's cells. #231: an edited assistant count shows here without
+      // opening the picker. Erin (2026-08-11): the "needs N more" shortfall IS
+      // the sign-up control (.am-assist-signup, wired below). withBtn is false
+      // for the second row of a whole-morning class so the button isn't shown
+      // twice; the server still rejects any hour you already hold.
+      function amCells(groveName, c, withBtn) {
+        var leader = highlightIfMe(c.teacher || '', myNames)
+          + (c.co_teachers ? ' &amp; ' + highlightIfMe(c.co_teachers, myNames) : '');
+        var assists = (c.helpers || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
+        if (c.helpers_needed > 0) {
+          var need = 'needs ' + c.helpers_needed + ' more';
+          assists += (assists ? ', ' : '') + (withBtn && !amIsMine(c)
+            ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(c.scheduled_hour || 'AM') + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + need + ' \u2014 sign up \u26a0</button>'
+            : '<span class="ra-open-note" style="display:inline;">' + need + ' \u26a0</span>');
+        }
+        return {
+          topic: escapeHtml(c.class_name || 'TBD'),
+          leader: leader,
+          assistants: assists || '\u2014',
+          room: escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groveName] || '')
+        };
+      }
+      // Scheduled + TBD groves interleave in MORNING_GROUP_ORDER (#209).
+      var amBlocksHtml = '', amPlaced = 0;
+      MORNING_GROUP_ORDER.forEach(function (g) {
+        if (g.name === 'Greenhouse') return;
+        var key = g.name.toLowerCase();
+        var placed = amByGrove[key];
+        var ages = groupActualAgesHtml(g.range || '', g.name);
+        var liaison = amLiaisonHtml(g.name);
+        if (placed) {
+          amPlaced++;
+          var whole = placed.am1 && placed.am2 && placed.am1 === placed.am2;
+          amBlocksHtml += buildMorningGroveBlock(g.name, {
+            am1: placed.am1 ? amCells(g.name, placed.am1, true) : null,
+            am2: placed.am2 ? amCells(g.name, placed.am2, !whole) : null
+          }, {
+            ages: ages, liaison: liaison, tappable: true,
+            myRow: !!((placed.am1 && amIsMine(placed.am1)) || (placed.am2 && amIsMine(placed.am2)))
+          });
+        } else if (amKidCounts[key]) {
+          amBlocksHtml += buildMorningGroveBlock(g.name, {}, {
+            ages: ages, liaison: liaison, tappable: true,
+            note: 'Teachers and topics fill in once the morning schedule is posted.'
+          });
+        }
+      });
+      if (amBlocksHtml) {
+        html += '<div class="mcb-grove-blocks">' + amBlocksHtml + '</div>';
+        if (!amPlaced) html += '<p style="color:var(--color-text-light);font-size:0.9rem;"><em>Groups are set \u2014 tap one to see its kids. Teachers and topics fill in once the morning schedule is posted.</em></p>';
       } else {
-        var amHourWord = { AM: 'Both', AM1: 'Hour 1', AM2: 'Hour 2' };
-        var groupIdx = {};
-        MORNING_GROUP_ORDER.forEach(function (g, i) { groupIdx[g.name.toLowerCase()] = { i: i, g: g }; });
-        var amRows = dbSess.am.slice().sort(function (a, b) {
-          var ai = (groupIdx[String((a.age_groups || [])[0] || '').toLowerCase()] || { i: 99 }).i;
-          var bi = (groupIdx[String((b.age_groups || [])[0] || '').toLowerCase()] || { i: 99 }).i;
-          if (ai !== bi) return ai - bi;
-          return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);
-        });
-        html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Hour</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
-        // #209 (Lyndsey): scheduled and TBD grove rows must interleave in
-        // MORNING_GROUP_ORDER (youngest→oldest). TBD rows used to be
-        // appended after the scheduled block, scrambling the table.
-        var amRowPieces = [];
-        amRows.forEach(function (c) {
-          var key = String((c.age_groups || [])[0] || '').toLowerCase();
-          var meta = groupIdx[key];
-          var groupName = meta ? meta.g.name : (key ? key.charAt(0).toUpperCase() + key.slice(1) : '\u2014');
-          // #233 (Colleen): co-leads belong in the Leader cell, not among
-          // the helpers — both names lead the class.
-          var helperNames = (c.helpers || []).slice();
-          var rowNames = helperNames.concat(c.co_teachers ? [c.co_teachers] : []);
-          var isMyRow = myNames.fullNames.some(function (fn) {
-            var l = fn.toLowerCase();
-            return l === String(c.teacher || '').trim().toLowerCase()
-              || rowNames.some(function (a) { return String(a).trim().toLowerCase() === l; });
-          });
-          // Erin 2026-08-02: scheduled rows stay tappable (grove kid list)
-          // just like the TBD rows — they lost the class when the DB
-          // branch was added.
-          var row = '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + escapeHtml(groupName) + '">';
-          // Group mark beside the colored name (Erin, 2026-07-11).
-          row += '<td class="am-group-col">' + ageGroupIconHtml(groupName) + ' <span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + escapeHtml(groupName) + '</span></td>';
-          row += '<td class="am-ages-col">' + (meta
-            ? groupActualAgesHtml(meta.g.range, meta.g.name)
-            : escapeHtml(c.scheduled_age_range || '')) + '</td>';
-          row += '<td>' + amLiaisonHtml(groupName) + '</td>';
-          row += '<td>' + escapeHtml(c.class_name || 'TBD') + '</td>';
-          row += '<td>' + (amHourWord[c.scheduled_hour] || 'Both') + '</td>';
-          row += '<td>' + highlightIfMe(c.teacher || '', myNames)
-            + (c.co_teachers ? ' &amp; ' + highlightIfMe(c.co_teachers, myNames) : '') + '</td>';
-          // #231: open assistant spots are visible here now \u2014 an edited
-          // assistant count shows up without opening the sign-up picker.
-          var amHelpersCell = helperNames.map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
-          if (c.helpers_needed > 0) {
-            // Erin (2026-08-11): the "needs N more" shortfall IS the sign-up
-            // control here too \u2014 click to assist this grove's class (with a
-            // confirm first). Hidden on your own class row; the server rejects
-            // any hour you're already committed to.
-            var amNeedTxt = 'needs ' + c.helpers_needed + ' more';
-            amHelpersCell += (amHelpersCell ? ', ' : '') + (!isMyRow
-              ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(c.scheduled_hour || 'AM') + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + amNeedTxt + ' \u2014 sign up \u26a0</button>'
-              : '<span class="ra-open-note" style="display:inline;">' + amNeedTxt + ' \u26a0</span>');
-          }
-          row += '<td>' + (amHelpersCell || '\u2014') + '</td>';
-          row += '<td>' + escapeHtml(c.scheduled_room || AM_GROUP_ROOMS[groupName] || '') + '</td>';
-          row += '</tr>';
-          amRowPieces.push({ i: meta ? meta.i : 99, html: row });
-        });
-        // Erin 2026-08-02 (prod): every grove with kids assigned shows a
-        // row even before its class/lead/liaison exists — TBD rows for
-        // the groves the published schedule hasn't covered yet.
-        var amKidCounts = {};
-        (FAMILIES || []).forEach(function (f) {
-          (f.kids || []).forEach(function (k) {
-            if (k.group) amKidCounts[String(k.group).toLowerCase()] = (amKidCounts[String(k.group).toLowerCase()] || 0) + 1;
-          });
-        });
-        var amScheduledKeys = {};
-        amRows.forEach(function (c) { amScheduledKeys[String((c.age_groups || [])[0] || '').toLowerCase()] = true; });
-        var amTbdCell = '<em style="color:var(--color-text-light);">TBD</em>';
-        MORNING_GROUP_ORDER.forEach(function (g, gi) {
-          var k = g.name.toLowerCase();
-          if (g.name === 'Greenhouse' || !amKidCounts[k] || amScheduledKeys[k]) return;
-          var row = '<tr class="session-class-row" data-group="' + g.name + '">';
-          row += '<td class="am-group-col">' + ageGroupIconHtml(g.name) + ' <span class="session-group-link ag-name ' + ageGroupClass(g.name) + '">' + g.name + '</span></td>';
-          row += '<td class="am-ages-col">' + groupActualAgesHtml(g.range || '', g.name) + '</td>';
-          row += '<td>' + amLiaisonHtml(g.name) + '</td>';
-          row += '<td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td><td>' + amTbdCell + '</td>';
-          row += '<td>' + escapeHtml(AM_GROUP_ROOMS[g.name] || '') + '</td>';
-          row += '</tr>';
-          amRowPieces.push({ i: gi, html: row });
-        });
-        // Stable sort keeps AM1-before-AM2 within a grove (amRows was
-        // pre-sorted that way).
-        amRowPieces.sort(function (a, b) { return a.i - b.i; });
-        amRowPieces.forEach(function (p) { html += p.html; });
-        html += '</tbody></table></div>';
+        html += '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
       }
     } else if (Object.keys(AM_CLASSES).length > 0) {
-      html += '<div class="directory-table-wrap"><table class="portal-table"><thead><tr><th class="am-group-col">Grove</th><th class="am-ages-col">Ages</th><th>Liaison</th><th>Topic</th><th>Leader</th><th>Assistants</th><th>Room</th></tr></thead><tbody>';
-      // #209: sheet-era fallback sorts by grove age order too.
-      var sheetGroupIdx = {};
-      MORNING_GROUP_ORDER.forEach(function (g, i) { sheetGroupIdx[g.name.toLowerCase()] = i; });
-      var groups = Object.keys(AM_CLASSES).sort(function (a, b) {
-        var ai = sheetGroupIdx[a.toLowerCase()]; if (ai === undefined) ai = 99;
-        var bi = sheetGroupIdx[b.toLowerCase()]; if (bi === undefined) bi = 99;
-        return ai - bi;
-      });
-      groups.forEach(function (groupName) {
-        var cls = AM_CLASSES[groupName];
-        var s = cls.sessions[viewSess];
-        if (!s) return;
+      // #209/#303: sheet-era fallback \u2014 one whole-morning class per grove,
+      // rendered as blocks too (no hour split in the sheet data).
+      var sheetBlocks = '';
+      MORNING_GROUP_ORDER.forEach(function (g) {
+        if (g.name === 'Greenhouse') return;
+        var cls = AM_CLASSES[g.name]; if (!cls) return;
+        var s = cls.sessions[viewSess]; if (!s) return;
         var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
         var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
-        html += '<tr class="session-class-row' + (isMyRow ? ' coord-my-row' : '') + '" data-group="' + groupName + '">';
-        html += '<td class="am-group-col"><span class="session-group-link ag-name ' + ageGroupClass(groupName) + '">' + groupName + '</span></td>';
-        html += '<td class="am-ages-col">' + groupActualAgesHtml(cls.ages, groupName) + '</td>';
-        html += '<td>' + amLiaisonHtml(groupName, cls.liaison) + '</td>';
-        html += '<td>' + s.topic + '</td>';
-        html += '<td>' + highlightIfMe(s.teacher, myNames) + '</td>';
-        html += '<td>' + assistantsHtml + '</td>';
-        html += '<td>' + s.room + '</td>';
-        html += '</tr>';
+        var cells = { topic: s.topic, leader: highlightIfMe(s.teacher, myNames), assistants: assistantsHtml, room: s.room };
+        sheetBlocks += buildMorningGroveBlock(g.name, { am1: cells, am2: cells }, {
+          ages: groupActualAgesHtml(cls.ages, g.name),
+          liaison: amLiaisonHtml(g.name, cls.liaison),
+          tappable: true, myRow: isMyRow
+        });
       });
-      html += '</tbody></table></div>';
+      html += sheetBlocks
+        ? '<div class="mcb-grove-blocks">' + sheetBlocks + '</div>'
+        : '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
     } else {
-      html += buildAmTbdTable()
+      html += buildAmTbdBlocks()
         || '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
     }
 
@@ -25523,10 +25626,12 @@
         html += '<div class="coverage-all-covered">All slots covered for this day!</div>';
       }
 
-      // ── Primary: who is covering whose role (always visible) ──
+      // ── Primary: who is covering whose role (collapsed by default) ──
+      // #321 (Erin): the open "Needs Coverage" list is what needs eyes;
+      // covered slots are reference, so tuck them behind a details toggle.
       if (coveredSlots.length > 0) {
-        html += '<div class="coverage-covered-section">';
-        html += '<div class="coverage-section-label coverage-section-label-ok">Covered</div>';
+        html += '<details class="coverage-covered-section coverage-covered-details">';
+        html += '<summary class="coverage-details-toggle coverage-section-label coverage-section-label-ok">Covered (' + coveredSlots.length + ')</summary>';
         coveredSlots.forEach(function (slot) {
           var isMyClaim = slot.claimed_by_email && slot.claimed_by_email === email;
           html += '<div class="coverage-slot coverage-slot-covered">';
@@ -25545,7 +25650,7 @@
           }
           html += '</div>';
         });
-        html += '</div>';
+        html += '</details>';
       }
 
       // ── Secondary: full detail (collapsed by default) ──
@@ -33790,6 +33895,16 @@
     for (var i = 0; i < SCHED_KID_STATUS.length; i++) if (SCHED_KID_STATUS[i].key === key) return SCHED_KID_STATUS[i];
     return null;
   }
+  // #319 (Colleen): the Afternoon Class Liaison places kids, not adults —
+  // so an ACL-only viewer gets just the Kids tab. VP/President (adult
+  // placement) and super users still see both.
+  function schedHideAdultsTab() {
+    if (typeof isSuperUserEmail === 'function' && isSuperUserEmail(getActiveEmail())) return false;
+    var roles = (typeof getWorkspaceRoles === 'function') ? getWorkspaceRoles() : [];
+    var isVpOrPres = roles.indexOf('President') !== -1 || roles.indexOf('Vice President') !== -1;
+    var isAcl = roles.indexOf('Afternoon Class Liaison') !== -1;
+    return isAcl && !isVpOrPres;
+  }
 
   function showSchedulesReportModal(opts) {
     opts = opts || {};
@@ -33899,12 +34014,15 @@
       h += '<div id="ws-sched-class-body"></div>';
     } else {
       // Tab strip — same visual treatment as the Merchandise report tabs.
+      // #319: ACL-only viewers get just Kids (no adult placer).
+      var hideAdults = schedHideAdultsTab();
+      if (hideAdults && _schedTab === 'adults') _schedTab = 'kids';
       var aUn = schedAdultsUnplacedCount();
       var kUn = schedKidsUnplacedCount();
       h += '<div class="merch-tab-nav" role="tablist">'
-        + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'adults' ? ' active' : '') + '" data-sched-tab="adults" role="tab">'
+        + (hideAdults ? '' : ('<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'adults' ? ' active' : '') + '" data-sched-tab="adults" role="tab">'
         +   'Adults' + (aUn > 0 ? ' <span class="merch-tab-badge">' + aUn + ' unplaced</span>' : '')
-        + '</button>'
+        + '</button>'))
         + '<button type="button" class="portal-tab merch-tab-btn sched-tab-btn' + (_schedTab === 'kids' ? ' active' : '') + '" data-sched-tab="kids" role="tab">'
         +   'Kids' + (kUn > 0 ? ' <span class="merch-tab-badge">' + kUn + ' unplaced</span>' : '')
         + '</button>'

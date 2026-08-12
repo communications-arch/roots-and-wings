@@ -8590,6 +8590,46 @@ ul[id="ws-todo-list"] .ws-link-icon,
 /* Editor footer — Save right-aligned per the portal-wide pattern. */
 .mcb-cell-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
 
+/* ── Morning grove blocks (#303/#310) — one card per grove, both hours as
+   rows inside. Shared by the Session Schedule and Everyone's Sign-ups so the
+   morning reads the same way in both. Grove colour rides the --ag token. */
+.mcb-grove-blocks { display: grid; gap: 14px; }
+.mcb-grove-block {
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--ag, var(--color-primary));
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface, #fff);
+}
+.mcb-grove-block.session-class-row { cursor: pointer; }
+.mcb-grove-block.session-class-row:hover { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07); }
+.mcb-grove-block.coord-my-row { box-shadow: inset 0 0 0 2px var(--ag, var(--color-primary)); }
+.mcb-grove-head {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px;
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--ag, var(--color-primary)) 10%, transparent);
+  border-bottom: 1px solid var(--color-border);
+}
+.mcb-grove-title { font-weight: 700; font-size: 0.98rem; display: inline-flex; align-items: center; gap: 5px; }
+.mcb-grove-ages { font-size: 0.8rem; color: var(--color-text-light); }
+/* #323: room is pushed to the far right of the header; liaison clusters with
+   the ages on the left. Both share the same dim label treatment. */
+.mcb-grove-liaison { font-size: 0.8rem; color: var(--color-text-light); }
+.mcb-grove-room { font-size: 0.8rem; color: var(--color-text-light); margin-left: auto; white-space: nowrap; }
+.mcb-grove-liaison .mcb-grove-lbl, .mcb-grove-room .mcb-grove-lbl { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.68rem; opacity: 0.75; margin-right: 3px; }
+.mcb-grove-note { padding: 10px 12px; font-size: 0.85rem; color: var(--color-text-light); font-style: italic; }
+/* #323: fixed layout + shared column widths so every grove block's columns
+   line up with the next one's (each grove is its own <table>). */
+.mcb-grove-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.mcb-grove-table th, .mcb-grove-table td { padding: 5px 10px; text-align: left; vertical-align: top; font-size: 0.82rem; border-top: 1px solid var(--color-border); overflow-wrap: anywhere; }
+.mcb-grove-table thead th { border-top: 0; background: rgba(var(--color-primary-rgb), 0.04); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-light); }
+.mcb-hour-col { white-space: nowrap; font-weight: 600; color: var(--color-primary-dark); width: 88px; }
+.mcb-hour-empty { color: var(--color-text-light); font-style: italic; }
+/* Per-hour support-role pledge lines above the morning blocks. */
+.vol-grid-am-pledge-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin: 4px 0 8px; font-size: 0.82rem; }
+.vol-grid-am-hour { font-weight: 600; color: var(--color-primary-dark); white-space: nowrap; }
+.vol-grid-grove-blocks { margin-bottom: 18px; }
+
 /* PM Schedule Builder helper inputs (Phase B2) — stacked member pickers. */
 .sbEditHelper { margin-bottom: 6px; }
 
@@ -13779,7 +13819,9 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; margin-top: 5px; margin-bottom: 6px; }
 /* Staff: photo circles + names, grouped Led by / Assisted by — same avatars as
    the Class Details popup (#297). */
-.ac-staff { display: flex; flex-wrap: wrap; gap: 5px 16px; align-items: center; }
+/* #314 (Lyndsey): Led by / Assisted by each on their OWN line, every card —
+   a column so the two groups always stack instead of sharing a line when short. */
+.ac-staff { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
 .ac-staff-grp { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .ac-staff-role { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-light); font-weight: 700; }
 .ac-staff-chip { display: inline-flex; align-items: center; gap: 4px; }
