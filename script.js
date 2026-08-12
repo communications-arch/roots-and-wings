@@ -5512,8 +5512,11 @@
       if (first.length) hF += '<span class="signup-class-reqs">' + joinNames(first) + '</span>';
       return hF;
     }
-    // #297 (Erin): one line — "KIDS REQUESTS (24 of 15)" (count of max).
-    var label = 'Kids requests' + (max > 0 ? ' (' + detailed.length + ' of ' + max + ')' : (detailed.length ? ' (' + detailed.length + ')' : ''));
+    // #297 (Erin): one line — "KIDS REQUESTS (N of max)". #343 (Lyndsey):
+    // the count is FIRST CHOICES ONLY — backups don't occupy seats (and the
+    // lottery pools rank-1 only, per #325), so "15 of 12" for a class with
+    // 4 firsts + 11 backups misread as over-full. Backups still list below.
+    var label = 'Kids requests' + (max > 0 ? ' (' + first.length + ' of ' + max + ')' : (first.length ? ' (' + first.length + ')' : ''));
     var h = '<span class="signup-class-count ac-reqs-label">' + escapeHtml(label) + '</span>';
     if (first.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + joinNames(first) + '</span>';
     if (backup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + joinNames(backup) + '</span>';
@@ -38828,8 +38831,11 @@
       // #296 (Erin): dev-only testing reset — clears every kid pick, adult
       // assist, pledge, and lottery record for this session while the
       // placed classes stay. Server refuses on production regardless.
+      // #342: reviewers (VP + Afternoon Class Liaison) see it too — they
+      // are the testers, and this whole panel is reviewer-gated anyway.
       if (typeof isDevHost === 'function' && isDevHost()
-          && typeof isSuperUserEmail === 'function' && isSuperUserEmail(getActiveEmail())) {
+          && ((typeof isSuperUserEmail === 'function' && isSuperUserEmail(getActiveEmail()))
+            || (typeof classSubmissionReviewer !== 'undefined' && classSubmissionReviewer))) {
         html += '<div class="sb-signup-panel-actions" style="margin-top:10px;"><button type="button" class="sc-btn sc-btn-del" id="sbSignupReset" title="Testing only: wipe this session’s sign-ups (kids + adults). Classes stay placed.">Reset sign-ups (testing)</button></div>';
       }
       html += '</div>';

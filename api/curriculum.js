@@ -3359,10 +3359,13 @@ module.exports = async function handler(req, res) {
       }
 
       // ── #296 (Erin): testing reset — wipe a session's sign-ups while the
-      // classes stay placed. Super users only, and NEVER on production
+      // classes stay placed. #342: reviewers (VP + Afternoon Class Liaison)
+      // can run it too — they're the testers. NEVER on production
       // (it's a dev/testing aid; prod data loss would be unrecoverable).
       if (action === 'reset-class-signups') {
-        if (!isSuperUser(user.email)) return res.status(403).json({ error: 'Super users only.' });
+        if (!isSuperUser(user.email) && !(await isReviewerReq(user, req))) {
+          return res.status(403).json({ error: 'Super users or the VP / Afternoon Class Liaison only.' });
+        }
         if (process.env.VERCEL_ENV === 'production') {
           return res.status(403).json({ error: 'The sign-up reset is a testing tool — it is disabled on production.' });
         }
