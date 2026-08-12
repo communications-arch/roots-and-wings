@@ -26835,7 +26835,9 @@
             var amGroupRaw = String((s.age_groups || [])[0] || '');
             var amGroupDisp = amGroupRaw ? amGroupRaw.charAt(0).toUpperCase() + amGroupRaw.slice(1) : '';
             out += '<button class="sc-btn mf-classsubs-info" data-id="' + s.id + '">'
-              + (typeof ageGroupIconHtml === 'function' && amGroupRaw ? ageGroupIconHtml(amGroupRaw) + ' ' : '')
+              // ageGroupIconHtml matches CAPITALIZED grove names — the raw
+              // age_groups value is lowercase, which rendered no icon at all.
+              + (typeof ageGroupIconHtml === 'function' && amGroupDisp ? ageGroupIconHtml(amGroupDisp) + ' ' : '')
               + (amGroupDisp ? escClsHtml(amGroupDisp) : 'My Grove') + '</button>';
           } else if (myClassSignupsClosed(s)) {
             out += '<button class="sc-btn mf-classsubs-info" data-id="' + s.id + '">' + brandIconImg('classes', 'ag-icon') + ' My Class</button>';

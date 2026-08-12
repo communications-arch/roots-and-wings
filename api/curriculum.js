@@ -3823,7 +3823,8 @@ module.exports = async function handler(req, res) {
         const daPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${daEmail} OR LOWER(personal_email) = ${daEmail} LIMIT 1`;
         const daName = daPeople.length ? ((daPeople[0].first_name || '') + ' ' + (daPeople[0].last_name || '')).trim() : (user.name || '');
-        const goneH = (['AM1', 'AM2', 'PM1', 'PM2'].indexOf(daBlock) !== -1)
+        const daHourScoped = ['AM1', 'AM2', 'PM1', 'PM2'].indexOf(daBlock) !== -1;
+        let goneH = daHourScoped
           ? await sql`DELETE FROM class_assignment_helpers
               WHERE class_submission_id = ${daSubId} AND block = ${daBlock}
                 AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
@@ -3832,7 +3833,31 @@ module.exports = async function handler(req, res) {
               WHERE class_submission_id = ${daSubId}
                 AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
               RETURNING id`;
-        if (!goneH.length) return res.status(404).json({ error: 'You are not on that class’s helper list.' });
+        // Whole-class rows (block='') are how single-hour classes store
+        // their assists, so an hour-scoped remove must reach them too —
+        // afternoon assistants were unremovable from every reviewer
+        // surface (Colleen, 2026-08-12: "it says I'm not the assistant").
+        // On a genuine two-hour class a whole-class row SHRINKS to the
+        // other hour instead, so only the requested hour is released.
+        if (daHourScoped && !goneH.length) {
+          const daCls = await sql`SELECT class_period, scheduled_hour FROM class_submissions WHERE id = ${daSubId}`;
+          const daSpansTwo = daCls.length && (daCls[0].class_period === 'AM'
+            ? (daCls[0].scheduled_hour !== 'AM1' && daCls[0].scheduled_hour !== 'AM2')
+            : daCls[0].scheduled_hour === 'both');
+          if (!daSpansTwo) {
+            goneH = await sql`DELETE FROM class_assignment_helpers
+              WHERE class_submission_id = ${daSubId} AND block = ''
+                AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
+              RETURNING id`;
+          } else {
+            const daOther = { AM1: 'AM2', AM2: 'AM1', PM1: 'PM2', PM2: 'PM1' }[daBlock];
+            goneH = await sql`UPDATE class_assignment_helpers SET block = ${daOther}
+              WHERE class_submission_id = ${daSubId} AND block = ''
+                AND (LOWER(person_email) = ${daEmail} OR (${daName} <> '' AND LOWER(person_name) = LOWER(${daName})))
+              RETURNING id`;
+          }
+        }
+        if (!goneH.length) return res.status(404).json({ error: 'No assist found for ' + (daName || daEmail) + ' on that class (that hour).' });
         return res.status(200).json({ ok: true });
       }
       // Withdraw own PM class submission. We keep the row (status='withdrawn')
