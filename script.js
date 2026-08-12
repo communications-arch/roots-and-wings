@@ -9279,15 +9279,9 @@
         showElectiveDetail(this.getAttribute('data-elective'));
       });
     });
-    container.querySelectorAll('.elective-card[data-db-class]').forEach(function (card) {
-      var openDetail = function () { showDbClassPopup(parseInt(card.getAttribute('data-db-class'), 10)); };
-      card.addEventListener('click', openDetail);
-      // The card is a div[role=button] now (so the assist link can nest) —
-      // keep it keyboard-openable like the button it replaced.
-      card.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDetail(); }
-      });
-    });
+    // (Afternoon Classes cards no longer open a details modal — #297, Erin:
+    // the card shows everything inline. Sheet-era data-elective cards below
+    // still open their legacy roster detail.)
 
     // Wire up full row clicks → open the AM class detail modal for that group
     container.querySelectorAll('.session-class-row').forEach(function (row) {
@@ -9374,11 +9368,10 @@
       return leadNames.concat(assistNames).some(function (a) { return String(a).trim().toLowerCase() === l; });
     });
     // #297: the SHARED compact card body (Class-Details layout) — identical to
-    // the Afternoon Class Sign-ups cards. A div (not a button) so the "needs N
-    // more — sign up" assist control can nest inside; clicking the card opens
-    // the details popup (wired below). Requests come from the same class-signup
-    // pool, loaded per session.
-    var html = '<div class="elective-card ac-body' + (isMyCard ? ' coord-my-card' : '') + '" data-db-class="' + e.id + '" role="button" tabindex="0" aria-label="View details for ' + escapeHtml(e.class_name || 'this class') + '">';
+    // the Afternoon Class Sign-ups cards. The card shows everything inline now,
+    // so the details modal is retired here (Erin, 2026-08-11) — it's a plain
+    // container whose only interactive bit is the "needs N more" assist link.
+    var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
       id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,

@@ -13846,6 +13846,18 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
    from a "both required" one — olive badge vs the teal required badge. */
 .signup-2hr-tag.signup-2hr-optional { background: var(--color-leaf); }
 .signup-class-pinned .signup-2hr-tag { margin-left: 0; margin-right: 4px; }
+/* Erin (2026-08-11): on the afternoon cards the 2-hour badge should be quiet —
+   a soft grey chip, not a bold uppercase banner. (The picker's PM2 pinned
+   reservation banner is outside .ac-body, so it keeps its loud treatment.) */
+.ac-body .signup-2hr-tag,
+.ac-body .signup-2hr-tag.signup-2hr-optional {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--color-text-light);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  margin-left: 0;
+}
 
 /* Detail popup: rank group headings + pending note + assistant tag. */
 .signup-detail-pendingnote { font-size: 0.76rem; color: var(--color-text-light); margin: 4px 0 6px; font-style: italic; }
