@@ -1303,7 +1303,7 @@ module.exports = async function handler(req, res) {
                        LIMIT 1) AS liaison_note
               FROM morning_class_assignments a
               LEFT JOIN LATERAL (
-                SELECT id, nickname, first_name, last_name, birth_date, family_email FROM kids
+                SELECT id, nickname, first_name, last_name, birth_date, family_email, allergies FROM kids
                 WHERE (a.kid_id IS NOT NULL AND kids.id = a.kid_id)
                    OR (a.kid_id IS NULL AND LOWER(kids.family_email) = LOWER(a.family_email)
                        AND LOWER(kids.first_name) = LOWER(a.kid_first_name))
@@ -3122,15 +3122,22 @@ module.exports = async function handler(req, res) {
         if (!ltScope || !scopeAllowsSub(ltScope, lt)) return res.status(403).json({ error: 'Reviewers only.' });
         const max = lt.max_students || 0;
         if (max < 1) return res.status(400).json({ error: 'Set a max before running a lottery.' });
-        const ltHour = (lt.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+        // A 2-hour ('both') class draws from BOTH hours' rank-1 picks — an
+        // optional-both class (e.g. Yearbook) takes single-hour picks in
+        // either hour, and counting only PM1 under-reads it vs the over-max
+        // To Do (#325, Colleen 2026-08-12).
+        const ltHours = lt.scheduled_hour === 'both' ? ['PM1', 'PM2']
+          : [(lt.scheduled_hour === 'PM2') ? 'PM2' : 'PM1'];
         // 1st-choice kids, with display names for the result summary.
         // kid_id rides along (kid_id-first join, name fallback for legacy
         // rows) so the bump insert + 2nd-choice promotion are rename-proof.
-        // Enrollment-scoped (2026-07-19): stale picks from kids not
-        // ENROLLED this season don't enter the lottery pool; NULL-kid_id
-        // legacy rows keep counting (transition tolerance).
-        const signed = await sql`
-          SELECT p.id AS pick_id, LOWER(p.family_email) AS fam, p.kid_first_name,
+        // Transition-tolerant enrollment scope (#325): a kid counts unless
+        // EXPLICITLY not-enrolled — kids mid-migration with no
+        // kid_enrollments row stay in the pool, matching the over-max
+        // count in signup-todos (the strict EXISTS form made the To Do say
+        // "over max" while the lottery said "not over max").
+        const signedRows = await sql`
+          SELECT p.id AS pick_id, p.hour, LOWER(p.family_email) AS fam, p.kid_first_name,
                  k.id AS kid_id,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
@@ -3140,12 +3147,25 @@ module.exports = async function handler(req, res) {
                           AND LOWER(k.family_email) = LOWER(p.family_email)
                           AND LOWER(k.first_name) = LOWER(p.kid_first_name))
           LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
-          WHERE p.class_submission_id = ${ltId} AND p.rank = 1 AND p.hour = ${ltHour}
+          WHERE p.class_submission_id = ${ltId} AND p.rank = 1 AND p.hour = ANY(${ltHours})
             AND p.school_year = ${lt.school_year} AND p.session_number = ${lt.scheduled_session}
-            AND (p.kid_id IS NULL OR EXISTS (
+            AND (p.kid_id IS NULL OR NOT EXISTS (
               SELECT 1 FROM kid_enrollments e
               WHERE e.kid_id = p.kid_id AND e.season = ${lt.school_year}
-                AND e.status = 'enrolled'))`;
+                AND e.status <> 'enrolled'))`;
+        // One lottery ticket per KID: a 2-hour class can hold a kid's pick
+        // in both hours — collapse to one entry carrying every pick row
+        // (each with its hour) so a loss removes all of them.
+        const signedByKid = new Map();
+        signedRows.forEach(r => {
+          const key = r.fam + '|' + String(r.kid_first_name).toLowerCase();
+          const cur = signedByKid.get(key);
+          if (cur) cur.picks.push({ id: r.pick_id, hour: r.hour });
+          else signedByKid.set(key, { fam: r.fam, kid_first_name: r.kid_first_name, kid_id: r.kid_id,
+            display_first: r.display_first, display_last: r.display_last,
+            picks: [{ id: r.pick_id, hour: r.hour }] });
+        });
+        const signed = Array.from(signedByKid.values());
         if (signed.length <= max) return res.status(409).json({ error: 'This class is not over its max — no lottery needed.' });
         // Exempt (never bumped): the lead's own kids, and any kid who
         // already lost a lottery this school year.
@@ -3180,15 +3200,19 @@ module.exports = async function handler(req, res) {
           await sql`INSERT INTO class_lottery_bumps
             (school_year, session_number, class_submission_id, family_email, kid_first_name, kid_id, created_by)
             VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${l.kid_id || null}, ${user.email})`;
-          // Drop the lost 1st choice; their 2nd choice (same hour) becomes
-          // their 1st so the family keeps a placement without re-picking.
-          // kid_id match first, name match for unmapped legacy rows.
-          await sql`DELETE FROM class_signup_picks WHERE id = ${l.pick_id}`;
-          await sql`UPDATE class_signup_picks SET rank = 1
-            WHERE school_year = ${lt.school_year} AND session_number = ${lt.scheduled_session}
-              AND (kid_id = ${l.kid_id || null}
-                OR (LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})))
-              AND hour = ${ltHour} AND rank = 2`;
+          // Drop the lost 1st choice(s); their 2nd choice becomes their 1st
+          // in each hour a pick was removed from, so the family keeps a
+          // placement without re-picking (never an hour they still hold a
+          // different 1st choice in). kid_id match first, name match for
+          // unmapped legacy rows.
+          await sql`DELETE FROM class_signup_picks WHERE id = ANY(${l.picks.map(p => p.id)})`;
+          for (const lostHour of Array.from(new Set(l.picks.map(p => p.hour)))) {
+            await sql`UPDATE class_signup_picks SET rank = 1
+              WHERE school_year = ${lt.school_year} AND session_number = ${lt.scheduled_session}
+                AND (kid_id = ${l.kid_id || null}
+                  OR (LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})))
+                AND hour = ${lostHour} AND rank = 2`;
+          }
         }
         await sql`UPDATE class_submissions SET lottery_run_at = NOW(), updated_at = NOW() WHERE id = ${ltId}`;
         return res.status(200).json({

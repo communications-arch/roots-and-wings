@@ -4482,7 +4482,12 @@
     fetch('/api/curriculum?action=class-info&id=' + classId + notifViewAsSuffix(), { headers: { 'Authorization': 'Bearer ' + cred } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
-        if (!d || !d.class) return;
+        // A server failure must SAY so — the silent no-op here hid a
+        // 500ing class-info for two days (Erin, 2026-08-12).
+        if (!d || !d.class) {
+          if (typeof showSupplyToast === 'function') showSupplyToast('Couldn’t load the class details — try again in a moment.');
+          return;
+        }
         var c = d.class;
         var html = '<div class="detail-actions no-print">'
           + '<button type="button" class="rd-icon duty-print-btn" aria-label="Print this class info" title="Print">' + ICON_SVG.print + '</button></div>';
@@ -4632,7 +4637,9 @@
           if (typeof startLessonPlanForClass === 'function') startLessonPlanForClass(c.class_name, c.ages || '', c.class_period === 'AM' ? 'AM' : 'PM');
         });
       })
-      .catch(function () {});
+      .catch(function () {
+        if (typeof showSupplyToast === 'function') showSupplyToast('Couldn’t load the class details — check your connection.');
+      });
   }
 
   // Pledge rows (Floater / Board / Prep) — the "what is this job?"
@@ -9755,6 +9762,11 @@
     if (e.helpers_needed > 0) {
       var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
       needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
+    } else if (assistNames.length) {
+      // A fully-staffed class must SAY it's full — a bare card with no
+      // sign-up affordance reads as "adult sign-ups are closed" (Erin,
+      // 2026-08-12; assist sign-ups never close, they just fill up).
+      needMore = '<div class="ac-need"><span class="ws-wv-context">assistant spots filled</span></div>';
     }
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
@@ -34658,12 +34670,26 @@
           + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">' + schedClassOpts(hour) + '</select></label>';
       } else {
         hk += '<label class="st-place-slot">' + SCHED_BLOCK_LABELS[hour]
-          + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '">'
+          + '<select class="cl-input sched-kid-pick" data-hour="' + hour + '" data-cur="' + pick.class_id + '">'
           + '<option value="">' + escapeHtml(pick.class_name) + ' (current)</option>'
           + '<option value="remove">✕ Remove from this hour</option>'
           + schedClassOpts(hour, { noPlaceholder: true })
           + '</select></label>';
       }
+      // #324 (Colleen): an OPTIONAL backup (2nd choice) rides along with the
+      // placement — same choices, saved as rank 2. The current backup comes
+      // from the row's full ranked choices, so editing the 1st choice no
+      // longer silently wipes an existing 2nd.
+      var curBackup = ((row.choices && row.choices[hour]) || []).filter(function (ch) {
+        return (ch.rank || 1) >= 2;
+      })[0] || null;
+      hk += '<label class="st-place-slot">Backup <span class="ws-wv-context">(optional)</span>'
+        + '<select class="cl-input sched-kid-pick2" data-hour="' + hour + '"' + (curBackup ? ' data-cur="' + curBackup.class_id + '"' : '') + '>'
+        + (curBackup
+            ? '<option value="">' + escapeHtml(curBackup.class_name) + ' (current backup)</option><option value="remove">✕ No backup</option>'
+            : '<option value="">— backup (optional) —</option>')
+        + schedClassOpts(hour, { noPlaceholder: true })
+        + '</select></label>';
     });
     hk += '<button type="button" class="btn btn-primary btn-sm sched-kid-save" data-fam="' + escapeHtml(row.family_email) + '" data-kid="' + escapeHtml(row.first_name) + '">Save</button>';
     hk += '<button type="button" class="sc-btn sched-edit-close">Close</button>';
@@ -34890,25 +34916,43 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var panel = btn.closest('.st-place-row');
-        var picks = {};
-        panel.querySelectorAll('.sched-kid-pick').forEach(function (sel) {
-          picks[sel.getAttribute('data-hour')] = sel.value;
+        // #324: per hour, resolve the 1st choice AND the optional backup.
+        // '' on a select = keep what's there (its data-cur); 'remove' clears.
+        // An hour posts only when one of its selects changed, and the post
+        // carries BOTH ranks so an edit preserves the other one.
+        var hours = {};
+        panel.querySelectorAll('.sched-kid-pick, .sched-kid-pick2').forEach(function (sel) {
+          var hr = sel.getAttribute('data-hour');
+          var slot = sel.classList.contains('sched-kid-pick2') ? 'backup' : 'first';
+          var h2 = hours[hr] || (hours[hr] = { changed: false });
+          h2[slot] = sel.value === 'remove' ? null
+            : sel.value ? parseInt(sel.value, 10)
+            : (sel.getAttribute('data-cur') ? parseInt(sel.getAttribute('data-cur'), 10) : null);
+          if (sel.value) h2.changed = true;
+          if (slot === 'first' && sel.value === 'remove') h2.cleared = true;
         });
-        if (!picks.PM1 && !picks.PM2) { alert('Pick a class (or ✕ Remove) first.'); return; }
+        var changedHours = Object.keys(hours).filter(function (hr) { return hours[hr].changed; });
+        if (!changedHours.length) { alert('Pick a class (or ✕ Remove) first.'); return; }
+        for (var chI = 0; chI < changedHours.length; chI++) {
+          var hh = hours[changedHours[chI]];
+          if (!hh.cleared && !hh.first && hh.backup) { alert('Pick a 1st choice before adding a backup.'); return; }
+        }
         var fam = btn.getAttribute('data-fam');
         var kid = btn.getAttribute('data-kid');
         btn.disabled = true;
         btn.textContent = 'Saving…';
-        function postHour(hour, cid) {
-          if (!cid) return Promise.resolve();
-          // #57: 'remove' clears the hour — empty ranked list unplaces.
-          var ranked = cid === 'remove' ? [] : [parseInt(cid, 10)];
+        function postHour(hour) {
+          var h2 = hours[hour];
+          if (!h2 || !h2.changed) return Promise.resolve();
+          // #57: '✕ Remove' on the 1st choice clears the whole hour.
+          var ranked = h2.cleared || !h2.first ? []
+            : (h2.backup && h2.backup !== h2.first) ? [h2.first, h2.backup] : [h2.first];
           return fetch('/api/curriculum?action=class-signup-picks', {
             method: 'POST', headers: rwAuthHeaders(true),
             body: JSON.stringify({ session: _schedRep.session, hour: hour, kid_first_name: kid, ranked_class_ids: ranked, view_as: fam })
           }).then(function (r) { return r.json().then(function (x) { if (!r.ok) throw new Error((x && x.error) || 'Save failed'); }); });
         }
-        postHour('PM1', picks.PM1).then(function () { return postHour('PM2', picks.PM2); })
+        postHour('PM1').then(function () { return postHour('PM2'); })
           .then(function () { schedRefresh(); })
           .catch(function (e2) { alert(e2.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = 'Save'; });
       });
