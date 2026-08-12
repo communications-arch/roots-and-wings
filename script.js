@@ -9460,18 +9460,7 @@
         openPersonByDisplayName(this.getAttribute('data-ac-person'));
       });
     });
-    // #297 (Erin): inline "Choose this class" — reveal the kid + choice picker;
-    // load the family's kids if they weren't ready yet.
-    container.querySelectorAll('.ac-choose-btn').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var panel = this.parentNode.querySelector('.ac-signup-panel');
-        if (!panel) return;
-        if (!panel.hasAttribute('hidden')) { panel.setAttribute('hidden', ''); return; }
-        panel.removeAttribute('hidden');
-        if ((!_signup || !acSignupKidOptions()) && typeof loadClassSignupCard === 'function') loadClassSignupCard();
-      });
-    });
+    // #297 (Erin): inline per-card sign-up (kid + 1st/2nd choice) → save.
     container.querySelectorAll('.ac-signup-save').forEach(function (btn) {
       btn.addEventListener('click', function (ev) {
         ev.stopPropagation();
@@ -9548,13 +9537,13 @@
     if (signupOpen) {
       var pmHour = (e.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
       var kidOpts = acSignupKidOptions();
+      // Always-visible inline picker (Erin: no "Choose this class" toggle).
       html += '<div class="ac-signup">'
-        + '<button type="button" class="sc-btn ac-choose-btn" data-class="' + e.id + '">' + brandIconImg('afternoon', 'ag-icon') + ' Choose this class</button>'
-        + '<div class="ac-signup-panel" hidden data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (e.scheduled_hour === 'both' ? '1' : '') + '">'
+        + '<div class="ac-signup-panel" data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (e.scheduled_hour === 'both' ? '1' : '') + '">'
         + (kidOpts
-            ? '<label class="ac-signup-row"><span>Kid</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
-              + '<label class="ac-signup-row"><span>Choice</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option></select></label>'
-              + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save pick</button>'
+            ? '<label class="ac-signup-row"><span>Sign up</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
+              + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option></select></label>'
+              + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save</button>'
               + '<span class="ac-signup-msg"></span>'
             : '<span class="ac-signup-msg">Loading your kids…</span>')
         + '</div>'
