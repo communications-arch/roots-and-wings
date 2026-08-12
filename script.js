@@ -5511,6 +5511,27 @@
     var kids = s.kids || [];
     return kids.length > 0 && kids.every(function (k) { return signupKidHasSaved(s, k); });
   }
+  // #297 (Erin): a kid is COMPLETE when each PM hour has its required picks
+  // (2, or fewer if the hour offers fewer classes; a required 2-hour class
+  // ranked in PM1 fills PM2's slot too). Mirrors the modal's save validation.
+  function signupKidComplete(s, kid) {
+    var w = (s.working && s.working[kid]) || {};
+    var cPM1 = (s.classes && s.classes.PM1) || [];
+    var cPM2 = (s.classes && s.classes.PM2) || [];
+    var pm1 = rankedIdsFrom(w.PM1 || {}).slice(0, 2);
+    var pm2 = rankedIdsFrom(w.PM2 || {}).slice(0, 2);
+    var both = 0;
+    pm1.forEach(function (cid) { cPM1.forEach(function (x) { if (x.id === cid && x.hour === 'both' && !x.bothOptional) both++; }); });
+    var reqPM1 = Math.min(2, cPM1.length);
+    var reqPM2 = Math.max(0, Math.min(2, cPM2.length) - both);
+    return pm1.length >= reqPM1 && pm2.length >= reqPM2;
+  }
+  // The afternoon sign-up card stays visible until EVERY kid is complete
+  // (both PM hours have their 2 picks) — Erin, 2026-08-12.
+  function signupAllKidsComplete(s) {
+    var kids = s.kids || [];
+    return kids.length > 0 && kids.every(function (k) { return signupKidComplete(s, k); });
+  }
 
   // Once every kid is saved, the big picker collapses and the pending
   // choices live under Kids' Schedule; "Edit picks" reopens it.
@@ -5550,7 +5571,7 @@
     // sign-ups AND there's still a kid who needs picks (or someone asked
     // to edit). Reviewers manage non-open sessions from the Schedule
     // Builder's "Afternoon Class Sign-Ups" panel under the Approved badge.
-    var collapsed = signupAllKidsSaved(s) && !_signupPickerOpen;
+    var collapsed = signupAllKidsComplete(s) && !_signupPickerOpen;
     if (!live || collapsed) {
       card.style.display = 'none';
       // If the picker modal is open when the window state changes (last
@@ -6197,7 +6218,7 @@
             var nm = c ? c.name : ('Class #' + cid);
             var isAssist = !!(s.pick_assists && s.pick_assists[kid] && s.pick_assists[kid][cid]);
             return '<button type="button" class="signup-pick-link" data-pick-class="' + cid + '">' +
-                   (isLocked ? '' : '<span class="mf-pick-rank">' + (i + 1) + '</span>') +
+                   (isLocked ? '' : '<span class="mf-pick-rank">' + (i === 0 ? '1st' : 'Backup') + '</span>') +
                    '<span class="mf-pick-name">' + escapeHtml(nm) + (isAssist ? ' · assistant' : '') + '</span></button>';
           }).join('');
           h += '</span></div>';
@@ -6300,7 +6321,7 @@
         delete _signupKidOpen[kid];
         setTimeout(function () {
           btn.disabled = false; btn.textContent = orig;
-          if (signupAllKidsSaved(_signup)) _signupPickerOpen = false;
+          if (signupAllKidsComplete(_signup)) _signupPickerOpen = false;
           renderClassSignupCard();
         }, 900);
       })
@@ -9141,7 +9162,7 @@
     chain.then(function () {
       if (!_signup.picks) _signup.picks = {};
       _signup.picks[kid] = { PM1: rankedIdsFrom(_signup.working[kid].PM1 || {}).slice(0, 2), PM2: rankedIdsFrom(_signup.working[kid].PM2 || {}).slice(0, 2) };
-      if (msgEl) msgEl.textContent = !rank ? ('Removed ✓ — ' + kid) : isAssist ? ('Saved ✓ — ' + kid + ' (assistant)') : ('Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)');
+      if (msgEl) msgEl.textContent = !rank ? ('Removed ✓ — ' + kid) : isAssist ? ('Saved ✓ — ' + kid + ' (assistant)') : ('Saved ✓ — ' + kid + (rank === 1 ? ' (1st choice)' : ' (Backup)'));
       if (btn) btn.disabled = false;
       // #297 (Erin): update the My Family Kids' Schedule immediately.
       if (typeof renderClassSignupCard === 'function') renderClassSignupCard();
@@ -9628,7 +9649,7 @@
       // The family's kids already signed up for THIS class — ✕ to remove.
       if (mine.length) {
         html += '<div class="ac-mine">' + mine.map(function (m) {
-          var tag = m.assist ? 'assistant' : (m.rank === 1 ? '1st choice' : '2nd choice');
+          var tag = m.assist ? 'assistant' : (m.rank === 1 ? '1st choice' : 'Backup');
           return '<span class="ac-mine-chip">' + escapeHtml(m.kid) + ' <span class="ac-mine-rank">(' + tag + ')</span>'
             + ' <button type="button" class="ac-mine-x" data-kid="' + escapeHtml(m.kid) + '" title="Remove ' + escapeHtml(m.kid) + '’s sign-up">✕</button></span>';
         }).join('') + '</div>';
@@ -9637,7 +9658,7 @@
       html += '<div class="ac-signup-panel">'
         + (kidOpts
             ? '<label class="ac-signup-row"><span>Sign up</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
-              + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option>'
+              + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">Backup</option>'
                 + (e.open_to_teen_assistant ? '<option value="assist">assistant (Cedars/Pigeons)</option>' : '') + '</select></label>'
               + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save</button>'
               + '<span class="ac-signup-msg"></span>'
