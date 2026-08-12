@@ -9312,7 +9312,7 @@
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
-        html += '<h4 class="session-section-title">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
+        html += '<h4 class="session-section-title" style="margin-top:32px;">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
         html += '<div class="elective-card-grid">';
         dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
