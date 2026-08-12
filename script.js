@@ -5789,6 +5789,9 @@
     if (leads.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Led by</span>' + leads.map(staffChip).join('') + '</span>';
     if (assists.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Assisted by</span>' + assists.map(staffChip).join('') + '</span>';
     if (staff) h += '<div class="ac-staff">' + staff + '</div>';
+    // Caller-supplied control that belongs right by the staff (e.g. the
+    // coordination card's "needs N more — sign up" assist link).
+    if (opts.afterStaff) h += opts.afterStaff;
     h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max) + '</div>';
     return h;
   }
@@ -9371,19 +9374,20 @@
     // the Afternoon Class Sign-ups cards. The card shows everything inline now,
     // so the details modal is retired here (Erin, 2026-08-11) — it's a plain
     // container whose only interactive bit is the "needs N more" assist link.
+    // "needs N more — sign up" assist link, same as the Morning Classes table
+    // (Erin, 2026-08-11), placed right by the Assisted-by staff line.
+    var needMore = '';
+    if (e.helpers_needed > 0) {
+      var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
+      needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more ⚠ — sign up</button></div>';
+    }
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
       id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
-    }, { myNames: myNames });
-    // "needs N more — sign up" assist link, same as the Morning Classes table
-    // (Erin, 2026-08-11). stopPropagation keeps the click off the card's popup.
-    if (e.helpers_needed > 0) {
-      var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
-      html += '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more ⚠ — sign up</button></div>';
-    }
+    }, { myNames: myNames, afterStaff: needMore });
     html += '</div>';
     return html;
   }
