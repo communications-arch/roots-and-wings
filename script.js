@@ -9104,7 +9104,10 @@
       var fit = (typeof fitsKid === 'function' && typeof kidBandsFor === 'function') ? fitsKid(kidBandsFor(age, group), ageText) : null;
       if (fit === false) {
         if (!window.confirm('“' + (cls ? cls.name : 'This class') + '” is outside ' + kid + '’s listed age range.\n\nSign them up anyway?')) { if (msgEl) msgEl.textContent = ''; return; }
-        noteText = window.prompt('Optional note for the Afternoon Class Liaison — why this class fits ' + kid + ':', '') || '';
+        // Cancelling the note prompt cancels the whole sign-up (Erin).
+        var entered = window.prompt('Note for the Afternoon Class Liaison — why this class fits ' + kid + ' (Cancel to not sign up):', '');
+        if (entered === null) { if (msgEl) msgEl.textContent = ''; return; }
+        noteText = entered;
       }
     }
 
