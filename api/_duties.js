@@ -171,7 +171,14 @@ async function deriveCoverageSlots(sql, opts) {
       FROM people WHERE LOWER(family_email) = ${famEmail}`;
     ppl.forEach(p => {
       if (p.family_name && !familyName) familyName = p.family_name;
-      if (!namesMatch((p.first_name || '') + ' ' + (p.last_name || ''))) return;
+      // #341 audit: absent_person is built as first name + FAMILY surname,
+      // but a people row may carry a different legal last_name (maiden /
+      // hyphenated) or none at all — mirror the client's personFullName
+      // fallback and also try first + family_name. Widens only within this
+      // family's rows, so the M3 alias protection is untouched.
+      const legal = (p.first_name || '') + ' ' + (p.last_name || '');
+      const familial = (p.first_name || '') + ' ' + (p.family_name || '');
+      if (!namesMatch(legal) && !namesMatch(familial)) return;
       if (p.email) emails.add(norm(p.email));
       if (p.personal_email) emails.add(norm(p.personal_email));
     });
@@ -197,12 +204,15 @@ async function deriveCoverageSlots(sql, opts) {
     });
   }
   // Scheduled classes: lead + co-leads (#232: co-leads are leads) + helpers.
+  // #341 audit: the old single-name LIMIT 1 (no ORDER BY) subquery could
+  // resolve a shared submitter email to the WRONG family member's name —
+  // aggregate every matching people name and lead-match against them all.
   const cls = await sql`
     SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.scheduled_room,
            c.submitted_by_email, c.submitted_by_name, c.co_teachers,
-           (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+           (SELECT ARRAY_AGG(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '')) FROM people p
              WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
-                OR LOWER(p.personal_email) = LOWER(c.submitted_by_email) LIMIT 1) AS person_name
+                OR LOWER(p.personal_email) = LOWER(c.submitted_by_email)) AS person_names
     FROM class_submissions c
     WHERE c.school_year = ${opts.schoolYear} AND c.scheduled_session = ${opts.session}
       AND c.status = 'scheduled'`;
@@ -227,8 +237,14 @@ async function deriveCoverageSlots(sql, opts) {
     }
     if (!targets.length) return;
     const name = c.class_name;
-    const leadHit = isPerson(c.submitted_by_email, c.person_name) || isPerson(c.submitted_by_email, c.submitted_by_name)
-      || String(c.co_teachers || '').split(/[,;]+/).some(nm => namesMatch(nm));
+    // #341 audit widenings (all name paths, M3-safe): every people name on
+    // the submitter email; '(via …)' stripped from on-behalf names; co-
+    // teachers split on & / and as well as commas (all real prod shapes).
+    const typedName = String(c.submitted_by_name || '').replace(/\s*\(via[^)]*\)\s*$/i, '');
+    const leadHit = isPerson(c.submitted_by_email, '')
+      || (c.person_names || []).some(n => n && namesMatch(n))
+      || (typedName && namesMatch(typedName))
+      || String(c.co_teachers || '').split(/[,;&]+|\band\b/i).some(nm => nm.trim() && namesMatch(nm));
     if (leadHit) targets.forEach(t => push(t.block, 'teacher', 'Leading ' + name + ' ' + t.time + room, name));
     helpers.forEach(h => {
       if (h.class_submission_id !== c.id || !isPerson(h.person_email, h.person_name)) return;

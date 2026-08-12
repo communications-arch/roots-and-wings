@@ -2625,6 +2625,20 @@ module.exports = async function handler(req, res) {
         let submitterEmail = resolveSubmitterEmail(user, req.query.view_as);
         let submitterName = submitterEmail.toLowerCase() === user.email.toLowerCase()
           ? (user.name || '') : '';
+        // #341 audit: a View-As-filed class stored submitted_by_name = '',
+        // which killed the coverage deriver's name fallback for exactly the
+        // rows that need it (alias-keyed submissions). Resolve the viewed
+        // member's name from people best-effort.
+        if (!submitterName) {
+          try {
+            const snRows = await sql`
+              SELECT NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), '') AS nm FROM people
+              WHERE LOWER(email) = ${submitterEmail.toLowerCase()}
+                 OR LOWER(personal_email) = ${submitterEmail.toLowerCase()}
+              ORDER BY (role = 'mlc') DESC NULLS LAST LIMIT 1`;
+            if (snRows.length && snRows[0].nm) submitterName = snRows[0].nm;
+          } catch (snErr) { console.error('submitter name resolve (non-fatal):', snErr); }
+        }
         // Reviewers/liaisons can file a class ON BEHALF of a member (the
         // builder's "+ New Class", 2026-07-06 — liaisons recruit teachers
         // in conversation and enter the class themselves). Workspace email
