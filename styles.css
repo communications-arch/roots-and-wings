@@ -13768,7 +13768,7 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
    style its shared children so the two surfaces read identically. */
 .ac-body { gap: 4px; }
 .elective-card.ac-body { padding: 13px 15px; }
-.ac-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
+.ac-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; padding-bottom: 5px; border-bottom: 1px solid var(--color-border); } /* rule under the title (Erin) */
 .ac-title { font-weight: 700; font-size: 1rem; color: var(--color-text); line-height: 1.2; }
 .ac-room { margin-left: auto; font-size: 0.72rem; font-weight: 600; color: var(--color-text-light); white-space: nowrap; } /* far right of the title row */
 .ac-groves { display: inline-flex; flex-wrap: wrap; gap: 4px; }
@@ -13881,12 +13881,17 @@ button.ac-person-link:hover, button.ac-person-link:focus-visible { text-decorati
    reservation banner is outside .ac-body, so it keeps its loud treatment.) */
 .ac-body .signup-2hr-tag,
 .ac-body .signup-2hr-tag.signup-2hr-optional {
-  background: rgba(0, 0, 0, 0.07);
-  color: var(--color-text); /* bold + black (Erin) */
+  /* Erin: make the 2-hour badge stand out — a golden pill with a dark border
+     and bold dark text. */
+  background: rgba(var(--color-accent-light-rgb), 0.55);
+  border: 1.5px solid var(--color-accent-dark);
+  color: var(--color-text);
   font-weight: 700;
+  font-size: 0.72rem;
   text-transform: none;
   letter-spacing: normal;
   margin-left: 0;
+  padding: 2px 9px;
 }
 
 /* Detail popup: rank group headings + pending note + assistant tag. */
