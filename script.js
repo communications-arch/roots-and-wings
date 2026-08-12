@@ -9040,15 +9040,22 @@
         // the flat class-wide list stays as the fallback.
         var hourHelpers = (c.helpers_by_hour && c.helpers_by_hour[hourBlk]) || c.helpers || [];
         var assists = hourHelpers.map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
-        if (c.helpers_needed > 0) {
-          var need = 'needs ' + c.helpers_needed + ' more';
+        // #339 (Lyndsey): each hour row shows ITS OWN shortfall, and its
+        // button commits to THAT hour only (a whole-morning class used to
+        // book both hours from one button). Older cached payloads without
+        // the per-hour fields fall back to the class-wide count.
+        var hourNeed = (typeof c.assistants_wanted === 'number' && c.helpers_by_hour)
+          ? Math.max(0, c.assistants_wanted - hourHelpers.length)
+          : (c.helpers_needed || 0);
+        if (hourNeed > 0) {
+          var need = 'needs ' + hourNeed + ' more';
           // Erin 2026-08-12: self-serve assist moves end when the session's
           // sign-up window closes \u2014 show the shortfall as a plain note then
           // (the server 409s the write for non-reviewers either way).
           var amAssistFrozen = _coordPmSignups.session === sessionTabView
             && ['closed', 'locked'].indexOf(String(_coordPmSignups.windowStatus || '')) !== -1;
           assists += (assists ? ', ' : '') + (withBtn && !amIsMine(c) && !amAssistFrozen
-            ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(c.scheduled_hour || 'AM') + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + need + ' \u2014 sign up \u26a0</button>'
+            ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(hourBlk) + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class \u2014 this hour only">' + need + ' \u2014 sign up \u26a0</button>'
             : '<span class="ra-open-note" style="display:inline;">' + need + ' \u26a0</span>');
         }
         return {
@@ -9068,10 +9075,12 @@
         var liaison = amLiaisonHtml(g.name);
         if (placed) {
           amPlaced++;
-          var whole = placed.am1 && placed.am2 && placed.am1 === placed.am2;
+          // #339: every hour row carries its OWN one-hour sign-up button —
+          // a whole-morning class no longer books both hours from one
+          // button (each row's button commits just that row's hour).
           amBlocksHtml += buildMorningGroveBlock(g.name, {
             am1: placed.am1 ? amCells(g.name, placed.am1, 'AM1', true) : null,
-            am2: placed.am2 ? amCells(g.name, placed.am2, 'AM2', !whole) : null
+            am2: placed.am2 ? amCells(g.name, placed.am2, 'AM2', true) : null
           }, {
             ages: ages, liaison: liaison, tappable: true,
             myRow: !!((placed.am1 && amIsMine(placed.am1)) || (placed.am2 && amIsMine(placed.am2)))
@@ -9159,8 +9168,9 @@
         var VG_BLK = { AM1: 'Morning Hour 1', AM2: 'Morning Hour 2', AM: 'both morning hours' };
         var blkTxt = VG_BLK[rawBlock] || 'the morning';
         if (!window.confirm('Sign up to assist “' + (self.getAttribute('data-vg-label') || 'this class') + '” during ' + blkTxt + '?\n\nYou can remove it later from your My Family schedule.')) return;
-        // A whole-morning ('AM') class assists both hours → send no specific
-        // block; an AM1/AM2 class assists just that hour.
+        // #339 (Lyndsey): every morning assist is a ONE-hour commitment —
+        // each hour row's button sends its own AM1/AM2 block. ('' = legacy
+        // whole-class fallback for a stale cached page.)
         var sendBlock = (rawBlock === 'AM1' || rawBlock === 'AM2') ? rawBlock : '';
         var cred = localStorage.getItem('rw_google_credential');
         self.disabled = true;
@@ -10907,6 +10917,10 @@
           // only, not the whole builder queue (approved-but-unplaced
           // classes also sit in the palette but aren't waiting on review).
           h += '<li id="ws-todo-classreview-item"' + (crPmOnly ? ' data-pm-only="1"' : '') + ' hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-todo-classreview-count">0</span><span class="ws-link-icon">' + brandIconImg('todo', 'ag-icon') + '</span><span>Review new ' + (crPmOnly ? 'afternoon ' : '') + 'class submissions — schedule, mark reviewed, or decline</span></button></li>';
+          // #340 (Lyndsey): a leader edited a PLACED class — it stays on
+          // the schedule; this To Do asks a reviewer to look the changes
+          // over (opening the class's Edit form and saving clears it).
+          h += '<li id="ws-todo-editedcls-item" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-editedcls-count">0</span><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span id="ws-editedcls-label">Review edits to scheduled classes</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">' + brandIconImg('classes', 'ag-icon') + '</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
@@ -26157,11 +26171,11 @@
             + (sk === 99 ? 'Flexible — any session' : 'Session ' + sk) + yearBit + '</li>';
         }
         var sessText = (s.session_preferences || []).map(function (x) { return SESSION_PREF_LABELS[x] || x; }).join(', ') || '—';
-        // #42 (Colleen): owners can edit drafted/scheduled classes too —
-        // saving sends the class back to 'submitted' for re-approval
-        // (server clears the placement). Withdraw stays pre-approval only.
-        // #211: past rows are read-only history — no Edit (re-approval on
-        // a finished session makes no sense).
+        // #42/#340: owners can edit drafted/scheduled classes — the class
+        // STAYS placed and reviewers get a look-it-over To Do (#340
+        // replaced the old revert-to-submitted). Withdraw stays
+        // pre-approval only. #211: past rows are read-only history — no
+        // Edit.
         var canEdit = !isPast && (s.status === 'submitted' || s.status === 'drafted' || s.status === 'scheduled');
         // #173 (Lyndsey): a DECLINED class can be removed from the tab too
         // (same soft-withdraw as pre-approval — nothing is deleted).
@@ -26175,6 +26189,17 @@
         out += '<div style="color:var(--color-text-light);font-size:0.85rem;margin-top:3px;">';
         out += periodTag + ' · For: ' + escClsHtml(sessText);
         out += '</div>';
+        // #336 (Erin): a SCHEDULED class says exactly where it landed —
+        // Session, half-day, hour, and room when assigned.
+        if (s.status === 'scheduled' && s.scheduled_session) {
+          var schedHour = { AM: 'Both hours', AM1: 'Hour 1', AM2: 'Hour 2', PM1: 'Hour 1', PM2: 'Hour 2', both: 'Both hours' }[s.scheduled_hour] || '';
+          out += '<div style="color:var(--color-teal);font-weight:600;font-size:0.85rem;margin-top:3px;">'
+            + 'Scheduled: Session ' + s.scheduled_session
+            + ' · ' + (s.class_period === 'AM' ? 'Morning' : 'Afternoon')
+            + (schedHour ? ' · ' + schedHour : '')
+            + (s.scheduled_room ? ' · ' + escClsHtml(s.scheduled_room) : '')
+            + '</div>';
+        }
         out += '<div style="margin-top:0.5rem;display:flex;gap:6px;flex-wrap:wrap;">';
         if (canEdit) {
           out += '<button class="sc-btn mf-classsubs-edit" data-id="' + s.id + '">Edit</button>';
@@ -26222,12 +26247,12 @@
     }
     if (currentSubs.length > 0) {
       subSort(currentSubs);
-      // #55: the re-approval warning applies to every drafted/scheduled
-      // row, so it's shown once above the list instead of once per row.
+      // #340 (Lyndsey): edits no longer knock a class off the schedule —
+      // the note says what actually happens now (reviewers get a To Do).
       var anyEditWarns = currentSubs.some(function (s) { return s.status === 'drafted' || s.status === 'scheduled'; });
       if (anyEditWarns) {
         html += '<p style="margin:0 0 0.5rem;font-size:0.8rem;color:var(--color-text-light);">';
-        html += 'Editing an approved or scheduled class sends it back to the VP / Afternoon Class Liaison for re-approval — it comes off the schedule until it’s re-placed.';
+        html += 'Editing a scheduled class keeps it on the schedule — the VP / Afternoon Class Liaison are alerted to look your changes over.';
         html += '</p>';
       }
       html += buildSubList(currentSubs, false);
@@ -26488,13 +26513,11 @@
     html += 'Teach something you love — a morning class or an afternoon elective. Need inspiration? Browse the <button type="button" class="ws-inline-link" data-resource-action="curriculum">Curriculum Library</button>. ';
     html += 'The VP and Afternoon Class Liaison will reach out when they\'re planning the next session.';
     html += '</p>';
-    // #42: editing an already drafted/scheduled class sends it back for
-    // re-approval — say so up front, before the member commits the edit.
+    // #340 (Lyndsey, replaces #42's revert): an owner's edit keeps the
+    // class scheduled; reviewers get a To Do + bell to look it over.
     if (isEdit && (cur.status === 'drafted' || cur.status === 'scheduled')) {
       html += '<p style="background:#FFF3E0;color:#7A4E00;font-size:0.85rem;border-radius:8px;padding:8px 12px;margin:0 0 1rem;">';
-      // #61: shortened per Colleen — the "comes off the schedule" clause
-      // read as alarming; re-approval already implies it.
-      html += '⚠️ This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + '. Saving an edit sends it back to the VP / Afternoon Class Liaison for re-approval.';
+      html += 'This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + ' — it stays there when you save. The VP / Afternoon Class Liaison will be alerted to review your changes.';
       html += '</p>';
     }
     // Placeholder for the "Need inspiration?" strip — filled asynchronously
@@ -26538,10 +26561,22 @@
     html += '</div></div>';
 
     // 4. Hour preference (afternoon only)
+    // #337 (Erin): single-select RADIOS, not checkboxes — one preference
+    // per class (same treatment as the #271 assistant count). A legacy
+    // multi-value row pre-selects its strongest pick (2hr flavors first).
+    var hourPrefCur = (function () {
+      var hp = cur.hour_preference || [];
+      if (hp.indexOf('2hr-required') !== -1) return '2hr-required';
+      if (hp.indexOf('2hr-optional') !== -1) return '2hr-optional';
+      return hp[0] || '';
+    })();
     html += '<div class="cls-field" id="clsHourField">';
     html += '<label class="cls-label">Which afternoon hour? <span class="cls-req">*</span></label>';
     html += '<div class="cls-cb-group">';
-    HOUR_PREF_VALUES.forEach(function (v) { html += checkbox('hour_preference', v, HOUR_PREF_LABELS[v]); });
+    HOUR_PREF_VALUES.forEach(function (v) {
+      html += '<label class="cls-cb-label"><input type="radio" name="clsHourPref" value="' + v + '"'
+        + (hourPrefCur === v ? ' checked' : '') + '> ' + escClsHtml(HOUR_PREF_LABELS[v] || v) + '</label>';
+    });
     html += '</div></div>';
 
     // 4b. Morning hours (2026-07-06): a group's morning can be one 2-hour
@@ -26638,7 +26673,9 @@
         + (curAssist === n ? ' checked' : '') + '> ' + n + ' Classroom assistant' + (n > 1 ? 's' : '') + '</label>';
     });
     html += '</div>';
-    html += '<label class="cls-cb-label" style="margin-top:8px;">';
+    // #338 (Lyndsey): student assistants are an AFTERNOON thing — morning
+    // classes never offer the option (hidden by applyPeriodUi).
+    html += '<label class="cls-cb-label" id="clsTeenAssistWrap" style="margin-top:8px;">';
     html += '<input type="checkbox" id="clsTeenAssist"' + (cur.open_to_teen_assistant ? ' checked' : '') + '> ';
     html += 'Willing to host a Cedars or Pigeons (12+) assistant';
     html += '</label>';
@@ -26856,7 +26893,8 @@
       // PM-only fields hide for morning; morning gets its own hour radios
       // + single age-group dropdown instead. With no pick yet, BOTH sets
       // stay hidden so nothing anchors the member to one answer.
-      ['clsHourField', 'clsSpaceField', 'clsMaxField', 'clsPmAgeField'].forEach(function (fid) {
+      // clsTeenAssistWrap: #338 — student assistants are PM-only.
+      ['clsHourField', 'clsSpaceField', 'clsMaxField', 'clsPmAgeField', 'clsTeenAssistWrap'].forEach(function (fid) {
         var el = document.getElementById(fid);
         if (el) el.hidden = (p !== 'PM');
       });
@@ -26928,7 +26966,11 @@
         session_preferences: collectChecked('session_preferences'),
         hour_preference: period === 'AM'
           ? [amHourSel ? amHourSel.value : 'both']
-          : collectChecked('hour_preference'),
+          // #337: single-select radio → exactly [v].
+          : (function () {
+              var r = document.querySelector('input[name="clsHourPref"]:checked');
+              return r ? [r.value] : [];
+            })(),
         assistant_count: (function () {
           // #271: single-select radio → exactly [n].
           var r = document.querySelector('input[name="clsAssistCount"]:checked');
@@ -26958,7 +27000,7 @@
         age_groups: period === 'AM' ? [amGroupSel.value] : collectChecked('age_groups'),
         age_groups_other: '',
         pre_enroll_kids: cur.pre_enroll_kids || '', // field not in v1 UI, preserve existing value on edit
-        open_to_teen_assistant: document.getElementById('clsTeenAssist').checked,
+        open_to_teen_assistant: period !== 'AM' && document.getElementById('clsTeenAssist').checked, // #338: PM-only
         prerequisites: document.getElementById('clsPrereq').value.trim(),
         other_info: document.getElementById('clsOtherInfo').value.trim()
       };
@@ -33039,6 +33081,15 @@
       (d.lottery_moves || []).length, 'Tell families about lottery moves — Session ' + d.session);
     paint('ws-todo-acl-confirm-item', 'ws-acl-confirm-count', 'ws-acl-confirm-label',
       confirmN, 'Send class confirmations — Session ' + d.session);
+    // #340: leader-edited placed classes awaiting a reviewer look-over —
+    // not window-gated (an edit needs eyes whenever it lands). Names the
+    // classes so the reviewer knows what to open in the Builder.
+    var editedList = d.edited_classes || [];
+    var editedLbl = 'Review edits to scheduled classes — '
+      + editedList.slice(0, 3).map(function (c) { return '“' + c.class_name + '”'; }).join(', ')
+      + (editedList.length > 3 ? ' +' + (editedList.length - 3) + ' more' : '');
+    paint('ws-todo-editedcls-item', 'ws-editedcls-count', 'ws-editedcls-label',
+      editedList.length, editedList.length ? editedLbl : 'Review edits to scheduled classes');
     if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();
   }
 

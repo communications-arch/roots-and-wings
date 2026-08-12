@@ -2583,3 +2583,10 @@ WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE sort_order <> 0);
 UPDATE class_submissions
    SET assistant_count = ARRAY[(SELECT MAX(x) FROM UNNEST(assistant_count) AS x)]
  WHERE COALESCE(array_length(assistant_count, 1), 0) > 1;
+
+-- 2026-08-12 (#340, Lyndsey): a class leader's edit no longer knocks the
+-- class off the schedule. The edit stamps owner_edited_at/by instead;
+-- reviewers (VP / Afternoon Class Liaison) get a To Do + bell to look the
+-- changes over, and any reviewer edit/review clears the stamp.
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_at TIMESTAMPTZ;
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_by TEXT DEFAULT '';

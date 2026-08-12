@@ -397,7 +397,9 @@ function normalizeSubmission(body) {
   const prerequisites   = String(body.prerequisites || '').trim().slice(0, 1000);
   const other_info      = String(body.other_info || '').trim().slice(0, 2000);
   const school_year     = String(body.school_year || '2026-2027').trim().slice(0, 20);
-  const open_to_teen_assistant = !!body.open_to_teen_assistant;
+  // #338 (Lyndsey): student assistants are afternoon-only — a morning
+  // class can never carry the flag, whatever the client sent.
+  const open_to_teen_assistant = !isAM && !!body.open_to_teen_assistant;
 
   return {
     class_period, class_name, session_preferences, hour_preference, assistant_count,
@@ -845,6 +847,7 @@ function serializeSubmission(r, helpers) {
     description: r.description,
     other_info: r.other_info || '',
     status: r.status,
+    owner_edited_at: r.owner_edited_at || null, // #340: pending reviewer look-over
     scheduled_session: r.scheduled_session,
     scheduled_hour: r.scheduled_hour,
     scheduled_age_range: r.scheduled_age_range,
@@ -1182,6 +1185,9 @@ module.exports = async function handler(req, res) {
               return hb;
             })(),
             helpers_needed: psNeeded(r),
+            // #339: per-hour open-spot math client-side (wanted per hour −
+            // helpers_by_hour[hour]) so each hour row shows ITS OWN need.
+            assistants_wanted: Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]),
             age_groups: r.age_groups || [],
             age_groups_other: r.age_groups_other || '',
             max_students: r.max_students || 0,
@@ -1460,6 +1466,7 @@ module.exports = async function handler(req, res) {
               FROM class_signup_picks WHERE school_year = ${stYear} AND session_number = ${stSess}`,
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.assistant_count,
                      c.max_students, c.lead_email_sent_at, c.lottery_run_at,
+                     c.owner_edited_at, c.owner_edited_by,
                      LOWER(c.submitted_by_email) AS teacher_email,
                      (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
                        WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
@@ -1569,6 +1576,17 @@ module.exports = async function handler(req, res) {
           }
         });
         adultsUnplaced.sort((a, b) => a.name.localeCompare(b.name));
+
+        // #340 (Lyndsey): classes whose OWNER edited after placement —
+        // the class stays on the schedule; reviewers get this To Do to
+        // look the changes over (opening + saving the class clears it).
+        const editedClasses = stCls
+          .filter(r => r.owner_edited_at)
+          .map(r => ({
+            id: r.id, class_name: r.class_name, class_period: r.class_period,
+            teacher: r.teacher_name || '', edited_at: r.owner_edited_at
+          }))
+          .sort((a, b) => a.class_name.localeCompare(b.class_name));
 
         // 3. Classes short on assistants (per hour for whole-morning classes,
         // once per class otherwise).
@@ -1684,7 +1702,10 @@ module.exports = async function handler(req, res) {
           // same gate with a 409. The client explains the lock from
           // kids_unpicked, so no extra flag is needed.
           confirm_pending: kidsUnpicked.length > 0 ? [] : confirmPending,
-          lottery_moves: lotteryMoves
+          lottery_moves: lotteryMoves,
+          // #340: owner-edited placed classes awaiting a reviewer look-over.
+          // Not window-gated — an edit needs eyes whenever it happens.
+          edited_classes: editedClasses
         });
       }
 
@@ -3665,6 +3686,10 @@ module.exports = async function handler(req, res) {
             reviewer_notes = ${clean.reviewer_notes},
             reviewed_by_email = ${user.email},
             reviewed_at = NOW(),
+            -- #340: any reviewer action counts as having looked the
+            -- owner's edit over — the review To Do clears.
+            owner_edited_at = NULL,
+            owner_edited_by = '',
             updated_at = NOW()
           WHERE id = ${id}
           RETURNING *
@@ -3752,40 +3777,34 @@ module.exports = async function handler(req, res) {
         }
         let finalRow = updated[0];
         if (ownerRevert) {
-          // Back to the reviewers' inbox: status returns to 'submitted' and
-          // the LIVE placement columns are cleared so the class drops out of
-          // every approved-only surface (My Classes, builder placed grid,
-          // published schedule) until it's re-placed. The prior placement is
-          // preserved in the notification below; reviewer_notes and any kid
-          // sign-up picks / helper roster stay attached, so re-approving
-          // into the same session keeps everyone enrolled.
-          const reverted = await sql`
+          // #340 (Lyndsey): an owner's edit NO LONGER knocks the class off
+          // the schedule (the old behavior reverted to 'submitted' and
+          // cleared the placement, silently emptying published schedules
+          // and sign-ups). The placement stands; the edit stamps
+          // owner_edited_at/by, which surfaces as a review To Do for the
+          // VP / Afternoon Class Liaison and clears when a reviewer edits
+          // or re-reviews the class.
+          const stamped = await sql`
             UPDATE class_submissions SET
-              status = 'submitted',
-              scheduled_session = NULL,
-              scheduled_hour = NULL,
-              scheduled_age_range = NULL,
-              scheduled_room = NULL,
-              scheduled_backup_room = '',
-              reviewed_by_email = NULL,
-              reviewed_at = NULL,
+              owner_edited_at = NOW(),
+              owner_edited_by = ${user.realEmail || user.email},
               updated_at = NOW()
             WHERE id = ${id}
             RETURNING *
           `;
-          finalRow = reverted[0];
+          finalRow = stamped[0];
           // Tell the VP + Afternoon Class Liaison (best-effort — the edit
           // itself never fails on a notification hiccup).
           try {
-            const priorPlace = row.status === 'scheduled'
-              ? 'was scheduled: Session ' + row.scheduled_session
+            const placeBit = row.status === 'scheduled'
+              ? 'scheduled: Session ' + row.scheduled_session
                 + (row.scheduled_hour ? ' · ' + row.scheduled_hour : '')
                 + (row.scheduled_room ? ' · ' + row.scheduled_room : '')
-              : 'was drafted';
+              : 'drafted';
             const editorLabel = row.submitted_by_name || row.submitted_by_email;
-            const notifTitle = 'Class re-submitted after edit: ' + clean.class_name;
-            const notifBody = editorLabel + ' edited "' + clean.class_name + '" (' + priorPlace
-              + ') — it needs re-approval and is off the schedule until re-placed.';
+            const notifTitle = 'Class edited: ' + clean.class_name;
+            const notifBody = editorLabel + ' edited "' + clean.class_name + '" (' + placeBit
+              + ') — it STAYS on the schedule; please look the changes over (Class Builder To Do).';
             const recipients = ['vicepresident@rootsandwingsindy.com'];
             const pmEmail = await getPmAssistantEmail();
             if (pmEmail && recipients.indexOf(pmEmail.toLowerCase()) === -1) recipients.push(pmEmail.toLowerCase());
@@ -3797,13 +3816,21 @@ module.exports = async function handler(req, res) {
               try {
                 await sendToUser(sql, rcpt, {
                   title: notifTitle, body: notifBody,
-                  tag: 'class-resubmit-' + id, url: '/members.html'
+                  tag: 'class-edited-' + id, url: '/members.html'
                 });
-              } catch (pushErr) { console.error('class resubmit push error:', pushErr); }
+              } catch (pushErr) { console.error('class edited push error:', pushErr); }
             }
           } catch (notifyErr) {
-            console.error('class resubmit notification failed:', notifyErr);
+            console.error('class edited notification failed:', notifyErr);
           }
+        } else if (isRowReviewer) {
+          // #340: a reviewer saving the edit form IS the review — clear
+          // any pending owner-edit stamp.
+          const cleared = await sql`
+            UPDATE class_submissions SET owner_edited_at = NULL, owner_edited_by = ''
+            WHERE id = ${id} AND owner_edited_at IS NOT NULL
+            RETURNING *`;
+          if (cleared.length) finalRow = cleared[0];
         }
         return res.status(200).json({ submission: serializeSubmission(finalRow, editHelpers) });
       }

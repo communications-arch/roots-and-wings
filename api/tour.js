@@ -2676,6 +2676,10 @@ async function handleWaiversCounts(req, res) {
   }
   try {
     const sql = getSql();
+    // #334 (Erin): a WITHDRAWN family's unsigned waivers are archived —
+    // they drop out of the pending/resent counts (signed rows stay as the
+    // liability record). Family resolved by ws.family_email, the person's
+    // own email, or the linked registration's email.
     const rows = await sql`
       SELECT
         COUNT(*) FILTER (WHERE ws.signed_at IS NULL AND ws.last_sent_at IS NULL)     AS pending,
@@ -2684,6 +2688,12 @@ async function handleWaiversCounts(req, res) {
       LEFT JOIN registrations r ON r.id = ws.registration_id
       WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition')
         AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
+        AND NOT (ws.signed_at IS NULL AND EXISTS (
+          SELECT 1 FROM member_profiles mp
+          WHERE mp.withdrawn_at IS NOT NULL
+            AND (LOWER(mp.family_email) = LOWER(NULLIF(ws.family_email, ''))
+              OR LOWER(mp.family_email) = LOWER(NULLIF(ws.person_email, ''))
+              OR (r.email IS NOT NULL AND LOWER(mp.family_email) = LOWER(r.email)))))
     `;
     const r = rows[0] || {};
     return res.status(200).json({
@@ -2742,6 +2752,14 @@ async function handleWaiversReport(req, res) {
       LEFT JOIN registrations r ON r.id = ws.registration_id
       WHERE (${season}::text IS NULL OR ws.season = ${season})
         AND (ws.registration_id IS NULL OR r.declined_at IS NULL)
+        -- #334 (Erin): withdrawn family ⇒ UNSIGNED waivers archive out of
+        -- the report; signed rows stay (liability record of attendance).
+        AND NOT (ws.signed_at IS NULL AND EXISTS (
+          SELECT 1 FROM member_profiles mp
+          WHERE mp.withdrawn_at IS NOT NULL
+            AND (LOWER(mp.family_email) = LOWER(NULLIF(ws.family_email, ''))
+              OR LOWER(mp.family_email) = LOWER(NULLIF(ws.person_email, ''))
+              OR (r.email IS NOT NULL AND LOWER(mp.family_email) = LOWER(r.email)))))
       ORDER BY COALESCE(ws.last_sent_at, ws.sent_at, ws.signed_at, ws.created_at) DESC
     `;
     // Re-shape into the three buckets the Waivers Report renderer
@@ -9041,7 +9059,13 @@ async function handleBoardGlance(req, res) {
         FROM waiver_signatures ws
         LEFT JOIN registrations reg ON reg.id = ws.registration_id
         WHERE ws.role IN ('backup_coach', 'one_off', 'guest', 'community_liaison', 'kid_addition')
-          AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)`;
+          AND (ws.registration_id IS NULL OR reg.declined_at IS NULL)
+          AND NOT (ws.signed_at IS NULL AND EXISTS (
+            SELECT 1 FROM member_profiles mp
+            WHERE mp.withdrawn_at IS NOT NULL
+              AND (LOWER(mp.family_email) = LOWER(NULLIF(ws.family_email, ''))
+                OR LOWER(mp.family_email) = LOWER(NULLIF(ws.person_email, ''))
+                OR (reg.email IS NOT NULL AND LOWER(mp.family_email) = LOWER(reg.email)))))`;
       return r[0].pending;
     }),
     metric(async () => {
