@@ -40620,6 +40620,9 @@
         try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
       }
       if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
+      // #333: refetch eagerly (repaints the Session tab on land) instead of
+      // waiting for the next render to notice the stale cache.
+      if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
     }).catch(function (err) {
       if (errEl) { errEl.textContent = err.message || 'Network error.'; errEl.style.display = ''; }
     });
@@ -40650,6 +40653,13 @@
       if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not update approval.');
       publishedSchedule.loaded = false; // approval publishes/unpublishes the PM side
       loadScheduleBuilder();
+      // #333 (Colleen): approving the afternoon side publishes it — Co-op
+      // Coordination must show the classes without a page refresh, same
+      // live-repaint treatment as the sign-up window changes (#332).
+      if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
+      if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+        try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+      }
     }).catch(function (err) {
       alert(err.message || 'Could not update approval.');
       loadScheduleBuilder();
