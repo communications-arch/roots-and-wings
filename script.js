@@ -5787,11 +5787,16 @@
       var disp = escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : ''));
       return linkNames ? '<button type="button" class="ac-person-link" data-ac-person="' + escapeHtml(s2.name) + '">' + disp + '</button>' : disp;
     };
+    // Keep each name + its trailing comma together so a comma never wraps to
+    // the start of the next line (Erin, 2026-08-12).
+    var joinNames = function (arr) {
+      return arr.map(function (s2, i) { return '<span class="ac-req-name">' + nm(s2) + (i < arr.length - 1 ? ',' : '') + '</span>'; }).join(' ');
+    };
     // #297 (Erin): one line — "KIDS REQUESTS (24 of 15)" (count of max).
     var label = 'Kids requests' + (max > 0 ? ' (' + detailed.length + ' of ' + max + ')' : (detailed.length ? ' (' + detailed.length + ')' : ''));
     var h = '<span class="signup-class-count ac-reqs-label">' + escapeHtml(label) + '</span>';
-    if (first.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + first.map(nm).join(', ') + '</span>';
-    if (backup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + backup.map(nm).join(', ') + '</span>';
+    if (first.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + joinNames(first) + '</span>';
+    if (backup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + joinNames(backup) + '</span>';
     return h;
   }
 

@@ -175,8 +175,8 @@ t('#297: signupRequestsHtml splits first choice from backup, tags assistants', f
   const html = api.signupRequestsHtml(
     [{ name: 'Ava', rank: 1 }, { name: 'Ben', rank: 1, assistant: true }, { name: 'Cara', rank: 2 }], 12);
   assert(/Kids requests \(3 of 12\)/.test(html), 'one-line label with count-of-max, got ' + html);
-  assert(/First choice:<\/span> Ava, Ben \(assistant\)/.test(html), 'first choices listed, assistant tagged');
-  assert(/Backup:<\/span> Cara/.test(html), 'backups listed separately');
+  assert(/First choice:<\/span>[\s\S]*Ava,[\s\S]*Ben \(assistant\)/.test(html), 'first choices listed, assistant tagged');
+  assert(/Backup:<\/span>[\s\S]*Cara/.test(html), 'backups listed separately');
 });
 t('#297: signupRequestsHtml empty → bare "Kids requests" label, no count when max 0', function () {
   const api = makeApi({});

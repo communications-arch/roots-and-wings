@@ -13775,7 +13775,7 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-groves .ag-icon { height: 0.95em; }
 .ac-groves .ag-grouptag { margin-right: 4px; gap: 2px; }
 .ac-meta { font-size: 0.72rem; color: var(--color-text-light); }
-.ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; }
+.ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; margin-bottom: 4px; }
 /* Staff: photo circles + names, grouped Led by / Assisted by — same avatars as
    the Class Details popup (#297). */
 .ac-staff { display: flex; flex-wrap: wrap; gap: 5px 16px; align-items: center; }
@@ -13819,8 +13819,9 @@ button.ac-person-link:hover, button.ac-person-link:focus-visible { text-decorati
 /* Tagged request roster on a picker card (Erin, 2026-08-11): who has asked
    for this class so far, split first-choice vs backup. Requests, not
    placements — the picker's header note spells out the lottery caveat once. */
-.signup-class-reqs { font-size: 0.72rem; color: var(--color-text-light); margin-top: 1px; line-height: 1.35; }
-.signup-class-reqs-backup { opacity: 0.85; }
+.signup-class-reqs { font-size: 0.72rem; color: var(--color-text-light); margin-top: 1px; line-height: 1.5; }
+.signup-class-reqs-backup { opacity: 0.85; margin-top: 5px; } /* space between First choice + Backup */
+.ac-req-name { white-space: nowrap; } /* keep "Ava," together — no comma at line start */
 .signup-req-tag { font-weight: 600; color: var(--color-text); }
 .signup-note-requests { font-style: italic; }
 /* Save button right-aligned under the kid's class grid (Erin, 2026-07-15). */
