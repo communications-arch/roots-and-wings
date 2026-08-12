@@ -5822,6 +5822,8 @@
     // Caller-supplied control that belongs right by the staff (e.g. the
     // coordination card's "needs N more — sign up" assist link).
     if (opts.afterStaff) h += opts.afterStaff;
+    // #297 (Erin): a small "Kids requests" label above the requests list.
+    h += '<div class="ac-reqs-label">Kids requests</div>';
     h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max, opts.linkNames) + '</div>';
     return h;
   }
@@ -9355,10 +9357,10 @@
         // #297 (Erin): sign up for afternoon classes straight from here when the
         // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
         var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
-        html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:40px;">'
-          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
-          + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
-          + '</div>';
+        // #297 (Erin): sign-up happens inline on the cards now \u2014 no separate
+        // "Choose classes" modal link here. Anchor id lets the My Family card
+        // jump straight to this section.
+        html += '<h4 class="session-section-title" id="coordAfternoonClasses" style="margin-top:40px;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>';
         // Load the family's sign-up data so the per-card kid picker is ready.
         if (pmSignupOpen && !_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
         html += coordGrovePillBar(dbSess.pm);
@@ -9434,14 +9436,6 @@
     // #218: Everyone's sign-ups grid, opened at the session being viewed.
     var sessGridBtn = container.querySelector('#sessSchedVolGridBtn');
     if (sessGridBtn) sessGridBtn.addEventListener('click', function () { showVolunteerGridModal(viewSess); });
-    // #297: sign up for afternoon classes from here — opens the same per-kid
-    // picker the My Family card uses. Load the family's sign-up data if it
-    // hasn't been fetched yet (the modal repaints when it lands).
-    var coordPmBtn = container.querySelector('#coordPmSignupBtn');
-    if (coordPmBtn) coordPmBtn.addEventListener('click', function () {
-      if (typeof showPmSignupModal === 'function') showPmSignupModal();
-      if (!_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
-    });
     // #297 (Erin): grove filter pills under the Afternoon Classes header.
     var coordGroveBar = container.querySelector('#coordGroveFilter');
     if (coordGroveBar) coordGroveBar.addEventListener('click', function (ev) {

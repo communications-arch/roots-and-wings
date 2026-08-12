@@ -2188,9 +2188,11 @@ module.exports = async function handler(req, res) {
             LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE p.school_year = ${vmYear} AND p.session_number = ${vmSess}
               AND p.hour IN ('PM1', 'PM2') AND p.rank = 1
-              AND (p.kid_id IS NULL OR EXISTS (
+              -- Transition-tolerant (Colleen, 2026-08-11): show unless explicitly
+              -- withdrawn — matches the class-signup "who signed up" display.
+              AND (p.kid_id IS NULL OR NOT EXISTS (
                 SELECT 1 FROM kid_enrollments e
-                WHERE e.kid_id = p.kid_id AND e.season = ${vmYear} AND e.status = 'enrolled'))
+                WHERE e.kid_id = p.kid_id AND e.season = ${vmYear} AND e.status <> 'enrolled'))
             GROUP BY p.class_submission_id, p.hour, k.nickname, k.last_name, mp.family_name, p.kid_first_name
           `;
           const kidsByClassHour = {};
@@ -2355,10 +2357,15 @@ module.exports = async function handler(req, res) {
           LEFT JOIN member_profiles mp
             ON LOWER(mp.family_email) = LOWER(p.family_email)
           WHERE p.school_year = ${sy} AND p.session_number = ${session}
-            AND (p.kid_id IS NULL OR EXISTS (
+            -- Transition-tolerant (Colleen, 2026-08-11): show every signed-up
+            -- kid UNLESS they've been explicitly withdrawn this season. The old
+            -- "must have an 'enrolled' row" filter hid nearly everyone, because
+            -- kid_enrollments is sparsely populated (a kid with no row is not
+            -- the same as a withdrawn kid).
+            AND (p.kid_id IS NULL OR NOT EXISTS (
               SELECT 1 FROM kid_enrollments e
               WHERE e.kid_id = p.kid_id AND e.season = ${sy}
-                AND e.status = 'enrolled'))
+                AND e.status <> 'enrolled'))
           GROUP BY p.class_submission_id, p.kid_first_name, LOWER(p.family_email),
                    k.nickname, k.last_name, mp.family_name
         `;
