@@ -7481,7 +7481,7 @@
           // session and every later one.
           var covSess = parseInt(a.session_number, 10) || currentSession;
           var popup = null;
-          if (s.block === 'AM' && s.group_or_class && BRAND_AGE_GROUPS.indexOf(s.group_or_class) !== -1) {
+          if ((s.block === 'AM' || s.block === 'AM1' || s.block === 'AM2') && s.group_or_class && BRAND_AGE_GROUPS.indexOf(s.group_or_class) !== -1) {
             popup = { type: 'amClass', group: s.group_or_class, session: covSess };
           } else if ((s.block === 'PM1' || s.block === 'PM2') && s.group_or_class) {
             popup = { type: 'elective', name: s.group_or_class };
@@ -25203,6 +25203,9 @@
       var g = { classes: [], electives: [] };
       (typeof myClassSubmissions !== 'undefined' && Array.isArray(myClassSubmissions) ? myClassSubmissions : []).forEach(function (s) {
         if (s.status !== 'scheduled' || s.scheduled_session !== sess) return;
+        // Same school-year guard as the duty derivation: my-submissions can
+        // carry prior years' rows with the same session number.
+        if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && s.school_year && ACTIVE_SESSION_YEAR && s.school_year !== ACTIVE_SESSION_YEAR) return;
         var into = s.class_period === 'AM' ? g.classes : g.electives;
         if (s.class_name) into.push(String(s.class_name).toLowerCase());
         if (s.class_period === 'AM') (s.age_groups || []).forEach(function (gr) { if (gr) g.classes.push(String(gr).toLowerCase()); });
@@ -25212,7 +25215,11 @@
         function mine(c) {
           var names = (c.helpers || []).slice();
           if (c.teacher) names.push(c.teacher);
-          if (c.co_teachers) names.push(c.co_teachers);
+          // co_teachers is comma/semicolon-joined text — split like every
+          // other read site so multi-co-lead classes match each person.
+          String(c.co_teachers || '').split(/[,;]+/).forEach(function (ct) {
+            if (ct.trim()) names.push(ct.trim());
+          });
           return names.some(function (h) {
             return parentFullNames.some(function (full) { return nameMatchAbsence(h, full); });
           });

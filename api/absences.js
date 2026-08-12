@@ -77,21 +77,29 @@ const GENERAL_BLOCK_LABEL = {
 };
 
 // Mark a slot covered by the member the reporter named (#179): resolve the
-// name to an email best-effort, stamp the claim, and send them a personal
-// heads-up. Returns true when the slot ended up claimed with an email
-// (false = name didn't resolve; slot stays open for the board).
+// name to an email, stamp the claim, and send them a personal heads-up.
+// Returns true when the slot ended up claimed with an email; false when the
+// name didn't resolve to an emailed people row OR the slot no longer exists.
+// On false NOTHING is written — the slot stays genuinely open/claimable.
+// (Review 2026-08-12: the old version stamped claimed_by_email='' + the
+// name on resolve failure, leaving a row the board showed as uncovered but
+// the claim gate's WHERE claimed_by_email IS NULL could never match.)
 async function preassignSlot(sql, user, absence, slotId, role_description, replName) {
   const pr = await sql`
     SELECT email, personal_email FROM people
     WHERE LOWER(TRIM(CONCAT_WS(' ', first_name, last_name))) = ${replName.toLowerCase()}
     LIMIT 1`;
   const replEmail = pr.length ? String(pr[0].email || pr[0].personal_email || '').toLowerCase() : '';
-  await sql`
+  if (!replEmail) return false;
+  // RETURNING guards the small window where a concurrent Coverage Board
+  // ?refresh=1 pruned this just-inserted row — claim gone ⇒ no notification.
+  const upd = await sql`
     UPDATE coverage_slots
     SET claimed_by_email = ${replEmail}, claimed_by_name = ${replName},
         claimed_at = NOW(), assigned_by = ${user.realEmail || user.email}
-    WHERE id = ${slotId}`;
-  if (!replEmail) return false;
+    WHERE id = ${slotId}
+    RETURNING id`;
+  if (upd.length === 0) return false;
   // absence_date is a string on the POST path, a Date when read from the
   // DB (edit path) — same normalization as notifyCoverageNeeded.
   const rIso = absence.absence_date instanceof Date
@@ -675,11 +683,11 @@ module.exports = async function handler(req, res) {
         const replName = replByKey[slotKey(slot)] || '';
         if (!replName) { openSlots.push(slotRow); continue; }
         try {
-          await preassignSlot(sql, user,
+          const preOk = await preassignSlot(sql, user,
             { id: absenceId, absence_date, absent_person },
             ins[0].id, slot.role_description, replName);
+          if (!preOk) openSlots.push(slotRow); // name didn't resolve — stays open
         } catch (replErr) {
-          // Name didn't resolve or the update failed — slot stays open.
           console.error('replacement pre-assign (non-fatal):', replErr);
           openSlots.push(slotRow);
         }
@@ -688,16 +696,21 @@ module.exports = async function handler(req, res) {
       // Named stand-ins for duty-less blocks (Erin 2026-08-02 / 2026-08-12):
       // the server derives NO 'general' slots, so the board lists real needs
       // only — but a member naming who's stepping in still records that
-      // cover. A named general inserts PRE-CLAIMED; if the name doesn't
-      // resolve the row is removed again rather than left as an open generic
-      // ask. Unnamed generals from the client are ignored entirely.
+      // cover. A named general only EXISTS claimed: if the name doesn't
+      // resolve (preassignSlot false) the row is removed again rather than
+      // left as an open generic ask. Unnamed generals are ignored entirely.
+      // One per block per request; legacy whole-morning 'AM' is not a
+      // general-picker block (the modal always maps it onto AM1/AM2).
       if (coverageNeeded) {
+        const handledGenBlocks = new Set();
         for (const cs of (Array.isArray(body.slots) ? body.slots : [])) {
           if (String(cs.role_type) !== 'general') continue;
           const rn = String(cs.replacement_name || '').trim().slice(0, 120);
           if (!rn) continue;
           const blk = String(cs.block || '');
-          if (!VALID_BLOCKS.includes(blk) || !blocks.includes(blk)) continue;
+          if (blk === 'AM' || !VALID_BLOCKS.includes(blk) || !blocks.includes(blk)) continue;
+          if (handledGenBlocks.has(blk)) continue;
+          handledGenBlocks.add(blk);
           if (generatedSlots.some(g => g.block === blk)) continue; // block has real duties
           const desc = GENERAL_BLOCK_LABEL[blk] || blk;
           const insG = await sql`
@@ -705,9 +718,13 @@ module.exports = async function handler(req, res) {
             VALUES (${absenceId}, ${blk}, 'general', ${desc}, '')
             RETURNING id`;
           try {
-            await preassignSlot(sql, user,
+            const genOk = await preassignSlot(sql, user,
               { id: absenceId, absence_date, absent_person }, insG[0].id, desc, rn);
-            createdSlots.push({ block: blk, role_type: 'general', role_description: desc });
+            if (genOk) {
+              createdSlots.push({ block: blk, role_type: 'general', role_description: desc });
+            } else {
+              await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
+            }
           } catch (replErr) {
             console.error('general stand-in pre-assign (non-fatal):', replErr);
             await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
@@ -883,12 +900,14 @@ module.exports = async function handler(req, res) {
             }
             if (match.claimed_by_email || match.claimed_by_name) {
               // Claim survives (this is still a real duty); only a NEW, different
-              // pre-picked replacement reassigns it — never auto-release.
+              // pre-picked replacement reassigns it — never auto-release. A
+              // false return (name didn't resolve) leaves the old claim alone.
               if (replName && replName !== match.claimed_by_name) {
                 try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, gen.role_description, replName); }
                 catch (replErr) { console.error('edit reassign (non-fatal):', replErr); }
               }
             } else if (replName) {
+              // False return = name didn't resolve — the slot simply stays open.
               try { await preassignSlot(sql, user, { id, absence_date, absent_person }, match.id, gen.role_description, replName); }
               catch (replErr) { console.error('edit preassign (non-fatal):', replErr); }
             }
@@ -898,12 +917,12 @@ module.exports = async function handler(req, res) {
               VALUES (${id}, ${gen.block}, ${gen.role_type}, ${gen.role_description}, ${gen.group_or_class})
               RETURNING id
             `;
+            let preassigned = false;
             if (replName) {
-              try { await preassignSlot(sql, user, { id, absence_date, absent_person }, ins[0].id, gen.role_description, replName); }
-              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); openNew.push({ block: gen.block, role_type: gen.role_type, role_description: gen.role_description }); }
-            } else {
-              openNew.push({ block: gen.block, role_type: gen.role_type, role_description: gen.role_description });
+              try { preassigned = await preassignSlot(sql, user, { id, absence_date, absent_person }, ins[0].id, gen.role_description, replName); }
+              catch (replErr) { console.error('edit preassign (non-fatal):', replErr); }
             }
+            if (!preassigned) openNew.push({ block: gen.block, role_type: gen.role_type, role_description: gen.role_description });
           }
         }
         // Named stand-ins for duty-less blocks — same rule as POST (Erin
@@ -914,12 +933,15 @@ module.exports = async function handler(req, res) {
         // otherwise insert pre-claimed, removing the row if the name fails
         // to resolve. Spliced out of `unmatched` so the prune below never
         // deletes a row we just claimed.
+        const handledGenBlocksEdit = new Set();
         for (const cs of (Array.isArray(body.slots) ? body.slots : [])) {
           if (String(cs.role_type) !== 'general') continue;
           const rnG = String(cs.replacement_name || '').trim().slice(0, 120);
           if (!rnG) continue;
           const blkG = String(cs.block || '');
-          if (!VALID_BLOCKS.includes(blkG) || !blocks.includes(blkG)) continue;
+          if (blkG === 'AM' || !VALID_BLOCKS.includes(blkG) || !blocks.includes(blkG)) continue;
+          if (handledGenBlocksEdit.has(blkG)) continue;
+          handledGenBlocksEdit.add(blkG);
           if (editGenerated.some(g => g.block === blkG)) continue; // block has real duties
           const descG = GENERAL_BLOCK_LABEL[blkG] || blkG;
           const exIdx = unmatched.findIndex(s => s.block === blkG && s.role_type === 'general');
@@ -928,7 +950,10 @@ module.exports = async function handler(req, res) {
             const exClaimed = !!(exG.claimed_by_email || exG.claimed_by_name);
             if (!exClaimed || rnG !== exG.claimed_by_name) {
               try {
-                await preassignSlot(sql, user, { id, absence_date, absent_person }, exG.id, exG.role_description, rnG);
+                const reOk = await preassignSlot(sql, user, { id, absence_date, absent_person }, exG.id, exG.role_description, rnG);
+                // Unclaimed row + name that didn't resolve = no arranged cover
+                // to keep — remove it (generals only exist claimed now).
+                if (!reOk && !exClaimed) await sql`DELETE FROM coverage_slots WHERE id = ${exG.id} AND claimed_by_email IS NULL`;
               } catch (replErr) {
                 console.error('edit general stand-in pre-assign (non-fatal):', replErr);
                 if (!exClaimed) await sql`DELETE FROM coverage_slots WHERE id = ${exG.id} AND claimed_by_email IS NULL`;
@@ -940,7 +965,8 @@ module.exports = async function handler(req, res) {
               VALUES (${id}, ${blkG}, 'general', ${descG}, '')
               RETURNING id`;
             try {
-              await preassignSlot(sql, user, { id, absence_date, absent_person }, insG[0].id, descG, rnG);
+              const genOk = await preassignSlot(sql, user, { id, absence_date, absent_person }, insG[0].id, descG, rnG);
+              if (!genOk) await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
             } catch (replErr) {
               console.error('edit general stand-in pre-assign (non-fatal):', replErr);
               await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
