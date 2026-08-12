@@ -13770,6 +13770,7 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .elective-card.ac-body { padding: 13px 15px; }
 .ac-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; }
 .ac-title { font-weight: 700; font-size: 1rem; color: var(--color-text); line-height: 1.2; }
+.ac-room { margin-left: auto; font-size: 0.72rem; font-weight: 600; color: var(--color-text-light); white-space: nowrap; } /* far right of the title row */
 .ac-groves { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .ac-groves .ag-name { font-size: 0.7rem; font-weight: 600; }
 .ac-groves .ag-icon { height: 0.95em; }
@@ -13881,8 +13882,8 @@ button.ac-person-link:hover, button.ac-person-link:focus-visible { text-decorati
 .ac-body .signup-2hr-tag,
 .ac-body .signup-2hr-tag.signup-2hr-optional {
   background: rgba(0, 0, 0, 0.07);
-  color: var(--color-text-light);
-  font-weight: 600;
+  color: var(--color-text); /* bold + black (Erin) */
+  font-weight: 700;
   text-transform: none;
   letter-spacing: normal;
   margin-left: 0;

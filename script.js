@@ -5607,11 +5607,11 @@
     var savedCount = kidsAll.filter(function (k) { return signupKidHasSaved(s, k); }).length;
     var alertH = '<h3 class="mf-card-title" data-help-key="mf-signup">' + brandIconImg('afternoon') + ' Afternoon Class Sign-ups</h3>';
     alertH += '<p>' + (status === 'open'
-      ? 'Session ' + s.session + ' sign-ups are <strong>open</strong> — pick a 1st and 2nd choice for each hour, for each kid.'
+      ? 'Session ' + s.session + ' sign-ups are <strong>open</strong> — pick a 1st choice and a backup for each hour, for each kid.'
       : status === 'closed'
         ? 'Session ' + s.session + ' sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.')
         : 'Session ' + s.session + ' sign-ups are <strong>locked</strong>.')
-      + (kidsAll.length ? ' Saved for <strong>' + savedCount + ' of ' + kidsAll.length + '</strong> kid' + (kidsAll.length === 1 ? '' : 's') + '.' : '') + '</p>';
+      + '</p>';
     alertH += '<button type="button" class="btn btn-primary" id="pmSignupOpenBtn">' + (status === 'open' ? 'Choose classes' : 'View picks') + '</button>';
     card.innerHTML = alertH;
     // #297 (Erin): sign-up happens inline on the Co-op Coordination Afternoon
@@ -5632,7 +5632,7 @@
     var canEdit = (status === 'open') || (reviewer && status === 'closed');
     if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
-    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st and 2nd choice</strong> for each hour for each kid. Classes matching their age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
+    else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st choice and a backup</strong> for each hour for each kid. Classes matching their age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
     // Requests are visible on each class so families can see who else is
     // interested — but they're only requests until the lottery runs, so the
     // caveat lives here ONCE (not repeated on every card). Hidden when locked,
@@ -5754,7 +5754,7 @@
   function showPmSignupModal() {
     var body = renderReportModal({
       title: '🌇 Afternoon Class Sign-ups',
-      subtitle: 'Pick a 1st and 2nd choice for each hour, for each kid — classes matching their age are highlighted.',
+      subtitle: 'Pick a 1st choice and a backup for each hour, for each kid — classes matching their age are highlighted.',
       bodyId: 'pm-signup-modal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -5822,8 +5822,10 @@
       ? '<button type="button" class="ac-title signup-class-name-link" data-detail-class="' + opts.titleLinkId + '" title="Class details">' + escapeHtml(norm.name) + '</button>'
       : '<span class="ac-title">' + escapeHtml(norm.name) + '</span>';
     // #313 (Lyndsey): groves sit on their OWN line below the title, on every
-    // card — parallel formatting, not inline-beside-title on some.
-    var h = '<div class="ac-head">' + title + '</div>';
+    // card — parallel formatting, not inline-beside-title on some. Once a room
+    // is assigned it shows on the far right of the title row (Erin, 2026-08-12).
+    var h = '<div class="ac-head">' + title
+      + (norm.room ? '<span class="ac-room">' + escapeHtml(norm.room) + '</span>' : '') + '</div>';
     if (groveTag) h += '<div class="ac-groves">' + groveTag + '</div>';
     // Time lives in the section header, and the room may not be assigned yet —
     // so neither shows on the card (Erin, 2026-08-11). The 2-hour badge stays,
