@@ -804,56 +804,14 @@
           allPeople.sort(function(a, b) { return nickOr(a.nickname, a.name).localeCompare(nickOr(b.nickname, b.name)); });
         }
 
-        // ── AM Classes ──
-        if (data.amClasses) {
-          // Map API keys to existing AM_CLASSES structure
-          for (var group in data.amClasses) {
-            AM_CLASSES[group] = data.amClasses[group];
-          }
-        }
-
-        // ── AM Support Roles ──
-        if (data.amSupportRoles) {
-          for (var s in data.amSupportRoles) {
-            AM_SUPPORT_ROLES[s] = data.amSupportRoles[s];
-          }
-        }
-
-        // ── PM Electives ──
-        if (data.pmElectives) {
-          for (var s in data.pmElectives) {
-            PM_ELECTIVES[s] = data.pmElectives[s];
-          }
-        }
-
-        // ── PM Support Roles ──
-        if (data.pmSupportRoles) {
-          for (var s in data.pmSupportRoles) {
-            var incoming = data.pmSupportRoles[s];
-            var existing = PM_SUPPORT_ROLES[s] || {};
-            // Keep hardcoded board duty values when live data is empty
-            if (incoming.boardDutiesPM2 && incoming.boardDutiesPM2.length === 0 && existing.boardDutiesPM2 && existing.boardDutiesPM2.length > 0) {
-              incoming.boardDutiesPM2 = existing.boardDutiesPM2;
-            }
-            if (incoming.boardDutiesPM1 && incoming.boardDutiesPM1.length === 0 && existing.boardDutiesPM1 && existing.boardDutiesPM1.length > 0) {
-              incoming.boardDutiesPM1 = existing.boardDutiesPM1;
-            }
-            // Handle old flat boardDuties field from cached API responses
-            if (incoming.boardDuties && !incoming.boardDutiesPM1) {
-              incoming.boardDutiesPM1 = incoming.boardDuties;
-              if (!incoming.boardDutiesPM2) incoming.boardDutiesPM2 = existing.boardDutiesPM2 || [];
-              delete incoming.boardDuties;
-            }
-            PM_SUPPORT_ROLES[s] = incoming;
-          }
-        }
-
         // ── Special Events (DB) ──
         // Approved events for the active season straight from
         // special_events/special_event_people via /api/sheets. The old
-        // sheet-shaped data.specialEvents / volunteerCommittees /
+        // sheet-shaped data.amClasses / pmElectives / amSupportRoles /
+        // pmSupportRoles / specialEvents / volunteerCommittees /
         // cleaningCrew / classIdeas keys are ignored — those tabs retired
-        // with the Sheets retirement (issue #25); cleaning comes from
+        // with the Sheets retirement (issue #25), and only a stale cached
+        // payload could still carry them; cleaning comes from
         // applyCleaningData (DB) and class ideas from class-inspiration.
         if (Array.isArray(data.specialEventsDb)) {
           SPECIAL_EVENTS_DB = data.specialEventsDb;
@@ -2894,21 +2852,6 @@
     coopCalendarNeedsSetup = !byYear[billingActive] || byYear[billingActive].length === 0;
   }
 
-  // ── Morning classes (by group, per session) ──
-  var AM_CLASSES = {
-  };
-
-  // ── Afternoon electives (per session) ──
-  var PM_ELECTIVES = {
-  };
-
-  // ── AM Support Roles (per session) ──
-  var AM_SUPPORT_ROLES = {
-  };
-
-  var PM_SUPPORT_ROLES = {
-  };
-
   // ── Cleaning crew assignments (structured by area) ──
   var CLEANING_CREW = {
     liaison: '',
@@ -3037,25 +2980,9 @@
     if (found) showPersonDetail(found.person);
   }
 
-  // Helper: build a clickable staff member chip
-  function staffChip(fullName, role) {
-    var name = String(fullName || '').trim();
-    if (!name) return '';
-    var found = findPersonByFullName(name);
-    var tag = found ? 'button' : 'span';
-    var dataAttr = found ? ' data-staff-idx="' + found.idx + '"' : '';
-    var pronouns = found && found.person.pronouns ? ' <em class="staff-pronouns">(' + found.person.pronouns + ')</em>' : '';
-    return '<' + tag + ' class="staff-role"' + dataAttr + '>' +
-      '<div class="staff-dot" style="background:' + faceColor(name) + '"><span>' + name.charAt(0) + '</span></div>' +
-      '<div class="staff-label"><strong>' + name + pronouns + '</strong><small>' + role + '</small></div>' +
-      '</' + tag + '>';
-  }
-
   // Is this a class/group filter? Handle "Teens" alias for "Pigeons"
-  // Anchored to the brand age-group list (members.html filter pills),
-  // not AM_CLASSES — AM_CLASSES is populated from the Master sheet's
-  // AM Volunteer tab and stays empty on dev/preview, which used to
-  // make "Saplings"-style filters silently fall through to "Everyone".
+  // Anchored to the brand age-group list (members.html filter pills) —
+  // the sheet-era AM_CLASSES map retired with the Sheets retirement (#25).
   var AM_GROUP_ROOMS = {
     Saplings: 'Love', Sassafras: 'Trust', Oaks: 'Patience', Maples: 'Faithfulness',
     Birch: 'MPR', Willows: 'Goodness', Pigeons: 'MYF', Cedars: 'JYF'
@@ -3274,12 +3201,6 @@
     // so the labels track FAMILIES whenever the directory is opened or filtered.
     refreshDirectoryGroupPills();
     var query = (directorySearch ? directorySearch.value : '').toLowerCase();
-    var staff = AM_CLASSES[activeFilter];
-    // Class View requires the AM Volunteer sheet payload (staff + sessions).
-    // When that's missing — e.g., dev/preview skips the Master sheet —
-    // fall through to the face-grid view so kids in this group still
-    // render, even if the staff banner doesn't.
-    var isClassView = isGroupFilter(activeFilter) && !query && !!staff && !!staff.sessions;
     var html = '';
     var shown = 0;
 
@@ -3311,79 +3232,12 @@
       return '';
     }
 
-    // ---- Class view (group filter, no search) — cards with extra info ----
-    if (isClassView) {
-      // Staff banner with room + age info
-      var sess = staff.sessions[currentSession];
-      html += '<div class="class-staff-banner">';
-      html += '<div class="class-staff-header">';
-      // Bare grove name (Erin, 2026-07-31) — the "Ages" meta right beside
-      // it already carries the roster-aware range once.
-      html += '<span class="class-staff-title">' + escapeHtml(activeFilter) + '</span>';
-      html += '<span class="class-staff-meta">Room: ' + (sess ? sess.room : '') + ' &middot; Ages ' + staff.ages;
-      if (staff.note) html += ' &middot; ' + staff.note;
-      if (sess && sess.topic) html += '<br><em>' + sess.topic + '</em>';
-      html += '</span>';
-      html += '</div>';
-      html += '<div class="class-staff-roles">';
-      html += staffChip(staff.liaison, 'Liaison (year-long)');
-      if (sess) {
-        html += staffChip(sess.teacher, 'Leader (Session ' + currentSession + ')');
-        sess.assistants.forEach(function (a) {
-          html += staffChip(a, 'Assistant (Session ' + currentSession + ')');
-        });
-      }
-      html += '</div></div>';
+    // ---- Face grid (all filters) ----
+    // The sheet-era "Class View" staff banner (AM_CLASSES) retired with
+    // the Sheets retirement (#25) — group filters render the same face
+    // grid as everything else.
+    {
 
-      // Class-wide allergy / medical alerts — mirrors the Class Pack callout
-      // so teachers see these whether they're on-screen or printed.
-      var classAllergies = [];
-      allPeople.forEach(function (p) {
-        if (p.type === 'kid' && p.group === activeFilter && p.schedule !== 'afternoon' && p.allergies) {
-          classAllergies.push({ name: p.name + ' ' + (p.lastName || p.family), allergies: p.allergies });
-        }
-      });
-      if (classAllergies.length > 0) {
-        html += '<div class="class-allergy-alerts"><div class="class-allergy-title">\u26A0 Allergy & Medical Alerts</div><ul>';
-        classAllergies.forEach(function (c) {
-          html += '<li><strong>' + escapeHtml(c.name) + ':</strong> ' + escapeHtml(c.allergies) + '</li>';
-        });
-        html += '</ul></div>';
-      }
-
-      // Face cards for kids in this group (excluding afternoon-only)
-      allPeople.forEach(function (person, idx) {
-        if (person.type !== 'kid' || person.group !== activeFilter) return;
-        if (person.schedule === 'afternoon') return;
-
-        var classCardFirst = nickOr(person.nickname, person.name);
-        var displayName = person.lastName && person.lastName !== person.family
-          ? classCardFirst + ' ' + person.lastName
-          : classCardFirst;
-        var bgStyle = faceColor(person.name);
-        // First-year families: green card outline (.yb-card-new) instead of a
-        // 🌱 badge — same cue, less clutter. Tooltip preserves the meaning.
-        var isNewM = isNewMemberPerson(person);
-        var notReEnrolled = isNotReEnrolledPerson(person);
-        var extras = '';
-        if (person.pronouns) extras += '<div class="yb-pronouns">' + escapeHtml(person.pronouns) + '</div>';
-        if (person.allergies) extras += '<div class="yb-allergy">' + escapeHtml(person.allergies) + '</div>';
-        if (person.schedule === 'morning') extras += '<div class="yb-schedule">AM only</div>';
-        if (person.photoConsent === false) extras += '<div class="yb-no-photo" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</div>';
-        if (notReEnrolled) extras += '<div class="yb-inactive-badge" title="This family hasn’t registered for the upcoming year yet.">Not re-enrolled</div>';
-
-        html += '<button class="yb-card yb-card-class' + (isNewM ? ' yb-card-new' : '') + (notReEnrolled ? ' yb-card-inactive' : '') + (person.photoConsent === false ? ' yb-card-no-photo' : '') + '" data-idx="' + idx + '" aria-label="' + escapeHtml(displayName + ' ' + person.family) + (isNewM ? ' (first-year family)' : '') + (notReEnrolled ? ' (not re-enrolled)' : '') + '">' +
-          '<div class="yb-photo" style="background:' + bgStyle + '"><span>' + escapeHtml(classCardFirst.charAt(0)) + '</span></div>' +
-          '<div class="yb-name">' + escapeHtml(displayName) + '</div>' +
-          '<div class="yb-subtitle">' + escapeHtml(person.group || '') + '</div>' +
-          '<div class="yb-family">' + escapeHtml((person.familyDisplay || person.family) + ' Family') + '</div>' +
-          extras +
-          '</button>';
-        shown++;
-      });
-
-    } else {
-      // ---- Face grid view (Everyone / Main Learning Coach / search) ----
       // The "parents" filter is now scoped to Main Learning Coach only.
       // BLCs and third+ parents (role='parent') still show under
       // "Everyone" but the labelled MLC pill stays honest — users
@@ -3542,25 +3396,13 @@
     var allergyPrintBtn = directoryGrid.querySelector('#dir-allergy-print');
     if (allergyPrintBtn) allergyPrintBtn.addEventListener('click', printAllergiesList);
     if (directoryCount) {
-      if (isClassView) {
-        directoryCount.textContent = shown + ' students in ' + activeFilter;
-      } else {
-        directoryCount.textContent = shown + ' of ' + allPeople.length + ' people';
-      }
+      directoryCount.textContent = shown + ' of ' + allPeople.length + ' people';
     }
 
     // Click handlers — face cards
     directoryGrid.querySelectorAll('.yb-card').forEach(function (card) {
       card.addEventListener('click', function () {
         var idx = parseInt(this.getAttribute('data-idx'), 10);
-        showPersonDetail(allPeople[idx]);
-      });
-    });
-
-    // Click handlers — staff banner people
-    directoryGrid.querySelectorAll('[data-staff-idx]').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        var idx = parseInt(this.getAttribute('data-staff-idx'), 10);
         showPersonDetail(allPeople[idx]);
       });
     });
@@ -3578,13 +3420,15 @@
     var sessInfo = SESSION_DATES[currentSession];
     if (!sessInfo) return '';
 
-    // For a parent, scan AM classes + PM electives + support roles.
-    // For a kid, pull the kid's AM group topic/room + their PM electives.
+    // Kid: their AM grove + PM electives (DB-backed). The old parent scan
+    // of sheet-era AM_CLASSES / PM_ELECTIVES / support-role rosters retired
+    // with the Sheets retirement (#25) — adult duties are server-derived on
+    // My Responsibilities now, so parents simply skip this section.
     var am = [], pm1 = [], pm2 = [];
 
     function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-    // #191 (Erin): grove rows show icon + brand-colored bare name \u2014 no
+    // #191 (Erin): grove rows show icon + brand-colored bare name — no
     // age range.
     function groveHtml(g) {
       return (typeof ageGroupIconHtml === 'function' ? ageGroupIconHtml(g) + ' ' : '')
@@ -3593,13 +3437,7 @@
     if (person.type === 'kid') {
       // AM: kid's group = their AM class
       var group = person.group;
-      var amClass = group && AM_CLASSES[group];
-      var amSess = amClass && amClass.sessions && amClass.sessions[currentSession];
-      if (amSess) {
-        var amLine = groveHtml(group);
-        if (amSess.topic) amLine += ' \u2014 ' + esc(amSess.topic);
-        am.push({ label: amLine, detail: amSess.room ? esc(amSess.room) : '' });
-      } else if (group) {
+      if (group) {
         am.push({ label: groveHtml(group), detail: '' });
       }
       // PM: kid's electives
@@ -3614,101 +3452,6 @@
       // Kid-only honoring the morning/afternoon flag
       if (person.schedule === 'morning') { pm1 = []; pm2 = []; }
       if (person.schedule === 'afternoon') { am = []; }
-    } else {
-      // Parent — scan roles
-      var lastName = person.lastName || fam.name;
-      var full = person.name + ' ' + lastName;
-      // Normalize for comparison: collapse whitespace, swap curly quotes for
-      // straight, and lowercase. Handles cross-tab spelling drift (different
-      // people type different quotes / extra spaces in the same sheet).
-      function norm(s) {
-        return String(s == null ? '' : s)
-          .replace(/[\u2018\u2019\u02BC]/g, "'")
-          .replace(/\s+/g, ' ')
-          .trim()
-          .toLowerCase();
-      }
-      var fullN = norm(full);
-      var myFirstN = norm(person.name).split(' ')[0];
-      var myLastN = norm(lastName);
-      function isMe(n) {
-        if (!n) return false;
-        var s = norm(n);
-        if (!s) return false;
-        if (s === fullN) return true;
-        // Fallback for "Erin B", "Erin B.", "Aimee O'Connor Gading" (whose
-        // directory parent name is "Aimee O'Connor" with family "Gading"),
-        // middle initials, etc. Accept when first-name matches exactly AND
-        // last word matches family name exactly OR is an abbreviation of it.
-        var parts = s.split(' ');
-        if (parts.length < 2) return false;
-        var first = parts[0].replace(/[^a-z']/g, '');
-        var last = parts[parts.length - 1].replace(/[^a-z]/g, '');
-        if (first !== myFirstN) return false;
-        if (last === myLastN) return true;
-        if (last.length <= 2 && myLastN.length > 0 && last.charAt(0) === myLastN.charAt(0)) return true;
-        return false;
-      }
-
-      // AM classes (teacher / assistant)
-      Object.keys(AM_CLASSES).forEach(function (groupName) {
-        var staff = AM_CLASSES[groupName];
-        var sess = staff.sessions && staff.sessions[currentSession];
-        if (!sess) return;
-        if (isMe(sess.teacher)) {
-          am.push({ label: groveHtml(groupName) + ' \u2014 Leading', detail: sess.room ? esc(sess.room) : '' });
-        }
-        (sess.assistants || []).forEach(function (a) {
-          if (isMe(a)) am.push({ label: groveHtml(groupName) + ' \u2014 Assisting', detail: sess.room ? esc(sess.room) : '' });
-        });
-      });
-      // AM support (floater / prep / board)
-      var amSupport = AM_SUPPORT_ROLES && AM_SUPPORT_ROLES[currentSession];
-      if (amSupport) {
-        ['10-11', '11-12'].forEach(function (slot) {
-          ['floaters', 'prepPeriod', 'boardDuties'].forEach(function (key) {
-            var arr = amSupport[key] && amSupport[key][slot];
-            if (!arr) return;
-            arr.forEach(function (name) {
-              if (!isMe(name)) return;
-              var label = key === 'floaters' ? 'Floater' : key === 'prepPeriod' ? 'Prep Period' : 'Board Duties';
-              am.push({ label: label + ' ' + slot, detail: '' });
-            });
-          });
-        });
-      }
-
-      // PM electives (leader / assistant)
-      var sessElectives = PM_ELECTIVES[currentSession] || [];
-      sessElectives.forEach(function (elec) {
-        var inPM1 = elec.hour === 1 || elec.hour === 'both';
-        var inPM2 = elec.hour === 2 || elec.hour === 'both';
-        function add(role) {
-          var label = esc(elec.name) + ' \u2014 ' + role;
-          var detail = elec.room ? esc(elec.room) : '';
-          if (inPM1) pm1.push({ label: label, detail: detail });
-          if (inPM2) pm2.push({ label: label, detail: detail });
-        }
-        if (isMe(elec.leader)) add('Leading');
-        (elec.assistants || []).forEach(function (a) { if (isMe(a)) add('Assisting'); });
-      });
-
-      // PM support (floater / prep period / board duties / supply closet)
-      var pmSupport = PM_SUPPORT_ROLES && PM_SUPPORT_ROLES[currentSession];
-      if (pmSupport) {
-        // Prefer hour-specific floater arrays; fall back to the combined
-        // `floaters` list (surfaces on PM1 only) for older API responses.
-        var flPM1 = pmSupport.floatersPM1;
-        var flPM2 = pmSupport.floatersPM2;
-        if (!flPM1 && !flPM2 && pmSupport.floaters) flPM1 = pmSupport.floaters;
-        (flPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Floater', detail: 'Available to cover' }); });
-        (flPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Floater', detail: 'Available to cover' }); });
-        (pmSupport.prepPeriodPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Prep Period', detail: 'Room setup' }); });
-        (pmSupport.prepPeriodPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Prep Period', detail: 'Room setup' }); });
-        (pmSupport.boardDutiesPM1 || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Board Duties', detail: '' }); });
-        (pmSupport.boardDutiesPM2 || []).forEach(function (name) { if (isMe(name)) pm2.push({ label: 'Board Duties', detail: '' }); });
-        (pmSupport.supplyCloset || []).forEach(function (name) { if (isMe(name)) pm1.push({ label: 'Supply Closet', detail: 'Manage supplies' }); });
-      }
     }
 
     // If the person has nothing in any block, skip the section entirely.
@@ -4025,42 +3768,17 @@
     }
 
     if (p.type === 'amClass') {
-      var cls = AM_CLASSES[p.group];
-      var sess = cls ? cls.sessions[p.session] : null;
+      // Grove header only — the sheet-era liaison/room/topic/staff header
+      // (AM_CLASSES) retired with the Sheets retirement (#25); DB-scheduled
+      // classes carry staff via showDbClassPopup above. This popup's job now
+      // is the grove roster below.
       html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">';
       // Erin 2026-07-31 (View Classmates): grove icon + bare name — no
       // range in the title; each kid carries their own (age) below.
       html += '<h3 style="margin:0;">' + (typeof ageGroupIconHtml === 'function' ? ageGroupIconHtml(p.group) + ' ' : '') + '<span class="ag-name ' + ageGroupClass(p.group) + '">' + escapeHtml(p.group) + '</span></h3>';
-      if (cls && cls.liaison) {
-        html += '<span style="font-size:0.85rem;color:var(--color-text-light);">Liaison: <strong style="color:var(--color-text);">' + cls.liaison + '</strong></span>';
-      }
       html += '</div>';
       html += '<div class="elective-meta">';
       html += '<span>10:00 &ndash; 12:00</span>';
-      html += '<span>' + (sess ? sess.room : '') + '</span>';
-      html += '</div>';
-      if (sess && sess.topic) html += '<p class="elective-description" style="font-style:italic;">' + sess.topic + '</p>';
-      html += '<div class="elective-staff-list">';
-      if (sess && sess.teacher) {
-        var teacherPerson = lookupPerson(sess.teacher);
-        var teacherEmail = teacherPerson ? teacherPerson.email : '';
-        var teacherFamily = teacherPerson ? teacherPerson.family : '';
-        html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(sess.teacher) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(sess.teacher, sess.teacher, teacherEmail, teacherFamily) + '</div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + sess.teacher + pronounTag(teacherPerson) + '</strong><small style="color:var(--color-text-light);">Leader</small></div>';
-        html += '</div>';
-      }
-      if (sess && sess.assistants) {
-        sess.assistants.forEach(function(a) {
-          var assistPerson = lookupPerson(a);
-          var aEmail = assistPerson ? assistPerson.email : '';
-          var aFamily = assistPerson ? assistPerson.family : '';
-          html += '<div class="elective-teacher">';
-          html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(a, a, aEmail, aFamily) + '</div>';
-          html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + a + pronounTag(assistPerson) + '</strong><small style="color:var(--color-text-light);">Assistant</small></div>';
-          html += '</div>';
-        });
-      }
       html += '</div>';
       // Show kids in this group — THIS season's roster. The community
       // snapshot (registered families + Morning Builder placements)
@@ -4416,9 +4134,7 @@
     var planClassName = '';
     if (/^(Leading|Teaching)/.test(String(duty.text || ''))) {
       if (p.type === 'amClass') {
-        var planCls = AM_CLASSES[p.group];
-        var planSess = planCls ? planCls.sessions[p.session] : null;
-        planClassName = (planSess && planSess.topic) || (groupWithAge ? groupWithAge(p.group) : p.group);
+        planClassName = (groupWithAge ? groupWithAge(p.group) : p.group);
       } else if (p.type === 'elective') {
         planClassName = p.name || String(duty.text).replace(/^(Leading|Teaching)\s*/, '');
       } else {
@@ -5223,35 +4939,9 @@
   function getKidElectives(kidFullName) {
     // Afternoon electives now come from DB sign-ups, surfaced by
     // renderPendingPicks (which runs when _signup loads): "pending" chips
-    // while open/closed, and the finalized schedule once locked. So this
-    // legacy sheet-era matcher stays retired.
+    // while open/closed, and the finalized schedule once locked. The
+    // sheet-era PM_ELECTIVES name-matcher is gone (Sheets retired, #25).
     return [];
-    var sessElectives = PM_ELECTIVES[currentSession] || [];
-    var result = [];
-    var parts = kidFullName.toLowerCase().split(/\s+/);
-    var kidFirst = parts[0];
-    var kidLast = parts.slice(1).join(' ');
-    sessElectives.forEach(function (elec) {
-      var found = elec.students.some(function(st) {
-        var stLower = st.toLowerCase().trim();
-        // Exact match
-        if (stLower === kidFullName.toLowerCase()) return true;
-        // Match by last name + first name starts with (handles nicknames like Junie/Juniper)
-        var stParts = stLower.split(/\s+/);
-        var stFirst = stParts[0];
-        var stLast = stParts.slice(1).join(' ');
-        if (kidLast && stLast === kidLast && (stFirst.indexOf(kidFirst) === 0 || kidFirst.indexOf(stFirst) === 0)) return true;
-        return false;
-      });
-      if (found) result.push(elec);
-    });
-    // Sort by hour
-    result.sort(function (a, b) {
-      var ha = a.hour === 'both' ? 1 : a.hour;
-      var hb = b.hour === 'both' ? 1 : b.hour;
-      return ha - hb;
-    });
-    return result;
   }
 
   // ── Roster-aware age-group ranges (members portal only) ──────────
@@ -5394,11 +5084,9 @@
     var displayName = groupName;
     var lookupName = groupName;
     if (groupName === 'Teens') lookupName = 'Pigeons';
-    var cls = AM_CLASSES[lookupName];
-    if (cls && cls.ages) return displayName + ' (' + widenRangeForGroup(cls.ages, lookupName) + ')';
-    // Sheet-era AM_CLASSES carries per-group ages; DB-first seasons often
-    // don't. Fall back to the canonical age-group labels so rosters and
-    // the View Classmates modal still show the range (Erin, 2026-07-15).
+    // Ranges come from the canonical age-group labels (the sheet-era
+    // AM_CLASSES per-group ages retired with the Sheets retirement, #25),
+    // widened to cover this year's actual placements (Erin, 2026-07-15).
     var lbl = AGE_GROUP_LABELS[String(lookupName || '').toLowerCase()];
     if (lbl && lbl.indexOf('(') !== -1) {
       return displayName + ' ' + widenRangeForGroup(lbl.slice(lbl.indexOf('(')), lookupName);
@@ -7627,79 +7315,16 @@
     var hasCleaning = false;
     if (!isSummerBreak) {
 
-    // ── AM duties ──
-    Object.keys(AM_CLASSES).forEach(function (groupName) {
-      var staff = AM_CLASSES[groupName];
-      var sess = staff.sessions[dutySession];
-      if (!sess) return;
-      parentFullNames.forEach(function (full) {
-        if (nameMatch(staff.liaison, full)) {
-          duties.push({block: 'annual', icon: 'star', text: groupWithAge(groupName) + ' Class Liaison', detail: '', popup: {type: 'amClass', group: groupName, session: dutySession}});
-        }
-        if (nameMatch(sess.teacher, full)) {
-          duties.push({block: 'AM', icon: 'teach', text: groupName + ' \u2014 Leading', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: dutySession}});
-        }
-        sess.assistants.forEach(function (a) {
-          if (nameMatch(a, full)) {
-            duties.push({block: 'AM', icon: 'assist', text: groupName + ' \u2014 Assisting', detail: (sess.room || ''), popup: {type: 'amClass', group: groupName, session: dutySession}});
-          }
-        });
-      });
-    });
-
-    // AM support roles (floater, prep, board duties)
-    var amSupport = AM_SUPPORT_ROLES[dutySession];
-    if (amSupport) {
-      ['10-11', '11-12'].forEach(function (slot) {
-        if (amSupport.floaters && amSupport.floaters[slot]) {
-          amSupport.floaters[slot].forEach(function (name) {
-            parentFullNames.forEach(function (full) {
-              if (nameMatch(name, full)) duties.push({block: 'AM', icon: 'assist', text: 'Floater ' + slot, detail: 'Available to cover classes', popup: null});
-            });
-          });
-        }
-        if (amSupport.prepPeriod && amSupport.prepPeriod[slot]) {
-          amSupport.prepPeriod[slot].forEach(function (name) {
-            parentFullNames.forEach(function (full) {
-              if (nameMatch(name, full)) duties.push({block: 'AM', icon: 'assist', text: 'Prep Period ' + slot, detail: 'Room setup', popup: null});
-            });
-          });
-        }
-        if (amSupport.boardDuties && amSupport.boardDuties[slot]) {
-          amSupport.boardDuties[slot].forEach(function (name) {
-            parentFullNames.forEach(function (full) {
-              if (nameMatch(name, full)) duties.push({block: 'AM', icon: 'board', text: 'Board Duties ' + slot, detail: 'Board work time', popup: null});
-            });
-          });
-        }
-      });
-    }
-
-    // ── PM duties ──
-    var sessElectives = PM_ELECTIVES[dutySession] || [];
-    sessElectives.forEach(function (elec) {
-      var isPM1 = elec.hour === 1 || elec.hour === 'both';
-      var isPM2 = elec.hour === 2 || elec.hour === 'both';
-      parentFullNames.forEach(function (full) {
-        if (nameMatch(elec.leader, full)) {
-          if (isPM1) duties.push({block: 'PM1', icon: 'teach', text: elec.name + ' \u2014 Leading', detail: '1:00\u20131:55 \u00b7 ' + (elec.room || ''), popup: {type: 'elective', name: elec.name}});
-          if (isPM2) duties.push({block: 'PM2', icon: 'teach', text: elec.name + ' \u2014 Leading', detail: '2:00\u20132:55 \u00b7 ' + (elec.room || ''), popup: {type: 'elective', name: elec.name}});
-        }
-        if (elec.assistants) elec.assistants.forEach(function(a) {
-          if (nameMatch(a, full)) {
-            if (isPM1) duties.push({block: 'PM1', icon: 'assist', text: elec.name + ' \u2014 Assisting', detail: '1:00\u20131:55 \u00b7 ' + (elec.room || ''), popup: {type: 'elective', name: elec.name}});
-            if (isPM2) duties.push({block: 'PM2', icon: 'assist', text: elec.name + ' \u2014 Assisting', detail: '2:00\u20132:55 \u00b7 ' + (elec.room || ''), popup: {type: 'elective', name: elec.name}});
-          }
-        });
-      });
-    });
+    // (The sheet-era AM_CLASSES / AM_SUPPORT_ROLES / PM_ELECTIVES duty
+    // loops are gone — Sheets retired, #25. AM/PM duties come from the
+    // scheduled class submissions below plus the published schedule and
+    // volunteer sign-up paths.)
 
     // ── Scheduled class submissions (DB) ──
     // Classes the active login submitted that the Class Builder has placed
     // into the CURRENT session surface as teaching duties — they're leading
     // them (Erin, 2026-07-05). Covers morning classes and afternoon
-    // electives; the legacy PM_ELECTIVES loop above keeps sheet-era rows,
-    // so skip anything it already added by class name.
+    // electives.
     (myClassSubmissions || []).forEach(function (s) {
       if (s.status !== 'scheduled' || s.scheduled_session !== dutySession) return;
       if (typeof ACTIVE_SESSION_YEAR !== 'undefined' && s.school_year && ACTIVE_SESSION_YEAR && s.school_year !== ACTIVE_SESSION_YEAR) return;
@@ -7768,31 +7393,6 @@
           });
         }
       }
-    }
-
-    // PM support roles
-    var pmSupport = PM_SUPPORT_ROLES[dutySession];
-    if (pmSupport) {
-      if (pmSupport.floaters) pmSupport.floaters.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatch(name, full)) duties.push({block: 'PM1', icon: 'assist', text: 'PM Floater', detail: 'Available to cover classes', popup: null});
-        });
-      });
-      if (pmSupport.boardDutiesPM1) pmSupport.boardDutiesPM1.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatch(name, full)) duties.push({block: 'PM1', icon: 'board', text: 'Board Duties', detail: '1:00\u20131:55 \u00b7 Board work time', popup: null});
-        });
-      });
-      if (pmSupport.boardDutiesPM2) pmSupport.boardDutiesPM2.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatch(name, full)) duties.push({block: 'PM2', icon: 'board', text: 'Board Duties', detail: '2:00\u20132:55 \u00b7 Board work time', popup: null});
-        });
-      });
-      if (pmSupport.supplyCloset) pmSupport.supplyCloset.forEach(function (name) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatch(name, full)) duties.push({block: 'PM1', icon: 'assist', text: 'Supply Closet', detail: 'Manage supplies', popup: null, manage: 'supplyCloset'});
-        });
-      });
     }
 
     // ── Cleaning ──
@@ -7881,7 +7481,7 @@
           // session and every later one.
           var covSess = parseInt(a.session_number, 10) || currentSession;
           var popup = null;
-          if (s.block === 'AM' && s.group_or_class && AM_CLASSES[s.group_or_class]) {
+          if (s.block === 'AM' && s.group_or_class && BRAND_AGE_GROUPS.indexOf(s.group_or_class) !== -1) {
             popup = { type: 'amClass', group: s.group_or_class, session: covSess };
           } else if ((s.block === 'PM1' || s.block === 'PM2') && s.group_or_class) {
             popup = { type: 'elective', name: s.group_or_class };
@@ -8304,16 +7904,13 @@
     fam.kids.forEach(function (kid) {
       // Finalized morning placement wins over the directory's stale group.
       var kidGroup = _kidPlacements[String(kid.name || '').toLowerCase()] || kid.group;
-      var staff = AM_CLASSES[kidGroup];
-      var sess = staff ? staff.sessions[currentSession] : null;
-      var room = (sess && sess.room) || AM_GROUP_ROOMS[kidGroup] || '';
-      var teacher = sess ? sess.teacher : 'TBD';
-      var topic = sess ? sess.topic : '';
+      // Room/teacher/topic come from the published schedule (pubAm below);
+      // this fallback row only has the group's fixed room (Sheets retired, #25).
+      var room = AM_GROUP_ROOMS[kidGroup] || '';
+      var teacher = 'TBD';
+      var topic = '';
       var displayLast = kid.lastName || fam.name;
       var kidFull = kid.name + ' ' + displayLast;
-
-      // Get afternoon electives
-      var electives = getKidElectives(kidFull);
 
       html += '<div class="mf-kid">';
       // Kid header bar
@@ -8327,10 +7924,8 @@
       // Schedule table
       html += '<div class="mf-schedule">';
 
-      // Morning — DB-first: the published Class Builder schedule owns
-      // morning classes now (one both-hours class OR an AM1+AM2 pair per
-      // group). The sheet-era AM_CLASSES teacher/topic below only speaks
-      // for 2025-2026 (server gates it off in newer seasons).
+      // Morning — the published Class Builder schedule owns morning
+      // classes (one both-hours class OR an AM1+AM2 pair per group).
       var pubAm = (typeof publishedAmForGroup === 'function') ? publishedAmForGroup(currentSession, kidGroup) : [];
       var kidSched = kid.schedule || 'all-day';
       if (kidSched === 'afternoon') {
@@ -8396,23 +7991,6 @@
         html += '<span class="mf-sched-time">PM</span>';
         html += '<span class="mf-sched-class mf-empty-text">Half day — mornings only</span>';
         html += '</div>';
-      } else if (electives.length > 0) {
-        electives.forEach(function (e) {
-          var label = e.hour === 'both' ? 'PM' : e.hour === 1 ? 'PM 1' : 'PM 2';
-          html += '<div class="mf-sched-row">';
-          html += '<span class="mf-sched-time">' + label + '</span>';
-          html += '<button class="mf-elective-link mf-sched-class" data-elective="' + e.name + '">' + e.name + '</button>';
-          html += '<span class="mf-sched-room">' + e.room + '</span>';
-          html += '<span class="mf-sched-teacher">' + e.leader + '</span>';
-          html += '</div>';
-          // #139 class scope: the lead's Things to Bring for this class,
-          // right under its row (dedup: once per class per family).
-          var cbKey = 'cls:' + String(e.name || '').toLowerCase();
-          if (!bringShownGroups[cbKey]) {
-            bringShownGroups[cbKey] = true;
-            html += renderClassBringBlock(e.name);
-          }
-        });
       } else {
         html += '<div class="mf-sched-row mf-sched-empty">';
         html += '<span class="mf-sched-time">PM</span>';
@@ -8739,11 +8317,9 @@
       });
     });
 
-    // Wire up "View Class" buttons — opens the AM class detail modal
-    // (same popup used for duties), giving a focused view of the class's
-    // teacher, topic, and students rather than dumping the user into
-    // the full Directory filtered view. Normalize "Teens" → "Pigeons"
-    // because AM_CLASSES is keyed by the canonical name.
+    // Wire up "View Class" rows — opens the grove roster modal (same
+    // popup used for duties). Normalize "Teens" → "Pigeons" (canonical
+    // grove name).
     // #255: the schedule ROW opens the class/classmates popup.
     grid.querySelectorAll('.mf-sched-rowlink').forEach(function (row) {
       function openRowClass(e) {
@@ -8754,14 +8330,6 @@
       }
       row.addEventListener('click', openRowClass);
       row.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRowClass(e); } });
-    });
-
-    // Wire up elective detail links
-    grid.querySelectorAll('.mf-elective-link').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var elecName = this.getAttribute('data-elective');
-        showElectiveDetail(elecName);
-      });
     });
 
     // Wire up "I'll Be Out" buttons (header + #169's Coverage Board copy)
@@ -8984,111 +8552,12 @@
       .catch(function () { /* banner just stays hidden (snapshot already painted) */ });
   }
 
-  // Elective detail popup (enhanced)
+  // Elective detail popup — RETIRED with the Sheets retirement (#25).
+  // The sheet-era PM_ELECTIVES rosters are gone; DB-scheduled electives
+  // open through showDbClassPopup (popup type 'dbClass') instead. Kept as
+  // a no-op so legacy popup-type 'elective' references stay harmless.
   function showElectiveDetail(elecName) {
-    // Check the pager's viewed session first, fall back to currentSession
-    var viewSess = (typeof sessionTabView !== 'undefined') ? sessionTabView : currentSession;
-    var sessElectives = PM_ELECTIVES[viewSess] || [];
-    var elec = null;
-    for (var i = 0; i < sessElectives.length; i++) {
-      if (sessElectives[i].name === elecName) { elec = sessElectives[i]; break; }
-    }
-    if (!elec || !personDetail || !personDetailCard) return;
-
-    var pct = Math.round((elec.students.length / elec.maxCapacity) * 100);
-    var barColor = pct >= 90 ? 'var(--color-error)' : pct >= 70 ? 'var(--color-accent)' : 'var(--color-primary-light)';
-
-    var html = '<button class="detail-close" aria-label="Close">&times;</button>';
-    html += '<div class="elective-detail">';
-    html += '<h3>' + elec.name + '</h3>';
-    html += '<div class="elective-meta">';
-    html += '<span class="elective-age-pill">' + elec.ageRange + '</span>';
-    html += '<span>' + electiveTime(elec.hour) + '</span>';
-    html += '<span>' + elec.room + '</span>';
-    if (elec.hour === 'both') html += '<span class="elective-both-badge">Both Hours</span>';
-    html += '</div>';
-
-    // Description
-    html += '<p class="elective-description">' + elec.description + '</p>';
-
-    // Leader + assistants
-    html += '<div class="elective-staff-list">';
-    var leaderPerson = lookupPerson(elec.leader);
-    var leaderEmail = leaderPerson ? leaderPerson.email : '';
-    var leaderFamily = leaderPerson ? leaderPerson.family : '';
-    html += '<div class="elective-teacher">';
-    html += '<div class="staff-dot" style="background:' + faceColor(elec.leader) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(elec.leader, elec.leader, leaderEmail, leaderFamily) + '</div>';
-    html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + elec.leader + pronounTag(leaderPerson) + '</strong><small style="color:var(--color-text-light);">Leader</small></div>';
-    html += '</div>';
-    if (elec.assistants && elec.assistants.length > 0) {
-      elec.assistants.forEach(function (a) {
-        var assistPerson = lookupPerson(a);
-        var aEmail = assistPerson ? assistPerson.email : '';
-        var aFamily = assistPerson ? assistPerson.family : '';
-        html += '<div class="elective-teacher">';
-        html += '<div class="staff-dot" style="background:' + faceColor(a) + ';width:36px;height:36px;overflow:hidden;">' + photoHtml(a, a, aEmail, aFamily) + '</div>';
-        html += '<div class="staff-label" style="color:var(--color-text);"><strong style="color:var(--color-text);">' + a + pronounTag(assistPerson) + '</strong><small style="color:var(--color-text-light);">Assistant</small></div>';
-        html += '</div>';
-      });
-    }
-    html += '</div>';
-
-    // Capacity bar
-    html += '<div class="elective-capacity">';
-    html += '<div class="elective-capacity-label">' + elec.students.length + ' of ' + elec.maxCapacity + ' spots filled</div>';
-    html += '<div class="elective-capacity-bar"><div class="elective-capacity-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
-    html += '</div>';
-
-    // Student roster (Erin 2026-07-31: count-first "N Kids", capitalized
-    // full names, age in parens)
-    html += '<h4 class="elective-roster-title">' + elec.students.length + ' Kid' + (elec.students.length === 1 ? '' : 's') + '</h4>';
-    // Allergy / medical alerts surface BEFORE the roster so they're visible
-    // without scrolling on smaller modals.
-    html += studentAllergyCallout(elec.students);
-    html += '<div class="elective-roster">';
-    elec.students.forEach(function (kidName) {
-      var first = kidName.split(' ')[0];
-      var last = kidName.split(' ').slice(1).join(' ');
-      var kidPerson = lookupPerson(kidName);
-      var kidEmail = kidPerson ? kidPerson.email : '';
-      var kidFamily = kidPerson ? kidPerson.family : last;
-      var optedOut = kidPerson && kidPerson.photoConsent === false;
-      var noPhoto = optedOut ? ' <span class="elective-student-nophoto" title="Opted out of EXTERNAL use (public website / social media). Internal use is fine.">⛔ No public/social</span>' : '';
-      html += '<div class="elective-student' + (optedOut ? ' elective-student-nophoto-card' : '') + '">';
-      html += '<div class="elective-student-dot" style="background:' + faceColor(first) + '">' + kidAvatarInnerHtml(kidName, kidEmail, kidFamily) + '</div>';
-      var kidCap = function (s) {
-        return String(s || '').trim().split(/\s+/).map(function (w) {
-          return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
-        }).join(' ');
-      };
-      html += '<div><strong>' + kidCap(first) + '</strong> <span class="elective-student-last">' + kidCap(last) + '</span>'
-        + (kidPerson && kidPerson.age ? ' <span class="elective-student-last">(' + kidPerson.age + ')</span>' : '')
-        + pronounTag(kidPerson) + noPhoto + '</div>';
-      html += '</div>';
-    });
-    html += '</div>';
-
-    // Append role description for leader/assistant
-    var activeEmail = getActiveEmail();
-    var activeFam = null;
-    for (var fi = 0; fi < FAMILIES.length; fi++) { if (familyMatchesEmail(FAMILIES[fi], activeEmail)) { activeFam = FAMILIES[fi]; break; } }
-    if (activeFam) {
-      var myFullNames = activeFam.parents.split(' & ').map(function(pp) { return pp.trim() + ' ' + activeFam.name; });
-      var isLeader = myFullNames.some(function(fn) { return fn.toLowerCase() === (elec.leader || '').trim().toLowerCase(); });
-      var isAssist = (elec.assistants || []).some(function(a) { return myFullNames.some(function(fn) { return fn.toLowerCase() === a.trim().toLowerCase(); }); });
-      if (isLeader) html += renderRoleDescriptionSection('classroom_instructor');
-      else if (isAssist) html += renderRoleDescriptionSection('classroom_assistant');
-    }
-
-    html += '</div>';
-
-    personDetailCard.innerHTML = html;
-    personDetail.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-    personDetailCard.querySelector('.detail-close').addEventListener('click', closeDetail);
-    personDetail.addEventListener('click', function (e) {
-      if (e.target === personDetail) closeDetail();
-    });
+    return;
   }
 
   // ──────────────────────────────────────────────
@@ -9164,9 +8633,7 @@
   var publishedSchedule = { loaded: false, loading: false, fetchedAt: 0, sessions: {} };
   // Published (approved) morning classes for one age group + session,
   // AM1 before AM2. Used by the My Family Kids' Schedule card so a kid's
-  // morning row shows the REAL approved class from the Class Builder —
-  // the sheet-era AM_CLASSES fallback only speaks for 2025-2026 and is
-  // season-gated off server-side (Erin's prod report, 2026-07-14).
+  // morning row shows the REAL approved class from the Class Builder.
   // Kicks off the fetch when the cache is cold; renderMyFamily re-runs
   // when it lands.
   function publishedAmForGroup(sessionNum, groupName) {
@@ -9421,7 +8888,6 @@
 
     var viewSess = sessionTabView;
     var sess = SESSION_DATES[viewSess];
-    var electives = PM_ELECTIVES[viewSess] || [];
 
     // #190 (Erin): shared tab anatomy — every Coordination tab opens with
     // the same serif title + an org-summary count strip (the Volunteers
@@ -9431,21 +8897,19 @@
     // + icon) and no purple session-info strip — just the pills.
     var html = buildSessionPager(viewSess, 'session');
 
-    // Morning classes table \u2014 DB-first: an approved morning side renders
-    // from the published Class Builder schedule; otherwise fall back to
-    // the legacy Master-sheet AM_CLASSES rows.
+    // Morning classes \u2014 an approved morning side renders from the
+    // published Class Builder schedule; otherwise the TBD grove blocks.
     var myNames = getMyNames();
     // Year-long group liaison ("<Group> Liaison" in the roles directory).
     // A year-long role, so it renders even in the TBD table before the
     // schedule posts. Returns highlighted, comma-joined holder names.
-    function amLiaisonHtml(groupName, sheetFallback) {
+    function amLiaisonHtml(groupName) {
       var want = String(groupName || '').toLowerCase();
       var names = [];
       (ROLES_DIRECTORY || []).forEach(function (r) {
         if (liaisonGroupOfRole(r.title || '') !== want) return;
         (r.holders || []).forEach(function (h) { if (h && h.name) names.push(h.name); });
       });
-      if (!names.length && sheetFallback) names.push(sheetFallback);
       return names.map(function (n) { return highlightIfMe(n, myNames); }).join(', ') || '\u2014';
     }
     // Erin (2026-07-22): groups-assigned-but-nothing-posted renders the
@@ -9564,33 +9028,13 @@
       } else {
         html += '<p style="color:var(--color-text-light);"><em>No morning classes posted for this session.</em></p>';
       }
-    } else if (Object.keys(AM_CLASSES).length > 0) {
-      // #209/#303: sheet-era fallback \u2014 one whole-morning class per grove,
-      // rendered as blocks too (no hour split in the sheet data).
-      var sheetBlocks = '';
-      MORNING_GROUP_ORDER.forEach(function (g) {
-        if (g.name === 'Greenhouse') return;
-        var cls = AM_CLASSES[g.name]; if (!cls) return;
-        var s = cls.sessions[viewSess]; if (!s) return;
-        var isMyRow = myNames.fullNames.some(function (fn) { var l = fn.toLowerCase(); return l === s.teacher.trim().toLowerCase() || (s.assistants || []).some(function (a) { return a.trim().toLowerCase() === l; }); });
-        var assistantsHtml = (s.assistants || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ') || '\u2014';
-        var cells = { topic: s.topic, leader: highlightIfMe(s.teacher, myNames), assistants: assistantsHtml, room: s.room };
-        sheetBlocks += buildMorningGroveBlock(g.name, { am1: cells, am2: cells }, {
-          ages: groupActualAgesHtml(cls.ages, g.name),
-          liaison: amLiaisonHtml(g.name, cls.liaison),
-          tappable: true, myRow: isMyRow
-        });
-      });
-      html += sheetBlocks
-        ? '<div class="mcb-grove-blocks">' + sheetBlocks + '</div>'
-        : '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
     } else {
       html += buildAmTbdBlocks()
         || '<p style="color:var(--color-text-light);"><em>The morning schedule for this session hasn\u2019t been posted yet.</em></p>';
     }
 
-    // Afternoon electives by hour \u2014 DB-first when the afternoon side is
-    // approved; sheet-era PM_ELECTIVES otherwise.
+    // Afternoon electives by hour \u2014 from the published (approved)
+    // afternoon side only.
     if (dbSess && dbSess.pm) {
       if (dbSess.pm.length === 0) {
         html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>No afternoon classes posted for this session.</em></p>';
@@ -9633,17 +9077,8 @@
     // Wire up pager
     wirePager(container);
 
-    // Wire up elective card clicks. Sheet-era cards open the legacy
-    // roster detail; DB cards open the full class popup (description,
-    // staff, and who has signed up so far — Erin, 2026-07-16).
-    container.querySelectorAll('.elective-card[data-elective]').forEach(function (card) {
-      card.addEventListener('click', function () {
-        showElectiveDetail(this.getAttribute('data-elective'));
-      });
-    });
     // (Afternoon Classes cards no longer open a details modal — #297, Erin:
-    // the card shows everything inline. Sheet-era data-elective cards below
-    // still open their legacy roster detail.)
+    // the card shows everything inline.)
 
     // Wire up full row clicks → open the AM class detail modal for that group
     container.querySelectorAll('.session-class-row').forEach(function (row) {
@@ -15920,9 +15355,10 @@
     // "26/27 Members" card drills in via initialNewFilter new/returning).
     if (opts && opts.initialFilter) _membershipFilter = opts.initialFilter;
     if (opts && opts.initialNewFilter) _membershipNewFilter = opts.initialNewFilter;
-    var sheetUrl = 'https://docs.google.com/spreadsheets/d/1ACLxC6nYfzb2vXbL3JzeaedNlqXzAPL-lEfq6dTIkRg/edit';
+    // "View as Google Sheet" retired with the Sheets retirement (#25) —
+    // the registrations mirror sheet is no longer written, so the DB-backed
+    // report (+ Export CSV) is the whole story.
     var icons = [
-      { label: 'View as Google Sheet', icon: ICON_SVG.sheet, aria: 'Open the source Google Sheet in a new tab', href: sheetUrl },
       { label: 'Print',      icon: ICON_SVG.print,    aria: 'Print the visible registrations',         action: function () { printMembershipReport(); } },
       { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the visible registrations as CSV', action: function () { exportMembershipCSV(); } }
     ];
@@ -22208,82 +21644,12 @@
     return false;
   }
 
-  // Returns an array of teaching/assisting assignments for the current user
-  // across all sessions. Used to pre-fill the curriculum editor.
+  // Teaching/assisting assignments used to pre-fill the curriculum editor.
+  // The sheet-era AM_CLASSES / PM_ELECTIVES scan retired with the Sheets
+  // retirement (#25) - callers all merge DB sources (class submissions,
+  // published schedule) and tolerate an empty list.
   function getMyTeachingAssignments() {
-    var email = localStorage.getItem('rw_user_email');
-    if (!email) return [];
-    var fam = null;
-    for (var i = 0; i < FAMILIES.length; i++) {
-      if (familyMatchesEmail(FAMILIES[i], email)) { fam = FAMILIES[i]; break; }
-    }
-    if (!fam) return [];
-    var parentFullNames = (fam.parents || '').split(' & ').map(function (p) {
-      return p.trim() + ' ' + fam.name;
-    });
-    function isMe(name) {
-      if (!name) return false;
-      var n = name.trim().toLowerCase();
-      return parentFullNames.some(function (pf) { return pf.toLowerCase() === n; });
-    }
-
-    var assignments = [];
-    var seen = {};
-    function addOnce(key, obj) {
-      if (seen[key]) return;
-      seen[key] = true;
-      assignments.push(obj);
-    }
-
-    // AM classes — every session
-    Object.keys(AM_CLASSES || {}).forEach(function (groupName) {
-      var staff = AM_CLASSES[groupName];
-      if (!staff || !staff.sessions) return;
-      Object.keys(staff.sessions).forEach(function (sessKey) {
-        var sess = staff.sessions[sessKey];
-        if (!sess) return;
-        var role = null;
-        if (isMe(sess.teacher)) role = 'Leading';
-        else if ((sess.assistants || []).some(isMe)) role = 'Assisting';
-        if (!role) return;
-        addOnce('am-' + groupName + '-' + sessKey, {
-          kind: 'AM',
-          sessionNum: parseInt(sessKey, 10),
-          role: role,
-          name: groupName,
-          topic: sess.topic || '',
-          ageRange: groupName, // try to match the group label to an age range option
-          description: sess.topic || ''
-        });
-      });
-    });
-
-    // PM electives — every session
-    Object.keys(PM_ELECTIVES || {}).forEach(function (sessKey) {
-      var rows = PM_ELECTIVES[sessKey] || [];
-      rows.forEach(function (elec) {
-        var role = null;
-        if (isMe(elec.leader)) role = 'Leading';
-        else if ((elec.assistants || []).some(isMe)) role = 'Assisting';
-        if (!role) return;
-        addOnce('pm-' + sessKey + '-' + elec.name, {
-          kind: 'PM',
-          sessionNum: parseInt(sessKey, 10),
-          role: role,
-          name: elec.name,
-          topic: elec.description || '',
-          ageRange: elec.ageRange || '',
-          description: elec.description || ''
-        });
-      });
-    });
-
-    // Sort: most recent session first, then by name
-    assignments.sort(function (a, b) {
-      if (a.sessionNum !== b.sessionNum) return b.sessionNum - a.sessionNum;
-      return a.name.localeCompare(b.name);
-    });
-    return assignments;
+    return [];
   }
 
   // Best-effort mapping of free-text age strings to one of AGE_RANGE_OPTIONS.
@@ -24786,74 +24152,9 @@
       });
     }
 
-    if (has('AM')) {
-      Object.keys(AM_CLASSES).forEach(function (groupName) {
-        var staff = AM_CLASSES[groupName];
-        var sess = staff.sessions[session];
-        if (!sess) return;
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(sess.teacher, full)) {
-            slots.push({ block: 'AM', role_type: 'teacher', role_description: 'Leading ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
-          }
-          (sess.assistants || []).forEach(function (a) {
-            if (nameMatchAbsence(a, full)) {
-              slots.push({ block: 'AM', role_type: 'assistant', role_description: 'Assisting ' + groupName + ' (' + staff.ages + ') 10:00\u201312:00 ' + (sess.room || ''), group_or_class: groupName });
-            }
-          });
-        });
-      });
-      var amSupport = AM_SUPPORT_ROLES[session];
-      if (amSupport) {
-        ['10-11', '11-12'].forEach(function (slot) {
-          if (amSupport.floaters && amSupport.floaters[slot]) {
-            amSupport.floaters[slot].forEach(function (name) {
-              parentFullNames.forEach(function (full) {
-                if (nameMatchAbsence(name, full)) slots.push({ block: 'AM', role_type: 'floater', role_description: 'AM Floater ' + slot, group_or_class: '' });
-              });
-            });
-          }
-          if (amSupport.prepPeriod && amSupport.prepPeriod[slot]) {
-            amSupport.prepPeriod[slot].forEach(function (name) {
-              parentFullNames.forEach(function (full) {
-                if (nameMatchAbsence(name, full)) slots.push({ block: 'AM', role_type: 'prep', role_description: 'Prep Period ' + slot, group_or_class: '' });
-              });
-            });
-          }
-        });
-      }
-    }
-
-    if (has('PM1') || has('PM2')) {
-      (PM_ELECTIVES[session] || []).forEach(function (elec) {
-        var isPM1 = elec.hour === 1 || elec.hour === 'both';
-        var isPM2 = elec.hour === 2 || elec.hour === 'both';
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(elec.leader, full)) {
-            if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
-            if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'teacher', role_description: 'Leading ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
-          }
-          (elec.assistants || []).forEach(function (a) {
-            if (nameMatchAbsence(a, full)) {
-              if (isPM1 && has('PM1')) slots.push({ block: 'PM1', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 1:00\u20131:55', group_or_class: elec.name });
-              if (isPM2 && has('PM2')) slots.push({ block: 'PM2', role_type: 'assistant', role_description: 'Assisting ' + elec.name + ' 2:00\u20132:55', group_or_class: elec.name });
-            }
-          });
-        });
-      });
-      var pmSupport = PM_SUPPORT_ROLES[session];
-      if (pmSupport) {
-        if (pmSupport.floaters) pmSupport.floaters.forEach(function (name) {
-          parentFullNames.forEach(function (full) {
-            if (nameMatchAbsence(name, full)) { if (has('PM1')) slots.push({ block: 'PM1', role_type: 'floater', role_description: 'PM Floater', group_or_class: '' }); }
-          });
-        });
-        if (pmSupport.supplyCloset) pmSupport.supplyCloset.forEach(function (name) {
-          parentFullNames.forEach(function (full) {
-            if (nameMatchAbsence(name, full)) { if (has('PM1')) slots.push({ block: 'PM1', role_type: 'supply_closet', role_description: 'Supply Closet', group_or_class: '' }); }
-          });
-        });
-      }
-    }
+    // (Sheet-era AM/PM slot loops removed - Sheets retired, #25. AM/PM
+    // coverage slots are server-derived now (api/_duties.js, #293); the DB
+    // class-submission scan below keeps the client fallback honest.)
 
     if (has('Cleaning')) {
       var sessClean = CLEANING_CREW.sessions[session];
@@ -24871,9 +24172,9 @@
     }
 
     // Scheduled DB class submissions (Erin 2026-07-31, Alice/PM2): classes
-    // placed by the Class Builder are duties the sheet-era loops above
-    // can't see. They belong to the submitting login (= the active/viewed
-    // person), so they only count when THAT person is being looked up.
+    // placed by the Class Builder. They belong to the submitting login
+    // (= the active/viewed person), so they only count when THAT person
+    // is being looked up.
     var subActiveP = fam ? getActivePerson(fam) : null;
     var subActiveFull = subActiveP ? personFullName(subActiveP, fam) : '';
     if (subActiveFull && parentFullNames.some(function (f) { return nameMatchAbsence(subActiveFull, f); })) {
@@ -25879,26 +25180,43 @@
 
     // Find which classes/electives I teach or assist — per session, since
     // loaded absences now span the current session and every later one.
+    // DB-first (Sheets retired, #25): classes I lead come from my scheduled
+    // class submissions; classes I help with come from the published
+    // schedule's teacher/helpers names. Lists hold LOWERCASED class names
+    // (plus grove names for morning classes) to match slot.group_or_class
+    // case-insensitively whichever form the server derived.
     var groupsBySession = {};
     function myGroupsFor(sess) {
       if (groupsBySession[sess]) return groupsBySession[sess];
       var g = { classes: [], electives: [] };
-      Object.keys(AM_CLASSES).forEach(function (groupName) {
-        var s = (AM_CLASSES[groupName].sessions || {})[sess];
-        if (!s) return;
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(s.teacher, full) || (s.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
-            g.classes.push(groupName);
-          }
-        });
+      (typeof myClassSubmissions !== 'undefined' && Array.isArray(myClassSubmissions) ? myClassSubmissions : []).forEach(function (s) {
+        if (s.status !== 'scheduled' || s.scheduled_session !== sess) return;
+        var into = s.class_period === 'AM' ? g.classes : g.electives;
+        if (s.class_name) into.push(String(s.class_name).toLowerCase());
+        if (s.class_period === 'AM') (s.age_groups || []).forEach(function (gr) { if (gr) g.classes.push(String(gr).toLowerCase()); });
       });
-      (PM_ELECTIVES[sess] || []).forEach(function (elec) {
-        parentFullNames.forEach(function (full) {
-          if (nameMatchAbsence(elec.leader, full) || (elec.assistants || []).some(function (a) { return nameMatchAbsence(a, full); })) {
-            g.electives.push(elec.name);
-          }
-        });
-      });
+      if (typeof publishedSchedule !== 'undefined' && publishedSchedule.loaded) {
+        var ps = publishedSchedule.sessions[String(sess)];
+        function mine(c) {
+          var names = (c.helpers || []).slice();
+          if (c.teacher) names.push(c.teacher);
+          if (c.co_teachers) names.push(c.co_teachers);
+          return names.some(function (h) {
+            return parentFullNames.some(function (full) { return nameMatchAbsence(h, full); });
+          });
+        }
+        if (ps) {
+          (ps.am || []).forEach(function (c) {
+            if (!mine(c)) return;
+            if (c.class_name) g.classes.push(String(c.class_name).toLowerCase());
+            (c.age_groups || []).forEach(function (gr) { if (gr) g.classes.push(String(gr).toLowerCase()); });
+          });
+          (ps.pm || []).forEach(function (e) {
+            if (!mine(e)) return;
+            if (e.class_name) g.electives.push(String(e.class_name).toLowerCase());
+          });
+        }
+      }
       groupsBySession[sess] = g;
       return g;
     }
@@ -25911,9 +25229,9 @@
       if (a.family_email === email) return;
       var mg = myGroupsFor(parseInt(a.session_number, 10) || currentSession);
       (a.slots || []).forEach(function (slot) {
-        var match = false;
-        if (mg.classes.indexOf(slot.group_or_class) !== -1) match = true;
-        if (mg.electives.indexOf(slot.group_or_class) !== -1) match = true;
+        var slotKey = String(slot.group_or_class || '').toLowerCase();
+        if (!slotKey) return;
+        var match = mg.classes.indexOf(slotKey) !== -1 || mg.electives.indexOf(slotKey) !== -1;
         if (!match) return;
         var dateLabel = formatDateLabel(a.absence_date);
         if (slot.claimed_by_email) {
@@ -41434,38 +40752,40 @@
   }
 
   function getClassInfo(classKey) {
-    // Get class details from schedule data
+    // Class details for the Class Pack header. DB-first (Sheets retired,
+    // #25): AM keys are the Capitalized grove name, PM keys 'PM:'+name \u2014
+    // both resolve against the published Class Builder schedule.
     var isPM = classKey.indexOf('PM:') === 0;
     var name = isPM ? classKey.slice(3) : classKey;
     var info = { name: name, isPM: isPM, time: '', room: '', teacher: '', assistants: [], ageRange: '', topic: '', students: [] };
+    var ps = (typeof publishedSchedule !== 'undefined' && publishedSchedule.loaded)
+      ? publishedSchedule.sessions[String(currentSession)] : null;
 
     if (!isPM) {
-      var cls = AM_CLASSES[name];
-      if (cls) {
-        info.ageRange = cls.ages || '';
-        var sess = cls.sessions[currentSession];
-        if (sess) {
-          info.time = '10:00\u201312:00';
-          info.room = sess.room || '';
-          info.teacher = sess.teacher || '';
-          info.assistants = sess.assistants || [];
-          info.topic = sess.topic || '';
-        }
+      info.ageRange = (groupWithAge(name).match(/\(([^)]+)\)/) || [])[1] || '';
+      info.room = AM_GROUP_ROOMS[name] || '';
+      var amRows = (ps && ps.am || []).filter(function (c) {
+        return String((c.age_groups || [])[0] || '').toLowerCase() === String(name).toLowerCase();
+      });
+      if (amRows.length) {
+        var c0 = amRows[0];
+        info.time = '10:00\u201312:00';
+        info.room = c0.scheduled_room || info.room;
+        info.teacher = c0.teacher || '';
+        info.assistants = (c0.helpers || []).slice();
+        info.topic = amRows.map(function (c) { return c.class_name || ''; }).filter(Boolean).join(' / ');
       }
     } else {
-      var electives = PM_ELECTIVES[currentSession] || [];
-      for (var i = 0; i < electives.length; i++) {
-        if (electives[i].name === name) {
-          var elec = electives[i];
-          info.time = elec.hour === 1 ? '1:00\u20131:55' : elec.hour === 2 ? '2:00\u20132:55' : '1:00\u20132:55';
-          info.room = elec.room || '';
-          info.teacher = elec.leader || '';
-          info.assistants = elec.assistants || [];
-          info.ageRange = elec.ageRange || '';
-          info.topic = elec.description || '';
-          info.students = elec.students || [];
-          break;
-        }
+      var pmRows = (ps && ps.pm || []).filter(function (e) {
+        return String(e.class_name || '').toLowerCase() === String(name).toLowerCase();
+      });
+      if (pmRows.length) {
+        var e0 = pmRows[0];
+        info.time = e0.scheduled_hour === 'PM1' ? '1:00\u20131:55' : e0.scheduled_hour === 'PM2' ? '2:00\u20132:55' : '1:00\u20132:55';
+        info.room = e0.scheduled_room || '';
+        info.teacher = e0.teacher || '';
+        info.assistants = (e0.helpers || []).slice();
+        info.topic = e0.description || '';
       }
     }
     return info;
