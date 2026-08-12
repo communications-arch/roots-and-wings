@@ -1353,10 +1353,12 @@ module.exports = async function handler(req, res) {
           }
         }
         // Afternoon classes: who has ranked this class so far (1st/2nd
-        // choice + assistant flag) — pending the lottery. Enrollment-scoped
-        // (2026-07-19): stale picks from kids not ENROLLED this season
-        // don't count; NULL-kid_id legacy rows keep counting (transition
-        // tolerance).
+        // choice + assistant flag) — pending the lottery. Transition-
+        // tolerant enrollment scope (#328, Colleen 2026-08-12: PM leads saw
+        // an empty roster): a kid counts unless EXPLICITLY not-enrolled —
+        // the strict EXISTS form dropped every kid still mid-migration
+        // with no kid_enrollments row. Matches the over-max / lottery /
+        // volunteer-matrix counts.
         let ciSignups = [];
         if (ci.class_period === 'PM' && ci.scheduled_session) {
           const suRows = await sql`
@@ -1375,10 +1377,10 @@ module.exports = async function handler(req, res) {
               ON LOWER(mp.family_email) = LOWER(p.family_email)
             WHERE p.class_submission_id = ${ciId}
               AND p.school_year = ${ci.school_year} AND p.session_number = ${ci.scheduled_session}
-              AND (p.kid_id IS NULL OR EXISTS (
+              AND (p.kid_id IS NULL OR NOT EXISTS (
                 SELECT 1 FROM kid_enrollments e
                 WHERE e.kid_id = p.kid_id AND e.season = ${ci.school_year}
-                  AND e.status = 'enrolled'))
+                  AND e.status <> 'enrolled'))
             GROUP BY p.kid_first_name, LOWER(p.family_email), k.nickname, k.last_name, mp.family_name
           `;
           ciSignups = suRows.map(r => ({

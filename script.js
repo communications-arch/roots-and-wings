@@ -34748,6 +34748,15 @@
     if (typeof fetchSignupTodos === 'function') { try { fetchSignupTodos(); } catch (e) { /* counts refresh is best-effort */ } }
     _schedMatrix = null;
     _schedPools = null;
+    // #330 (Colleen): a placement change here must reach Co-op Coordination
+    // without a manual reload — the coordination cards (helpers, "needs N
+    // more" links) paint from the published-schedule cache, so refetch it;
+    // loadPublishedSchedule repaints the Session tab when it lands.
+    if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
+    if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
+    if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+      try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+    }
     schedFetchReport(function () {
       if (_schedEditKey) {
         // Keep the panel open while the row exists — a fully-placed row
