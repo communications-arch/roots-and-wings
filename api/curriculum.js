@@ -2037,6 +2037,15 @@ module.exports = async function handler(req, res) {
           sql`SELECT approved_at FROM co_op_sessions
               WHERE school_year = ${vmYear} AND session_number = ${vmSess}`
         ]);
+        // Erin 2026-08-12: self-serve assist moves are window-gated — ride
+        // the session's sign-up window status so the panel can hide the
+        // step-out ✕ and assist pickers once sign-ups close.
+        let vmWinStatus = '';
+        try {
+          const vmWin = await sql`SELECT status FROM class_signup_windows
+            WHERE school_year = ${vmYear} AND session_number = ${vmSess} LIMIT 1`;
+          vmWinStatus = vmWin.length ? String(vmWin[0].status || '') : '';
+        } catch (e) { console.error('volunteer-matrix window lookup (non-fatal):', e); }
         // Afternoon classes stay out of the matrix until the session's PM
         // side is APPROVED (Erin, 2026-07-11) — same rule as the published
         // schedule. Bug #63 hardening: the query above now takes ONLY
@@ -2220,6 +2229,7 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           school_year: vmYear, session: vmSess, pm_approved: pmApproved,
           pm_signups_finalized: pmSignupsFinalized, blocks, mine, cleaning, cleaning_open,
+          signup_window_status: vmWinStatus,
           me: { email: actingEmail, name: meName, is_board: await isBoardMember(actingEmail) }
         });
       }
@@ -2857,6 +2867,15 @@ module.exports = async function handler(req, res) {
         const vc = vaCls[0];
         if ((vc.submitted_by_email || '').toLowerCase() === vaEmail) {
           return res.status(409).json({ error: 'You lead this class — no need to assist it too.' });
+        }
+        // Erin 2026-08-12: assistants place THEMSELVES freely until the
+        // session's class sign-up window CLOSES; after close/lock, moves go
+        // through the VP / Afternoon Class Liaison (reviewers exempt — they
+        // place adults anytime, incl. via the Schedules grid).
+        const vaWin = await sql`SELECT status FROM class_signup_windows
+          WHERE school_year = ${vc.school_year} AND session_number = ${vc.scheduled_session} LIMIT 1`;
+        if (vaWin.length && ['closed', 'locked'].indexOf(vaWin[0].status) !== -1 && !(await isReviewerReq(user, req))) {
+          return res.status(409).json({ error: 'Session ' + vc.scheduled_session + ' sign-ups are closed — ask the VP or Afternoon Class Liaison to place or move you.' });
         }
         const vaPeople = await sql`SELECT first_name, last_name FROM people
           WHERE LOWER(email) = ${vaEmail} OR LOWER(personal_email) = ${vaEmail} LIMIT 1`;
@@ -3855,6 +3874,16 @@ module.exports = async function handler(req, res) {
         const daSubId = parseInt(req.query.id, 10);
         if (!Number.isFinite(daSubId)) return res.status(400).json({ error: 'id required' });
         const daEmail = (await actingEmailForPlacement(user, req)).toLowerCase();
+        // Erin 2026-08-12: same window rule as signing up — self-serve
+        // stepping out ends when the session's sign-up window closes.
+        const daWinCls = await sql`SELECT school_year, scheduled_session FROM class_submissions WHERE id = ${daSubId}`;
+        if (daWinCls.length && daWinCls[0].scheduled_session) {
+          const daWin = await sql`SELECT status FROM class_signup_windows
+            WHERE school_year = ${daWinCls[0].school_year} AND session_number = ${daWinCls[0].scheduled_session} LIMIT 1`;
+          if (daWin.length && ['closed', 'locked'].indexOf(daWin[0].status) !== -1 && !(await isReviewerReq(user, req))) {
+            return res.status(409).json({ error: 'Session ' + daWinCls[0].scheduled_session + ' sign-ups are closed — ask the VP or Afternoon Class Liaison to move you.' });
+          }
+        }
         // Optional hour scope: removing an hour-only assist leaves the
         // other hour's row; no block removes every row for the class.
         const daBlock = String(req.query.block || '').trim();

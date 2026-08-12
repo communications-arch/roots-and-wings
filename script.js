@@ -6138,7 +6138,7 @@
     responsibilities: 'accent-8',
     notes: 'accent-16',
     coverage: 'accent-33',
-    supplyCloset: 'accent-7',
+    supplyCloset: 'accent-41', // 🐌 gold snail (Erin 2026-08-12 — carries the closet; was accent-7 teal bloom)
     membersSummary: 'accent-32',
     visibility: 'accent-30',
     newFamily: 'accent-24',
@@ -6180,7 +6180,7 @@
     // ── final pass — provisional picks by art (Erin may reassign) ──
     calendar: 'accent-55',    // 📅/📆 dates & calendar rows (radial aster = day)
     welcome: 'accent-45',     // 👋 orientation / greet new members (petal fan = wave)
-    outreach: 'accent-41',    // 💛 reach out / care (gold wings)
+    outreach: 'accent-7',     // 💛 reach out / care (teal bloom; swapped with the gold snail — Erin 2026-08-12)
     departure: 'accent-31',   // 🚪/👋 offboarding — non-returning, remove accounts (leaf leaving)
     tour: 'accent-50',        // 🏡 tour requests / visits (mushroom = cottage)
     brandKit: 'accent-59',    // 🎨 Brand & Logo Kit (purple bloom = the brand itself; art pick — Erin may reassign)
@@ -6255,8 +6255,14 @@
     var vpAssign = !!(opts && opts.vpAssign);
     var b = (d.blocks || {})[blockKey] || { classes: [], floaters: [], board: [], prep: [] };
     var h = (opts && opts.noPlaceholder) ? '' : '<option value="">— sign up… —</option>';
+    // Erin 2026-08-12: members pick/move class assists freely UNTIL the
+    // session's sign-up window closes; after that, placement is the VP /
+    // Afternoon Class Liaison's (vpAssign surfaces keep every option —
+    // the server exempts reviewers). Support pledges are not window-gated.
+    var assistFrozen = !vpAssign
+      && ['closed', 'locked'].indexOf(String(d.signup_window_status || '')) !== -1;
     var sorted = b.classes.slice().sort(function (x, y) { return (y.helpers_needed || 0) - (x.helpers_needed || 0); });
-    sorted.forEach(function (c) {
+    if (!assistFrozen) sorted.forEach(function (c) {
       var need = c.helpers_needed || 0;
       // Covered classes are HIDDEN, same rule as full support roles below
       // (testers, 2026-07-16: the selectable "(covered)" option let the VP
@@ -6397,6 +6403,10 @@
       if (key.indexOf('AM') === 0) return famHasAM && ((((d.blocks || {})[key] || {}).classes) || []).length > 0;
       return famHasPM && !!d.pm_approved;
     }
+    // Erin 2026-08-12: assistants move THEMSELVES until the session's
+    // class sign-up window CLOSES (then it's the VP / ACL's board via
+    // Schedules). The server enforces the same rule on volunteer-assist.
+    var assistFrozen = ['closed', 'locked'].indexOf(String(d.signup_window_status || '')) !== -1;
     var openBlocks = [];
     VOL_BLOCKS.forEach(function (blk) {
       var mine = (d.mine || {})[blk.key];
@@ -6406,13 +6416,34 @@
       // the matrix's own `mine` (leads/assists/pledges for THAT session).
       if (!mine && !(isCurrent && _mfDutyBlocks[blk.key]) && blockAvailable(blk.key)) openBlocks.push(blk);
       if (!isCurrent || !mine) return;
-      if (_mfDutyBlocks[blk.key] && (mine.kind === 'lead' || mine.kind === 'assist')) return; // already listed as a duty
+      if (_mfDutyBlocks[blk.key] && (mine.kind === 'lead' || mine.kind === 'assist')) {
+        // Already listed as a duty row — but an ASSIST must still offer its
+        // step-out ✕ there while the window is open (Erin 2026-08-12: the
+        // dedup silently removed the only self-serve way to move).
+        if (mine.kind === 'assist' && !assistFrozen && mine.class_id) {
+          var dutySec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
+          if (dutySec) {
+            var dutyRows = Array.prototype.slice.call(dutySec.querySelectorAll('.mf-duty'));
+            var lblMatch = String(mine.label).match(/^Assisting\s+“(.+)”$/);
+            var wantName = lblMatch ? lblMatch[1].toLowerCase() : '';
+            var target = dutyRows.filter(function (r) {
+              if (r.querySelector('.mf-vol-remove')) return false;
+              var t = (r.textContent || '').toLowerCase();
+              return t.indexOf('assisting') !== -1 && (!wantName || t.indexOf(wantName) !== -1);
+            })[0];
+            var acts = target && target.querySelector('.mf-duty-actions');
+            if (acts) acts.insertAdjacentHTML('afterbegin',
+              '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" data-block="' + (mine.block || '') + '" title="Step out of this class">✕</button>');
+          }
+        }
+        return;
+      }
       var sec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
       if (!sec) return;
       var row = document.createElement('div');
       row.className = 'mf-duty mf-vol-inline';
       var removeBtn = mine.kind === 'assist'
-        ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" data-block="' + (mine.block || '') + '" title="Step out">✕</button>'
+        ? (assistFrozen ? '' : '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" data-block="' + (mine.block || '') + '" title="Step out">✕</button>')
         : (mine.signup_id ? '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="signup" data-id="' + mine.signup_id + '" title="Remove sign-up">✕</button>' : '');
       // Class rows render as title + role tag with the room underneath
       // (Erin, 2026-07-11); pledge rows keep their plain label.
@@ -8986,7 +9017,12 @@
         var assists = (c.helpers || []).map(function (a) { return highlightIfMe(a, myNames); }).join(', ');
         if (c.helpers_needed > 0) {
           var need = 'needs ' + c.helpers_needed + ' more';
-          assists += (assists ? ', ' : '') + (withBtn && !amIsMine(c)
+          // Erin 2026-08-12: self-serve assist moves end when the session's
+          // sign-up window closes \u2014 show the shortfall as a plain note then
+          // (the server 409s the write for non-reviewers either way).
+          var amAssistFrozen = _coordPmSignups.session === sessionTabView
+            && ['closed', 'locked'].indexOf(String(_coordPmSignups.windowStatus || '')) !== -1;
+          assists += (assists ? ', ' : '') + (withBtn && !amIsMine(c) && !amAssistFrozen
             ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(c.scheduled_hour || 'AM') + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + need + ' \u2014 sign up \u26a0</button>'
             : '<span class="ra-open-note" style="display:inline;">' + need + ' \u26a0</span>');
         }
@@ -9215,7 +9251,14 @@
     var needMore = '';
     if (e.helpers_needed > 0) {
       var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
-      needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
+      // Erin 2026-08-12: self-serve assist moves end when the session's
+      // sign-up window closes — plain shortfall note after that (server
+      // 409s the write for non-reviewers regardless).
+      var pmAssistFrozen = _coordPmSignups.session === sessionTabView
+        && ['closed', 'locked'].indexOf(String(_coordPmSignups.windowStatus || '')) !== -1;
+      needMore = pmAssistFrozen
+        ? '<div class="ac-need"><span class="ra-open-note" style="display:inline;">needs ' + e.helpers_needed + ' more</span></div>'
+        : '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
     }
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
@@ -23870,6 +23913,11 @@
     html += logoCard('/brand/kit/logo-black.svg', false, 'One-color black', [
       ['SVG', '/brand/kit/logo-black.svg', true],
       ['Outlined text SVG', '/brand/kit/logo-black-outlines.svg', true]
+    ]);
+    // Gold snail accent (Erin 2026-08-12) — the Supply Closet mark, offered
+    // here so flyers/signs can carry it alongside the logos.
+    html += logoCard('/brand/kit/RW_GoldSnail_Accent.png', false, 'Gold snail — accent art', [
+      ['PNG', '/brand/kit/RW_GoldSnail_Accent.png', true]
     ]);
     html += '</div>';
     html += '<p style="color:#777;font-size:0.9em;margin:10px 0 0;">Designer masters: '
