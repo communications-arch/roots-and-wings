@@ -39367,6 +39367,29 @@
         html += '<label>End <input type="date" id="sbSignupEnd" value="' + escClsAttr(winEnd) + '"></label>';
         html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupSave">Save dates</button>';
         html += '</div>';
+      } else if (winStatus === 'locked') {
+        // Locked = placements final. Reviewers can still adjust individual
+        // kids from the Schedules report / picker; Unlock drops back to
+        // 'closed' if a broader re-shuffle is needed.
+        html += '<div class="sb-signup-panel-state">Sign-ups <strong>locked</strong> — placements are final. Kid Schedules show the classes as their real electives.</div>';
+        html += '<div class="sb-signup-panel-actions">';
+        html += '<button type="button" class="sc-btn" id="sbSignupUnlock" title="Back to closed — placements show as pending the lottery again.">Unlock</button>';
+        html += '</div>';
+      } else if (winStatus === 'closed') {
+        // The missing final step (Erin, 2026-08-12: "after the lottery ran
+        // the kid schedule still shows pending lottery") — nothing ever set
+        // status='locked', so picks stayed "pending" forever. Lock = the
+        // lottery/over-max work is done and placements are final.
+        html += '<div class="sb-signup-panel-state">Sign-ups <strong>closed</strong>. Once over-full classes are resolved (lottery / max / 2nd section), lock to finalize — Kid Schedules show "pending lottery" until then.</div>';
+        html += '<div class="sb-signup-panel-actions">';
+        html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupLock" title="Finalize placements: every kid’s rank-1 pick becomes their real schedule, and rosters show on the sign-up grids.">Lock — finalize placements</button>';
+        html += '<button type="button" class="sc-btn" id="sbSignupEdit">Reopen with new dates</button>';
+        html += '</div>';
+        html += '<div class="sb-signup-edit-row" id="sbSignupEditRow" style="display:none;">';
+        html += '<label>Start <input type="date" id="sbSignupStart" value="' + escClsAttr(winStart) + '"></label>';
+        html += '<label>End <input type="date" id="sbSignupEnd" value="' + escClsAttr(winEnd) + '"></label>';
+        html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupSave">Reopen sign-ups</button>';
+        html += '</div>';
       } else {
         html += '<div class="sb-signup-panel-state">Sign-ups not yet open. Pick a start and end date so parents can rank classes during that window.</div>';
         html += '<div class="sb-signup-edit-row">';
@@ -39810,6 +39833,17 @@
       if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
     });
     if (saveBtn) saveBtn.addEventListener('click', function () { saveSignupWindow(sess, 'open'); });
+    // Lock/unlock — the finalize step after the over-max work is done.
+    var lockBtn = document.getElementById('sbSignupLock');
+    if (lockBtn) lockBtn.addEventListener('click', function () {
+      if (!confirm('Lock Session ' + sess + ' sign-ups and finalize placements?\n\nEvery kid’s 1st-choice pick becomes their real afternoon schedule (no more "pending lottery"), and class rosters show on the sign-up grids. You can unlock later if needed.')) return;
+      saveSignupWindow(sess, 'locked');
+    });
+    var unlockBtn = document.getElementById('sbSignupUnlock');
+    if (unlockBtn) unlockBtn.addEventListener('click', function () {
+      if (!confirm('Unlock Session ' + sess + '? Placements go back to "pending lottery" on Kid Schedules until you lock again.')) return;
+      saveSignupWindow(sess, 'closed');
+    });
 
     // Wire + Add buttons
     body.querySelectorAll('.sb-cell-add').forEach(function (btn) {
