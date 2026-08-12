@@ -67,6 +67,15 @@ function getSql() {
 // (whole-morning) stays valid so pre-split absences keep working.
 const VALID_BLOCKS = ['AM', 'AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'];
 
+// Labels for a NAMED stand-in on a duty-less block (Erin 2026-08-02 /
+// 2026-08-12: the board lists real needs only — the server derives no
+// 'general' slots — but a member naming who's stepping in still records
+// that cover, inserted pre-claimed).
+const GENERAL_BLOCK_LABEL = {
+  AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)',
+  PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning'
+};
+
 // Mark a slot covered by the member the reporter named (#179): resolve the
 // name to an email best-effort, stamp the claim, and send them a personal
 // heads-up. Returns true when the slot ended up claimed with an email
@@ -676,6 +685,36 @@ module.exports = async function handler(req, res) {
         }
       }
 
+      // Named stand-ins for duty-less blocks (Erin 2026-08-02 / 2026-08-12):
+      // the server derives NO 'general' slots, so the board lists real needs
+      // only — but a member naming who's stepping in still records that
+      // cover. A named general inserts PRE-CLAIMED; if the name doesn't
+      // resolve the row is removed again rather than left as an open generic
+      // ask. Unnamed generals from the client are ignored entirely.
+      if (coverageNeeded) {
+        for (const cs of (Array.isArray(body.slots) ? body.slots : [])) {
+          if (String(cs.role_type) !== 'general') continue;
+          const rn = String(cs.replacement_name || '').trim().slice(0, 120);
+          if (!rn) continue;
+          const blk = String(cs.block || '');
+          if (!VALID_BLOCKS.includes(blk) || !blocks.includes(blk)) continue;
+          if (generatedSlots.some(g => g.block === blk)) continue; // block has real duties
+          const desc = GENERAL_BLOCK_LABEL[blk] || blk;
+          const insG = await sql`
+            INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
+            VALUES (${absenceId}, ${blk}, 'general', ${desc}, '')
+            RETURNING id`;
+          try {
+            await preassignSlot(sql, user,
+              { id: absenceId, absence_date, absent_person }, insG[0].id, desc, rn);
+            createdSlots.push({ block: blk, role_type: 'general', role_description: desc });
+          } catch (replErr) {
+            console.error('general stand-in pre-assign (non-fatal):', replErr);
+            await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
+          }
+        }
+      }
+
       // Notify members — but only about slots actually needing coverage.
       // A zero-slot absence (no session duties on file) is informational;
       // if duties appear later, PATCH below fires the notification then.
@@ -867,6 +906,48 @@ module.exports = async function handler(req, res) {
             }
           }
         }
+        // Named stand-ins for duty-less blocks — same rule as POST (Erin
+        // 2026-08-02 / 2026-08-12): generals are never derived, but a name
+        // the reporter picked still records an arranged cover. Reuse the
+        // block's existing general row when there is one (claimed → only a
+        // DIFFERENT name reassigns, matching the derived-slot rule above);
+        // otherwise insert pre-claimed, removing the row if the name fails
+        // to resolve. Spliced out of `unmatched` so the prune below never
+        // deletes a row we just claimed.
+        for (const cs of (Array.isArray(body.slots) ? body.slots : [])) {
+          if (String(cs.role_type) !== 'general') continue;
+          const rnG = String(cs.replacement_name || '').trim().slice(0, 120);
+          if (!rnG) continue;
+          const blkG = String(cs.block || '');
+          if (!VALID_BLOCKS.includes(blkG) || !blocks.includes(blkG)) continue;
+          if (editGenerated.some(g => g.block === blkG)) continue; // block has real duties
+          const descG = GENERAL_BLOCK_LABEL[blkG] || blkG;
+          const exIdx = unmatched.findIndex(s => s.block === blkG && s.role_type === 'general');
+          if (exIdx !== -1) {
+            const exG = unmatched.splice(exIdx, 1)[0];
+            const exClaimed = !!(exG.claimed_by_email || exG.claimed_by_name);
+            if (!exClaimed || rnG !== exG.claimed_by_name) {
+              try {
+                await preassignSlot(sql, user, { id, absence_date, absent_person }, exG.id, exG.role_description, rnG);
+              } catch (replErr) {
+                console.error('edit general stand-in pre-assign (non-fatal):', replErr);
+                if (!exClaimed) await sql`DELETE FROM coverage_slots WHERE id = ${exG.id} AND claimed_by_email IS NULL`;
+              }
+            }
+          } else {
+            const insG = await sql`
+              INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
+              VALUES (${id}, ${blkG}, 'general', ${descG}, '')
+              RETURNING id`;
+            try {
+              await preassignSlot(sql, user, { id, absence_date, absent_person }, insG[0].id, descG, rnG);
+            } catch (replErr) {
+              console.error('edit general stand-in pre-assign (non-fatal):', replErr);
+              await sql`DELETE FROM coverage_slots WHERE id = ${insG[0].id} AND claimed_by_email IS NULL`;
+            }
+          }
+        }
+
         // Prune slots the edit no longer covers — but #293 review F1: NEVER
         // delete a CLAIMED slot here. A member's commitment must survive an
         // edit/re-derive even if the duty's identity drifted (a class rename

@@ -24405,7 +24405,24 @@
       // ERROR returns {slots:[]} (HTTP 200), indistinguishable from a legit
       // empty — so on empty, fall through to the client computation below (a
       // genuinely-empty case still yields [] there; a derive error recovers).
-      if (_absSrvPreview.slots && _absSrvPreview.slots.length && _absSrvPreview.sig === _absPreviewSig()) return _absSrvPreview.slots;
+      // Erin 2026-08-12: the server derives NO generic 'general' slots any
+      // more (the board lists real needs only) — appendGeneralPickers below
+      // adds the OPTIONAL "name who's stepping in" rows client-side for
+      // duty-less blocks; blank ones send nothing, a named one is saved as
+      // an arranged (pre-claimed) cover.
+      var pickerBlocks = getSelectedBlocks();
+      function appendGeneralPickers(list, skip) {
+        pickerBlocks.forEach(function (b) {
+          if (skip && skip[b]) return;
+          if (!list.some(function (s) { return s.block === b; })) {
+            list.push({ block: b, role_type: 'general', role_description: ABS_GENERIC_LABEL[b] || b, group_or_class: '' });
+          }
+        });
+        return list;
+      }
+      if (_absSrvPreview.slots && _absSrvPreview.slots.length && _absSrvPreview.sig === _absPreviewSig()) {
+        return appendGeneralPickers(_absSrvPreview.slots.slice());
+      }
       var blocks = getSelectedBlocks();
       // The duty sources work in whole-morning terms — look up with 'AM'
       // whenever either morning hour is selected, then split the results
@@ -24447,15 +24464,10 @@
         prepBlocks[s.block] = true;
         return false;
       });
-      // #179: no duty on file for a selected block (classes not scheduled
-      // yet, or nothing signed up) still yields a claimable GENERAL spot.
-      blocks.forEach(function (b) {
-        if (prepBlocks[b]) return;
-        if (!slots.some(function (s) { return s.block === b; })) {
-          slots.push({ block: b, role_type: 'general', role_description: ABS_GENERIC_LABEL[b] || b, group_or_class: '' });
-        }
-      });
-      return slots;
+      // Optional stand-in pickers for duty-less blocks (was the #179
+      // "claimable general spot" — retired 2026-08-12; see above). #187/
+      // #259: a prep/board-only block had a real duty, so no picker there.
+      return appendGeneralPickers(slots, prepBlocks);
     }
     // Erin 2026-07-31: each block's coverage rows render INLINE directly
     // under that block's own checkbox, not in one combined box below.
@@ -25371,98 +25383,15 @@
 
   // ── Backfill coverage slots onto absences reported before responsibilities
   // existed ─────────────────────────────────────────────────────────────────
-  // A member can enter dates to be out before they've picked (or been given)
-  // any responsibilities for that session — the absence saves with zero
-  // slots and no notification goes out. Whenever the board renders, diff
-  // each of MY family's upcoming absences against the responsibilities the
-  // schedule shows NOW; any missing slots are added via PATCH, and the
-  // server fires the deferred "Coverage Needed" notification the first time
-  // a slot-less absence gains slots. Only ever adds — existing slots
-  // (claimed or not) are never touched, so this is safe to re-run.
-  var _absenceSyncTried = {};
   function syncMyAbsenceSlots() {
-    // #293: DISABLED. The SERVER now derives coverage slots authoritatively on
-    // absence report (POST) and edit — the browser no longer computes or writes
+    // #293: DISABLED (body removed 2026-08-12). The SERVER derives coverage
+    // slots authoritatively on absence report (POST), edit, and Coverage
+    // Board load (#320 ?refresh=1) — the browser never computes or writes
     // them. This reconciler was the 2026-08-06 phantom-incident's write path
     // (it wrote slots from whatever schedule the browser had painted, so a
-    // poisoned cache wrote dev duties into prod). Neutered as a no-op so its
-    // callers need no change; the unreachable body below is removed in cleanup.
+    // poisoned cache wrote dev duties into prod). No-op so callers need no
+    // change.
     return;
-    // eslint-disable-next-line no-unreachable
-    try {
-      if (typeof liveScheduleFresh !== 'undefined' && !liveScheduleFresh) return;
-      if (isSummerBreak || !loadedAbsences || loadedAbsences.length === 0) return;
-      var email = getActiveEmail();
-      if (!email || !FAMILIES) return;
-      var me = null;
-      for (var i = 0; i < FAMILIES.length; i++) { if (familyMatchesEmail(FAMILIES[i], email)) { me = FAMILIES[i]; break; } }
-      if (!me) return;
-      var cred = localStorage.getItem('rw_google_credential');
-      if (!cred) return;
-      var todayIso = new Date().toISOString().slice(0, 10);
-      function slotKey(s) { return s.block + '|' + s.role_type + '|' + s.role_description; }
-
-      var pending = [];
-      loadedAbsences.forEach(function (a) {
-        if (a.cancelled_at || a.family_email !== me.email) return;
-        // #197 (Colleen): a backup-learning-coach-covered absence needs NO
-        // coverage — never backfill slots onto it (the server refuses too).
-        if (a.coverage_needed === false) return;
-        var absDate = String(a.absence_date || '').slice(0, 10);
-        if (!absDate || absDate < todayIso) return;
-        // Zero-slot absences stick to the blocks the member picked in the
-        // modal (blocks are always saved); legacy rows with no blocks at
-        // all reconcile against every hour block.
-        var blocks = (a.blocks && a.blocks.length > 0) ? a.blocks : ['AM1', 'AM2', 'PM1', 'PM2', 'Cleaning'];
-        var rawBlocks = [];
-        blocks.forEach(function (b) {
-          var rb = (b === 'AM1' || b === 'AM2') ? 'AM' : b;
-          if (rawBlocks.indexOf(rb) === -1) rawBlocks.push(rb);
-        });
-        var expected = absExpandMorningSlots(
-          getResponsibilitiesForBlocks([a.absent_person], parseInt(a.session_number, 10) || currentSession, rawBlocks, me.name, me), blocks)
-          // #187 prep + #259 board: neither needs coverage — never sync in.
-          .filter(function (s) { return s.role_type !== 'prep' && s.role_type !== 'board'; });
-        if (expected.length === 0) return;
-        var have = {};
-        (a.slots || []).forEach(function (s) {
-          have[slotKey(s)] = true;
-          // A legacy whole-morning row already covers both hour twins —
-          // don't re-add them as AM1/AM2 duplicates.
-          if (s.block === 'AM') {
-            have['AM1|' + s.role_type + '|' + s.role_description] = true;
-            have['AM2|' + s.role_type + '|' + s.role_description] = true;
-          }
-        });
-        var missing = expected.filter(function (s) { return !have[slotKey(s)]; });
-        if (missing.length === 0) return;
-        // One attempt per absence+diff; stops retry loops if the server
-        // rejects, while still allowing a NEW diff (another responsibility
-        // picked later) to sync.
-        var sig = a.id + ':' + missing.map(slotKey).sort().join(';');
-        if (_absenceSyncTried[sig]) return;
-        _absenceSyncTried[sig] = true;
-        pending.push(
-          fetch('/api/absences?id=' + encodeURIComponent(a.id), {
-            method: 'PATCH',
-            headers: rwAuthHeaders(true),
-            body: JSON.stringify({ slots: missing })
-          }).then(function (r) {
-            // Only count it when the server actually added something —
-            // a concurrent device may have synced the same diff already.
-            return r.json().then(function (d) { return r.ok && d.added > 0; });
-          }).catch(function () { return false; })
-        );
-      });
-      if (pending.length === 0) return;
-      Promise.all(pending).then(function (results) {
-        if (results.some(Boolean)) {
-          showSupplyToast('Coverage requests created for your reported absences');
-          loadCoverageBoard();
-          loadNotifications();
-        }
-      });
-    } catch (e) { console.error('absence slot sync failed:', e); }
   }
 
   var notifState = { notifications: [], unreadCount: 0, dropdownOpen: false };

@@ -285,10 +285,9 @@ async function deriveCoverageSlots(sql, opts) {
     }
   } catch (e) { console.error('deriveCoverageSlots committee roles (non-fatal):', e); }
 
-  // ── 4. Support sign-ups (self-serve): floater needs coverage; a prep/board
-  // duty needs NONE but still means the block "had a duty" (no general filler).
+  // ── 4. Support sign-ups (self-serve): floater needs coverage; prep/board
+  // duties need none.
   // #293 review H1: morning floaters are stored per-hour (AM1/AM2), not 'AM'.
-  const dutyOnlyBlocks = new Set(); // held a prep/board duty → suppress general
   try {
     if (emailList.length) {
       const vol = await sql`
@@ -302,30 +301,19 @@ async function deriveCoverageSlots(sql, opts) {
           if (amMatch('AM2')) push('AM2', 'floater', 'AM Floater ' + amTime('AM2'), '');
           if (v.block === 'PM1' && wantPM1) push('PM1', 'floater', 'PM Floater', '');
           if (v.block === 'PM2' && wantPM2) push('PM2', 'floater', 'PM Floater', '');
-        } else { // board / prep — no coverage, but the block had a duty
-          if (amMatch('AM1')) dutyOnlyBlocks.add('AM1');
-          if (amMatch('AM2')) dutyOnlyBlocks.add('AM2');
-          if (v.block === 'PM1' && wantPM1) dutyOnlyBlocks.add('PM1');
-          if (v.block === 'PM2' && wantPM2) dutyOnlyBlocks.add('PM2');
         }
       });
     }
   } catch (e) { console.error('deriveCoverageSlots support roles (non-fatal):', e); }
 
-  // ── 5. General filler (#179): a selected block with NO specific coverable
-  // duty still needs adult coverage (the absence reduces the ratio) — UNLESS
-  // the person only held a prep/board duty there (that block was already
-  // "theirs" but doesn't need covering). Mirrors the client's effectiveSlots.
-  const GEN_LABEL = {
-    AM1: 'Morning Hour 1 (10:00–10:55)', AM2: 'Morning Hour 2 (11:00–11:55)',
-    PM1: 'Afternoon Hour 1 (1:00–1:55)', PM2: 'Afternoon Hour 2 (2:00–2:55)', Cleaning: 'Cleaning'
-  };
-  const coverageBlocks = amHours.concat(wantPM1 ? ['PM1'] : [], wantPM2 ? ['PM2'] : [], wantClean ? ['Cleaning'] : []);
-  const hasSpecific = {};
-  slots.forEach(s => { hasSpecific[s.block] = true; });
-  coverageBlocks.forEach(b => {
-    if (!hasSpecific[b] && !dutyOnlyBlocks.has(b)) push(b, 'general', GEN_LABEL[b] || b, '');
-  });
+  // ── (Generic hour fillers REMOVED — Erin, 2026-08-12.) The #179 behavior
+  // created a 'general' slot for any selected block with no specific duty,
+  // so every pre-staffing absence flooded the board with "coverage needed"
+  // for adults who weren't signed up for anything. Slots now exist only for
+  // real duties (class / cleaning / opener / closer / supply closet /
+  // floater). Existing unclaimed 'general' slots are pruned by the #320
+  // read-refresh reconciler on the next Coverage Board load; claimed ones
+  // are preserved.
 
   // De-dupe by identity (block|role_type|group_or_class) — a person can match
   // a class under multiple paths (grove map + scheduled submission).
