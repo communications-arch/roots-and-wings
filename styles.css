@@ -13776,7 +13776,7 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-groves .ag-icon { height: 0.95em; }
 .ac-groves .ag-grouptag { margin-right: 4px; gap: 2px; }
 .ac-meta { font-size: 0.72rem; color: var(--color-text-light); }
-.ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; margin-bottom: 4px; }
+.ac-desc { font-size: 0.78rem; color: var(--color-text); line-height: 1.35; margin-top: 5px; margin-bottom: 6px; }
 /* Staff: photo circles + names, grouped Led by / Assisted by — same avatars as
    the Class Details popup (#297). */
 .ac-staff { display: flex; flex-wrap: wrap; gap: 5px 16px; align-items: center; }
