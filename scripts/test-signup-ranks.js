@@ -174,16 +174,15 @@ t('#297: signupRequestsHtml splits first choice from backup, tags assistants', f
   const api = makeApi({});
   const html = api.signupRequestsHtml(
     [{ name: 'Ava', rank: 1 }, { name: 'Ben', rank: 1, assistant: true }, { name: 'Cara', rank: 2 }], 12);
-  assert(/Requests \(3\)/.test(html), 'count reflects all requests, got ' + html);
+  assert(/Kids requests \(3 of 12\)/.test(html), 'one-line label with count-of-max, got ' + html);
   assert(/First choice:<\/span> Ava, Ben \(assistant\)/.test(html), 'first choices listed, assistant tagged');
   assert(/Backup:<\/span> Cara/.test(html), 'backups listed separately');
-  assert(/max 12 kids/.test(html), 'capacity shown');
 });
-t('#297: signupRequestsHtml empty → "No requests yet", no capacity when max 0', function () {
+t('#297: signupRequestsHtml empty → bare "Kids requests" label, no count when max 0', function () {
   const api = makeApi({});
   const html = api.signupRequestsHtml([], 0);
-  assert(/No requests yet/.test(html), 'empty state');
-  assert(!/max/.test(html), 'no capacity clause when max is 0');
+  assert(/Kids requests/.test(html), 'label present');
+  assert(!/\(/.test(html), 'no count/max parens when empty and max 0');
 });
 
 // ── #291: coverage duties must not occupy an hour for volunteer sign-up ──

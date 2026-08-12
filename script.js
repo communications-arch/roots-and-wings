@@ -5762,9 +5762,9 @@
       var disp = escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : ''));
       return linkNames ? '<button type="button" class="ac-person-link" data-ac-person="' + escapeHtml(s2.name) + '">' + disp + '</button>' : disp;
     };
-    var head = [detailed.length > 0 ? 'Requests (' + detailed.length + ')' : 'No requests yet'];
-    if (max > 0) head.push('max ' + max + ' kids');
-    var h = '<span class="signup-class-count">' + escapeHtml(head.join(' · ')) + '</span>';
+    // #297 (Erin): one line — "KIDS REQUESTS (24 of 15)" (count of max).
+    var label = 'Kids requests' + (max > 0 ? ' (' + detailed.length + ' of ' + max + ')' : (detailed.length ? ' (' + detailed.length + ')' : ''));
+    var h = '<span class="signup-class-count ac-reqs-label">' + escapeHtml(label) + '</span>';
     if (first.length) h += '<span class="signup-class-reqs"><span class="signup-req-tag">First choice:</span> ' + first.map(nm).join(', ') + '</span>';
     if (backup.length) h += '<span class="signup-class-reqs signup-class-reqs-backup"><span class="signup-req-tag">Backup:</span> ' + backup.map(nm).join(', ') + '</span>';
     return h;
@@ -5833,8 +5833,6 @@
     // Caller-supplied control that belongs right by the staff (e.g. the
     // coordination card's "needs N more — sign up" assist link).
     if (opts.afterStaff) h += opts.afterStaff;
-    // #297 (Erin): a small "Kids requests" label above the requests list.
-    h += '<div class="ac-reqs-label">Kids requests</div>';
     h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max, opts.linkNames) + '</div>';
     return h;
   }

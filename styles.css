@@ -13784,13 +13784,14 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-staff-chip { display: inline-flex; align-items: center; gap: 4px; }
 .ac-staff-dot { width: 22px; height: 22px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; color: var(--color-text-light); background: rgba(0, 0, 0, 0.08); flex-shrink: 0; }
 .ac-staff-name { font-size: 0.74rem; color: var(--color-text); }
-.ac-reqs-label { margin-top: 6px; font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-light); }
+.signup-class-count.ac-reqs-label { margin-top: 6px; font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-light); }
 .ac-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 1px; }
 .ac-need { margin-top: 2px; }
 /* #297: inline "Choose this class" sign-up on the coordination cards. */
 .ac-signup { margin-top: 8px; }
 .ac-signup-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(var(--color-primary-rgb), 0.04); }
 .ac-signup-row { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--color-text-light); }
+.ac-signup-row > span { white-space: nowrap; } /* don't wrap "Sign up" */
 .ac-signup-row select { font-size: 0.8rem; padding: 3px 6px; }
 .ac-signup-msg { font-size: 0.76rem; color: var(--color-primary-dark); }
 /* #297: names on the coordination cards link to the directory card. */
