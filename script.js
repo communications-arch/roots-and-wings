@@ -5494,8 +5494,14 @@
   // VP-chosen date window.
   function signupWindowLive(s) {
     var status = (s.window && s.window.status) || null;
-    var startDate = (s.window && s.window.signup_start_date) || null;
-    var endDate = (s.window && s.window.signup_end_date) || null;
+    // The API serializes the DATE columns as full ISO timestamps
+    // ("2026-08-12T04:00:00.000Z") — sliced to YYYY-MM-DD so the string
+    // compare below is date-vs-date. Unsliced, "2026-08-12" >= that ISO
+    // string is FALSE (shorter string sorts first), which hid the sign-up
+    // banner on exactly the FIRST day of the window (prod launch day,
+    // Erin 2026-08-12 — timezone-date family, third bite).
+    var startDate = String((s.window && s.window.signup_start_date) || '').slice(0, 10) || null;
+    var endDate = String((s.window && s.window.signup_end_date) || '').slice(0, 10) || null;
     if (status !== 'open' || !startDate || !endDate) return false;
     var todayStr = '';
     try {
@@ -39391,8 +39397,11 @@
     if (period === 'PM' && isApproved && sbScopeAll()) {
       var win = sbSignupWindowFor(sess);
       var winStatus = win && win.status;
-      var winStart = (win && win.signup_start_date) || '';
-      var winEnd = (win && win.signup_end_date) || '';
+      // Sliced to YYYY-MM-DD: the API serializes these DATE columns as full
+      // ISO timestamps, which <input type="date"> rejects as a value (and
+      // which broke the string date-compare in signupWindowLive).
+      var winStart = String((win && win.signup_start_date) || '').slice(0, 10);
+      var winEnd = String((win && win.signup_end_date) || '').slice(0, 10);
       html += '<div class="sb-signup-panel">';
       html += '<div class="sb-signup-panel-title">Afternoon Class Sign-Ups</div>';
       if (winStatus === 'open' && winStart && winEnd) {
