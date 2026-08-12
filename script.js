@@ -5621,7 +5621,7 @@
       ? 'Session ' + s.session + ' sign-ups are <strong>open</strong> — pick a 1st choice and a backup for each hour, for each kid.'
       : status === 'closed'
         ? 'Session ' + s.session + ' sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.')
-        : 'Session ' + s.session + ' sign-ups are <strong>locked</strong>.')
+        : 'Session ' + s.session + ' sign-ups are <strong>locked</strong>' + (reviewer ? ' — you can still adjust placements.' : '.'))
       + '</p>';
     alertH += '<button type="button" class="btn btn-primary" id="pmSignupOpenBtn">' + (status === 'open' ? 'Choose classes' : 'View picks') + '</button>';
     card.innerHTML = alertH;
@@ -5640,8 +5640,12 @@
     }
 
     var locked = status === 'locked';
-    var canEdit = (status === 'open') || (reviewer && status === 'closed');
-    if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + '.</p>';
+    // Reviewers (VP + Afternoon Class Liaison) move kids in ANY window
+    // state — closed AND locked (Erin, 2026-08-12: "the VP / liaison can
+    // change assignments anytime"). The server's picks write already
+    // exempts reviewers from every window gate.
+    var canEdit = (status === 'open') || (reviewer && (status === 'closed' || locked));
+    if (locked) h += '<p class="signup-note">Sign-ups are <strong>locked</strong> for Session ' + s.session + (reviewer ? ' — you can still adjust placements.' : '.') + '</p>';
     else if (status === 'closed') h += '<p class="signup-note">Sign-ups are <strong>closed</strong>' + (reviewer ? ' — you can still adjust picks.' : '.') + '</p>';
     else if (status === 'open') h += '<p class="signup-note">Pick a <strong>1st choice and a backup</strong> for each hour for each kid. Classes matching their age are <span class="signup-fit-key">highlighted</span> — choosing one outside the age range lets you add an optional note for the Afternoon Class Liaison.</p>';
     // Requests are visible on each class so families can see who else is
