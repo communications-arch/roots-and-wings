@@ -2570,3 +2570,16 @@ UPDATE rooms SET sort_order = CASE LOWER(name)
     WHEN 'west lawn'          THEN 130
     ELSE 900 END
 WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE sort_order <> 0);
+
+-- 2026-08-12 (#271 follow-up, Erin): before the assistant-count picker
+-- became single-select (v20260810d), editing a class could save a
+-- multi-value count ([1,2] — the old checkbox left "1" checked when the
+-- VP picked "2"). Every open-spot calculation takes MIN(assistant_count),
+-- so the raised ask never surfaced on the coordination cards or sign-up
+-- surfaces. The radio form already pre-selects the MAX of a legacy row;
+-- collapse stored multi-value rows to that same MAX so the intended
+-- spots appear without re-saving each class. Idempotent: single-value
+-- rows are untouched and the WHERE matches nothing on re-run.
+UPDATE class_submissions
+   SET assistant_count = ARRAY[(SELECT MAX(x) FROM UNNEST(assistant_count) AS x)]
+ WHERE COALESCE(array_length(assistant_count, 1), 0) > 1;
