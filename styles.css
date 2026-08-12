@@ -8966,16 +8966,18 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
    + Kids (150); the morning/cleaning (--am) table has no Kids column, so its
    Assistants/Family column simply absorbs that width. max-width:100% lets the
    whole thing scale down together (still aligned) on a narrow screen. */
-.vol-grid .mcb-teach { table-layout: fixed; width: 660px; max-width: 100%; min-width: 0; }
+/* #300 (Erin): trimmed 660→604px so the afternoon tables fit the narrowed
+   modal without a horizontal scrollbar. */
+.vol-grid .mcb-teach { table-layout: fixed; width: 604px; max-width: 100%; min-width: 0; }
 .vol-grid .mcb-teach th:nth-child(1),
-.vol-grid .mcb-teach td:nth-child(1) { width: 150px; } /* Grove / Class / Floor */
+.vol-grid .mcb-teach td:nth-child(1) { width: 138px; } /* Grove / Class / Floor */
 .vol-grid .mcb-teach th:nth-child(2),
-.vol-grid .mcb-teach td:nth-child(2) { width: 140px; } /* Leader / Area          */
+.vol-grid .mcb-teach td:nth-child(2) { width: 128px; } /* Leader / Area          */
 .vol-grid .mcb-teach--pm th:nth-child(3),
-.vol-grid .mcb-teach--pm td:nth-child(3) { width: 220px; } /* Assistants (+CTA)   */
+.vol-grid .mcb-teach--pm td:nth-child(3) { width: 200px; } /* Assistants (+CTA)   */
 .vol-grid .mcb-teach--pm th:nth-child(4),
-.vol-grid .mcb-teach--pm td:nth-child(4) { width: 150px; } /* Kids signed up      */
-/* --am col 3 (Assistants / Family) is left unpinned → fills to 660px. */
+.vol-grid .mcb-teach--pm td:nth-child(4) { width: 138px; } /* Kids signed up      */
+/* --am col 3 (Assistants / Family) is left unpinned → fills to 604px. */
 .vol-grid .mcb-teach td { overflow-wrap: anywhere; } /* long name lists wrap, not clip */
 .vol-grid .mcb-teach thead th { text-align: left; } /* headers sit over left-aligned data */
 /* Faint zebra so long rosters don't smear. */
@@ -8989,6 +8991,11 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
   margin: 28px 0 8px;
   padding-top: 16px;
   border-top: 2px solid rgba(var(--color-primary-rgb), 0.25);
+  /* #305 (Erin): read like the Co-op Coordination section titles — sentence
+     case, no uppercase/tracking, same 1rem sans. */
+  font-size: 1rem;
+  text-transform: none;
+  letter-spacing: normal;
 }
 .vol-grid .roles-mgr-se-head:first-of-type { margin-top: 10px; border-top: 0; padding-top: 0; }
 .vol-grid .mcb-teach-wrap { margin: 0 0 2px; }

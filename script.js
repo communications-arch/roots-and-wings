@@ -5777,7 +5777,10 @@
     var title = opts.titleLinkId
       ? '<button type="button" class="ac-title signup-class-name-link" data-detail-class="' + opts.titleLinkId + '" title="Class details">' + escapeHtml(norm.name) + '</button>'
       : '<span class="ac-title">' + escapeHtml(norm.name) + '</span>';
-    var h = '<div class="ac-head">' + title + (groveTag ? ' <span class="ac-groves">' + groveTag + '</span>' : '') + '</div>';
+    // #313 (Lyndsey): groves sit on their OWN line below the title, on every
+    // card — parallel formatting, not inline-beside-title on some.
+    var h = '<div class="ac-head">' + title + '</div>';
+    if (groveTag) h += '<div class="ac-groves">' + groveTag + '</div>';
     // Time lives in the section header, and the room may not be assigned yet —
     // so neither shows on the card (Erin, 2026-08-11). The 2-hour badge stays,
     // since it's the class's shape, not a schedule detail.
