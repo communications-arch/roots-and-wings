@@ -9032,7 +9032,10 @@ button.vgrid-need-btn:disabled { opacity: 0.5; cursor: default; text-decoration:
   padding-top: 16px;
   border-top: 2px solid rgba(var(--color-primary-rgb), 0.25);
   /* #305 (Erin): read like the Co-op Coordination section titles — sentence
-     case, no uppercase/tracking, same 1rem sans. */
+     case, no uppercase/tracking, same 1rem sans. The h4 was still inheriting
+     the display serif — the body font-family is the piece that makes it
+     match .session-section-title ("not the right font", round 2). */
+  font-family: var(--font-body);
   font-size: 1rem;
   text-transform: none;
   letter-spacing: normal;

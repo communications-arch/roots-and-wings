@@ -23917,9 +23917,9 @@
     // (issue #8) — Adults tab for Place adults / Fill assistant spots,
     // Kids tab for Place kids. The old showSignupTodoModal list panels
     // remain in the codebase as a fallback.
-    else if (action === 'signup-todo-adults' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults' });
-    else if (action === 'signup-todo-kids' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'kids' });
-    else if (action === 'signup-todo-assist' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults' });
+    else if (action === 'signup-todo-adults' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults', session: _signupTodoState && _signupTodoState.session });
+    else if (action === 'signup-todo-kids' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'kids', session: _signupTodoState && _signupTodoState.session });
+    else if (action === 'signup-todo-assist' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults', session: _signupTodoState && _signupTodoState.session });
     else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
     else if (action === 'acl-lottery-moves' && typeof showLotteryMovesModal === 'function') showLotteryMovesModal();
     else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
@@ -25407,7 +25407,10 @@
     // numbers repeat every school year, so a from_session=currentSession
     // filter silently dropped next-season absences around the boundary
     // (the board vanished right after a claim re-fetch, Erin 2026-07-19).
-    fetch('/api/absences?upcoming=1', { headers: rwAuthHeaders() })
+    // #320: refresh=1 re-derives each future absence's slots from TODAY's
+    // duties server-side (claims preserved), so an absence reported before
+    // its member had assignments stops showing generic hour fillers.
+    fetch('/api/absences?upcoming=1&refresh=1', { headers: rwAuthHeaders() })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       var raw = data.absences || [];
@@ -25633,13 +25636,16 @@
           // from non-board viewers; the server enforces the same rule.
           var boardOnly = slot.role_type === 'opener' || slot.role_type === 'closer';
           var viewerIsBoard = typeof boardCalViewerIsBoard === 'function' && boardCalViewerIsBoard();
+          // Member-entered strings (names via registration, class names via
+          // submissions) MUST escape — this board had a real stored XSS once
+          // (2026-08-08 review) and the detail section below already escapes.
           html += '<div class="coverage-slot coverage-slot-open">';
-          html += '<span class="coverage-slot-block">' + slot.block + '</span>';
-          html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span>'
+          html += '<span class="coverage-slot-block">' + escapeHtmlWs(slot.block) + '</span>';
+          html += '<span class="coverage-slot-desc">' + escapeHtmlWs(slot.role_description) + ' <span class="coverage-slot-for">(' + escapeHtmlWs(slot._person) + ')</span>'
             + (boardOnly ? ' <span class="coverage-board-tag">Board only</span>' : '') + '</span>';
           html += '<span class="coverage-slot-actions">';
           if (!isMyOwnAbsence && (!boardOnly || viewerIsBoard)) {
-            html += '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '">I\'ll Cover This</button>';
+            html += '<button class="btn btn-sm btn-cover" data-slot-id="' + slot.id + '" data-slot-block="' + escapeHtml(String(slot.block || '')) + '">I\'ll Cover This</button>';
           }
           if (isVpUser) html += '<button class="btn btn-sm btn-outline btn-assign" data-slot-id="' + slot.id + '" data-slot-desc="' + (slot.role_description || '').replace(/"/g, '&quot;') + '" data-slot-date="' + date + '">Assign\u2026</button>';
           html += '</span>';
@@ -25659,9 +25665,9 @@
         coveredSlots.forEach(function (slot) {
           var isMyClaim = slot.claimed_by_email && slot.claimed_by_email === email;
           html += '<div class="coverage-slot coverage-slot-covered">';
-          html += '<span class="coverage-slot-block">' + slot.block + '</span>';
-          html += '<span class="coverage-slot-desc">' + slot.role_description + ' <span class="coverage-slot-for">(' + slot._person + ')</span></span>';
-          html += '<span class="coverage-slot-claimer">Covered by <strong>' + (slot.claimed_by_name || slot.claimed_by_email) + '</strong></span>';
+          html += '<span class="coverage-slot-block">' + escapeHtmlWs(slot.block) + '</span>';
+          html += '<span class="coverage-slot-desc">' + escapeHtmlWs(slot.role_description) + ' <span class="coverage-slot-for">(' + escapeHtmlWs(slot._person) + ')</span></span>';
+          html += '<span class="coverage-slot-claimer">Covered by <strong>' + escapeHtmlWs(slot.claimed_by_name || slot.claimed_by_email) + '</strong></span>';
           if (isVpUser || isMyClaim) {
             html += '<span class="coverage-slot-actions">';
             if (isVpUser) {
@@ -25717,6 +25723,15 @@
     el.querySelectorAll('.btn-cover').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var slotId = parseInt(btn.getAttribute('data-slot-id'), 10);
+        // #299 (Erin): already committed that hour (a session duty from My
+        // Responsibilities)? Say so \u2014 but let them take it anyway, since
+        // some roles CAN stack (e.g. keeping an eye on a neighboring room).
+        var covBlk = btn.getAttribute('data-slot-block') || '';
+        var covBusy = covBlk === 'AM'
+          ? (_mfDutyBlocks.AM1 || _mfDutyBlocks.AM2)
+          : !!_mfDutyBlocks[covBlk];
+        var COV_BLK_LBL = { AM1: 'Morning Hour 1', AM2: 'Morning Hour 2', PM1: 'Afternoon Hour 1', PM2: 'Afternoon Hour 2', AM: 'the morning' };
+        if (covBusy && !confirm('Heads up \u2014 you already have a role during ' + (COV_BLK_LBL[covBlk] || covBlk) + ' this session.\n\nYou can still cover this if the two jobs work together. Cover it anyway?')) return;
         btn.disabled = true; btn.textContent = 'Claiming\u2026';
         var cred = localStorage.getItem('rw_google_credential');
         fetch('/api/coverage', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ slot_id: slotId, claimer_name: myName }) })
@@ -33939,7 +33954,12 @@
     _schedFilter = 'all';
     _schedKidStatus = 'all';
     _schedView = 'person'; // #37: each open starts on By person
-    if (_schedSession == null) _schedSession = (_signup && _signup.session) || currentSession;
+    // #322 (Colleen): a To Do count is computed for ONE session — opening
+    // from it must land on that session, not wherever the sticky session
+    // was left from an earlier browse ("3 next to Place kids" with an
+    // empty-looking grid was the count's session vs the view's session).
+    if (opts.session) _schedSession = opts.session;
+    else if (_schedSession == null) _schedSession = (_signup && _signup.session) || currentSession;
     renderReportModal({
       title: 'Schedules',
       subtitle: 'Who is where each co-op hour — every adult and every kid, one row each. Open cells offer the qualifying spots still available.',
@@ -34790,10 +34810,12 @@
     var all = ((_schedTab === 'adults' ? _schedRep.adults : _schedRep.kids) || []);
     var unplacedN = all.filter(function (r) { return schedMissingFor(r).length > 0; }).length;
     var nameCol = {
-      key: 'name', label: _schedTab === 'adults' ? 'Member' : 'Kid', type: 'string',
+      // #295 (Erin): the word "age" lives in the header — cells show just
+      // "Name (7)".
+      key: 'name', label: _schedTab === 'adults' ? 'Member' : 'Kid (age)', type: 'string',
       render: function (r) {
         var extra = '';
-        if (_schedTab === 'kids' && r.age != null) extra = ' <span class="ws-wv-context">(age ' + r.age + ')</span>';
+        if (_schedTab === 'kids' && r.age != null) extra = ' <span class="ws-wv-context">(' + r.age + ')</span>';
         return '<strong>' + escapeHtml(r.name) + '</strong>' + extra;
       },
       filter: {
@@ -39416,6 +39438,13 @@
         html += '</div>';
       }
       html += '<div class="sb-signup-error cls-error" id="sbSignupError" style="display:none;"></div>';
+      // #296 (Erin): dev-only testing reset — clears every kid pick, adult
+      // assist, pledge, and lottery record for this session while the
+      // placed classes stay. Server refuses on production regardless.
+      if (typeof isDevHost === 'function' && isDevHost()
+          && typeof isSuperUserEmail === 'function' && isSuperUserEmail(getActiveEmail())) {
+        html += '<div class="sb-signup-panel-actions" style="margin-top:10px;"><button type="button" class="sc-btn sc-btn-del" id="sbSignupReset" title="Testing only: wipe this session’s sign-ups (kids + adults). Classes stay placed.">Reset sign-ups (testing)</button></div>';
+      }
       html += '</div>';
     }
 
@@ -39860,6 +39889,28 @@
     if (unlockBtn) unlockBtn.addEventListener('click', function () {
       if (!confirm('Unlock Session ' + sess + '? Placements go back to "pending lottery" on Kid Schedules until you lock again.')) return;
       saveSignupWindow(sess, 'closed');
+    });
+    // #296: dev-only sign-up reset (double confirm — it deletes real rows).
+    var resetBtn = document.getElementById('sbSignupReset');
+    if (resetBtn) resetBtn.addEventListener('click', function () {
+      if (!confirm('TESTING RESET — wipe ALL Session ' + sess + ' sign-ups?\n\nEvery kid pick, adult assist, floater/board/prep pledge, and lottery record for this session is deleted. The placed classes stay.')) return;
+      if (!confirm('Really reset Session ' + sess + ' sign-ups? This cannot be undone.')) return;
+      resetBtn.disabled = true;
+      fetch('/api/curriculum?action=reset-class-signups' + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ session: sess })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert((res.data && res.data.error) || 'Reset failed.'); resetBtn.disabled = false; return; }
+          alert('Session ' + sess + ' sign-ups reset: ' + res.data.kid_picks + ' kid picks, ' + res.data.adult_assists + ' adult assists, ' + res.data.pledges + ' pledges, ' + res.data.lottery_bumps + ' lottery records.');
+          if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
+          _signup = null;
+          if (typeof loadClassSignupCard === 'function') { try { loadClassSignupCard(); } catch (e) { /* best-effort */ } }
+          if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+            try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+          }
+          loadScheduleBuilder();
+        })
+        .catch(function () { alert('Network error — try again.'); resetBtn.disabled = false; });
     });
 
     // Wire + Add buttons

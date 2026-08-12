@@ -457,6 +457,66 @@ module.exports = async function handler(req, res) {
             WHERE session_number = ${session} AND cancelled_at IS NULL
             ORDER BY absence_date, absent_person
           `;
+      // ── #320: duties keep changing AFTER an absence is reported (the VP
+      // staffs classes, assists get placed) — an absence created before its
+      // member had duties is stuck with generic hour-filler slots forever.
+      // With ?refresh=1 (the Coverage Board load), each FUTURE absence's
+      // slot set re-derives from TODAY's duties: claims preserved by
+      // identity (same rules as the edit path), drifted descriptions
+      // refreshed, unclaimed slots whose duty vanished pruned, and inserts
+      // conditional so two simultaneous board loads can't duplicate a slot.
+      // No notifications fire from a read-refresh. Failures are non-fatal.
+      if (req.query.refresh === '1' || req.query.refresh === 'true') {
+        let rfToday = '';
+        try {
+          const rfParts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+          }).formatToParts(new Date());
+          const rfL = {}; rfParts.forEach(p => { rfL[p.type] = p.value; });
+          rfToday = rfL.year + '-' + rfL.month + '-' + rfL.day;
+        } catch (e) { rfToday = new Date().toISOString().slice(0, 10); }
+        const rfKey = s => String(s.block || '') + '|' + String(s.role_type || '') + '|' + norm(String(s.group_or_class || ''));
+        for (const a of absences) {
+          const aDate = (a.absence_date instanceof Date) ? a.absence_date.toISOString().slice(0, 10) : String(a.absence_date).slice(0, 10);
+          if (a.coverage_needed === false || aDate < rfToday) continue;
+          try {
+            const gen = await deriveCoverageSlots(sql, {
+              schoolYear: activeSchoolYear(new Date(aDate + 'T12:00:00')),
+              session: a.session_number, absentPerson: a.absent_person,
+              familyEmail: a.family_email, blocks: a.blocks
+            });
+            const cur = await sql`SELECT * FROM coverage_slots WHERE absence_id = ${a.id} ORDER BY id`;
+            const unmatched = cur.slice();
+            for (const g of gen) {
+              if (!VALID_BLOCKS.includes(g.block)) continue;
+              let idx = unmatched.findIndex(s => rfKey(s) === rfKey(g));
+              if (idx === -1 && (g.block === 'AM1' || g.block === 'AM2')) {
+                const legacyK = 'AM|' + String(g.role_type || '') + '|' + norm(String(g.group_or_class || ''));
+                idx = unmatched.findIndex(s => rfKey(s) === legacyK);
+              }
+              if (idx !== -1) {
+                const m = unmatched.splice(idx, 1)[0];
+                if (m.block !== g.block || m.role_description !== g.role_description) {
+                  await sql`UPDATE coverage_slots SET block = ${g.block}, role_description = ${g.role_description} WHERE id = ${m.id}`;
+                }
+              } else {
+                await sql`INSERT INTO coverage_slots (absence_id, block, role_type, role_description, group_or_class)
+                  SELECT ${a.id}, ${g.block}, ${g.role_type}, ${g.role_description}, ${g.group_or_class}
+                  WHERE NOT EXISTS (SELECT 1 FROM coverage_slots
+                    WHERE absence_id = ${a.id} AND block = ${g.block} AND role_type = ${g.role_type}
+                      AND COALESCE(group_or_class, '') = ${String(g.group_or_class || '')})`;
+              }
+            }
+            for (const s of unmatched) {
+              if (s.claimed_by_email || s.claimed_by_name) continue;
+              await sql`DELETE FROM coverage_slots WHERE id = ${s.id} AND claimed_by_email IS NULL`;
+            }
+          } catch (rfErr) {
+            console.error('[absences] read-refresh reconcile (non-fatal) for absence ' + a.id + ':', rfErr);
+          }
+        }
+      }
+
       const absenceIds = absences.map(a => a.id);
       let slots = [];
       if (absenceIds.length > 0) {

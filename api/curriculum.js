@@ -3289,6 +3289,42 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, id: csId });
       }
 
+      // ── #296 (Erin): testing reset — wipe a session's sign-ups while the
+      // classes stay placed. Super users only, and NEVER on production
+      // (it's a dev/testing aid; prod data loss would be unrecoverable).
+      if (action === 'reset-class-signups') {
+        if (!isSuperUser(user.email)) return res.status(403).json({ error: 'Super users only.' });
+        if (process.env.VERCEL_ENV === 'production') {
+          return res.status(403).json({ error: 'The sign-up reset is a testing tool — it is disabled on production.' });
+        }
+        const rsSess = parseInt((req.body || {}).session, 10);
+        if (!rsSess) return res.status(400).json({ error: 'session required' });
+        const rsYear = activeSchoolYear(new Date());
+        const rsCls = await sql`SELECT id FROM class_submissions
+          WHERE school_year = ${rsYear} AND scheduled_session = ${rsSess}
+            AND status IN ('scheduled', 'drafted')`;
+        const rsIds = rsCls.map(r => r.id);
+        const rsPicks = await sql`DELETE FROM class_signup_picks
+          WHERE school_year = ${rsYear} AND session_number = ${rsSess} RETURNING id`;
+        const rsBumps = await sql`DELETE FROM class_lottery_bumps
+          WHERE school_year = ${rsYear} AND session_number = ${rsSess} RETURNING id`;
+        const rsHelpers = rsIds.length
+          ? await sql`DELETE FROM class_assignment_helpers
+              WHERE class_submission_id = ANY(${rsIds}) RETURNING id`
+          : [];
+        const rsPledges = await sql`DELETE FROM volunteer_signups
+          WHERE school_year = ${rsYear} AND session_number = ${rsSess} RETURNING id`;
+        if (rsIds.length) {
+          await sql`UPDATE class_submissions SET lottery_run_at = NULL, lead_email_sent_at = NULL
+            WHERE id = ANY(${rsIds})`;
+        }
+        return res.status(200).json({
+          ok: true, session: rsSess,
+          kid_picks: rsPicks.length, lottery_bumps: rsBumps.length,
+          adult_assists: rsHelpers.length, pledges: rsPledges.length
+        });
+      }
+
       if (action === 'class-signup-window') {
         // Sign-ups are an afternoon concern — full-scope reviewers only.
         const swScope = await reviewerScopeReq(user, req);
