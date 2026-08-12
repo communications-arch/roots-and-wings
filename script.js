@@ -5523,6 +5523,19 @@
   // more groves, the same groves the class-detail card shows.
   var _signupGroveSel = [];
 
+  // #297 (Erin): jump to the Co-op Coordination Afternoon Classes section —
+  // info view → Session Schedule tab → the Afternoon Classes heading, where
+  // the inline sign-up lives. Used by My Family's "Choose classes"/"Edit picks".
+  function gotoCoordAfternoon() {
+    if (typeof showViewMode === 'function') showViewMode('info');
+    var sessTab = document.querySelector('.portal-tab[data-tab="session"]');
+    if (sessTab && !sessTab.classList.contains('active')) sessTab.click();
+    setTimeout(function () {
+      var target = document.getElementById('coordAfternoonClasses');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  }
+
   function renderClassSignupCard() {
     var card = document.getElementById('classSignupCard');
     if (!card || !_signup) return;
@@ -5581,18 +5594,9 @@
     alertH += '<button type="button" class="btn btn-primary" id="pmSignupOpenBtn">' + (status === 'open' ? 'Choose classes' : 'View picks') + '</button>';
     card.innerHTML = alertH;
     // #297 (Erin): sign-up happens inline on the Co-op Coordination Afternoon
-    // Classes cards now — this button jumps there (info view → Session Schedule
-    // tab → the Afternoon Classes section) instead of opening the modal.
+    // Classes cards now — this button jumps there instead of opening the modal.
     var pmOpenBtn = card.querySelector('#pmSignupOpenBtn');
-    if (pmOpenBtn) pmOpenBtn.addEventListener('click', function () {
-      if (typeof showViewMode === 'function') showViewMode('info');
-      var sessTab = document.querySelector('.portal-tab[data-tab="session"]');
-      if (sessTab && !sessTab.classList.contains('active')) sessTab.click();
-      setTimeout(function () {
-        var target = document.getElementById('coordAfternoonClasses');
-        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 120);
-    });
+    if (pmOpenBtn) pmOpenBtn.addEventListener('click', gotoCoordAfternoon);
 
     // Everything below paints the FULL picker — only when its modal is open.
     var modalBody = document.getElementById('pm-signup-modal-body');
@@ -6215,15 +6219,9 @@
       });
       var editBtn = el.querySelector('.mf-pending-edit');
       if (editBtn) {
-        editBtn.addEventListener('click', function () {
-          _signupPickerOpen = true;
-          // Expand THIS kid in the picker (saved kids fold by default).
-          _signupKidOpen[kid] = true;
-          // The picker is a modal now (Erin, 2026-07-31) — open it
-          // directly instead of scrolling to the old inline card.
-          if (typeof showPmSignupModal === 'function') showPmSignupModal();
-          else renderClassSignupCard();
-        });
+        // #297 (Erin): editing picks happens on the Co-op Coordination
+        // Afternoon Classes cards now — jump there instead of the modal.
+        editBtn.addEventListener('click', gotoCoordAfternoon);
       }
     });
   }
