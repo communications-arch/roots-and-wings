@@ -9775,11 +9775,6 @@
     if (e.helpers_needed > 0) {
       var pmBlock = (e.scheduled_hour === 'PM1' || e.scheduled_hour === 'PM2') ? e.scheduled_hour : '';
       needMore = '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
-    } else if (assistNames.length) {
-      // A fully-staffed class must SAY it's full — a bare card with no
-      // sign-up affordance reads as "adult sign-ups are closed" (Erin,
-      // 2026-08-12; assist sign-ups never close, they just fill up).
-      needMore = '<div class="ac-need"><span class="ws-wv-context">assistant spots filled</span></div>';
     }
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
@@ -35101,7 +35096,7 @@
       h += '<span class="ws-wv-context">"' + escapeHtml(m.from_class) + '" lottery</span>';
       h += m.moved_to
         ? '<span class="signup-class-count">→ moved to “' + escapeHtml(m.moved_to) + '”</span>'
-        : '<span class="signup-class-count st-flag-coral">→ no 2nd choice — place them from “Place kids”</span>';
+        : '<span class="signup-class-count st-flag-coral">→ no 2nd choice — place them in Schedules (Reports &amp; Forms)</span>';
       h += '<button type="button" class="btn btn-primary btn-sm lm-told">Mark told</button>';
       h += '</div>';
       return h;
@@ -40564,6 +40559,16 @@
         return;
       }
       loadScheduleBuilder();
+      // #332 (Colleen): a window change — especially Lock — repaints every
+      // surface that keys on the status WITHOUT a page refresh: the Kid
+      // Schedule pending-picks blocks ("pending lottery" → real electives)
+      // read _signup, and the coordination afternoon cards flip to the
+      // final roster once their sign-ups snapshot refetches.
+      if (typeof loadClassSignupCard === 'function') { try { _signup = null; loadClassSignupCard(); } catch (e) { /* best-effort */ } }
+      if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+        try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+      }
+      if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
     }).catch(function (err) {
       if (errEl) { errEl.textContent = err.message || 'Network error.'; errEl.style.display = ''; }
     });
