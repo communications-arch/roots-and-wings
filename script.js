@@ -5794,7 +5794,7 @@
   // Co-op Coordination elective cards — they're the same data. REQUESTS, not
   // placements: first-choice split from backup, pending the lottery. `detailed`
   // is the class's signedUpDetailed ([{name, rank, assistant}]).
-  function signupRequestsHtml(detailed, max, linkNames) {
+  function signupRequestsHtml(detailed, max, linkNames, finalRoster) {
     detailed = Array.isArray(detailed) ? detailed : [];
     // Student assistants are shown on their own line, not as seat requests.
     detailed = detailed.filter(function (s2) { return !s2.assistant; });
@@ -5809,6 +5809,15 @@
     var joinNames = function (arr) {
       return arr.map(function (s2, i) { return '<span class="ac-req-name">' + nm(s2) + (i < arr.length - 1 ? ',' : '') + '</span>'; }).join(' ');
     };
+    // Locked window (Erin, 2026-08-12): the lottery is done, so the card
+    // shows the FINAL roster — rank-1 kids only, no requests framing, no
+    // backup list (a leftover rank-2 just means the kid wasn't bumped).
+    if (finalRoster) {
+      var hF = '<span class="signup-class-count ac-reqs-label">'
+        + escapeHtml('Kids' + (max > 0 ? ' (' + first.length + ' of ' + max + ')' : (first.length ? ' (' + first.length + ')' : ''))) + '</span>';
+      if (first.length) hF += '<span class="signup-class-reqs">' + joinNames(first) + '</span>';
+      return hF;
+    }
     // #297 (Erin): one line — "KIDS REQUESTS (24 of 15)" (count of max).
     var label = 'Kids requests' + (max > 0 ? ' (' + detailed.length + ' of ' + max + ')' : (detailed.length ? ' (' + detailed.length + ')' : ''));
     var h = '<span class="signup-class-count ac-reqs-label">' + escapeHtml(label) + '</span>';
@@ -5890,7 +5899,7 @@
     // Caller-supplied control that belongs right by the staff (e.g. the
     // coordination card's "needs N more — sign up" assist link).
     if (opts.afterStaff) h += opts.afterStaff;
-    h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max, opts.linkNames) + '</div>';
+    h += '<div class="ac-reqs">' + signupRequestsHtml(norm.signedUpDetailed, norm.max, opts.linkNames, opts.finalRoster) + '</div>';
     return h;
   }
 
@@ -6031,7 +6040,7 @@
           id: c.id, name: c.name, ageGroups: c.ageGroups, description: c.description,
           room: c.room, hour: c.hour, bothOptional: c.bothOptional,
           leads: cLeads, assists: (c.helpers || []), max: c.max, signedUpDetailed: c.signedUpDetailed
-        }, { titleLinkId: c.id });
+        }, { titleLinkId: c.id, finalRoster: !!(_signup && _signup.window && _signup.window.status === 'locked') });
         // Teen (Cedars/Pigeons) assistant on a teacher-opted-in class: the
         // assistant option is ALWAYS visible so it's discoverable (Erin,
         // 2026-07-15 — it was hidden until the class was ranked and looked
@@ -9778,7 +9787,11 @@
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
-    }, { myNames: myNames, afterStaff: needMore, linkNames: true });
+    }, {
+      myNames: myNames, afterStaff: needMore, linkNames: true,
+      // Locked = lottery done → final roster, not requests (Erin, 2026-08-12).
+      finalRoster: _coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'locked'
+    });
     // #297 (Erin): sign up straight from the card — pick a kid + 1st/2nd choice.
     if (signupOpen) {
       var pmHour = (e.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
