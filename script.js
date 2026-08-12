@@ -5471,6 +5471,9 @@
           _signup.workingAssist[k] = acopy;
         });
         renderClassSignupCard();
+        // #297: the Co-op Coordination Afternoon Classes cards read _signup for
+        // their inline "Choose this class" kid picker — repaint them once it lands.
+        if (typeof renderSessionTab === 'function' && document.getElementById('sessionTabContent')) renderSessionTab();
       })
       .catch(function () { card.style.display = 'none'; });
   }
@@ -9027,6 +9030,51 @@
     if (!groups.length) return true; // all-ages always shows
     return groups.some(function (g) { return _coordGroveSel.indexOf(g) !== -1; });
   }
+  // #297 (Erin): inline sign-up straight from an Afternoon Classes card —
+  // pick a kid + 1st/2nd choice, no separate modal. Kids come from the loaded
+  // class-signup data (_signup.kids, the pickable PM kids for the family).
+  function acSignupKidOptions() {
+    if (!_signup || !Array.isArray(_signup.kids) || !_signup.kids.length) return '';
+    return _signup.kids.map(function (k) { return '<option value="' + escapeHtml(k) + '">' + escapeHtml(k) + '</option>'; }).join('');
+  }
+  // Set `classId` as `kid`'s rank-`rank` choice for its hour(s), then save that
+  // hour's ranked list (position = rank). A 2-hour ('both') class fills both.
+  function acInlineSavePick(classId, hour, isBoth, kid, rank, btn, msgEl) {
+    if (!_signup || !_signup.working || !_signup.working[kid]) {
+      if (msgEl) msgEl.textContent = 'Still loading your kids — try again in a moment.';
+      if (!_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
+      return;
+    }
+    var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
+    var hours = isBoth ? ['PM1', 'PM2'] : [hour];
+    btn.disabled = true;
+    if (msgEl) msgEl.textContent = 'Saving…';
+    var chain = Promise.resolve();
+    hours.forEach(function (h) {
+      var map = _signup.working[kid][h] || (_signup.working[kid][h] = {});
+      applyRankChange(map, classId, rank);
+      var ordered = rankedIdsFrom(map).slice(0, 2);
+      chain = chain.then(function () {
+        return fetch('/api/curriculum?action=class-signup-picks', {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ session: _signup.session, hour: h, kid_first_name: kid, ranked_class_ids: ordered, notes: {}, assist: {}, view_as: active })
+        }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
+      });
+    });
+    chain.then(function () {
+      if (!_signup.picks) _signup.picks = {};
+      _signup.picks[kid] = { PM1: rankedIdsFrom(_signup.working[kid].PM1 || {}).slice(0, 2), PM2: rankedIdsFrom(_signup.working[kid].PM2 || {}).slice(0, 2) };
+      if (msgEl) msgEl.textContent = 'Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)';
+      btn.disabled = false;
+      // Refresh the cards' "kids signed up so far" to include the new pick.
+      _coordPmSignups.session = null;
+      loadCoordPmSignups(sessionTabView);
+    }).catch(function (e) {
+      if (msgEl) msgEl.textContent = e.message || 'Could not save.';
+      btn.disabled = false;
+    });
+  }
+
   function coordGrovePillBar(pm) {
     var groves = coordGrovesInPool(pm);
     if (groves.length < 2) return '';
@@ -9311,13 +9359,15 @@
           + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
           + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
           + '</div>';
+        // Load the family's sign-up data so the per-card kid picker is ready.
+        if (pmSignupOpen && !_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
         html += coordGrovePillBar(dbSess.pm);
         html += '<div class="elective-card-grid">';
-        dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
+        dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen); });
         html += '</div>';
         html += '<h4 class="session-section-title" style="margin-top:44px;">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
         html += '<div class="elective-card-grid">';
-        dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
+        dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen); });
         html += '</div>';
       }
     } else {
@@ -9410,6 +9460,34 @@
         openPersonByDisplayName(this.getAttribute('data-ac-person'));
       });
     });
+    // #297 (Erin): inline "Choose this class" — reveal the kid + choice picker;
+    // load the family's kids if they weren't ready yet.
+    container.querySelectorAll('.ac-choose-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var panel = this.parentNode.querySelector('.ac-signup-panel');
+        if (!panel) return;
+        if (!panel.hasAttribute('hidden')) { panel.setAttribute('hidden', ''); return; }
+        panel.removeAttribute('hidden');
+        if ((!_signup || !acSignupKidOptions()) && typeof loadClassSignupCard === 'function') loadClassSignupCard();
+      });
+    });
+    container.querySelectorAll('.ac-signup-save').forEach(function (btn) {
+      btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var panel = this.closest('.ac-signup-panel');
+        if (!panel) return;
+        var kidSel = panel.querySelector('.ac-signup-kid');
+        var rankSel = panel.querySelector('.ac-signup-rank');
+        if (!kidSel || !rankSel) return;
+        acInlineSavePick(
+          parseInt(panel.getAttribute('data-class'), 10),
+          panel.getAttribute('data-hour'),
+          panel.getAttribute('data-both') === '1',
+          kidSel.value, parseInt(rankSel.value, 10),
+          this, panel.querySelector('.ac-signup-msg'));
+      });
+    });
     // #297 (Erin): assist an open afternoon-class spot from the card — same
     // confirm + volunteer-assist flow as the Morning Classes table.
     container.querySelectorAll('.pm-assist-signup').forEach(function (btn) {
@@ -9438,7 +9516,7 @@
 
   // Published-DB elective card: same look as the sheet-era card, but no
   // roster/capacity bar yet (sign-ups feature will bring enrollment counts).
-  function buildDbElectiveCard(e, myNames) {
+  function buildDbElectiveCard(e, myNames, signupOpen) {
     // Leads = teacher + co-leads (co-leads LEAD the class, same as the detail
     // card and morning table treat them); assistants are separate.
     var coLeads = String(e.co_teachers || '').split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean);
@@ -9466,6 +9544,22 @@
       leads: leadNames, assists: assistNames, max: e.max_students,
       signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
     }, { myNames: myNames, afterStaff: needMore, linkNames: true });
+    // #297 (Erin): sign up straight from the card — pick a kid + 1st/2nd choice.
+    if (signupOpen) {
+      var pmHour = (e.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+      var kidOpts = acSignupKidOptions();
+      html += '<div class="ac-signup">'
+        + '<button type="button" class="sc-btn ac-choose-btn" data-class="' + e.id + '">' + brandIconImg('afternoon', 'ag-icon') + ' Choose this class</button>'
+        + '<div class="ac-signup-panel" hidden data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (e.scheduled_hour === 'both' ? '1' : '') + '">'
+        + (kidOpts
+            ? '<label class="ac-signup-row"><span>Kid</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
+              + '<label class="ac-signup-row"><span>Choice</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option></select></label>'
+              + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save pick</button>'
+              + '<span class="ac-signup-msg"></span>'
+            : '<span class="ac-signup-msg">Loading your kids…</span>')
+        + '</div>'
+        + '</div>';
+    }
     html += '</div>';
     return html;
   }

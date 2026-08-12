@@ -13786,6 +13786,12 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .ac-staff-name { font-size: 0.74rem; color: var(--color-text); }
 .ac-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 2px; }
 .ac-need { margin-top: 2px; }
+/* #297: inline "Choose this class" sign-up on the coordination cards. */
+.ac-signup { margin-top: 8px; }
+.ac-signup-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(var(--color-primary-rgb), 0.04); }
+.ac-signup-row { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--color-text-light); }
+.ac-signup-row select { font-size: 0.8rem; padding: 3px 6px; }
+.ac-signup-msg { font-size: 0.76rem; color: var(--color-primary-dark); }
 /* #297: names on the coordination cards link to the directory card. */
 button.ac-person-link { border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 button.ac-person-link:hover, button.ac-person-link:focus-visible { text-decoration: underline; }
