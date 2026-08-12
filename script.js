@@ -5435,6 +5435,10 @@
     if (_signup) renderClassSignupCard();
     var qs = '?action=class-signup';
     if (sessionOverride) qs += '&session=' + encodeURIComponent(sessionOverride);
+    // Hint the current session so that when NO window is open, the API still
+    // returns this session's saved picks (Kids' Schedule) instead of nothing
+    // (Erin, 2026-08-12 — picks vanished after sign-ups closed).
+    if (typeof currentSession !== 'undefined' && currentSession) qs += '&default_session=' + encodeURIComponent(currentSession);
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
     if (active) qs += '&view_as=' + encodeURIComponent(active);
     fetch('/api/curriculum' + qs, { headers: { 'Authorization': 'Bearer ' + cred } })
@@ -5781,10 +5785,12 @@
   // is the class's signedUpDetailed ([{name, rank, assistant}]).
   function signupRequestsHtml(detailed, max, linkNames) {
     detailed = Array.isArray(detailed) ? detailed : [];
+    // Student assistants are shown on their own line, not as seat requests.
+    detailed = detailed.filter(function (s2) { return !s2.assistant; });
     var first = detailed.filter(function (s2) { return s2.rank === 1; });
     var backup = detailed.filter(function (s2) { return s2.rank !== 1; });
     var nm = function (s2) {
-      var disp = escapeHtml(s2.name + (s2.assistant ? ' (assistant)' : ''));
+      var disp = escapeHtml(s2.name);
       return linkNames ? '<button type="button" class="ac-person-link" data-ac-person="' + escapeHtml(s2.name) + '">' + disp + '</button>' : disp;
     };
     // Keep each name + its trailing comma together so a comma never wraps to
@@ -5862,6 +5868,14 @@
     if (leads.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Led by</span>' + leads.map(staffChip).join('') + '</span>';
     if (assists.length) staff += '<span class="ac-staff-grp"><span class="ac-staff-role">Assisted by</span>' + assists.map(staffChip).join('') + '</span>';
     if (staff) h += '<div class="ac-staff">' + staff + '</div>';
+    // #297 (Erin): student assistants (Cedars/Pigeons kids who signed up to
+    // assist) shown as their own line — confirmed helpers, not seat requests.
+    var studentAssists = (norm.signedUpDetailed || []).filter(function (x) { return x.assistant; });
+    if (studentAssists.length) {
+      h += '<div class="ac-staff ac-student-assist"><span class="ac-staff-grp"><span class="ac-staff-role">Student '
+        + (studentAssists.length === 1 ? 'assistant' : 'assistants') + '</span>'
+        + studentAssists.map(function (x) { return staffChip(x.name); }).join('') + '</span></div>';
+    }
     // Caller-supplied control that belongs right by the staff (e.g. the
     // coordination card's "needs N more — sign up" assist link).
     if (opts.afterStaff) h += opts.afterStaff;

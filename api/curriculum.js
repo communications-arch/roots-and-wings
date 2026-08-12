@@ -2286,17 +2286,35 @@ module.exports = async function handler(req, res) {
       if (action === 'class-signup') {
         const sy = activeSchoolYear(new Date());
         const reviewer = await isReviewerReq(user, req);
-        // session is optional: with none, fall back to whichever session has an
-        // OPEN window (most recent) so the parent card auto-shows the active
-        // sign-up. Reviewers pass an explicit session to manage any of them.
+        // session is optional. Prefer whichever session has an OPEN window (the
+        // active sign-up, possibly a future session opening mid-season). Once
+        // sign-ups CLOSE there's no open window — returning nothing made the
+        // family's saved picks vanish from the Kids' Schedule (Erin, 2026-08-12)
+        // — so fall back to the caller's CURRENT session (a client hint), then
+        // to the most recent window. The card's `signupWindowLive` gate still
+        // keeps the sign-up card open-only.
         let session = parseInt(req.query.session, 10) || null;
         if (!session) {
           const openWin = await sql`
             SELECT session_number FROM class_signup_windows
             WHERE school_year = ${sy} AND status = 'open'
-            ORDER BY session_number DESC LIMIT 1
-          `;
-          session = openWin[0] ? openWin[0].session_number : null;
+            ORDER BY session_number DESC LIMIT 1`;
+          if (openWin[0]) session = openWin[0].session_number;
+        }
+        if (!session) {
+          const dflt = parseInt(req.query.default_session, 10) || null;
+          if (dflt) {
+            const dw = await sql`
+              SELECT session_number FROM class_signup_windows
+              WHERE school_year = ${sy} AND session_number = ${dflt} LIMIT 1`;
+            if (dw[0]) session = dw[0].session_number;
+          }
+        }
+        if (!session) {
+          const recent = await sql`
+            SELECT session_number FROM class_signup_windows
+            WHERE school_year = ${sy} ORDER BY session_number DESC LIMIT 1`;
+          session = recent[0] ? recent[0].session_number : null;
         }
         if (!session) {
           return res.status(200).json({
