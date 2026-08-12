@@ -24,6 +24,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
+const { pushNotifications } = require('./_push');
 const {
   CAPABILITIES, LOCKED_RULES, NONE_SENTINEL,
   capabilityRoles, hasCapability, invalidateGrantsCache
@@ -676,15 +677,19 @@ module.exports = async function handler(req, res) {
               if (recipients.size === 0 && re) recipients.add(re);
             }
             if (recipients.size === 0) recipients.add('vicepresident@rootsandwingsindy.com');
+            const rolePushRows = [];
             for (const rcpt of recipients) {
-              await sql`
+              const r = await sql`
                 INSERT INTO notifications (recipient_email, type, title, body, link_url)
                 VALUES (${rcpt}, 'role_interest',
                         ${'🙋 ' + whoName + ' is interested — ' + seatTitle},
                         ${whoName + ' raised a hand for ' + seatTitle + (seatCommittee ? ' (' + seatCommittee + ')' : '') + '. See who’s interested in Roles Assignments.'},
                         '')
+                RETURNING id, recipient_email, title, body, link_url
               `;
+              r.forEach(x => rolePushRows.push(x));
             }
+            try { await pushNotifications(sql, rolePushRows); } catch (pe) { console.error('role-interest push (non-fatal):', pe.message); }
           } catch (e) {
             console.error('role-interest notification failed (non-fatal):', e.message);
           }

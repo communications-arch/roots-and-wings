@@ -16,7 +16,7 @@ const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
-const { broadcastAll } = require('./_push');
+const { pushNotifications } = require('./_push');
 const { canActAs } = require('./_family');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
@@ -1392,11 +1392,13 @@ async function handleBlcEmailRequest(body, req, res) {
   let commsTo = '';
   try { commsTo = await getRoleHolderEmail('Communications Director'); } catch (e) { /* mailbox fallback */ }
   try {
-    await sql`
+    const blcNotif = await sql`
       INSERT INTO notifications (recipient_email, type, title, body, link_url)
       VALUES (${(commsTo || 'communications@rootsandwingsindy.com').toLowerCase()}, 'blc_signin_request',
               ${'R&W sign-in requested — ' + blcName},
-              ${'The ' + famName + ' family asked for a portal sign-in for their backup Learning Coach ' + blcName + '. Set it up from your To Do list.'}, '')`;
+              ${'The ' + famName + ' family asked for a portal sign-in for their backup Learning Coach ' + blcName + '. Set it up from your To Do list.'}, '')
+      RETURNING id, recipient_email, title, body, link_url`;
+    try { await pushNotifications(sql, blcNotif); } catch (pe) { console.error('blc sign-in push (non-fatal):', pe.message); }
   } catch (e) { console.error('blc sign-in notification failed (non-fatal):', e.message); }
   return res.status(200).json({ success: true });
 }
@@ -7191,21 +7193,14 @@ async function handleEventSignupsOpen(body, req, res) {
         FROM people
         WHERE COALESCE(role, '') <> 'blc'
           AND COALESCE(NULLIF(email, ''), personal_email, '') <> ''
-        RETURNING id
+        RETURNING id, recipient_email, title, body, link_url
       `;
       notified = ins.length;
-      // Also send a real PUSH — this path only wrote bell rows, so members
-      // (like Erin) got the in-portal notification but no phone/desktop alert
-      // (2026-08-11). broadcastAll covers everyone who enabled push; failures
-      // are non-fatal so a flaky push service can't fail the open action.
-      try {
-        await broadcastAll(sql, {
-          title: '🎉 ' + evName + ' — sign-ups are open!',
-          body: 'Helpers and contributions are needed for the ' + evName + '. See “Ways to Help” to claim a spot.',
-          tag: 'event-signups-open-' + eventId,
-          url: '/members.html'
-        });
-      } catch (pushErr) { console.error('event-signups-open push (non-fatal):', pushErr); }
+      // Push by default: this path only wrote bell rows, so members got the
+      // in-portal notification but no phone/desktop alert (2026-08-11). Push
+      // each new row to its recipient; non-fatal so a flaky push service can't
+      // fail the open action.
+      try { await pushNotifications(sql, ins); } catch (pushErr) { console.error('event-signups-open push (non-fatal):', pushErr); }
     }
     return res.status(200).json({ ok: true, sections: secs.length, notified });
   } catch (err) {
@@ -7328,6 +7323,7 @@ async function handleEventSignupClaim(body, req, res) {
         const secTitle = sec.title || 'Discussion';
         const nTitle = '💬 ' + evName + ' — ' + secTitle;
         const nLink = 'evspace:' + sec.special_event_id;
+        const discPushRows = [];
         for (const rcpt of Object.keys(recipients)) {
           const openRow = await sql`
             SELECT id, body FROM notifications
@@ -7335,21 +7331,26 @@ async function handleEventSignupClaim(body, req, res) {
               AND title = ${nTitle} AND link_url = ${nLink} AND is_read = FALSE
             ORDER BY id DESC LIMIT 1
           `;
+          let nBody;
           if (openRow.length) {
             const m = String(openRow[0].body || '').match(/^(\d+) new/);
             const count = (m ? parseInt(m[1], 10) : 1) + 1;
+            nBody = count + ' new messages — latest from ' + who.name;
             await sql`
               UPDATE notifications
-              SET body = ${count + ' new messages — latest from ' + who.name}, created_at = NOW()
+              SET body = ${nBody}, created_at = NOW()
               WHERE id = ${openRow[0].id}
             `;
           } else {
+            nBody = '1 new message from ' + who.name;
             await sql`
               INSERT INTO notifications (recipient_email, type, title, body, link_url)
-              VALUES (${rcpt}, 'discussion_post', ${nTitle}, ${'1 new message from ' + who.name}, ${nLink})
+              VALUES (${rcpt}, 'discussion_post', ${nTitle}, ${nBody}, ${nLink})
             `;
           }
+          discPushRows.push({ recipient_email: rcpt, title: nTitle, body: nBody, link_url: nLink });
         }
+        try { await pushNotifications(sql, discPushRows); } catch (dpErr) { console.error('discussion push (non-fatal):', dpErr); }
       } catch (discErr) {
         console.error('discussion notify failed (non-fatal):', discErr);
       }
@@ -7783,14 +7784,18 @@ async function handleEventSeatInterest(body, req, res) {
     const notifBody = who.name + ' signed up as ' + seatLabel + ' for the ' + ev.name
       + '. Their name is already on the event in the Special Events grid — adjust there if needed.'
       + (seat === 'lead' ? ' (Two people can share the lead as co-leads.)' : '');
+    const seatPushRows = [];
     for (const rcpt of recipients) {
       try {
-        await sql`
+        const r = await sql`
           INSERT INTO notifications (recipient_email, type, title, body, link_url)
           VALUES (${rcpt}, 'event_seat_interest', ${notifTitle}, ${notifBody}, '')
+          RETURNING id, recipient_email, title, body, link_url
         `;
+        r.forEach(x => seatPushRows.push(x));
       } catch (e) { console.error('event-seat-interest notification failed (non-fatal):', e.message); }
     }
+    try { await pushNotifications(sql, seatPushRows); } catch (pe) { console.error('event-seat-interest push (non-fatal):', pe.message); }
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-seat-interest error:', err);
@@ -9314,10 +9319,12 @@ async function membershipMayDecide(realEmail) {
 
 async function notifyEnrollment(sql, recipientEmail, title, bodyTxt) {
   try {
-    await sql`
+    const r = await sql`
       INSERT INTO notifications (recipient_email, type, title, body, link_url)
       VALUES (${String(recipientEmail || '').toLowerCase()}, 'enrollment_request', ${title}, ${bodyTxt}, '')
+      RETURNING id, recipient_email, title, body, link_url
     `;
+    try { await pushNotifications(sql, r); } catch (pe) { console.error('enrollment push (non-fatal):', pe.message); }
   } catch (e) { console.error('enrollment notification failed (non-fatal):', e.message); }
 }
 
@@ -10391,11 +10398,13 @@ async function handleOffboardingNotify(body, req, res) {
       if (famFailed) { failed.push(f.family_email); continue; }
       for (const l of f.logins) {
         try {
-          await sql`
+          const r = await sql`
             INSERT INTO notifications (recipient_email, type, title, body, link_url)
             VALUES (${l}, 'account_notice', ${subject},
                     ${bodyText.slice(0, 800) + '\n\n(Account deletion is handled manually by the Communications Director — check your email for the full notice.)'}, '')
+            RETURNING id, recipient_email, title, body, link_url
           `;
+          try { await pushNotifications(sql, r); } catch (pe) { console.error('offboarding push (non-fatal):', pe.message); }
         } catch (e) { console.error('offboarding portal notification failed (non-fatal):', e.message); }
       }
       await sql`

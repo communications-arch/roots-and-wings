@@ -55,6 +55,29 @@ async function sendToUser(sql, email, payload) {
   return results;
 }
 
+// "Every bell notification also alerts the device" (Erin, 2026-08-11): push a
+// batch of freshly-INSERTed notification rows to their recipients. Pass the
+// rows a caller got from `RETURNING id, recipient_email, title, body, link_url`.
+// Per-recipient (so targeted notifications reach only their person) and safe
+// for whole-membership broadcasts too — subs are cached per email so a big
+// broadcast doesn't re-query. Non-path link_urls (e.g. "evspace:12", which the
+// bell handles) fall back to /members.html for the push's click target.
+async function pushNotifications(sql, rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  if (!init()) return;
+  const subsByEmail = {};
+  for (const r of rows) {
+    const email = String(r.recipient_email || '').toLowerCase();
+    if (!email) continue;
+    if (!subsByEmail[email]) {
+      subsByEmail[email] = await sql`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE LOWER(user_email) = ${email}`;
+    }
+    const url = (r.link_url && /^\//.test(r.link_url)) ? r.link_url : '/members.html';
+    const payload = { title: r.title, body: r.body, tag: 'notif-' + (r.id || email), url };
+    for (const sub of subsByEmail[email]) await trySend(sql, sub, payload);
+  }
+}
+
 async function broadcastAll(sql, payload) {
   if (!init()) return;
   const subs = await sql`SELECT endpoint, p256dh, auth FROM push_subscriptions`;
@@ -66,4 +89,4 @@ async function broadcastAll(sql, payload) {
   console.log('[push] broadcast:', ok, 'delivered,', failed, 'failed of', subs.length);
 }
 
-module.exports = { sendToUser, broadcastAll };
+module.exports = { sendToUser, broadcastAll, pushNotifications };
