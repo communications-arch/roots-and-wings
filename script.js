@@ -9056,12 +9056,22 @@
     _signup.kids.forEach(function (kid) {
       var w = _signup.working[kid];
       var r = w && w[h] && w[h][classId];
-      if (r) out.push({ kid: kid, rank: r });
+      if (r) out.push({ kid: kid, rank: r, assist: !!(_signup.workingAssist && _signup.workingAssist[kid] && _signup.workingAssist[kid][classId]) });
     });
     return out;
   }
-  // Set `classId` as `kid`'s rank-`rank` choice for its hour(s), then save that
-  // hour's ranked list (position = rank). A 2-hour ('both') class fills both.
+  // Find a PM class in the loaded sign-up pool (for age-fit / opted-in checks).
+  function acFindSignupClass(classId) {
+    if (!_signup || !_signup.classes) return null;
+    var lists = [_signup.classes.PM1 || [], _signup.classes.PM2 || []];
+    for (var i = 0; i < lists.length; i++) for (var j = 0; j < lists[i].length; j++) {
+      if (lists[i][j].id === classId) return lists[i][j];
+    }
+    return null;
+  }
+  // Save (or remove) a family kid's pick from the inline card. `rank` is
+  // 1 | 2 | 'assist' | null(remove). Out-of-range picks verify + take an
+  // optional note; 'assist' is Cedars/Pigeons only, on opted-in classes.
   function acInlineSavePick(classId, hour, isBoth, kid, rank, btn, msgEl) {
     if (!_signup || !_signup.working || !_signup.working[kid]) {
       if (msgEl) msgEl.textContent = 'Still loading your kids — try again in a moment.';
@@ -9070,31 +9080,73 @@
     }
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
     var hours = isBoth ? ['PM1', 'PM2'] : [hour];
+    var cls = acFindSignupClass(classId);
+    var age = (_signup.kidAges && _signup.kidAges[kid] != null) ? _signup.kidAges[kid] : null;
+    var group = (_signup.kidGroups && _signup.kidGroups[kid]) || '';
+    var isAssist = rank === 'assist';
+    var noteText = '';
+
+    if (isAssist) {
+      var isTeen = ['pigeons', 'cedars'].indexOf(String(group).toLowerCase()) !== -1 || (age != null && age >= 12);
+      if (!isTeen) { if (msgEl) msgEl.textContent = 'Only Cedars/Pigeons (12+) can assist a class.'; return; }
+      // Capacity: an assist takes a free choice slot; block if both are full.
+      for (var i = 0; i < hours.length; i++) {
+        var m0 = _signup.working[kid][hours[i]] || {};
+        if (!m0[classId]) {
+          var r1 = Object.keys(m0).some(function (c) { return m0[c] === 1; });
+          var r2 = Object.keys(m0).some(function (c) { return m0[c] === 2; });
+          if (r1 && r2) { if (msgEl) msgEl.textContent = kid + ' already has 2 picks this hour — remove one to assist.'; return; }
+        }
+      }
+    } else if (rank) {
+      // #297 (Erin): an out-of-range pick needs a verify + optional note.
+      var ageText = cls ? signupAgeText(cls) : '';
+      var fit = (typeof fitsKid === 'function' && typeof kidBandsFor === 'function') ? fitsKid(kidBandsFor(age, group), ageText) : null;
+      if (fit === false) {
+        if (!window.confirm('“' + (cls ? cls.name : 'This class') + '” is outside ' + kid + '’s listed age range.\n\nSign them up anyway?')) { if (msgEl) msgEl.textContent = ''; return; }
+        noteText = window.prompt('Optional note for the Afternoon Class Liaison — why this class fits ' + kid + ':', '') || '';
+      }
+    }
+
     if (btn) btn.disabled = true;
     if (msgEl) msgEl.textContent = rank ? 'Saving…' : 'Removing…';
     var chain = Promise.resolve();
     hours.forEach(function (h) {
       var map = _signup.working[kid][h] || (_signup.working[kid][h] = {});
-      applyRankChange(map, classId, rank);
+      var effRank = rank;
+      if (isAssist) {
+        // Keep an existing rank; otherwise take the first free slot.
+        effRank = map[classId] || (!Object.keys(map).some(function (c) { return map[c] === 1; }) ? 1 : 2);
+      }
+      applyRankChange(map, classId, isAssist ? effRank : rank);
       var ordered = rankedIdsFrom(map).slice(0, 2);
+      // Notes + assist flags for this hour's picks.
+      var notesObj = {}; if (noteText) notesObj[classId] = noteText;
+      _signup.workingAssist = _signup.workingAssist || {};
+      _signup.workingAssist[kid] = _signup.workingAssist[kid] || {};
+      if (isAssist) _signup.workingAssist[kid][classId] = true;
+      if (!rank) delete _signup.workingAssist[kid][classId]; // removal clears it
+      var assistObj = {};
+      ordered.forEach(function (cid) { if (_signup.workingAssist[kid][cid]) assistObj[cid] = true; });
       chain = chain.then(function () {
         return fetch('/api/curriculum?action=class-signup-picks', {
           method: 'POST', headers: rwAuthHeaders(true),
-          body: JSON.stringify({ session: _signup.session, hour: h, kid_first_name: kid, ranked_class_ids: ordered, notes: {}, assist: {}, view_as: active })
+          body: JSON.stringify({ session: _signup.session, hour: h, kid_first_name: kid, ranked_class_ids: ordered, notes: notesObj, assist: assistObj, view_as: active })
         }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d && d.error) || 'Save failed'); return d; }); });
       });
     });
     chain.then(function () {
       if (!_signup.picks) _signup.picks = {};
       _signup.picks[kid] = { PM1: rankedIdsFrom(_signup.working[kid].PM1 || {}).slice(0, 2), PM2: rankedIdsFrom(_signup.working[kid].PM2 || {}).slice(0, 2) };
-      if (msgEl) msgEl.textContent = rank ? ('Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)') : ('Removed ✓ — ' + kid);
+      if (msgEl) msgEl.textContent = !rank ? ('Removed ✓ — ' + kid) : isAssist ? ('Saved ✓ — ' + kid + ' (assistant)') : ('Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)');
       if (btn) btn.disabled = false;
-      // Refresh the cards ("kids signed up so far" + the family's own picks).
+      // #297 (Erin): update the My Family Kids' Schedule immediately.
+      if (typeof renderClassSignupCard === 'function') renderClassSignupCard();
       _coordPmSignups.session = null;
       loadCoordPmSignups(sessionTabView);
     }).catch(function (e) {
       if (msgEl) msgEl.textContent = e.message || 'Could not save.';
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -9489,7 +9541,7 @@
           parseInt(wrap.getAttribute('data-class'), 10),
           wrap.getAttribute('data-hour'),
           wrap.getAttribute('data-both') === '1',
-          kidSel.value, parseInt(rankSel.value, 10),
+          kidSel.value, (rankSel.value === 'assist' ? 'assist' : parseInt(rankSel.value, 10)),
           this, panel.querySelector('.ac-signup-msg'));
       });
     });
@@ -9573,7 +9625,8 @@
       // The family's kids already signed up for THIS class — ✕ to remove.
       if (mine.length) {
         html += '<div class="ac-mine">' + mine.map(function (m) {
-          return '<span class="ac-mine-chip">' + escapeHtml(m.kid) + ' <span class="ac-mine-rank">(' + (m.rank === 1 ? '1st' : '2nd') + ' choice)</span>'
+          var tag = m.assist ? 'assistant' : (m.rank === 1 ? '1st choice' : '2nd choice');
+          return '<span class="ac-mine-chip">' + escapeHtml(m.kid) + ' <span class="ac-mine-rank">(' + tag + ')</span>'
             + ' <button type="button" class="ac-mine-x" data-kid="' + escapeHtml(m.kid) + '" title="Remove ' + escapeHtml(m.kid) + '’s sign-up">✕</button></span>';
         }).join('') + '</div>';
       }
@@ -9581,7 +9634,8 @@
       html += '<div class="ac-signup-panel">'
         + (kidOpts
             ? '<label class="ac-signup-row"><span>Sign up</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
-              + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option></select></label>'
+              + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option>'
+                + (e.open_to_teen_assistant ? '<option value="assist">assistant (Cedars/Pigeons)</option>' : '') + '</select></label>'
               + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save</button>'
               + '<span class="ac-signup-msg"></span>'
             : '<span class="ac-signup-msg">Loading your kids…</span>')
