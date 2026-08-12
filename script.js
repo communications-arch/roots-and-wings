@@ -9048,6 +9048,20 @@
     if (!_signup || !Array.isArray(_signup.kids) || !_signup.kids.length) return '';
     return _signup.kids.map(function (k) { return '<option value="' + escapeHtml(k) + '">' + escapeHtml(k) + '</option>'; }).join('');
   }
+  // Which of the acting family's kids are signed up for THIS class, and at what
+  // rank — so the card can show them with an ✕ to remove (Erin, 2026-08-11).
+  // A 2-hour ('both') class is ranked under PM1.
+  function acFamilyPicksForClass(classId, hour, isBoth) {
+    var out = [];
+    if (!_signup || !_signup.working || !Array.isArray(_signup.kids)) return out;
+    var h = isBoth ? 'PM1' : hour;
+    _signup.kids.forEach(function (kid) {
+      var w = _signup.working[kid];
+      var r = w && w[h] && w[h][classId];
+      if (r) out.push({ kid: kid, rank: r });
+    });
+    return out;
+  }
   // Set `classId` as `kid`'s rank-`rank` choice for its hour(s), then save that
   // hour's ranked list (position = rank). A 2-hour ('both') class fills both.
   function acInlineSavePick(classId, hour, isBoth, kid, rank, btn, msgEl) {
@@ -9058,8 +9072,8 @@
     }
     var active = (typeof getActiveEmail === 'function') ? getActiveEmail() : '';
     var hours = isBoth ? ['PM1', 'PM2'] : [hour];
-    btn.disabled = true;
-    if (msgEl) msgEl.textContent = 'Saving…';
+    if (btn) btn.disabled = true;
+    if (msgEl) msgEl.textContent = rank ? 'Saving…' : 'Removing…';
     var chain = Promise.resolve();
     hours.forEach(function (h) {
       var map = _signup.working[kid][h] || (_signup.working[kid][h] = {});
@@ -9075,9 +9089,9 @@
     chain.then(function () {
       if (!_signup.picks) _signup.picks = {};
       _signup.picks[kid] = { PM1: rankedIdsFrom(_signup.working[kid].PM1 || {}).slice(0, 2), PM2: rankedIdsFrom(_signup.working[kid].PM2 || {}).slice(0, 2) };
-      if (msgEl) msgEl.textContent = 'Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)';
-      btn.disabled = false;
-      // Refresh the cards' "kids signed up so far" to include the new pick.
+      if (msgEl) msgEl.textContent = rank ? ('Saved ✓ — ' + kid + ' (' + (rank === 1 ? '1st' : '2nd') + ' choice)') : ('Removed ✓ — ' + kid);
+      if (btn) btn.disabled = false;
+      // Refresh the cards ("kids signed up so far" + the family's own picks).
       _coordPmSignups.session = null;
       loadCoordPmSignups(sessionTabView);
     }).catch(function (e) {
@@ -9467,17 +9481,32 @@
     container.querySelectorAll('.ac-signup-save').forEach(function (btn) {
       btn.addEventListener('click', function (ev) {
         ev.stopPropagation();
+        var wrap = this.closest('.ac-signup');
         var panel = this.closest('.ac-signup-panel');
-        if (!panel) return;
+        if (!wrap || !panel) return;
         var kidSel = panel.querySelector('.ac-signup-kid');
         var rankSel = panel.querySelector('.ac-signup-rank');
         if (!kidSel || !rankSel) return;
         acInlineSavePick(
-          parseInt(panel.getAttribute('data-class'), 10),
-          panel.getAttribute('data-hour'),
-          panel.getAttribute('data-both') === '1',
+          parseInt(wrap.getAttribute('data-class'), 10),
+          wrap.getAttribute('data-hour'),
+          wrap.getAttribute('data-both') === '1',
           kidSel.value, parseInt(rankSel.value, 10),
           this, panel.querySelector('.ac-signup-msg'));
+      });
+    });
+    // #297 (Erin): ✕ removes a family kid's sign-up for this class.
+    container.querySelectorAll('.ac-mine-x').forEach(function (btn) {
+      btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var wrap = this.closest('.ac-signup');
+        if (!wrap) return;
+        acInlineSavePick(
+          parseInt(wrap.getAttribute('data-class'), 10),
+          wrap.getAttribute('data-hour'),
+          wrap.getAttribute('data-both') === '1',
+          this.getAttribute('data-kid'), null,
+          null, wrap.querySelector('.ac-signup-msg'));
       });
     });
     // #297 (Erin): assist an open afternoon-class spot from the card — same
@@ -9539,10 +9568,19 @@
     // #297 (Erin): sign up straight from the card — pick a kid + 1st/2nd choice.
     if (signupOpen) {
       var pmHour = (e.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
+      var isBothPm = e.scheduled_hour === 'both';
       var kidOpts = acSignupKidOptions();
-      // Always-visible inline picker (Erin: no "Choose this class" toggle).
-      html += '<div class="ac-signup">'
-        + '<div class="ac-signup-panel" data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (e.scheduled_hour === 'both' ? '1' : '') + '">'
+      var mine = acFamilyPicksForClass(e.id, pmHour, isBothPm);
+      html += '<div class="ac-signup" data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (isBothPm ? '1' : '') + '">';
+      // The family's kids already signed up for THIS class — ✕ to remove.
+      if (mine.length) {
+        html += '<div class="ac-mine">' + mine.map(function (m) {
+          return '<span class="ac-mine-chip">' + escapeHtml(m.kid) + ' <span class="ac-mine-rank">(' + (m.rank === 1 ? '1st' : '2nd') + ' choice)</span>'
+            + ' <button type="button" class="ac-mine-x" data-kid="' + escapeHtml(m.kid) + '" title="Remove ' + escapeHtml(m.kid) + '’s sign-up">✕</button></span>';
+        }).join('') + '</div>';
+      }
+      // Add-a-pick row (always shown while sign-ups are open).
+      html += '<div class="ac-signup-panel">'
         + (kidOpts
             ? '<label class="ac-signup-row"><span>Sign up</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
               + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">2nd choice</option></select></label>'

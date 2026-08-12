@@ -13787,8 +13787,14 @@ button.signup-class-name-link:hover, button.signup-class-name-link:focus-visible
 .signup-class-count.ac-reqs-label { margin-top: 6px; font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-light); }
 .ac-reqs { display: flex; flex-direction: column; align-items: flex-start; margin-top: 1px; }
 .ac-need { margin-top: 2px; }
-/* #297: inline "Choose this class" sign-up on the coordination cards. */
+/* #297: inline sign-up on the coordination cards. */
 .ac-signup { margin-top: 8px; }
+/* The family's own kids signed up for this class, each with an ✕ to remove. */
+.ac-mine { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ac-mine-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 0.78rem; font-weight: 600; color: var(--color-text); padding: 2px 4px 2px 8px; border: 1px solid var(--color-primary); border-radius: 999px; background: rgba(var(--color-primary-rgb), 0.08); }
+.ac-mine-rank { font-weight: 400; color: var(--color-text-light); }
+.ac-mine-x { border: 0; background: none; cursor: pointer; color: var(--color-error); font-weight: 700; font-size: 0.9rem; line-height: 1; padding: 0 3px; }
+.ac-mine-x:hover { color: #a32222; }
 .ac-signup-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(var(--color-primary-rgb), 0.04); }
 .ac-signup-row { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; color: var(--color-text-light); }
 .ac-signup-row > span { white-space: nowrap; } /* don't wrap "Sign up" */
