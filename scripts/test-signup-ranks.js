@@ -175,7 +175,9 @@ t('#297: signupRequestsHtml splits first choice from backup, excludes assistants
   const html = api.signupRequestsHtml(
     [{ name: 'Ava', rank: 1 }, { name: 'Ben', rank: 1, assistant: true }, { name: 'Cara', rank: 2 }], 12);
   // Student assistants are shown separately, not counted as seat requests.
-  assert(/Kids requests \(2 of 12\)/.test(html), 'count excludes assistants, got ' + html);
+  // #343 (Lyndsey): the count is FIRST CHOICES only — backups don't occupy
+  // seats, so Ava alone counts toward the 12 (Cara lists but isn't counted).
+  assert(/Kids requests \(1 of 12\)/.test(html), 'count is firsts only, got ' + html);
   assert(/First choice:<\/span>[\s\S]*Ava/.test(html), 'first choice listed');
   assert(/Backup:<\/span>[\s\S]*Cara/.test(html), 'backups listed separately');
   assert(!/Ben/.test(html), 'the assistant is not in the requests list');
