@@ -9304,15 +9304,15 @@
         // #297 (Erin): sign up for afternoon classes straight from here when the
         // window is open \u2014 same picker as the My Family Afternoon Class Sign-ups.
         var pmSignupOpen = (_coordPmSignups.session === sessionTabView && _coordPmSignups.windowStatus === 'open');
-        html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:8px;">'
-          + '<h4 class="session-section-title" style="margin-right:auto;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
+        html += '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:40px;">'
+          + '<h4 class="session-section-title" style="margin:0 auto 0 0;">Afternoon Classes &mdash; Hour 1: 1:00\u20131:55</h4>'
           + (pmSignupOpen ? '<button type="button" class="ws-inline-link" id="coordPmSignupBtn" style="white-space:nowrap;font-size:0.78rem;">' + brandIconImg('afternoon', 'ag-icon') + ' Choose classes</button>' : '')
           + '</div>';
         html += coordGrovePillBar(dbSess.pm);
         html += '<div class="elective-card-grid">';
         dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';
-        html += '<h4 class="session-section-title" style="margin-top:32px;">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
+        html += '<h4 class="session-section-title" style="margin-top:44px;">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
         html += '<div class="elective-card-grid">';
         dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames); });
         html += '</div>';

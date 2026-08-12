@@ -16,6 +16,7 @@ const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
+const { broadcastAll } = require('./_push');
 const { canActAs } = require('./_family');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
@@ -7193,6 +7194,18 @@ async function handleEventSignupsOpen(body, req, res) {
         RETURNING id
       `;
       notified = ins.length;
+      // Also send a real PUSH — this path only wrote bell rows, so members
+      // (like Erin) got the in-portal notification but no phone/desktop alert
+      // (2026-08-11). broadcastAll covers everyone who enabled push; failures
+      // are non-fatal so a flaky push service can't fail the open action.
+      try {
+        await broadcastAll(sql, {
+          title: '🎉 ' + evName + ' — sign-ups are open!',
+          body: 'Helpers and contributions are needed for the ' + evName + '. See “Ways to Help” to claim a spot.',
+          tag: 'event-signups-open-' + eventId,
+          url: '/members.html'
+        });
+      } catch (pushErr) { console.error('event-signups-open push (non-fatal):', pushErr); }
     }
     return res.status(200).json({ ok: true, sections: secs.length, notified });
   } catch (err) {

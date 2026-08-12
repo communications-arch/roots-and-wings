@@ -3322,7 +3322,7 @@ body.rw-booting #myFamilyGrid { min-height: 72vh; }
 
 /* ---------- Portal Board ---------- */
 .portal-board {
-  padding: 60px 0;
+  padding: 24px 0 60px;
   background: var(--color-white);
 }
 
