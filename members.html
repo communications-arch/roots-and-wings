@@ -391,7 +391,7 @@
 
     <!-- ====== Address/Map modal (opened from the top pin icon) ====== -->
     <div class="directory-overlay" id="addressOverlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="addressModalTitle">
-      <div class="directory-modal-card" style="max-width:680px;">
+      <div class="directory-modal-card" style="max-width:860px;">
         <button class="detail-close address-close" aria-label="Close address">&times;</button>
         <h2 id="addressModalTitle" class="directory-modal-title">Where We Meet</h2>
         <div class="info-card" style="margin-bottom:16px;">
@@ -410,6 +410,16 @@
           width="100%" height="320" style="border:0;border-radius:var(--radius-md);" allowfullscreen loading="lazy"
           referrerpolicy="no-referrer-when-downgrade"
           title="First Mennonite Church location"></iframe>
+        <div class="info-card" style="margin-top:16px;">
+          <h4>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"/><path d="M8 2v16"/><path d="M16 6v16"/></svg>
+            Building Map
+          </h4>
+          <a href="img/building-map.png" target="_blank" rel="noopener noreferrer" aria-label="Open the building map full size in a new tab">
+            <img src="img/building-map.png" alt="Building map of Roots and Wings rooms at First Mennonite Church, main floor and upstairs" style="display:block; width:100%; height:auto; border:1px solid var(--color-border); border-radius:var(--radius-md);">
+          </a>
+          <p style="font-size:0.85rem; color:var(--color-text-muted); margin:8px 0 0;">Tap the map to open it full size for zooming.</p>
+        </div>
       </div>
     </div>
 
@@ -547,7 +557,7 @@
   </div><!-- end .dashboard -->
 
   <script src="https://www.paypal.com/sdk/js?client-id=AcJZV39ZKQGi3MSgpG0juU3fvY8yezjfC7vdNAC_YaWmjt4__LU9juHSOlm_E9CUVrArgn8uNxrjAWZ0&components=buttons&enable-funding=venmo&currency=USD" data-namespace="paypal_sdk"></script>
-  <script src="script.js?v=20260812zd"></script>
+  <script src="script.js?v=20260812ze"></script>
 
   <!-- Pull the Board of Directors from the DB so the portal reflects
        role_holders_v2 without hand-edits to this HTML when the board
