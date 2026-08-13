@@ -9329,7 +9329,7 @@
         + (kidOpts
             ? '<label class="ac-signup-row"><span>Sign up</span><select class="ac-signup-kid rd-input">' + kidOpts + '</select></label>'
               + '<label class="ac-signup-row"><span>as</span><select class="ac-signup-rank rd-input"><option value="1">1st choice</option><option value="2">Backup</option>'
-                + (e.open_to_teen_assistant ? '<option value="assist">assistant (Cedars/Pigeons)</option>' : '') + '</select></label>'
+                + (e.open_to_teen_assistant ? '<option value="assist">Assistant (Cedars/Pigeons)</option>' : '') + '</select></label>'
               + '<button type="button" class="sc-btn mcb-primary ac-signup-save">Save</button>'
               + '<span class="ac-signup-msg"></span>'
             : '<span class="ac-signup-msg">Loading your kids…</span>')
