@@ -141,6 +141,63 @@ console.log('\nwidenRangeToSpan');
   });
 }
 
+// ── kidBandsFor / kidCanAssist: the assigned grove ALWAYS wins ────────────
+// #346/#347/#349 (Lyndsey + Colleen, 2026-08-13): afternoon age-range
+// checks (picker highlight, Schedule ⚠, CSV !age flag) key off the kid's
+// assigned morning grove, NEVER their literal birth-date age — a class
+// labeled for Cedars fits every Cedars kid even if they're literally 14.
+// Literal age is only the fallback when no grove is assigned. Same rule
+// for assistant eligibility (#348).
+console.log('\nkidBandsFor / kidCanAssist (grove wins over literal age)');
+{
+  const labelsM = src.match(/var AGE_GROUP_LABELS = \{[\s\S]*?\};/);
+  assert.ok(labelsM, 'could not extract AGE_GROUP_LABELS from script.js');
+  const fitFactory = new Function(
+    labelsM[0] + '\n' +
+    [extract('parseAgeBands'), extract('kidBandsFor'),
+     extract('fitsKid'), extract('kidCanAssist')].join('\n\n') +
+    '\nreturn { parseAgeBands, kidBandsFor, fitsKid, kidCanAssist };'
+  );
+  const { kidBandsFor, fitsKid, kidCanAssist } = fitFactory();
+
+  t('grove band wins even when a literal age is on file', () => {
+    // A 14-year-old placed in Cedars uses the Cedars band, not [[14,14]].
+    assert.deepStrictEqual(kidBandsFor(14, 'cedars'), [[12, 13]]);
+  });
+  t('Cedars kid (literal 14) FITS a Cedars-labeled class — the #346 case', () => {
+    assert.strictEqual(fitsKid(kidBandsFor(14, 'cedars'), 'Cedars (12–13)'), true);
+  });
+  t('grove capitalization/whitespace tolerated', () => {
+    assert.strictEqual(fitsKid(kidBandsFor(14, ' Cedars '), 'Cedars (12–13)'), true);
+  });
+  t('literal age is the fallback only when no grove is assigned', () => {
+    assert.deepStrictEqual(kidBandsFor(14, ''), [[14, 14]]);
+    assert.strictEqual(fitsKid(kidBandsFor(14, ''), 'Cedars (12–13)'), false);
+  });
+  t('no grove and no age → null (never flagged)', () => {
+    assert.strictEqual(kidBandsFor(null, ''), null);
+    assert.strictEqual(fitsKid(kidBandsFor(null, ''), 'Cedars (12–13)'), null);
+  });
+  t('legacy "teens" slug maps to Pigeons', () => {
+    assert.deepStrictEqual(kidBandsFor(null, 'teens'), [[14, 200]]);
+  });
+
+  t('kidCanAssist: Cedars/Pigeons kids may assist regardless of literal age', () => {
+    assert.strictEqual(kidCanAssist(11, 'cedars'), true);
+    assert.strictEqual(kidCanAssist(null, 'pigeons'), true);
+    assert.strictEqual(kidCanAssist(null, 'teens'), true);
+  });
+  t('kidCanAssist: another grove blocks assisting even at 12+', () => {
+    assert.strictEqual(kidCanAssist(12, 'willows'), false);
+    assert.strictEqual(kidCanAssist(9, 'oaks'), false);
+  });
+  t('kidCanAssist: age 12+ is the no-grove fallback', () => {
+    assert.strictEqual(kidCanAssist(12, ''), true);
+    assert.strictEqual(kidCanAssist(11, ''), false);
+    assert.strictEqual(kidCanAssist(null, ''), false);
+  });
+}
+
 // ── refreshDirectoryGroupPills load-order safety ──────────────────────────
 // This one is a REGRESSION GUARD, not a feature test. script.js is one big
 // IIFE: renderDirectory() is invoked at top level around line 4400, but

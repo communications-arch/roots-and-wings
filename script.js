@@ -5380,10 +5380,10 @@
         var group = (s.kidGroups && s.kidGroups[kid]) || '';
         var kidBands = kidBandsFor(age, group);
         var kidDisplay = nickOr(kidNickByFirst[String(kid).trim().toLowerCase()], kid);
-        // Pill shows the exact age when we have a birth date, else the
-        // kid's assigned age group (dev/test kids and birthday-less
-        // profiles still get a pill + highlighting via the group band).
-        var pill = age != null ? 'age ' + age : (group ? escapeHtml(group) : '');
+        // Pill shows the kid's assigned grove (the band that drives the
+        // fit highlight now — #346/#347 grove-wins), falling back to the
+        // exact age only when no grove is assigned.
+        var pill = group ? escapeHtml(group) : (age != null ? 'age ' + age : '');
         // Already-saved kids fold to a one-line summary so the picker
         // focuses on whoever still needs picks (Erin, 2026-07-15).
         if (signupKidHasSaved(s, kid) && !_signupKidOpen[kid]) {
@@ -5400,9 +5400,10 @@
         // last-resort pick, Erin 2026-07-15).
         // #283 (Lyndsey): both Pigeons (14+) AND Cedars (12–13) may sign up to
         // assist a class whose teacher opted in — the flag reads "willing to
-        // host a Cedars or Pigeons (12+) assistant". The gate had allowed only
-        // Pigeons/14+, so Cedars kids never saw the assistant option.
-        var isTeenAssistKid = ['pigeons', 'cedars'].indexOf(String(group).toLowerCase()) !== -1 || (age != null && age >= 12);
+        // host a Cedars or Pigeons (12+) assistant". #348: grove-wins — a kid
+        // placed in another grove can't assist even if literally 12+ (age is
+        // only the fallback when no grove is assigned). Shared kidCanAssist.
+        var isTeenAssistKid = kidCanAssist(age, group);
         h += '<div class="signup-kid">';
         h += '<div class="signup-kid-name">' + escapeHtml(kidDisplay) +
              (pill ? ' <span class="signup-kid-age">' + pill + '</span>' : '') + '</div>';
@@ -5463,7 +5464,7 @@
   function showPmSignupModal() {
     var body = renderReportModal({
       title: '🌇 Afternoon Class Sign-ups',
-      subtitle: 'Pick a 1st choice and a backup for each hour, for each kid — classes matching their age are highlighted.',
+      subtitle: 'Pick a 1st choice and a backup for each hour, for each kid — classes matching their grove are highlighted.',
       bodyId: 'pm-signup-modal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
@@ -5790,17 +5791,29 @@
     return bands.length ? { bands: bands } : null;
   }
 
-  // The kid's age band(s) for fit-checking: exact age when the birth date is
-  // on file, otherwise the age band of their assigned class group (many dev/
-  // test kids — and any family that skipped the birthday — only have a
-  // group; Violet-in-Pigeons should still highlight Pigeons classes).
+  // The kid's age band(s) for fit-checking. #346/#347/#349 (Lyndsey +
+  // Colleen, 2026-08-13): the kid's assigned morning grove ALWAYS wins —
+  // a class labeled for Cedars fits every Cedars kid, whatever their
+  // literal birth-date age (the groves overlap the literal ages by
+  // design, so exact-age checks flagged correctly-placed kids). The
+  // exact age is only the fallback when no grove is assigned.
   function kidBandsFor(age, group) {
-    if (age != null) return [[age, age]];
     var slug = String(group || '').trim().toLowerCase();
     if (slug === 'teens') slug = 'pigeons';
     var label = slug ? AGE_GROUP_LABELS[slug] : '';
     var p = label ? parseAgeBands(label) : null;
-    return p && p.bands ? p.bands : null;
+    if (p && p.bands) return p.bands;
+    return age != null ? [[age, age]] : null;
+  }
+
+  // #348: student-assistant eligibility follows the same grove-wins rule —
+  // a kid assigned to Cedars or Pigeons may assist regardless of literal
+  // age; age 12+ is only the fallback when no grove is assigned.
+  function kidCanAssist(age, group) {
+    var slug = String(group || '').trim().toLowerCase();
+    if (slug === 'teens') slug = 'pigeons';
+    if (slug) return slug === 'cedars' || slug === 'pigeons';
+    return age != null && age >= 12;
   }
 
   // null = can't tell (don't flag); true = the kid's band overlaps the
@@ -8799,8 +8812,14 @@
     var noteText = '';
 
     if (isAssist) {
-      var isTeen = ['pigeons', 'cedars'].indexOf(String(group).toLowerCase()) !== -1 || (age != null && age >= 12);
-      if (!isTeen) { if (msgEl) msgEl.textContent = 'Only Cedars/Pigeons (12+) can assist a class.'; return; }
+      // #348 (Lyndsey): grove-wins eligibility + a real error box (same
+      // blocking-alert pattern as the picker's other validations), not just
+      // the quiet note next to Save.
+      if (!kidCanAssist(age, group)) {
+        window.alert('“Assistant” is out of age range for ' + kid + ' — only Cedars and Pigeons kids can assist a class.');
+        if (msgEl) msgEl.textContent = 'Only Cedars/Pigeons kids can assist a class.';
+        return;
+      }
       // Capacity: an assist takes a free choice slot; block if both are full.
       for (var i = 0; i < hours.length; i++) {
         var m0 = _signup.working[kid][hours[i]] || {};
@@ -9209,6 +9228,29 @@
         e.stopPropagation();
         openPersonByDisplayName(this.getAttribute('data-ac-person'));
       });
+    });
+    // #348 (Lyndsey): picking "Assistant (Cedars/Pigeons)" for a kid who
+    // isn't in Cedars/Pigeons throws the error box the moment it's selected
+    // (grove-wins via kidCanAssist) and snaps the choice back — the Save
+    // gate in acInlineSavePick stays as the backstop.
+    container.querySelectorAll('.ac-signup-panel').forEach(function (panel) {
+      var kidSel = panel.querySelector('.ac-signup-kid');
+      var rankSel = panel.querySelector('.ac-signup-rank');
+      if (!kidSel || !rankSel) return;
+      var checkAssistFit = function () {
+        if (rankSel.value !== 'assist') return;
+        var kid = kidSel.value;
+        var age = (_signup && _signup.kidAges && _signup.kidAges[kid] != null) ? _signup.kidAges[kid] : null;
+        var group = (_signup && _signup.kidGroups && _signup.kidGroups[kid]) || '';
+        if (typeof kidCanAssist === 'function' && !kidCanAssist(age, group)) {
+          window.alert('“Assistant” is out of age range for ' + kid + ' — only Cedars and Pigeons kids can assist a class.');
+          rankSel.value = '1';
+          var msg = panel.querySelector('.ac-signup-msg');
+          if (msg) msg.textContent = 'Only Cedars/Pigeons kids can assist a class.';
+        }
+      };
+      rankSel.addEventListener('change', checkAssistFit);
+      kidSel.addEventListener('change', checkAssistFit);
     });
     // #297 (Erin): inline per-card sign-up (kid + 1st/2nd choice) → save.
     container.querySelectorAll('.ac-signup-save').forEach(function (btn) {
@@ -33692,13 +33734,16 @@
         var pick = hour === 'PM1' ? r.pm1 : r.pm2;
         if (!pick && hour === 'PM2' && r.pm1 && r.pm1.both) pick = r.pm1;
         if (!pick) return 'open';
-        return pick.class_name + (pick.both ? ' (2-hour)' : '') + (pick.assistant ? ' (assist)' : (schedPickOutOfRange(pick, r) ? ' (!age)' : ''));
+        return pick.class_name + (pick.both ? ' (2-hour)' : '')
+          + (pick.assistant ? ' (assist)' + (schedAssistOutOfRange(pick, r) ? ' (!age)' : '')
+                            : (schedPickOutOfRange(pick, r) ? ' (!age)' : ''));
       };
       var choiceText = function (r, hour) {
         var ch = (r.choices || {})[hour] || [];
         return ch.slice().sort(function (a, b) { return a.rank - b.rank; }).map(function (p) {
           return (p.rank === 1 ? '1st' : p.rank === 2 ? '2nd' : p.rank + 'th') + ': ' + p.class_name
-            + (p.assistant ? ' (assist)' : (schedPickOutOfRange(p, r) ? ' (!age)' : ''));
+            + (p.assistant ? ' (assist)' + (schedAssistOutOfRange(p, r) ? ' (!age)' : '')
+                           : (schedPickOutOfRange(p, r) ? ' (!age)' : ''));
         }).join(' | ');
       };
       rows.push(['Kid', 'Age', 'Morning', 'PM Hour 1', 'PM Hour 2', 'PM1 all choices', 'PM2 all choices', 'Selections status']);
@@ -33926,12 +33971,23 @@
     var ageText = (typeof signupAgeText === 'function') ? signupAgeText(pick) : '';
     return fitsKid(kidBandsFor(row.age, row.group), ageText) === false;
   }
+  // #348: an assistant pick by a kid who is NOT Cedars/Pigeons (grove-wins,
+  // age-12+ fallback only when no grove is assigned) is itself out of range.
+  function schedAssistOutOfRange(pick, row) {
+    return !!(pick && pick.assistant)
+      && typeof kidCanAssist === 'function' && !kidCanAssist(row.age, row.group);
+  }
   function schedPickMarksHtml(pick, row) {
     if (!pick) return '';
     // An assistant is EXPECTED to be older than the class's age range, so the
-    // out-of-range caution never applies to them — just the assist mark
-    // (Erin, 2026-08-11).
-    if (pick.assistant) return ' <span class="sched-assist-mark" title="Signed up to assist this class">' + brandIconImg('assist', 'ag-icon') + '</span>';
+    // class-range caution never applies to them — just the assist mark
+    // (Erin, 2026-08-11). #348: unless the KID isn't assistant-eligible
+    // (not Cedars/Pigeons) — that gets the same ⚠ triangle.
+    if (pick.assistant) {
+      var mk = ' <span class="sched-assist-mark" title="Signed up to assist this class">' + brandIconImg('assist', 'ag-icon') + '</span>';
+      if (schedAssistOutOfRange(pick, row)) mk += ' <span class="sched-warn-mark" title="Signed up to assist but not in Cedars/Pigeons — out of age range">⚠</span>';
+      return mk;
+    }
     if (schedPickOutOfRange(pick, row)) return ' <span class="sched-warn-mark" title="Selected outside their listed age range">⚠</span>';
     return '';
   }
