@@ -2605,3 +2605,24 @@ ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_by TEXT DEFA
 UPDATE coverage_slots
    SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
  WHERE claimed_by_email = '';
+
+-- 2026-08-14 (#350, Erin): Greenhouse Host — a per-SESSION adult sign-up
+-- anchoring the 0-2 room. The Greenhouse grove has no programming (toddlers
+-- stay with their parents) and the Greenhouse Liaison role was archived; a
+-- host commits to the room for a whole session so other toddler parents can
+-- float. Max 2 ACTIVE claims per (school_year, session_number) — one
+-- primary + one optional co-host — enforced server-side in api/coverage.js
+-- (conditional INSERT ... SELECT, the DB is the arbiter). Releasing sets
+-- released_at; no DELETE (the migration runner rejects destructive SQL and
+-- the history stays useful).
+CREATE TABLE IF NOT EXISTS greenhouse_host_claims (
+  id SERIAL PRIMARY KEY,
+  school_year TEXT NOT NULL,
+  session_number INTEGER NOT NULL,
+  family_email TEXT NOT NULL,
+  claimed_by_email TEXT NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  released_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_greenhouse_host_year_session
+  ON greenhouse_host_claims (school_year, session_number);
