@@ -15,6 +15,27 @@
 //     with on_hand below restock_threshold, minus what's already
 //     on_order from the supplier.
 
+// Normalize a client lines payload: ints, qty 1-99, duplicate variants
+// merged, max 30 distinct lines. Returns null when nothing valid.
+// Shared by the member place-order path (api/supply-closet.js) and the
+// public homepage order form (api/tour.js merch-desk-order).
+function normalizeLines(raw) {
+  if (!Array.isArray(raw)) return null;
+  const byVariant = {};
+  const order = [];
+  raw.slice(0, 60).forEach(l => {
+    const vid = parseInt(l && l.variant_id, 10);
+    let qty = parseInt(l && l.qty, 10);
+    if (!Number.isInteger(vid) || vid < 1) return;
+    if (!Number.isFinite(qty) || qty < 1) return;
+    qty = Math.min(qty, 99);
+    if (!byVariant[vid]) { byVariant[vid] = 0; order.push(vid); }
+    byVariant[vid] = Math.min(byVariant[vid] + qty, 99);
+  });
+  if (order.length === 0 || order.length > 30) return null;
+  return order.map(vid => ({ variant_id: vid, qty: byVariant[vid] }));
+}
+
 // Split one requested line against available stock.
 // → { allocated, backordered, remainingOnHand }
 function splitLine(qty, onHand) {
@@ -81,4 +102,4 @@ function needsOrderingQty(variant, backorderedDemand) {
   return Math.max(0, demand + shortfall - onOrder);
 }
 
-module.exports = { splitLine, allocateOrder, orderTotalCents, needsOrderingQty };
+module.exports = { normalizeLines, splitLine, allocateOrder, orderTotalCents, needsOrderingQty };

@@ -20,7 +20,7 @@ const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isS
 const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
 const { resolveFamily } = require('./_family');
-const { allocateOrder, needsOrderingQty } = require('./_merch');
+const { allocateOrder, needsOrderingQty, normalizeLines } = require('./_merch');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1299,7 +1299,11 @@ async function handleLoanRemindersCron(req, res) {
 //     Manager by default, editable in the Permissions admin), plus any
 //     board member and the super users.
 
-const MERCH_PAYMENT_METHODS = ['cash', 'check', 'venmo', 'paypal'];
+// Methods accepted for NEW payments (Erin, 2026-08-14: the manager's
+// personal Venmo is retired — financial tracking got hairy). 'venmo'
+// stays valid in the schema CHECK so historical rows keep rendering;
+// it just can't be recorded on anything new.
+const MERCH_PAYMENT_METHODS = ['cash', 'check', 'paypal'];
 
 async function canManageMerchDesk(email) {
   if (!email) return false;
@@ -1320,24 +1324,10 @@ async function merchFamilyEmailFor(sql, email) {
   return String(email || '').toLowerCase();
 }
 
-// Normalize a client lines payload: ints, qty 1-99, duplicate variants
-// merged, max 30 distinct lines. Returns null when nothing valid.
-function merchNormalizeLines(raw) {
-  if (!Array.isArray(raw)) return null;
-  const byVariant = {};
-  const order = [];
-  raw.slice(0, 60).forEach(l => {
-    const vid = parseInt(l && l.variant_id, 10);
-    let qty = parseInt(l && l.qty, 10);
-    if (!Number.isInteger(vid) || vid < 1) return;
-    if (!Number.isFinite(qty) || qty < 1) return;
-    qty = Math.min(qty, 99);
-    if (!byVariant[vid]) { byVariant[vid] = 0; order.push(vid); }
-    byVariant[vid] = Math.min(byVariant[vid] + qty, 99);
-  });
-  if (order.length === 0 || order.length > 30) return null;
-  return order.map(vid => ({ variant_id: vid, qty: byVariant[vid] }));
-}
+// Lines normalization lives in api/_merch.js (normalizeLines) — pure,
+// shared with the public homepage order form in api/tour.js, and
+// guarded by scripts/test-merch-allocation.js.
+const merchNormalizeLines = normalizeLines;
 
 // Load + validate the variants a lines payload references. Returns
 // { error } or { variants: { [id]: row } }.
@@ -1355,7 +1345,11 @@ async function merchLoadVariants(sql, lines, requireActive) {
   for (const l of lines) {
     const v = byId[l.variant_id];
     if (!v) return { error: 'One of those items no longer exists — refresh and try again.' };
-    if (requireActive && (!v.active || !v.item_active)) {
+    // Members (and the public form) may only buy active, PRICED variants —
+    // price_cents = 0 means the manager hasn't set a price yet (e.g. the
+    // inventory carry-over seed). Quick Sale (requireActive false) is the
+    // manager's own hands, so it stays exempt.
+    if (requireActive && (!v.active || !v.item_active || !(v.price_cents > 0))) {
       return { error: (v.item_name + (v.label ? ' (' + v.label + ')' : '')) + ' isn’t available right now — refresh and try again.' };
     }
   }
@@ -1425,7 +1419,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       SELECT v.id, v.item_id, v.label, v.price_cents, v.on_hand, v.sort_order
       FROM merch_variants v
       JOIN merch_items i ON i.id = v.item_id
-      WHERE v.active = TRUE AND i.active = TRUE
+      WHERE v.active = TRUE AND i.active = TRUE AND v.price_cents > 0
       ORDER BY v.item_id, v.sort_order, v.label
     `;
     return res.status(200).json({ items, variants });
@@ -1534,7 +1528,8 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const orders = await sql`
       SELECT id, family_email, buyer_name, status, payment_method, paid_at,
-             total_cents, note, created_at, created_by_email
+             total_cents, note, created_at, created_by_email,
+             contact_email, contact_phone, screen_reason
       FROM merch_desk_orders
       ORDER BY created_at DESC
       LIMIT 300
@@ -1559,7 +1554,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (set === 'paid') {
       const method = String(body.payment_method || '');
       if (MERCH_PAYMENT_METHODS.indexOf(method) === -1) {
-        return res.status(400).json({ error: 'How did they pay? (cash, check, venmo, or paypal)' });
+        return res.status(400).json({ error: 'How did they pay? (cash, check, or paypal)' });
       }
       const upd = await sql`
         UPDATE merch_desk_orders
@@ -1578,7 +1573,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         UPDATE merch_desk_orders SET status = ${set} WHERE id = ${id} RETURNING *
       `;
       if (set === 'ready' && order.family_email) {
-        const owedNote = order.paid_at ? '' : ' Payment (' + '$' + (order.total_cents / 100).toFixed(2) + ') is due at pickup — cash, check, or Venmo.';
+        const owedNote = order.paid_at ? '' : ' Payment (' + '$' + (order.total_cents / 100).toFixed(2) + ') is due at pickup — cash, check, or PayPal.';
         await notifyMember(sql, String(order.family_email).toLowerCase(),
           'Your merch order is ready',
           'Your Roots & Wings merch order is ready for pickup at the next event.' + owedNote,
@@ -1741,7 +1736,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (!lines) return res.status(400).json({ error: 'Tap at least one item.' });
     const method = String(body.payment_method || '');
     if (MERCH_PAYMENT_METHODS.indexOf(method) === -1) {
-      return res.status(400).json({ error: 'Pick how they paid (cash, check, venmo, or paypal).' });
+      return res.status(400).json({ error: 'Pick how they paid (cash, check, or paypal).' });
     }
     let famEmail = String(body.family_email || '').trim().toLowerCase().slice(0, 200) || null;
     if (famEmail && famEmail.indexOf('@') === -1) famEmail = null;

@@ -10779,7 +10779,7 @@
       render: function () {
         var h = '<p class="ws-body-hint">Co-op shirts, mugs, and more — order ahead and pay at pickup, at the next event.</p>';
         h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-shop">Shop Merch</button>'
-          + '<span class="ws-part-submit-hint">No online payment — you pay the Merchandise Manager at pickup (cash, check, or Venmo).</span></p>';
+          + '<span class="ws-part-submit-hint">No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).</span></p>';
         h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-my-orders">My Orders</button>'
           + '<span class="ws-part-submit-hint">See what you’ve ordered, what’s ready, and what you still owe.</span></p>';
         return h;
@@ -11737,7 +11737,7 @@
     'group-bring': 'Your group’s snack sign-ups — the liaison is in charge of snacks for the year. Post spots (one family per snack day works well); families claim them from their Kid Schedule and claimed days land on their Packing List.',
     'my-class': 'A liaison’s quick view of their class — every kid with parents, phone, and allergies, who’s teaching each session, the topic and lesson plan, plus private per-kid notes only the liaison chain can see.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
-    'merch': 'Shop Roots &amp; Wings merchandise. Place an order and pick it up at the next event — no online payment; you pay the Merchandise Manager at pickup (cash, check, or Venmo). My Orders shows each order’s status, what’s reserved vs. waiting on a supplier order, and what you still owe.',
+    'merch': 'Shop Roots &amp; Wings merchandise. Place an order and pick it up at the next event — no online payment; you pay the Merchandise Manager at pickup (cash, check, or PayPal). My Orders shows each order’s status, what’s reserved vs. waiting on a supplier order, and what you still owe.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
     'bg-president': 'President tools and the board’s at-a-glance view for the year.',
@@ -14780,9 +14780,12 @@
       return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold);
     }).length;
     var ordersUnpaid = (_merchOrdersCache || []).filter(function (o) { return !o.paid_at && !o.screen_reason; }).length;
+    // The Desk queue is the ONE working list (Erin, 2026-08-14): its
+    // open count folds in the legacy web-form orders still awaiting
+    // delivery, which render merged into the same tab.
     var deskOpen = (_merchDeskCache || []).filter(function (o) {
-      return o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready';
-    }).length;
+      return (o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready') && !o.screen_reason;
+    }).length + merchWebOpenOrders().length;
     var badges = {
       orders: ordersUnpaid > 0 ? ' <span class="merch-tab-badge">' + ordersUnpaid + ' unpaid</span>' : '',
       inventory: lowCount > 0 ? ' <span class="merch-tab-badge merch-tab-badge-warn">' + lowCount + ' low</span>' : '',
@@ -14948,6 +14951,11 @@
       }
       _merchOrdersCache = Array.isArray(res.data.orders) ? res.data.orders : [];
       renderMerchOrdersBody(body);
+      // Merged queue: the Desk tab folds these web-form rows into its
+      // list and badge count, so refresh both once they arrive.
+      if (_merchActiveTab === 'desk') renderMerchDeskBody();
+      var deskNav = document.querySelector('.merch-tab-nav');
+      if (deskNav) renderMerchTabNav(deskNav);
     }).catch(function (err) {
       body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtml((err && err.message) || 'unknown') + '</p>';
     });
@@ -15537,7 +15545,12 @@
     return sign + '$' + Math.floor(n / 100) + '.' + ('0' + (n % 100)).slice(-2);
   }
 
+  // Labels cover every method that can appear on a stored order —
+  // including 'venmo' on historical rows. NEW payments only offer
+  // MERCH_PAY_METHODS_NEW (Erin, 2026-08-14: the manager's personal
+  // Venmo is retired). The server enforces the same list.
   var MERCH_PAY_LABELS = { cash: 'Cash', check: 'Check', venmo: 'Venmo', paypal: 'PayPal' };
+  var MERCH_PAY_METHODS_NEW = ['cash', 'check', 'paypal'];
 
   function merchDeskStatusPill(o) {
     if (o.status === 'cancelled') return '<span class="ws-wv-declined">Cancelled</span>';
@@ -15588,39 +15601,111 @@
       });
   }
 
+  // ── Merged queue (Erin, 2026-08-14: ONE list for the manager) ──
+  // Open legacy web-form orders (merch_orders rows not yet delivered and
+  // not screened) fold into the Desk Orders list, badged "web form" and
+  // sorted by date with everything else. Their actions stay EXACTLY the
+  // legacy ones — Paid / Delivered toggles writing to merch_orders via
+  // the existing kind:'merch-update' endpoint. No prices on those rows
+  // (the legacy table never had any). The Web Orders tab remains the
+  // full archive/screening view.
+  function merchWebOpenOrders() {
+    return (_merchOrdersCache || []).filter(function (o) { return !o.delivered_at && !o.screen_reason; });
+  }
+
+  function merchLegacyToggle(id, field, nextOn, btn) {
+    if (btn) btn.disabled = true;
+    fetch('/api/tour', {
+      method: 'POST', headers: rwAuthHeaders(true),
+      body: JSON.stringify({ kind: 'merch-update', id: id, field: field, value: nextOn })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the order.'); if (btn) btn.disabled = false; return; }
+        var hit = (_merchOrdersCache || []).filter(function (o) { return o.id === id; })[0];
+        if (hit && res.data.order) {
+          hit.paid_at = res.data.order.paid_at;
+          hit.delivered_at = res.data.order.delivered_at;
+        }
+        renderMerchDeskBody();
+        var ordersBody = document.getElementById('ws-merch-orders-body');
+        if (ordersBody) renderMerchOrdersBody(ordersBody);
+        var nav = document.querySelector('.merch-tab-nav');
+        if (nav) renderMerchTabNav(nav);
+      })
+      .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
+  }
+
   function renderMerchDeskBody() {
     var body = document.getElementById('ws-merch-desk-body');
     if (!body) return;
     var all = _merchDeskCache || [];
-    var open = all.filter(function (o) { return o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready'; });
+    // Screened public-form orders stay out of the working queue (they
+    // took no stock and emailed no one) — they surface under All with a
+    // "screened" pill, one click from acting on them anyway.
+    var open = all.filter(function (o) { return (o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready') && !o.screen_reason; });
     var delivered = all.filter(function (o) { return o.status === 'delivered'; });
     var cancelled = all.filter(function (o) { return o.status === 'cancelled'; });
+    var webOpen = merchWebOpenOrders();
 
-    var rows = _merchDeskFilter === 'open' ? open
+    var deskRows = _merchDeskFilter === 'open' ? open
       : _merchDeskFilter === 'delivered' ? delivered
       : _merchDeskFilter === 'cancelled' ? cancelled
       : all;
+    // Merge legacy web-form rows into Open and All, newest first across
+    // both sources (both created_at values are full ISO timestamps).
+    var entries = deskRows.map(function (o) { return { web: false, o: o }; });
+    if (_merchDeskFilter === 'open' || _merchDeskFilter === 'all') {
+      entries = entries.concat(webOpen.map(function (o) { return { web: true, o: o }; }));
+    }
+    entries.sort(function (a, b) {
+      return String(b.o.created_at || '') < String(a.o.created_at || '') ? -1
+        : String(b.o.created_at || '') > String(a.o.created_at || '') ? 1 : 0;
+    });
 
-    var h = '<p class="ws-body-hint">Member pickup orders and recorded event sales. Mark orders paid (with how they paid), ready for pickup, and delivered — cancelling an order puts its reserved stock back on the shelf.</p>';
+    var h = '<p class="ws-body-hint">The whole working queue: member pickup orders, homepage web orders, and recorded event sales. Mark orders paid (with how they paid), ready for pickup, and delivered — cancelling an order puts its reserved stock back on the shelf. Rows badged “web form” are legacy homepage orders (no prices on file) — their toggles write to the old ledger, same as the Web Orders tab.</p>';
     h += '<div class="rd-counts">';
-    [['open', 'Open', open.length], ['all', 'All', all.length], ['delivered', 'Delivered', delivered.length], ['cancelled', 'Cancelled', cancelled.length]].forEach(function (f) {
+    [['open', 'Open', open.length + webOpen.length], ['all', 'All', all.length + webOpen.length], ['delivered', 'Delivered', delivered.length], ['cancelled', 'Cancelled', cancelled.length]].forEach(function (f) {
       h += '<button type="button" class="sc-btn merch-desk-filter' + (_merchDeskFilter === f[0] ? ' sc-save' : '') + '" data-desk-filter="' + f[0] + '">' + f[1] + ' (' + f[2] + ')</button>';
     });
     h += '</div>';
 
-    if (rows.length === 0) {
+    if (entries.length === 0) {
       h += '<p class="ws-empty">' + (_merchDeskFilter === 'open' ? 'No open orders — nothing waiting on you.' : 'Nothing here yet.') + '</p>';
     }
-    rows.forEach(function (o) {
+    entries.forEach(function (entry) {
+      var o = entry.o;
+      if (entry.web) {
+        // Legacy homepage order — item/size/color/qty + buyer, no price.
+        h += '<div class="ws-lending-row merch-desk-row" data-web-order-id="' + o.id + '">';
+        h += '<span class="ws-lending-main"><strong>' + escapeHtmlWs(o.customer_name || '(no name)') + '</strong>'
+          + ' <span class="merch-tab-badge">web form</span>'
+          + ' <span class="ws-wv-context">' + escapeHtmlWs(o.customer_email || '')
+          + (o.customer_phone ? ' · ' + escapeHtmlWs(o.customer_phone) : '') + '</span>'
+          + ' <span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>';
+        h += '<span class="ws-lending-sub">' + (o.qty || 1) + ' × ' + escapeHtmlWs(
+          (o.item || '') + (o.size ? ' — ' + o.size : '') + (o.color ? (o.size ? ' · ' : ' — ') + o.color : '')) + '</span>';
+        if (o.notes) h += '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(o.notes) + '</span>';
+        h += '</span>';
+        h += '<span class="ws-lending-actions">';
+        h += o.paid_at ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">Unpaid</span>';
+        h += '<button type="button" class="sc-btn merch-desk-web-toggle" data-web-id="' + o.id + '" data-field="paid" data-next="' + (o.paid_at ? '0' : '1') + '">' + (o.paid_at ? 'Mark unpaid' : 'Mark paid') + '</button>';
+        h += '<button type="button" class="sc-btn sc-save merch-desk-web-toggle" data-web-id="' + o.id + '" data-field="delivered" data-next="1">Delivered</button>';
+        h += '</span></div>';
+        return;
+      }
       var who = o.buyer_name ? escapeHtmlWs(o.buyer_name) : '(no name)';
-      var famBit = o.family_email ? '<span class="ws-wv-context">' + escapeHtmlWs(o.family_email) + '</span>' : '<span class="ws-wv-context">walk-up guest</span>';
+      var famBit = o.family_email ? '<span class="ws-wv-context">' + escapeHtmlWs(o.family_email) + '</span>'
+        : o.contact_email ? '<span class="ws-wv-context">' + escapeHtmlWs(o.contact_email) + '</span>'
+        : '<span class="ws-wv-context">walk-up guest</span>';
       h += '<div class="ws-lending-row merch-desk-row" data-order-id="' + o.id + '">';
       h += '<span class="ws-lending-main"><strong>' + who + '</strong> ' + famBit
+        + (o.created_by_email === 'public-form' ? ' <span class="merch-tab-badge">web form</span>' : '')
         + ' <span class="ws-wv-context">#' + o.id + ' · ' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>';
       h += '<span class="ws-lending-sub">' + merchDeskLinesHtml(o.lines) + ' · <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong></span>';
       if (o.note) h += '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(o.note) + '</span>';
       h += '</span>';
       h += '<span class="ws-lending-actions">' + merchDeskStatusPill(o) + ' ' + merchDeskPaidPill(o);
+      if (o.screen_reason) h += '<span class="ws-wv-declined">screened: ' + escapeHtmlWs(o.screen_reason) + '</span>';
       if (o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready') {
         if (!o.paid_at) h += '<button type="button" class="sc-btn merch-desk-pay-btn" data-order-id="' + o.id + '">Mark paid</button>';
         if (o.status !== 'ready') h += '<button type="button" class="sc-btn merch-desk-act" data-order-id="' + o.id + '" data-set="ready">Ready</button>';
@@ -15630,7 +15715,7 @@
       h += '</span>';
       if (_merchDeskPayFor === o.id) {
         h += '<span class="merch-desk-payrow">How did they pay? ';
-        Object.keys(MERCH_PAY_LABELS).forEach(function (m) {
+        MERCH_PAY_METHODS_NEW.forEach(function (m) {
           h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
         });
         h += '<button type="button" class="sc-btn merch-desk-pay-close" aria-label="Close">×</button></span>';
@@ -15672,6 +15757,17 @@
         rwArmTwoStep(self, 'cancel', function () {
           merchDeskAct(parseInt(self.getAttribute('data-order-id'), 10), 'cancel', null, self);
         });
+      });
+    });
+    // Legacy web-form rows: Paid toggle + Delivered via the EXISTING
+    // legacy endpoint (merchLegacyToggle) — nothing new server-side.
+    body.querySelectorAll('.merch-desk-web-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        merchLegacyToggle(
+          parseInt(btn.getAttribute('data-web-id'), 10),
+          btn.getAttribute('data-field'),
+          btn.getAttribute('data-next') === '1',
+          btn);
       });
     });
   }
@@ -16080,7 +16176,7 @@
       h += '</datalist>';
 
       h += '<div class="ws-merch-add-toggles">';
-      Object.keys(MERCH_PAY_LABELS).forEach(function (m) {
+      MERCH_PAY_METHODS_NEW.forEach(function (m) {
         h += '<button type="button" class="sc-btn merch-qs-method' + (_merchQsMethod === m ? ' sc-save' : '') + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
       });
       h += '</div>';
@@ -16147,7 +16243,7 @@
         return;
       }
       if (!_merchQsMethod) {
-        status.textContent = 'Tap how they paid (cash, check, Venmo, or PayPal).';
+        status.textContent = 'Tap how they paid (cash, check, or PayPal).';
         status.className = 'ws-merch-add-status ws-wv-err';
         return;
       }
@@ -16208,7 +16304,7 @@
   function showMemberMerchModal(tab) {
     var outer = renderReportModal({
       title: 'Merch',
-      subtitle: 'Order Roots & Wings merchandise for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or Venmo).',
+      subtitle: 'Order Roots & Wings merchandise for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).',
       meta: '',
       icons: [],
       bodyId: 'mm-merch-modal-body',
@@ -16305,7 +16401,9 @@
       return;
     }
     cat.items.forEach(function (item) {
-      var variants = cat.variants.filter(function (v) { return v.item_id === item.id; });
+      // Server already filters to active + priced variants — this is the
+      // client-side belt to the server's suspenders (never show $0.00).
+      var variants = cat.variants.filter(function (v) { return v.item_id === item.id && v.price_cents > 0; });
       if (variants.length === 0) return;
       h += '<div class="ws-merch-add-form" style="margin-top:10px;">';
       h += '<div class="ws-merch-add-header"><strong>' + escapeHtmlWs(item.name) + '</strong></div>';
@@ -16385,7 +16483,7 @@
     if (!o) { renderMemberMerchShop(body); return; }
     var h = '<div class="ws-merch-add-form">';
     h += '<div class="ws-merch-add-header"><strong>Order placed — thank you!</strong></div>';
-    h += '<p class="ws-body-hint">Bring payment to the next event: <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong> due at pickup (cash, check, or Venmo to the Merchandise Manager).</p>';
+    h += '<p class="ws-body-hint">Bring payment to the next event: <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong> due at pickup (cash, check, or PayPal to the Merchandise Manager).</p>';
     (o.lines || []).forEach(function (l) {
       h += '<div class="ws-lending-row"><span class="ws-lending-main">' + l.qty + ' × '
         + escapeHtmlWs(l.item_name + (l.variant_label ? ' — ' + l.variant_label : ''))

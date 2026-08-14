@@ -17,7 +17,8 @@ const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { pushNotifications } = require('./_push');
-const { canActAs } = require('./_family');
+const { canActAs, resolveFamily } = require('./_family');
+const { allocateOrder, normalizeLines } = require('./_merch');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -5236,6 +5237,239 @@ async function handleMerchOrder(body, req, res) {
   if (typeof waitUntil === 'function') waitUntil(emailWork);
 
   return res.status(200).json({ ok: true, order_id: orderId });
+}
+
+// ── Merch bridge (#351 Phase 2): the public homepage form now writes
+// merch_desk_orders (the Merch Desk queue) instead of legacy
+// merch_orders. Two handlers:
+//   - GET ?merch_catalog=1 — public, auth-free, READ-ONLY catalog:
+//     active items and their active variants with price_cents > 0.
+//     Labels + prices ONLY — no stock counts, no emails, nothing else.
+//   - POST kind 'merch-desk-order' — public order intake with the SAME
+//     layered screening as handleMerchOrder above (#150/#207: honeypot,
+//     signed form token, timing, content heuristics, stamp reuse, and
+//     per-IP rate caps sharing the legacy 'merch' bucket). A screened
+//     order still saves (hidden behind screen_reason, all lines
+//     backordered so a bot can never drain stock counts), sends no
+//     emails, and answers a plain 200 so bots get no signal.
+// The legacy merch-order INSERT path above stays for safety, but the
+// homepage form no longer calls it.
+
+async function handleMerchDeskCatalogPublic(req, res) {
+  try {
+    const sql = getSql();
+    const items = await sql`
+      SELECT id, name, description, image_url, sort_order
+      FROM merch_items WHERE active = TRUE
+      ORDER BY sort_order, name
+    `;
+    const variants = await sql`
+      SELECT v.id, v.item_id, v.label, v.price_cents, v.sort_order
+      FROM merch_variants v
+      JOIN merch_items i ON i.id = v.item_id
+      WHERE v.active = TRUE AND i.active = TRUE AND v.price_cents > 0
+      ORDER BY v.item_id, v.sort_order, v.label
+    `;
+    // Don't leak item names that have nothing sellable yet (e.g. the
+    // tee grid before Erin prices + activates it).
+    const sellable = {};
+    variants.forEach(v => { sellable[v.item_id] = true; });
+    // Public + anonymous: let the CDN absorb repeat loads.
+    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+    return res.status(200).json({
+      items: items.filter(i => sellable[i.id]),
+      variants
+    });
+  } catch (err) {
+    console.error('merch desk catalog error:', err);
+    return res.status(500).json({ error: 'Could not load the catalog.' });
+  }
+}
+
+async function handleMerchDeskPublicOrder(body, req, res) {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim();
+  const phone = String(body.phone || '').trim();
+  const notes = String(body.notes || '').trim();
+
+  if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
+  if (name.length > 200 || email.length > 200 || phone.length > 50 || notes.length > 1000) {
+    return res.status(400).json({ error: 'Input too long.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+  const lines = normalizeLines(body.lines);
+  if (!lines) return res.status(400).json({ error: 'Pick at least one item.' });
+
+  // Same layered screening + rate caps as handleMerchOrder — one door,
+  // one bucket (form = 'merch' is shared with the legacy path).
+  let junkReason = String(body.website || '').trim() ? 'honeypot filled' : null;
+  if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
+  if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
+  if (!junkReason) junkReason = inquiryContentScreen({ name, email, message: notes });
+
+  const ip = clientIp(req);
+  const formTs = parseFormToken(body.form_token) || parseInt(body.form_ts, 10) || 0;
+  let hardDrop = false;
+  const sql = getSql();
+  try {
+    if (!junkReason && formTs > 0) {
+      const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'merch' AND form_ts = ${formTs} LIMIT 1`;
+      if (reused.length) junkReason = 'form_ts reused';
+    }
+    const cnt = await sql`
+      SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '10 minutes') AS short_n,
+             COUNT(*) AS day_n
+      FROM public_form_hits
+      WHERE form = 'merch' AND ip = ${ip} AND created_at > NOW() - INTERVAL '24 hours'
+    `;
+    const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
+    const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
+    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'merch', ${formTs})`;
+    await sql`DELETE FROM public_form_hits WHERE created_at < NOW() - INTERVAL '2 days'`;
+  } catch (rlErr) {
+    console.error('merch desk rate/reuse check error (non-fatal):', rlErr);
+  }
+  if (hardDrop) {
+    console.warn('merch-desk-form hard-dropped (IP over daily cap):', ip);
+    return res.status(200).json({ success: true });
+  }
+
+  // Validate the lines against the live catalog: active + priced only —
+  // the public form must never buy a hidden or unpriced variant.
+  let variantById = {};
+  try {
+    const vids = lines.map(l => l.variant_id);
+    const rows = await sql`
+      SELECT v.id, v.label, v.price_cents, v.on_hand, v.active,
+             i.name AS item_name, i.active AS item_active
+      FROM merch_variants v
+      JOIN merch_items i ON i.id = v.item_id
+      WHERE v.id = ANY(${vids})
+    `;
+    rows.forEach(r => { variantById[r.id] = r; });
+  } catch (dbErr) {
+    console.error('merch desk variant load error:', dbErr);
+    return res.status(500).json({ error: 'Could not save your order. Please try again.' });
+  }
+  for (const l of lines) {
+    const v = variantById[l.variant_id];
+    if (!v || !v.active || !v.item_active || !(v.price_cents > 0)) {
+      return res.status(409).json({ error: 'One of those items isn’t available right now — refresh the page and try again.' });
+    }
+  }
+
+  // Member link: buyer email → family_email via the standard resolver
+  // (family_email itself, a people row, or additional_emails). EMAIL
+  // match ONLY — never names. No match = guest order.
+  let famEmail = null;
+  try {
+    const fam = await resolveFamily(sql, email);
+    if (fam && fam.family_email) famEmail = String(fam.family_email).toLowerCase();
+  } catch (famErr) {
+    console.error('merch desk resolveFamily failed (non-fatal):', famErr);
+  }
+
+  // Allocation: clean orders reserve stock exactly like the member shop.
+  // Screened orders take NOTHING from the shelf (every line backordered)
+  // so junk can't drain counts — rescuing via ready/delivered consumes
+  // stock at that point through merchConsumeBackorders.
+  const priced = lines.map(l => ({
+    variant_id: l.variant_id, qty: l.qty,
+    price_cents_each: variantById[l.variant_id].price_cents
+  }));
+  let orderLines, decrements, totalCents;
+  if (junkReason) {
+    orderLines = priced.map(l => ({
+      variant_id: l.variant_id, qty: l.qty,
+      price_cents_each: l.price_cents_each, stock_status: 'backordered'
+    }));
+    decrements = {};
+    totalCents = priced.reduce((s, l) => s + l.qty * l.price_cents_each, 0);
+  } else {
+    const onHand = {};
+    priced.forEach(l => { onHand[l.variant_id] = variantById[l.variant_id].on_hand; });
+    const alloc = allocateOrder(priced, onHand);
+    orderLines = alloc.lines;
+    decrements = alloc.decrements;
+    totalCents = alloc.total_cents;
+  }
+
+  let order = null;
+  try {
+    const ins = await sql`
+      INSERT INTO merch_desk_orders (
+        family_email, buyer_name, status, total_cents, note,
+        created_by_email, contact_email, contact_phone, screen_reason
+      ) VALUES (
+        ${famEmail}, ${name}, 'pending_payment', ${totalCents}, ${notes},
+        'public-form', ${email.toLowerCase()}, ${phone}, ${junkReason || ''}
+      )
+      RETURNING id, total_cents
+    `;
+    order = ins[0];
+    for (const l of orderLines) {
+      await sql`
+        INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
+        VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, ${l.stock_status})
+      `;
+    }
+    for (const vid of Object.keys(decrements)) {
+      await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
+    }
+  } catch (dbErr) {
+    console.error('Merch desk order insert error:', dbErr);
+    return res.status(500).json({ error: 'Could not save your order. Please try again.' });
+  }
+  if (junkReason) {
+    console.warn('merch-desk-form screened to junk:', junkReason);
+    return res.status(200).json({ success: true, id: order.id });
+  }
+
+  // Confirmation email to the buyer, CC the Merchandise Manager —
+  // mirrors the legacy form's posture (email failure never loses the
+  // order, which is already in the Desk queue).
+  let merchCc = null;
+  try {
+    merchCc = await getRoleHolderEmail('Merchandise Manager');
+  } catch (_) { /* fall through */ }
+  if (!merchCc) merchCc = 'communications@rootsandwingsindy.com';
+
+  const totalStr = '$' + (totalCents / 100).toFixed(2);
+  const lineRows = orderLines.map(l => {
+    const v = variantById[l.variant_id];
+    const label = v.item_name + (v.label ? ' — ' + v.label : '');
+    return '<tr><td style="padding:6px 16px 6px 0;">' + l.qty + ' × ' + escapeHtml(label) + '</td>'
+      + '<td style="padding:6px 0;text-align:right;">$' + ((l.qty * l.price_cents_each) / 100).toFixed(2) + '</td></tr>';
+  }).join('');
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const emailWork = resend.emails.send({
+    from: 'Roots & Wings Website <noreply@rootsandwingsindy.com>',
+    to: email,
+    cc: [merchCc],
+    replyTo: merchCc,
+    subject: emailSubject('Roots & Wings: We received your merch order'),
+    html: `
+      <h2>Thanks for your order!</h2>
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>We've received your merchandise order. Payment (<strong>${escapeHtml(totalStr)}</strong>) is due at pickup — we accept cash, check, or PayPal. Our Merchandise Manager will follow up with pickup timing.</p>
+      <table style="border-collapse:collapse;font-family:sans-serif;margin:16px 0;">
+        ${lineRows}
+        <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Total</td><td style="padding:6px 0;text-align:right;font-weight:bold;">${escapeHtml(totalStr)}</td></tr>
+      </table>
+      ${notes ? '<p><strong>Your notes:</strong> ' + escapeHtml(notes) + '</p>' : ''}
+      <p>Reply to this email with any questions — it goes straight to our Merchandise Manager.</p>
+      <p>— Roots &amp; Wings Indy</p>
+    `
+  }).catch(err => { console.error('Merch desk email send error:', err); });
+  if (typeof waitUntil === 'function') waitUntil(emailWork);
+
+  return res.status(200).json({ ok: true, order_id: order.id, total_cents: totalCents });
 }
 
 // Manual order entry by the Merchandise Manager or Comms Director, for
@@ -10846,6 +11080,7 @@ module.exports = async function handler(req, res) {
     if (req.query.action === 'profile') return handleProfileGet(req, res);
     if (req.query.cron === 'reconcile-payments') return handleReconcileCron(req, res);
     if (req.query.list === 'merch_orders') return handleMerchOrdersList(req, res);
+    if (req.query.merch_catalog === '1') return handleMerchDeskCatalogPublic(req, res);
     if (req.query.list === 'bug_reports') return handleBugReportsList(req, res);
     if (req.query.list === 'enrollment_requests') return handleEnrollmentRequestList(req, res);
     if (req.query.adjust_enroll === '1') return handleAdjustEnrollmentGet(req, res);
@@ -10872,6 +11107,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'tour') return handleTour(body, res, req);
     if (kind === 'contact') return handleContact(body, req, res);
     if (kind === 'merch-order') return handleMerchOrder(body, req, res);
+    if (kind === 'merch-desk-order') return handleMerchDeskPublicOrder(body, req, res);
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'merch-order-edit') return handleMerchOrderEdit(body, req, res);

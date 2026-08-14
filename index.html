@@ -604,8 +604,8 @@
       </div>
 
       <p class="merch-footnote text-center fade-in">
-        Orders are confirmed by email; we'll send Venmo payment details and pickup
-        info from our Merchandise Manager.
+        Orders are confirmed by email; pay at pickup — cash, check, or PayPal.
+        Our Merchandise Manager will follow up with pickup info.
       </p>
     </div>
   </section>
@@ -972,10 +972,37 @@
     <div class="tour-modal">
       <button class="tour-modal-close" aria-label="Close" onclick="document.getElementById('merch-modal').classList.remove('active');document.body.style.overflow='';">&times;</button>
       <h2 class="tour-modal-title">Order Merch</h2>
-      <p class="tour-modal-subtitle">Fill this out and our Merchandise Manager will follow up by email with Venmo payment details and pickup info.</p>
+      <p class="tour-modal-subtitle">Pick your items and we'll confirm by email. Payment is due at pickup — cash, check, or PayPal.</p>
       <form id="merch-modal-form" class="tour-modal-form">
         <!-- Bot screening: honeypot (never visible; humans leave it empty). -->
         <input type="text" id="merch-website" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;border:0;padding:0;">
+        <!-- Catalog-driven picker: items/variants/prices come from the
+             public read-only catalog (GET /api/tour?merch_catalog=1 —
+             active, priced variants only). Orders land in the Merch
+             Desk queue (merch_desk_orders), not the legacy ledger. -->
+        <div id="merch-catalog-status" class="tour-modal-subtitle" style="margin-bottom:8px;">Loading the catalog…</div>
+        <div id="merch-picker" style="display:none;">
+          <div class="tour-form-row">
+            <div class="tour-form-field">
+              <label for="merch-item">Item</label>
+              <select id="merch-item"></select>
+            </div>
+            <div class="tour-form-field" id="merch-variant-field">
+              <label for="merch-variant">Option</label>
+              <select id="merch-variant"></select>
+            </div>
+          </div>
+          <div class="tour-form-row">
+            <div class="tour-form-field">
+              <label for="merch-qty">Quantity</label>
+              <input type="number" id="merch-qty" min="1" max="99" value="1">
+            </div>
+            <div class="tour-form-field" style="display:flex; align-items:flex-end;">
+              <button type="button" id="merch-add-line" class="btn btn-primary btn-sm" style="width:100%;">Add to order</button>
+            </div>
+          </div>
+          <div id="merch-cart" style="margin-bottom:12px;"></div>
+        </div>
         <div class="tour-form-field">
           <label for="merch-name">Your Name</label>
           <input type="text" id="merch-name" name="name" required placeholder="First and Last Name">
@@ -988,33 +1015,6 @@
           <label for="merch-phone">Phone (optional)</label>
           <input type="tel" id="merch-phone" name="phone" placeholder="(317) 555-1234">
         </div>
-        <div class="tour-form-row">
-          <div class="tour-form-field">
-            <label for="merch-item">Item</label>
-            <select id="merch-item" name="item" required>
-              <option value="tshirt">T-Shirt</option>
-              <option value="mug">Campfire Coffee Mug</option>
-              <option value="tumbler">Stainless Tumbler</option>
-              <option value="pin">Enamel Pin</option>
-              <option value="patch">Woven Patch</option>
-              <option value="tote">Block-Printed Tote</option>
-            </select>
-          </div>
-          <div class="tour-form-field">
-            <label for="merch-qty">Quantity</label>
-            <input type="number" id="merch-qty" name="qty" required min="1" max="99" value="1">
-          </div>
-        </div>
-        <div class="tour-form-row">
-          <div class="tour-form-field" id="merch-size-field" style="display:none;">
-            <label for="merch-size">Size</label>
-            <select id="merch-size" name="size"></select>
-          </div>
-          <div class="tour-form-field" id="merch-color-field" style="display:none;">
-            <label for="merch-color">Color</label>
-            <select id="merch-color" name="color"></select>
-          </div>
-        </div>
         <div class="tour-form-field">
           <label for="merch-notes">Notes (optional)</label>
           <textarea id="merch-notes" name="notes" rows="2" maxlength="1000" placeholder="Anything else we should know?"></textarea>
@@ -1024,42 +1024,28 @@
       </form>
       <div id="merch-modal-success" style="display:none; text-align: center;">
         <h2 class="tour-modal-title">Order received!</h2>
-        <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Our Merchandise Manager will reach out with Venmo payment details and pickup info.</p>
+        <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Payment is due at pickup — cash, check, or PayPal. Our Merchandise Manager will follow up with pickup info.</p>
         <button type="button" id="merch-modal-done" class="btn btn-primary tour-form-submit" style="margin-top: 8px;">Close</button>
       </div>
       <script>
         (function () {
-          // Catalog mirrors api/tour.js MERCH_CATALOG. Keep in sync if
-          // sizes/colors change.
-          var CATALOG = {
-            tshirt:  { sizes: ['Toddler 2T','Toddler 3T','Toddler 4T','Toddler 5T','Kids XS','Kids S','Kids M','Kids L','Kids XL','Adult S','Adult M','Adult L','Adult XL','Adult XXL'], colors: ['Purple','Olive','Lime','Teal'] },
-            mug:     { sizes: [], colors: [] },
-            tumbler: { sizes: [], colors: [] },
-            pin:     { sizes: [], colors: [] },
-            patch:   { sizes: [], colors: [] },
-            tote:    { sizes: ['Small','Large'], colors: ['Black','Brown','Purple'] }
-          };
-          var itemSel  = document.getElementById('merch-item');
-          var sizeSel  = document.getElementById('merch-size');
-          var colorSel = document.getElementById('merch-color');
-          var sizeField  = document.getElementById('merch-size-field');
-          var colorField = document.getElementById('merch-color-field');
+          // Merch bridge (#351 Phase 2): the form is catalog-driven. The
+          // public read (GET /api/tour?merch_catalog=1) returns ONLY
+          // active items and their active variants with a real price —
+          // ids, labels, and price_cents, nothing else. The buyer builds
+          // a small cart (variant + qty lines), and submit creates a
+          // merch_desk_orders row (status pending_payment) so the order
+          // lands straight in the manager's Desk Orders queue.
+          var CAT = null;            // { items: [], variants: [] } once loaded
+          var cart = [];             // [{ variant_id, qty }]
+          var loadPromise = null;
 
-          function applyVariants() {
-            var def = CATALOG[itemSel.value] || { sizes: [], colors: [] };
-            sizeSel.innerHTML  = def.sizes.map(function (s, i) { return '<option value="' + s + '"' + (i === 0 ? ' selected' : '') + '>' + s + '</option>'; }).join('');
-            colorSel.innerHTML = def.colors.map(function (c, i) { return '<option value="' + c + '"' + (i === 0 ? ' selected' : '') + '>' + c + '</option>'; }).join('');
-            // iOS Safari sometimes reports .value as '' after innerHTML replace
-            // until an option is explicitly selected — force selectedIndex.
-            if (def.sizes.length)  sizeSel.selectedIndex  = 0;
-            if (def.colors.length) colorSel.selectedIndex = 0;
-            sizeField.style.display  = def.sizes.length  ? '' : 'none';
-            colorField.style.display = def.colors.length ? '' : 'none';
-            sizeSel.required  = def.sizes.length  > 0;
-            colorSel.required = def.colors.length > 0;
-          }
-          itemSel.addEventListener('change', applyVariants);
-          applyVariants();
+          // Maps the static homepage cards' slugs to catalog item names
+          // so a card click preselects that item when it's for sale.
+          var CARD_ITEM_NAMES = {
+            tshirt: 'T-Shirt', mug: 'Campfire Coffee Mug', tumbler: 'Stainless Tumbler',
+            pin: 'Enamel Pin', patch: 'Woven Patch', tote: 'Block-Printed Tote'
+          };
 
           var modalEl    = document.getElementById('merch-modal');
           var titleEl    = modalEl.querySelector('.tour-modal-title');
@@ -1068,10 +1054,149 @@
           var successEl  = document.getElementById('merch-modal-success');
           var submitBtn  = document.getElementById('merch-modal-btn');
           var errEl      = document.getElementById('merch-modal-error');
+          var statusEl   = document.getElementById('merch-catalog-status');
+          var pickerEl   = document.getElementById('merch-picker');
+          var itemSel    = document.getElementById('merch-item');
+          var variantSel = document.getElementById('merch-variant');
+          var variantField = document.getElementById('merch-variant-field');
+          var qtyInput   = document.getElementById('merch-qty');
+          var cartEl     = document.getElementById('merch-cart');
+
+          function money(cents) {
+            var n = Math.round(Number(cents) || 0);
+            return '$' + Math.floor(n / 100) + '.' + ('0' + (n % 100)).slice(-2);
+          }
+          function variantById(id) {
+            if (!CAT) return null;
+            for (var i = 0; i < CAT.variants.length; i++) {
+              if (CAT.variants[i].id === id) return CAT.variants[i];
+            }
+            return null;
+          }
+          function itemById(id) {
+            if (!CAT) return null;
+            for (var i = 0; i < CAT.items.length; i++) {
+              if (CAT.items[i].id === id) return CAT.items[i];
+            }
+            return null;
+          }
+          function lineLabel(v) {
+            var item = itemById(v.item_id);
+            return (item ? item.name : 'Item') + (v.label ? ' — ' + v.label : '');
+          }
+          function cartTotal() {
+            var t = 0;
+            cart.forEach(function (l) {
+              var v = variantById(l.variant_id);
+              if (v) t += l.qty * v.price_cents;
+            });
+            return t;
+          }
+
+          // All render paths use textContent / createElement — no HTML
+          // string interpolation of server data anywhere in this form.
+          function renderItemOptions() {
+            itemSel.textContent = '';
+            CAT.items.forEach(function (item) {
+              var opt = document.createElement('option');
+              opt.value = String(item.id);
+              opt.textContent = item.name;
+              itemSel.appendChild(opt);
+            });
+            renderVariantOptions();
+          }
+          function renderVariantOptions() {
+            variantSel.textContent = '';
+            var itemId = parseInt(itemSel.value, 10);
+            var vs = CAT.variants.filter(function (v) { return v.item_id === itemId; });
+            vs.forEach(function (v) {
+              var opt = document.createElement('option');
+              opt.value = String(v.id);
+              opt.textContent = (v.label || 'Standard') + ' — ' + money(v.price_cents);
+              variantSel.appendChild(opt);
+            });
+            if (vs.length) variantSel.selectedIndex = 0;
+            variantField.style.display = '';
+          }
+          function renderCart() {
+            cartEl.textContent = '';
+            if (cart.length === 0) {
+              submitBtn.textContent = 'Place Order';
+              return;
+            }
+            cart.forEach(function (l, idx) {
+              var v = variantById(l.variant_id);
+              if (!v) return;
+              var row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.08);';
+              var label = document.createElement('span');
+              label.textContent = l.qty + ' × ' + lineLabel(v) + ' — ' + money(l.qty * v.price_cents);
+              row.appendChild(label);
+              var rm = document.createElement('button');
+              rm.type = 'button';
+              rm.setAttribute('aria-label', 'Remove ' + lineLabel(v));
+              rm.textContent = '×';
+              rm.style.cssText = 'border:0;background:none;font-size:1.1rem;cursor:pointer;line-height:1;';
+              rm.addEventListener('click', function () {
+                cart.splice(idx, 1);
+                renderCart();
+              });
+              row.appendChild(rm);
+              cartEl.appendChild(row);
+            });
+            var totalRow = document.createElement('div');
+            totalRow.style.cssText = 'display:flex;justify-content:space-between;padding:8px 0;font-weight:700;';
+            var tl = document.createElement('span'); tl.textContent = 'Total (pay at pickup)';
+            var tv = document.createElement('span'); tv.textContent = money(cartTotal());
+            totalRow.appendChild(tl); totalRow.appendChild(tv);
+            cartEl.appendChild(totalRow);
+            submitBtn.textContent = 'Place Order — ' + money(cartTotal());
+          }
+
+          function loadCatalog() {
+            if (loadPromise) return loadPromise;
+            loadPromise = fetch('/api/tour?merch_catalog=1')
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                CAT = {
+                  items: Array.isArray(d.items) ? d.items : [],
+                  variants: Array.isArray(d.variants) ? d.variants : []
+                };
+                if (CAT.items.length === 0 || CAT.variants.length === 0) {
+                  statusEl.textContent = 'Online ordering is briefly unavailable — please email communications@rootsandwingsindy.com and we’ll get you sorted.';
+                  return;
+                }
+                statusEl.style.display = 'none';
+                pickerEl.style.display = '';
+                renderItemOptions();
+              })
+              .catch(function () {
+                loadPromise = null;
+                statusEl.textContent = 'We couldn’t load the catalog — please refresh, or email communications@rootsandwingsindy.com.';
+              });
+            return loadPromise;
+          }
+
+          itemSel.addEventListener('change', renderVariantOptions);
+          document.getElementById('merch-add-line').addEventListener('click', function () {
+            var vid = parseInt(variantSel.value, 10);
+            var qty = parseInt(qtyInput.value, 10);
+            if (!vid || !variantById(vid)) return;
+            if (!qty || qty < 1) qty = 1;
+            qty = Math.min(qty, 99);
+            var existing = null;
+            cart.forEach(function (l) { if (l.variant_id === vid) existing = l; });
+            if (existing) existing.qty = Math.min(existing.qty + qty, 99);
+            else cart.push({ variant_id: vid, qty: qty });
+            qtyInput.value = 1;
+            errEl.style.display = 'none';
+            renderCart();
+          });
 
           function resetMerchModal() {
             formEl.reset();
-            applyVariants();
+            cart = [];
+            renderCart();
             submitBtn.disabled = false;
             submitBtn.textContent = 'Place Order';
             errEl.style.display = 'none';
@@ -1089,23 +1214,35 @@
 
           document.getElementById('merch-modal-done').addEventListener('click', closeMerchModal);
 
-          // Open from .merch-card click — preselect the clicked item.
+          // Open from .merch-card click — preselect the clicked item if
+          // it's in the live catalog (it may not be while the manager is
+          // still pricing it, e.g. tees at launch).
           document.querySelectorAll('.merch-card').forEach(function (card) {
             card.addEventListener('click', function () {
               resetMerchModal();
-              var item = card.getAttribute('data-merch-item');
-              if (item && CATALOG[item]) {
-                itemSel.value = item;
-                applyVariants();
-              }
               modalEl.classList.add('active');
               document.body.style.overflow = 'hidden';
+              loadCatalog().then(function () {
+                if (!CAT) return;
+                var wanted = CARD_ITEM_NAMES[card.getAttribute('data-merch-item')] || '';
+                CAT.items.forEach(function (item) {
+                  if (item.name.toLowerCase() === wanted.toLowerCase()) {
+                    itemSel.value = String(item.id);
+                    renderVariantOptions();
+                  }
+                });
+              });
             });
           });
 
           formEl.addEventListener('submit', async function (e) {
             e.preventDefault();
             errEl.style.display = 'none';
+            if (cart.length === 0) {
+              errEl.textContent = 'Add at least one item to your order first.';
+              errEl.style.display = 'block';
+              return;
+            }
             submitBtn.disabled = true;
             submitBtn.textContent = 'Submitting…';
             try {
@@ -1114,14 +1251,11 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  kind: 'merch-order',
+                  kind: 'merch-desk-order',
                   name:  document.getElementById('merch-name').value,
                   email: document.getElementById('merch-email').value,
                   phone: document.getElementById('merch-phone').value,
-                  item:  itemSel.value,
-                  size:  sizeField.style.display === 'none' ? '' : sizeSel.value,
-                  color: colorField.style.display === 'none' ? '' : colorSel.value,
-                  qty:   parseInt(document.getElementById('merch-qty').value, 10) || 1,
+                  lines: cart,
                   notes: document.getElementById('merch-notes').value,
                   website: document.getElementById('merch-website').value,
                   form_ts: window.__rwPageTs || 0,
@@ -1147,7 +1281,7 @@
                 : 'Something went wrong. Please email communications@rootsandwingsindy.com.';
               errEl.style.display = 'block';
               submitBtn.disabled = false;
-              submitBtn.textContent = 'Place Order';
+              submitBtn.textContent = 'Place Order — ' + money(cartTotal());
             }
           });
         })();

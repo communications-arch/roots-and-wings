@@ -2694,3 +2694,111 @@ CREATE TABLE IF NOT EXISTS merch_desk_order_items (
 );
 CREATE INDEX IF NOT EXISTS merch_desk_order_items_order_idx   ON merch_desk_order_items (order_id);
 CREATE INDEX IF NOT EXISTS merch_desk_order_items_variant_idx ON merch_desk_order_items (variant_id);
+
+-- ──────────────────────────────────────────────
+-- Merch bridge (#351 Phase 2, 2026-08-14)
+-- ──────────────────────────────────────────────
+-- One queue, one door. The public homepage form now creates
+-- merch_desk_orders directly (handled in api/tour.js with the same
+-- anti-garbage screening as the legacy merch_orders form) — these
+-- columns carry the guest contact info and the screening verdict.
+-- Legacy merch_orders / merch_inventory stay untouched as the archive.
+ALTER TABLE merch_desk_orders ADD COLUMN IF NOT EXISTS contact_email TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_desk_orders ADD COLUMN IF NOT EXISTS contact_phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_desk_orders ADD COLUMN IF NOT EXISTS screen_reason TEXT NOT NULL DEFAULT '';
+
+-- Catalog seed (Erin, 2026-08-14): prices are the published homepage
+-- card prices, so those variants arrive ACTIVE and sellable. T-shirts
+-- only publish "From $10" — per-size tiers are Erin's call — so every
+-- tee variant seeds at $10 but INACTIVE until she prices + activates
+-- them. Hand counts carry over from merch_inventory where the
+-- item/size/color matches. Every statement is guarded with
+-- WHERE NOT EXISTS so re-runs are no-ops and rows the manager already
+-- created by hand (matched case-insensitively on name/label) win.
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'T-Shirt', 'Soft, comfortable tees featuring the Roots & Wings logo.', 'img/merch/tshirt.jpg', TRUE, 1, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 't-shirt');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Campfire Coffee Mug', '13 oz speckled ceramic mug in teal. Tin-cup design, perfect for outdoor use.', 'img/merch/mug.jpg', TRUE, 2, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'campfire coffee mug');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Stainless Tumbler', '20 oz Polar Camel double-wall insulated tumbler, fits most cup holders.', 'img/merch/tumbler.jpg', TRUE, 3, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'stainless tumbler');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Enamel Pin', '1.25" die-struck iron lapel pin with soft enamel and rubber clutch.', 'img/merch/pin.jpg', TRUE, 4, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'enamel pin');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Woven Patch', '2" woven patch with white merrowed border, heat-seal backing.', 'img/merch/patch.jpg', TRUE, 5, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'woven patch');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Block-Printed Tote', 'Custom block-printed canvas tote in our signature tree design.', 'img/merch/tote.jpg', TRUE, 6, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'block-printed tote');
+
+-- Single-variant items: label '' — published prices, ACTIVE.
+INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, updated_by)
+SELECT it.id, '', v.price_cents, COALESCE(mi.on_hand, 0), 0, COALESCE(mi.low_threshold, 0), TRUE, 0, 'migrate.sql'
+FROM (VALUES
+  ('mug',     'campfire coffee mug', 1200),
+  ('tumbler', 'stainless tumbler',   3000),
+  ('pin',     'enamel pin',           700),
+  ('patch',   'woven patch',          700)
+) AS v(slug, iname, price_cents)
+JOIN merch_items it ON LOWER(it.name) = v.iname
+LEFT JOIN merch_inventory mi ON mi.item = v.slug AND mi.size = '' AND mi.color = ''
+WHERE NOT EXISTS (SELECT 1 FROM merch_variants x WHERE x.item_id = it.id AND x.label = '');
+
+-- Tote: Small $10 / Large $20 in Black, Brown, Purple — ACTIVE.
+INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, updated_by)
+SELECT it.id, sz.size || ' — ' || c.color, sz.price_cents, COALESCE(mi.on_hand, 0), 0, COALESCE(mi.low_threshold, 0), TRUE,
+       (sz.ord * 10 + c.ord)::int, 'migrate.sql'
+FROM merch_items it
+CROSS JOIN (VALUES ('Small', 1000, 1), ('Large', 2000, 2)) AS sz(size, price_cents, ord)
+CROSS JOIN unnest(ARRAY['Black', 'Brown', 'Purple']) WITH ORDINALITY AS c(color, ord)
+LEFT JOIN merch_inventory mi ON mi.item = 'tote' AND mi.size = sz.size AND mi.color = c.color
+WHERE LOWER(it.name) = 'block-printed tote'
+  AND NOT EXISTS (SELECT 1 FROM merch_variants x
+                  WHERE x.item_id = it.id AND LOWER(x.label) = LOWER(sz.size || ' — ' || c.color));
+
+-- T-shirt: full size × color grid at $10, INACTIVE until Erin sets the
+-- real per-size tiers and flips them on in Catalog & Stock.
+INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, updated_by)
+SELECT it.id, s.size || ' — ' || c.color, 1000, COALESCE(mi.on_hand, 0), 0, COALESCE(mi.low_threshold, 0), FALSE,
+       (s.ord * 10 + c.ord)::int, 'migrate.sql'
+FROM merch_items it
+CROSS JOIN unnest(ARRAY[
+  'Toddler 2T', 'Toddler 3T', 'Toddler 4T', 'Toddler 5T',
+  'Kids XS', 'Kids S', 'Kids M', 'Kids L', 'Kids XL',
+  'Adult S', 'Adult M', 'Adult L', 'Adult XL', 'Adult XXL'
+]) WITH ORDINALITY AS s(size, ord)
+CROSS JOIN unnest(ARRAY['Purple', 'Olive', 'Lime', 'Teal']) WITH ORDINALITY AS c(color, ord)
+LEFT JOIN merch_inventory mi ON mi.item = 'tshirt' AND mi.size = s.size AND mi.color = c.color
+WHERE LOWER(it.name) = 't-shirt'
+  AND NOT EXISTS (SELECT 1 FROM merch_variants x
+                  WHERE x.item_id = it.id AND LOWER(x.label) = LOWER(s.size || ' — ' || c.color));
+
+-- Any OTHER hand-added merch_inventory rows (items outside the known
+-- slugs) still carry over: item active, variant $0 + INACTIVE so it
+-- never shows to buyers until the manager prices + activates it.
+-- Vendor info stays readable on the legacy Inventory tab — the Desk
+-- tables have no per-variant notes column, so it is not copied.
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT DISTINCT mi.item, '', '', TRUE, 50, 'migrate.sql'
+FROM merch_inventory mi
+WHERE mi.item NOT IN ('tshirt', 'mug', 'tumbler', 'pin', 'patch', 'tote')
+  AND NOT EXISTS (SELECT 1 FROM merch_items x WHERE LOWER(x.name) = LOWER(mi.item));
+
+INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, updated_by)
+SELECT it.id,
+       TRIM(mi.size || CASE WHEN mi.size <> '' AND mi.color <> '' THEN ' — ' ELSE '' END || mi.color),
+       0, mi.on_hand, 0, mi.low_threshold, FALSE, 0, 'migrate.sql'
+FROM merch_inventory mi
+JOIN merch_items it ON LOWER(it.name) = LOWER(mi.item)
+WHERE mi.item NOT IN ('tshirt', 'mug', 'tumbler', 'pin', 'patch', 'tote')
+  AND NOT EXISTS (SELECT 1 FROM merch_variants x
+                  WHERE x.item_id = it.id
+                    AND LOWER(x.label) = LOWER(TRIM(mi.size || CASE WHEN mi.size <> '' AND mi.color <> '' THEN ' — ' ELSE '' END || mi.color)));

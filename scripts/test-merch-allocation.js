@@ -13,7 +13,7 @@
 // Usage: node scripts/test-merch-allocation.js   (also runs in npm test)
 
 const assert = require('assert');
-const { splitLine, allocateOrder, orderTotalCents, needsOrderingQty } = require('../api/_merch.js');
+const { normalizeLines, splitLine, allocateOrder, orderTotalCents, needsOrderingQty } = require('../api/_merch.js');
 
 let passed = 0;
 let failed = 0;
@@ -121,6 +121,42 @@ t('orderTotalCents sums qty × price', () => {
     { qty: 1, price_cents_each: 800 }
   ]), 3800);
   assert.strictEqual(orderTotalCents([]), 0);
+});
+
+// ── normalizeLines ─────────────────────────────────────────────────────
+// Shared by the member shop AND the public homepage form (#351 Phase 2)
+// — the untrusted-input funnel every order body passes through.
+t('normalizeLines: happy path passes through', () => {
+  assert.deepStrictEqual(
+    normalizeLines([{ variant_id: 3, qty: 2 }, { variant_id: 5, qty: 1 }]),
+    [{ variant_id: 3, qty: 2 }, { variant_id: 5, qty: 1 }]
+  );
+});
+t('normalizeLines: duplicate variants merge, capped at 99', () => {
+  assert.deepStrictEqual(
+    normalizeLines([{ variant_id: 3, qty: 60 }, { variant_id: 3, qty: 60 }]),
+    [{ variant_id: 3, qty: 99 }]
+  );
+});
+t('normalizeLines: garbage rows dropped, strings coerced', () => {
+  assert.deepStrictEqual(
+    normalizeLines([
+      { variant_id: 'x', qty: 1 }, { variant_id: -2, qty: 1 },
+      { variant_id: 4, qty: 0 }, { variant_id: '7', qty: '2' }
+    ]),
+    [{ variant_id: 7, qty: 2 }]
+  );
+});
+t('normalizeLines: nothing valid (or not an array) → null', () => {
+  assert.strictEqual(normalizeLines([]), null);
+  assert.strictEqual(normalizeLines([{ variant_id: 0, qty: 5 }]), null);
+  assert.strictEqual(normalizeLines('lines'), null);
+  assert.strictEqual(normalizeLines(null), null);
+});
+t('normalizeLines: more than 30 distinct variants → null', () => {
+  const many = [];
+  for (let i = 1; i <= 31; i++) many.push({ variant_id: i, qty: 1 });
+  assert.strictEqual(normalizeLines(many), null);
 });
 
 // ── needsOrderingQty ───────────────────────────────────────────────────
