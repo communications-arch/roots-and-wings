@@ -2605,3 +2605,71 @@ ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edited_by TEXT DEFA
 UPDATE coverage_slots
    SET claimed_by_email = NULL, claimed_by_name = NULL, claimed_at = NULL, assigned_by = NULL
  WHERE claimed_by_email = '';
+
+-- ──────────────────────────────────────────────
+-- Merch Desk Phase 1 (#351, 2026-08-14)
+-- ──────────────────────────────────────────────
+-- DB-driven merch ledger: catalog items + priced variants, member pickup
+-- orders with allocation/backorder inventory truth, and event quick-sales
+-- with payment-method recording. Lives alongside (does NOT replace) the
+-- legacy public-form tables: `merch_orders` was already taken by the
+-- 2026-05 homepage order-form ledger (single-line orders, no prices) and
+-- `merch_inventory` by its hand-counted stock table — so the Phase-1
+-- desk orders use the merch_desk_* names. API: merch-* actions on
+-- api/supply-closet.js; allocation math in api/_merch.js
+-- (scripts/test-merch-allocation.js guards it).
+
+CREATE TABLE IF NOT EXISTS merch_items (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  image_url   TEXT NOT NULL DEFAULT '',   -- optional (no upload flow in Phase 1)
+  active      BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS merch_variants (
+  id                SERIAL PRIMARY KEY,
+  item_id           INTEGER NOT NULL REFERENCES merch_items(id) ON DELETE CASCADE,
+  label             TEXT NOT NULL DEFAULT '',  -- e.g. 'Youth M — Purple' (blank for single-variant items)
+  price_cents       INTEGER NOT NULL DEFAULT 0,
+  on_hand           INTEGER NOT NULL DEFAULT 0,
+  on_order          INTEGER NOT NULL DEFAULT 0, -- already ordered from the supplier
+  restock_threshold INTEGER NOT NULL DEFAULT 0, -- below this → Needs-ordering report
+  active            BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS merch_variants_item_idx ON merch_variants (item_id);
+
+CREATE TABLE IF NOT EXISTS merch_desk_orders (
+  id               SERIAL PRIMARY KEY,
+  family_email     TEXT,                       -- NULL = walk-up guest sale
+  buyer_name       TEXT NOT NULL DEFAULT '',   -- display name (required for guests)
+  status           TEXT NOT NULL DEFAULT 'pending_payment'
+                   CHECK (status IN ('pending_payment','paid','ready','delivered','cancelled')),
+  payment_method   TEXT CHECK (payment_method IN ('cash','check','venmo','paypal')),
+  paid_at          TIMESTAMPTZ,
+  total_cents      INTEGER NOT NULL DEFAULT 0,
+  note             TEXT NOT NULL DEFAULT '',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by_email TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS merch_desk_orders_family_idx ON merch_desk_orders (LOWER(family_email));
+CREATE INDEX IF NOT EXISTS merch_desk_orders_status_idx ON merch_desk_orders (status);
+
+CREATE TABLE IF NOT EXISTS merch_desk_order_items (
+  id               SERIAL PRIMARY KEY,
+  order_id         INTEGER NOT NULL REFERENCES merch_desk_orders(id) ON DELETE CASCADE,
+  variant_id       INTEGER NOT NULL REFERENCES merch_variants(id),
+  qty              INTEGER NOT NULL DEFAULT 1,
+  price_cents_each INTEGER NOT NULL DEFAULT 0,  -- price at order time
+  stock_status     TEXT NOT NULL DEFAULT 'allocated'
+                   CHECK (stock_status IN ('allocated','backordered'))
+);
+CREATE INDEX IF NOT EXISTS merch_desk_order_items_order_idx   ON merch_desk_order_items (order_id);
+CREATE INDEX IF NOT EXISTS merch_desk_order_items_variant_idx ON merch_desk_order_items (variant_id);
