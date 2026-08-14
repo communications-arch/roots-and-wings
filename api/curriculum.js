@@ -3567,6 +3567,17 @@ module.exports = async function handler(req, res) {
         `;
         if (kidOk.length === 0) return res.status(400).json({ error: 'That child is not in your family.' });
         const kidId = kidOk[0].id;
+        // #348 (Erin 2026-08-14): assist flags are enforced server-side, not
+        // just in the picker UI. Grove wins (same rule as kidBandsFor):
+        // Cedars/Pigeons kids may assist regardless of literal age; a kid
+        // with no grove assignment falls back to age 12+. Ineligible flags
+        // are stripped (pick still saves as a normal choice), mirroring how
+        // invalid-hour picks are silently dropped rather than 400'd.
+        const kidGroupLc = String(kidOk[0].class_group || '').trim().toLowerCase();
+        const kidAgeForAssist = ageFromBirthDate(kidOk[0].birth_date);
+        const kidMayAssist = kidGroupLc
+          ? (kidGroupLc === 'cedars' || kidGroupLc === 'pigeons' || kidGroupLc === 'teens')
+          : (kidAgeForAssist != null && kidAgeForAssist >= 12);
         // Mirror the picker's eligibility server-side: Greenhouse /
         // under-3 kids aren't in afternoon programming, and the season's
         // kid_enrollments row is the schedule truth (enrollment re-key
@@ -3651,7 +3662,7 @@ module.exports = async function handler(req, res) {
         `];
         for (let i = 0; i < cleanIds.length; i++) {
           const note = String(rawNotes[cleanIds[i]] || '').trim().slice(0, 300);
-          const asAssistant = !!rawAssist[cleanIds[i]] && teenOkById[cleanIds[i]] === true;
+          const asAssistant = !!rawAssist[cleanIds[i]] && teenOkById[cleanIds[i]] === true && kidMayAssist;
           pickStmts.push(sql`
             INSERT INTO class_signup_picks
               (school_year, session_number, family_email, kid_first_name, kid_id, hour, rank, class_submission_id, note, as_assistant, created_by_email)
