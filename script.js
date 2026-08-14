@@ -5413,18 +5413,9 @@
         // 2nd-choice slot, and vice versa).
         var pm1Map = (s.working[kid] && s.working[kid].PM1) || {};
         var pm2Map = (s.working[kid] && s.working[kid].PM2) || {};
-        var pinnedBoth = [];
-        var bothRankTaken = {};
-        (s.classes.PM1 || []).forEach(function (c) {
-          // #282 (Colleen): only a REQUIRED-both class reserves its choice
-          // number in the other hour. An OPTIONAL ("one or both") 2-hour class
-          // ranks each hour independently — no reservation — so hour 1 and
-          // hour 2 both offer a full 1st/2nd choice.
-          if (c.hour === 'both' && !c.bothOptional && pm1Map[c.id]) {
-            pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
-            bothRankTaken[pm1Map[c.id]] = true;
-          }
-        });
+        var bothPins = signupBothPins(s.classes.PM1 || [], pm1Map);
+        var pinnedBoth = bothPins.pinnedBoth;
+        var bothRankTaken = bothPins.bothRankTaken;
         // Shift any PM2 pick off a number the 2-hour class now occupies.
         Object.keys(pm2Map).forEach(function (cid2) {
           if (bothRankTaken[pm2Map[cid2]]) {
@@ -5682,6 +5673,24 @@
     return h;
   }
 
+  // #282/#345: which of a kid's ranked PM1 classes pin into PM Hour 2 and
+  // reserve their choice number there. ONLY a REQUIRED 2-hour class
+  // ('both' and not bothOptional) does — #279/#280 confirmed that
+  // reservation is correct and it must stay. An OPTIONAL ("one or both
+  // hours") 2-hour class ranks each hour independently: no pin, no
+  // reservation. Pure — exercised by scripts/test-signup-ranks.js.
+  function signupBothPins(classesPM1, pm1Map) {
+    var pinnedBoth = [];
+    var bothRankTaken = {};
+    (classesPM1 || []).forEach(function (c) {
+      if (c.hour === 'both' && !c.bothOptional && pm1Map[c.id]) {
+        pinnedBoth.push({ name: c.name, rank: pm1Map[c.id] });
+        bothRankTaken[pm1Map[c.id]] = true;
+      }
+    });
+    return { pinnedBoth: pinnedBoth, bothRankTaken: bothRankTaken };
+  }
+
   function signupHourHtml(kid, hour, classes, canEdit, kidBands, isTeenAssist, pinnedBoth, excludeRanks) {
     var rankMap = (_signup.working[kid] && _signup.working[kid][hour]) || {};
     var kidAssist = (_signup.workingAssist && _signup.workingAssist[kid]) || {};
@@ -5892,11 +5901,13 @@
           if (!m[cid]) {
             var used = {};
             Object.keys(m).forEach(function (k) { used[m[k]] = true; });
-            // A ranked 2-hour class reserves its choice number in Hour 2.
+            // A ranked REQUIRED 2-hour class reserves its choice number in
+            // Hour 2 (#345: an optional-both class doesn't — its hours are
+            // independent, same rule as signupBothPins).
             if (hour === 'PM2') {
               var pm1m = (_signup.working[kid] && _signup.working[kid].PM1) || {};
               (_signup.classes.PM1 || []).forEach(function (c2) {
-                if (c2.hour === 'both' && pm1m[c2.id]) used[pm1m[c2.id]] = true;
+                if (c2.hour === 'both' && !c2.bothOptional && pm1m[c2.id]) used[pm1m[c2.id]] = true;
               });
             }
             var free = !used[1] ? 1 : (!used[2] ? 2 : null);
@@ -8745,7 +8756,19 @@
   // "kids signed up so far" as the Afternoon Class Sign-ups. That per-class
   // requests data lives in the class-signup pool (signedUpDetailed), which any
   // authed member may read — cache it per session and repaint when it lands.
-  var _coordPmSignups = { session: null, loading: false, byClass: {}, windowStatus: null };
+  // byHour: {PM1: {classId: signedUpDetailed}, PM2: {…}} — kept PER HOUR
+  // (#345) so an optional 2-hour class's Hour 1 and Hour 2 cards each show
+  // their own sign-ups instead of one list overwriting the other.
+  var _coordPmSignups = { session: null, loading: false, byHour: { PM1: {}, PM2: {} }, windowStatus: null };
+  // The sign-ups to show on a coordination card: the card's own hour when
+  // that pool carries the class, else whichever pool has it (a REQUIRED
+  // 2-hour class lives only in the PM1 pool but renders in both grids).
+  function acCardSignups(classId, hour) {
+    var by = _coordPmSignups.byHour || {};
+    var own = by[hour] && by[hour][classId];
+    if (own !== undefined) return own;
+    return (by.PM1 && by.PM1[classId]) || (by.PM2 && by.PM2[classId]) || [];
+  }
   // #297 (Erin): grove filter for the coordination Afternoon Classes cards.
   var _coordGroveSel = [];
   function coordGrovesInPool(pm) {
@@ -8770,6 +8793,21 @@
   function acSignupKidOptions() {
     if (!_signup || !Array.isArray(_signup.kids) || !_signup.kids.length) return '';
     return _signup.kids.map(function (k) { return '<option value="' + escapeHtml(k) + '">' + escapeHtml(k) + '</option>'; }).join('');
+  }
+  // #345 (Lyndsey): the sign-up hour context for a Co-op Coordination
+  // afternoon card. gridHour = the hour section the card is rendered under.
+  // A REQUIRED 2-hour class saves under PM1 and fills BOTH hours (isBoth —
+  // #279/#280 confirmed behavior, keep it). An OPTIONAL ("one or both
+  // hours") 2-hour class saves ONLY the hour of the grid it sits in, so a
+  // kid can take just one hour. Pure — exercised by
+  // scripts/test-signup-ranks.js.
+  function coordCardHourCtx(e, gridHour) {
+    if (e.scheduled_hour === 'both') {
+      return e.both_optional
+        ? { hour: (gridHour === 'PM2' ? 'PM2' : 'PM1'), isBoth: false }
+        : { hour: 'PM1', isBoth: true };
+    }
+    return { hour: (e.scheduled_hour === 'PM2' ? 'PM2' : 'PM1'), isBoth: false };
   }
   // Which of the acting family's kids are signed up for THIS class, and at what
   // rank — so the card can show them with an ✕ to remove (Erin, 2026-08-11).
@@ -8908,13 +8946,13 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         _coordPmSignups.loading = false;
-        var byClass = {};
+        var byHour = { PM1: {}, PM2: {} };
         if (d && d.classes) {
           ['PM1', 'PM2'].forEach(function (hr) {
-            (d.classes[hr] || []).forEach(function (c) { byClass[c.id] = c.signedUpDetailed || []; });
+            (d.classes[hr] || []).forEach(function (c) { byHour[hr][c.id] = c.signedUpDetailed || []; });
           });
         }
-        _coordPmSignups = { session: session, loading: false, byClass: byClass, windowStatus: (d && d.window && d.window.status) || null };
+        _coordPmSignups = { session: session, loading: false, byHour: byHour, windowStatus: (d && d.window && d.window.status) || null };
         renderSessionTab();
       })
       .catch(function () { _coordPmSignups.loading = false; });
@@ -9148,11 +9186,11 @@
         if (pmSignupOpen && !_signup && typeof loadClassSignupCard === 'function') loadClassSignupCard();
         html += coordGrovePillBar(dbSess.pm);
         html += '<div class="elective-card-grid">';
-        dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen); });
+        dbH1.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen, 'PM1'); });
         html += '</div>';
         html += '<h4 class="session-section-title" style="margin-top:44px;">Afternoon Classes &mdash; Hour 2: 2:00\u20132:55</h4>';
         html += '<div class="elective-card-grid">';
-        dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen); });
+        dbH2.forEach(function (e) { html += buildDbElectiveCard(e, myNames, pmSignupOpen, 'PM2'); });
         html += '</div>';
       }
     } else {
@@ -9312,7 +9350,7 @@
 
   // Published-DB elective card: same look as the sheet-era card, but no
   // roster/capacity bar yet (sign-ups feature will bring enrollment counts).
-  function buildDbElectiveCard(e, myNames, signupOpen) {
+  function buildDbElectiveCard(e, myNames, signupOpen, gridHour) {
     // Leads = teacher + co-leads (co-leads LEAD the class, same as the detail
     // card and morning table treat them); assistants are separate.
     var coLeads = String(e.co_teachers || '').split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean);
@@ -9340,12 +9378,18 @@
         ? '<div class="ac-need"><span class="ra-open-note" style="display:inline;">needs ' + e.helpers_needed + ' more</span></div>'
         : '<div class="ac-need"><button type="button" class="ra-open-note vgrid-need-btn pm-assist-signup" data-vg-class="' + e.id + '" data-vg-block="' + pmBlock + '" data-vg-label="' + escapeHtml(e.class_name || 'this class') + '" title="Sign yourself up to assist this class">needs ' + e.helpers_needed + ' more — sign up</button></div>';
     }
+    // #345: the card's sign-up hour context. An optional 2-hour class's
+    // Hour 1 and Hour 2 cards are INDEPENDENT sign-ups; a required 2-hour
+    // class keeps saving under PM1 and filling both hours.
+    var ctx = coordCardHourCtx(e, gridHour || 'PM1');
+    var pmHour = ctx.hour;
+    var isBothPm = ctx.isBoth;
     var html = '<div class="elective-card ac-body coord-pm-card' + (isMyCard ? ' coord-my-card' : '') + '">';
     html += afternoonCardBody({
       id: e.id, name: e.class_name || 'TBD', ageGroups: e.age_groups, description: e.description,
       room: e.scheduled_room, hour: e.scheduled_hour, bothOptional: !!e.both_optional,
       leads: leadNames, assists: assistNames, max: e.max_students,
-      signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? _coordPmSignups.byClass[e.id] : []
+      signedUpDetailed: (_coordPmSignups.session === sessionTabView) ? acCardSignups(e.id, pmHour) : []
     }, {
       myNames: myNames, afterStaff: needMore, linkNames: true,
       // Locked = lottery done → final roster, not requests (Erin, 2026-08-12).
@@ -9353,11 +9397,15 @@
     });
     // #297 (Erin): sign up straight from the card — pick a kid + 1st/2nd choice.
     if (signupOpen) {
-      var pmHour = (e.scheduled_hour === 'PM2') ? 'PM2' : 'PM1';
-      var isBothPm = e.scheduled_hour === 'both';
       var kidOpts = acSignupKidOptions();
       var mine = acFamilyPicksForClass(e.id, pmHour, isBothPm);
       html += '<div class="ac-signup" data-class="' + e.id + '" data-hour="' + pmHour + '" data-both="' + (isBothPm ? '1' : '') + '">';
+      // #345: spell out that an optional 2-hour class signs up per hour —
+      // this card commits ONLY its own hour; the other hour has its own card.
+      if (e.scheduled_hour === 'both' && e.both_optional) {
+        html += '<div class="ac-signup-hournote"><span class="ws-wv-context">Signing up here is for '
+          + (pmHour === 'PM2' ? 'Hour 2' : 'Hour 1') + ' only — want both hours? Sign up on this class’s card under each hour.</span></div>';
+      }
       // The family's kids already signed up for THIS class — ✕ to remove.
       if (mine.length) {
         html += '<div class="ac-mine">' + mine.map(function (m) {

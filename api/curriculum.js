@@ -1765,7 +1765,7 @@ module.exports = async function handler(req, res) {
               FROM morning_class_assignments WHERE school_year = ${srYear}`,
           sql`SELECT LOWER(p.family_email) AS fam, LOWER(p.kid_first_name) AS kid, p.hour,
                      p.rank, p.as_assistant,
-                     c.id AS class_id, c.class_name, c.scheduled_hour,
+                     c.id AS class_id, c.class_name, c.scheduled_hour, c.hour_preference,
                      c.age_groups, c.scheduled_age_range
               FROM class_signup_picks p
               JOIN class_submissions c ON c.id = p.class_submission_id
@@ -1847,6 +1847,12 @@ module.exports = async function handler(req, res) {
         // row + flag a kid who hasn't finished picking (#Schedules kids tab).
         const srPickBy = {};
         const srChoicesBy = {};
+        // #345: `both` marks picks that COVER the other PM hour — only a
+        // REQUIRED 2-hour class does that. An OPTIONAL ("one or both hours")
+        // 2-hour class is picked per hour, so its PM1 pick must not spill
+        // into the grid's PM2 cell or the completeness math.
+        const srCovers = r => r.scheduled_hour === 'both'
+          && (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') === -1;
         srPicks.forEach(r => {
           const hk = r.fam + '|' + r.kid + '|' + r.hour;
           if (!srPickBy[hk]) srPickBy[hk] = r; // lowest rank wins → rank 1
@@ -1855,7 +1861,7 @@ module.exports = async function handler(req, res) {
           if (bucket[r.hour]) bucket[r.hour].push({
             rank: parseInt(r.rank, 10) || 1,
             class_id: r.class_id, class_name: r.class_name,
-            both: r.scheduled_hour === 'both',
+            both: srCovers(r),
             assistant: r.as_assistant === true,
             ageRange: r.scheduled_age_range || '',
             ageGroups: Array.isArray(r.age_groups) ? r.age_groups : []
@@ -1878,7 +1884,7 @@ module.exports = async function handler(req, res) {
             // class-signup payload) so the grid can show a placed class's
             // age range via signupAgeText, same as the pickers (#31).
             return p ? {
-              class_id: p.class_id, class_name: p.class_name, both: p.scheduled_hour === 'both',
+              class_id: p.class_id, class_name: p.class_name, both: srCovers(p),
               assistant: p.as_assistant === true,
               ageRange: p.scheduled_age_range || '',
               ageGroups: Array.isArray(p.age_groups) ? p.age_groups : []
@@ -2411,8 +2417,12 @@ module.exports = async function handler(req, res) {
         // Enrollment-scoped (2026-07-19): stale picks from kids not
         // ENROLLED this season don't inflate demand; NULL-kid_id legacy
         // rows keep counting (transition tolerance).
+        // #345: p.hour rides along (and joins the GROUP BY) so an OPTIONAL
+        // 2-hour class can show each hour's OWN sign-ups on its per-hour
+        // cards. For every other class a kid's picks live under one hour
+        // anyway, so the grouping change adds no duplicate rows for them.
         const pickKidRows = await sql`
-          SELECT p.class_submission_id, p.kid_first_name, LOWER(p.family_email) AS fam_email,
+          SELECT p.class_submission_id, p.hour, p.kid_first_name, LOWER(p.family_email) AS fam_email,
                  MIN(p.rank) AS pick_rank,
                  BOOL_OR(p.as_assistant) AS as_assistant,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
@@ -2435,31 +2445,43 @@ module.exports = async function handler(req, res) {
               SELECT 1 FROM kid_enrollments e
               WHERE e.kid_id = p.kid_id AND e.season = ${sy}
                 AND e.status <> 'enrolled'))
-          GROUP BY p.class_submission_id, p.kid_first_name, LOWER(p.family_email),
+          GROUP BY p.class_submission_id, p.hour, p.kid_first_name, LOWER(p.family_email),
                    k.nickname, k.last_name, mp.family_name
         `;
-        const pickCounts = {};
-        const pickNames = {};
         const pickDetailed = {};
         pickKidRows.forEach(r => {
           const id = r.class_submission_id;
-          pickCounts[id] = (pickCounts[id] || 0) + 1;
           const base = (r.display_first + ' ' + (r.display_last || '')).trim();
           if (!base) return;
           if (!pickDetailed[id]) pickDetailed[id] = [];
           pickDetailed[id].push({
             name: base,
             rank: parseInt(r.pick_rank, 10) || 1,
-            assistant: r.as_assistant === true
+            assistant: r.as_assistant === true,
+            hour: r.hour
           });
         });
         // 1st choices first, then 2nd (etc.), alphabetical within a rank —
         // the detail popup groups them; the flat list feeds the tiles.
         Object.keys(pickDetailed).forEach(id => {
           pickDetailed[id].sort((a, b) => (a.rank - b.rank) || a.name.localeCompare(b.name));
-          pickNames[id] = pickDetailed[id].map(d => d.name + (d.assistant ? ' (assistant)' : ''));
         });
-        const ser = (r) => ({
+        // #281/#282/#345: a scheduled 2-hour ('both') class is EITHER "both
+        // hours required" or "one or both hours" (the teacher's
+        // hour_preference). Only the OPTIONAL kind takes independent
+        // per-hour sign-ups.
+        const isOptionalBoth = (r) => r.scheduled_hour === 'both'
+          && (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1;
+        // #345 (Lyndsey): an optional 2-hour class's PM1 card shows/counts
+        // only the PM1 sign-ups and its PM2 card only the PM2 ones — a kid
+        // taking one hour must not read as filling both. Every other class
+        // keeps the combined list (their picks live under one hour anyway;
+        // a required-both class ranks under PM1 and fills both by design).
+        const detFor = (r, hourCtx) => {
+          const det = pickDetailed[r.id] || [];
+          return isOptionalBoth(r) ? det.filter(d => d.hour === hourCtx) : det;
+        };
+        const ser = (r, hourCtx) => ({
           id: r.id, name: r.class_name, hour: r.scheduled_hour,
           // scheduled_age_range is the reviewer's free-text override; most
           // schedules leave it blank, so the teacher-picked age_groups slugs
@@ -2478,21 +2500,19 @@ module.exports = async function handler(req, res) {
           // required" or "one or both hours" (the teacher's hour_preference).
           // Only the OPTIONAL kind ranks each hour independently; the required
           // kind reserves its choice number in the other hour (see the picker).
-          bothOptional: (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1,
-          signedUp: pickCounts[r.id] || 0,
-          signedUpNames: pickNames[r.id] || [],
-          signedUpDetailed: pickDetailed[r.id] || []
+          bothOptional: isOptionalBoth(r),
+          signedUp: detFor(r, hourCtx).length,
+          signedUpNames: detFor(r, hourCtx).map(d => d.name + (d.assistant ? ' (assistant)' : '')),
+          signedUpDetailed: detFor(r, hourCtx)
         });
         // A REQUIRED 2-hour ('both') class is ranked under PM1 only and fills
         // both slots (ranking it there reserves/covers PM2). An OPTIONAL
         // ("one or both hours", hour_preference '2hr-optional') 2-hour class is
         // selectable in BOTH hours independently (#282, Erin — e.g. Yearbook),
         // so it appears in each list.
-        const isOptionalBoth = (r) => r.scheduled_hour === 'both'
-          && (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1;
         const classes = {
-          PM1: classRows.filter(r => r.scheduled_hour === 'PM1' || r.scheduled_hour === 'both').map(ser),
-          PM2: classRows.filter(r => r.scheduled_hour === 'PM2' || isOptionalBoth(r)).map(ser)
+          PM1: classRows.filter(r => r.scheduled_hour === 'PM1' || r.scheduled_hour === 'both').map(r => ser(r, 'PM1')),
+          PM2: classRows.filter(r => r.scheduled_hour === 'PM2' || isOptionalBoth(r)).map(r => ser(r, 'PM2'))
         };
         const effEmail = resolveSubmitterEmail(user, req.query.view_as);
         const fam = await resolveFamily(sql, effEmail);
@@ -3578,7 +3598,7 @@ module.exports = async function handler(req, res) {
         let validRows = [];
         if (ranked.length) {
           validRows = await sql`
-            SELECT id, scheduled_hour, open_to_teen_assistant FROM class_submissions
+            SELECT id, scheduled_hour, open_to_teen_assistant, hour_preference FROM class_submissions
             WHERE status='scheduled' AND school_year=${sy} AND scheduled_session=${session}
               AND class_period = 'PM'
               AND id = ANY(${ranked}::int[])
@@ -3586,9 +3606,17 @@ module.exports = async function handler(req, res) {
         }
         const hourById = {};
         const teenOkById = {};
+        const optBothById = {};
         validRows.forEach(r => {
           hourById[r.id] = r.scheduled_hour;
           teenOkById[r.id] = r.open_to_teen_assistant === true;
+          // #345: an OPTIONAL ("one or both hours") 2-hour class takes
+          // independent per-hour picks, so it's valid under PM2 too. A
+          // REQUIRED-both class stays PM1-only (ranking it there covers
+          // both hours — #279/#280 confirmed behavior; PM2 rows for it
+          // are still silently dropped, never expanded).
+          optBothById[r.id] = r.scheduled_hour === 'both'
+            && (Array.isArray(r.hour_preference) ? r.hour_preference : []).indexOf('2hr-optional') !== -1;
         });
         const cleanIds = [];
         const seen = {};
@@ -3596,7 +3624,8 @@ module.exports = async function handler(req, res) {
           if (seen[cid]) continue;
           const h = hourById[cid];
           if (!h) continue;
-          if ((hour === 'PM1' && (h === 'PM1' || h === 'both')) || (hour === 'PM2' && h === 'PM2')) {
+          if ((hour === 'PM1' && (h === 'PM1' || h === 'both'))
+            || (hour === 'PM2' && (h === 'PM2' || optBothById[cid]))) {
             cleanIds.push(cid); seen[cid] = true;
           }
         }

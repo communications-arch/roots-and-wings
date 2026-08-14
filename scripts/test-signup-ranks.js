@@ -127,6 +127,56 @@ t('#281/#301: a REQUIRED 2-hour class reads "(mandatory)"; an OPTIONAL one reads
   assert(/signup-2hr-optional/.test(optional), 'optional-both must carry the .signup-2hr-optional modifier');
 });
 
+// ── #345 (Lyndsey): a 2-hour class where both hours are OPTIONAL takes
+// independent per-hour sign-ups — picking hour 1 must NOT auto-fill hour 2.
+// A REQUIRED 2-hour class keeps the #279/#280 behavior exactly: ranking it
+// under PM1 pins + reserves the same choice number in PM Hour 2.
+const signupBothPins = new Function(extractFn('signupBothPins') + '\n return signupBothPins;')();
+const coordCardHourCtx = new Function(extractFn('coordCardHourCtx') + '\n return coordCardHourCtx;')();
+
+console.log('\n  #345: 2hr-optional vs 2hr-required');
+
+t('#345 guard (a): a REQUIRED 2-hour class ranked in PM1 still pins into PM Hour 2 and reserves its choice number', function () {
+  const pins = signupBothPins([{ id: 30, name: 'Epic Play', hour: 'both' }], { 30: 1 });
+  assert(pins.pinnedBoth.length === 1 && pins.pinnedBoth[0].name === 'Epic Play' && pins.pinnedBoth[0].rank === 1,
+    'required-both must pin into PM2, got ' + JSON.stringify(pins.pinnedBoth));
+  assert(pins.bothRankTaken[1] === true, 'required-both must reserve choice 1 in PM2');
+});
+
+t('#345 (b): an OPTIONAL 2-hour class ranked in PM1 does NOT pin or reserve anything in PM Hour 2', function () {
+  const pins = signupBothPins([{ id: 30, name: 'Open Studio', hour: 'both', bothOptional: true }], { 30: 1 });
+  assert(pins.pinnedBoth.length === 0, 'optional-both must not pin into PM2, got ' + JSON.stringify(pins.pinnedBoth));
+  assert(Object.keys(pins.bothRankTaken).length === 0, 'optional-both must not reserve a choice number');
+});
+
+t('#345: an unranked or 1-hour class never pins (baseline)', function () {
+  const none = signupBothPins([{ id: 30, name: 'Epic Play', hour: 'both' }, { id: 31, name: 'Wood', hour: 'PM1' }], { 31: 1 });
+  assert(none.pinnedBoth.length === 0 && Object.keys(none.bothRankTaken).length === 0,
+    'nothing should pin when no 2-hour class is ranked');
+});
+
+t('#345: coordination card — a REQUIRED 2-hour class saves under PM1 and fills both hours, from EITHER grid', function () {
+  const req = { scheduled_hour: 'both', both_optional: false };
+  const h1 = coordCardHourCtx(req, 'PM1');
+  const h2 = coordCardHourCtx(req, 'PM2');
+  assert(h1.hour === 'PM1' && h1.isBoth === true, 'required-both from the Hour 1 grid → PM1 + both, got ' + JSON.stringify(h1));
+  assert(h2.hour === 'PM1' && h2.isBoth === true, 'required-both from the Hour 2 grid → still PM1 + both, got ' + JSON.stringify(h2));
+});
+
+t('#345: coordination card — an OPTIONAL 2-hour class saves ONLY the hour of the grid it was clicked in', function () {
+  const opt = { scheduled_hour: 'both', both_optional: true };
+  const h1 = coordCardHourCtx(opt, 'PM1');
+  const h2 = coordCardHourCtx(opt, 'PM2');
+  assert(h1.hour === 'PM1' && h1.isBoth === false, 'optional-both from the Hour 1 grid → PM1 only, got ' + JSON.stringify(h1));
+  assert(h2.hour === 'PM2' && h2.isBoth === false, 'optional-both from the Hour 2 grid → PM2 only, got ' + JSON.stringify(h2));
+});
+
+t('#345: coordination card — plain 1-hour classes keep their own hour', function () {
+  assert(coordCardHourCtx({ scheduled_hour: 'PM2' }, 'PM2').hour === 'PM2', 'a PM2 class saves under PM2');
+  assert(coordCardHourCtx({ scheduled_hour: 'PM1' }, 'PM1').hour === 'PM1', 'a PM1 class saves under PM1');
+  assert(coordCardHourCtx({ scheduled_hour: 'PM2' }, 'PM2').isBoth === false, 'a 1-hour class never fills both');
+});
+
 t('prominence: the PM Hour 2 pinned banner explains the single choice number and fronts the badge', function () {
   const api = makeApi({});
   const html = api.signupHourHtml('Kid', 'PM2', PM2_CLASSES, true, null, false, PINNED_BOTH, { 1: true });
