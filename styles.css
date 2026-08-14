@@ -12346,6 +12346,46 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-primary-dark);
   border-bottom-color: var(--color-primary);
 }
+/* Merch Desk (#351) — quick-sale grid is phone-first: big tap targets
+   for selling while standing at a folding table. Everything else on the
+   Merch Desk tabs reuses the existing ws-merch-add-* / ws-lending-row /
+   merch-inv-edit building blocks. */
+.merch-qs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.merch-qs-item {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.25;
+}
+.merch-qs-item-name { font-weight: 600; }
+.merch-qs-item-price { font-size: 0.8rem; color: var(--color-text-light); }
+.merch-qs-item-on {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+.merch-qs-item-on .merch-qs-item-price { color: var(--color-primary); font-weight: 700; }
+/* Inline expanding row (payment-method chips / receive-stock form) under
+   a Desk Orders or Catalog row. */
+.merch-desk-payrow {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  font-size: 0.86rem;
+}
+.merch-desk-row { flex-wrap: wrap; }
 /* Status pills shared by Membership Report + Waivers Report (and any
    other table that needs Paid/Pending/Signed status cells). Same
    all-caps + tracking + bold treatment as .ws-part-status / .pmrep-status

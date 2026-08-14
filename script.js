@@ -10769,6 +10769,22 @@
         if (typeof loadLendingCard === 'function') loadLendingCard();
       }
     },
+    'merch': {
+      // Merch Desk Phase 1 (#351, 2026-08-14): browse the DB-driven
+      // catalog, place a pay-at-pickup order, and track order status.
+      // Plain text header for now — no brand accent assigned yet (one
+      // mark per meaning; Erin picks the accent later).
+      title: 'Merch',
+      roleGate: null,
+      render: function () {
+        var h = '<p class="ws-body-hint">Co-op shirts, mugs, and more — order ahead and pay at pickup, at the next event.</p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-shop">Shop Merch</button>'
+          + '<span class="ws-part-submit-hint">No online payment — you pay the Merchandise Manager at pickup (cash, check, or Venmo).</span></p>';
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-my-orders">My Orders</button>'
+          + '<span class="ws-part-submit-hint">See what you’ve ordered, what’s ready, and what you still owe.</span></p>';
+        return h;
+      }
+    },
     'my-links': {
       title: 'My Links',
       roleGate: null,
@@ -11692,7 +11708,7 @@
     // Erin 2026-08-02 (supersedes #152's order): Special Events To Do
     // leads the Shared section — row 1: Special Events (To Do), Members,
     // Ways to Help; row 2: Class Development, Lending, Resources.
-    '*': ['shared-todos', 'ways-to-help', 'class-ideas', 'lending', 'resources']
+    '*': ['shared-todos', 'ways-to-help', 'class-ideas', 'lending', 'merch', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -11721,6 +11737,7 @@
     'group-bring': 'Your group’s snack sign-ups — the liaison is in charge of snacks for the year. Post spots (one family per snack day works well); families claim them from their Kid Schedule and claimed days land on their Packing List.',
     'my-class': 'A liaison’s quick view of their class — every kid with parents, phone, and allergies, who’s teaching each session, the topic and lesson plan, plus private per-kid notes only the liaison chain can see.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
+    'merch': 'Shop Roots &amp; Wings merchandise. Place an order and pick it up at the next event — no online payment; you pay the Merchandise Manager at pickup (cash, check, or Venmo). My Orders shows each order’s status, what’s reserved vs. waiting on a supplier order, and what you still owe.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
     'bg-president': 'President tools and the board’s at-a-glance view for the year.',
@@ -14506,6 +14523,18 @@
   var _merchInventoryAddOpen = false; // "+ Add item" form visibility
   var _merchScreenedOpen = false; // #150: screened-as-spam bucket expanded
 
+  // ── Merch Desk (#351) manager state ──
+  var _merchDeskCache = null;        // desk orders (each with .lines)
+  var _merchDeskFilter = 'open';     // open | all | delivered | cancelled
+  var _merchDeskPayFor = null;       // order id showing the how-did-they-pay chips
+  var _merchCatalogCache = null;     // { items, variants, backordered }
+  var _merchCatItemEditId = null;    // item id with edit panel open; 'new' = add form
+  var _merchCatVariantEditId = null; // variant id with edit panel open
+  var _merchCatAddVariantFor = null; // item id with the add-variant form open
+  var _merchStockAdjustFor = null;   // variant id with the receive-stock row open
+  var _merchQsCart = {};             // quick-sale: variant id -> qty
+  var _merchQsMethod = '';           // quick-sale payment method
+
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'customer_name', label: 'Name', type: 'string',
       render: function (o) {
@@ -14662,36 +14691,53 @@
     }
   };
 
+  // Manager tab strip. Web Orders + Inventory are the LEGACY surfaces
+  // (public homepage form / hand-counted stock); Desk Orders, Catalog &
+  // Stock, Needs Ordering, and Quick Sale are the Merch Desk Phase 1
+  // ledger (#351) — DB catalog, member pickup orders with backorder
+  // tracking, and event sales.
+  var MERCH_MANAGER_TABS = [
+    { key: 'orders',    label: 'Web Orders',      bodyId: 'ws-merch-orders-body' },
+    { key: 'inventory', label: 'Inventory',       bodyId: 'ws-merch-inventory-body' },
+    { key: 'desk',      label: 'Desk Orders',     bodyId: 'ws-merch-desk-body' },
+    { key: 'catalog',   label: 'Catalog & Stock', bodyId: 'ws-merch-catalog-body' },
+    { key: 'needs',     label: 'Needs Ordering',  bodyId: 'ws-merch-needs-body' },
+    { key: 'quicksale', label: 'Quick Sale',      bodyId: 'ws-merch-qs-body' }
+  ];
+
   function showMerchOrdersModal() {
     // Add Order lives in the Orders tab's toolbar above the table (the
     // standard add placement, Erin 2026-07-19) — not in the header chrome.
     var icons = [];
     var outer = renderReportModal({
       title: 'Merchandise',
-      subtitle: 'Customer orders from the public site plus on-hand inventory counts. Use the tabs to switch.',
+      subtitle: 'Web orders from the public site, plus the Merch Desk: catalog & stock, member pickup orders, and event quick-sales. Use the tabs to switch.',
       meta: '',
       icons: icons,
       bodyId: 'ws-merch-modal-body',
       bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
     });
     if (!outer) return;
-    // Reset per-open state: tab to Orders, clear any stale edit.
+    // Reset per-open state: tab to Web Orders, clear any stale edit.
     _merchActiveTab = 'orders';
     _merchInventoryEditId = null;
     _merchOrderEditId = null;
+    _merchDeskPayFor = null;
+    _merchCatItemEditId = null;
+    _merchCatVariantEditId = null;
+    _merchCatAddVariantFor = null;
+    _merchStockAdjustFor = null;
     renderMerchTabbedBody();
-    // Kick off both loaders. Orders fills its tab; inventory loads in
-    // the background so the low-stock badge on the Inventory tab is
-    // accurate as soon as the count comes back.
+    // Kick off the badge loaders. Orders fills its tab; inventory + desk
+    // orders load in the background so the tab badges are accurate as
+    // soon as the counts come back.
     var ordersBody = document.getElementById('ws-merch-orders-body');
     if (ordersBody) loadMerchOrdersReport(ordersBody);
     loadMerchInventory(function () {
-      // If user hasn't switched tabs yet, re-render to update the badge.
-      if (_merchActiveTab === 'orders') {
-        var nav = document.querySelector('.merch-tab-nav');
-        if (nav) renderMerchTabNav(nav);
-      }
+      var nav = document.querySelector('.merch-tab-nav');
+      if (nav && _merchActiveTab !== 'inventory') renderMerchTabNav(nav);
     });
+    loadMerchDeskOrders(true);
   }
 
   // Renders the [tabs][content] structure into the modal body. Called
@@ -14699,17 +14745,28 @@
   function renderMerchTabbedBody() {
     var modalBody = document.getElementById('ws-merch-modal-body');
     if (!modalBody) return;
+    var tab = MERCH_MANAGER_TABS.filter(function (t) { return t.key === _merchActiveTab; })[0] || MERCH_MANAGER_TABS[0];
     modalBody.innerHTML = ''
       + '<div class="merch-tab-nav" role="tablist"></div>'
-      + (_merchActiveTab === 'orders'
-          ? '<div id="ws-merch-orders-body"><p class="ws-empty">Loading orders…</p></div>'
-          : '<div id="ws-merch-inventory-body"><p class="ws-empty">Loading inventory…</p></div>');
+      + '<div id="' + tab.bodyId + '"><p class="ws-empty">Loading…</p></div>';
     var nav = modalBody.querySelector('.merch-tab-nav');
     renderMerchTabNav(nav);
     if (_merchActiveTab === 'inventory') {
       var invBody = document.getElementById('ws-merch-inventory-body');
       if (_merchInventoryCache) renderMerchInventoryBody(invBody);
       else loadMerchInventory(function () { renderMerchInventoryBody(document.getElementById('ws-merch-inventory-body')); });
+    } else if (_merchActiveTab === 'desk') {
+      if (_merchDeskCache) renderMerchDeskBody();
+      else loadMerchDeskOrders();
+    } else if (_merchActiveTab === 'catalog') {
+      if (_merchCatalogCache) renderMerchCatalogBody();
+      else loadMerchDeskCatalog(renderMerchCatalogBody);
+    } else if (_merchActiveTab === 'needs') {
+      // Always fresh — cheap query, and the numbers shift with every order.
+      loadMerchNeeds();
+    } else if (_merchActiveTab === 'quicksale') {
+      if (_merchCatalogCache) renderMerchQuickSaleBody();
+      else loadMerchDeskCatalog(renderMerchQuickSaleBody);
     } else {
       var ordBody = document.getElementById('ws-merch-orders-body');
       if (_merchOrdersCache) renderMerchOrdersBody(ordBody);
@@ -14722,14 +14779,20 @@
     var lowCount = (_merchInventoryCache || []).filter(function (r) {
       return r.on_hand === 0 || (r.low_threshold > 0 && r.on_hand <= r.low_threshold);
     }).length;
-    var ordersUnpaid = (_merchOrdersCache || []).filter(function (o) { return !o.paid_at; }).length;
-    nav.innerHTML = ''
-      + '<button type="button" class="portal-tab merch-tab-btn' + (_merchActiveTab === 'orders' ? ' active' : '') + '" data-merch-tab="orders" role="tab">'
-      +   'Orders' + (ordersUnpaid > 0 ? ' <span class="merch-tab-badge">' + ordersUnpaid + ' unpaid</span>' : '')
-      + '</button>'
-      + '<button type="button" class="portal-tab merch-tab-btn' + (_merchActiveTab === 'inventory' ? ' active' : '') + '" data-merch-tab="inventory" role="tab">'
-      +   'Inventory' + (lowCount > 0 ? ' <span class="merch-tab-badge merch-tab-badge-warn">' + lowCount + ' low</span>' : '')
-      + '</button>';
+    var ordersUnpaid = (_merchOrdersCache || []).filter(function (o) { return !o.paid_at && !o.screen_reason; }).length;
+    var deskOpen = (_merchDeskCache || []).filter(function (o) {
+      return o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready';
+    }).length;
+    var badges = {
+      orders: ordersUnpaid > 0 ? ' <span class="merch-tab-badge">' + ordersUnpaid + ' unpaid</span>' : '',
+      inventory: lowCount > 0 ? ' <span class="merch-tab-badge merch-tab-badge-warn">' + lowCount + ' low</span>' : '',
+      desk: deskOpen > 0 ? ' <span class="merch-tab-badge">' + deskOpen + ' open</span>' : ''
+    };
+    nav.innerHTML = MERCH_MANAGER_TABS.map(function (t) {
+      return '<button type="button" class="portal-tab merch-tab-btn' + (_merchActiveTab === t.key ? ' active' : '') + '" data-merch-tab="' + t.key + '" role="tab">'
+        + t.label + (badges[t.key] || '')
+        + '</button>';
+    }).join('');
     nav.querySelectorAll('.merch-tab-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var tab = btn.getAttribute('data-merch-tab');
@@ -15455,6 +15518,943 @@
           if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
         });
     });
+  }
+
+  // ══════════════════════════════════════════════
+  // Merch Desk Phase 1 (#351, 2026-08-14)
+  // ══════════════════════════════════════════════
+  // DB catalog + member pickup orders + event quick-sale, riding
+  // /api/supply-closet?action=merch-*. Manager surfaces live as tabs in
+  // the Merchandise report above; the member Shop / My Orders modal is
+  // opened from the Shared "Merch" workspace card. All money is integer
+  // cents through fmtCents (the one shared formatter).
+
+  // Shared money formatter — integer cents in, "$12.50" out.
+  function fmtCents(cents) {
+    var n = Math.round(Number(cents) || 0);
+    var sign = n < 0 ? '-' : '';
+    n = Math.abs(n);
+    return sign + '$' + Math.floor(n / 100) + '.' + ('0' + (n % 100)).slice(-2);
+  }
+
+  var MERCH_PAY_LABELS = { cash: 'Cash', check: 'Check', venmo: 'Venmo', paypal: 'PayPal' };
+
+  function merchDeskStatusPill(o) {
+    if (o.status === 'cancelled') return '<span class="ws-wv-declined">Cancelled</span>';
+    if (o.status === 'delivered') return '<span class="ws-wv-ok">Delivered</span>';
+    if (o.status === 'ready') return '<span class="ws-wv-ok">Ready</span>';
+    if (o.status === 'paid') return '<span class="ws-wv-ok">Paid</span>';
+    return '<span class="ws-wv-pending">Pending</span>';
+  }
+
+  function merchDeskPaidPill(o) {
+    if (o.status === 'cancelled') return '';
+    if (o.paid_at) {
+      return '<span class="ws-wv-ok">Paid' + (o.payment_method ? ' · ' + escapeHtmlWs(MERCH_PAY_LABELS[o.payment_method] || o.payment_method) : '') + '</span>';
+    }
+    return '<span class="ws-wv-pending">Owes ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</span>';
+  }
+
+  // One-line item summary for an order's lines, with backorder callouts.
+  function merchDeskLinesHtml(lines) {
+    var parts = (lines || []).map(function (l) {
+      var label = l.item_name + (l.variant_label ? ' — ' + l.variant_label : '');
+      var bit = l.qty + ' × ' + escapeHtmlWs(label);
+      if (l.stock_status === 'backordered') bit += ' <span class="merch-stock-pill merch-stock-low">backordered</span>';
+      return bit;
+    });
+    return parts.join(' · ');
+  }
+
+  // ── Desk Orders tab ─────────────────────────────
+  function loadMerchDeskOrders(badgeOnly) {
+    fetch('/api/supply-closet?action=merch-orders' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        _merchDeskCache = (res.ok && Array.isArray(res.data.orders)) ? res.data.orders : [];
+        if (!res.ok) console.warn('Merch desk orders load failed:', res.data && res.data.error);
+        if (badgeOnly) {
+          var nav = document.querySelector('.merch-tab-nav');
+          if (nav && _merchActiveTab !== 'desk') renderMerchTabNav(nav);
+          if (_merchActiveTab === 'desk') renderMerchDeskBody();
+        } else {
+          renderMerchDeskBody();
+        }
+      })
+      .catch(function (err) {
+        _merchDeskCache = [];
+        console.warn('Merch desk orders network error:', err && err.message);
+        if (!badgeOnly) renderMerchDeskBody();
+      });
+  }
+
+  function renderMerchDeskBody() {
+    var body = document.getElementById('ws-merch-desk-body');
+    if (!body) return;
+    var all = _merchDeskCache || [];
+    var open = all.filter(function (o) { return o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready'; });
+    var delivered = all.filter(function (o) { return o.status === 'delivered'; });
+    var cancelled = all.filter(function (o) { return o.status === 'cancelled'; });
+
+    var rows = _merchDeskFilter === 'open' ? open
+      : _merchDeskFilter === 'delivered' ? delivered
+      : _merchDeskFilter === 'cancelled' ? cancelled
+      : all;
+
+    var h = '<p class="ws-body-hint">Member pickup orders and recorded event sales. Mark orders paid (with how they paid), ready for pickup, and delivered — cancelling an order puts its reserved stock back on the shelf.</p>';
+    h += '<div class="rd-counts">';
+    [['open', 'Open', open.length], ['all', 'All', all.length], ['delivered', 'Delivered', delivered.length], ['cancelled', 'Cancelled', cancelled.length]].forEach(function (f) {
+      h += '<button type="button" class="sc-btn merch-desk-filter' + (_merchDeskFilter === f[0] ? ' sc-save' : '') + '" data-desk-filter="' + f[0] + '">' + f[1] + ' (' + f[2] + ')</button>';
+    });
+    h += '</div>';
+
+    if (rows.length === 0) {
+      h += '<p class="ws-empty">' + (_merchDeskFilter === 'open' ? 'No open orders — nothing waiting on you.' : 'Nothing here yet.') + '</p>';
+    }
+    rows.forEach(function (o) {
+      var who = o.buyer_name ? escapeHtmlWs(o.buyer_name) : '(no name)';
+      var famBit = o.family_email ? '<span class="ws-wv-context">' + escapeHtmlWs(o.family_email) + '</span>' : '<span class="ws-wv-context">walk-up guest</span>';
+      h += '<div class="ws-lending-row merch-desk-row" data-order-id="' + o.id + '">';
+      h += '<span class="ws-lending-main"><strong>' + who + '</strong> ' + famBit
+        + ' <span class="ws-wv-context">#' + o.id + ' · ' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>';
+      h += '<span class="ws-lending-sub">' + merchDeskLinesHtml(o.lines) + ' · <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong></span>';
+      if (o.note) h += '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(o.note) + '</span>';
+      h += '</span>';
+      h += '<span class="ws-lending-actions">' + merchDeskStatusPill(o) + ' ' + merchDeskPaidPill(o);
+      if (o.status === 'pending_payment' || o.status === 'paid' || o.status === 'ready') {
+        if (!o.paid_at) h += '<button type="button" class="sc-btn merch-desk-pay-btn" data-order-id="' + o.id + '">Mark paid</button>';
+        if (o.status !== 'ready') h += '<button type="button" class="sc-btn merch-desk-act" data-order-id="' + o.id + '" data-set="ready">Ready</button>';
+        h += '<button type="button" class="sc-btn sc-save merch-desk-act" data-order-id="' + o.id + '" data-set="delivered">Delivered</button>';
+        h += '<button type="button" class="sc-btn sc-btn-del merch-desk-cancel" data-order-id="' + o.id + '">Cancel</button>';
+      }
+      h += '</span>';
+      if (_merchDeskPayFor === o.id) {
+        h += '<span class="merch-desk-payrow">How did they pay? ';
+        Object.keys(MERCH_PAY_LABELS).forEach(function (m) {
+          h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
+        });
+        h += '<button type="button" class="sc-btn merch-desk-pay-close" aria-label="Close">×</button></span>';
+      }
+      h += '</div>';
+    });
+    body.innerHTML = h;
+
+    body.querySelectorAll('.merch-desk-filter').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchDeskFilter = btn.getAttribute('data-desk-filter');
+        _merchDeskPayFor = null;
+        renderMerchDeskBody();
+      });
+    });
+    body.querySelectorAll('.merch-desk-pay-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-order-id'), 10);
+        _merchDeskPayFor = (_merchDeskPayFor === id) ? null : id;
+        renderMerchDeskBody();
+      });
+    });
+    body.querySelectorAll('.merch-desk-pay-close').forEach(function (btn) {
+      btn.addEventListener('click', function () { _merchDeskPayFor = null; renderMerchDeskBody(); });
+    });
+    body.querySelectorAll('.merch-desk-pay-method').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        merchDeskAct(parseInt(btn.getAttribute('data-order-id'), 10), 'paid', btn.getAttribute('data-method'), btn);
+      });
+    });
+    body.querySelectorAll('.merch-desk-act').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        merchDeskAct(parseInt(btn.getAttribute('data-order-id'), 10), btn.getAttribute('data-set'), null, btn);
+      });
+    });
+    body.querySelectorAll('.merch-desk-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var self = this;
+        rwArmTwoStep(self, 'cancel', function () {
+          merchDeskAct(parseInt(self.getAttribute('data-order-id'), 10), 'cancel', null, self);
+        });
+      });
+    });
+  }
+
+  function merchDeskAct(id, set, method, btn) {
+    if (btn) btn.disabled = true;
+    var payload = { set: set, id: id };
+    if (method) payload.payment_method = method;
+    fetch('/api/supply-closet?action=merch-order-status' + notifViewAsSuffix(), {
+      method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the order.'); if (btn) btn.disabled = false; return; }
+        var idx = (_merchDeskCache || []).findIndex(function (o) { return o.id === id; });
+        if (idx !== -1 && res.data.order) {
+          // Keep the joined lines; the status response has none.
+          res.data.order.lines = _merchDeskCache[idx].lines;
+          if (set === 'ready' || set === 'delivered') {
+            (res.data.order.lines || []).forEach(function (l) { l.stock_status = 'allocated'; });
+          }
+          _merchDeskCache[idx] = res.data.order;
+        }
+        _merchDeskPayFor = null;
+        // Stock moved (ready/delivered consume backorders; cancel restocks).
+        if (set !== 'paid') { _merchCatalogCache = null; }
+        renderMerchDeskBody();
+        var nav = document.querySelector('.merch-tab-nav');
+        if (nav) renderMerchTabNav(nav);
+      })
+      .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
+  }
+
+  // ── Catalog & Stock tab ─────────────────────────
+  function loadMerchDeskCatalog(done) {
+    fetch('/api/supply-closet?action=merch-admin-catalog' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (res.ok) {
+          _merchCatalogCache = {
+            items: res.data.items || [],
+            variants: res.data.variants || [],
+            backordered: res.data.backordered || []
+          };
+        } else {
+          _merchCatalogCache = { items: [], variants: [], backordered: [], error: (res.data && res.data.error) || 'load failed' };
+        }
+        if (typeof done === 'function') done();
+      })
+      .catch(function (err) {
+        _merchCatalogCache = { items: [], variants: [], backordered: [], error: (err && err.message) || 'network error' };
+        if (typeof done === 'function') done();
+      });
+  }
+
+  function merchBackorderedFor(variantId) {
+    var hit = ((_merchCatalogCache && _merchCatalogCache.backordered) || []).filter(function (b) { return b.variant_id === variantId; })[0];
+    return hit ? hit.backordered : 0;
+  }
+
+  function merchItemFormHtml(item) {
+    var isNew = !item;
+    item = item || { name: '', description: '', image_url: '', active: true, sort_order: 0 };
+    var idAttr = isNew ? 'new' : item.id;
+    var h = '<div class="merch-inv-edit merch-cat-item-form" data-item-id="' + idAttr + '">';
+    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add an item' : 'Edit item') + '</strong></div>';
+    h += '<div class="merch-inv-edit-grid">';
+    h += '<label><span>Name</span><input type="text" maxlength="200" id="merch-cat-name-' + idAttr + '" value="' + escapeAttr(item.name) + '"></label>';
+    h += '<label><span>Sort</span><input type="number" min="0" max="10000" id="merch-cat-sort-' + idAttr + '" value="' + (item.sort_order || 0) + '"></label>';
+    h += '<label><span>Image URL (optional)</span><input type="text" maxlength="500" id="merch-cat-img-' + idAttr + '" value="' + escapeAttr(item.image_url || '') + '" placeholder="https://…"></label>';
+    h += '<label class="merch-inv-edit-notes"><span>Description</span><textarea maxlength="1000" rows="2" id="merch-cat-desc-' + idAttr + '">' + escapeHtml(item.description || '') + '</textarea></label>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-toggles"><label><input type="checkbox" id="merch-cat-active-' + idAttr + '"' + (item.active !== false ? ' checked' : '') + '> Show in the member shop</label></div>';
+    h += '<div class="merch-inv-edit-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm merch-cat-item-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm merch-cat-item-save" data-item-id="' + idAttr + '">Save</button>';
+    h += '<span class="merch-inv-status" role="status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function merchVariantFormHtml(variant, itemId) {
+    var isNew = !variant;
+    variant = variant || { label: '', price_cents: 0, on_order: 0, restock_threshold: 0, active: true, sort_order: 0 };
+    var idAttr = isNew ? ('new-' + itemId) : variant.id;
+    var h = '<div class="merch-inv-edit merch-cat-variant-form" data-variant-id="' + idAttr + '" data-item-id="' + itemId + '">';
+    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add a variant' : 'Edit variant') + '</strong> <span class="ws-wv-context">size/color/style — leave the label blank for single-variant items</span></div>';
+    h += '<div class="merch-inv-edit-grid">';
+    h += '<label><span>Label</span><input type="text" maxlength="200" id="merch-var-label-' + idAttr + '" value="' + escapeAttr(variant.label || '') + '" placeholder="Youth M — Purple"></label>';
+    h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-var-price-' + idAttr + '" value="' + ((variant.price_cents || 0) / 100).toFixed(2) + '"></label>';
+    h += '<label><span>On order (supplier)</span><input type="number" min="0" max="100000" id="merch-var-onorder-' + idAttr + '" value="' + (variant.on_order || 0) + '"></label>';
+    h += '<label><span>Restock below</span><input type="number" min="0" max="100000" id="merch-var-restock-' + idAttr + '" value="' + (variant.restock_threshold || 0) + '"></label>';
+    h += '<label><span>Sort</span><input type="number" min="0" max="10000" id="merch-var-sort-' + idAttr + '" value="' + (variant.sort_order || 0) + '"></label>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-toggles"><label><input type="checkbox" id="merch-var-active-' + idAttr + '"' + (variant.active !== false ? ' checked' : '') + '> Available to order</label></div>';
+    h += '<div class="merch-inv-edit-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm merch-cat-variant-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm merch-cat-variant-save" data-variant-id="' + idAttr + '" data-item-id="' + itemId + '">Save</button>';
+    h += '<span class="merch-inv-status" role="status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderMerchCatalogBody() {
+    var body = document.getElementById('ws-merch-catalog-body');
+    if (!body) return;
+    var cat = _merchCatalogCache || { items: [], variants: [] };
+    var h = '';
+    if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
+    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. <strong>Receive stock</strong> when a shipment arrives (it can draw down the on-order count); the shop and orders keep on-hand up to date from there.</p>';
+    h += '<div class="coop-cal-toolbar"><button type="button" class="btn btn-outline-dark btn-sm" id="merch-cat-add-item-btn">+ Add item</button></div>';
+    if (_merchCatItemEditId === 'new') h += merchItemFormHtml(null);
+
+    if (cat.items.length === 0 && !cat.error) {
+      h += '<p class="ws-empty">No catalog yet — add your first item above.</p>';
+    }
+    cat.items.forEach(function (item) {
+      var variants = cat.variants.filter(function (v) { return v.item_id === item.id; });
+      h += '<div class="ws-merch-add-form merch-cat-item" data-item-id="' + item.id + '">';
+      h += '<div class="ws-merch-add-header"><strong>' + escapeHtmlWs(item.name) + '</strong>'
+        + (item.active ? '' : ' <span class="ws-wv-declined">Hidden</span>')
+        + '<span style="margin-left:auto;"><button type="button" class="sc-btn merch-cat-item-edit" data-item-id="' + item.id + '">Edit</button></span></div>';
+      if (item.description) h += '<p class="ws-body-hint">' + escapeHtmlWs(item.description) + '</p>';
+      if (_merchCatItemEditId === item.id) h += merchItemFormHtml(item);
+
+      variants.forEach(function (v) {
+        var stockPill = '';
+        if (v.on_hand === 0) stockPill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
+        else if (v.restock_threshold > 0 && v.on_hand < v.restock_threshold) stockPill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
+        var backed = merchBackorderedFor(v.id);
+        h += '<div class="ws-lending-row" data-variant-id="' + v.id + '">';
+        h += '<span class="ws-lending-main">' + (v.label ? escapeHtmlWs(v.label) : '<em>Standard</em>')
+          + (v.active ? '' : ' <span class="ws-wv-declined">Hidden</span>')
+          + ' · <strong>' + escapeHtmlWs(fmtCents(v.price_cents)) + '</strong>'
+          + '<span class="ws-lending-sub">On hand <strong>' + v.on_hand + '</strong>' + stockPill
+          + (backed > 0 ? ' · <span class="merch-stock-pill merch-stock-low">' + backed + ' backordered</span>' : '')
+          + (v.on_order > 0 ? ' · ' + v.on_order + ' on order' : '')
+          + (v.restock_threshold > 0 ? ' · restock below ' + v.restock_threshold : '')
+          + '</span></span>';
+        h += '<span class="ws-lending-actions">'
+          + '<button type="button" class="sc-btn merch-var-stock-btn" data-variant-id="' + v.id + '">Receive stock</button>'
+          + '<button type="button" class="sc-btn merch-cat-variant-edit" data-variant-id="' + v.id + '" data-item-id="' + item.id + '">Edit</button>'
+          + '</span>';
+        if (_merchStockAdjustFor === v.id) {
+          h += '<span class="merch-desk-payrow">Adjust on-hand by '
+            + '<input type="number" id="merch-stock-delta-' + v.id + '" value="1" step="1" style="width:70px;"> '
+            + '<label style="font-weight:normal;"><input type="checkbox" id="merch-stock-fromorder-' + v.id + '" checked> came from my supplier order</label> '
+            + '<button type="button" class="sc-btn sc-save merch-stock-save" data-variant-id="' + v.id + '">Save</button>'
+            + '<button type="button" class="sc-btn merch-stock-cancel">×</button>'
+            + '<span class="ws-wv-context">use a negative number to correct a recount</span></span>';
+        }
+        h += '</div>';
+        if (_merchCatVariantEditId === v.id) h += merchVariantFormHtml(v, item.id);
+      });
+
+      if (_merchCatAddVariantFor === item.id) h += merchVariantFormHtml(null, item.id);
+      else h += '<p class="ws-part-submit-line"><button type="button" class="ws-inline-link merch-cat-add-variant" data-item-id="' + item.id + '">+ Add a variant</button></p>';
+      h += '</div>';
+    });
+    body.innerHTML = h;
+    wireMerchCatalogBody(body);
+  }
+
+  function wireMerchCatalogBody(body) {
+    var addItemBtn = body.querySelector('#merch-cat-add-item-btn');
+    if (addItemBtn) addItemBtn.addEventListener('click', function () {
+      _merchCatItemEditId = (_merchCatItemEditId === 'new') ? null : 'new';
+      renderMerchCatalogBody();
+    });
+    body.querySelectorAll('.merch-cat-item-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-item-id'), 10);
+        _merchCatItemEditId = (_merchCatItemEditId === id) ? null : id;
+        renderMerchCatalogBody();
+      });
+    });
+    body.querySelectorAll('.merch-cat-add-variant').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchCatAddVariantFor = parseInt(btn.getAttribute('data-item-id'), 10);
+        _merchCatVariantEditId = null;
+        renderMerchCatalogBody();
+      });
+    });
+    body.querySelectorAll('.merch-cat-variant-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-variant-id'), 10);
+        _merchCatVariantEditId = (_merchCatVariantEditId === id) ? null : id;
+        _merchCatAddVariantFor = null;
+        renderMerchCatalogBody();
+      });
+    });
+    body.querySelectorAll('.merch-cat-item-cancel, .merch-cat-variant-cancel, .merch-stock-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchCatItemEditId = null;
+        _merchCatVariantEditId = null;
+        _merchCatAddVariantFor = null;
+        _merchStockAdjustFor = null;
+        renderMerchCatalogBody();
+      });
+    });
+    body.querySelectorAll('.merch-var-stock-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-variant-id'), 10);
+        _merchStockAdjustFor = (_merchStockAdjustFor === id) ? null : id;
+        renderMerchCatalogBody();
+        var input = document.getElementById('merch-stock-delta-' + id);
+        if (input) input.focus();
+      });
+    });
+
+    body.querySelectorAll('.merch-cat-item-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idAttr = btn.getAttribute('data-item-id');
+        var isNew = idAttr === 'new';
+        var g = function (p) { var el = document.getElementById('merch-cat-' + p + '-' + idAttr); return el ? el.value : ''; };
+        var payload = {
+          name: g('name').trim(),
+          description: g('desc').trim(),
+          image_url: g('img').trim(),
+          sort_order: parseInt(g('sort'), 10) || 0,
+          active: !!(document.getElementById('merch-cat-active-' + idAttr) || {}).checked
+        };
+        if (!isNew) payload.id = parseInt(idAttr, 10);
+        var statusEl = btn.parentNode.querySelector('.merch-inv-status');
+        if (!payload.name) { if (statusEl) { statusEl.textContent = 'A name is required.'; statusEl.className = 'merch-inv-status ws-wv-err'; } return; }
+        btn.disabled = true;
+        if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
+        fetch('/api/supply-closet?action=merch-item-save' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+            _merchCatItemEditId = null;
+            loadMerchDeskCatalog(renderMerchCatalogBody);
+          }).catch(function (err) {
+            btn.disabled = false;
+            if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
+          });
+      });
+    });
+
+    body.querySelectorAll('.merch-cat-variant-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idAttr = btn.getAttribute('data-variant-id');
+        var isNew = idAttr.indexOf('new-') === 0;
+        var g = function (p) { var el = document.getElementById('merch-var-' + p + '-' + idAttr); return el ? el.value : ''; };
+        var priceDollars = parseFloat(g('price'));
+        var payload = {
+          label: g('label').trim(),
+          price_cents: Number.isFinite(priceDollars) ? Math.round(priceDollars * 100) : -1,
+          on_order: parseInt(g('onorder'), 10) || 0,
+          restock_threshold: parseInt(g('restock'), 10) || 0,
+          sort_order: parseInt(g('sort'), 10) || 0,
+          active: !!(document.getElementById('merch-var-active-' + idAttr) || {}).checked
+        };
+        if (isNew) payload.item_id = parseInt(btn.getAttribute('data-item-id'), 10);
+        else payload.id = parseInt(idAttr, 10);
+        var statusEl = btn.parentNode.querySelector('.merch-inv-status');
+        btn.disabled = true;
+        if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
+        fetch('/api/supply-closet?action=merch-variant-save' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+            _merchCatVariantEditId = null;
+            _merchCatAddVariantFor = null;
+            loadMerchDeskCatalog(renderMerchCatalogBody);
+          }).catch(function (err) {
+            btn.disabled = false;
+            if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
+          });
+      });
+    });
+
+    body.querySelectorAll('.merch-stock-save').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-variant-id'), 10);
+        var delta = parseInt((document.getElementById('merch-stock-delta-' + id) || {}).value, 10);
+        var fromOrder = !!(document.getElementById('merch-stock-fromorder-' + id) || {}).checked;
+        if (!Number.isFinite(delta) || delta === 0) { alert('Enter how many arrived (or a negative correction).'); return; }
+        btn.disabled = true;
+        fetch('/api/supply-closet?action=merch-stock-adjust' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true),
+          body: JSON.stringify({ variant_id: id, delta: delta, from_on_order: fromOrder })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+            _merchStockAdjustFor = null;
+            loadMerchDeskCatalog(renderMerchCatalogBody);
+          }).catch(function (err) {
+            btn.disabled = false;
+            alert('Could not adjust stock: ' + ((err && err.message) || 'unknown'));
+          });
+      });
+    });
+  }
+
+  // ── Needs Ordering tab ──────────────────────────
+  function loadMerchNeeds() {
+    var body = document.getElementById('ws-merch-needs-body');
+    fetch('/api/supply-closet?action=merch-needs-ordering' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!body || !body.isConnected) body = document.getElementById('ws-merch-needs-body');
+        if (!body) return;
+        if (!res.ok) {
+          body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load: ' + escapeHtml((res.data && res.data.error) || 'error') + '</p>';
+          return;
+        }
+        renderMerchNeedsBody(body, res.data.rows || []);
+      })
+      .catch(function (err) {
+        if (body) body.innerHTML = '<p class="ws-empty ws-wv-err">Network error: ' + escapeHtml((err && err.message) || 'unknown') + '</p>';
+      });
+  }
+
+  function renderMerchNeedsBody(body, rows) {
+    var h = '<p class="ws-body-hint">What to order from the supplier: members’ backordered lines (sold beyond stock) plus anything that fell below its restock threshold. <strong>Suggested</strong> = backordered + shortfall to the threshold − already on order.</p>';
+    if (rows.length === 0) {
+      body.innerHTML = h + '<p class="ws-empty">Nothing needs ordering right now.</p>';
+      return;
+    }
+    body.innerHTML = h + '<div id="ws-merch-needs-table"></div>';
+    var cols = [
+      { key: 'item_name', label: 'Item', type: 'string', render: function (r) { return escapeHtmlWs(r.item_name); } },
+      { key: 'label', label: 'Variant', type: 'string',
+        render: function (r) { return r.label ? escapeHtmlWs(r.label) : '<span class="ws-srt-actions-empty">&mdash;</span>'; } },
+      { key: 'on_hand', label: 'On hand', type: 'number',
+        render: function (r) {
+          var pill = r.on_hand === 0 ? ' <span class="merch-stock-pill merch-stock-out">Out</span>' : '';
+          return '<strong>' + r.on_hand + '</strong>' + pill;
+        } },
+      { key: 'restock_threshold', label: 'Restock below', type: 'number',
+        render: function (r) { return r.restock_threshold > 0 ? r.restock_threshold : '<span class="ws-srt-actions-empty">&mdash;</span>'; } },
+      { key: 'backordered', label: 'Backordered', type: 'number',
+        render: function (r) { return r.backordered > 0 ? '<span class="merch-stock-pill merch-stock-low">' + r.backordered + '</span>' : '<span class="ws-srt-actions-empty">&mdash;</span>'; } },
+      { key: 'on_order', label: 'On order', type: 'number',
+        render: function (r) { return r.on_order > 0 ? r.on_order : '<span class="ws-srt-actions-empty">&mdash;</span>'; } },
+      { key: 'suggested', label: 'Suggested', type: 'number',
+        render: function (r) { return r.suggested > 0 ? '<strong>' + r.suggested + '</strong>' : '<span class="ws-srt-actions-empty">&mdash;</span>'; } }
+    ];
+    renderSortableTable(body.querySelector('#ws-merch-needs-table'), cols, rows, {
+      initialSort: { key: 'suggested', dir: 'desc' },
+      rowKey: function (r) { return r.id; }
+    });
+  }
+
+  // ── Quick Sale tab (event mode) ─────────────────
+  // Built for a phone at a folding table: big item buttons that add one
+  // per tap, a running total, member-or-guest buyer, payment chips, done.
+  function merchQsTotalCents() {
+    var cat = _merchCatalogCache || { variants: [] };
+    var total = 0;
+    Object.keys(_merchQsCart).forEach(function (vid) {
+      var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
+      if (v) total += _merchQsCart[vid] * v.price_cents;
+    });
+    return total;
+  }
+
+  function renderMerchQuickSaleBody() {
+    var body = document.getElementById('ws-merch-qs-body');
+    if (!body) return;
+    var cat = _merchCatalogCache || { items: [], variants: [] };
+    var activeItems = cat.items.filter(function (i) { return i.active; });
+    var h = '<p class="ws-body-hint">Tap items as you sell them — each tap adds one. Pick the member family (or type a guest name), tap how they paid, and record. The sale lands as a delivered + paid order and the stock counts come down.</p>';
+    if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
+
+    h += '<div class="merch-qs-grid">';
+    activeItems.forEach(function (item) {
+      cat.variants.filter(function (v) { return v.item_id === item.id && v.active; }).forEach(function (v) {
+        var count = _merchQsCart[v.id] || 0;
+        h += '<button type="button" class="sc-btn merch-qs-item' + (count > 0 ? ' merch-qs-item-on' : '') + '" data-variant-id="' + v.id + '">'
+          + '<span class="merch-qs-item-name">' + escapeHtmlWs(item.name) + (v.label ? ' · ' + escapeHtmlWs(v.label) : '') + '</span>'
+          + '<span class="merch-qs-item-price">' + escapeHtmlWs(fmtCents(v.price_cents)) + (count > 0 ? ' · ×' + count : '') + '</span>'
+          + '</button>';
+      });
+    });
+    h += '</div>';
+
+    var cartLines = Object.keys(_merchQsCart).filter(function (vid) { return _merchQsCart[vid] > 0; });
+    if (cartLines.length > 0) {
+      h += '<div class="ws-merch-add-form" style="margin-top:12px;">';
+      cartLines.forEach(function (vid) {
+        var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
+        if (!v) return;
+        var item = cat.items.filter(function (i) { return i.id === v.item_id; })[0] || { name: '' };
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + _merchQsCart[vid] + ' × '
+          + escapeHtmlWs(item.name + (v.label ? ' · ' + v.label : ''))
+          + ' — ' + escapeHtmlWs(fmtCents(_merchQsCart[vid] * v.price_cents)) + '</span>'
+          + '<span class="ws-lending-actions"><button type="button" class="sc-btn merch-qs-minus" data-variant-id="' + v.id + '" aria-label="Remove one">−</button></span></div>';
+      });
+      h += '<p class="ws-part-earned" style="margin:8px 0 0;">Total: <strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></p>';
+      h += '</div>';
+
+      h += '<div class="ws-merch-add-grid" style="margin-top:12px;">';
+      h += '<label class="ws-merch-add-field"><span>Member family</span><input type="text" id="merch-qs-family" list="merch-qs-fams" placeholder="Start typing a family…" autocomplete="off"></label>';
+      h += '<label class="ws-merch-add-field"><span>…or guest name</span><input type="text" id="merch-qs-guest" maxlength="200" placeholder="Walk-up guest"></label>';
+      h += '</div>';
+      h += '<datalist id="merch-qs-fams">';
+      var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
+      fams.forEach(function (fam) {
+        if (!fam || !fam.email) return;
+        h += '<option value="' + escapeAttr(fam.email) + '">' + escapeHtmlWs((fam.displayName || fam.name || '') + ' family') + '</option>';
+      });
+      h += '</datalist>';
+
+      h += '<div class="ws-merch-add-toggles">';
+      Object.keys(MERCH_PAY_LABELS).forEach(function (m) {
+        h += '<button type="button" class="sc-btn merch-qs-method' + (_merchQsMethod === m ? ' sc-save' : '') + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
+      });
+      h += '</div>';
+      h += '<div class="ws-merch-add-actions">';
+      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="merch-qs-clear">Clear</button>';
+      h += '<button type="button" class="btn btn-primary btn-sm" id="merch-qs-record">Record sale — ' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</button>';
+      h += '</div>';
+      h += '<div class="ws-merch-add-status" id="merch-qs-status" role="status" aria-live="polite"></div>';
+    } else {
+      h += '<p class="ws-empty">Nothing rung up yet — tap items above.</p>';
+    }
+    // Preserve buyer fields across re-renders (each tap re-renders).
+    var prevFam = (document.getElementById('merch-qs-family') || {}).value || '';
+    var prevGuest = (document.getElementById('merch-qs-guest') || {}).value || '';
+    body.innerHTML = h;
+    if (document.getElementById('merch-qs-family')) document.getElementById('merch-qs-family').value = prevFam;
+    if (document.getElementById('merch-qs-guest')) document.getElementById('merch-qs-guest').value = prevGuest;
+    wireMerchQuickSale(body);
+  }
+
+  function wireMerchQuickSale(body) {
+    body.querySelectorAll('.merch-qs-item').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var vid = parseInt(btn.getAttribute('data-variant-id'), 10);
+        _merchQsCart[vid] = Math.min((_merchQsCart[vid] || 0) + 1, 99);
+        renderMerchQuickSaleBody();
+      });
+    });
+    body.querySelectorAll('.merch-qs-minus').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var vid = parseInt(btn.getAttribute('data-variant-id'), 10);
+        _merchQsCart[vid] = Math.max((_merchQsCart[vid] || 0) - 1, 0);
+        if (_merchQsCart[vid] === 0) delete _merchQsCart[vid];
+        renderMerchQuickSaleBody();
+      });
+    });
+    body.querySelectorAll('.merch-qs-method').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchQsMethod = btn.getAttribute('data-method');
+        renderMerchQuickSaleBody();
+      });
+    });
+    var clearBtn = body.querySelector('#merch-qs-clear');
+    if (clearBtn) clearBtn.addEventListener('click', function () {
+      _merchQsCart = {};
+      _merchQsMethod = '';
+      renderMerchQuickSaleBody();
+    });
+    var recordBtn = body.querySelector('#merch-qs-record');
+    if (recordBtn) recordBtn.addEventListener('click', function () {
+      var status = body.querySelector('#merch-qs-status');
+      var famInput = ((body.querySelector('#merch-qs-family') || {}).value || '').trim().toLowerCase();
+      var guest = ((body.querySelector('#merch-qs-guest') || {}).value || '').trim();
+      var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
+      var famHit = famInput ? fams.filter(function (f) { return f && String(f.email || '').toLowerCase() === famInput; })[0] : null;
+      if (famInput && !famHit) {
+        status.textContent = 'That doesn’t match a member family — pick from the list, or use the guest field.';
+        status.className = 'ws-merch-add-status ws-wv-err';
+        return;
+      }
+      if (!famHit && !guest) {
+        status.textContent = 'Pick the member family, or type a guest name.';
+        status.className = 'ws-merch-add-status ws-wv-err';
+        return;
+      }
+      if (!_merchQsMethod) {
+        status.textContent = 'Tap how they paid (cash, check, Venmo, or PayPal).';
+        status.className = 'ws-merch-add-status ws-wv-err';
+        return;
+      }
+      var lines = Object.keys(_merchQsCart).map(function (vid) {
+        return { variant_id: parseInt(vid, 10), qty: _merchQsCart[vid] };
+      }).filter(function (l) { return l.qty > 0; });
+      if (lines.length === 0) return;
+      recordBtn.disabled = true;
+      status.textContent = 'Recording…';
+      status.className = 'ws-merch-add-status';
+      fetch('/api/supply-closet?action=merch-quick-sale' + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true),
+        body: JSON.stringify({
+          lines: lines,
+          family_email: famHit ? famHit.email : '',
+          buyer_name: famHit ? (((famHit.displayName || famHit.name) || '') + ' family').trim() : guest,
+          payment_method: _merchQsMethod
+        })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+          if (res.data.order && Array.isArray(_merchDeskCache)) _merchDeskCache.unshift(res.data.order);
+          var soldTotal = res.data.order ? res.data.order.total_cents : merchQsTotalCents();
+          _merchQsCart = {};
+          _merchQsMethod = '';
+          _merchCatalogCache = null; // stock moved
+          loadMerchDeskCatalog(function () {
+            renderMerchQuickSaleBody();
+            var st = document.getElementById('merch-qs-status');
+            // Re-render wipes the status area with the empty-cart view;
+            // surface the confirmation above the grid instead.
+            var bodyEl = document.getElementById('ws-merch-qs-body');
+            if (bodyEl) {
+              var okLine = document.createElement('p');
+              okLine.className = 'ws-part-earned';
+              okLine.textContent = 'Recorded — ' + fmtCents(soldTotal) + ' collected. Ready for the next customer.';
+              bodyEl.insertBefore(okLine, bodyEl.firstChild);
+            }
+            if (st) st.textContent = '';
+          });
+        }).catch(function (err) {
+          recordBtn.disabled = false;
+          status.textContent = 'Could not record: ' + ((err && err.message) || 'unknown');
+          status.className = 'ws-merch-add-status ws-wv-err';
+        });
+    });
+  }
+
+  // ══════════════════════════════════════════════
+  // Member Merch modal — Shop + My Orders (#351)
+  // ══════════════════════════════════════════════
+  var _mmMerchTab = 'shop';
+  var _mmMerchCatalog = null;   // { items, variants }
+  var _mmMerchOrders = null;    // my family's orders
+  var _mmMerchCart = {};        // variant id -> qty
+  var _mmMerchPlaced = null;    // last placed order (confirmation view)
+
+  function showMemberMerchModal(tab) {
+    var outer = renderReportModal({
+      title: 'Merch',
+      subtitle: 'Order Roots & Wings merchandise for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or Venmo).',
+      meta: '',
+      icons: [],
+      bodyId: 'mm-merch-modal-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!outer) return;
+    _mmMerchTab = tab === 'orders' ? 'orders' : 'shop';
+    _mmMerchCart = {};
+    _mmMerchPlaced = null;
+    _mmMerchCatalog = null;
+    _mmMerchOrders = null;
+    renderMemberMerchBody();
+    // Load both up front: the catalog fills the Shop, the orders power
+    // both the My Orders tab and its count badge.
+    fetch('/api/supply-closet?action=merch-catalog' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        _mmMerchCatalog = res.ok
+          ? { items: res.data.items || [], variants: res.data.variants || [] }
+          : { items: [], variants: [], error: (res.data && res.data.error) || 'load failed' };
+        renderMemberMerchBody();
+      })
+      .catch(function (err) {
+        _mmMerchCatalog = { items: [], variants: [], error: (err && err.message) || 'network error' };
+        renderMemberMerchBody();
+      });
+    loadMemberMerchOrders();
+  }
+
+  function loadMemberMerchOrders() {
+    fetch('/api/supply-closet?action=merch-my-orders' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        _mmMerchOrders = (res.ok && Array.isArray(res.data.orders)) ? res.data.orders : [];
+        if (_mmMerchTab === 'orders') { renderMemberMerchBody(); return; }
+        // Shop tab: update just the My Orders badge so a full re-render
+        // doesn't interrupt someone mid-typing in a qty box.
+        var modalBody = document.getElementById('mm-merch-modal-body');
+        var btn = modalBody && modalBody.querySelector('[data-mm-tab="orders"]');
+        if (btn) {
+          var openCount = (_mmMerchOrders || []).filter(function (o) { return o.status !== 'delivered' && o.status !== 'cancelled'; }).length;
+          btn.innerHTML = 'My Orders' + (openCount > 0 ? ' <span class="merch-tab-badge">' + openCount + '</span>' : '');
+        }
+      })
+      .catch(function () { if (_mmMerchOrders === null) _mmMerchOrders = []; });
+  }
+
+  function mmMerchCartTotal() {
+    var cat = _mmMerchCatalog || { variants: [] };
+    var total = 0;
+    Object.keys(_mmMerchCart).forEach(function (vid) {
+      var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
+      if (v) total += _mmMerchCart[vid] * v.price_cents;
+    });
+    return total;
+  }
+
+  function renderMemberMerchBody() {
+    var modalBody = document.getElementById('mm-merch-modal-body');
+    if (!modalBody) return;
+    var openCount = (_mmMerchOrders || []).filter(function (o) { return o.status !== 'delivered' && o.status !== 'cancelled'; }).length;
+    var h = '<div class="merch-tab-nav" role="tablist">'
+      + '<button type="button" class="portal-tab merch-tab-btn' + (_mmMerchTab === 'shop' ? ' active' : '') + '" data-mm-tab="shop" role="tab">Shop</button>'
+      + '<button type="button" class="portal-tab merch-tab-btn' + (_mmMerchTab === 'orders' ? ' active' : '') + '" data-mm-tab="orders" role="tab">My Orders'
+      + (openCount > 0 ? ' <span class="merch-tab-badge">' + openCount + '</span>' : '') + '</button>'
+      + '</div>'
+      + '<div id="mm-merch-body"></div>';
+    modalBody.innerHTML = h;
+    modalBody.querySelectorAll('.merch-tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var t = btn.getAttribute('data-mm-tab');
+        if (t === _mmMerchTab) return;
+        _mmMerchTab = t;
+        _mmMerchPlaced = null;
+        renderMemberMerchBody();
+      });
+    });
+    var body = modalBody.querySelector('#mm-merch-body');
+    if (_mmMerchTab === 'orders') renderMemberMerchOrders(body);
+    else if (_mmMerchPlaced) renderMemberMerchConfirmation(body);
+    else renderMemberMerchShop(body);
+  }
+
+  function renderMemberMerchShop(body) {
+    var cat = _mmMerchCatalog;
+    if (!cat) { body.innerHTML = '<p class="ws-empty">Loading the catalog…</p>'; return; }
+    var h = '';
+    if (cat.error) {
+      body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
+      return;
+    }
+    if (cat.items.length === 0) {
+      body.innerHTML = '<p class="ws-empty">The shop is empty right now — check back soon!</p>';
+      return;
+    }
+    cat.items.forEach(function (item) {
+      var variants = cat.variants.filter(function (v) { return v.item_id === item.id; });
+      if (variants.length === 0) return;
+      h += '<div class="ws-merch-add-form" style="margin-top:10px;">';
+      h += '<div class="ws-merch-add-header"><strong>' + escapeHtmlWs(item.name) + '</strong></div>';
+      if (item.description) h += '<p class="ws-body-hint">' + escapeHtmlWs(item.description) + '</p>';
+      if (item.image_url) h += '<p><a href="' + escapeAttr(item.image_url) + '" target="_blank" rel="noopener" class="ws-inline-link">See a photo ↗</a></p>';
+      variants.forEach(function (v) {
+        var qty = _mmMerchCart[v.id] || 0;
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">'
+          + (v.label ? escapeHtmlWs(v.label) : '<em>Standard</em>')
+          + ' · <strong>' + escapeHtmlWs(fmtCents(v.price_cents)) + '</strong>';
+        if (v.on_hand <= 0) {
+          h += '<span class="ws-lending-sub"><span class="merch-stock-pill merch-stock-low">Out of stock</span> — you can still order; it ships with the next supplier order.</span>';
+        } else if (qty > v.on_hand) {
+          h += '<span class="ws-lending-sub">Only ' + v.on_hand + ' on hand — the rest would wait on the next supplier order.</span>';
+        }
+        h += '</span><span class="ws-lending-actions"><label class="ws-wv-context" style="display:flex;align-items:center;gap:6px;">Qty '
+          + '<input type="number" class="mm-merch-qty" data-variant-id="' + v.id + '" min="0" max="99" value="' + qty + '" style="width:64px;" inputmode="numeric"></label></span></div>';
+      });
+      h += '</div>';
+    });
+    var total = mmMerchCartTotal();
+    h += '<div class="ws-merch-add-actions" style="margin-top:14px;">';
+    h += '<span class="ws-part-earned" id="mm-merch-total" style="margin-right:auto;">Total: <strong>' + escapeHtmlWs(fmtCents(total)) + '</strong> · pay at pickup</span>';
+    h += '<button type="button" class="btn btn-primary btn-sm" id="mm-merch-place"' + (total > 0 ? '' : ' disabled') + '>Place order</button>';
+    h += '</div>';
+    h += '<div class="ws-merch-add-status" id="mm-merch-status" role="status" aria-live="polite"></div>';
+    body.innerHTML = h;
+
+    body.querySelectorAll('.mm-merch-qty').forEach(function (input) {
+      input.addEventListener('input', function () {
+        var vid = parseInt(input.getAttribute('data-variant-id'), 10);
+        var q = parseInt(input.value, 10);
+        if (!Number.isFinite(q) || q <= 0) delete _mmMerchCart[vid];
+        else _mmMerchCart[vid] = Math.min(q, 99);
+        var totalEl = body.querySelector('#mm-merch-total');
+        if (totalEl) totalEl.innerHTML = 'Total: <strong>' + escapeHtmlWs(fmtCents(mmMerchCartTotal())) + '</strong> · pay at pickup';
+        var placeBtn = body.querySelector('#mm-merch-place');
+        if (placeBtn) placeBtn.disabled = mmMerchCartTotal() <= 0 && Object.keys(_mmMerchCart).length === 0;
+      });
+    });
+    var placeBtn = body.querySelector('#mm-merch-place');
+    if (placeBtn) placeBtn.addEventListener('click', function () {
+      var self = this;
+      rwArmTwoStep(self, 'place order', function () {
+        var status = body.querySelector('#mm-merch-status');
+        var lines = Object.keys(_mmMerchCart).map(function (vid) {
+          return { variant_id: parseInt(vid, 10), qty: _mmMerchCart[vid] };
+        }).filter(function (l) { return l.qty > 0; });
+        if (lines.length === 0) {
+          status.textContent = 'Pick at least one item first.';
+          status.className = 'ws-merch-add-status ws-wv-err';
+          return;
+        }
+        self.disabled = true;
+        status.textContent = 'Placing your order…';
+        status.className = 'ws-merch-add-status';
+        fetch('/api/supply-closet?action=merch-place-order' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ lines: lines })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+          .then(function (res) {
+            if (!res.ok) throw new Error((res.data && res.data.error) || 'order failed');
+            _mmMerchPlaced = res.data.order;
+            _mmMerchCart = {};
+            renderMemberMerchBody();  // confirmation view, immediately
+            loadMemberMerchOrders();  // My Orders + badge refresh behind it
+          }).catch(function (err) {
+            self.disabled = false;
+            status.textContent = 'Could not place the order: ' + ((err && err.message) || 'unknown');
+            status.className = 'ws-merch-add-status ws-wv-err';
+          });
+      });
+    });
+  }
+
+  function renderMemberMerchConfirmation(body) {
+    var o = _mmMerchPlaced;
+    if (!o) { renderMemberMerchShop(body); return; }
+    var h = '<div class="ws-merch-add-form">';
+    h += '<div class="ws-merch-add-header"><strong>Order placed — thank you!</strong></div>';
+    h += '<p class="ws-body-hint">Bring payment to the next event: <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong> due at pickup (cash, check, or Venmo to the Merchandise Manager).</p>';
+    (o.lines || []).forEach(function (l) {
+      h += '<div class="ws-lending-row"><span class="ws-lending-main">' + l.qty + ' × '
+        + escapeHtmlWs(l.item_name + (l.variant_label ? ' — ' + l.variant_label : ''))
+        + ' — ' + escapeHtmlWs(fmtCents(l.qty * l.price_cents_each));
+      if (l.stock_status === 'backordered') {
+        h += '<span class="ws-lending-sub">Waiting on the next supplier order — the Merchandise Manager will let you know when it’s in.</span>';
+      } else {
+        h += '<span class="ws-lending-sub">Reserved for you.</span>';
+      }
+      h += '</span></div>';
+    });
+    h += '<div class="ws-merch-add-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm" id="mm-merch-back">Back to the shop</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm" id="mm-merch-to-orders">See My Orders</button>';
+    h += '</div></div>';
+    body.innerHTML = h;
+    body.querySelector('#mm-merch-back').addEventListener('click', function () {
+      _mmMerchPlaced = null;
+      renderMemberMerchBody();
+    });
+    body.querySelector('#mm-merch-to-orders').addEventListener('click', function () {
+      _mmMerchPlaced = null;
+      _mmMerchTab = 'orders';
+      renderMemberMerchBody();
+    });
+  }
+
+  function mmMerchStatusPill(o) {
+    if (o.status === 'cancelled') return '<span class="ws-wv-declined">Cancelled</span>';
+    if (o.status === 'delivered') return '<span class="ws-wv-ok">Delivered</span>';
+    if (o.status === 'ready') return '<span class="ws-wv-ok">Ready for pickup</span>';
+    if (o.status === 'paid') return '<span class="ws-wv-ok">Paid</span>';
+    return '<span class="ws-wv-pending">Pending</span>';
+  }
+
+  function renderMemberMerchOrders(body) {
+    if (_mmMerchOrders === null) { body.innerHTML = '<p class="ws-empty">Loading your orders…</p>'; return; }
+    var orders = _mmMerchOrders;
+    if (orders.length === 0) {
+      body.innerHTML = '<p class="ws-empty">No orders yet — visit the Shop tab to place your first one.</p>';
+      return;
+    }
+    var h = '';
+    orders.forEach(function (o) {
+      h += '<div class="ws-merch-add-form" style="margin-top:10px;">';
+      h += '<div class="ws-merch-add-header"><strong>Order #' + o.id + '</strong> <span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>'
+        + '<span style="margin-left:auto;">' + mmMerchStatusPill(o) + '</span></div>';
+      (o.lines || []).forEach(function (l) {
+        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + l.qty + ' × '
+          + escapeHtmlWs(l.item_name + (l.variant_label ? ' — ' + l.variant_label : ''))
+          + ' — ' + escapeHtmlWs(fmtCents(l.qty * l.price_cents_each));
+        if (l.stock_status === 'backordered' && o.status !== 'cancelled') {
+          h += '<span class="ws-lending-sub">Waiting on the next supplier order.</span>';
+        }
+        h += '</span></div>';
+      });
+      h += '<p class="ws-part-earned" style="margin:8px 0 0;">Total: <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong>';
+      if (o.status === 'cancelled') {
+        // nothing owed
+      } else if (o.paid_at) {
+        h += ' · Paid' + (o.payment_method ? ' by ' + escapeHtmlWs(MERCH_PAY_LABELS[o.payment_method] || o.payment_method) : '')
+          + (o.paid_at ? ' ' + escapeHtmlWs(formatReportDate(o.paid_at)) : '');
+      } else {
+        h += ' · <span class="ws-wv-pending">Owed at pickup: ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</span>';
+      }
+      h += '</p>';
+      h += '</div>';
+    });
+    body.innerHTML = h;
   }
 
   function showSendWaiverModal(opts) {
@@ -23514,6 +24514,8 @@
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
     else if (action === 'lending-requests' && typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
+    else if (action === 'merch-shop' && typeof showMemberMerchModal === 'function') showMemberMerchModal('shop');
+    else if (action === 'merch-my-orders' && typeof showMemberMerchModal === 'function') showMemberMerchModal('orders');
     else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
     // #139: group "Things to Bring" sections (Kid Schedule + liaison card)
     // — the shared signup markup with group endpoints.

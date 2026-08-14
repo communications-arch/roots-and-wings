@@ -280,6 +280,7 @@ const unitTests = [
   'scripts/test-form-token.js',
   'scripts/test-ics-feed.js',
   'scripts/test-dr-backup.js',
+  'scripts/test-merch-allocation.js',
 ];
 
 for (const rel of unitTests) {
