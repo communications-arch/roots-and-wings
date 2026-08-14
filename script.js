@@ -6757,6 +6757,119 @@
       .catch(function () { /* keep the static copy */ });
   }
 
+  // #350 (Erin): Greenhouse Host — a per-SESSION adult sign-up anchoring
+  // the 0-2 room so other toddler parents can float. Renders as a section
+  // of the Ways to Help card (below the jump grid). Server-gated: the API
+  // answers greenhouse_kids:false unless at least one enrolled kid is in
+  // the Greenhouse group this season, and then the section stays hidden
+  // entirely. null = not fetched; 'loading' = fetch in flight.
+  var _greenhouseHost = null;
+  function loadGreenhouseHost(force) {
+    if (!localStorage.getItem('rw_google_credential')) return;
+    if (_greenhouseHost === 'loading') return;
+    if (_greenhouseHost && !force) { paintGreenhouseHost(); return; }
+    var had = _greenhouseHost;
+    _greenhouseHost = 'loading';
+    fetch('/api/coverage?action=greenhouse-host', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        _greenhouseHost = (d && d.sessions) ? d : had === 'loading' ? null : had;
+        paintGreenhouseHost();
+      })
+      .catch(function () { if (_greenhouseHost === 'loading') _greenhouseHost = had === 'loading' ? null : had; });
+  }
+
+  function ghHostFmtDay(s) {
+    s = String(s || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+    // Local-day parsing (noon anchor) per the house timezone rule.
+    return new Date(s + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  function paintGreenhouseHost() {
+    var box = document.getElementById('ws-greenhouse-host');
+    if (!box) return;
+    var d = _greenhouseHost;
+    if (!d || d === 'loading' || !d.greenhouse_kids || !(d.sessions || []).length) {
+      box.innerHTML = '';
+      return;
+    }
+    var h = '<h5 class="ws-part-subhead">Greenhouse Host (0–2 room)</h5>';
+    h += '<p class="ws-body-hint">Anchor the Greenhouse for a whole session so other toddler parents can float. '
+      + 'Two spots per session — a host and a co-host — and any adult member can claim one. '
+      + 'Everyone can see who’s hosting, so toddler families know.</p>';
+    h += '<ul class="ws-part-recap" id="ws-gh-host-list">';
+    d.sessions.forEach(function (s) {
+      var label = s.name ? escapeHtml(s.name) : ('Session ' + s.session_number);
+      var range = ghHostFmtDay(s.start_date);
+      var end = ghHostFmtDay(s.end_date);
+      if (range && end) range += ' – ' + end;
+      h += '<li><strong>' + label + '</strong>' + (range ? ' <span style="color:var(--color-text-light);">(' + range + ')</span>' : '') + ' — ';
+      var bits = [];
+      var iHost = false;
+      (s.hosts || []).forEach(function (host) {
+        var bit = escapeHtml(host.name);
+        if (host.mine) {
+          iHost = true;
+          bit += ' (you) <button type="button" class="sc-btn sc-btn-del gh-host-release" data-id="' + host.id + '">Release</button>';
+        } else if (d.can_release_any) {
+          bit += ' <button type="button" class="sc-btn sc-btn-del gh-host-release" data-id="' + host.id + '">Release</button>';
+        }
+        bits.push(bit);
+      });
+      var openSlots = (d.max_hosts || 2) - (s.hosts || []).length;
+      for (var i = 0; i < openSlots; i++) {
+        // One claim button is enough even when both spots are open.
+        bits.push(i === 0 && !iHost
+          ? 'Open <button type="button" class="sc-btn gh-host-claim" data-sess="' + s.session_number + '">Claim</button>'
+          : 'Open');
+      }
+      h += bits.join(' · ') + '</li>';
+    });
+    h += '</ul>';
+    h += '<div class="cls-error" id="ghHostErr" style="display:none;"></div>';
+    box.innerHTML = h;
+
+    function ghErr(msg) {
+      var el = document.getElementById('ghHostErr');
+      if (el) { el.textContent = msg; el.style.display = ''; }
+    }
+    function ghPost(body, btn) {
+      fetch('/api/coverage', {
+        method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            ghErr((res.data && res.data.error) || 'Could not update — try again.');
+            if (btn) btn.disabled = false;
+            return;
+          }
+          loadGreenhouseHost(true);
+        })
+        .catch(function () { ghErr('Network error — try again.'); if (btn) btn.disabled = false; });
+    }
+    box.querySelectorAll('.gh-host-claim').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sess = parseInt(this.getAttribute('data-sess'), 10);
+        if (!Number.isFinite(sess)) return;
+        this.disabled = true;
+        ghPost({ action: 'greenhouse-host-claim', session_number: sess }, this);
+      });
+    });
+    // Release is destructive-ish → the shared two-step inline confirm.
+    box.querySelectorAll('.gh-host-release').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-id'), 10);
+        if (!id) return;
+        rwArmTwoStep(this, 'release', function (b) {
+          b.disabled = true;
+          ghPost({ action: 'greenhouse-host-release', id: id }, b);
+        });
+      });
+    });
+  }
+
   // #133 (Colleen): Cleaning Crew sign-ups from Ways to Help — the same
   // claim/release flow as My Family's cleaning picker, in the house
   // report-modal shell with S1–S5 chips.
@@ -10816,11 +10929,16 @@
           ? jumpTile('org-structure', 'waysToHelp', 'Committee Seats', 'none open — explore roles')
           : jumpTile('open-seats-modal', 'waysToHelp', 'Committee Seats', '<strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's'));
         h += '</div>';
+        // #350: Greenhouse Host section — painted async by
+        // loadGreenhouseHost(); stays empty (hidden) unless a Greenhouse
+        // kid is enrolled this season (server-gated).
+        h += '<div id="ws-greenhouse-host"></div>';
         return h;
       },
       afterRender: function () {
         if (_eventOpenings === null && typeof loadEventOpenings === 'function') loadEventOpenings();
         if (_cleaningOpenCount === null && typeof loadCleaningOpenCount === 'function') loadCleaningOpenCount();
+        if (typeof loadGreenhouseHost === 'function') loadGreenhouseHost();
       }
     },
     'class-ideas': {
