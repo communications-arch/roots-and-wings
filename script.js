@@ -14549,7 +14549,10 @@
   var _merchCatVariantEditId = null; // variant id with edit panel open
   var _merchCatAddVariantFor = null; // item id with the add-variant form open
   var _merchStockAdjustFor = null;   // variant id with the receive-stock row open
-  var _merchCatNeedsOnly = false;    // Catalog & Stock: "Needs ordering" chip on
+  var _merchCatNeedsOnly = false;    // Catalog & Stock: Need funnel = "Needs ordering" (To Do deep-link presets it)
+  var _merchCatItemFilter = 'all';   // Catalog & Stock: Item funnel ('all' | item id as string)
+  var _merchCatActiveFilter = 'any'; // Catalog & Stock: Active funnel ('any' | 'active' | 'inactive')
+  var _merchCatSort = null;          // Catalog & Stock: last header sort {key, dir}, kept across re-renders
   var _merchQsCart = {};             // quick-sale: variant id -> qty
   var _merchQsMethod = '';           // quick-sale payment method
 
@@ -14577,6 +14580,9 @@
     // paint) but every open re-fetches so the list and badges are current.
     _merchActiveTab = MERCH_MANAGER_TABS.some(function (t) { return t.key === opts.tab; }) ? opts.tab : 'desk';
     _merchCatNeedsOnly = !!opts.needsOnly;
+    _merchCatItemFilter = 'all';
+    _merchCatActiveFilter = 'any';
+    _merchCatSort = null;
     _merchDeskFilter = 'open';
     _merchDeskPayFor = null;
     _merchScreenedOpen = false;
@@ -15163,17 +15169,20 @@
     return h;
   }
 
-  function merchVariantFormHtml(variant, itemId) {
+  // itemName is optional context for the toolbar 'Add a variant' form (the
+  // in-table edit sits right under its own row, so it needs none).
+  function merchVariantFormHtml(variant, itemId, itemName) {
     var isNew = !variant;
-    variant = variant || { label: '', price_cents: 0, on_order: 0, restock_threshold: 0, active: true, sort_order: 0, notes: '' };
+    variant = variant || { label: '', price_cents: 0, on_hand: 0, on_order: 0, restock_threshold: 0, active: true, sort_order: 0, notes: '' };
     var idAttr = isNew ? ('new-' + itemId) : variant.id;
     var h = '<div class="merch-inv-edit merch-cat-variant-form" data-variant-id="' + idAttr + '" data-item-id="' + itemId + '">';
-    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add a variant' : 'Edit variant') + '</strong> <span class="ws-wv-context">size/color/style — leave the label blank for single-variant items</span></div>';
+    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add a variant' : 'Edit variant') + '</strong>' + (itemName ? ' ' + escapeHtmlWs(itemName) : '') + ' <span class="ws-wv-context">size/color/style — leave the label blank for single-variant items</span></div>';
     h += '<div class="merch-inv-edit-grid">';
     h += '<label><span>Label</span><input type="text" maxlength="200" id="merch-var-label-' + idAttr + '" value="' + escapeAttr(variant.label || '') + '" placeholder="Youth M — Purple"></label>';
     h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-var-price-' + idAttr + '" value="' + ((variant.price_cents || 0) / 100).toFixed(2) + '"></label>';
+    h += '<label><span>On hand' + (isNew ? ' (starting count)' : ' (recount)') + '</span><input type="number" min="0" max="100000" id="merch-var-onhand-' + idAttr + '" value="' + (variant.on_hand || 0) + '"></label>';
     h += '<label><span>On order (supplier)</span><input type="number" min="0" max="100000" id="merch-var-onorder-' + idAttr + '" value="' + (variant.on_order || 0) + '"></label>';
-    h += '<label><span>Restock below</span><input type="number" min="0" max="100000" id="merch-var-restock-' + idAttr + '" value="' + (variant.restock_threshold || 0) + '"></label>';
+    h += '<label><span>Reorder at (restock below)</span><input type="number" min="0" max="100000" id="merch-var-restock-' + idAttr + '" value="' + (variant.restock_threshold || 0) + '"></label>';
     h += '<label><span>Sort</span><input type="number" min="0" max="10000" id="merch-var-sort-' + idAttr + '" value="' + (variant.sort_order || 0) + '"></label>';
     h += '<label class="merch-inv-edit-notes"><span>Notes (manager only)</span><textarea maxlength="1000" rows="2" id="merch-var-notes-' + idAttr + '" placeholder="e.g. ordered 24 from PrintCo 5/12">' + escapeHtml(variant.notes || '') + '</textarea></label>';
     h += '</div>';
@@ -15186,145 +15195,284 @@
     return h;
   }
 
+  // Catalog & Stock — ONE sortable table, one row per variant (Erin,
+  // 2026-08-15 as Merch Manager on dev: the stacked item cards were "a lot
+  // of scrolling"; she wants it tabular like the old Inventory tab). Rows
+  // are { id, item, v, need, backordered } built by merchCatalogRows();
+  // item-level fields (name / vendor / notes / pre-order) edit from the
+  // compact chip toolbar ABOVE the table so the table stays dense.
+  function merchPad5(n) { return ('00000' + (parseInt(n, 10) || 0)).slice(-5); }
+  var MERCH_CATALOG_TABLE_COLS = [
+    { key: 'item', label: 'Item', type: 'string',
+      // Default order = item sort_order, then variant sort_order — the
+      // catalog order the member shop uses. Composite string key so the
+      // helper's single-column sort reproduces it.
+      sortValue: function (r) {
+        return merchPad5(r.item.sort_order) + '|' + String(r.item.name || '').toLowerCase()
+          + '|' + merchPad5(r.v.sort_order) + '|' + String(r.v.label || '').toLowerCase();
+      },
+      // Name + Hidden pill only — the pre-order badge lives on the item chip
+      // above the table so a 14-variant tee doesn't repeat it 14 times.
+      render: function (r) {
+        return escapeHtmlWs(r.item.name)
+          + (r.item.active ? '' : ' <span class="ws-wv-declined">Hidden</span>');
+      }
+    },
+    { key: 'variant', label: 'Variant', type: 'string',
+      sortValue: function (r) { return r.v.label || ''; },
+      render: function (r) { return r.v.label ? escapeHtmlWs(r.v.label) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'price', label: 'Price', type: 'number',
+      sortValue: function (r) { return r.v.price_cents; },
+      render: function (r) { return '<span class="ws-srt-num">' + escapeHtmlWs(fmtCents(r.v.price_cents)) + '</span>'; }
+    },
+    { key: 'on_hand', label: 'On hand', type: 'number',
+      sortValue: function (r) { return r.v.on_hand; },
+      render: function (r) {
+        var pill = '';
+        if (r.v.on_hand === 0) pill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
+        else if (r.v.restock_threshold > 0 && r.v.on_hand < r.v.restock_threshold) pill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
+        return String(r.v.on_hand) + pill
+          + (r.backordered > 0 ? ' <span class="merch-stock-pill merch-stock-low">' + r.backordered + ' backordered</span>' : '');
+      }
+    },
+    { key: 'on_order', label: 'On order', type: 'number', mobileHide: true,
+      sortValue: function (r) { return r.v.on_order; },
+      render: function (r) { return r.v.on_order > 0 ? String(r.v.on_order) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'restock_threshold', label: 'Reorder at', type: 'number', mobileHide: true,
+      sortValue: function (r) { return r.v.restock_threshold; },
+      render: function (r) { return r.v.restock_threshold > 0 ? String(r.v.restock_threshold) : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'need', label: 'Need', type: 'number',
+      sortValue: function (r) { return r.need; },
+      render: function (r) {
+        if (r.need > 0) return String(r.need);
+        // Flagged as needing an order but the on-order count already covers
+        // it — say so rather than leaving a confusing blank on a filtered row.
+        return r.needs ? '<span class="ws-wv-context">on order</span>' : '';
+      }
+    },
+    { key: 'active', label: 'Active', type: 'number',
+      sortValue: function (r) { return r.v.active ? 1 : 0; },
+      render: function (r) { return r.v.active ? '✓' : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+    },
+    { key: 'actions', label: '', sortable: false,
+      render: function (r) {
+        return '<span class="ws-srt-actions">'
+          + '<button type="button" class="sc-btn merch-cat-variant-edit" data-variant-id="' + r.id + '" data-item-id="' + r.item.id + '">Edit</button>'
+          + '<button type="button" class="sc-btn merch-var-stock-btn" data-variant-id="' + r.id + '">Receive stock</button>'
+          + '</span>';
+      }
+    }
+  ];
+
+  function merchCatalogRows() {
+    var cat = _merchCatalogCache || { items: [], variants: [] };
+    var byId = {};
+    (cat.items || []).forEach(function (it) { byId[it.id] = it; });
+    var rows = [];
+    (cat.variants || []).forEach(function (v) {
+      var item = byId[v.item_id];
+      if (!item) return;
+      var needs = merchVariantNeedsOrdering(v);
+      rows.push({ id: v.id, item: item, v: v, needs: needs, need: needs ? merchSuggestedOrderQty(v) : 0, backordered: merchBackorderedFor(v.id) });
+    });
+    return rows;
+  }
+
+  // Receive-stock inline row (rendered beneath the variant row via the
+  // shared table's editRowKey). Same merch-stock-adjust flow as before.
+  function merchStockRowHtml(r) {
+    return '<div class="merch-inv-edit-title"><strong>' + escapeHtmlWs(r.item.name) + '</strong>'
+      + (r.v.label ? ' <span class="ws-wv-context">' + escapeHtmlWs(r.v.label) + '</span>' : '') + '</div>'
+      + '<span class="merch-desk-payrow">Received '
+      + '<input type="number" id="merch-stock-delta-' + r.id + '" value="1" step="1" style="width:70px;"> '
+      + '<label style="font-weight:normal;"><input type="checkbox" id="merch-stock-fromorder-' + r.id + '" checked> from a supplier order (draws down on order' + (r.v.on_order > 0 ? ': ' + r.v.on_order : '') + ')</label> '
+      + '<button type="button" class="sc-btn sc-save merch-stock-save" data-variant-id="' + r.id + '">Save</button>'
+      + '<button type="button" class="sc-btn merch-stock-cancel">Cancel</button>'
+      + '<span class="ws-wv-context">use a negative number to correct a recount</span></span>';
+  }
+
   function renderMerchCatalogBody() {
     var body = document.getElementById('ws-merch-catalog-body');
     if (!body) return;
     var cat = _merchCatalogCache || { items: [], variants: [] };
+    var allRows = merchCatalogRows();
     var needsAll = merchNeedsOrderingVariants();
     var h = '';
     if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
-    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. Counts here are the <strong>live stock</strong> — every order and quick sale moves them, and <strong>Receive stock</strong> adds a shipment (it can draw down the on-order count). Vendor and notes live on each item; per-variant notes on the variant. <strong>Needs ordering</strong> lists what to order from the supplier: backordered demand plus anything below its restock threshold, with a suggested quantity (backordered + shortfall − already on order).</p>';
-    h += '<div class="rd-counts">'
-      + '<button type="button" class="sc-btn merch-cat-filter' + (!_merchCatNeedsOnly ? ' sc-save' : '') + '" data-needs="0">All variants (' + (cat.variants || []).length + ')</button>'
-      + '<button type="button" class="sc-btn merch-cat-filter' + (_merchCatNeedsOnly ? ' sc-save' : '') + '" data-needs="1">Needs ordering (' + needsAll.length + ')</button>'
-      + '</div>';
-    h += '<div class="coop-cal-toolbar"><button type="button" class="btn btn-outline-dark btn-sm" id="merch-cat-add-item-btn">+ Add item</button></div>';
-    if (_merchCatItemEditId === 'new') h += merchItemFormHtml(null);
+    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. Counts here are the <strong>live stock</strong> — every order and quick sale moves them, and <strong>Receive stock</strong> adds a shipment (it can draw down the on-order count). Vendor and notes live on each item (<strong>Edit item</strong> above the table); per-variant notes on the variant (<strong>Edit</strong> on the row). <strong>Need</strong> is what to order from the supplier — backordered demand plus anything below its reorder point, minus what is already on order; sort or filter that column to see what needs ordering.</p>';
 
-    if (cat.items.length === 0 && !cat.error) {
-      h += '<p class="ws-empty">No catalog yet — add your first item above.</p>';
-    } else if (_merchCatNeedsOnly && needsAll.length === 0) {
-      h += '<p class="ws-empty">Nothing needs ordering right now.</p>';
-    }
-    cat.items.forEach(function (item) {
-      var variants = cat.variants.filter(function (v) { return v.item_id === item.id; });
-      if (_merchCatNeedsOnly) {
-        variants = variants.filter(merchVariantNeedsOrdering);
-        if (variants.length === 0 && _merchCatItemEditId !== item.id) return;
-      }
-      var vendorHtml = merchVendorHtml(item);
-      h += '<div class="ws-merch-add-form merch-cat-item" data-item-id="' + item.id + '">';
-      h += '<div class="ws-merch-add-header"><strong>' + escapeHtmlWs(item.name) + '</strong>'
+    // Item toolbar — one chip per item (name · variant count · Edit item ·
+    // + Add variant) plus Add item. The open item / add-variant form
+    // renders directly beneath the strip.
+    h += '<div class="rd-counts merch-cat-toolbar">';
+    (cat.items || []).forEach(function (item) {
+      var n = allRows.filter(function (r) { return r.item.id === item.id; }).length;
+      var open = _merchCatItemEditId === item.id || _merchCatAddVariantFor === item.id;
+      h += '<span class="merch-cat-item-chip' + (open ? ' is-open' : '') + '">'
+        + '<span>' + escapeHtmlWs(item.name)
         + (item.active ? '' : ' <span class="ws-wv-declined">Hidden</span>')
-        + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order only</span>' : '')
-        + '<span style="margin-left:auto;"><button type="button" class="sc-btn merch-cat-item-edit" data-item-id="' + item.id + '">Edit</button></span></div>';
-      if (item.description) h += '<p class="ws-body-hint">' + escapeHtmlWs(item.description) + '</p>';
-      if (vendorHtml || item.notes) {
-        h += '<p class="ws-body-hint">'
-          + (vendorHtml ? 'Vendor: ' + vendorHtml : '')
-          + (vendorHtml && item.notes ? ' · ' : '')
-          + (item.notes ? '<em>' + escapeHtmlWs(item.notes) + '</em>' : '')
-          + '</p>';
-      }
-      if (_merchCatItemEditId === item.id) h += merchItemFormHtml(item);
-
-      variants.forEach(function (v) {
-        var stockPill = '';
-        if (v.on_hand === 0) stockPill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
-        else if (v.restock_threshold > 0 && v.on_hand < v.restock_threshold) stockPill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
-        var backed = merchBackorderedFor(v.id);
-        var needs = merchVariantNeedsOrdering(v);
-        var suggested = needs ? merchSuggestedOrderQty(v) : 0;
-        h += '<div class="ws-lending-row" data-variant-id="' + v.id + '">';
-        h += '<span class="ws-lending-main">' + (v.label ? escapeHtmlWs(v.label) : '<em>Standard</em>')
-          + (v.active ? '' : ' <span class="ws-wv-declined">Hidden</span>')
-          + ' · <strong>' + escapeHtmlWs(fmtCents(v.price_cents)) + '</strong>'
-          + '<span class="ws-lending-sub">On hand <strong>' + v.on_hand + '</strong>' + stockPill
-          + (backed > 0 ? ' · <span class="merch-stock-pill merch-stock-low">' + backed + ' backordered</span>' : '')
-          + (v.on_order > 0 ? ' · ' + v.on_order + ' on order' : '')
-          + (v.restock_threshold > 0 ? ' · restock below ' + v.restock_threshold : '')
-          + (needs ? ' · <strong>order ' + suggested + '</strong>' : '')
-          + '</span>'
-          + (v.notes ? '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(v.notes) + '</span>' : '')
-          + '</span>';
-        h += '<span class="ws-lending-actions">'
-          + '<button type="button" class="sc-btn merch-var-stock-btn" data-variant-id="' + v.id + '">Receive stock</button>'
-          + '<button type="button" class="sc-btn merch-cat-variant-edit" data-variant-id="' + v.id + '" data-item-id="' + item.id + '">Edit</button>'
-          + '</span>';
-        if (_merchStockAdjustFor === v.id) {
-          h += '<span class="merch-desk-payrow">Adjust on-hand by '
-            + '<input type="number" id="merch-stock-delta-' + v.id + '" value="1" step="1" style="width:70px;"> '
-            + '<label style="font-weight:normal;"><input type="checkbox" id="merch-stock-fromorder-' + v.id + '" checked> came from my supplier order</label> '
-            + '<button type="button" class="sc-btn sc-save merch-stock-save" data-variant-id="' + v.id + '">Save</button>'
-            + '<button type="button" class="sc-btn merch-stock-cancel">×</button>'
-            + '<span class="ws-wv-context">use a negative number to correct a recount</span></span>';
-        }
-        h += '</div>';
-        if (_merchCatVariantEditId === v.id) h += merchVariantFormHtml(v, item.id);
-      });
-
-      if (_merchCatAddVariantFor === item.id) h += merchVariantFormHtml(null, item.id);
-      else h += '<p class="ws-part-submit-line"><button type="button" class="ws-inline-link merch-cat-add-variant" data-item-id="' + item.id + '">+ Add a variant</button></p>';
-      h += '</div>';
+        + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '')
+        + ' <span class="ws-wv-context">· ' + n + (n === 1 ? ' variant' : ' variants') + '</span></span>'
+        + '<button type="button" class="sc-btn merch-cat-item-edit" data-item-id="' + item.id + '">Edit item</button>'
+        + '<button type="button" class="sc-btn merch-cat-add-variant" data-item-id="' + item.id + '">+ Add variant</button>'
+        + '</span>';
     });
+    h += '<button type="button" class="btn btn-outline-dark btn-sm" id="merch-cat-add-item-btn">+ Add item</button>';
+    h += '</div>';
+    if (_merchCatItemEditId === 'new') h += merchItemFormHtml(null);
+    else if (_merchCatItemEditId != null) {
+      var editItem = (cat.items || []).filter(function (it) { return it.id === _merchCatItemEditId; })[0];
+      if (editItem) h += merchItemFormHtml(editItem);
+    }
+    if (_merchCatAddVariantFor != null) {
+      var addFor = (cat.items || []).filter(function (it) { return it.id === _merchCatAddVariantFor; })[0];
+      h += merchVariantFormHtml(null, _merchCatAddVariantFor, addFor ? addFor.name : '');
+    }
+
+    if ((cat.items || []).length === 0 && !cat.error) {
+      h += '<p class="ws-empty">No catalog yet — add your first item above.</p>';
+    } else {
+      h += '<div id="merch-cat-table-target"></div>';
+    }
     body.innerHTML = h;
-    wireMerchCatalogBody(body);
+    wireMerchCatalogToolbar(body);
+    wireMerchCatalogForms(body);
+
+    var target = body.querySelector('#merch-cat-table-target');
+    if (!target) return;
+
+    function rowsForFilter() {
+      return allRows.filter(function (r) {
+        if (_merchCatItemFilter !== 'all' && String(r.item.id) !== _merchCatItemFilter) return false;
+        if (_merchCatNeedsOnly && !r.needs) return false;
+        if (_merchCatActiveFilter === 'active' && !r.v.active) return false;
+        if (_merchCatActiveFilter === 'inactive' && r.v.active) return false;
+        return true;
+      });
+    }
+
+    function renderTable() {
+      var cols = MERCH_CATALOG_TABLE_COLS.map(function (c) {
+        var copy = {}; Object.keys(c).forEach(function (k) { copy[k] = c[k]; }); return copy;
+      });
+      var itemOptions = [{ value: 'all', label: 'All items', count: allRows.length }];
+      (cat.items || []).forEach(function (item) {
+        itemOptions.push({ value: String(item.id), label: item.name, count: allRows.filter(function (r) { return r.item.id === item.id; }).length });
+      });
+      var activeCount = allRows.filter(function (r) { return r.v.active; }).length;
+      cols.forEach(function (col) {
+        if (col.key === 'item') col.filter = {
+          options: itemOptions, current: _merchCatItemFilter,
+          onChange: function (v) { _merchCatItemFilter = v; renderTable(); }
+        };
+        if (col.key === 'need') col.filter = {
+          options: [{ value: 'any', label: 'Any', count: allRows.length }, { value: 'needs', label: 'Needs ordering', count: needsAll.length }],
+          current: _merchCatNeedsOnly ? 'needs' : 'any',
+          onChange: function (v) { _merchCatNeedsOnly = (v === 'needs'); renderTable(); }
+        };
+        if (col.key === 'active') col.filter = {
+          options: [{ value: 'any', label: 'Any', count: allRows.length }, { value: 'active', label: 'Active', count: activeCount }, { value: 'inactive', label: 'Inactive', count: allRows.length - activeCount }],
+          current: _merchCatActiveFilter,
+          onChange: function (v) { _merchCatActiveFilter = v; renderTable(); }
+        };
+      });
+      var rows = rowsForFilter();
+      renderSortableTable(target, cols, rows, {
+        initialSort: _merchCatSort || { key: 'item', dir: 'asc' },
+        rowKey: function (r) { return r.id; },
+        // ONE in-place row at a time: the variant editor OR the receive-
+        // stock row (opening one closes the other).
+        editRowKey: _merchCatVariantEditId != null ? _merchCatVariantEditId : _merchStockAdjustFor,
+        renderEditRow: function (r) {
+          if (_merchCatVariantEditId === r.id) return merchVariantFormHtml(r.v, r.item.id);
+          return merchStockRowHtml(r);
+        },
+        onRender: function () {
+          // Remember the active sort so edit toggles / filter changes (which
+          // re-create the table) don't snap back to catalog order.
+          target.querySelectorAll('th.ws-sort').forEach(function (t) {
+            var a = t.querySelector('.ws-sort-arrow');
+            if (a && a.textContent) _merchCatSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
+          });
+          target.querySelectorAll('.merch-cat-variant-edit').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var id = parseInt(btn.getAttribute('data-variant-id'), 10);
+              _merchCatVariantEditId = (_merchCatVariantEditId === id) ? null : id;
+              _merchStockAdjustFor = null;
+              renderTable();
+            });
+          });
+          target.querySelectorAll('.merch-var-stock-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var id = parseInt(btn.getAttribute('data-variant-id'), 10);
+              _merchStockAdjustFor = (_merchStockAdjustFor === id) ? null : id;
+              _merchCatVariantEditId = null;
+              renderTable();
+              var input = document.getElementById('merch-stock-delta-' + id);
+              if (input) input.focus();
+            });
+          });
+          wireMerchCatalogForms(target, renderTable);
+        }
+      });
+      if (rows.length === 0) {
+        var msg = (_merchCatNeedsOnly && needsAll.length === 0 && _merchCatItemFilter === 'all' && _merchCatActiveFilter === 'any')
+          ? 'Nothing needs ordering right now.' : 'No variants match these filters.';
+        target.insertAdjacentHTML('beforeend', '<p class="ws-empty">' + msg + '</p>');
+      }
+    }
+    renderTable();
   }
 
-  function wireMerchCatalogBody(body) {
-    body.querySelectorAll('.merch-cat-filter').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        _merchCatNeedsOnly = btn.getAttribute('data-needs') === '1';
-        renderMerchCatalogBody();
-      });
-    });
+  // Toolbar (above the table): item chips, add variant, add item.
+  function wireMerchCatalogToolbar(body) {
     var addItemBtn = body.querySelector('#merch-cat-add-item-btn');
     if (addItemBtn) addItemBtn.addEventListener('click', function () {
       _merchCatItemEditId = (_merchCatItemEditId === 'new') ? null : 'new';
+      _merchCatAddVariantFor = null;
       renderMerchCatalogBody();
     });
     body.querySelectorAll('.merch-cat-item-edit').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(btn.getAttribute('data-item-id'), 10);
         _merchCatItemEditId = (_merchCatItemEditId === id) ? null : id;
+        _merchCatAddVariantFor = null;
         renderMerchCatalogBody();
       });
     });
     body.querySelectorAll('.merch-cat-add-variant').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        _merchCatAddVariantFor = parseInt(btn.getAttribute('data-item-id'), 10);
+        var id = parseInt(btn.getAttribute('data-item-id'), 10);
+        _merchCatAddVariantFor = (_merchCatAddVariantFor === id) ? null : id;
+        _merchCatItemEditId = null;
         _merchCatVariantEditId = null;
         renderMerchCatalogBody();
       });
     });
-    body.querySelectorAll('.merch-cat-variant-edit').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-variant-id'), 10);
-        _merchCatVariantEditId = (_merchCatVariantEditId === id) ? null : id;
-        _merchCatAddVariantFor = null;
-        renderMerchCatalogBody();
-      });
-    });
-    body.querySelectorAll('.merch-cat-item-cancel, .merch-cat-variant-cancel, .merch-stock-cancel').forEach(function (btn) {
+  }
+
+  // Save / Cancel wiring for the item form, variant form (toolbar add OR
+  // in-table edit), and receive-stock row. `scope` limits the query so the
+  // toolbar and the table each wire only their own buttons; `rerender` is
+  // what a Cancel repaints (table-local when possible, whole tab otherwise).
+  function wireMerchCatalogForms(scope, rerender) {
+    var repaint = typeof rerender === 'function' ? rerender : renderMerchCatalogBody;
+    scope.querySelectorAll('.merch-cat-item-cancel, .merch-cat-variant-cancel, .merch-stock-cancel').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _merchCatItemEditId = null;
         _merchCatVariantEditId = null;
         _merchCatAddVariantFor = null;
         _merchStockAdjustFor = null;
-        renderMerchCatalogBody();
-      });
-    });
-    body.querySelectorAll('.merch-var-stock-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-variant-id'), 10);
-        _merchStockAdjustFor = (_merchStockAdjustFor === id) ? null : id;
-        renderMerchCatalogBody();
-        var input = document.getElementById('merch-stock-delta-' + id);
-        if (input) input.focus();
+        repaint();
       });
     });
 
-    body.querySelectorAll('.merch-cat-item-save').forEach(function (btn) {
+    scope.querySelectorAll('.merch-cat-item-save').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var idAttr = btn.getAttribute('data-item-id');
         var isNew = idAttr === 'new';
@@ -15360,7 +15508,7 @@
       });
     });
 
-    body.querySelectorAll('.merch-cat-variant-save').forEach(function (btn) {
+    scope.querySelectorAll('.merch-cat-variant-save').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var idAttr = btn.getAttribute('data-variant-id');
         var isNew = idAttr.indexOf('new-') === 0;
@@ -15377,6 +15525,10 @@
         };
         if (isNew) payload.item_id = parseInt(btn.getAttribute('data-item-id'), 10);
         else payload.id = parseInt(idAttr, 10);
+        // On hand is NOT a variant-save field (stock truth moves only through
+        // orders + merch-stock-adjust) — a changed value here is recorded as
+        // a recount correction right after the save.
+        var onHandWanted = parseInt(g('onhand'), 10);
         var statusEl = btn.parentNode.querySelector('.merch-inv-status');
         btn.disabled = true;
         if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
@@ -15385,6 +15537,16 @@
         }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
           .then(function (res) {
             if (!res.ok) throw new Error((res.data && res.data.error) || 'save failed');
+            var saved = (res.data && res.data.variant) || {};
+            var delta = Number.isFinite(onHandWanted) && saved.id ? onHandWanted - (parseInt(saved.on_hand, 10) || 0) : 0;
+            if (!delta) return null;
+            return fetch('/api/supply-closet?action=merch-stock-adjust' + notifViewAsSuffix(), {
+              method: 'POST', headers: rwAuthHeaders(true),
+              body: JSON.stringify({ variant_id: saved.id, delta: delta, from_on_order: false })
+            }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res2) { if (!res2.ok) throw new Error('saved, but the on-hand recount failed: ' + ((res2.data && res2.data.error) || 'unknown')); });
+          })
+          .then(function () {
             _merchCatVariantEditId = null;
             _merchCatAddVariantFor = null;
             merchReloadCatalog();
@@ -15396,7 +15558,7 @@
       });
     });
 
-    body.querySelectorAll('.merch-stock-save').forEach(function (btn) {
+    scope.querySelectorAll('.merch-stock-save').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(btn.getAttribute('data-variant-id'), 10);
         var delta = parseInt((document.getElementById('merch-stock-delta-' + id) || {}).value, 10);

@@ -12386,6 +12386,9 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 0.86rem;
 }
 .merch-desk-row { flex-wrap: wrap; }
+/* Catalog & Stock item toolbar (#351): name · variant count · Edit item · + Add variant, one chip group per item. */
+.merch-cat-item-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 0.82rem; white-space: nowrap; }
+.merch-cat-item-chip.is-open { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.06); }
 /* Status pills shared by Membership Report + Waivers Report (and any
    other table that needs Paid/Pending/Signed status cells). Same
    all-caps + tracking + bold treatment as .ws-part-status / .pmrep-status
@@ -15373,6 +15376,8 @@ button.sched-status-pill:hover { filter: brightness(0.97); }
   color: var(--color-text-light);
   font-size: 0.85rem;
 }
+/* Numeric cell (Price etc.): right-aligned, lined-up digits. Wrap the cell content. */
+.ws-srt-num { display: block; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------- Roles Manager (President workspace widget → modal) ---------- */
 .roles-mgr-modal { width: min(820px, 96vw); }
