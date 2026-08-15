@@ -4708,9 +4708,9 @@
   var ACTIVE_YEAR = activeSchoolYear();
 
   // Short season label for headings: '2026-2027' → '26/27'. Falls back to
-  // the raw label if it isn't the long YYYY-YYYY form. Used by the board
-  // "26/27 Members" summary card + snapshot title so the season rolls over
-  // automatically each year (and can be re-derived from live data).
+  // the raw label if it isn't the long YYYY-YYYY form. Used by the Class
+  // Builder heading (and formerly the "26/27 Members" card, now titled
+  // "My Community" — Erin 2026-08-15) so the season rolls over each year.
   function seasonShortLabel(label) {
     var m = String(label || '').match(/^(\d{4})-(\d{4})$/);
     if (m) return m[1].slice(2) + '/' + m[2].slice(2);
@@ -7411,6 +7411,14 @@
     // loadMyFamilyWaiverBanner; stays hidden when nothing is pending.
     html += '<div class="mf-card mf-card-full mf-waiver-banner" id="mfWaiverBanner" style="display:none;"></div>';
 
+    // ──── Heads-up card (full width) ────
+    // Erin 2026-08-15: ONE notifications-style alert that lists reference
+    // items the family should know about (outstanding merch orders today;
+    // future rows plug into headsUpProviders()). Same gold waiver-banner
+    // treatment as the sign-ups alert. Filled async by loadHeadsUpCard;
+    // stays hidden when there's nothing to show.
+    html += '<div class="mf-card mf-card-full mf-waiver-banner" id="mfHeadsUpCard" style="display:none;"></div>';
+
     // ──── Coverage Board (full width, collapsible) ────
     // Hidden during summer break — no co-op days = no coverage to claim.
     // EXCEPT when upcoming absences already exist (next season's rows get
@@ -8375,12 +8383,16 @@
     // slot now hosts the community Members card, moved HOME from My
     // Workspace: it's for every member, so it belongs on My Family. Body
     // painted by loadMembersSummary() (same endpoint + roster drill-in).
+    // Erin 2026-08-15: titled "My Community" (was "26/27 Members"), no
+    // subtitle, and a Purchase Merch CTA at the bottom that opens the
+    // public site's Merch section — the member shop IS the public shop
+    // now (photos, blurbs, sizes; orders link back to the family by
+    // email). The button sits OUTSIDE #ws-msum-body so re-paints keep it.
     html += '<div class="mf-card mf-members-card" id="mfMembersCard">';
-    html += '<h3 class="mf-card-title" data-help-key="mf-members-summary">' + brandIconImg('membersSummary') + ' <span id="mfMsumTitleText">' + SEASON_SHORT + ' Members</span></h3>';
-    html += '<p class="mf-card-subtitle" style="color:var(--color-text-light);font-size:0.9rem;margin:0 0 1rem;">';
-    html += 'A snapshot of our co-op community this season — tap a count to see the families.';
-    html += '</p>';
+    html += '<h3 class="mf-card-title" data-help-key="mf-members-summary">' + brandIconImg('membersSummary') + ' My Community</h3>';
     html += '<div class="ws-msum" id="ws-msum-body" aria-live="polite"><p class="ws-part-meter-caption ws-msum-loading">Loading community…</p></div>';
+    html += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="index.html#merch">Purchase Merch</a>'
+      + '<span class="ws-part-submit-hint">Shirts, mugs, totes and more — order online, pay at pickup.</span></p>';
     html += '</div>';
 
     // #116 (prod report: "keeps flickering"): the staggered loaders keep
@@ -8405,6 +8417,10 @@
     // Afternoon class sign-ups card — loads async; hides itself when nothing
     // is open for sign-ups and the viewer isn't a reviewer (VP/Liaison).
     if (typeof loadClassSignupCard === 'function') loadClassSignupCard(fam);
+
+    // Heads-up card (outstanding merch orders + future reference items) —
+    // loads async; hides itself when there's nothing to show.
+    if (typeof loadHeadsUpCard === 'function') loadHeadsUpCard(fam);
 
     // Kids' finalized morning placements (re-renders once when they land).
     if (typeof loadKidPlacements === 'function') loadKidPlacements(fam);
@@ -8742,6 +8758,133 @@
         _waiverBannerSnap = { html: h, visible: true };
       })
       .catch(function () { /* banner just stays hidden (snapshot already painted) */ });
+  }
+
+  // ──────────────────────────────────────────────
+  // My Family "Heads-up" card (Erin 2026-08-15)
+  // ──────────────────────────────────────────────
+  // ONE notifications-style alert card (same gold .mf-waiver-banner
+  // treatment as the sign-ups alert) that lists reference items the family
+  // should know about — each a compact row: title · one-line detail · one
+  // button. Hidden entirely when there are no rows.
+  //
+  // HOW TO ADD A ROW KIND: push a provider onto headsUpProviders():
+  //   { key: 'unique', load: function (done) { ... done([row, ...]); } }
+  // where each row is { title, detail, action: { label, resource } } and
+  // `resource` is a data-resource-action key the global dispatcher already
+  // handles (or add one there). Providers run in parallel; each calls
+  // done([]) on error/nothing so the card can settle. Text is escaped at
+  // the sink here — providers pass PLAIN strings.
+  //
+  // Seeded with the family's outstanding merch orders (Desk orders in a
+  // pre-order state: pending_payment / paid / ready). The existing waiver
+  // banner and class sign-up alert keep their own tested flows and are
+  // deliberately NOT folded in (yet) — candidates for future rows.
+  var _headsUpRows = {};          // provider key -> [row]
+  var _headsUpSnap = null;        // { html, visible } — last paint, per family
+  var _headsUpSnapEmail = '';
+
+  function headsUpProviders() {
+    return [
+      { key: 'merch', load: loadHeadsUpMerchRows }
+      // Future: { key: 'waiver', load: ... }, { key: 'registration', load: ... }
+    ];
+  }
+
+  function loadHeadsUpCard(fam) {
+    var card = document.getElementById('mfHeadsUpCard');
+    if (!card) return;
+    var cred = localStorage.getItem('rw_google_credential');
+    if (!cred) { card.style.display = 'none'; return; }
+    var famKey = String((fam && fam.email) || ((typeof getActiveEmail === 'function') ? getActiveEmail() : '') || '').toLowerCase();
+    if (_headsUpSnapEmail === famKey && _headsUpSnap) {
+      // renderMyFamily just rebuilt the grid (wiping the painted card) —
+      // repaint the last snapshot right away, then refresh underneath.
+      card.innerHTML = _headsUpSnap.html;
+      card.style.display = _headsUpSnap.visible ? '' : 'none';
+      if (_headsUpSnap.visible && typeof injectMyFamilyHelp === 'function') injectMyFamilyHelp(card);
+    } else {
+      // Different family (View-As switch / sign-in): drop stale rows.
+      _headsUpRows = {};
+      _headsUpSnap = null;
+      _headsUpSnapEmail = famKey;
+      card.style.display = 'none';
+    }
+    headsUpProviders().forEach(function (p) {
+      try {
+        p.load(function (rows) {
+          // A late callback from a previous family must not paint over
+          // the current one.
+          if (_headsUpSnapEmail !== famKey) return;
+          _headsUpRows[p.key] = Array.isArray(rows) ? rows : [];
+          renderHeadsUpCard();
+        });
+      } catch (e) {
+        _headsUpRows[p.key] = [];
+        renderHeadsUpCard();
+      }
+    });
+  }
+
+  function renderHeadsUpCard() {
+    var card = document.getElementById('mfHeadsUpCard');
+    if (!card) return;
+    var rows = [];
+    headsUpProviders().forEach(function (p) {
+      (_headsUpRows[p.key] || []).forEach(function (r) { rows.push(r); });
+    });
+    if (rows.length === 0) {
+      card.style.display = 'none';
+      card.innerHTML = '';
+      _headsUpSnap = { html: '', visible: false };
+      return;
+    }
+    var h = '<h3 class="mf-card-title" data-help-key="mf-heads-up">' + brandIconImg('announce') + ' Heads-up</h3>';
+    rows.forEach(function (r) {
+      h += '<div class="ws-lending-row">';
+      h += '<span class="ws-lending-main"><strong>' + escapeHtml(String(r.title || '')) + '</strong>';
+      if (r.detail) h += '<span class="ws-lending-sub">' + escapeHtml(String(r.detail)) + '</span>';
+      h += '</span>';
+      if (r.action && r.action.resource) {
+        h += '<span class="ws-lending-actions"><button type="button" class="btn btn-primary btn-sm" data-resource-action="' + escapeAttr(String(r.action.resource)) + '">'
+          + escapeHtml(String(r.action.label || 'Open')) + '</button></span>';
+      }
+      h += '</div>';
+    });
+    card.innerHTML = h;
+    card.style.display = '';
+    _headsUpSnap = { html: h, visible: true };
+    // Buttons ride the document-level data-resource-action dispatcher —
+    // no per-render wiring. Help "?" beside the title, like every card.
+    if (typeof injectMyFamilyHelp === 'function') injectMyFamilyHelp(card);
+  }
+
+  // Provider: outstanding merch orders (family-scoped merch-my-orders —
+  // the same data the My Merch Orders modal shows in detail).
+  function loadHeadsUpMerchRows(done) {
+    fetch('/api/supply-closet?action=merch-my-orders' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var orders = (d && Array.isArray(d.orders)) ? d.orders : [];
+        var rows = [];
+        orders.forEach(function (o) {
+          if (!o || o.status === 'delivered' || o.status === 'cancelled') return;
+          var lines = Array.isArray(o.lines) ? o.lines : [];
+          var itemCount = lines.reduce(function (n, l) { return n + (parseInt(l.qty, 10) || 0); }, 0);
+          var backordered = lines.some(function (l) { return l.stock_status === 'backordered'; });
+          var detail = itemCount + (itemCount === 1 ? ' item' : ' items') + ' · ' + fmtCents(o.total_cents) + ' · ';
+          if (o.status === 'ready') detail += 'ready for pickup' + (o.paid_at ? '' : ' — pay at pickup');
+          else if (backordered) detail += 'back-ordered items waiting on the next shipment' + (o.paid_at ? '' : ' — pay at pickup');
+          else detail += (o.paid_at ? 'paid — pickup at the next event' : 'pay at pickup');
+          rows.push({
+            title: 'Merch order #' + o.id,
+            detail: detail,
+            action: { label: 'My Orders', resource: 'merch-my-orders' }
+          });
+        });
+        done(rows);
+      })
+      .catch(function () { done([]); });
   }
 
   // Elective detail popup — RETIRED with the Sheets retirement (#25).
@@ -10769,22 +10912,10 @@
         if (typeof loadLendingCard === 'function') loadLendingCard();
       }
     },
-    'merch': {
-      // Merch Desk Phase 1 (#351, 2026-08-14): browse the DB-driven
-      // catalog, place a pay-at-pickup order, and track order status.
-      // Plain text header for now — no brand accent assigned yet (one
-      // mark per meaning; Erin picks the accent later).
-      title: 'Merch',
-      roleGate: null,
-      render: function () {
-        var h = '<p class="ws-body-hint">Co-op shirts, mugs, and more — order ahead and pay at pickup, at the next event.</p>';
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-shop">Shop Merch</button>'
-          + '<span class="ws-part-submit-hint">No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).</span></p>';
-        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="merch-my-orders">My Orders</button>'
-          + '<span class="ws-part-submit-hint">See what you’ve ordered, what’s ready, and what you still owe.</span></p>';
-        return h;
-      }
-    },
+    // (The member 'merch' Workspace card retired 2026-08-15 — Erin: the
+    // public site's Merch section IS the member shop; "Purchase Merch"
+    // lives on the My Community card and outstanding orders surface on
+    // the My Family Heads-up card. See showMemberMerchOrdersModal.)
     'my-links': {
       title: 'My Links',
       roleGate: null,
@@ -11629,7 +11760,7 @@
     // The Membership report is BOARD-ONLY (Erin, 2026-07-03). Welcome
     // Coordinator is a committee role (not a voted board seat), so it no
     // longer gets the report — Welcome Coordinators use the all-members
-    // community snapshot (26/27 Members card) like everyone else.
+    // community snapshot (the My Community card) like everyone else.
     // ALL board members get the Membership report in Reports (Erin, 2026-07-03):
     // President, Secretary, Sustaining Director + VP now hold it alongside the
     // acting roles above. Read-only for non-acting board members
@@ -11722,7 +11853,7 @@
     // Erin 2026-08-02 (supersedes #152's order): Special Events To Do
     // leads the Shared section — row 1: Special Events (To Do), Members,
     // Ways to Help; row 2: Class Development, Lending, Resources.
-    '*': ['shared-todos', 'ways-to-help', 'class-ideas', 'lending', 'merch', 'resources']
+    '*': ['shared-todos', 'ways-to-help', 'class-ideas', 'lending', 'resources']
   };
 
   // ══════════════════════════════════════════════
@@ -11740,7 +11871,8 @@
     'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles &amp; Committees, Facilities, and more. In the Class Builder, scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.”',
     'admin-consoles': 'Admin tools and data sources for the roles you hold — permissions, calendars, and other back-office consoles.',
     'roles': 'Who holds each board and committee role this year. Depending on your role you can assign or update holders here.',
-    'mf-members-summary': 'A friendly snapshot of this season’s registered families — returning vs. new, and kids by track. Click a count to see the roster (names, members, track). No sensitive info.',
+    'mf-members-summary': 'Our co-op community this season — returning vs. new families, and kids by track. Click a count to see the roster (names, members, track). No sensitive info. Purchase Merch opens the shop on our public site; orders placed with your email show up under Heads-up here.',
+    'mf-heads-up': 'Things your family should know about, in one place — right now that’s any merch order you’ve placed that’s still waiting on payment or pickup. Each row has a button into the details. The card disappears when there’s nothing to show.',
     'board-notes': 'A shared scratchpad for the board. Any board member can add a note; the author (or a super user) can remove one.',
     'special-events': 'Special events for the year — assign a lead and helpers, and track dates from proposed to approved.',
     'supply-closet-mgmt': 'Manage the supply closet inventory and storage locations. Flag items low, set quantities, and record who holds member-held supplies.',
@@ -11751,7 +11883,6 @@
     'group-bring': 'Your group’s snack sign-ups — the liaison is in charge of snacks for the year. Post spots (one family per snack day works well); families claim them from their Kid Schedule and claimed days land on their Packing List.',
     'my-class': 'A liaison’s quick view of their class — every kid with parents, phone, and allergies, who’s teaching each session, the topic and lesson plan, plus private per-kid notes only the liaison chain can see.',
     'lending': 'Members’ own supplies offered to borrow or take — request an item for a session (or any dates), approve requests on your items, and see who has what. Reminders go out before hand-off and return days.',
-    'merch': 'Shop Roots &amp; Wings merchandise. Place an order and pick it up at the next event — no online payment; you pay the Merchandise Manager at pickup (cash, check, or PayPal). My Orders shows each order’s status, what’s reserved vs. waiting on a supplier order, and what you still owe.',
     'my-links': 'Your personalized shortcuts into the parts of the portal you use most.',
     // Board section per-role cards (bg-*)
     'bg-president': 'President tools and the board’s at-a-glance view for the year.',
@@ -11873,7 +12004,7 @@
   var HELP_CARD_LABELS = {
     'todos': 'To Do', 'reports': 'Reports & Forms',
     'coop-management': 'Co-op Management', 'admin-consoles': 'Admin Consoles & Sources',
-    'roles': 'Roles & Committees', 'mf-members-summary': 'My Family — Members Snapshot', 'board-notes': 'Board Notes',
+    'roles': 'Roles & Committees', 'mf-members-summary': 'My Family — My Community', 'mf-heads-up': 'My Family — Heads-up', 'board-notes': 'Board Notes',
     'special-events': 'Special Events', 'supply-closet-mgmt': 'Supply Closet', 'upcoming-events': 'Upcoming Events',
     'ways-to-help': 'Ways to Help', 'resources': 'Resources', 'my-links': 'My Links',
     'bg-president': 'Board — President', 'bg-vp': 'Board — Vice President', 'bg-treasurer': 'Board — Treasurer',
@@ -15815,44 +15946,28 @@
   }
 
   // ══════════════════════════════════════════════
-  // Member Merch modal — Shop + My Orders (#351)
+  // Member "My Merch Orders" modal (#351)
   // ══════════════════════════════════════════════
-  var _mmMerchTab = 'shop';
-  var _mmMerchCatalog = null;   // { items, variants }
+  // Erin 2026-08-15: the portal's own Shop tab is RETIRED — the public
+  // site's Merch section (index.html#merch: photos, blurbs, sizes/colors)
+  // is the one shop for everyone. Its form writes the same Desk queue and
+  // links the order to the family by email (api/tour.js
+  // handleMerchDeskPublicOrder → resolveFamily / contact-email resolver),
+  // so a member's web order shows up here and on the My Family Heads-up
+  // card. This modal is the DETAIL view of the family's orders only.
   var _mmMerchOrders = null;    // my family's orders
-  var _mmMerchCart = {};        // variant id -> qty
-  var _mmMerchPlaced = null;    // last placed order (confirmation view)
 
-  function showMemberMerchModal(tab) {
+  function showMemberMerchOrdersModal() {
     var outer = renderReportModal({
-      title: 'Merch',
-      subtitle: 'Order Roots & Wings merchandise for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).',
+      title: 'My Merch Orders',
+      subtitle: 'Orders you’ve placed for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).',
       meta: '',
       icons: [],
       bodyId: 'mm-merch-modal-body',
-      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+      bodyPlaceholder: '<p class="ws-empty">Loading your orders…</p>'
     });
     if (!outer) return;
-    _mmMerchTab = tab === 'orders' ? 'orders' : 'shop';
-    _mmMerchCart = {};
-    _mmMerchPlaced = null;
-    _mmMerchCatalog = null;
     _mmMerchOrders = null;
-    renderMemberMerchBody();
-    // Load both up front: the catalog fills the Shop, the orders power
-    // both the My Orders tab and its count badge.
-    fetch('/api/supply-closet?action=merch-catalog' + notifViewAsSuffix(), { headers: rwAuthHeaders() })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-      .then(function (res) {
-        _mmMerchCatalog = res.ok
-          ? { items: res.data.items || [], variants: res.data.variants || [] }
-          : { items: [], variants: [], error: (res.data && res.data.error) || 'load failed' };
-        renderMemberMerchBody();
-      })
-      .catch(function (err) {
-        _mmMerchCatalog = { items: [], variants: [], error: (err && err.message) || 'network error' };
-        renderMemberMerchBody();
-      });
     loadMemberMerchOrders();
   }
 
@@ -15861,179 +15976,14 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         _mmMerchOrders = (res.ok && Array.isArray(res.data.orders)) ? res.data.orders : [];
-        if (_mmMerchTab === 'orders') { renderMemberMerchBody(); return; }
-        // Shop tab: update just the My Orders badge so a full re-render
-        // doesn't interrupt someone mid-typing in a qty box.
-        var modalBody = document.getElementById('mm-merch-modal-body');
-        var btn = modalBody && modalBody.querySelector('[data-mm-tab="orders"]');
-        if (btn) {
-          var openCount = (_mmMerchOrders || []).filter(function (o) { return o.status !== 'delivered' && o.status !== 'cancelled'; }).length;
-          btn.innerHTML = 'My Orders' + (openCount > 0 ? ' <span class="merch-tab-badge">' + openCount + '</span>' : '');
-        }
+        var body = document.getElementById('mm-merch-modal-body');
+        if (body) renderMemberMerchOrders(body);
       })
-      .catch(function () { if (_mmMerchOrders === null) _mmMerchOrders = []; });
-  }
-
-  function mmMerchCartTotal() {
-    var cat = _mmMerchCatalog || { variants: [] };
-    var total = 0;
-    Object.keys(_mmMerchCart).forEach(function (vid) {
-      var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
-      if (v) total += _mmMerchCart[vid] * v.price_cents;
-    });
-    return total;
-  }
-
-  function renderMemberMerchBody() {
-    var modalBody = document.getElementById('mm-merch-modal-body');
-    if (!modalBody) return;
-    var openCount = (_mmMerchOrders || []).filter(function (o) { return o.status !== 'delivered' && o.status !== 'cancelled'; }).length;
-    var h = '<div class="merch-tab-nav" role="tablist">'
-      + '<button type="button" class="portal-tab merch-tab-btn' + (_mmMerchTab === 'shop' ? ' active' : '') + '" data-mm-tab="shop" role="tab">Shop</button>'
-      + '<button type="button" class="portal-tab merch-tab-btn' + (_mmMerchTab === 'orders' ? ' active' : '') + '" data-mm-tab="orders" role="tab">My Orders'
-      + (openCount > 0 ? ' <span class="merch-tab-badge">' + openCount + '</span>' : '') + '</button>'
-      + '</div>'
-      + '<div id="mm-merch-body"></div>';
-    modalBody.innerHTML = h;
-    modalBody.querySelectorAll('.merch-tab-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var t = btn.getAttribute('data-mm-tab');
-        if (t === _mmMerchTab) return;
-        _mmMerchTab = t;
-        _mmMerchPlaced = null;
-        renderMemberMerchBody();
+      .catch(function () {
+        if (_mmMerchOrders === null) _mmMerchOrders = [];
+        var body = document.getElementById('mm-merch-modal-body');
+        if (body) renderMemberMerchOrders(body);
       });
-    });
-    var body = modalBody.querySelector('#mm-merch-body');
-    if (_mmMerchTab === 'orders') renderMemberMerchOrders(body);
-    else if (_mmMerchPlaced) renderMemberMerchConfirmation(body);
-    else renderMemberMerchShop(body);
-  }
-
-  function renderMemberMerchShop(body) {
-    var cat = _mmMerchCatalog;
-    if (!cat) { body.innerHTML = '<p class="ws-empty">Loading the catalog…</p>'; return; }
-    var h = '';
-    if (cat.error) {
-      body.innerHTML = '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
-      return;
-    }
-    if (cat.items.length === 0) {
-      body.innerHTML = '<p class="ws-empty">The shop is empty right now — check back soon!</p>';
-      return;
-    }
-    cat.items.forEach(function (item) {
-      // Server already filters to active + priced variants — this is the
-      // client-side belt to the server's suspenders (never show $0.00).
-      var variants = cat.variants.filter(function (v) { return v.item_id === item.id && v.price_cents > 0; });
-      if (variants.length === 0) return;
-      h += '<div class="ws-merch-add-form" style="margin-top:10px;">';
-      h += '<div class="ws-merch-add-header"><strong>' + escapeHtmlWs(item.name) + '</strong>'
-        + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '') + '</div>';
-      if (item.description) h += '<p class="ws-body-hint">' + escapeHtmlWs(item.description) + '</p>';
-      // Printed-to-order items (tees): say so up front (Erin, 2026-08-15).
-      if (item.preorder_only) h += '<p class="ws-body-hint"><em>Printed to order — this is a pre-order. We’ll let you know when it’s ready for pickup.</em></p>';
-      if (item.image_url) h += '<p><a href="' + escapeAttr(item.image_url) + '" target="_blank" rel="noopener" class="ws-inline-link">See a photo ↗</a></p>';
-      variants.forEach(function (v) {
-        var qty = _mmMerchCart[v.id] || 0;
-        h += '<div class="ws-lending-row"><span class="ws-lending-main">'
-          + (v.label ? escapeHtmlWs(v.label) : '<em>Standard</em>')
-          + ' · <strong>' + escapeHtmlWs(fmtCents(v.price_cents)) + '</strong>';
-        if (v.on_hand <= 0) {
-          h += '<span class="ws-lending-sub"><span class="merch-stock-pill merch-stock-low">Out of stock</span> — you can still order; it ships with the next supplier order.</span>';
-        } else if (qty > v.on_hand) {
-          h += '<span class="ws-lending-sub">Only ' + v.on_hand + ' on hand — the rest would wait on the next supplier order.</span>';
-        }
-        h += '</span><span class="ws-lending-actions"><label class="ws-wv-context" style="display:flex;align-items:center;gap:6px;">Qty '
-          + '<input type="number" class="mm-merch-qty" data-variant-id="' + v.id + '" min="0" max="99" value="' + qty + '" style="width:64px;" inputmode="numeric"></label></span></div>';
-      });
-      h += '</div>';
-    });
-    var total = mmMerchCartTotal();
-    h += '<div class="ws-merch-add-actions" style="margin-top:14px;">';
-    h += '<span class="ws-part-earned" id="mm-merch-total" style="margin-right:auto;">Total: <strong>' + escapeHtmlWs(fmtCents(total)) + '</strong> · pay at pickup</span>';
-    h += '<button type="button" class="btn btn-primary btn-sm" id="mm-merch-place"' + (total > 0 ? '' : ' disabled') + '>Place order</button>';
-    h += '</div>';
-    h += '<div class="ws-merch-add-status" id="mm-merch-status" role="status" aria-live="polite"></div>';
-    body.innerHTML = h;
-
-    body.querySelectorAll('.mm-merch-qty').forEach(function (input) {
-      input.addEventListener('input', function () {
-        var vid = parseInt(input.getAttribute('data-variant-id'), 10);
-        var q = parseInt(input.value, 10);
-        if (!Number.isFinite(q) || q <= 0) delete _mmMerchCart[vid];
-        else _mmMerchCart[vid] = Math.min(q, 99);
-        var totalEl = body.querySelector('#mm-merch-total');
-        if (totalEl) totalEl.innerHTML = 'Total: <strong>' + escapeHtmlWs(fmtCents(mmMerchCartTotal())) + '</strong> · pay at pickup';
-        var placeBtn = body.querySelector('#mm-merch-place');
-        if (placeBtn) placeBtn.disabled = mmMerchCartTotal() <= 0 && Object.keys(_mmMerchCart).length === 0;
-      });
-    });
-    var placeBtn = body.querySelector('#mm-merch-place');
-    if (placeBtn) placeBtn.addEventListener('click', function () {
-      var self = this;
-      rwArmTwoStep(self, 'place order', function () {
-        var status = body.querySelector('#mm-merch-status');
-        var lines = Object.keys(_mmMerchCart).map(function (vid) {
-          return { variant_id: parseInt(vid, 10), qty: _mmMerchCart[vid] };
-        }).filter(function (l) { return l.qty > 0; });
-        if (lines.length === 0) {
-          status.textContent = 'Pick at least one item first.';
-          status.className = 'ws-merch-add-status ws-wv-err';
-          return;
-        }
-        self.disabled = true;
-        status.textContent = 'Placing your order…';
-        status.className = 'ws-merch-add-status';
-        fetch('/api/supply-closet?action=merch-place-order' + notifViewAsSuffix(), {
-          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ lines: lines })
-        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-          .then(function (res) {
-            if (!res.ok) throw new Error((res.data && res.data.error) || 'order failed');
-            _mmMerchPlaced = res.data.order;
-            _mmMerchCart = {};
-            renderMemberMerchBody();  // confirmation view, immediately
-            loadMemberMerchOrders();  // My Orders + badge refresh behind it
-          }).catch(function (err) {
-            self.disabled = false;
-            status.textContent = 'Could not place the order: ' + ((err && err.message) || 'unknown');
-            status.className = 'ws-merch-add-status ws-wv-err';
-          });
-      });
-    });
-  }
-
-  function renderMemberMerchConfirmation(body) {
-    var o = _mmMerchPlaced;
-    if (!o) { renderMemberMerchShop(body); return; }
-    var h = '<div class="ws-merch-add-form">';
-    h += '<div class="ws-merch-add-header"><strong>Order placed — thank you!</strong></div>';
-    h += '<p class="ws-body-hint">Bring payment to the next event: <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong> due at pickup (cash, check, or PayPal to the Merchandise Manager).</p>';
-    (o.lines || []).forEach(function (l) {
-      h += '<div class="ws-lending-row"><span class="ws-lending-main">' + l.qty + ' × '
-        + escapeHtmlWs(l.item_name + (l.variant_label ? ' — ' + l.variant_label : ''))
-        + ' — ' + escapeHtmlWs(fmtCents(l.qty * l.price_cents_each));
-      if (l.stock_status === 'backordered') {
-        h += '<span class="ws-lending-sub">Waiting on the next supplier order — the Merchandise Manager will let you know when it’s in.</span>';
-      } else {
-        h += '<span class="ws-lending-sub">Reserved for you.</span>';
-      }
-      h += '</span></div>';
-    });
-    h += '<div class="ws-merch-add-actions">';
-    h += '<button type="button" class="btn btn-outline-dark btn-sm" id="mm-merch-back">Back to the shop</button>';
-    h += '<button type="button" class="btn btn-primary btn-sm" id="mm-merch-to-orders">See My Orders</button>';
-    h += '</div></div>';
-    body.innerHTML = h;
-    body.querySelector('#mm-merch-back').addEventListener('click', function () {
-      _mmMerchPlaced = null;
-      renderMemberMerchBody();
-    });
-    body.querySelector('#mm-merch-to-orders').addEventListener('click', function () {
-      _mmMerchPlaced = null;
-      _mmMerchTab = 'orders';
-      renderMemberMerchBody();
-    });
   }
 
   function mmMerchStatusPill(o) {
@@ -16048,7 +15998,7 @@
     if (_mmMerchOrders === null) { body.innerHTML = '<p class="ws-empty">Loading your orders…</p>'; return; }
     var orders = _mmMerchOrders;
     if (orders.length === 0) {
-      body.innerHTML = '<p class="ws-empty">No orders yet — visit the Shop tab to place your first one.</p>';
+      body.innerHTML = '<p class="ws-empty">No orders yet — <a class="ws-inline-link" href="index.html#merch">shop the merch page</a> to place your first one.</p>';
       return;
     }
     var h = '';
@@ -16077,6 +16027,8 @@
       h += '</p>';
       h += '</div>';
     });
+    h += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="index.html#merch">Purchase Merch</a>'
+      + '<span class="ws-part-submit-hint">Order more from the shop on our public site — pay at pickup.</span></p>';
     body.innerHTML = h;
   }
 
@@ -24137,8 +24089,7 @@
     else if (action === 'lending-browse' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true });
     else if (action === 'lending-offer' && typeof showSupplyClosetPopup === 'function') showSupplyClosetPopup(true, { lendingOnly: true, addLend: true });
     else if (action === 'lending-requests' && typeof showLendingRequestsModal === 'function') showLendingRequestsModal();
-    else if (action === 'merch-shop' && typeof showMemberMerchModal === 'function') showMemberMerchModal('shop');
-    else if (action === 'merch-my-orders' && typeof showMemberMerchModal === 'function') showMemberMerchModal('orders');
+    else if (action === 'merch-my-orders' && typeof showMemberMerchOrdersModal === 'function') showMemberMerchOrdersModal();
     // Merchandise Manager To Do deep-links (Erin, 2026-08-15).
     else if (action === 'merch-catalog-needs' && typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'catalog', needsOnly: true });
     else if (action === 'merch-orders-open' && typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'desk' });
@@ -26469,6 +26420,13 @@
         }
       } else if ((nType === 'event_signups_open' || nType === 'discussion_post') && /^evspace:\d+$/.test(nLink)) {
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
+      } else if (nType === 'merch_ready') {
+        // "Your merch order is ready" → the family's My Merch Orders detail
+        // modal (2026-08-15; the Heads-up card lists the same orders).
+        if (typeof showMemberMerchOrdersModal === 'function') showMemberMerchOrdersModal();
+      } else if (nType === 'merch_order') {
+        // Manager-side "New merch order from …" → the Desk queue.
+        if (typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'desk' });
       } else if (['coverage_needed', 'slot_claimed', 'slot_reassigned', 'kids_absent'].indexOf(nType) !== -1 || !nType) {
         // Codebase review 2026-08-08: this targeted #coverage, which
         // doesn't exist — the real card is #coverageBoardCard (a collapsed
@@ -38311,10 +38269,8 @@
         // Cache for the roster drill-in modal.
         _communityRoster = fams;
 
-        // Roll the card title to whatever season the server is serving.
-        var dataSeason = (res.data && res.data.season) ? res.data.season : ACTIVE_YEAR.label;
-        var titleEl = document.getElementById('mfMsumTitleText');
-        if (titleEl) titleEl.textContent = seasonShortLabel(dataSeason) + ' Members';
+        // Card is titled "My Community" now (Erin 2026-08-15) — the season
+        // no longer rides in the title, so no per-season relabel here.
 
         if (fams.length === 0) {
           el.innerHTML = '<p class="ws-empty">No families registered yet this season.</p>';
