@@ -2802,3 +2802,46 @@ WHERE mi.item NOT IN ('tshirt', 'mug', 'tumbler', 'pin', 'patch', 'tote')
   AND NOT EXISTS (SELECT 1 FROM merch_variants x
                   WHERE x.item_id = it.id
                     AND LOWER(x.label) = LOWER(TRIM(mi.size || CASE WHEN mi.size <> '' AND mi.color <> '' THEN ' — ' ELSE '' END || mi.color)));
+
+-- Tee price tiers (Erin, 2026-08-15): Toddler $10, Kids/Youth $15,
+-- Adult $20 — price + ACTIVATE. Only touches migrate-seeded tee rows
+-- still sitting at the $10 placeholder and inactive, so anything the
+-- manager has already re-priced or toggled by hand is left alone.
+UPDATE merch_variants v SET price_cents = 1000, active = TRUE, updated_by = 'migrate.sql'
+FROM merch_items it
+WHERE it.id = v.item_id AND LOWER(it.name) = 't-shirt'
+  AND v.label LIKE 'Toddler %' AND v.price_cents = 1000 AND v.active = FALSE AND v.updated_by = 'migrate.sql';
+
+UPDATE merch_variants v SET price_cents = 1500, active = TRUE, updated_by = 'migrate.sql'
+FROM merch_items it
+WHERE it.id = v.item_id AND LOWER(it.name) = 't-shirt'
+  AND v.label LIKE 'Kids %' AND v.price_cents = 1000 AND v.active = FALSE AND v.updated_by = 'migrate.sql';
+
+UPDATE merch_variants v SET price_cents = 2000, active = TRUE, updated_by = 'migrate.sql'
+FROM merch_items it
+WHERE it.id = v.item_id AND LOWER(it.name) = 't-shirt'
+  AND v.label LIKE 'Adult %' AND v.price_cents = 1000 AND v.active = FALSE AND v.updated_by = 'migrate.sql';
+
+-- Keychain + Sticker (Erin, 2026-08-15): $2 each, ACTIVE. A hand-count
+-- 'sticker' row may already have carried over above (as an item named
+-- 'sticker' with a $0 inactive variant) — the item match is
+-- case-insensitive so it is reused, and its $0 variant gets priced.
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Keychain', 'Roots & Wings logo keychain.', '', TRUE, 7, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'keychain');
+
+INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
+SELECT 'Sticker', 'Roots & Wings logo sticker.', '', TRUE, 8, 'migrate.sql'
+WHERE NOT EXISTS (SELECT 1 FROM merch_items WHERE LOWER(name) = 'sticker');
+
+INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, updated_by)
+SELECT it.id, '', 200, COALESCE(mi.on_hand, 0), 0, COALESCE(mi.low_threshold, 0), TRUE, 0, 'migrate.sql'
+FROM merch_items it
+LEFT JOIN merch_inventory mi ON LOWER(mi.item) = LOWER(it.name) AND mi.size = '' AND mi.color = ''
+WHERE LOWER(it.name) IN ('keychain', 'sticker')
+  AND NOT EXISTS (SELECT 1 FROM merch_variants x WHERE x.item_id = it.id);
+
+UPDATE merch_variants v SET price_cents = 200, active = TRUE, updated_by = 'migrate.sql'
+FROM merch_items it
+WHERE it.id = v.item_id AND LOWER(it.name) IN ('keychain', 'sticker')
+  AND v.price_cents = 0 AND v.active = FALSE;
