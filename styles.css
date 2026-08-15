@@ -12346,10 +12346,13 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   color: var(--color-primary-dark);
   border-bottom-color: var(--color-primary);
 }
-/* Merch Desk (#351) — quick-sale grid is phone-first: big tap targets
-   for selling while standing at a folding table. Everything else on the
-   Merch Desk tabs reuses the existing ws-merch-add-* / ws-lending-row /
-   merch-inv-edit building blocks. */
+/* Merch Desk (#351) — Quick Sale is a standalone PHONE-FIRST modal (Erin,
+   2026-08-15: used standing at a folding table). One tile per ITEM, an
+   inline Size → Color picker under the tapped tile, and a cart pinned to
+   the bottom of the modal (compact bar → expanded checkout). Everything
+   is ≥44px tall, no hover-only affordances, nothing scrolls sideways at
+   390px. Everything else on the Merch Desk tabs reuses the existing
+   ws-merch-add-* / ws-lending-row / merch-inv-edit building blocks. */
 .merch-qs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -12363,6 +12366,9 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   align-items: flex-start;
   justify-content: center;
   gap: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.92rem;
   text-align: left;
   white-space: normal;
   line-height: 1.25;
@@ -12374,6 +12380,158 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 .merch-qs-item-on .merch-qs-item-price { color: var(--color-primary); font-weight: 700; }
+.merch-qs-item-open {
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border-color: var(--color-primary);
+}
+.merch-qs-count {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+.merch-qs-out {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b93a33;
+  margin-left: 4px;
+}
+/* Inline variant picker — spans the grid under the tapped tile. */
+.merch-qs-picker {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(var(--color-primary-rgb), 0.05);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+.merch-qs-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-heading);
+  color: var(--color-primary-dark);
+}
+.merch-qs-axis { display: flex; flex-direction: column; gap: 6px; }
+.merch-qs-axis-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-light);
+}
+.merch-qs-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Thumb-sized chip: sc-btn look, 44px floor. */
+.merch-qs-chip {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  background: var(--color-white);
+}
+.merch-qs-chip:disabled { opacity: 0.45; cursor: default; }
+.merch-qs-chip-sub { font-size: 0.78rem; color: var(--color-text-light); margin-left: 4px; }
+.merch-qs-chip-on,
+.merch-qs-chip-on:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.merch-qs-chip-on .merch-qs-chip-sub { color: rgba(255, 255, 255, 0.85); }
+.merch-qs-picker-close { padding: 8px 12px; font-size: 1.1rem; line-height: 1; }
+/* Pinned cart — sticks to the bottom of the modal's scroll area. */
+.merch-qs-cart {
+  position: sticky;
+  bottom: 0; /* the modal card (.person-detail-card) is the scroll container */
+  z-index: 2;
+  margin-top: 14px;
+  background: var(--color-white);
+  border-top: 2px solid var(--color-primary);
+  box-shadow: 0 -8px 14px -10px rgba(0, 0, 0, 0.35);
+}
+.merch-qs-cart-bar {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 4px;
+  border: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+.merch-qs-cart-sum strong { color: var(--color-primary-dark); }
+.merch-qs-cart-cta { color: var(--color-primary); font-weight: 700; white-space: nowrap; }
+.merch-qs-cart-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 8px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.merch-qs-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-border);
+}
+.merch-qs-line-name { flex: 1 1 auto; min-width: 0; font-size: 0.92rem; overflow-wrap: anywhere; }
+.merch-qs-line-price { display: block; font-size: 0.85rem; color: var(--color-text-light); }
+.merch-qs-qty { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
+.merch-qs-qty .merch-qs-chip { padding: 8px 0; font-size: 1.15rem; }
+.merch-qs-qty-n { min-width: 1.6em; text-align: center; font-weight: 700; font-size: 1rem; }
+.merch-qs-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 0 0;
+  border-top: 2px solid var(--color-border);
+  font-size: 1.05rem;
+}
+.merch-qs-total strong { font-size: 1.25rem; color: var(--color-primary-dark); }
+.merch-qs-note { margin: 0; }
+.merch-qs-buyer .ws-merch-add-field input { min-height: 44px; font-size: 1rem; }
+.merch-qs-methods { display: flex; gap: 8px; }
+.merch-qs-methods .merch-qs-chip { flex: 1 1 0; text-align: center; justify-content: center; font-weight: 600; }
+.merch-qs-record {
+  width: 100%;
+  justify-content: center;
+  min-height: 52px;
+  padding: 12px 16px;
+  font-size: 1.05rem;
+}
+.merch-qs-actions { display: flex; justify-content: flex-end; }
+.merch-qs-actions .btn { min-height: 44px; }
+.merch-qs-done {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(90, 107, 57, 0.12); /* --color-success (olive) */
+  border-left: 3px solid var(--color-success);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.merch-qs-empty { margin-top: 12px; }
 /* Inline expanding row (payment-method chips / receive-stock form) under
    a Desk Orders or Catalog row. */
 .merch-desk-payrow {
