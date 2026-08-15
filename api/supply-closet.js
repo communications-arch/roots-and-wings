@@ -20,7 +20,7 @@ const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isS
 const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
 const { resolveFamily } = require('./_family');
-const { allocateOrder, needsOrderingQty, normalizeLines } = require('./_merch');
+const { allocateOrder, reallocateBackorders, needsOrderingQty, normalizeLines } = require('./_merch');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1305,6 +1305,19 @@ async function handleLoanRemindersCron(req, res) {
 // it just can't be recorded on anything new.
 const MERCH_PAYMENT_METHODS = ['cash', 'check', 'paypal'];
 
+// merch_desk_orders.source = where an order came from: 'portal' (member
+// Shop), 'event' (Quick Sale), 'web' (public homepage form, api/tour.js).
+// The manager's Orders tab shows web + portal as "Web" (ordered ahead)
+// and event as "Event" (Erin, 2026-08-15). Rows from before the column
+// existed are back-filled by migrate.sql.
+
+// Free-text fields the manager types (vendor, notes): trim, drop any
+// markup, cap the length. Escaping still happens at every render sink —
+// this just keeps junk out of the ledger.
+function merchCleanText(v, max) {
+  return String(v == null ? '' : v).replace(/<[^>]*>/g, '').trim().slice(0, max);
+}
+
 async function canManageMerchDesk(email) {
   if (!email) return false;
   if (isSuperUser(email)) return true;
@@ -1335,7 +1348,7 @@ async function merchLoadVariants(sql, lines, requireActive) {
   const vids = lines.map(l => l.variant_id);
   const rows = await sql`
     SELECT v.id, v.item_id, v.label, v.price_cents, v.on_hand, v.active,
-           i.name AS item_name, i.active AS item_active
+           i.name AS item_name, i.active AS item_active, i.preorder_only AS item_preorder_only
     FROM merch_variants v
     JOIN merch_items i ON i.id = v.item_id
     WHERE v.id = ANY(${vids})
@@ -1411,7 +1424,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
   if (action === 'merch-catalog') {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const items = await sql`
-      SELECT id, name, description, image_url, sort_order
+      SELECT id, name, description, image_url, sort_order, preorder_only
       FROM merch_items WHERE active = TRUE
       ORDER BY sort_order, name
     `;
@@ -1464,9 +1477,9 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const famEmail = await merchFamilyEmailFor(sql, email);
     const buyerName = await merchBuyerNameFor(sql, email, user.name);
     const ins = await sql`
-      INSERT INTO merch_desk_orders (family_email, buyer_name, status, total_cents, note, created_by_email)
-      VALUES (${famEmail}, ${buyerName}, 'pending_payment', ${alloc.total_cents}, ${note}, ${email})
-      RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at
+      INSERT INTO merch_desk_orders (family_email, buyer_name, status, total_cents, note, created_by_email, source)
+      VALUES (${famEmail}, ${buyerName}, 'pending_payment', ${alloc.total_cents}, ${note}, ${email}, 'portal')
+      RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
     `;
     const order = ins[0];
     for (const l of alloc.lines) {
@@ -1506,12 +1519,13 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
   if (action === 'merch-admin-catalog') {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const items = await sql`
-      SELECT id, name, description, image_url, active, sort_order, updated_at, updated_by
+      SELECT id, name, description, image_url, active, sort_order, updated_at, updated_by,
+             vendor_name, vendor_url, notes, preorder_only
       FROM merch_items ORDER BY sort_order, name
     `;
     const variants = await sql`
       SELECT id, item_id, label, price_cents, on_hand, on_order, restock_threshold,
-             active, sort_order, updated_at, updated_by
+             active, sort_order, updated_at, updated_by, notes
       FROM merch_variants ORDER BY item_id, sort_order, label
     `;
     const demand = await sql`
@@ -1529,7 +1543,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const orders = await sql`
       SELECT id, family_email, buyer_name, status, payment_method, paid_at,
              total_cents, note, created_at, created_by_email,
-             contact_email, contact_phone, screen_reason
+             contact_email, contact_phone, screen_reason, source
       FROM merch_desk_orders
       ORDER BY created_at DESC
       LIMIT 300
@@ -1602,6 +1616,102 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     return res.status(400).json({ error: 'set must be paid, ready, delivered, or cancel' });
   }
 
+  // "Not spam" for a screened public-form order (Orders tab bucket).
+  // Clears screen_reason and — because screened orders were saved
+  // all-backordered so junk could never drain the shelf — re-runs
+  // allocation against CURRENT stock (api/_merch.js reallocateBackorders):
+  // each backordered line becomes allocated for what stock covers now,
+  // with any remainder split off as a fresh backordered line. No email
+  // goes out (the buyer's confirmation never sent — the manager follows
+  // up by hand, same as the legacy rescue).
+  if (action === 'merch-order-unscreen') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const id = parseInt(body.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+    const rows = await sql`SELECT * FROM merch_desk_orders WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Order not found.' });
+    const order = rows[0];
+    if (order.status === 'cancelled') return res.status(409).json({ error: 'That order was cancelled.' });
+    if (!order.screen_reason) return res.status(409).json({ error: 'That order isn’t screened.' });
+
+    const back = await sql`
+      SELECT id, variant_id, qty, price_cents_each FROM merch_desk_order_items
+      WHERE order_id = ${id} AND stock_status = 'backordered'
+      ORDER BY id
+    `;
+    let reallocated = 0;
+    if (back.length) {
+      const vids = back.map(l => l.variant_id);
+      const stockRows = await sql`SELECT id, on_hand FROM merch_variants WHERE id = ANY(${vids})`;
+      const onHand = {};
+      stockRows.forEach(r => { onHand[r.id] = r.on_hand; });
+      const re = reallocateBackorders(back, onHand);
+      const priceById = {};
+      back.forEach(l => { priceById[l.id] = l.price_cents_each; });
+      for (const u of re.updates) {
+        if (u.allocated <= 0) continue;
+        reallocated += u.allocated;
+        await sql`UPDATE merch_desk_order_items SET qty = ${u.allocated}, stock_status = 'allocated' WHERE id = ${u.id}`;
+        if (u.backordered > 0) {
+          await sql`
+            INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
+            VALUES (${id}, ${u.variant_id}, ${u.backordered}, ${priceById[u.id] || 0}, 'backordered')
+          `;
+        }
+      }
+      for (const vid of Object.keys(re.decrements)) {
+        await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${re.decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
+      }
+    }
+    const upd = await sql`
+      UPDATE merch_desk_orders SET screen_reason = '' WHERE id = ${id} RETURNING *
+    `;
+    const linesByOrder = await merchLinesByOrder(sql, [id]);
+    return res.status(200).json({
+      order: Object.assign({}, upd[0], { lines: linesByOrder[id] || [] }),
+      reallocated
+    });
+  }
+
+  // Cheap counts for the Merchandise Manager's To Do card: variants
+  // that need ordering (open backorders or below the restock threshold)
+  // + open orders waiting on the manager (Desk queue + legacy web-form
+  // rows not yet delivered), both excluding screened rows.
+  if (action === 'merch-todo-counts') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const needs = await sql`
+      SELECT COUNT(*)::int AS n
+      FROM merch_variants v
+      LEFT JOIN (
+        SELECT oi.variant_id, SUM(oi.qty)::int AS backordered
+        FROM merch_desk_order_items oi
+        JOIN merch_desk_orders o ON o.id = oi.order_id
+        WHERE oi.stock_status = 'backordered' AND o.status NOT IN ('cancelled', 'delivered')
+        GROUP BY oi.variant_id
+      ) b ON b.variant_id = v.id
+      WHERE v.active = TRUE
+        AND (COALESCE(b.backordered, 0) > 0 OR v.on_hand < v.restock_threshold)
+    `;
+    const deskOpen = await sql`
+      SELECT COUNT(*)::int AS n FROM merch_desk_orders
+      WHERE status IN ('pending_payment', 'paid', 'ready') AND screen_reason = ''
+    `;
+    let legacyOpen = 0;
+    try {
+      const lo = await sql`
+        SELECT COUNT(*)::int AS n FROM merch_orders
+        WHERE delivered_at IS NULL AND screen_reason = ''
+      `;
+      legacyOpen = (lo[0] && lo[0].n) || 0;
+    } catch (legacyErr) {
+      console.error('merch-todo-counts legacy count (non-fatal):', legacyErr);
+    }
+    return res.status(200).json({
+      needs: (needs[0] && needs[0].n) || 0,
+      open: ((deskOpen[0] && deskOpen[0].n) || 0) + legacyOpen
+    });
+  }
+
   // Catalog item upsert.
   if (action === 'merch-item-save') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -1611,21 +1721,33 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const imageUrl = String(body.image_url || '').trim().slice(0, 500);
     const active = body.active === undefined ? true : !!body.active;
     const sortOrder = Math.max(0, Math.min(parseInt(body.sort_order, 10) || 0, 10000));
+    // Vendor + notes carried over from the retired Inventory tab (Erin,
+    // 2026-08-15); preorder_only = printed to order (tees) — Quick Sale
+    // records these as pre-orders, and the Shop/public form say so.
+    const vendorName = merchCleanText(body.vendor_name, 200);
+    const vendorUrl = merchCleanText(body.vendor_url, 500);
+    const notes = merchCleanText(body.notes, 1000);
+    const preorderOnly = !!body.preorder_only;
     const id = body.id != null ? parseInt(body.id, 10) : null;
     let row;
     if (Number.isInteger(id) && id > 0) {
       const upd = await sql`
         UPDATE merch_items
         SET name = ${name}, description = ${description}, image_url = ${imageUrl},
-            active = ${active}, sort_order = ${sortOrder}, updated_at = NOW(), updated_by = ${email}
+            active = ${active}, sort_order = ${sortOrder},
+            vendor_name = ${vendorName}, vendor_url = ${vendorUrl}, notes = ${notes},
+            preorder_only = ${preorderOnly},
+            updated_at = NOW(), updated_by = ${email}
         WHERE id = ${id} RETURNING *
       `;
       if (!upd.length) return res.status(404).json({ error: 'Item not found.' });
       row = upd[0];
     } else {
       const ins = await sql`
-        INSERT INTO merch_items (name, description, image_url, active, sort_order, updated_by)
-        VALUES (${name}, ${description}, ${imageUrl}, ${active}, ${sortOrder}, ${email})
+        INSERT INTO merch_items (name, description, image_url, active, sort_order,
+                                 vendor_name, vendor_url, notes, preorder_only, updated_by)
+        VALUES (${name}, ${description}, ${imageUrl}, ${active}, ${sortOrder},
+                ${vendorName}, ${vendorUrl}, ${notes}, ${preorderOnly}, ${email})
         RETURNING *
       `;
       row = ins[0];
@@ -1647,6 +1769,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const restockThreshold = Math.max(0, Math.min(parseInt(body.restock_threshold, 10) || 0, 100000));
     const active = body.active === undefined ? true : !!body.active;
     const sortOrder = Math.max(0, Math.min(parseInt(body.sort_order, 10) || 0, 10000));
+    const notes = merchCleanText(body.notes, 1000);
     const id = body.id != null ? parseInt(body.id, 10) : null;
     let row;
     if (Number.isInteger(id) && id > 0) {
@@ -1654,7 +1777,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         UPDATE merch_variants
         SET label = ${label}, price_cents = ${priceCents}, on_order = ${onOrder},
             restock_threshold = ${restockThreshold}, active = ${active},
-            sort_order = ${sortOrder}, updated_at = NOW(), updated_by = ${email}
+            sort_order = ${sortOrder}, notes = ${notes}, updated_at = NOW(), updated_by = ${email}
         WHERE id = ${id} RETURNING *
       `;
       if (!upd.length) return res.status(404).json({ error: 'Variant not found.' });
@@ -1664,8 +1787,8 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       const item = await sql`SELECT id FROM merch_items WHERE id = ${itemId}`;
       if (!item.length) return res.status(404).json({ error: 'Item not found.' });
       const ins = await sql`
-        INSERT INTO merch_variants (item_id, label, price_cents, on_order, restock_threshold, active, sort_order, updated_by)
-        VALUES (${itemId}, ${label}, ${priceCents}, ${onOrder}, ${restockThreshold}, ${active}, ${sortOrder}, ${email})
+        INSERT INTO merch_variants (item_id, label, price_cents, on_order, restock_threshold, active, sort_order, notes, updated_by)
+        VALUES (${itemId}, ${label}, ${priceCents}, ${onOrder}, ${restockThreshold}, ${active}, ${sortOrder}, ${notes}, ${email})
         RETURNING *
       `;
       row = ins[0];
@@ -1748,27 +1871,66 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const loaded = await merchLoadVariants(sql, lines, false);
     if (loaded.error) return res.status(409).json({ error: loaded.error });
 
-    let total = 0;
-    const priced = lines.map(l => {
+    // Printed-to-order items (merch_items.preorder_only — tees) can't be
+    // handed over at the table (Erin, 2026-08-15): those lines become a
+    // separate PRE-ORDER (paid now, allocated/backordered against stock,
+    // NOT delivered) so the queue still shows a pickup owed. Everything
+    // else is the instant, delivered + paid sale it always was. A mixed
+    // cart yields two orders — both returned.
+    const instant = [];
+    const preorder = [];
+    lines.forEach(l => {
       const v = loaded.variants[l.variant_id];
-      total += l.qty * v.price_cents;
-      return { variant_id: l.variant_id, qty: l.qty, price_cents_each: v.price_cents };
+      (v.item_preorder_only ? preorder : instant).push({ variant_id: l.variant_id, qty: l.qty, price_cents_each: v.price_cents });
     });
-    const ins = await sql`
-      INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email)
-      VALUES (${famEmail}, ${buyerName}, 'delivered', ${method}, NOW(), ${total}, ${note}, ${email})
-      RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at
-    `;
-    const order = ins[0];
-    for (const l of priced) {
-      await sql`
-        INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
-        VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, 'allocated')
+    const orders = [];
+
+    if (instant.length) {
+      const total = instant.reduce((s, l) => s + l.qty * l.price_cents_each, 0);
+      const ins = await sql`
+        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
+        VALUES (${famEmail}, ${buyerName}, 'delivered', ${method}, NOW(), ${total}, ${note}, ${email}, 'event')
+        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
       `;
-      await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${l.qty}, 0), updated_at = NOW() WHERE id = ${l.variant_id}`;
+      const order = ins[0];
+      for (const l of instant) {
+        await sql`
+          INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
+          VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, 'allocated')
+        `;
+        await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${l.qty}, 0), updated_at = NOW() WHERE id = ${l.variant_id}`;
+      }
+      orders.push(order);
     }
-    const linesByOrder = await merchLinesByOrder(sql, [order.id]);
-    return res.status(201).json({ order: Object.assign({}, order, { lines: linesByOrder[order.id] || [] }) });
+
+    if (preorder.length) {
+      const onHandByVariant = {};
+      preorder.forEach(l => { onHandByVariant[l.variant_id] = loaded.variants[l.variant_id].on_hand; });
+      const alloc = allocateOrder(preorder, onHandByVariant);
+      const preNote = (note ? note + ' — ' : '') + 'Pre-order from the merch table (printed to order).';
+      const ins = await sql`
+        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
+        VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${alloc.total_cents}, ${preNote.slice(0, 500)}, ${email}, 'event')
+        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
+      `;
+      const order = ins[0];
+      for (const l of alloc.lines) {
+        await sql`
+          INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
+          VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, ${l.stock_status})
+        `;
+      }
+      for (const vid of Object.keys(alloc.decrements)) {
+        await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${alloc.decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
+      }
+      orders.push(order);
+    }
+
+    const linesByOrder = await merchLinesByOrder(sql, orders.map(o => o.id));
+    const withLines = orders.map(o => Object.assign({}, o, { lines: linesByOrder[o.id] || [] }));
+    // `order` = the first (instant sale when present) for older clients;
+    // `orders` = everything this cart produced.
+    return res.status(201).json({ order: withLines[0], orders: withLines, preorder: preorder.length > 0 });
   }
 
   return res.status(400).json({ error: 'Unknown merch action' });

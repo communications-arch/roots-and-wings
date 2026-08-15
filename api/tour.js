@@ -5259,7 +5259,7 @@ async function handleMerchDeskCatalogPublic(req, res) {
   try {
     const sql = getSql();
     const items = await sql`
-      SELECT id, name, description, image_url, sort_order
+      SELECT id, name, description, image_url, sort_order, preorder_only
       FROM merch_items WHERE active = TRUE
       ORDER BY sort_order, name
     `;
@@ -5404,10 +5404,10 @@ async function handleMerchDeskPublicOrder(body, req, res) {
     const ins = await sql`
       INSERT INTO merch_desk_orders (
         family_email, buyer_name, status, total_cents, note,
-        created_by_email, contact_email, contact_phone, screen_reason
+        created_by_email, contact_email, contact_phone, screen_reason, source
       ) VALUES (
         ${famEmail}, ${name}, 'pending_payment', ${totalCents}, ${notes},
-        'public-form', ${email.toLowerCase()}, ${phone}, ${junkReason || ''}
+        'public-form', ${email.toLowerCase()}, ${phone}, ${junkReason || ''}, 'web'
       )
       RETURNING id, total_cents
     `;

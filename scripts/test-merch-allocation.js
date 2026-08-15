@@ -13,7 +13,7 @@
 // Usage: node scripts/test-merch-allocation.js   (also runs in npm test)
 
 const assert = require('assert');
-const { normalizeLines, splitLine, allocateOrder, orderTotalCents, needsOrderingQty } = require('../api/_merch.js');
+const { normalizeLines, splitLine, allocateOrder, reallocateBackorders, orderTotalCents, needsOrderingQty } = require('../api/_merch.js');
 
 let passed = 0;
 let failed = 0;
@@ -112,6 +112,43 @@ t('allocateOrder: does not mutate the caller stock map', () => {
   const stock = { 9: 4 };
   allocateOrder([{ variant_id: 9, qty: 4, price_cents_each: 100 }], stock);
   assert.strictEqual(stock[9], 4);
+});
+
+// ── reallocateBackorders (merch-order-unscreen) ────────────────────────
+// A screened public-form order saved every line backordered; "Not spam"
+// re-runs allocation against CURRENT stock, keyed by stored line id so
+// the handler can UPDATE the allocated part in place and INSERT the
+// still-backordered remainder.
+t('reallocateBackorders: fully coverable line → all allocated, one decrement', () => {
+  const r = reallocateBackorders([{ id: 11, variant_id: 3, qty: 2 }], { 3: 5 });
+  assert.deepStrictEqual(r.updates, [{ id: 11, variant_id: 3, allocated: 2, backordered: 0 }]);
+  assert.deepStrictEqual(r.decrements, { 3: 2 });
+});
+t('reallocateBackorders: partial coverage keeps the id and splits the qty', () => {
+  const r = reallocateBackorders([{ id: 12, variant_id: 3, qty: 4 }], { 3: 1 });
+  assert.deepStrictEqual(r.updates, [{ id: 12, variant_id: 3, allocated: 1, backordered: 3 }]);
+  assert.deepStrictEqual(r.decrements, { 3: 1 });
+});
+t('reallocateBackorders: still out of stock → untouched, no decrement', () => {
+  const r = reallocateBackorders([{ id: 13, variant_id: 9, qty: 2 }], { 9: 0 });
+  assert.deepStrictEqual(r.updates, [{ id: 13, variant_id: 9, allocated: 0, backordered: 2 }]);
+  assert.deepStrictEqual(r.decrements, {});
+});
+t('reallocateBackorders: two lines on one variant drain the same pool', () => {
+  const r = reallocateBackorders(
+    [{ id: 21, variant_id: 4, qty: 2 }, { id: 22, variant_id: 4, qty: 2 }],
+    { 4: 3 }
+  );
+  assert.deepStrictEqual(r.updates, [
+    { id: 21, variant_id: 4, allocated: 2, backordered: 0 },
+    { id: 22, variant_id: 4, allocated: 1, backordered: 1 }
+  ]);
+  assert.deepStrictEqual(r.decrements, { 4: 3 });
+});
+t('reallocateBackorders: does not mutate the caller stock map', () => {
+  const stock = { 5: 2 };
+  reallocateBackorders([{ id: 1, variant_id: 5, qty: 2 }], stock);
+  assert.strictEqual(stock[5], 2);
 });
 
 // ── orderTotalCents ────────────────────────────────────────────────────

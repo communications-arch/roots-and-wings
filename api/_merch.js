@@ -83,6 +83,35 @@ function allocateOrder(lines, onHandByVariant) {
   return { lines: out, decrements: decrements, total_cents: total };
 }
 
+// Re-run allocation for STORED backordered lines against current stock —
+// used when the manager rescues a screened public-form order (those
+// were saved all-backordered so junk could never drain the shelf) via
+// merch-order-unscreen. Same sequential-pool math as allocateOrder,
+// but keyed by stored line id so the caller can UPDATE each row in
+// place (allocated part) and INSERT the remainder (still backordered).
+//   lines:           [{ id, variant_id, qty }]   (stock_status = 'backordered')
+//   onHandByVariant: { [variant_id]: on_hand }   (NOT mutated)
+// → {
+//   updates:    [{ id, variant_id, allocated, backordered }]  one per input line
+//   decrements: { [variant_id]: unitsTakenFromStock }
+// }
+function reallocateBackorders(lines, onHandByVariant) {
+  const stock = {};
+  Object.keys(onHandByVariant || {}).forEach(k => {
+    stock[k] = Math.max(0, parseInt(onHandByVariant[k], 10) || 0);
+  });
+  const updates = [];
+  const decrements = {};
+  (lines || []).forEach(line => {
+    const vid = line.variant_id;
+    const split = splitLine(line.qty, stock[vid]);
+    stock[vid] = split.remainingOnHand;
+    updates.push({ id: line.id, variant_id: vid, allocated: split.allocated, backordered: split.backordered });
+    if (split.allocated > 0) decrements[vid] = (decrements[vid] || 0) + split.allocated;
+  });
+  return { updates: updates, decrements: decrements };
+}
+
 // Sum of qty × price for stored order lines.
 function orderTotalCents(lines) {
   return (lines || []).reduce((sum, l) => {
@@ -102,4 +131,4 @@ function needsOrderingQty(variant, backorderedDemand) {
   return Math.max(0, demand + shortfall - onOrder);
 }
 
-module.exports = { normalizeLines, splitLine, allocateOrder, orderTotalCents, needsOrderingQty };
+module.exports = { normalizeLines, splitLine, allocateOrder, reallocateBackorders, orderTotalCents, needsOrderingQty };

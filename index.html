@@ -1001,6 +1001,7 @@
               <button type="button" id="merch-add-line" class="btn btn-primary btn-sm" style="width:100%;">Add to order</button>
             </div>
           </div>
+          <p id="merch-preorder-note" hidden style="margin:-4px 0 10px;font-size:0.85rem;font-style:italic;color:#5c5c5c;">Printed to order — this item is a pre-order. We’ll let you know when it’s ready for pickup.</p>
           <div id="merch-cart" style="margin-bottom:12px;"></div>
         </div>
         <div class="tour-form-field">
@@ -1117,6 +1118,10 @@
             });
             if (vs.length) variantSel.selectedIndex = 0;
             variantField.style.display = '';
+            // Printed-to-order items (tees): say so before they add one.
+            var preNote = document.getElementById('merch-preorder-note');
+            var curItem = itemById(itemId);
+            if (preNote) preNote.hidden = !(curItem && curItem.preorder_only);
           }
           function renderCart() {
             cartEl.textContent = '';

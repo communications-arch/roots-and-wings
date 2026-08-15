@@ -2845,3 +2845,116 @@ UPDATE merch_variants v SET price_cents = 200, active = TRUE, updated_by = 'migr
 FROM merch_items it
 WHERE it.id = v.item_id AND LOWER(it.name) IN ('keychain', 'sticker')
   AND v.price_cents = 0 AND v.active = FALSE;
+
+-- ──────────────────────────────────────────────
+-- Merch manager consolidation (#351, 2026-08-15)
+-- ──────────────────────────────────────────────
+-- Erin (as Merch Manager on dev): ONE Orders tab with a Source badge,
+-- Inventory folded into Catalog & Stock, Needs Ordering → To Do items.
+--   source        where a desk order came from (web / portal / event) —
+--                 set by every write path, back-filled below for rows
+--                 that predate the column (public-form → web, no family
+--                 → event, otherwise portal).
+--   vendor/notes  the two things the retired Inventory tab had that the
+--                 catalog lacked — carried over from merch_inventory
+--                 (first non-empty legacy value per item, notes per
+--                 matching variant), only where the catalog field is
+--                 still blank so re-runs never clobber a manager edit.
+--   preorder_only printed-to-order items (tees) — Quick Sale records
+--                 these as pre-orders, Shop / public form say so.
+ALTER TABLE merch_desk_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+
+UPDATE merch_desk_orders
+SET source = CASE
+  WHEN created_by_email = 'public-form' THEN 'web'
+  WHEN family_email IS NULL OR family_email = '' THEN 'event'
+  ELSE 'portal'
+END
+WHERE source = '';
+
+ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS vendor_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS vendor_url  TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS notes       TEXT NOT NULL DEFAULT '';
+ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS preorder_only BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE merch_variants ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+
+-- Vendor name: first non-empty legacy value per item (legacy slug →
+-- catalog name, same mapping as the catalog seed above).
+UPDATE merch_items it
+SET vendor_name = src.vendor_name
+FROM (
+  SELECT DISTINCT ON (x.item_key) x.item_key, x.vendor_name
+  FROM (
+    SELECT CASE mi.item
+             WHEN 'tshirt'  THEN 't-shirt'
+             WHEN 'mug'     THEN 'campfire coffee mug'
+             WHEN 'tumbler' THEN 'stainless tumbler'
+             WHEN 'pin'     THEN 'enamel pin'
+             WHEN 'patch'   THEN 'woven patch'
+             WHEN 'tote'    THEN 'block-printed tote'
+             ELSE LOWER(mi.item)
+           END AS item_key,
+           mi.vendor_name, mi.id
+    FROM merch_inventory mi
+    WHERE mi.vendor_name <> ''
+  ) x
+  ORDER BY x.item_key, x.id
+) src
+WHERE LOWER(it.name) = src.item_key AND it.vendor_name = '';
+
+UPDATE merch_items it
+SET vendor_url = src.vendor_url
+FROM (
+  SELECT DISTINCT ON (x.item_key) x.item_key, x.vendor_url
+  FROM (
+    SELECT CASE mi.item
+             WHEN 'tshirt'  THEN 't-shirt'
+             WHEN 'mug'     THEN 'campfire coffee mug'
+             WHEN 'tumbler' THEN 'stainless tumbler'
+             WHEN 'pin'     THEN 'enamel pin'
+             WHEN 'patch'   THEN 'woven patch'
+             WHEN 'tote'    THEN 'block-printed tote'
+             ELSE LOWER(mi.item)
+           END AS item_key,
+           mi.vendor_url, mi.id
+    FROM merch_inventory mi
+    WHERE mi.vendor_url <> ''
+  ) x
+  ORDER BY x.item_key, x.id
+) src
+WHERE LOWER(it.name) = src.item_key AND it.vendor_url = '';
+
+-- Per-variant notes: legacy size/color compose to the variant label the
+-- seed used ('Size — Color', or just the one that is set, or '' for
+-- single-variant items).
+UPDATE merch_variants v
+SET notes = src.notes
+FROM (
+  SELECT DISTINCT ON (x.item_key, x.vlabel) x.item_key, x.vlabel, x.notes
+  FROM (
+    SELECT CASE mi.item
+             WHEN 'tshirt'  THEN 't-shirt'
+             WHEN 'mug'     THEN 'campfire coffee mug'
+             WHEN 'tumbler' THEN 'stainless tumbler'
+             WHEN 'pin'     THEN 'enamel pin'
+             WHEN 'patch'   THEN 'woven patch'
+             WHEN 'tote'    THEN 'block-printed tote'
+             ELSE LOWER(mi.item)
+           END AS item_key,
+           LOWER(TRIM(mi.size || CASE WHEN mi.size <> '' AND mi.color <> '' THEN ' — ' ELSE '' END || mi.color)) AS vlabel,
+           mi.notes, mi.id
+    FROM merch_inventory mi
+    WHERE mi.notes <> ''
+  ) x
+  ORDER BY x.item_key, x.vlabel, x.id
+) src, merch_items it
+WHERE it.id = v.item_id
+  AND LOWER(it.name) = src.item_key
+  AND LOWER(v.label) = src.vlabel
+  AND v.notes = '';
+
+-- Tees are printed to order. Guarded on the seed's updated_by so the
+-- first manager save of the item (which stamps their email) ends the
+-- re-flip — unticking it later sticks.
+UPDATE merch_items SET preorder_only = TRUE
+WHERE LOWER(name) = 't-shirt' AND preorder_only = FALSE AND updated_by = 'migrate.sql';
