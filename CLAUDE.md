@@ -12,19 +12,30 @@ Members portal for a homeschool co-op. LIVE at https://www.rootsandwingsindy.com
    privately (it holds the DEV database connection — never commit it; the
    repo's `.gitignore` already excludes it). You do NOT need `.env.local`
    (that's Erin's prod-side file) or any Vercel access to fix bugs.
-2. `git clone https://github.com/communications-arch/roots-and-wings.git`
-   → drop `.env.local.dev` in the repo root → `npm install`.
-3. `git checkout dev` — all work happens on `dev`. Never push to `master`.
-4. `npm test` — the regression suite must be green before you touch
+2. **One-time tools** (skip any you already have): install
+   [Git](https://git-scm.com/downloads), [Node.js LTS](https://nodejs.org),
+   and Claude Code (Anthropic's desktop app or the `claude` CLI). Sign in to
+   GitHub once with `gh auth login` (the GitHub CLI installs with Git on
+   Windows) or let Git prompt you on the first clone.
+3. **Clone = download the project.** Open a terminal (Windows: PowerShell)
+   in the folder where you keep projects (e.g. `Documents`) and run:
+   `git clone https://github.com/communications-arch/roots-and-wings.git`
+   — that creates a `roots-and-wings` folder. Then `cd roots-and-wings`,
+   drop the `.env.local.dev` file Erin sent you into that folder, and run
+   `npm install` (fetches the project's libraries; a minute or two).
+4. `git checkout dev` — all work happens on `dev`. Never push to `master`.
+5. `npm test` — the regression suite must be green before you touch
    anything (and the pre-push hook re-runs it for you).
-5. Open a Claude Code session in the repo folder; this file loads
-   automatically. Read the "Working the bug list" section below before
-   your first fix. Open bugs live at
+6. Open a Claude Code session IN that folder (desktop app: open the folder;
+   CLI: `cd roots-and-wings` then `claude`). This file loads automatically —
+   ask Claude "read CLAUDE.md and summarize how we work here" as a first
+   prompt. Read the "Working the bug list" section below before your first
+   fix. Open bugs live at
    https://github.com/communications-arch/roots-and-wings/issues.
-6. Dev-DB reads/scripts: `node --env-file=.env.local.dev scripts/<script>.js`.
+7. Dev-DB reads/scripts: `node --env-file=.env.local.dev scripts/<script>.js`.
    Migrations: `node --env-file=.env.local.dev scripts/run-migration.js`
    (runs `scripts/migrate.sql` against DEV — additive statements only).
-7. Pushing to `dev` builds a Vercel preview automatically, but re-pointing
+8. Pushing to `dev` builds a Vercel preview automatically, but re-pointing
    the stable dev URL (https://rw-dev.vercel.app) needs `npm run deploy:dev`
    from a machine whose Vercel CLI is logged into the co-op's Vercel account.
    Unless Erin has added you to that Vercel team, comment on the issue after
