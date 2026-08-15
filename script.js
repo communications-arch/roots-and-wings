@@ -14695,19 +14695,21 @@
   // badge (Web = ordered ahead: legacy form, homepage form, member Shop;
   // Event = Quick Sale) and a fulfillment pill (Pre-order / Fulfilled /
   // Cancelled) next to its own payment pill. The old Web Orders +
-  // Inventory + Needs Ordering tabs are gone: the screened-spam bucket
-  // lives at the bottom of Orders, hand counts + vendor/notes live in
-  // Catalog & Stock, and restock needs surface as To Do items
+  // Inventory + Needs Ordering tabs are gone: screened-spam rows show
+  // under Status → All (with a Screened pill), hand counts + vendor/notes
+  // live in Catalog & Stock, and restock needs surface as To Do items
   // (loadMerchTodos) that deep-link into the catalog's "Needs ordering"
   // view. Caches are per-session; the modal re-fetches on every open.
   var _merchOrdersCache = null;   // legacy merch_orders rows
   var _merchActiveTab = 'desk';   // MERCH_MANAGER_TABS key
-  var _merchScreenedOpen = false; // #150: screened-as-spam bucket expanded
 
   // ── Merch Desk (#351) manager state ──
   var _merchDeskCache = null;        // desk orders (each with .lines)
-  var _merchDeskFilter = 'open';     // open (pre-orders) | all | delivered (fulfilled) | cancelled
-  var _merchDeskPayFor = null;       // order id showing the how-did-they-pay chips
+  var _merchDeskFilter = 'open';     // Orders Status funnel: open (pre-orders) | delivered (fulfilled) | cancelled | all (screened included)
+  var _merchDeskSourceFilter = 'any'; // Orders Source funnel: any | web | event
+  var _merchDeskPaidFilter = 'any';   // Orders Paid funnel: any | paid | unpaid
+  var _merchDeskInline = null;       // Orders in-place row under one order: { key, kind: 'pay' (method chooser) | 'cancel' | 'delete' (two-step confirm) }
+  var _merchDeskSort = null;         // Orders: last header sort {key, dir}, kept across re-renders
   var _merchCatalogCache = null;     // { items, variants, backordered }
   var _merchCatItemEditId = null;    // item id with edit panel open; 'new' = add form
   var _merchCatVariantEditId = null; // variant id with edit panel open
@@ -14748,8 +14750,10 @@
     _merchCatActiveFilter = 'any';
     _merchCatSort = null;
     _merchDeskFilter = 'open';
-    _merchDeskPayFor = null;
-    _merchScreenedOpen = false;
+    _merchDeskSourceFilter = 'any';
+    _merchDeskPaidFilter = 'any';
+    _merchDeskInline = null;
+    _merchDeskSort = null;
     _merchCatItemEditId = null;
     _merchCatVariantEditId = null;
     _merchCatAddVariantFor = null;
@@ -14883,6 +14887,7 @@
       .then(function (res) {
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not delete the order.'); if (btn) btn.disabled = false; return; }
         _merchOrdersCache = (_merchOrdersCache || []).filter(function (o) { return o.id !== id; });
+        _merchDeskInline = null;
         merchAfterOrderChange();
       })
       .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
@@ -14940,12 +14945,13 @@
       + (o.status === 'ready' ? ' <span class="ws-wv-context">ready for pickup</span>' : '');
   }
 
+  // Paid · method / Unpaid (the amount owed is the Total column's job).
   function merchDeskPaidPill(o) {
-    if (o.status === 'cancelled') return '';
+    if (o.status === 'cancelled') return '<span class="ws-srt-actions-empty">&mdash;</span>';
     if (o.paid_at) {
       return '<span class="ws-wv-ok">Paid' + (o.payment_method ? ' · ' + escapeHtmlWs(MERCH_PAY_LABELS[o.payment_method] || o.payment_method) : '') + '</span>';
     }
-    return '<span class="ws-wv-pending">Owes ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</span>';
+    return '<span class="ws-wv-pending">Unpaid</span>';
   }
 
   // One-line item summary for an order's lines, with backorder callouts.
@@ -15007,11 +15013,13 @@
     return 'open';
   }
 
-  // Every order from both ledgers as { web, o, state }, newest first
-  // (both created_at values are full ISO timestamps).
+  // Every order from both ledgers as { key, web, o, state }, newest first
+  // (both created_at values are full ISO timestamps). `key` is unique
+  // across the two ledgers ('d' + Desk id / 'w' + legacy id) — the table's
+  // rowKey and the in-place-row / Actions-select handle.
   function merchOrderEntries() {
-    var entries = (_merchDeskCache || []).map(function (o) { return { web: false, o: o }; })
-      .concat((_merchOrdersCache || []).map(function (o) { return { web: true, o: o }; }));
+    var entries = (_merchDeskCache || []).map(function (o) { return { key: 'd' + o.id, web: false, o: o }; })
+      .concat((_merchOrdersCache || []).map(function (o) { return { key: 'w' + o.id, web: true, o: o }; }));
     entries.forEach(function (e) { e.state = merchEntryState(e); });
     entries.sort(function (a, b) {
       var ka = String(a.o.created_at || ''), kb = String(b.o.created_at || '');
@@ -15020,199 +15028,403 @@
     return entries;
   }
 
-  function merchDeskFilterMatches(entry) {
-    if (_merchDeskFilter === 'open') return entry.state === 'open';
-    if (_merchDeskFilter === 'delivered') return entry.state === 'delivered';
-    if (_merchDeskFilter === 'cancelled') return entry.state === 'cancelled';
+  // Orders funnel filters (Status · Source · Paid) — each returns whether
+  // an entry passes ITS filter; counts on the funnel options come from
+  // the full entry list so the manager can see what a switch would show.
+  function merchOrderStatusMatches(entry, filter) {
+    if (filter === 'open') return entry.state === 'open';
+    if (filter === 'delivered') return entry.state === 'delivered';
+    if (filter === 'cancelled') return entry.state === 'cancelled';
     return true; // all — screened rows included, with their pill
   }
+  function merchOrderSourceMatches(entry, filter) {
+    if (filter === 'web') return merchOrderSourceLabel(entry) === 'Web';
+    if (filter === 'event') return merchOrderSourceLabel(entry) === 'Event';
+    return true;
+  }
+  function merchOrderPaidMatches(entry, filter) {
+    if (filter === 'paid') return !!entry.o.paid_at;
+    if (filter === 'unpaid') return !entry.o.paid_at;
+    return true;
+  }
+  function merchDeskFilterMatches(entry) {
+    return merchOrderStatusMatches(entry, _merchDeskFilter)
+      && merchOrderSourceMatches(entry, _merchDeskSourceFilter)
+      && merchOrderPaidMatches(entry, _merchDeskPaidFilter);
+  }
 
-  // One row of the merged list. Legacy rows keep their legacy actions
-  // (Paid/Fulfilled toggles + Delete via /api/tour); Desk rows keep the
-  // Desk lifecycle (Mark paid → Ready → Fulfilled / Cancel). Screened
-  // rows of either kind show the reason + Not spam (+ Delete / Cancel).
-  function merchOrderRowHtml(entry) {
+  // Buyer display name, both ledgers.
+  function merchOrderBuyerName(entry) {
     var o = entry.o;
-    var srcBadge = ' <span class="merch-tab-badge">' + merchOrderSourceLabel(entry) + '</span>';
-    var h = '';
-    if (entry.web) {
-      h += '<div class="ws-lending-row merch-desk-row" data-web-order-id="' + o.id + '">';
-      h += '<span class="ws-lending-main"><strong>' + escapeHtmlWs(o.customer_name || '(no name)') + '</strong>' + srcBadge
-        + ' <span class="ws-wv-context">' + escapeHtmlWs(o.customer_email || '')
-        + (o.customer_phone ? ' · ' + escapeHtmlWs(o.customer_phone) : '') + '</span>'
-        + ' <span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>';
-      h += '<span class="ws-lending-sub">' + (o.qty || 1) + ' × ' + escapeHtmlWs(
-        (o.item || '') + (o.size ? ' — ' + o.size : '') + (o.color ? (o.size ? ' · ' : ' — ') + o.color : ''))
-        + ' <span class="ws-wv-context">(older web order — no price on file)</span></span>';
-      if (o.notes) h += '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(o.notes) + '</span>';
-      h += '</span>';
-      h += '<span class="ws-lending-actions">';
-      if (entry.state === 'screened') {
-        h += '<span class="ws-wv-declined">screened: ' + escapeHtmlWs(o.screen_reason) + '</span>';
-        h += '<button type="button" class="sc-btn sc-save merch-web-rescue" data-web-id="' + o.id + '">Not spam</button>';
-        h += '<button type="button" class="sc-btn sc-btn-del merch-web-delete" data-web-id="' + o.id + '">Delete</button>';
-      } else {
-        h += entry.state === 'delivered' ? '<span class="ws-wv-ok">Fulfilled</span>' : '<span class="ws-wv-pending">Pre-order</span>';
-        h += o.paid_at ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">Unpaid</span>';
-        h += '<button type="button" class="sc-btn merch-web-toggle" data-web-id="' + o.id + '" data-field="paid" data-next="' + (o.paid_at ? '0' : '1') + '">' + (o.paid_at ? 'Mark unpaid' : 'Mark paid') + '</button>';
-        if (entry.state === 'delivered') {
-          h += '<button type="button" class="sc-btn merch-web-toggle" data-web-id="' + o.id + '" data-field="delivered" data-next="0">Undo fulfilled</button>';
-        } else {
-          h += '<button type="button" class="sc-btn sc-save merch-web-toggle" data-web-id="' + o.id + '" data-field="delivered" data-next="1">Fulfilled</button>';
-        }
-        h += '<button type="button" class="sc-btn sc-btn-del merch-web-delete" data-web-id="' + o.id + '">Delete</button>';
-      }
-      h += '</span></div>';
-      return h;
-    }
-    var who = o.buyer_name ? escapeHtmlWs(o.buyer_name) : '(no name)';
-    var famBit = o.family_email ? '<span class="ws-wv-context">' + escapeHtmlWs(o.family_email) + '</span>'
-      : o.contact_email ? '<span class="ws-wv-context">non-member · ' + escapeHtmlWs(o.contact_email) + '</span>'
-      : '<span class="ws-wv-context">walk-up guest</span>';
-    h += '<div class="ws-lending-row merch-desk-row" data-order-id="' + o.id + '">';
-    h += '<span class="ws-lending-main"><strong>' + who + '</strong>' + srcBadge + ' ' + famBit
-      + (o.contact_phone ? ' <span class="ws-wv-context">' + escapeHtmlWs(o.contact_phone) + '</span>' : '')
-      + ' <span class="ws-wv-context">#' + o.id + ' · ' + escapeHtmlWs(formatReportDate(o.created_at)) + '</span>';
-    h += '<span class="ws-lending-sub">' + merchDeskLinesHtml(o.lines) + ' · <strong>' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong></span>';
-    if (o.note) h += '<span class="ws-lending-sub" style="font-style:italic;">' + escapeHtmlWs(o.note) + '</span>';
-    h += '</span>';
-    h += '<span class="ws-lending-actions">';
+    return (entry.web ? o.customer_name : o.buyer_name) || '(no name)';
+  }
+
+  // Compact "2 × Tote — Black · 1 × Mug" summary; legacy rows carry one
+  // item with optional size/color. Plain text (unescaped) — the callers
+  // escape at the sink or use it as a sort key.
+  function merchLegacyItemText(o) {
+    return (o.qty || 1) + ' × ' + (o.item || '')
+      + (o.size ? ' — ' + o.size : '')
+      + (o.color ? (o.size ? ' · ' : ' — ') + o.color : '');
+  }
+  function merchOrderItemsText(entry) {
+    if (entry.web) return merchLegacyItemText(entry.o);
+    return (entry.o.lines || []).map(function (l) {
+      return l.qty + ' × ' + l.item_name + (l.variant_label ? ' — ' + l.variant_label : '');
+    }).join(' · ');
+  }
+
+  // Status cell: fulfillment pill (screened rows show the Screened pill
+  // here, reason underneath); Paid cell: Paid · method / Unpaid.
+  var MERCH_STATE_ORDER = { open: 0, delivered: 1, cancelled: 2, screened: 3 };
+  function merchOrderStatusCellHtml(entry) {
+    var o = entry.o;
     if (entry.state === 'screened') {
-      h += merchDeskPaidPill(o);
-      h += '<span class="ws-wv-declined">screened: ' + escapeHtmlWs(o.screen_reason) + '</span>';
-      h += '<button type="button" class="sc-btn sc-save merch-desk-unscreen" data-order-id="' + o.id + '">Not spam</button>';
-      h += '<button type="button" class="sc-btn sc-btn-del merch-desk-cancel" data-order-id="' + o.id + '">Cancel</button>';
-    } else {
-      h += merchDeskStatusPill(o) + ' ' + merchDeskPaidPill(o);
-      if (entry.state === 'open') {
-        if (!o.paid_at) h += '<button type="button" class="sc-btn merch-desk-pay-btn" data-order-id="' + o.id + '">Mark paid</button>';
-        if (o.status !== 'ready') h += '<button type="button" class="sc-btn merch-desk-act" data-order-id="' + o.id + '" data-set="ready">Ready</button>';
-        h += '<button type="button" class="sc-btn sc-save merch-desk-act" data-order-id="' + o.id + '" data-set="delivered">Fulfilled</button>';
-        h += '<button type="button" class="sc-btn sc-btn-del merch-desk-cancel" data-order-id="' + o.id + '">Cancel</button>';
+      return '<span class="ws-wv-declined">Screened</span>'
+        + (o.screen_reason ? '<br><span class="ws-wv-context">' + escapeHtmlWs(o.screen_reason) + '</span>' : '');
+    }
+    if (entry.web) return o.delivered_at ? '<span class="ws-wv-ok">Fulfilled</span>' : '<span class="ws-wv-pending">Pre-order</span>';
+    return merchDeskStatusPill(o);
+  }
+  function merchOrderPaidCellHtml(entry) {
+    var o = entry.o;
+    if (entry.web) return o.paid_at ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">Unpaid</span>';
+    return merchDeskPaidPill(o);
+  }
+
+  // Per-row Actions dropdown — only the applicable options appear.
+  // Values are the action verbs merchDeskRowAction() dispatches on.
+  function merchOrderActionOptions(entry) {
+    var o = entry.o;
+    var opts = [];
+    if (entry.web) {
+      if (entry.state === 'screened') {
+        opts.push(['unscreen', 'Not spam']);
+        opts.push(['delete', 'Delete…']);
+      } else {
+        opts.push(o.paid_at ? ['unpaid', 'Mark unpaid'] : ['paid', 'Mark paid']);
+        opts.push(entry.state === 'delivered' ? ['undelivered', 'Undo fulfilled'] : ['delivered', 'Mark fulfilled']);
+        opts.push(['delete', 'Delete…']);
+      }
+    } else if (entry.state === 'screened') {
+      opts.push(['unscreen', 'Not spam']);
+      opts.push(['cancel', 'Cancel order…']);
+    } else if (entry.state === 'open') {
+      if (!o.paid_at) opts.push(['pay', 'Mark paid…']);
+      if (o.status !== 'ready') opts.push(['ready', 'Mark ready']);
+      opts.push(['delivered', 'Mark fulfilled']);
+      opts.push(['cancel', 'Cancel order…']);
+    }
+    opts.push(['items', 'View items']);
+    return opts;
+  }
+
+  // Column definitions for the Orders grid (renderSortableTable). Rows
+  // are the merged entries from merchOrderEntries(). Funnels (Status /
+  // Source / Paid) are attached per render in renderMerchDeskBody so
+  // their counts + current values stay live.
+  var MERCH_ORDERS_TABLE_COLS = [
+    { key: 'created_at', label: 'Date', type: 'date',
+      sortValue: function (e) { return e.o.created_at; },
+      render: function (e) {
+        return escapeHtmlWs(formatReportDate(e.o.created_at))
+          + (e.web ? '' : '<br><span class="ws-wv-context">#' + escapeHtmlWs(String(e.o.id)) + '</span>');
+      }
+    },
+    { key: 'buyer', label: 'Buyer', type: 'string',
+      sortValue: function (e) { return merchOrderBuyerName(e); },
+      render: function (e) {
+        var o = e.o;
+        var sub;
+        if (e.web) {
+          sub = [o.customer_email, o.customer_phone].filter(Boolean).map(escapeHtmlWs).join(' · ');
+          sub = (sub ? sub + ' · ' : '') + 'non-member';
+        } else if (o.family_email) {
+          sub = escapeHtmlWs(o.family_email) + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '');
+        } else if (o.contact_email) {
+          sub = escapeHtmlWs(o.contact_email) + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '') + ' · non-member';
+        } else {
+          sub = 'walk-up guest' + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '');
+        }
+        return '<strong>' + escapeHtmlWs(merchOrderBuyerName(e)) + '</strong>'
+          + '<br><span class="ws-wv-context">' + sub + '</span>';
+      }
+    },
+    { key: 'items', label: 'Items', type: 'string',
+      sortValue: function (e) { return merchOrderItemsText(e); },
+      render: function (e) {
+        if (e.web) return escapeHtmlWs(merchLegacyItemText(e.o));
+        return merchDeskLinesHtml(e.o.lines) || '<span class="ws-srt-actions-empty">&mdash;</span>';
+      }
+    },
+    { key: 'total', label: 'Total', type: 'number',
+      sortValue: function (e) { return e.web ? -1 : (Number(e.o.total_cents) || 0); },
+      render: function (e) {
+        if (e.web) return '<span class="ws-srt-num ws-srt-actions-empty" title="older web order — no price on file">&mdash;</span>';
+        return '<span class="ws-srt-num">' + escapeHtmlWs(fmtCents(e.o.total_cents)) + '</span>';
+      }
+    },
+    { key: 'source', label: 'Source', type: 'string',
+      sortValue: function (e) { return merchOrderSourceLabel(e); },
+      render: function (e) { return '<span class="merch-tab-badge">' + merchOrderSourceLabel(e) + '</span>'; }
+    },
+    { key: 'status', label: 'Status', type: 'number',
+      sortValue: function (e) { return MERCH_STATE_ORDER[e.state] != null ? MERCH_STATE_ORDER[e.state] : 9; },
+      render: merchOrderStatusCellHtml
+    },
+    { key: 'paid', label: 'Paid', type: 'number',
+      sortValue: function (e) { return e.o.paid_at ? 1 : 0; },
+      render: merchOrderPaidCellHtml
+    },
+    // Trailing Actions dropdown — the Membership Report's collapsed-select
+    // idiom (.ws-mem-action-sel). Picking an option acts at once, opens
+    // the in-place row (Mark paid → method chooser; Cancel / Delete →
+    // two-step confirm), or toggles the row's items expansion.
+    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
+      render: function (e) {
+        var opts = merchOrderActionOptions(e).map(function (p) {
+          return '<option value="' + p[0] + '">' + p[1] + '</option>';
+        }).join('');
+        return '<div class="ws-srt-actions">'
+          + '<select class="sc-btn ws-mem-action-sel" data-order-key="' + escapeHtmlWs(e.key) + '" aria-label="Actions for ' + escapeHtmlWs(merchOrderBuyerName(e)) + '">'
+          + '<option value="">Actions&hellip;</option>' + opts
+          + '</select></div>';
       }
     }
-    h += '</span>';
-    if (_merchDeskPayFor === o.id) {
-      h += '<span class="merch-desk-payrow">How did they pay? ';
+  ];
+
+  // Row expansion (click the row or pick View items): every line with its
+  // allocated/backordered status, contact details, note, screen reason.
+  function merchOrderDetailHtml(entry) {
+    var o = entry.o;
+    var h = '<div class="ws-reg-detail-grid">';
+    function field(label, valHtml) {
+      if (!valHtml) return;
+      h += '<div class="ws-reg-detail-field"><span class="ws-reg-detail-label">' + label + '</span><span class="ws-reg-detail-val">' + valHtml + '</span></div>';
+    }
+    if (entry.web) {
+      field('Buyer', escapeHtmlWs(o.customer_name || '(no name)'));
+      field('Email', escapeHtmlWs(o.customer_email || ''));
+      field('Phone', escapeHtmlWs(o.customer_phone || ''));
+      field('Ordered', escapeHtmlWs(formatReportDate(o.created_at)));
+      field('Source', '<span class="merch-tab-badge">Web</span> <span class="ws-wv-context">older homepage form — no price on file</span>');
+    } else {
+      field('Order', '#' + escapeHtmlWs(String(o.id)));
+      field('Buyer', escapeHtmlWs(o.buyer_name || '(no name)'));
+      field('Family', o.family_email ? escapeHtmlWs(o.family_email) : '<span class="ws-wv-context">non-member</span>');
+      field('Contact', [o.contact_email, o.contact_phone].filter(Boolean).map(escapeHtmlWs).join(' · '));
+      field('Ordered', escapeHtmlWs(formatReportDate(o.created_at)));
+      field('Source', '<span class="merch-tab-badge">' + merchOrderSourceLabel(entry) + '</span>');
+      field('Payment', merchDeskPaidPill(o) + (o.paid_at ? ' <span class="ws-wv-context">' + escapeHtmlWs(formatReportDate(o.paid_at)) + '</span>' : ''));
+    }
+    if (entry.state === 'screened') field('Screened', '<span class="ws-wv-declined">' + escapeHtmlWs(o.screen_reason) + '</span> <span class="ws-wv-context">never emailed, took no stock</span>');
+    h += '</div>';
+
+    h += '<div class="ws-reg-detail-section"><h5>Items</h5><ul class="ws-reg-detail-kidlist">';
+    if (entry.web) {
+      h += '<li>' + escapeHtmlWs(merchLegacyItemText(o)) + '</li>';
+    } else if ((o.lines || []).length === 0) {
+      h += '<li><span class="ws-wv-context">no lines on file</span></li>';
+    } else {
+      (o.lines || []).forEach(function (l) {
+        var label = l.item_name + (l.variant_label ? ' — ' + l.variant_label : '');
+        h += '<li>' + l.qty + ' × ' + escapeHtmlWs(label)
+          + ' <span class="ws-wv-context">' + escapeHtmlWs(fmtCents(l.price_cents_each)) + ' each</span> '
+          + (l.stock_status === 'backordered'
+              ? '<span class="merch-stock-pill merch-stock-low">backordered</span>'
+              : '<span class="ws-wv-ok">allocated</span>')
+          + '</li>';
+      });
+      h += '<li><strong>Total ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</strong></li>';
+    }
+    h += '</ul></div>';
+    var note = entry.web ? o.notes : o.note;
+    if (note) h += '<div class="ws-reg-detail-section"><h5>Note</h5><div class="ws-reg-detail-notes">' + escapeHtmlWs(note) + '</div></div>';
+    return h;
+  }
+
+  // In-place row beneath an order (the table's editRowKey slot): the
+  // how-did-they-pay chooser, or the two-step confirm for Cancel / Delete.
+  function merchOrderInlineRowHtml(entry) {
+    var kind = _merchDeskInline && _merchDeskInline.kind;
+    var o = entry.o;
+    var who = '<strong>' + escapeHtmlWs(merchOrderBuyerName(entry)) + '</strong>';
+    var h = '<span class="merch-desk-payrow">';
+    if (kind === 'pay') {
+      h += 'How did ' + who + ' pay? ';
       MERCH_PAY_METHODS_NEW.forEach(function (m) {
         h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
       });
-      h += '<button type="button" class="sc-btn merch-desk-pay-close" aria-label="Close">×</button></span>';
+      h += '<button type="button" class="sc-btn merch-desk-inline-close" aria-label="Close">×</button>';
+    } else if (kind === 'cancel') {
+      h += 'Cancel order #' + escapeHtmlWs(String(o.id)) + ' for ' + who + '? <span class="ws-wv-context">Reserved stock goes back on the shelf.</span> '
+        + '<button type="button" class="sc-btn sc-btn-del merch-desk-inline-confirm" data-kind="cancel" data-order-id="' + o.id + '">Confirm cancel</button>'
+        + '<button type="button" class="sc-btn merch-desk-inline-close">Keep order</button>';
+    } else if (kind === 'delete') {
+      h += 'Delete this older web order for ' + who + '? <span class="ws-wv-context">It leaves the ledger for good.</span> '
+        + '<button type="button" class="sc-btn sc-btn-del merch-desk-inline-confirm" data-kind="delete" data-order-id="' + o.id + '">Confirm delete</button>'
+        + '<button type="button" class="sc-btn merch-desk-inline-close">Keep order</button>';
     }
-    h += '</div>';
+    h += '</span>';
     return h;
+  }
+
+  // Dispatch one Actions-dropdown pick. `sel` is the <select> (disabled
+  // while a request is in flight — the row re-renders on success).
+  function merchDeskRowAction(entry, act, sel, renderTable) {
+    var o = entry.o;
+    var id = o.id;
+    if (act === 'items') {
+      // The helper's own row-click toggles the expansion surgically
+      // (no re-render, scroll untouched) — reuse it.
+      var tr = sel.closest('tr');
+      if (tr) tr.click();
+      return;
+    }
+    if (act === 'pay' || act === 'cancel' || act === 'delete') {
+      _merchDeskInline = (_merchDeskInline && _merchDeskInline.key === entry.key && _merchDeskInline.kind === act)
+        ? null : { key: entry.key, kind: act };
+      renderTable();
+      return;
+    }
+    if (entry.web) {
+      if (act === 'unscreen') return merchLegacyRescue(id, sel);
+      if (act === 'paid') return merchLegacyToggle(id, 'paid', true, sel);
+      if (act === 'unpaid') return merchLegacyToggle(id, 'paid', false, sel);
+      if (act === 'delivered') return merchLegacyToggle(id, 'delivered', true, sel);
+      if (act === 'undelivered') return merchLegacyToggle(id, 'delivered', false, sel);
+      return;
+    }
+    if (act === 'unscreen') return merchDeskUnscreen(id, sel);
+    if (act === 'ready' || act === 'delivered') return merchDeskAct(id, act, null, sel);
   }
 
   function renderMerchDeskBody() {
     var body = document.getElementById('ws-merch-desk-body');
     if (!body) return;
     var entries = merchOrderEntries();
-    var counts = { open: 0, all: entries.length, delivered: 0, cancelled: 0, screened: 0 };
-    entries.forEach(function (e) { if (counts[e.state] != null) counts[e.state]++; });
-    var shown = entries.filter(merchDeskFilterMatches);
-    var screened = entries.filter(function (e) { return e.state === 'screened'; });
+    var counts = { open: 0, all: entries.length, delivered: 0, cancelled: 0, screened: 0, web: 0, event: 0, paid: 0 };
+    entries.forEach(function (e) {
+      if (counts[e.state] != null) counts[e.state]++;
+      if (merchOrderSourceLabel(e) === 'Event') counts.event++; else counts.web++;
+      if (e.o.paid_at) counts.paid++;
+    });
+    var byKey = {};
+    entries.forEach(function (e) { byKey[e.key] = e; });
 
     var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
     if (metaEl) metaEl.textContent = counts.all + ' order' + (counts.all === 1 ? '' : 's');
 
-    var h = '<p class="ws-body-hint">One working queue, every source. <strong>Web</strong> = ordered ahead (homepage form or the member shop), paid at pickup; <strong>Event</strong> = sold at a merch table via Quick Sale. <strong>Pre-orders</strong> are waiting to be picked up — mark them paid (with how they paid), Ready when set aside, and <strong>Fulfilled</strong> when handed over. Cancelling puts reserved stock back on the shelf. Older web orders (from before the Merch Desk) carry no prices; their buttons write to the old ledger.</p>';
-    h += '<div class="rd-counts">';
-    [['open', 'Pre-orders', counts.open], ['all', 'All', counts.all], ['delivered', 'Fulfilled', counts.delivered], ['cancelled', 'Cancelled', counts.cancelled]].forEach(function (f) {
-      h += '<button type="button" class="sc-btn merch-desk-filter' + (_merchDeskFilter === f[0] ? ' sc-save' : '') + '" data-desk-filter="' + f[0] + '">' + f[1] + ' (' + f[2] + ')</button>';
-    });
-    h += '</div>';
-    if (!_merchDeskCache && !_merchOrdersCache) {
-      h += '<p class="ws-empty">Loading…</p>';
-    } else if (shown.length === 0) {
-      h += '<p class="ws-empty">' + (_merchDeskFilter === 'open' ? 'No pre-orders waiting — nothing to hand over right now.' : 'Nothing here yet.') + '</p>';
-    }
-    shown.forEach(function (entry) { h += merchOrderRowHtml(entry); });
+    var h = '<p class="ws-body-hint">One working queue, every source. <strong>Web</strong> = ordered ahead (homepage form or the member shop), paid at pickup; <strong>Event</strong> = sold at a merch table via Quick Sale. <strong>Pre-orders</strong> are waiting to be picked up — use each row’s <strong>Actions</strong> menu to mark them paid (with how they paid), ready when set aside, and <strong>fulfilled</strong> when handed over; cancelling puts reserved stock back on the shelf. Click a row (or <strong>View items</strong>) for every line, contact details, and notes. Filter with the funnels on Status, Source, and Paid. Older web orders (from before the Merch Desk) carry no prices; their actions write to the old ledger.</p>';
 
-    // #150: screened-as-spam bucket — collapsed, at the bottom, both
-    // ledgers. "Not spam" puts a row back into the working list (Desk
-    // rows reserve stock on the way); Delete / Cancel clears it.
-    if (screened.length > 0) {
-      h += '<div class="ws-merch-screened" style="margin-top:14px;">';
-      h += '<button type="button" class="sc-btn" id="ws-merch-screened-toggle" aria-expanded="' + (_merchScreenedOpen ? 'true' : 'false') + '">'
-        + (_merchScreenedOpen ? '▾' : '▸') + ' Screened as likely spam (' + screened.length + ')</button>';
-      if (_merchScreenedOpen) {
-        h += '<p class="ws-body-hint" style="margin:8px 0 4px;">These never emailed anyone and took no stock. “Not spam” moves an order back into the list above (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent.</p>';
-        h += '<p class="ws-body-hint" id="ws-merch-spam-stats" style="margin:0 0 6px;"></p>';
-        screened.forEach(function (entry) { h += merchOrderRowHtml(entry); });
+    // Screened-as-spam summary (#150): above the table whenever the
+    // Status funnel is All (screened rows are in the list) or any
+    // screened rows exist (so the manager knows where they are).
+    if (_merchDeskFilter === 'all' || counts.screened > 0) {
+      if (counts.screened > 0) {
+        h += '<p class="ws-body-hint" style="margin:0 0 6px;"><strong>' + counts.screened + '</strong> screened as likely spam — never emailed anyone, took no stock'
+          + (_merchDeskFilter === 'all' ? '; they carry a Screened pill below.' : '; set Status to <strong>All</strong> to see them.')
+          + ' “Not spam” puts an order back in the queue (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent.</p>';
       }
-      h += '</div>';
+      h += '<div id="ws-merch-spam-stats"></div>';
     }
+    if (!_merchDeskCache && !_merchOrdersCache) h += '<p class="ws-empty">Loading…</p>';
+    else h += '<div id="merch-desk-table-target"></div>';
     body.innerHTML = h;
-    wireMerchDeskBody(body);
-  }
 
-  function wireMerchDeskBody(body) {
-    // Screened-counts one-liner (site-wide, all public forms) fills the
-    // slot inside the expanded screened bucket.
-    if (_merchScreenedOpen && typeof rwSpamStatsSummaryHtml === 'function') {
+    if (typeof rwSpamStatsSummaryHtml === 'function') {
       rwSpamStatsSummaryHtml(function (html) {
         var slot = body.querySelector('#ws-merch-spam-stats');
         if (slot) slot.innerHTML = html;
       });
     }
-    body.querySelectorAll('.merch-desk-filter').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        _merchDeskFilter = btn.getAttribute('data-desk-filter');
-        _merchDeskPayFor = null;
-        renderMerchDeskBody();
+
+    var target = body.querySelector('#merch-desk-table-target');
+    if (!target) return;
+
+    function renderTable() {
+      var cols = MERCH_ORDERS_TABLE_COLS.map(function (c) {
+        var copy = {}; Object.keys(c).forEach(function (k) { copy[k] = c[k]; }); return copy;
       });
-    });
-    var tog = body.querySelector('#ws-merch-screened-toggle');
-    if (tog) tog.addEventListener('click', function () {
-      _merchScreenedOpen = !_merchScreenedOpen;
-      renderMerchDeskBody();
-    });
-    body.querySelectorAll('.merch-desk-pay-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-order-id'), 10);
-        _merchDeskPayFor = (_merchDeskPayFor === id) ? null : id;
-        renderMerchDeskBody();
+      cols.forEach(function (col) {
+        if (col.key === 'status') col.filter = {
+          options: [
+            { value: 'open',      label: 'Pre-orders', count: counts.open },
+            { value: 'delivered', label: 'Fulfilled',  count: counts.delivered },
+            { value: 'cancelled', label: 'Cancelled',  count: counts.cancelled },
+            { value: 'all',       label: 'All',        count: counts.all }
+          ],
+          current: _merchDeskFilter,
+          onChange: function (v) { _merchDeskFilter = v; _merchDeskInline = null; renderMerchDeskBody(); }
+        };
+        if (col.key === 'source') col.filter = {
+          options: [
+            { value: 'any',   label: 'Any',   count: counts.all },
+            { value: 'web',   label: 'Web',   count: counts.web },
+            { value: 'event', label: 'Event', count: counts.event }
+          ],
+          current: _merchDeskSourceFilter,
+          onChange: function (v) { _merchDeskSourceFilter = v; renderTable(); }
+        };
+        if (col.key === 'paid') col.filter = {
+          options: [
+            { value: 'any',    label: 'Any',    count: counts.all },
+            { value: 'paid',   label: 'Paid',   count: counts.paid },
+            { value: 'unpaid', label: 'Unpaid', count: counts.all - counts.paid }
+          ],
+          current: _merchDeskPaidFilter,
+          onChange: function (v) { _merchDeskPaidFilter = v; renderTable(); }
+        };
       });
-    });
-    body.querySelectorAll('.merch-desk-pay-close').forEach(function (btn) {
-      btn.addEventListener('click', function () { _merchDeskPayFor = null; renderMerchDeskBody(); });
-    });
-    body.querySelectorAll('.merch-desk-pay-method').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        merchDeskAct(parseInt(btn.getAttribute('data-order-id'), 10), 'paid', btn.getAttribute('data-method'), btn);
+      var rows = entries.filter(merchDeskFilterMatches);
+      renderSortableTable(target, cols, rows, {
+        initialSort: _merchDeskSort || { key: 'created_at', dir: 'desc' },
+        expandable: true,
+        renderDetail: merchOrderDetailHtml,
+        rowKey: function (e) { return e.key; },
+        editRowKey: _merchDeskInline ? _merchDeskInline.key : null,
+        renderEditRow: merchOrderInlineRowHtml,
+        rowClass: function (e) { return (e.state === 'cancelled' || e.state === 'screened') ? 'ws-srt-row-declined' : ''; },
+        onRender: function () {
+          // Remember the active sort so actions / filter changes (which
+          // re-create the table) don't snap back to newest-first.
+          target.querySelectorAll('th.ws-sort').forEach(function (t) {
+            var a = t.querySelector('.ws-sort-arrow');
+            if (a && a.textContent) _merchDeskSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
+          });
+          target.querySelectorAll('.ws-mem-action-sel').forEach(function (sel) {
+            sel.addEventListener('change', function () {
+              var act = sel.value;
+              sel.value = '';
+              var entry = byKey[sel.getAttribute('data-order-key')];
+              if (!act || !entry) return;
+              merchDeskRowAction(entry, act, sel, renderTable);
+            });
+          });
+          target.querySelectorAll('.merch-desk-pay-method').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              merchDeskAct(parseInt(btn.getAttribute('data-order-id'), 10), 'paid', btn.getAttribute('data-method'), btn);
+            });
+          });
+          target.querySelectorAll('.merch-desk-inline-confirm').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var id = parseInt(btn.getAttribute('data-order-id'), 10);
+              if (btn.getAttribute('data-kind') === 'delete') merchLegacyDelete(id, btn);
+              else merchDeskAct(id, 'cancel', null, btn);
+            });
+          });
+          target.querySelectorAll('.merch-desk-inline-close').forEach(function (btn) {
+            btn.addEventListener('click', function () { _merchDeskInline = null; renderTable(); });
+          });
+        }
       });
-    });
-    body.querySelectorAll('.merch-desk-act').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        merchDeskAct(parseInt(btn.getAttribute('data-order-id'), 10), btn.getAttribute('data-set'), null, btn);
-      });
-    });
-    body.querySelectorAll('.merch-desk-cancel').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var self = this;
-        rwArmTwoStep(self, 'cancel', function () {
-          merchDeskAct(parseInt(self.getAttribute('data-order-id'), 10), 'cancel', null, self);
-        });
-      });
-    });
-    body.querySelectorAll('.merch-desk-unscreen').forEach(function (btn) {
-      btn.addEventListener('click', function () { merchDeskUnscreen(parseInt(btn.getAttribute('data-order-id'), 10), btn); });
-    });
-    // Legacy rows → the EXISTING /api/tour endpoints.
-    body.querySelectorAll('.merch-web-toggle').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        merchLegacyToggle(parseInt(btn.getAttribute('data-web-id'), 10), btn.getAttribute('data-field'), btn.getAttribute('data-next') === '1', btn);
-      });
-    });
-    body.querySelectorAll('.merch-web-rescue').forEach(function (btn) {
-      btn.addEventListener('click', function () { merchLegacyRescue(parseInt(btn.getAttribute('data-web-id'), 10), btn); });
-    });
-    body.querySelectorAll('.merch-web-delete').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var self = this;
-        rwArmTwoStep(self, 'delete', function () { merchLegacyDelete(parseInt(self.getAttribute('data-web-id'), 10), self); });
-      });
-    });
+      if (rows.length === 0) {
+        var msg = (_merchDeskFilter === 'open' && _merchDeskSourceFilter === 'any' && _merchDeskPaidFilter === 'any')
+          ? 'No pre-orders waiting — nothing to hand over right now.' : 'No orders match these filters.';
+        target.insertAdjacentHTML('beforeend', '<p class="ws-empty">' + msg + '</p>');
+      }
+    }
+    renderTable();
   }
 
   // "Not spam" on a screened Desk order: the server clears the flag and
@@ -15250,7 +15462,7 @@
           }
           _merchDeskCache[idx] = res.data.order;
         }
-        _merchDeskPayFor = null;
+        _merchDeskInline = null;
         merchAfterOrderChange();
         // Stock moved (ready/delivered consume backorders; cancel restocks).
         if (set !== 'paid') merchReloadCatalog();
