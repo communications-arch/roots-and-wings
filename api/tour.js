@@ -5699,10 +5699,20 @@ async function handleMerchDeskPublicOrder(body, req, res) {
   // Member link: buyer email → family_email via the standard resolver
   // (family_email itself, a people row, or additional_emails). EMAIL
   // match ONLY — never names. No match = guest order.
+  // 2026-08-15 (Erin: the public form IS the member shop now): a member
+  // typing their PERSONAL email here should still land on their family,
+  // so fall back to the registration flow's contact-email resolver
+  // (adds people.personal_email, MLC rows only, and refuses ambiguous
+  // matches). This family_email is what makes the order show up in the
+  // member's My Merch Orders / Heads-up card and the "ready" notice.
   let famEmail = null;
   try {
     const fam = await resolveFamily(sql, email);
     if (fam && fam.family_email) famEmail = String(fam.family_email).toLowerCase();
+    if (!famEmail) {
+      const hit = await resolveFamilyByContactEmail(sql, email, 0);
+      if (hit && hit.familyEmail) famEmail = String(hit.familyEmail).toLowerCase();
+    }
   } catch (famErr) {
     console.error('merch desk resolveFamily failed (non-fatal):', famErr);
   }

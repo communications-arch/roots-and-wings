@@ -1327,6 +1327,39 @@
             resetMerchModal();
           }
 
+          // Signed-in members arrive here from the portal's "Purchase
+          // Merch" button (the public Merch section IS the member shop,
+          // Erin 2026-08-15). Same origin ⇒ the portal's localStorage is
+          // readable: `rw_user_email` is the family's @rootsandwingsindy
+          // login (what the server links the order to — family_email /
+          // people / additional_emails match), and the session credential
+          // is a JWT whose payload carries Google's display name. Both are
+          // best-effort and only fill EMPTY fields — the buyer can edit.
+          // Values go through .value (never innerHTML).
+          function prefillFromPortal() {
+            try {
+              var emailEl = document.getElementById('merch-email');
+              var nameEl  = document.getElementById('merch-name');
+              var em = localStorage.getItem('rw_user_email') || '';
+              var payload = null;
+              var tok = localStorage.getItem('rw_google_credential') || '';
+              var part = tok.split('.')[1] || '';
+              if (part) {
+                var b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+                while (b64.length % 4) b64 += '=';
+                try { payload = JSON.parse(decodeURIComponent(escape(atob(b64)))); }
+                catch (e1) { try { payload = JSON.parse(atob(b64)); } catch (e2) { payload = null; } }
+              }
+              if (!em && payload && payload.email) em = String(payload.email);
+              // Only a Roots & Wings login pre-fills — a stray token from
+              // some other account on this device shouldn't leak in.
+              if (em && !/@rootsandwingsindy\.com$/i.test(em)) em = '';
+              if (em && emailEl && !emailEl.value) emailEl.value = em;
+              var nm = (payload && payload.name) ? String(payload.name).trim() : '';
+              if (em && nm && nameEl && !nameEl.value) nameEl.value = nm;
+            } catch (e) { /* public page: never let a portal read break the form */ }
+          }
+
           document.getElementById('merch-modal-done').addEventListener('click', closeMerchModal);
 
           // Open from .merch-card click — preselect the clicked item if
@@ -1335,6 +1368,7 @@
           document.querySelectorAll('.merch-card').forEach(function (card) {
             card.addEventListener('click', function () {
               resetMerchModal();
+              prefillFromPortal();
               modalEl.classList.add('active');
               document.body.style.overflow = 'hidden';
               loadCatalog().then(function () {
@@ -1418,9 +1452,6 @@
     </div>
   </div>
 
-<<<<<<< HEAD
-  <script src="script.js?v=20260815c"></script>
-=======
   <!-- Turnstile widgets render the moment a public-form modal opens (its
        container is display:none until then, and an interactive check
        can't run in a hidden box). No-op when Turnstile isn't configured. -->
@@ -1445,8 +1476,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260814c"></script>
->>>>>>> worktree-agent-ad307fc3bcdd9bd5e
+  <script src="script.js?v=20260815c"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.

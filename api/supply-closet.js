@@ -1442,11 +1442,14 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
   if (action === 'merch-my-orders') {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const famEmail = await merchFamilyEmailFor(sql, email);
+    // Screened (spam-flagged) web orders stay out of the family's view —
+    // they surface only in the manager's screened bucket until un-screened
+    // (the family's Heads-up card reads this list, 2026-08-15).
     const orders = await sql`
       SELECT id, family_email, buyer_name, status, payment_method, paid_at,
              total_cents, note, created_at
       FROM merch_desk_orders
-      WHERE LOWER(family_email) = ${famEmail}
+      WHERE LOWER(family_email) = ${famEmail} AND screen_reason = ''
       ORDER BY created_at DESC
       LIMIT 100
     `;
