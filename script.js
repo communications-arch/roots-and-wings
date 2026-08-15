@@ -12940,6 +12940,33 @@
   // submissions, status='junk'). Toggled by the small Junk chip; junk
   // rows never mix into the normal lists or counts.
   var _inquiryJunkView = false;
+  // 2026-08-15: one-line "Screened this month: …" summary above the
+  // screened buckets (Inquiries junk view + Merch web-order bucket).
+  // GET /api/tour?spam_stats=1 (Membership / Merch Manager / board),
+  // cached 5 min per session so toggling the bucket doesn't refetch.
+  var _spamStatsCache = null;   // { at, html }
+  var SPAM_STATS_CLASS_LABELS = { turnstile: 'turnstile', content: 'content', rate: 'rate', timing: 'timing', replay: 'replay', honeypot: 'honeypot', other: 'other', none: 'unlabeled' };
+  function rwSpamStatsSummaryHtml(cb) {
+    if (_spamStatsCache && Date.now() - _spamStatsCache.at < 5 * 60 * 1000) { cb(_spamStatsCache.html); return; }
+    fetch('/api/tour?spam_stats=1', { headers: rwAuthHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var html = '';
+        if (d && d.last30) {
+          var parts = [];
+          Object.keys(d.last30.classes || {}).sort(function (a, b) { return d.last30.classes[b] - d.last30.classes[a]; })
+            .forEach(function (k) { parts.push(d.last30.classes[k] + ' ' + escapeHtmlWs(SPAM_STATS_CLASS_LABELS[k] || k)); });
+          html = '<p class="ws-body-hint rw-spam-stats" style="margin:0 0 8px;">Screened this month: <strong>' + (parseInt(d.last30.total, 10) || 0) + '</strong>'
+            + (parts.length ? ' — ' + parts.join(', ') : '')
+            + ' · ' + (parseInt(d.last7 && d.last7.total, 10) || 0) + ' in the last 7 days'
+            + (d.turnstileEnabled === false ? ' · <em>Turnstile not configured</em>' : '')
+            + '</p>';
+        }
+        _spamStatsCache = { at: Date.now(), html: html };
+        cb(html);
+      })
+      .catch(function () { cb(''); });
+  }
   // Bumped on every optimistic mutation. Background fetches stash the
   // version they started at and discard their response if it has since
   // advanced — fixes the "schedule a tour, pill flickers" race where a
@@ -13304,7 +13331,14 @@
               junkChip = '<button type="button" class="ws-tour-status ws-tour-status-junk' + (_inquiryJunkView ? ' is-active' : '') + '" data-strip-filter="__junk-toggle" aria-pressed="' + (_inquiryJunkView ? 'true' : 'false') + '" title="Submissions the spam screen caught — nothing here emailed anyone. Rescue real ones with Not spam.">'
                 + (_inquiryJunkView ? '← Back to inquiries' : '🚫 Junk (' + counts.junk + ')') + '</button>';
             }
-            stripEl.innerHTML = junkChip;
+            // Junk view: one-line screened-counts summary under the chip.
+            stripEl.innerHTML = junkChip + (_inquiryJunkView ? '<div id="ws-inq-spam-stats" style="flex-basis:100%;"></div>' : '');
+            if (_inquiryJunkView) {
+              rwSpamStatsSummaryHtml(function (html) {
+                var slot = document.getElementById('ws-inq-spam-stats');
+                if (slot) slot.innerHTML = html;
+              });
+            }
           }
           if (!_inquiryJunkView && counts.inquiry === 0) {
             if (tableTarget) tableTarget.innerHTML = '<p class="ws-empty">No new inquiries right now. Questions from the website Contact form will land here.</p>';
@@ -14967,6 +15001,7 @@
         + (_merchScreenedOpen ? '▾' : '▸') + ' Screened as likely spam (' + screened.length + ')</button>';
       if (_merchScreenedOpen) {
         h += '<p class="ws-body-hint" style="margin:8px 0 4px;">These never emailed anyone and took no stock. “Not spam” moves an order back into the list above (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent.</p>';
+        h += '<p class="ws-body-hint" id="ws-merch-spam-stats" style="margin:0 0 6px;"></p>';
         screened.forEach(function (entry) { h += merchOrderRowHtml(entry); });
       }
       h += '</div>';
@@ -14976,6 +15011,14 @@
   }
 
   function wireMerchDeskBody(body) {
+    // Screened-counts one-liner (site-wide, all public forms) fills the
+    // slot inside the expanded screened bucket.
+    if (_merchScreenedOpen && typeof rwSpamStatsSummaryHtml === 'function') {
+      rwSpamStatsSummaryHtml(function (html) {
+        var slot = body.querySelector('#ws-merch-spam-stats');
+        if (slot) slot.innerHTML = html;
+      });
+    }
     body.querySelectorAll('.merch-desk-filter').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _merchDeskFilter = btn.getAttribute('data-desk-filter');
