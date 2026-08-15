@@ -479,6 +479,227 @@ function formTokenScreen(token, minMs, maxMs, now) {
   return null;
 }
 
+// ── Cloudflare Turnstile (Erin, 2026-08-15: "we are still getting spam") ──
+// What still lands is real-browser, patient spam that clears the
+// honeypot / signed-token / timing / link-count layers. Turnstile
+// (managed, invisible-unless-needed) is the browser-integrity layer on
+// top. FAIL-OPEN BY DESIGN: the check only runs when BOTH env vars are
+// set (TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY) AND Cloudflare answers.
+// Missing keys (dev / preview until Erin adds them), a Cloudflare outage,
+// a network timeout, or a config-side error code all SKIP the check with
+// a log line — a real family is never blocked because our config is
+// missing. Only a definitive "this token is bad" verdict screens the
+// submission, and even then it lands silently as a screened row
+// (rescuable), never a hard error.
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const TURNSTILE_TIMEOUT_MS = 5000;
+let _turnstileHalfConfigWarned = false;
+function turnstileSiteKey() { return String(process.env.TURNSTILE_SITE_KEY || '').trim(); }
+function turnstileEnabled() {
+  const site = turnstileSiteKey();
+  const secret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
+  if (site && secret) return true;
+  if ((site || secret) && !_turnstileHalfConfigWarned) {
+    _turnstileHalfConfigWarned = true;
+    console.warn('Turnstile half-configured (only one of TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY is set) — skipping the check');
+  }
+  return false;
+}
+// → junk reason string when Cloudflare says the token is bad; null when
+// the token verifies OR the check is skipped (not configured / CF down).
+// `action` is the widget's declared action ('tour' | 'contact' | 'merch');
+// a mismatch means the token was minted for a different form (replayed).
+async function turnstileScreen(token, ip, action) {
+  if (!turnstileEnabled()) return null;
+  const tok = String(token || '').trim();
+  if (!tok) return 'turnstile: no token from browser';
+  if (tok.length > 2048) return 'turnstile: malformed token';
+  const secret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
+  const params = new URLSearchParams({ secret, response: tok });
+  if (ip) params.set('remoteip', ip);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TURNSTILE_TIMEOUT_MS);
+  try {
+    const r = await fetch(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      signal: ctrl.signal
+    });
+    if (!r.ok) {
+      console.error('turnstile siteverify HTTP ' + r.status + ' — skipping check (fail-open)');
+      return null;
+    }
+    const d = await r.json();
+    if (d && d.success === true) {
+      if (action && d.action && d.action !== action) return 'turnstile: action mismatch (' + String(d.action).slice(0, 40) + ')';
+      return null;
+    }
+    const codes = (d && Array.isArray(d['error-codes']) ? d['error-codes'] : []).map(String);
+    // Config-side / Cloudflare-side failures are OUR problem, not the
+    // visitor's → fail open. Only visitor-side verdicts screen.
+    if (codes.length === 0 || codes.some(c => /secret|internal-error|bad-request/.test(c))) {
+      console.error('turnstile siteverify config/service error — skipping check (fail-open):', codes.join(',') || '(no error codes)');
+      return null;
+    }
+    return 'turnstile failed (' + codes.join(', ').slice(0, 120) + ')';
+  } catch (err) {
+    console.error('turnstile verify unreachable — skipping check (fail-open):', err && err.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── Content scoring (2026-08-15) ─────────────────────────────────────────
+// A small additive scorer for the spam that clears every mechanical
+// layer: SEO/agency pitches, crypto/loan/pharma, cold-email openers,
+// bulk-mail footers, machine-looking names/emails, spam-heavy TLDs.
+// Each CLASS contributes its weight ONCE (not per keyword) and the total
+// must reach SPAM_JUNK_THRESHOLD to screen — so no single weak signal
+// (a family whose email is on .xyz, a note that says "I came across your
+// website") can hide a real family. Screened rows are rescuable.
+// Weights are deliberately conservative — a false positive means a real
+// family's request is hidden; a miss just means Membership deletes junk.
+const SPAM_JUNK_THRESHOLD = 5;   // total score >= this → junk (rescuable)
+const SPAM_W_PITCH       = 3;    // SEO / web-dev / marketing agency vocabulary
+const SPAM_W_SHADY       = 3;    // crypto / loans / pharma / adult / gambling
+const SPAM_W_SALESY      = 2;    // "free consultation", "would you be interested"
+const SPAM_W_OPENER      = 2;    // "I came across your website", "hope this finds you well"
+const SPAM_W_BULK        = 3;    // "unsubscribe" / "reply STOP" footers
+const SPAM_W_HTML        = 2;    // raw HTML / BBCode in a plain textarea
+const SPAM_W_LINK        = 1;    // per URL, max 2 (3+ already junks in inquiryContentScreen)
+const SPAM_W_NAME_DIGITS = 2;    // 2+ digits in a person's name
+const SPAM_W_NAME_CHAOS  = 1;    // random interior casing ("DkLmQp")
+const SPAM_W_NAME_LOCAL  = 1;    // name == the email's machine-looking local part
+const SPAM_W_EMAIL_RANDOM = 2;   // local part looks generated (many digits / alternations)
+const SPAM_W_EMAIL_ROLE  = 1;    // info@ / sales@ / marketing@ …
+const SPAM_W_TLD         = 2;    // spam-heavy TLDs (never junks alone)
+const SPAM_W_DOMAIN_ODD  = 1;    // digits / multiple hyphens in the domain
+const SPAM_W_SCRIPT      = 1;    // non-Latin name with an all-ASCII message (weak)
+const SPAM_W_SHOUTING    = 1;    // >=60% CAPS in a 30+ letter message
+const SPAM_W_LONG        = 1;    // > 1200 chars (families write a paragraph, not an essay)
+const SPAM_W_AGES        = 2;    // tour "ages" field with no plausible age in it
+
+const SPAM_RE_PITCH = /\b(?:seo|backlinks?|search engine (?:ranking|optimi[sz]ation|marketing)|rank(?:ing|ed)? (?:higher )?on google|(?:first|1st|top) page of google|(?:increase|boost|grow|double|drive|generate) (?:your |more |the )?(?:web(?:site)? )?(?:traffic|sales|leads|revenue|conversions|rankings?|visibility|online presence)|web(?:site)? (?:design|development|redesign|traffic|audit|speed)|digital marketing|lead generation|link ?building|guest post(?:ing|s)?|sponsored post|domain authority|google (?:ads|reviews|ranking|my business)|social media (?:marketing|management|growth)|content (?:writing|marketing)|(?:app|software) development|ppc|email marketing|outsourc(?:e|ing)|virtual assistants?|explainer videos?|logo design|graphic design services|ai (?:agents?|automation|chatbots?)|business (?:listing|loans?)|(?:local|business) citations)\b/i;
+const SPAM_RE_SHADY = /\b(?:crypto(?:currency)?|bitcoin|forex|binary options|investment (?:opportunit(?:y|ies)|plans?)|loan (?:offer|approval)|payday|casino|betting|slots online|viagra|cialis|pharmacy|escorts?|xxx|porn|adult (?:site|content|dating)|weight[- ]loss|cbd|vape|earn (?:money|\$?\d+) (?:online|daily|per day))\b/i;
+const SPAM_RE_SALESY = /\b(?:free (?:trial|quote|consultation|audit|demo|sample|estimate)|no obligation|limited[- ]time|act now|special offer|discount code|money[- ]back|guaranteed results|affordable (?:price|rate|package)s?|best prices?|we (?:offer|provide|specialize|are a|are an|help businesses)|our (?:services|team|agency|company|clients|portfolio)|let me know if you(?:'re| are) interested|would you be interested|are you interested in|schedule a (?:call|demo|quick call)|book a call|reply (?:to this email|back) (?:with|and)|price list|quotation|our pricing)\b/i;
+const SPAM_RE_OPENER = /\b(?:(?:came|come|stumbled|ran) across|(?:was|were) (?:browsing|going through|looking at|checking(?: out)?|reviewing)|(?:visited|checked|reviewed|analy[sz]ed|audited|noticed)) (?:your|the) (?:web ?site|site|page|home ?page|business|company|listing)\b|\bhope (?:this|my) (?:email|message|note) finds you\b|\bdear (?:sir|madam|sir\/madam|owner|webmaster|business owner)\b/i;
+const SPAM_RE_BULK = /\b(?:unsubscribe|opt[- ]?out|to stop receiving|remove me from|this is not spam|not a spam)\b|\breply (?:with )?["“]?(?:stop|remove)["”]?\b/i;
+const SPAM_RE_HTML = /<\s*(?:a|br|p|div|span|img|b|strong|em|table|font|u|h[1-6])\b[^>]*>|&nbsp;|\[(?:url|link)=/i;
+const SPAM_ROLE_LOCALS = ['info', 'sales', 'marketing', 'seo', 'admin', 'support', 'noreply', 'no-reply', 'contact', 'office', 'hello', 'team', 'media', 'press', 'promo', 'offers', 'newsletter', 'webmaster', 'outreach', 'partnerships'];
+const SPAM_TLDS = ['xyz', 'top', 'click', 'icu', 'buzz', 'cam', 'rest', 'monster', 'work', 'loan', 'win', 'bid', 'date', 'stream', 'download', 'review', 'party', 'gq', 'ml', 'cf', 'tk', 'ga', 'quest', 'sbs', 'cfd', 'cyou', 'lol', 'mom', 'best', 'site', 'online', 'store', 'space', 'website', 'fun', 'pw', 'su', 'ru', 'cn'];
+const SPAM_RE_AGE_WORDS = /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|teen|teenager|baby|infant|toddler|newborn|preschool(?:er)?|kinder(?:garten)?|month|months|year|years|yr|yrs|old|under|almost|turning|nearly)\b/i;
+
+// Pure. fields = { name, email, message, ages? } → { score, hits: [] }.
+// `message` is the free text (contact message / merch notes; the tour
+// form passes its ages field so pitch vocabulary there still counts).
+function spamScore(fields) {
+  const name = String((fields && fields.name) || '').trim();
+  const email = String((fields && fields.email) || '').toLowerCase().trim();
+  const message = String((fields && fields.message) || '');
+  const ages = fields && fields.ages != null ? String(fields.ages) : null;
+  const hits = [];
+  let score = 0;
+  function hit(label, w) { hits.push(label); score += w; }
+
+  const text = name + '\n' + message;
+  if (SPAM_RE_PITCH.test(text)) hit('pitch', SPAM_W_PITCH);
+  if (SPAM_RE_SHADY.test(text)) hit('shady', SPAM_W_SHADY);
+  if (SPAM_RE_SALESY.test(text)) hit('salesy', SPAM_W_SALESY);
+  if (SPAM_RE_OPENER.test(message)) hit('opener', SPAM_W_OPENER);
+  if (SPAM_RE_BULK.test(message)) hit('bulk-footer', SPAM_W_BULK);
+  if (SPAM_RE_HTML.test(message)) hit('html', SPAM_W_HTML);
+  const urls = message.match(/(?:https?:\/\/|www\.)\S+/gi) || [];
+  if (urls.length) hit('links:' + urls.length, Math.min(urls.length, 2) * SPAM_W_LINK);
+
+  // Name shape.
+  if ((name.match(/\d/g) || []).length >= 2) hit('name-digits', SPAM_W_NAME_DIGITS);
+  const nameTokens = name.split(/[^A-Za-z]+/).filter(Boolean);
+  if (nameTokens.some(t => (t.match(/[a-z][A-Z]/g) || []).length >= 2)) hit('name-casing', SPAM_W_NAME_CHAOS);
+  if (/[^\x00-\x7F]/.test(name) && !/[\p{Script=Latin}]/u.test(name.replace(/[^\p{L}]/gu, '')) && message.length >= 20 && !/[^\x00-\x7F]/.test(message)) {
+    hit('name-script', SPAM_W_SCRIPT);
+  }
+
+  // Email shape.
+  const at = email.indexOf('@');
+  const local = at > 0 ? email.slice(0, at) : '';
+  const domain = at > 0 ? email.slice(at + 1) : '';
+  if (local) {
+    const digits = (local.match(/\d/g) || []).length;
+    const alternations = (local.match(/(?:[a-z]\d|\d[a-z])/g) || []).length;
+    const noSeparators = !/[._-]/.test(local);
+    if ((digits >= 5 && noSeparators && local.length >= 8) || alternations >= 4) hit('email-random', SPAM_W_EMAIL_RANDOM);
+    if (SPAM_ROLE_LOCALS.indexOf(local) !== -1) hit('email-role', SPAM_W_EMAIL_ROLE);
+    if (digits >= 1 && name && name.toLowerCase().replace(/[^a-z0-9]/g, '') === local.replace(/[^a-z0-9]/g, '')) hit('name-is-local', SPAM_W_NAME_LOCAL);
+  }
+  if (domain) {
+    const tld = domain.split('.').pop();
+    if (SPAM_TLDS.indexOf(tld) !== -1) hit('tld:.' + tld, SPAM_W_TLD);
+    const dom = domain.split('.').slice(0, -1).join('.');
+    if ((dom.match(/\d/g) || []).length >= 3 || (dom.match(/-/g) || []).length >= 2) hit('domain-odd', SPAM_W_DOMAIN_ODD);
+  }
+
+  // Message shape.
+  const letters = message.replace(/[^A-Za-z]/g, '');
+  if (letters.length >= 30) {
+    const upper = (letters.match(/[A-Z]/g) || []).length;
+    if (upper / letters.length >= 0.6) hit('shouting', SPAM_W_SHOUTING);
+  }
+  if (message.length > 1200) hit('long', SPAM_W_LONG);
+
+  // Tour form's ages field: a real answer has a digit or an age word.
+  if (ages !== null) {
+    const a = ages.trim();
+    if (a.length >= 3 && !/\d/.test(a) && !SPAM_RE_AGE_WORDS.test(a)) hit('ages-implausible', SPAM_W_AGES);
+  }
+  return { score, hits };
+}
+// → junk reason or null. Reason carries the score + hit labels (no
+// visitor text) so the screened bucket shows WHY at a glance.
+function spamScoreScreen(fields) {
+  const r = spamScore(fields);
+  if (r.score >= SPAM_JUNK_THRESHOLD) return 'content score ' + r.score + ' (' + r.hits.join(', ') + ')';
+  return null;
+}
+
+// Duplicate-text screen (DB): the SAME long message from a DIFFERENT
+// email within DUP_MSG_DAYS is bulk spam — a real family never resends
+// an identical 80+ character note under another address. (Same-email
+// repeats already merge into the person's open pipeline row.) Compares
+// a normalized form (lowercase, alphanumerics only) on both sides.
+const DUP_MSG_MIN_CHARS = 80;
+const DUP_MSG_DAYS = 7;
+async function duplicateMessageScreen(sql, email, message) {
+  const norm = String(message || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (norm.length < DUP_MSG_MIN_CHARS) return null;
+  const rows = await sql`
+    SELECT COUNT(*)::int AS n
+    FROM tours
+    WHERE created_at > NOW() - make_interval(days => ${DUP_MSG_DAYS})
+      AND LOWER(family_email) <> ${String(email || '').toLowerCase().trim()}
+      AND regexp_replace(lower(COALESCE(message, '')), '[^a-z0-9]', '', 'g') = ${norm}
+  `;
+  const n = rows[0] && rows[0].n;
+  if (n > 0) return 'duplicate message (same text from ' + n + ' other email' + (n === 1 ? '' : 's') + ' in ' + DUP_MSG_DAYS + ' days)';
+  return null;
+}
+
+// Bucket a free-text screen_reason into a class for the spam-stats
+// summary ("30 turnstile, 8 content, 3 rate"). Order matters — the
+// first match wins.
+function classifyScreenReason(reason) {
+  const r = String(reason || '').toLowerCase();
+  if (!r) return 'none';
+  if (r.indexOf('turnstile') !== -1) return 'turnstile';
+  if (r.indexOf('honeypot') !== -1) return 'honeypot';
+  if (r.indexOf('rate limited') !== -1) return 'rate';
+  if (r.indexOf('reused') !== -1) return 'replay';
+  if (/content score|gibberish|url in name|link|disposable|only links|duplicate message/.test(r)) return 'content';
+  if (/form_token|form_ts|submitted \d+ms|stale|future/.test(r)) return 'timing';
+  return 'other';
+}
+
 // ── #45: layered inquiry screening (Contact Us form only) ────────────
 // The Contact form is where the spam lands (Erin: tour requests are
 // clean), so the inquiry endpoint gets the hardened stack: honeypot +
@@ -557,28 +778,71 @@ const INQUIRY_RATE = {
 };
 
 async function handleTour(body, res, req) {
+  const { name, email, phone, numKids, ages } = body;
+  const ip = req ? clientIp(req) : '';
   // #207: signed token first (unforgeable timing), then the legacy
-  // honeypot/content layers. Trips stay a SILENT 200 discard.
-  const botReason = formTokenScreen(body.form_token, 4000, 24 * 3600 * 1000) || botScreen(body);
-  if (botReason) {
-    console.warn('tour-request bot screen tripped:', botReason);
-    return res.status(200).json({ success: true });
-  }
-  // Token single-use (replay) — same public_form_hits ledger the contact
-  // and merch forms use. Non-fatal: the ledger must never block a family.
+  // honeypot/content layers. Trips stay a SILENT 200.
+  // 2026-08-15: + content score + Turnstile + the same per-IP caps the
+  // contact/merch forms use. A tripped submission now SAVES as a hidden
+  // status='junk' pipeline row (rescuable, screen_reason set) instead of
+  // vanishing — visibility for Membership; the bot still sees a 200.
+  let junkReason = formTokenScreen(body.form_token, 4000, 24 * 3600 * 1000) || botScreen(body);
+  if (!junkReason) junkReason = spamScoreScreen({ name, email, message: '', ages });
+  if (!junkReason) junkReason = await turnstileScreen(body.turnstile_token, ip, 'tour');
+  // Token single-use (replay) + per-IP rate caps — same public_form_hits
+  // ledger the contact and merch forms use. Non-fatal: the ledger must
+  // never block a family.
+  const tokTs = parseFormToken(body.form_token) || 0;
+  let hardDrop = false;
   try {
     const sql = getSql();
-    const tokTs = parseFormToken(body.form_token);
-    const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'tour' AND form_ts = ${tokTs} LIMIT 1`;
-    if (reused.length) {
-      console.warn('tour-request bot screen tripped: form_token reused');
-      return res.status(200).json({ success: true });
+    if (!junkReason && tokTs > 0) {
+      const reused = await sql`SELECT 1 FROM public_form_hits WHERE form = 'tour' AND form_ts = ${tokTs} LIMIT 1`;
+      if (reused.length) junkReason = 'form_token reused';
     }
-    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${req ? clientIp(req) : ''}, 'tour', ${tokTs})`;
+    const cnt = await sql`
+      SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '10 minutes') AS short_n,
+             COUNT(*) AS day_n
+      FROM public_form_hits
+      WHERE form = 'tour' AND ip = ${ip} AND created_at > NOW() - INTERVAL '24 hours'
+    `;
+    const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
+    const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
+    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'tour', ${tokTs})`;
   } catch (ledgerErr) {
     console.error('tour token-ledger check error (non-fatal):', ledgerErr);
   }
-  const { name, email, phone, numKids, ages } = body;
+  if (hardDrop) {
+    console.warn('tour-request hard-dropped (IP over daily cap):', ip);
+    return res.status(200).json({ success: true });
+  }
+  if (junkReason) {
+    console.warn('tour-request bot screen tripped:', junkReason);
+    // Save what we can for the rescuable bucket (needs a name + a
+    // plausible email — direct API garbage without either just drops).
+    const jName = String(name || '').trim().slice(0, 200);
+    const jEmail = String(email || '').trim().slice(0, 200);
+    if (jName && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(jEmail)) {
+      try {
+        const sql = getSql();
+        const jKids = parseInt(numKids, 10);
+        await sql`
+          INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                             status, source, message, screen_reason, status_history)
+          VALUES (${jName}, ${jEmail.toLowerCase()}, ${String(phone || '').slice(0, 50)},
+                  ${Number.isFinite(jKids) ? jKids : null}, ${String(ages || '').slice(0, 200)},
+                  'junk', 'tour-request', '', ${junkReason},
+                  ${JSON.stringify([{ at: new Date().toISOString(), by: 'spam-screen', from: null, to: 'junk', note: junkReason }])}::jsonb)
+        `;
+      } catch (junkErr) {
+        console.error('tour junk-bucket insert error (non-fatal):', junkErr);
+      }
+    }
+    return res.status(200).json({ success: true });
+  }
   const preferredDate = body.preferred_date ? String(body.preferred_date).trim() : null;
   const preferredTime = body.preferred_time ? String(body.preferred_time).trim() : null;
 
@@ -737,6 +1001,62 @@ async function handleTour(body, res, req) {
   return res.status(200).json({ success: true, tourId });
 }
 
+// ── GET ?spam_stats=1 — screened-submission counts (2026-08-15) ──
+// Counts of screened public-form submissions by class for the last 7 and
+// 30 days, across the three buckets (tours junk rows, merch_orders,
+// merch_desk_orders). Feeds the one-line "Screened this month: …"
+// summary above the screened buckets. Read-gated like the reports it
+// sits in: Membership (tours_view), the Merchandise Manager, or any
+// board member. Rescued/deleted rows drop out of the counts (rescue
+// clears screen_reason), so this is "what is sitting in the buckets".
+async function handleSpamStats(req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const canRead = (await hasCapability(auth.email, 'tours_view'))
+    || (await canManageMerch(auth.email))
+    || (await isBoardMember(auth.email));
+  if (!canRead) return res.status(403).json({ error: 'Not authorized.' });
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT CASE WHEN source = 'contact-form' THEN 'contact' ELSE 'tour' END AS form,
+             screen_reason, created_at
+      FROM tours
+      WHERE status = 'junk' AND created_at > NOW() - INTERVAL '30 days'
+      UNION ALL
+      SELECT 'merch' AS form, screen_reason, created_at
+      FROM merch_orders
+      WHERE screen_reason <> '' AND created_at > NOW() - INTERVAL '30 days'
+      UNION ALL
+      SELECT 'merch' AS form, screen_reason, created_at
+      FROM merch_desk_orders
+      WHERE screen_reason <> '' AND created_at > NOW() - INTERVAL '30 days'
+    `;
+    const cutoff7 = Date.now() - 7 * 24 * 3600 * 1000;
+    const mk = () => ({ total: 0, classes: {}, forms: {} });
+    const last7 = mk();
+    const last30 = mk();
+    rows.forEach(r => {
+      const cls = classifyScreenReason(r.screen_reason);
+      const form = String(r.form || 'other');
+      const at = new Date(r.created_at).getTime();
+      [last30].concat(at >= cutoff7 ? [last7] : []).forEach(b => {
+        b.total += 1;
+        b.classes[cls] = (b.classes[cls] || 0) + 1;
+        b.forms[form] = (b.forms[form] || 0) + 1;
+      });
+    });
+    return res.status(200).json({
+      last7, last30,
+      turnstileEnabled: turnstileEnabled(),
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('spam stats error:', err);
+    return res.status(500).json({ error: 'Failed to load spam stats.' });
+  }
+}
+
 // ── Contact / general inquiry (public, no auth) ──
 // The public "Contact Us" form. Lands in the SAME Tour Pipeline as a tour
 // request (so Membership works one list) but tagged source='contact-form'
@@ -770,8 +1090,13 @@ async function handleContact(body, req, res) {
   if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
   if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
   if (!junkReason) junkReason = inquiryContentScreen({ name, email, message });
-
+  // 2026-08-15: content score (pitch/crypto/opener/bulk vocabulary,
+  // machine-looking names + emails) then Turnstile (fail-open when not
+  // configured). Both are still a silent, rescuable junk row.
+  if (!junkReason) junkReason = spamScoreScreen({ name, email, message });
   const ip = clientIp(req);
+  if (!junkReason) junkReason = await turnstileScreen(body.turnstile_token, ip, 'contact');
+
   // Single-use stamp = the token's server-issued ts when present (bots
   // can't mint fresh ones); legacy client form_ts only as a fallback so
   // junked rows still record something.
@@ -779,6 +1104,8 @@ async function handleContact(body, req, res) {
   let hardDrop = false;
   try {
     const sql = getSql();
+    // Same long message from a different email inside a week = bulk.
+    if (!junkReason) junkReason = await duplicateMessageScreen(sql, email, message);
     // Page stamps are single-use: the same form_ts posting twice means a
     // replay (the form re-stamps itself after a successful send).
     if (!junkReason && formTs > 0) {
@@ -5127,8 +5454,11 @@ async function handleMerchOrder(body, req, res) {
   if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
   if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
   if (!junkReason) junkReason = inquiryContentScreen({ name, email, message: notes });
-
+  // 2026-08-15: content score + Turnstile (fail-open) — see handleContact.
+  if (!junkReason) junkReason = spamScoreScreen({ name, email, message: notes });
   const ip = clientIp(req);
+  if (!junkReason) junkReason = await turnstileScreen(body.turnstile_token, ip, 'merch');
+
   const formTs = parseFormToken(body.form_token) || parseInt(body.form_ts, 10) || 0;
   let hardDrop = false;
   try {
@@ -5308,8 +5638,11 @@ async function handleMerchDeskPublicOrder(body, req, res) {
   if (!junkReason) junkReason = formTokenScreen(body.form_token, INQUIRY_MIN_FILL_MS, INQUIRY_MAX_AGE_MS);
   if (!junkReason) junkReason = inquiryTimingScreen(body.form_ts);
   if (!junkReason) junkReason = inquiryContentScreen({ name, email, message: notes });
-
+  // 2026-08-15: content score + Turnstile (fail-open) — see handleContact.
+  if (!junkReason) junkReason = spamScoreScreen({ name, email, message: notes });
   const ip = clientIp(req);
+  if (!junkReason) junkReason = await turnstileScreen(body.turnstile_token, ip, 'merch');
+
   const formTs = parseFormToken(body.form_token) || parseInt(body.form_ts, 10) || 0;
   let hardDrop = false;
   const sql = getSql();
@@ -11068,7 +11401,13 @@ module.exports = async function handler(req, res) {
     // #207: public — the index-page forms fetch a signed single-use token
     // at render; POSTs without one are screened as junk. Issuing is
     // stateless and cheap (one HMAC), so no auth or rate concern here.
-    if (req.query.form_token === '1') return res.status(200).json({ token: issueFormToken() });
+    // 2026-08-15: the same fetch hands the page the Turnstile site key
+    // (public by nature) — null when Turnstile isn't configured, so the
+    // page loads no Cloudflare script and the server skips the check.
+    if (req.query.form_token === '1') {
+      return res.status(200).json({ token: issueFormToken(), turnstileSiteKey: turnstileEnabled() ? turnstileSiteKey() : null });
+    }
+    if (req.query.spam_stats === '1') return handleSpamStats(req, res);
     if (req.query.list === 'registrations') return handleList(req, res);
     if (req.query.list === 'tours') return handleTourList(req, res);
     if (req.query.list === 'registration-invites') return handleRegistrationInvitesList(req, res);
@@ -11212,3 +11551,12 @@ module.exports.inquiryContentScreen = inquiryContentScreen;
 module.exports.issueFormToken = issueFormToken;
 module.exports.parseFormToken = parseFormToken;
 module.exports.formTokenScreen = formTokenScreen;
+// 2026-08-15 content scorer + Turnstile helpers — pure parts exported for
+// scripts/test-spam-score.js (turnstileScreen is exported so the suite
+// can prove it fails OPEN with no env vars set).
+module.exports.spamScore = spamScore;
+module.exports.spamScoreScreen = spamScoreScreen;
+module.exports.SPAM_JUNK_THRESHOLD = SPAM_JUNK_THRESHOLD;
+module.exports.classifyScreenReason = classifyScreenReason;
+module.exports.turnstileScreen = turnstileScreen;
+module.exports.turnstileEnabled = turnstileEnabled;

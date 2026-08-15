@@ -24,9 +24,87 @@
     window.__rwFetchFormToken = function () {
       return fetch('/api/tour?form_token=1')
         .then(function (r) { return r.json(); })
-        .then(function (d) { if (d && d.token) window.__rwFormToken = d.token; })
+        .then(function (d) {
+          if (d && d.token) window.__rwFormToken = d.token;
+          // Turnstile site key rides the same fetch (null = not configured
+          // → no Cloudflare script loads, server skips the check).
+          if (d && d.turnstileSiteKey && window.__rwTurnstile) window.__rwTurnstile.setKey(d.turnstileSiteKey);
+        })
         .catch(function () {});
     };
+    // Cloudflare Turnstile (2026-08-15) for the public forms — managed,
+    // "interaction-only" appearance: invisible for humans unless
+    // Cloudflare needs a checkbox tap. FAIL-OPEN end to end: no site key
+    // → nothing loads and every form submits exactly as before; script
+    // blocked / errored → the form still submits (the server logs it as
+    // screened, rescuable — it never hard-fails a family). One widget per
+    // form, rendered when its modal opens (a hidden container can't run
+    // an interactive challenge). Tokens are single-use, so a widget is
+    // reset after each successful send.
+    window.__rwTurnstile = (function () {
+      var key = '', api = null, loaded = false, loading = false;
+      var pending = [], widgets = {}, tokens = {}, interactive = {};
+      function loadScript() {
+        if (loading || loaded || !key) return;
+        loading = true;
+        window.__rwTurnstileOnload = function () {
+          api = window.turnstile; loaded = true;
+          pending.splice(0).forEach(function (f) { f(); });
+        };
+        var s = document.createElement('script');
+        s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__rwTurnstileOnload';
+        s.async = true; s.defer = true;
+        s.onerror = function () { loading = false; };
+        document.head.appendChild(s);
+      }
+      return {
+        setKey: function (k) { key = String(k || ''); if (key) loadScript(); },
+        enabled: function () { return !!key; },
+        // Render (once) the widget for a form into its container.
+        ensure: function (name, containerId, action) {
+          if (!key) return;
+          var go = function () {
+            if (widgets[name] != null || !api) return;
+            var el = document.getElementById(containerId);
+            if (!el) return;
+            try {
+              widgets[name] = api.render(el, {
+                sitekey: key, action: action, appearance: 'interaction-only',
+                'refresh-expired': 'auto', 'retry': 'auto',
+                callback: function (t) { tokens[name] = t; },
+                'expired-callback': function () { tokens[name] = ''; },
+                'error-callback': function () { tokens[name] = ''; return true; },
+                'before-interactive-callback': function () { interactive[name] = true; },
+                'after-interactive-callback': function () { interactive[name] = false; }
+              });
+            } catch (e) { /* fail open */ }
+          };
+          if (loaded) go(); else pending.push(go);
+        },
+        // Promise<string>: the current token, waiting up to waitMs for a
+        // pending challenge (or a still-loading script). '' when Turnstile
+        // isn't configured, or nothing arrived in time — the form still
+        // submits either way (server decides; never a hard fail).
+        token: function (name, waitMs) {
+          if (!key) return Promise.resolve('');
+          return new Promise(function (resolve) {
+            var started = Date.now();
+            (function poll() {
+              if (tokens[name]) return resolve(tokens[name]);
+              if (Date.now() - started > (waitMs || 6000)) return resolve('');
+              setTimeout(poll, 150);
+            })();
+          });
+        },
+        // True while Cloudflare is showing this form's checkbox — the
+        // submit handlers ask the visitor to finish it instead of sending.
+        needsInteraction: function (name) { return !!interactive[name] && !tokens[name]; },
+        reset: function (name) {
+          tokens[name] = ''; interactive[name] = false;
+          if (api && widgets[name] != null) { try { api.reset(widgets[name]); } catch (e) {} }
+        }
+      };
+    })();
     window.__rwFetchFormToken();
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -793,6 +871,8 @@
             </select>
           </div>
         </div>
+        <!-- Cloudflare Turnstile slot (renders only when configured; invisible unless a check is needed). -->
+        <div id="tour-turnstile" class="rw-turnstile" style="display:flex;justify-content:center;"></div>
         <div id="tour-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
         <button type="submit" id="tour-modal-btn" class="btn btn-primary tour-form-submit">Request a Tour</button>
       </form>
@@ -841,6 +921,15 @@
           btn.textContent = 'Sending…';
           try {
             if (!window.__rwFormToken) await window.__rwFetchFormToken();
+            // Turnstile token ('' when not configured — server skips).
+            var tsTok = await window.__rwTurnstile.token('tour');
+            if (!tsTok && window.__rwTurnstile.needsInteraction('tour')) {
+              errEl.textContent = 'Please tap the quick "I\'m human" check above, then try again.';
+              errEl.style.display = 'block';
+              btn.disabled = false;
+              btn.textContent = 'Request a Tour';
+              return;
+            }
             var pickedDate = document.getElementById('tour-pref-date').value;
             var pickedTime = document.getElementById('tour-pref-time').value;
             // If the family picked a date but no time (or vice versa),
@@ -859,7 +948,8 @@
                 preferred_time: pickedTime || null,
                 website: document.getElementById('tour-website').value,
                 form_ts: window.__rwPageTs || 0,
-                form_token: window.__rwFormToken || ''
+                form_token: window.__rwFormToken || '',
+                turnstile_token: tsTok
               })
             });
             if (!res.ok) {
@@ -867,11 +957,14 @@
               try { data = await res.json(); } catch (e) {}
               throw new Error((data && data.error) || 'request failed');
             }
+            window.__rwTurnstile.reset('tour');
             var modal = document.querySelector('.tour-modal');
             modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'tour-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
               + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
               + '<p class="tour-modal-subtitle">We\'ve received your tour request and will be in touch soon to confirm a time. We can\'t wait to meet your family!</p>';
           } catch (err) {
+            // Turnstile tokens are single-use — mint a fresh one for the retry.
+            window.__rwTurnstile.reset('tour');
             errEl.textContent = (err && err.message)
               ? ('We couldn\'t send your request: ' + err.message + '. Please email membership@rootsandwingsindy.com directly.')
               : 'Something went wrong. Please email membership@rootsandwingsindy.com directly.';
@@ -913,6 +1006,8 @@
           <label for="contact-message">Your Message</label>
           <textarea id="contact-message" name="message" rows="4" required placeholder="What would you like to know?"></textarea>
         </div>
+        <!-- Cloudflare Turnstile slot (renders only when configured; invisible unless a check is needed). -->
+        <div id="contact-turnstile" class="rw-turnstile" style="display:flex;justify-content:center;"></div>
         <div id="contact-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
         <button type="submit" id="contact-modal-btn" class="btn btn-primary tour-form-submit">Send Message</button>
       </form>
@@ -926,6 +1021,15 @@
           btn.textContent = 'Sending…';
           try {
             if (!window.__rwFormToken) await window.__rwFetchFormToken();
+            // Turnstile token ('' when not configured — server skips).
+            var tsTok = await window.__rwTurnstile.token('contact');
+            if (!tsTok && window.__rwTurnstile.needsInteraction('contact')) {
+              errEl.textContent = 'Please tap the quick "I\'m human" check above, then try again.';
+              errEl.style.display = 'block';
+              btn.disabled = false;
+              btn.textContent = 'Send Message';
+              return;
+            }
             var res = await fetch('/api/tour', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -937,7 +1041,8 @@
                 message: document.getElementById('contact-message').value,
                 website: document.getElementById('contact-website').value,
                 form_ts: window.__rwPageTs || 0,
-                form_token: window.__rwFormToken || ''
+                form_token: window.__rwFormToken || '',
+                turnstile_token: tsTok
               })
             });
             if (!res.ok) {
@@ -947,14 +1052,17 @@
             }
             // Page stamps are single-use server-side (#45): re-stamp so a
             // second genuine message from this page load isn't screened
-            // as a replay.
+            // as a replay. Same for the Turnstile widget.
             window.__rwPageTs = Date.now();
             window.__rwFormToken = ''; window.__rwFetchFormToken();
+            window.__rwTurnstile.reset('contact');
             var modal = document.querySelector('#contact-modal .tour-modal');
             modal.innerHTML = '<button class="tour-modal-close" aria-label="Close" onclick="document.getElementById(\'contact-modal\').classList.remove(\'active\');document.body.style.overflow=\'\';">&times;</button>'
               + '<h2 class="tour-modal-title">Thanks for reaching out!</h2>'
               + '<p class="tour-modal-subtitle">We\'ve received your message and someone from our Membership team will be in touch soon.</p>';
           } catch (err) {
+            // Turnstile tokens are single-use — mint a fresh one for the retry.
+            window.__rwTurnstile.reset('contact');
             errEl.textContent = (err && err.message)
               ? ('We couldn\'t send your message: ' + err.message + '. Please email membership@rootsandwingsindy.com directly.')
               : 'Something went wrong. Please email membership@rootsandwingsindy.com directly.';
@@ -1019,6 +1127,8 @@
           <label for="merch-notes">Notes (optional)</label>
           <textarea id="merch-notes" name="notes" rows="2" maxlength="1000" placeholder="Anything else we should know?"></textarea>
         </div>
+        <!-- Cloudflare Turnstile slot (renders only when configured; invisible unless a check is needed). -->
+        <div id="merch-turnstile" class="rw-turnstile" style="display:flex;justify-content:center;"></div>
         <div id="merch-modal-error" style="display:none; color: var(--color-error); text-align: center; font-weight: 600; margin-bottom: 8px;"></div>
         <button type="submit" id="merch-modal-btn" class="btn btn-primary tour-form-submit">Place Order</button>
       </form>
@@ -1247,6 +1357,15 @@
             submitBtn.textContent = 'Submitting…';
             try {
               if (!window.__rwFormToken) await window.__rwFetchFormToken();
+              // Turnstile token ('' when not configured — server skips).
+              var tsTok = await window.__rwTurnstile.token('merch');
+              if (!tsTok && window.__rwTurnstile.needsInteraction('merch')) {
+                errEl.textContent = 'Please tap the quick "I\'m human" check above, then try again.';
+                errEl.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Place Order — ' + money(cartTotal());
+                return;
+              }
               var res = await fetch('/api/tour', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1259,7 +1378,8 @@
                   notes: document.getElementById('merch-notes').value,
                   website: document.getElementById('merch-website').value,
                   form_ts: window.__rwPageTs || 0,
-                  form_token: window.__rwFormToken || ''
+                  form_token: window.__rwFormToken || '',
+                  turnstile_token: tsTok
                 })
               });
               if (!res.ok) {
@@ -1269,13 +1389,17 @@
               }
               // Tokens are single-use server-side — grab a fresh one so a
               // second order from this page load isn't screened as a replay.
+              // Same for the Turnstile widget.
               window.__rwPageTs = Date.now();
               window.__rwFormToken = ''; window.__rwFetchFormToken();
+              window.__rwTurnstile.reset('merch');
               titleEl.style.display = 'none';
               subtitleEl.style.display = 'none';
               formEl.style.display = 'none';
               successEl.style.display = 'block';
             } catch (err) {
+              // Turnstile tokens are single-use — mint a fresh one for the retry.
+              window.__rwTurnstile.reset('merch');
               errEl.textContent = (err && err.message)
                 ? ('We couldn\'t place your order: ' + err.message + '. Please email communications@rootsandwingsindy.com.')
                 : 'Something went wrong. Please email communications@rootsandwingsindy.com.';
@@ -1288,6 +1412,30 @@
       </script>
     </div>
   </div>
+
+  <!-- Turnstile widgets render the moment a public-form modal opens (its
+       container is display:none until then, and an interactive check
+       can't run in a hidden box). No-op when Turnstile isn't configured. -->
+  <script>
+    (function () {
+      var FORMS = [
+        ['tour-modal', 'tour', 'tour-turnstile'],
+        ['contact-modal', 'contact', 'contact-turnstile'],
+        ['merch-modal', 'merch', 'merch-turnstile']
+      ];
+      FORMS.forEach(function (f) {
+        var overlay = document.getElementById(f[0]);
+        if (!overlay || !window.MutationObserver) return;
+        var ensure = function () {
+          if (overlay.classList.contains('active') && window.__rwTurnstile) window.__rwTurnstile.ensure(f[1], f[2], f[1]);
+        };
+        new MutationObserver(ensure).observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        // Belt and braces: first focus into the form also renders it.
+        overlay.addEventListener('focusin', ensure);
+        ensure();
+      });
+    })();
+  </script>
 
   <script src="script.js?v=20260814c"></script>
 
