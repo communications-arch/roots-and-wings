@@ -14696,11 +14696,15 @@
   // Stock, Needs Ordering, and Quick Sale are the Merch Desk Phase 1
   // ledger (#351) — DB catalog, member pickup orders with backorder
   // tracking, and event sales.
+  // Erin (2026-08-15, as Merch Manager on dev): ONE Orders tab — legacy
+  // web-form rows and Desk orders in a single list with a Source badge
+  // (Web / Portal / Event / Manual). The old Web Orders tab is gone; its
+  // screened-spam bucket now lives at the bottom of Orders. Legacy rows
+  // are still read from + written to merch_orders (unchanged endpoints).
   var MERCH_MANAGER_TABS = [
-    { key: 'orders',    label: 'Web Orders',      bodyId: 'ws-merch-orders-body' },
-    { key: 'inventory', label: 'Inventory',       bodyId: 'ws-merch-inventory-body' },
-    { key: 'desk',      label: 'Desk Orders',     bodyId: 'ws-merch-desk-body' },
+    { key: 'desk',      label: 'Orders',          bodyId: 'ws-merch-desk-body' },
     { key: 'catalog',   label: 'Catalog & Stock', bodyId: 'ws-merch-catalog-body' },
+    { key: 'inventory', label: 'Inventory',       bodyId: 'ws-merch-inventory-body' },
     { key: 'needs',     label: 'Needs Ordering',  bodyId: 'ws-merch-needs-body' },
     { key: 'quicksale', label: 'Quick Sale',      bodyId: 'ws-merch-qs-body' }
   ];
