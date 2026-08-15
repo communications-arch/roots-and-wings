@@ -8391,8 +8391,7 @@
     html += '<div class="mf-card mf-members-card" id="mfMembersCard">';
     html += '<h3 class="mf-card-title" data-help-key="mf-members-summary">' + brandIconImg('membersSummary') + ' My Community</h3>';
     html += '<div class="ws-msum" id="ws-msum-body" aria-live="polite"><p class="ws-part-meter-caption ws-msum-loading">Loading community…</p></div>';
-    html += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="index.html#merch">Purchase Merch</a>'
-      + '<span class="ws-part-submit-hint">Shirts, mugs, totes and more — order online, pay at pickup.</span></p>';
+    html += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="/#merch">Shop Merch</a></p>';
     html += '</div>';
 
     // #116 (prod report: "keeps flickering"): the staggered loaders keep
@@ -11871,7 +11870,7 @@
     'coop-management': 'Central hub for co-op operations you help run — the Class Builder, Roles &amp; Committees, Facilities, and more. In the Class Builder, scheduling a class into a session/hour — or declining it — is the review; there’s no separate “approve.”',
     'admin-consoles': 'Admin tools and data sources for the roles you hold — permissions, calendars, and other back-office consoles.',
     'roles': 'Who holds each board and committee role this year. Depending on your role you can assign or update holders here.',
-    'mf-members-summary': 'Our co-op community this season — returning vs. new families, and kids by track. Click a count to see the roster (names, members, track). No sensitive info. Purchase Merch opens the shop on our public site; orders placed with your email show up under Heads-up here.',
+    'mf-members-summary': 'Our co-op community this season — returning vs. new families, and kids by track. Click a count to see the roster (names, members, track). No sensitive info. Shop Merch opens the shop on our public site; orders placed with your email show up under Heads-up here.',
     'mf-heads-up': 'Things your family should know about, in one place — right now that’s any merch order you’ve placed that’s still waiting on payment or pickup. Each row has a button into the details. The card disappears when there’s nothing to show.',
     'board-notes': 'A shared scratchpad for the board. Any board member can add a note; the author (or a super user) can remove one.',
     'special-events': 'Special events for the year — assign a lead and helpers, and track dates from proposed to approved.',
@@ -15992,7 +15991,7 @@
     if (_mmMerchOrders === null) { body.innerHTML = '<p class="ws-empty">Loading your orders…</p>'; return; }
     var orders = _mmMerchOrders;
     if (orders.length === 0) {
-      body.innerHTML = '<p class="ws-empty">No orders yet — <a class="ws-inline-link" href="index.html#merch">shop the merch page</a> to place your first one.</p>';
+      body.innerHTML = '<p class="ws-empty">No orders yet — <a class="ws-inline-link" href="/#merch">shop the merch page</a> to place your first one.</p>';
       return;
     }
     var h = '';
@@ -16021,7 +16020,7 @@
       h += '</p>';
       h += '</div>';
     });
-    h += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="index.html#merch">Purchase Merch</a>'
+    h += '<p class="ws-part-submit-line" style="margin-top:14px;"><a class="btn btn-primary btn-sm" href="/#merch">Shop Merch</a>'
       + '<span class="ws-part-submit-hint">Order more from the shop on our public site — pay at pickup.</span></p>';
     body.innerHTML = h;
   }

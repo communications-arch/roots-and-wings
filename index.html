@@ -1476,7 +1476,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260815e"></script>
+  <script src="script.js?v=20260815f"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.
@@ -1535,6 +1535,17 @@
           }
         })
         .catch(function () { /* keep hardcoded fallbacks */ });
+    })();
+    // Deep links like /#merch (portal "Shop Merch" button): the board grid
+    // above is injected async and shifts the page after the native anchor
+    // jump has already happened, so re-scroll to the hash once layout has
+    // settled. scroll-padding-top on <html> handles the fixed nav offset.
+    (function () {
+      var id = (location.hash || '').replace(/^#/, '');
+      if (!id) return;
+      var target = document.getElementById(id);
+      if (!target) return;
+      window.setTimeout(function () { target.scrollIntoView({ block: 'start' }); }, 400);
     })();
   </script>
 </body>
