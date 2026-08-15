@@ -1,0 +1,113 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Merch Payments Setup</title>
+<style>
+  :root {
+    --ground: #FBFAF6;
+    --surface: #F3F0E9;
+    --ink: #2B2437;
+    --ink-soft: #5C5468;
+    --line: #DDD8CC;
+    --purple: #5B4B8A;
+    --gold: #B8901F;
+    --gold-soft: #F0E3BC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #1D1926; --surface: #272134; --ink: #ECE8F2; --ink-soft: #ABA3BC;
+      --line: #3C3450; --purple: #A99BD6; --gold: #D9B54A; --gold-soft: #4A3E1E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #1D1926; --surface: #272134; --ink: #ECE8F2; --ink-soft: #ABA3BC;
+    --line: #3C3450; --purple: #A99BD6; --gold: #D9B54A; --gold-soft: #4A3E1E;
+  }
+  body { background: var(--ground); color: var(--ink); font-family: "Segoe UI", system-ui, -apple-system, sans-serif; line-height: 1.6; margin: 0; padding: 3rem 1.25rem 5rem; }
+  .page { max-width: 44rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Palatino Linotype", Palatino, Georgia, serif; line-height: 1.2; text-wrap: balance; }
+  h1 { font-size: 2.2rem; margin: 0.4rem 0 0.3rem; font-weight: 600; }
+  h2 { font-size: 1.4rem; margin: 2.6rem 0 0.6rem; color: var(--purple); font-weight: 600; }
+  h3 { font-size: 1.05rem; margin: 1.4rem 0 0.3rem; font-weight: 700; }
+  p { margin: 0.6rem 0; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.72rem; font-weight: 600; color: var(--gold); }
+  .lede { font-size: 1.05rem; color: var(--ink-soft); margin-top: 0; }
+  .kicker { border-top: 3px solid var(--purple); padding-top: 1.4rem; }
+  ol.steps { padding-left: 0; list-style: none; counter-reset: step; margin: 1rem 0; }
+  ol.steps > li { counter-increment: step; position: relative; padding: 0.9rem 1rem 0.9rem 3.2rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin: 0.6rem 0; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 0.9rem; top: 0.85rem; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--purple); color: var(--ground); font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; }
+  ol.steps li strong.t { display: block; margin-bottom: 0.15rem; }
+  ul { padding-left: 1.3rem; margin: 0.4rem 0; }
+  li { margin: 0.25rem 0; }
+  .who { display: inline-block; background: var(--gold-soft); border-radius: 4px; font-size: 0.72rem; font-weight: 700; padding: 0.05rem 0.5rem; letter-spacing: 0.05em; text-transform: uppercase; margin-left: 0.4rem; vertical-align: middle; }
+  .note { background: var(--surface); border-left: 3px solid var(--gold); padding: 0.7rem 1rem; margin: 1rem 0; font-size: 0.95rem; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 0.86em; background: var(--surface); padding: 0.1em 0.35em; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; margin: 0.8rem 0; }
+  .tablewrap { overflow-x: auto; }
+  th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-soft); border-bottom: 2px solid var(--line); padding: 0.4rem 0.7rem 0.3rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: 0.45rem 0.7rem 0.45rem 0; vertical-align: top; }
+</style>
+
+<div class="page">
+  <header class="kicker">
+    <div class="eyebrow">Roots &amp; Wings Indy · Setup Guide · August 2026</div>
+    <h1>Merch Payments Setup</h1>
+    <p class="lede">A one-time, ~10-minute setup so merchandise can take electronic payments on the co-op's PayPal account — without the merch manager's personal Venmo, and without adding to the treasurer's plate.</p>
+  </header>
+
+  <h2>The idea in one paragraph</h2>
+  <p>We create a <strong>named PayPal payment link — "R&amp;W Merch"</strong> — on the co-op's existing PayPal business account, print its QR code for the merch table, and give the merch manager her own limited login to that account so she can watch merch payments come in. Every merch payment arrives self-labeled "R&amp;W Merch," so the treasurer can ignore them day to day. The members portal remains the ledger: the manager records each sale there (cash, check, or PayPal), and that's the record of truth.</p>
+
+  <h2>Who does what</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Person</th><th>One-time</th><th>Ongoing</th></tr>
+    <tr><td><strong>Treasurer</strong> (holds the PayPal login)</td><td>Steps 1–4 below (~10 min)</td><td>Nothing. Optionally glance at "R&amp;W Merch" activity at year end.</td></tr>
+    <tr><td><strong>Merch Manager</strong></td><td>Accept the PayPal user invite; test one payment</td><td>Show the QR at events; tap "PayPal" in Quick Sale when someone pays that way.</td></tr>
+    <tr><td><strong>Erin / portal</strong></td><td>Wire the link + QR into the portal's Quick Sale screen and order-confirmation emails</td><td>—</td></tr>
+  </table></div>
+
+  <h2>Treasurer setup <span class="who">Treasurer</span></h2>
+  <ol class="steps">
+    <li><strong class="t">Create the payment link.</strong>
+      Sign in at paypal.com (business account) → <em>Pay &amp; Get Paid</em> → <em>Payment links and buttons</em> (sometimes labeled "PayPal.Me" or "Create payment link"). Create a new link named <strong>R&amp;W Merch</strong>. Leave the amount blank/flexible so the buyer types the total the manager tells them. If it offers "let the payer add a note," turn that on — buyers can write what they bought.
+      <div class="note">The homepage donate button already uses one of these links, so this is the same feature you've used before — just a second, named link.</div>
+    </li>
+    <li><strong class="t">Print the QR code.</strong>
+      Every payment link has a QR code option (on the web: the link's "Share" / "QR code" button; in the PayPal Business app: <em>Get paid</em> → <em>QR code</em>). Download it, print it letter-size, and put it in a stand-up sign holder for the merch table. Print a second copy — they walk off.
+    </li>
+    <li><strong class="t">Add the merch manager as a limited user.</strong>
+      Gear icon → <em>Account Settings</em> → <em>Account access</em> → <em>Manage users</em> → <em>Add user</em>. Enter her name and email; grant only <em>view transactions</em> and <em>issue refunds</em> (skip withdrawals, bank/card changes, and account settings). She gets an invite email and creates her own password — she never sees yours.
+    </li>
+    <li><strong class="t">Send Erin two things.</strong>
+      The payment-link URL (looks like <code>paypal.com/ncp/payment/…</code> or <code>paypal.me/…</code>) and the QR image file. Erin wires them into the portal so the manager can show the QR from her phone and web-form buyers can pay ahead from their confirmation email.
+    </li>
+  </ol>
+
+  <h2>Merch manager <span class="who">Merch Manager</span></h2>
+  <ol class="steps">
+    <li><strong class="t">Accept the PayPal invite</strong> and sign in once so it's ready before the first event.</li>
+    <li><strong class="t">Do one test payment</strong> — scan the QR with your own phone, pay $1, watch it appear under your login, then refund it. Now you know exactly what buyers see.</li>
+    <li><strong class="t">At the table:</strong> Quick Sale in the portal → tap the items → tell the buyer the total → they scan and pay (or hand you cash/check) → tap the payment method → Record. Inventory updates itself. That's the entire process.</li>
+  </ol>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li><strong>Buyers without a PayPal account:</strong> PayPal is finishing an account-side fix ("guest checkout") that lets people pay a link by card with no PayPal account. Until it lands, card-only buyers can pay cash/check or pay at pickup — the portal already says so.</li>
+    <li><strong>Fees:</strong> PayPal takes its normal fee on each payment (roughly 2–3%). Merch prices already absorb this; nothing to configure.</li>
+    <li><strong>Refunds:</strong> the manager can issue them from her limited login; no need to involve the treasurer.</li>
+    <li><strong>Old Venmo payments:</strong> stay recorded as history in the portal. Nothing new goes to Venmo.</li>
+    <li><strong>Reporting:</strong> if anyone ever needs merch totals, it's one report in the portal (payments by method and date). The PayPal activity filtered to "R&amp;W Merch" is the cross-check.</li>
+  </ul>
+
+  <h2>Current prices (loaded in the portal)</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Item</th><th>Price</th></tr>
+    <tr><td>T-Shirt — Toddler</td><td>$10</td></tr>
+    <tr><td>T-Shirt — Kids</td><td>$15</td></tr>
+    <tr><td>T-Shirt — Adult</td><td>$20</td></tr>
+    <tr><td>Campfire Coffee Mug</td><td>$12</td></tr>
+    <tr><td>Stainless Tumbler</td><td>$30</td></tr>
+    <tr><td>Enamel Pin · Woven Patch</td><td>$7 each</td></tr>
+    <tr><td>Block-Printed Tote</td><td>Small $10 · Large $20</td></tr>
+    <tr><td>Keychain · Sticker</td><td>$2 each</td></tr>
+  </table></div>
+</div>
+</html>
