@@ -11330,8 +11330,8 @@
         var merchTitles = (typeof grantTitlesFor === 'function' && grantTitlesFor('merch_manage')) || ['Merchandise Manager'];
         var merchTodoRole = merchTitles.some(function (t) { return normalizeWorkspaceTitle(t) === role; });
         if (merchTodoRole) {
-          h += '<li id="ws-todo-merch-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-catalog-needs"><span class="ws-link-count" id="ws-merch-restock-count">0</span><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span><span id="ws-merch-restock-label">Reorder low or back-ordered merch</span></button></li>';
-          h += '<li id="ws-todo-merch-open-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-orders-open"><span class="ws-link-count" id="ws-merch-open-count">0</span><span class="ws-link-icon">' + brandIconImg('todo', 'ag-icon') + '</span><span id="ws-merch-open-label">Merch orders waiting on you</span></button></li>';
+          h += '<li id="ws-todo-merch-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-catalog-needs"><span class="ws-link-count" id="ws-merch-restock-count">0</span><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span><span id="ws-merch-restock-label">Replenish Stock</span></button></li>';
+          h += '<li id="ws-todo-merch-open-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-orders-open"><span class="ws-link-count" id="ws-merch-open-count">0</span><span class="ws-link-icon">' + brandIconImg('todo', 'ag-icon') + '</span><span id="ws-merch-open-label">Outstanding Pre-Orders</span></button></li>';
         }
         if (role === 'Communications Director') {
           h += '<li id="ws-todo-onboard-item" hidden><button type="button" class="ws-link-btn" data-resource-action="member-onboarding"><span class="ws-link-count" id="ws-onboard-count">0</span><span class="ws-link-icon">' + brandIconImg('newFamily', 'new-fam-icon') + '</span><span id="ws-onboard-label">Member Onboarding</span></button></li>';
@@ -11737,10 +11737,10 @@
       // by View-As'ing into Membership.
       { key: 'waivers', title: 'Waivers Report' },
       { key: 'membership', title: 'Membership' },
-      { key: 'merch-orders', title: 'Merchandise Orders' }
+      { key: 'merch-orders', title: 'Merchandise & Orders' }
     ],
     'Merchandise Manager': [
-      { key: 'merch-orders', title: 'Merchandise Orders' }
+      { key: 'merch-orders', title: 'Merchandise & Orders' }
     ],
     // Cleaning Crew Management lives in My Workspace for the liaison
     // (Erin, 2026-07-15) — the My Family duty card + Roles Assignments
@@ -12173,7 +12173,7 @@
     'waivers_manage':        { reports: [{ key: 'waivers', title: 'Waivers Report' }],
                                forms:   [{ key: 'send-waiver', title: 'Send Waiver' },
                                          { key: 'guest-setup', title: 'Set Up a Guest' }] },
-    'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise Orders' }] },
+    'merch_manage':          { reports: [{ key: 'merch-orders', title: 'Merchandise & Orders' }] },
     'registration_invite':   { forms:   [{ key: 'send-registration', title: 'Send Registration Form' }] },
     // 'special_events_manage' no longer drives the special-events card
     // (Erin, 2026-07-21): the grant list defaults to SEL + VP, and the VP
@@ -14734,8 +14734,8 @@
   function showMerchOrdersModal(opts) {
     opts = opts || {};
     var outer = renderReportModal({
-      title: 'Merchandise',
-      subtitle: 'Every merch order in one list — homepage web orders, member pickup orders, and event sales — plus the catalog with live stock counts and the event quick-sale screen.',
+      title: 'Merchandise & Orders',
+      subtitle: '',
       meta: '',
       icons: [],
       bodyId: 'ws-merch-modal-body',
@@ -15315,7 +15315,7 @@
     var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
     if (metaEl) metaEl.textContent = counts.all + ' order' + (counts.all === 1 ? '' : 's');
 
-    var h = '<p class="ws-body-hint">One working queue, every source. <strong>Web</strong> = ordered ahead (homepage form or the member shop), paid at pickup; <strong>Event</strong> = sold at a merch table via Quick Sale. <strong>Pre-orders</strong> are waiting to be picked up — use each row’s <strong>Actions</strong> menu to mark them paid (with how they paid), ready when set aside, and <strong>fulfilled</strong> when handed over; cancelling puts reserved stock back on the shelf. Click a row (or <strong>View items</strong>) for every line, contact details, and notes. Filter with the funnels on Status, Source, and Paid. Older web orders (from before the Merch Desk) carry no prices; their actions write to the old ledger.</p>';
+    var h = '';
 
     // Screened-as-spam summary (#150): above the table whenever the
     // Status funnel is All (screened rows are in the list) or any
@@ -15696,7 +15696,7 @@
     var needsAll = merchNeedsOrderingVariants();
     var h = '';
     if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
-    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. Counts here are the <strong>live stock</strong> — every order and quick sale moves them, and <strong>Receive stock</strong> adds a shipment (it can draw down the on-order count). Each row’s <strong>Actions</strong> menu edits the variant, receives stock, edits the item (vendor, notes, pre-order flag), or adds a variant to that item; <strong>+ Add item</strong> above starts a new item. <strong>Need</strong> is what to order from the supplier — backordered demand plus anything below its reorder point, minus what is already on order; sort or filter that column to see what needs ordering.</p>';
+
 
     // Toolbar (Erin 2026-08-15): creation only. Editing an item, adding a
     // variant, and receiving stock all live on each row's standard
@@ -35745,14 +35745,14 @@
           var pill = li.querySelector('.ws-link-count');
           if (pill) pill.textContent = String(needs);
           var label = li.querySelector('#ws-merch-restock-label') || li.querySelector('span:last-child');
-          if (label) label.textContent = needs === 1 ? 'Reorder 1 low or back-ordered merch variant' : 'Reorder ' + needs + ' low or back-ordered merch variants';
+          if (label) label.textContent = 'Replenish Stock';
           li.hidden = needs <= 0;
         });
         document.querySelectorAll('li[id="ws-todo-merch-open-item"]').forEach(function (li) {
           var pill = li.querySelector('.ws-link-count');
           if (pill) pill.textContent = String(open);
           var label = li.querySelector('#ws-merch-open-label') || li.querySelector('span:last-child');
-          if (label) label.textContent = open === 1 ? '1 merch pre-order waiting on you' : open + ' merch pre-orders waiting on you';
+          if (label) label.textContent = 'Outstanding Pre-Orders';
           li.hidden = open <= 0;
         });
         if (typeof recomputeTodoEmptyState === 'function') recomputeTodoEmptyState();

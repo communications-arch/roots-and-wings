@@ -30,7 +30,7 @@ repeat journey 1 on the phone viewport — she gets pinged there.)
    - *Secretary:* none wired — the card should say so, not sit blank.
 2. **Reports & Forms.** Open every row. Expected — *Membership:* Member
    Pipeline, Grove Builder, Membership, Send Registration Form. *Comms:*
-   Waivers Report, Membership, Merchandise Orders, Send Waiver, Set Up a
+   Waivers Report, Membership, Merchandise & Orders, Send Waiver, Set Up a
    Guest. *Secretary / Sustaining:* Membership only (read-only — no Actions
    column). Each opens with real data or an honest empty state.
 3. **Seat-specific tool.** *Membership:* walk one family through the

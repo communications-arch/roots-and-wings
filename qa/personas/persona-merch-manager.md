@@ -17,7 +17,7 @@ no one holds it, run as erinb@ (Communications Director passes
 
 ## Journeys
 
-1. **Orders tab, one queue.** Reports & Forms → Merchandise Orders. Expected:
+1. **Orders tab, one queue.** Reports & Forms → Merchandise & Orders. Expected:
    filter chips Pre-orders / All / Fulfilled / Cancelled with counts that
    sum sensibly; every row wears a Source badge (Web or Event) and a
    fulfillment pill (Pre-order / Fulfilled / Cancelled) beside a payment pill
