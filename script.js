@@ -11609,6 +11609,15 @@
             items.unshift(sharedParticipation);
           }
         }
+        // Quick Sale (#351, Erin 2026-08-15): the merch manager's phone
+        // doorway rides the Merchandise report row — same role /
+        // merch_manage gate (grants reconcile the merch-orders row; this
+        // follows it), so both buttons sit on the card together.
+        var merchAt = -1;
+        items.forEach(function (r, i) { if (r.key === 'merch-orders') merchAt = i; });
+        if (merchAt !== -1 && !items.some(function (r) { return r.key === 'merch-quick-sale'; })) {
+          items.splice(merchAt + 1, 0, { key: 'merch-quick-sale', title: 'Quick Sale' });
+        }
         var formItems = (ROLE_FORMS[role] || []);
         var h = '<p class="ws-body-hint">Live reports scoped to your role'
           + (formItems.length ? ', plus forms to send out' : '') + '.</p>';
@@ -12706,6 +12715,7 @@
         else if (key === 'tour-pipeline') showTourPipelineModal();
         else if (key === 'morning-classes') showMorningClassBuilder();
         else if (key === 'merch-orders') showMerchOrdersModal();
+        else if (key === 'merch-quick-sale' && typeof showMerchQuickSaleModal === 'function') showMerchQuickSaleModal();
         else if (key === 'cleaning-crew') showCleaningManagementModal();
         else if (key === 'schedules') showSchedulesReportModal();
       });
@@ -14721,15 +14731,20 @@
   var _merchCatSort = null;          // Catalog & Stock: last header sort {key, dir}, kept across re-renders
   var _merchQsCart = {};             // quick-sale: variant id -> qty
   var _merchQsMethod = '';           // quick-sale payment method
+  var _merchQsOpenItem = null;       // quick-sale: item id whose variant picker is open
+  var _merchQsPick = { a: '', b: '' }; // quick-sale: picker's chosen Size (a) / Color (b)
+  var _merchQsCartOpen = false;      // quick-sale: pinned cart expanded (checkout) vs compact bar
+  var _merchQsLastSale = null;       // quick-sale: { total_cents, ids, preorder } — success banner until the next tap
 
-  // Manager tab strip — Orders · Catalog & Stock · Quick Sale.
+  // Manager tab strip — Orders · Catalog. Quick Sale is its OWN doorway
+  // (Erin, 2026-08-15): a standalone phone-first modal opened from the
+  // Reports & Forms card (showMerchQuickSaleModal), not a tab.
   var MERCH_MANAGER_TABS = [
     { key: 'desk',      label: 'Orders',          bodyId: 'ws-merch-desk-body' },
-    { key: 'catalog',   label: 'Catalog', bodyId: 'ws-merch-catalog-body' },
-    { key: 'quicksale', label: 'Quick Sale',      bodyId: 'ws-merch-qs-body' }
+    { key: 'catalog',   label: 'Catalog', bodyId: 'ws-merch-catalog-body' }
   ];
 
-  // opts: { tab: 'desk'|'catalog'|'quicksale', needsOnly: bool } — the
+  // opts: { tab: 'desk'|'catalog', needsOnly: bool } — the
   // To Do items deep-link here (Orders queue / catalog "Needs ordering").
   function showMerchOrdersModal(opts) {
     opts = opts || {};
@@ -14760,12 +14775,40 @@
     _merchStockAdjustFor = null;
     renderMerchTabbedBody(true);
     // Three background loads: legacy web-form rows + Desk orders feed the
-    // Orders list and its badge; the catalog feeds Catalog & Stock, Quick
-    // Sale, and the "to order" badge. Each repaints the active tab when
-    // it lands.
+    // Orders list and its badge; the catalog feeds Catalog & Stock and
+    // the "to order" badge. Each repaints the active tab when it lands.
     loadMerchOrdersReport();
     loadMerchDeskOrders();
     merchReloadCatalog();
+  }
+
+  // Standalone Quick Sale modal (Erin, 2026-08-15) — the manager's phone
+  // screen for selling at a folding table. Sits beside the Merchandise
+  // report on the Reports & Forms card (same merch_manage / role gate —
+  // the row rides the merch-orders entry) and shares the report's
+  // catalog cache + loaders. `_merchActiveTab` parks at 'quicksale' while
+  // it is open so merchReloadCatalog repaints this body instead of a tab
+  // (the tab list itself has no such key; showMerchOrdersModal resets it).
+  function showMerchQuickSaleModal() {
+    var outer = renderReportModal({
+      title: 'Quick Sale',
+      subtitle: 'Tap an item (then size + color), review the cart, record who paid and how.',
+      meta: '',
+      icons: [],
+      bodyId: 'ws-merch-qs-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading the catalog…</p>'
+    });
+    if (!outer) return;
+    _merchActiveTab = 'quicksale';
+    _merchQsCart = {};
+    _merchQsMethod = '';
+    _merchQsOpenItem = null;
+    _merchQsPick = { a: '', b: '' };
+    _merchQsCartOpen = false;
+    _merchQsLastSale = null;
+    if (_merchCatalogCache) renderMerchQuickSaleBody(); // instant paint from the session cache…
+    merchReloadCatalog();                               // …then fresh stock counts.
+    if (!_merchDeskCache) loadMerchDeskOrders();        // so a sale can land in the Orders cache
   }
 
   function refreshMerchNav() {
@@ -14799,9 +14842,6 @@
     } else if (_merchActiveTab === 'catalog') {
       if (_merchCatalogCache) renderMerchCatalogBody();
       else if (!skipLoad) loadMerchDeskCatalog(renderMerchCatalogBody);
-    } else if (_merchActiveTab === 'quicksale') {
-      if (_merchCatalogCache) renderMerchQuickSaleBody();
-      else if (!skipLoad) loadMerchDeskCatalog(renderMerchQuickSaleBody);
     }
   }
 
@@ -15958,9 +15998,14 @@
     });
   }
 
-  // ── Quick Sale tab (event mode) ─────────────────
-  // Built for a phone at a folding table: big item buttons that add one
-  // per tap, a running total, member-or-guest buyer, payment chips, done.
+  // ── Quick Sale (standalone modal, event mode) ────
+  // Built for a PHONE at a folding table (Erin, 2026-08-15): one tile per
+  // ITEM (not per variant — the tee grid alone is 56 variants), tap →
+  // single-variant items go straight into the cart, multi-variant items
+  // open an inline Size → Color picker; the cart is pinned to the bottom
+  // of the modal as a compact bar (n items · total · Checkout) that
+  // expands into lines with qty steppers, buyer, payment chips, and one
+  // big Record button. Every sink is escaped; controls are ≥44px.
   function merchQsTotalCents() {
     var cat = _merchCatalogCache || { variants: [] };
     var total = 0;
@@ -15971,71 +16016,161 @@
     return total;
   }
 
+  function merchQsCartCount() {
+    return Object.keys(_merchQsCart).reduce(function (s, vid) { return s + (_merchQsCart[vid] || 0); }, 0);
+  }
+
+  // Active variants of an item in catalog sort order.
+  function merchQsVariantsFor(itemId) {
+    var cat = _merchCatalogCache || { variants: [] };
+    return cat.variants.filter(function (v) { return v.item_id === itemId && v.active; })
+      .sort(function (x, y) { return (x.sort_order || 0) - (y.sort_order || 0) || x.id - y.id; });
+  }
+
+  // Two-axis split for a multi-variant item. The catalog convention for
+  // variant labels is "Size — Color" (em dash; the add-variant form's
+  // placeholder is "Youth M — Purple" and the seed builds tees + totes
+  // that way). When EVERY active variant's label splits into exactly two
+  // parts on ' — ', the picker shows a Size row then a Color row and maps
+  // the pair back to its variant; otherwise it falls back to a compact
+  // list of variant chips (labels that don't split, e.g. "Small" /
+  // "Large" alone). Returns { split, a: [...], b: [...], byPair: {} }.
+  function merchQsAxes(variants) {
+    var a = [], b = [], byPair = {};
+    var ok = variants.length > 0 && variants.every(function (v) {
+      var parts = String(v.label || '').split(' — ');
+      return parts.length === 2 && parts[0].trim() && parts[1].trim();
+    });
+    if (!ok) return { split: false, a: [], b: [], byPair: {} };
+    variants.forEach(function (v) {
+      var parts = String(v.label).split(' — ');
+      var s = parts[0].trim(), c = parts[1].trim();
+      if (a.indexOf(s) === -1) a.push(s);
+      if (b.indexOf(c) === -1) b.push(c);
+      byPair[s + '|' + c] = v;
+    });
+    return { split: true, a: a, b: b, byPair: byPair };
+  }
+
+  // Add one of a variant to the cart, close the picker, drop any stale
+  // success banner, and repaint.
+  function merchQsAdd(variantId) {
+    _merchQsCart[variantId] = Math.min((_merchQsCart[variantId] || 0) + 1, 99);
+    _merchQsOpenItem = null;
+    _merchQsPick = { a: '', b: '' };
+    _merchQsLastSale = null;
+    renderMerchQuickSaleBody();
+  }
+
+  // Small stock mark for a variant: "out" when on hand is 0. The sale is
+  // still allowed — physical truth wins (the server clamps stock at 0),
+  // and printed-to-order items back-order against a 0 count anyway.
+  function merchQsOutMark(v) {
+    return (v && v.on_hand === 0) ? ' <span class="merch-qs-out">out</span>' : '';
+  }
+
   function renderMerchQuickSaleBody() {
     var body = document.getElementById('ws-merch-qs-body');
     if (!body) return;
     var cat = _merchCatalogCache || { items: [], variants: [] };
-    var activeItems = cat.items.filter(function (i) { return i.active; });
-    var h = '<p class="ws-body-hint">Tap items as you sell them — each tap adds one. Pick the member family (or type a guest name), tap how they paid, and record. The sale lands as a fulfilled + paid order and the stock counts come down. Items marked <span class="merch-tab-badge">pre-order</span> (T-shirts — printed to order) are still paid here but saved as a <strong>pre-order</strong> for pickup, not handed over.</p>';
-    if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
+    var activeItems = cat.items.filter(function (i) { return i.active && merchQsVariantsFor(i.id).length > 0; })
+      .sort(function (x, y) { return (x.sort_order || 0) - (y.sort_order || 0) || x.id - y.id; });
+    var h = '';
 
+    // Success banner from the last sale — stays until the next tap.
+    if (_merchQsLastSale) {
+      var ls = _merchQsLastSale;
+      h += '<div class="merch-qs-done" role="status" aria-live="polite"><strong>Recorded — ' + escapeHtmlWs(fmtCents(ls.total_cents)) + ' collected.</strong>'
+        + (ls.ids.length ? ' Order' + (ls.ids.length > 1 ? 's ' : ' ') + escapeHtmlWs(ls.ids.map(function (id) { return '#' + id; }).join(' + ')) + '.' : '')
+        + (ls.preorder ? ' T-shirt lines were saved as a pre-order for pickup (Merchandise → Orders → Pre-orders).' : '')
+        + ' Ready for the next customer.</div>';
+    }
+    h += '<p class="ws-body-hint">Tap an item to add one. Sizes and colors pick on the next step. Items marked <span class="merch-tab-badge">pre-order</span> (T-shirts — printed to order) are paid here but saved as a <strong>pre-order</strong> for pickup.</p>';
+    if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
+    if (!cat.error && activeItems.length === 0) h += '<p class="ws-empty">Nothing is on sale yet — activate items and variants in Merchandise → Catalog.</p>';
+
+    // ── Item tiles (one per item; picker panel inline under the tapped one) ──
     h += '<div class="merch-qs-grid">';
     activeItems.forEach(function (item) {
-      cat.variants.filter(function (v) { return v.item_id === item.id && v.active; }).forEach(function (v) {
-        var count = _merchQsCart[v.id] || 0;
-        h += '<button type="button" class="sc-btn merch-qs-item' + (count > 0 ? ' merch-qs-item-on' : '') + '" data-variant-id="' + v.id + '">'
-          + '<span class="merch-qs-item-name">' + escapeHtmlWs(item.name) + (v.label ? ' · ' + escapeHtmlWs(v.label) : '')
-          + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '') + '</span>'
-          + '<span class="merch-qs-item-price">' + escapeHtmlWs(fmtCents(v.price_cents)) + (count > 0 ? ' · ×' + count : '') + '</span>'
-          + '</button>';
-      });
+      var vars = merchQsVariantsFor(item.id);
+      var prices = vars.map(function (v) { return v.price_cents; });
+      var minP = Math.min.apply(null, prices), maxP = Math.max.apply(null, prices);
+      var priceTxt = minP === maxP ? fmtCents(minP) : 'from ' + fmtCents(minP);
+      var inCart = vars.reduce(function (s, v) { return s + (_merchQsCart[v.id] || 0); }, 0);
+      var isOpen = _merchQsOpenItem === item.id;
+      var single = vars.length === 1;
+      h += '<button type="button" class="sc-btn merch-qs-item' + (inCart > 0 ? ' merch-qs-item-on' : '') + (isOpen ? ' merch-qs-item-open' : '') + '"'
+        + ' data-item-id="' + item.id + '"' + (single ? '' : ' aria-expanded="' + (isOpen ? 'true' : 'false') + '"') + '>'
+        + '<span class="merch-qs-item-name">' + escapeHtmlWs(item.name)
+        + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '')
+        + (single ? merchQsOutMark(vars[0]) : '') + '</span>'
+        + '<span class="merch-qs-item-price">' + escapeHtmlWs(priceTxt)
+        + (single ? '' : ' · ' + vars.length + ' options')
+        + (inCart > 0 ? ' <span class="merch-qs-count">×' + inCart + '</span>' : '') + '</span>'
+        + '</button>';
+      if (isOpen && !single) h += merchQsPickerHtml(item, vars);
     });
     h += '</div>';
 
-    var cartLines = Object.keys(_merchQsCart).filter(function (vid) { return _merchQsCart[vid] > 0; });
-    if (cartLines.length > 0) {
-      var cartHasPreorder = false;
-      h += '<div class="ws-merch-add-form" style="margin-top:12px;">';
-      cartLines.forEach(function (vid) {
-        var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
-        if (!v) return;
-        var item = cat.items.filter(function (i) { return i.id === v.item_id; })[0] || { name: '' };
-        if (item.preorder_only) cartHasPreorder = true;
-        h += '<div class="ws-lending-row"><span class="ws-lending-main">' + _merchQsCart[vid] + ' × '
-          + escapeHtmlWs(item.name + (v.label ? ' · ' + v.label : ''))
-          + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '')
-          + ' — ' + escapeHtmlWs(fmtCents(_merchQsCart[vid] * v.price_cents)) + '</span>'
-          + '<span class="ws-lending-actions"><button type="button" class="sc-btn merch-qs-minus" data-variant-id="' + v.id + '" aria-label="Remove one">−</button></span></div>';
-      });
-      h += '<p class="ws-part-earned" style="margin:8px 0 0;">Total: <strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></p>';
-      if (cartHasPreorder) h += '<p class="ws-body-hint" style="margin:6px 0 0;"><em>T-shirts are printed to order — those lines will be saved as a pre-order (paid now, picked up later) and show under Pre-orders on the Orders tab.</em></p>';
-      h += '</div>';
+    // ── Pinned cart: compact bar, or the full checkout when expanded ──
+    var lines = Object.keys(_merchQsCart).filter(function (vid) { return _merchQsCart[vid] > 0; });
+    var count = merchQsCartCount();
+    if (lines.length > 0) {
+      h += '<div class="merch-qs-cart' + (_merchQsCartOpen ? ' merch-qs-cart-open' : '') + '">';
+      h += '<button type="button" class="merch-qs-cart-bar" id="merch-qs-cart-toggle" aria-expanded="' + (_merchQsCartOpen ? 'true' : 'false') + '">'
+        + '<span class="merch-qs-cart-sum">' + count + ' item' + (count === 1 ? '' : 's') + ' · <strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></span>'
+        + '<span class="merch-qs-cart-cta">' + (_merchQsCartOpen ? 'Hide cart' : 'Checkout') + ' <span aria-hidden="true">' + (_merchQsCartOpen ? '▾' : '▸') + '</span></span>'
+        + '</button>';
+      if (_merchQsCartOpen) {
+        var cartHasPreorder = false;
+        h += '<div class="merch-qs-cart-body">';
+        lines.forEach(function (vid) {
+          var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
+          if (!v) return;
+          var item = cat.items.filter(function (i) { return i.id === v.item_id; })[0] || { name: '' };
+          if (item.preorder_only) cartHasPreorder = true;
+          var qty = _merchQsCart[vid];
+          h += '<div class="merch-qs-line">'
+            + '<span class="merch-qs-line-name">' + escapeHtmlWs(item.name) + (v.label ? ' <span class="ws-wv-context">' + escapeHtmlWs(v.label) + '</span>' : '')
+            + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '') + merchQsOutMark(v)
+            + '<span class="merch-qs-line-price">' + escapeHtmlWs(fmtCents(qty * v.price_cents)) + '</span></span>'
+            + '<span class="merch-qs-qty">'
+            + '<button type="button" class="sc-btn merch-qs-chip merch-qs-minus" data-variant-id="' + v.id + '" aria-label="One fewer">−</button>'
+            + '<span class="merch-qs-qty-n" aria-live="polite">' + qty + '</span>'
+            + '<button type="button" class="sc-btn merch-qs-chip merch-qs-plus" data-variant-id="' + v.id + '" aria-label="One more">+</button>'
+            + '<button type="button" class="sc-btn merch-qs-chip merch-qs-remove" data-variant-id="' + v.id + '" aria-label="Remove line" title="Remove">&times;</button>'
+            + '</span></div>';
+        });
+        h += '<div class="merch-qs-total"><span>Total</span><strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></div>';
+        if (cartHasPreorder) h += '<p class="ws-body-hint merch-qs-note"><em>T-shirts are printed to order — those lines will be saved as a pre-order (paid now, picked up later) and show under Pre-orders on the Orders tab.</em></p>';
 
-      h += '<div class="ws-merch-add-grid" style="margin-top:12px;">';
-      h += '<label class="ws-merch-add-field"><span>Member family</span><input type="text" id="merch-qs-family" list="merch-qs-fams" placeholder="Start typing a family…" autocomplete="off"></label>';
-      h += '<label class="ws-merch-add-field"><span>…or guest name</span><input type="text" id="merch-qs-guest" maxlength="200" placeholder="Walk-up guest"></label>';
-      h += '</div>';
-      h += '<datalist id="merch-qs-fams">';
-      var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
-      fams.forEach(function (fam) {
-        if (!fam || !fam.email) return;
-        h += '<option value="' + escapeAttr(fam.email) + '">' + escapeHtmlWs((fam.displayName || fam.name || '') + ' family') + '</option>';
-      });
-      h += '</datalist>';
+        h += '<div class="ws-merch-add-grid merch-qs-buyer">';
+        h += '<label class="ws-merch-add-field"><span>Member family</span><input type="text" id="merch-qs-family" list="merch-qs-fams" placeholder="Start typing a family…" autocomplete="off" autocapitalize="off"></label>';
+        h += '<label class="ws-merch-add-field"><span>…or guest name</span><input type="text" id="merch-qs-guest" maxlength="200" placeholder="Walk-up guest" autocomplete="off"></label>';
+        h += '</div>';
+        h += '<datalist id="merch-qs-fams">';
+        var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
+        fams.forEach(function (fam) {
+          if (!fam || !fam.email) return;
+          h += '<option value="' + escapeAttr(fam.email) + '">' + escapeHtmlWs((fam.displayName || fam.name || '') + ' family') + '</option>';
+        });
+        h += '</datalist>';
 
-      h += '<div class="ws-merch-add-toggles">';
-      MERCH_PAY_METHODS_NEW.forEach(function (m) {
-        h += '<button type="button" class="sc-btn merch-qs-method' + (_merchQsMethod === m ? ' sc-save' : '') + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
-      });
-      h += '</div>';
-      h += '<div class="ws-merch-add-actions">';
-      h += '<button type="button" class="btn btn-outline-dark btn-sm" id="merch-qs-clear">Clear</button>';
-      h += '<button type="button" class="btn btn-primary btn-sm" id="merch-qs-record">Record sale — ' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</button>';
-      h += '</div>';
-      h += '<div class="ws-merch-add-status" id="merch-qs-status" role="status" aria-live="polite"></div>';
-    } else {
-      h += '<p class="ws-empty">Nothing rung up yet — tap items above.</p>';
+        h += '<div class="merch-qs-methods" role="group" aria-label="How they paid">';
+        MERCH_PAY_METHODS_NEW.forEach(function (m) {
+          h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-method' + (_merchQsMethod === m ? ' merch-qs-chip-on' : '') + '" data-method="' + m + '" aria-pressed="' + (_merchQsMethod === m ? 'true' : 'false') + '">' + escapeHtmlWs(MERCH_PAY_LABELS[m]) + '</button>';
+        });
+        h += '</div>';
+        h += '<button type="button" class="btn btn-primary merch-qs-record" id="merch-qs-record">Record sale — ' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</button>';
+        h += '<div class="merch-qs-actions"><button type="button" class="btn btn-outline-dark btn-sm" id="merch-qs-clear">Clear cart</button></div>';
+        h += '<div class="ws-merch-add-status" id="merch-qs-status" role="status" aria-live="polite"></div>';
+        h += '</div>'; // .merch-qs-cart-body
+      }
+      h += '</div>'; // .merch-qs-cart
+    } else if (activeItems.length > 0 && !_merchQsLastSale) {
+      h += '<p class="ws-empty merch-qs-empty">Nothing rung up yet — tap items above.</p>';
     }
+
     // Preserve buyer fields across re-renders (each tap re-renders).
     var prevFam = (document.getElementById('merch-qs-family') || {}).value || '';
     var prevGuest = (document.getElementById('merch-qs-guest') || {}).value || '';
@@ -16045,8 +16180,99 @@
     wireMerchQuickSale(body);
   }
 
+  // Inline picker panel under a multi-variant tile: Size row → Color row
+  // (when labels split), else a compact list of variant chips. Picking a
+  // full combination adds ONE line to the cart. Missing pairs (a size
+  // with no such color) hide that color chip; picked size limits colors.
+  function merchQsPickerHtml(item, vars) {
+    var ax = merchQsAxes(vars);
+    var h = '<div class="merch-qs-picker" data-item-id="' + item.id + '">';
+    h += '<div class="merch-qs-picker-head"><strong>' + escapeHtmlWs(item.name) + '</strong>'
+      + '<button type="button" class="sc-btn merch-qs-chip merch-qs-picker-close" aria-label="Close picker">&times;</button></div>';
+    if (ax.split) {
+      var pickA = ax.a.indexOf(_merchQsPick.a) !== -1 ? _merchQsPick.a : '';
+      h += '<div class="merch-qs-axis"><span class="merch-qs-axis-label">Size</span><div class="merch-qs-chips">';
+      ax.a.forEach(function (s) {
+        var any = ax.b.filter(function (c) { return !!ax.byPair[s + '|' + c]; });
+        var priceSet = {};
+        any.forEach(function (c) { priceSet[ax.byPair[s + '|' + c].price_cents] = true; });
+        var pk = Object.keys(priceSet);
+        var priceTxt = pk.length === 1 ? ' <span class="merch-qs-chip-sub">' + escapeHtmlWs(fmtCents(parseInt(pk[0], 10))) + '</span>' : '';
+        h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-axis-a' + (pickA === s ? ' merch-qs-chip-on' : '') + '" data-axis-a="' + escapeAttr(s) + '" aria-pressed="' + (pickA === s ? 'true' : 'false') + '">' + escapeHtmlWs(s) + priceTxt + '</button>';
+      });
+      h += '</div></div>';
+      h += '<div class="merch-qs-axis"><span class="merch-qs-axis-label">Color' + (pickA ? '' : ' <span class="ws-wv-context">(pick a size first)</span>') + '</span><div class="merch-qs-chips">';
+      ax.b.forEach(function (c) {
+        var v = pickA ? ax.byPair[pickA + '|' + c] : null;
+        if (pickA && !v) return; // this size never came in this color
+        h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-axis-b" data-axis-b="' + escapeAttr(c) + '"' + (pickA ? '' : ' disabled') + '>'
+          + escapeHtmlWs(c) + (v ? merchQsOutMark(v) : '') + '</button>';
+      });
+      h += '</div></div>';
+    } else {
+      h += '<div class="merch-qs-axis"><div class="merch-qs-chips">';
+      vars.forEach(function (v) {
+        h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-variant" data-variant-id="' + v.id + '">'
+          + escapeHtmlWs(v.label || item.name) + ' <span class="merch-qs-chip-sub">' + escapeHtmlWs(fmtCents(v.price_cents)) + '</span>' + merchQsOutMark(v) + '</button>';
+      });
+      h += '</div></div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   function wireMerchQuickSale(body) {
+    // Item tiles: single variant → add; several → open/close the picker.
     body.querySelectorAll('.merch-qs-item').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var itemId = parseInt(btn.getAttribute('data-item-id'), 10);
+        var vars = merchQsVariantsFor(itemId);
+        if (vars.length === 1) { merchQsAdd(vars[0].id); return; }
+        _merchQsOpenItem = (_merchQsOpenItem === itemId) ? null : itemId;
+        _merchQsPick = { a: '', b: '' };
+        _merchQsLastSale = null;
+        renderMerchQuickSaleBody();
+        var panel = document.querySelector('.merch-qs-picker');
+        if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+    var closePick = body.querySelector('.merch-qs-picker-close');
+    if (closePick) closePick.addEventListener('click', function () {
+      _merchQsOpenItem = null;
+      _merchQsPick = { a: '', b: '' };
+      renderMerchQuickSaleBody();
+    });
+    // Size chip → remember, repaint (colors enable). Color chip → add the pair.
+    body.querySelectorAll('.merch-qs-axis-a').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchQsPick.a = btn.getAttribute('data-axis-a') || '';
+        _merchQsPick.b = '';
+        renderMerchQuickSaleBody();
+        var colors = document.querySelector('.merch-qs-axis-b');
+        if (colors && typeof colors.scrollIntoView === 'function') colors.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+    body.querySelectorAll('.merch-qs-axis-b').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var itemId = _merchQsOpenItem;
+        var ax = merchQsAxes(merchQsVariantsFor(itemId));
+        var v = ax.byPair[_merchQsPick.a + '|' + (btn.getAttribute('data-axis-b') || '')];
+        if (v) merchQsAdd(v.id);
+      });
+    });
+    body.querySelectorAll('.merch-qs-variant').forEach(function (btn) {
+      btn.addEventListener('click', function () { merchQsAdd(parseInt(btn.getAttribute('data-variant-id'), 10)); });
+    });
+
+    // Cart bar + steppers.
+    var toggle = body.querySelector('#merch-qs-cart-toggle');
+    if (toggle) toggle.addEventListener('click', function () {
+      _merchQsCartOpen = !_merchQsCartOpen;
+      renderMerchQuickSaleBody();
+      var cart = document.querySelector('.merch-qs-cart');
+      if (_merchQsCartOpen && cart && typeof cart.scrollIntoView === 'function') cart.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+    body.querySelectorAll('.merch-qs-plus').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var vid = parseInt(btn.getAttribute('data-variant-id'), 10);
         _merchQsCart[vid] = Math.min((_merchQsCart[vid] || 0) + 1, 99);
@@ -16061,6 +16287,12 @@
         renderMerchQuickSaleBody();
       });
     });
+    body.querySelectorAll('.merch-qs-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        delete _merchQsCart[parseInt(btn.getAttribute('data-variant-id'), 10)];
+        renderMerchQuickSaleBody();
+      });
+    });
     body.querySelectorAll('.merch-qs-method').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _merchQsMethod = btn.getAttribute('data-method');
@@ -16071,8 +16303,13 @@
     if (clearBtn) clearBtn.addEventListener('click', function () {
       _merchQsCart = {};
       _merchQsMethod = '';
+      _merchQsCartOpen = false;
       renderMerchQuickSaleBody();
     });
+
+    // Record: member family (must match the list) OR guest name, plus a
+    // payment method. Server splits printed-to-order lines into a paid
+    // pre-order and decrements stock (clamped at 0).
     var recordBtn = body.querySelector('#merch-qs-record');
     if (recordBtn) recordBtn.addEventListener('click', function () {
       var status = body.querySelector('#merch-qs-status');
@@ -16118,27 +16355,25 @@
           var made = Array.isArray(res.data.orders) ? res.data.orders : (res.data.order ? [res.data.order] : []);
           if (Array.isArray(_merchDeskCache)) made.slice().reverse().forEach(function (o) { _merchDeskCache.unshift(o); });
           var soldTotal = made.length ? made.reduce(function (s, o) { return s + (o.total_cents || 0); }, 0) : merchQsTotalCents();
-          var hadPreorder = !!res.data.preorder;
+          _merchQsLastSale = {
+            total_cents: soldTotal,
+            ids: made.map(function (o) { return o.id; }).filter(function (id) { return id != null; }),
+            preorder: !!res.data.preorder
+          };
           _merchQsCart = {};
           _merchQsMethod = '';
+          _merchQsCartOpen = false;
+          _merchQsOpenItem = null;
+          _merchQsPick = { a: '', b: '' };
+          // Clear the buyer fields for the next customer (they persist
+          // across re-renders otherwise).
+          var famEl = document.getElementById('merch-qs-family'); if (famEl) famEl.value = '';
+          var guestEl = document.getElementById('merch-qs-guest'); if (guestEl) guestEl.value = '';
+          renderMerchQuickSaleBody(); // success banner + empty cart, from cached stock…
+          merchReloadCatalog();       // …then fresh counts (stock moved) + Orders badge
           merchTodoRefresh();
-          loadMerchDeskCatalog(function () { // stock moved
-            renderMerchQuickSaleBody();
-            refreshMerchNav();
-            var st = document.getElementById('merch-qs-status');
-            // Re-render wipes the status area with the empty-cart view;
-            // surface the confirmation above the grid instead.
-            var bodyEl = document.getElementById('ws-merch-qs-body');
-            if (bodyEl) {
-              var okLine = document.createElement('p');
-              okLine.className = 'ws-part-earned';
-              okLine.textContent = 'Recorded — ' + fmtCents(soldTotal) + ' collected.'
-                + (hadPreorder ? ' T-shirt lines were saved as a pre-order for pickup (see Orders → Pre-orders).' : '')
-                + ' Ready for the next customer.';
-              bodyEl.insertBefore(okLine, bodyEl.firstChild);
-            }
-            if (st) st.textContent = '';
-          });
+          var card = document.getElementById('personDetailCard');
+          if (card) card.scrollTop = 0;
         }).catch(function (err) {
           recordBtn.disabled = false;
           status.textContent = 'Could not record: ' + ((err && err.message) || 'unknown');
@@ -24295,6 +24530,7 @@
     // Merchandise Manager To Do deep-links (Erin, 2026-08-15).
     else if (action === 'merch-catalog-needs' && typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'catalog', needsOnly: true });
     else if (action === 'merch-orders-open' && typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'desk' });
+    else if (action === 'merch-quick-sale' && typeof showMerchQuickSaleModal === 'function') showMerchQuickSaleModal();
     else if (action === 'cleaning-signup-modal' && typeof showCleaningSignupModal === 'function') showCleaningSignupModal();
     // #139: group "Things to Bring" sections (Kid Schedule + liaison card)
     // — the shared signup markup with group endpoints.

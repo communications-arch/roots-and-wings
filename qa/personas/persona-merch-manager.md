@@ -1,7 +1,8 @@
 # The Merch Manager
 
-**Run me when:** the Merchandise report (Orders / Catalog & Stock / Quick
-Sale), the homepage Order Merch form, the Heads-up card, My Merch Orders,
+**Run me when:** the Merchandise report (Orders / Catalog), the standalone
+Quick Sale modal (its own Reports & Forms button — one tile per item, then
+size + color), the homepage Order Merch form, the Heads-up card, My Merch Orders,
 merch To Dos, spam screening of public forms, or payment methods change.
 
 **Who:** The volunteer who sells shirts at a folding table and fills web
@@ -33,8 +34,10 @@ no one holds it, run as erinb@ (Communications Director passes
    adds a shipment and draws down On order when the box is ticked; the
    "Pre-order only — printed to order" flag on an item shows a pre-order
    badge on its chip and in Quick Sale.
-4. **Quick Sale on the phone.** Tap a mug ×2 and a tee ×1, pick a member
-   family from the list, tap Cash, Record sale. Expected: the running total
+4. **Quick Sale on the phone.** Reports & Forms → Quick Sale (its own modal).
+   Tap Mug twice, tap T-Shirt → pick a size → pick a color (one tee line),
+   open the pinned cart bar, pick a member family from the list, tap Cash,
+   Record sale. Expected: the running total
    is right; the note says tees are saved as a pre-order; "Recorded — $X
    collected" names the split; Orders now holds TWO Event orders — mugs
    Fulfilled + Paid · Cash, the tee under Pre-orders, Paid · Cash — and the
