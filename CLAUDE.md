@@ -5,6 +5,33 @@ Members portal for a homeschool co-op. LIVE at https://www.rootsandwingsindy.com
 `script.js` + 12 Vercel serverless functions + Neon Postgres. Branches:
 `dev` (work here) → `master` (prod, Erin-approved ships only).
 
+## Getting started (new person / new Claude session on a fresh machine)
+
+1. **Get access from Erin:** a GitHub collaborator invite to
+   `communications-arch/roots-and-wings`, and the `.env.local.dev` file sent
+   privately (it holds the DEV database connection — never commit it; the
+   repo's `.gitignore` already excludes it). You do NOT need `.env.local`
+   (that's Erin's prod-side file) or any Vercel access to fix bugs.
+2. `git clone https://github.com/communications-arch/roots-and-wings.git`
+   → drop `.env.local.dev` in the repo root → `npm install`.
+3. `git checkout dev` — all work happens on `dev`. Never push to `master`.
+4. `npm test` — the regression suite must be green before you touch
+   anything (and the pre-push hook re-runs it for you).
+5. Open a Claude Code session in the repo folder; this file loads
+   automatically. Read the "Working the bug list" section below before
+   your first fix. Open bugs live at
+   https://github.com/communications-arch/roots-and-wings/issues.
+6. Dev-DB reads/scripts: `node --env-file=.env.local.dev scripts/<script>.js`.
+   Migrations: `node --env-file=.env.local.dev scripts/run-migration.js`
+   (runs `scripts/migrate.sql` against DEV — additive statements only).
+7. Pushing to `dev` builds a Vercel preview automatically, but re-pointing
+   the stable dev URL (https://rw-dev.vercel.app) needs `npm run deploy:dev`
+   from a machine whose Vercel CLI is logged into the co-op's Vercel account.
+   Unless Erin has added you to that Vercel team, comment on the issue after
+   pushing and ask Erin (or her Claude) to deploy dev for verification.
+   Portal-side verification uses the dev portal's fake families (Erin has
+   the login map).
+
 ## Hard rules (no exceptions)
 
 1. **NEVER read or write the production database directly.** Local DB access
