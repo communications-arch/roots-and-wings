@@ -14724,7 +14724,7 @@
   // Manager tab strip — Orders · Catalog & Stock · Quick Sale.
   var MERCH_MANAGER_TABS = [
     { key: 'desk',      label: 'Orders',          bodyId: 'ws-merch-desk-body' },
-    { key: 'catalog',   label: 'Catalog & Stock', bodyId: 'ws-merch-catalog-body' },
+    { key: 'catalog',   label: 'Catalog', bodyId: 'ws-merch-catalog-body' },
     { key: 'quicksale', label: 'Quick Sale',      bodyId: 'ws-merch-qs-body' }
   ];
 
@@ -15476,25 +15476,27 @@
     var needsAll = merchNeedsOrderingVariants();
     var h = '';
     if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
-    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. Counts here are the <strong>live stock</strong> — every order and quick sale moves them, and <strong>Receive stock</strong> adds a shipment (it can draw down the on-order count). Vendor and notes live on each item (<strong>Edit item</strong> above the table); per-variant notes on the variant (<strong>Edit</strong> on the row). <strong>Need</strong> is what to order from the supplier — backordered demand plus anything below its reorder point, minus what is already on order; sort or filter that column to see what needs ordering.</p>';
+    h += '<p class="ws-body-hint">The member shop shows every <strong>active</strong> item and variant. Prices are per variant. Counts here are the <strong>live stock</strong> — every order and quick sale moves them, and <strong>Receive stock</strong> adds a shipment (it can draw down the on-order count). Vendor and notes live on each item (<strong>Edit item…</strong> above the table); per-variant notes on the variant (<strong>Edit</strong> on the row). <strong>Need</strong> is what to order from the supplier — backordered demand plus anything below its reorder point, minus what is already on order; sort or filter that column to see what needs ordering.</p>';
 
-    // Item toolbar — one chip per item (name · variant count · Edit item ·
-    // + Add variant) plus Add item. The open item / add-variant form
-    // renders directly beneath the strip.
-    h += '<div class="rd-counts merch-cat-toolbar">';
-    (cat.items || []).forEach(function (item) {
+    // Item toolbar (Erin 2026-08-15: the per-item chip strip read as
+    // noise) — one quiet row: an "Edit item…" dropdown listing every item
+    // (+ "Add a new item"), and an "Add variant to…" dropdown. Picking an
+    // option opens the matching form directly beneath the row.
+    var itemOpts = (cat.items || []).map(function (item) {
       var n = allRows.filter(function (r) { return r.item.id === item.id; }).length;
-      var open = _merchCatItemEditId === item.id || _merchCatAddVariantFor === item.id;
-      h += '<span class="merch-cat-item-chip' + (open ? ' is-open' : '') + '">'
-        + '<span>' + escapeHtmlWs(item.name)
-        + (item.active ? '' : ' <span class="ws-wv-declined">Hidden</span>')
-        + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '')
-        + ' <span class="ws-wv-context">· ' + n + (n === 1 ? ' variant' : ' variants') + '</span></span>'
-        + '<button type="button" class="sc-btn merch-cat-item-edit" data-item-id="' + item.id + '">Edit item</button>'
-        + '<button type="button" class="sc-btn merch-cat-add-variant" data-item-id="' + item.id + '">+ Add variant</button>'
-        + '</span>';
+      var flag = (item.active ? '' : ' (hidden)') + (item.preorder_only ? ' (pre-order)' : '');
+      return { id: item.id, label: item.name + flag + ' · ' + n + (n === 1 ? ' variant' : ' variants'), plain: item.name };
     });
-    h += '<button type="button" class="btn btn-outline-dark btn-sm" id="merch-cat-add-item-btn">+ Add item</button>';
+    h += '<div class="rd-counts merch-cat-toolbar">';
+    h += '<select class="sc-btn merch-cat-item-select" aria-label="Edit an item">'
+      + '<option value="">Edit item…</option>'
+      + itemOpts.map(function (o) { return '<option value="' + o.id + '"' + (_merchCatItemEditId === o.id ? ' selected' : '') + '>' + escapeHtmlWs(o.label) + '</option>'; }).join('')
+      + '<option value="new"' + (_merchCatItemEditId === 'new' ? ' selected' : '') + '>+ Add a new item</option>'
+      + '</select>';
+    h += '<select class="sc-btn merch-cat-addvar-select" aria-label="Add a variant to an item">'
+      + '<option value="">Add variant to…</option>'
+      + itemOpts.map(function (o) { return '<option value="' + o.id + '"' + (_merchCatAddVariantFor === o.id ? ' selected' : '') + '>' + escapeHtmlWs(o.plain) + '</option>'; }).join('')
+      + '</select>';
     h += '</div>';
     if (_merchCatItemEditId === 'new') h += merchItemFormHtml(null);
     else if (_merchCatItemEditId != null) {
@@ -15605,28 +15607,20 @@
 
   // Toolbar (above the table): item chips, add variant, add item.
   function wireMerchCatalogToolbar(body) {
-    var addItemBtn = body.querySelector('#merch-cat-add-item-btn');
-    if (addItemBtn) addItemBtn.addEventListener('click', function () {
-      _merchCatItemEditId = (_merchCatItemEditId === 'new') ? null : 'new';
+    var itemSel = body.querySelector('.merch-cat-item-select');
+    if (itemSel) itemSel.addEventListener('change', function () {
+      var v = itemSel.value;
+      _merchCatItemEditId = v === '' ? null : v === 'new' ? 'new' : parseInt(v, 10);
       _merchCatAddVariantFor = null;
       renderMerchCatalogBody();
     });
-    body.querySelectorAll('.merch-cat-item-edit').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-item-id'), 10);
-        _merchCatItemEditId = (_merchCatItemEditId === id) ? null : id;
-        _merchCatAddVariantFor = null;
-        renderMerchCatalogBody();
-      });
-    });
-    body.querySelectorAll('.merch-cat-add-variant').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(btn.getAttribute('data-item-id'), 10);
-        _merchCatAddVariantFor = (_merchCatAddVariantFor === id) ? null : id;
-        _merchCatItemEditId = null;
-        _merchCatVariantEditId = null;
-        renderMerchCatalogBody();
-      });
+    var addVarSel = body.querySelector('.merch-cat-addvar-select');
+    if (addVarSel) addVarSel.addEventListener('change', function () {
+      var v = addVarSel.value;
+      _merchCatAddVariantFor = v === '' ? null : parseInt(v, 10);
+      _merchCatItemEditId = null;
+      _merchCatVariantEditId = null;
+      renderMerchCatalogBody();
     });
   }
 
