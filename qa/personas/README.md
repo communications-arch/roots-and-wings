@@ -39,8 +39,32 @@ device, scripted journeys, an exploratory charter, and reporting rules.
 | The Newcomer | newbiel@ | Cuthbert |
 | The Half-Day | morning@ (verify a morning-only kid; else recast) | Joy Anderson |
 | The Age-Edge Family | erinb@ (Padme Amidala — kids in Willows + Maples) | Amidala/Skywalker |
-| The Reviewer | vp@ | Swan |
+| The Reviewer | vp@ (or the ACL login afternoon@) | Swan (Park) |
+| The President | president@ | Flynn-Fletcher |
+| The Board Desk (template) | Communications erinb@ · Membership membership@ · Secretary secretary@ · Sustaining averyl@ | Amidala · Heeler · Miller · Simpson |
+| The Treasurer | treasurer@ | Dunphy |
+| The Grove Liaison (template ×9) | Saplings waterg@ · Willows crtest-sanders@ · Maples afternoon@ · Cedars registern@ · other groves: recast via View-As | Mathews · Ming Lee · Park · Eleanor Little |
+| The Operations Crew (template) | Special Events Liaison mem@ · Supply Coordinator / Cleaning Crew Liaison / Building Opener-Closer: recast via View-As to the Roles & Committees holder | Potter |
+| The Coordinator (template) | Gratitude morning@ · Yearbook registern@ · other coordinators: recast via View-As | Joy Anderson · Eleanor Little |
+| The Welcomer | undot@ | Gilmore |
+| The Coverage Claimer | member@ (verify duties on dev; else recast — undot@ Alice Gilmore holds a PM1 prep + PM2 lead) | Pickles |
+| The Merch Manager | the dev Merchandise Manager holder; if unfilled, erinb@ (Comms passes merch_manage) | — |
 
-Phase 2 (planned): one-command sweeps. Phase 3: full bench — see issue #352
-for the roster (President, Board Desk, Grove Liaison ×9, Operations Crew,
-Coordinator templates, Treasurer, Welcomer, Coverage Claimer, Merch Manager).
+Full bench (2026-08-15): the four member shapes above + nine role-holder
+personas — `persona-president.md`, `persona-board-desk.md`,
+`persona-treasurer.md`, `persona-grove-liaison.md`,
+`persona-operations-crew.md`, `persona-coordinator.md`,
+`persona-welcomer.md`, `persona-coverage-claimer.md`,
+`persona-merch-manager.md`. Templates say which seat to run as; note the
+seat and any recast in the sweep summary. Phase 2 (planned): one-command
+sweeps.
+
+## Sweep after major merch/spam changes (2026-08-15)
+
+Suggested first full-bench sweep, in this order: **The Newcomer** (public
+form → portal week-one path, phone), **The Half-Day** (nothing merch- or
+afternoon-shaped leaks onto a morning-only family), **The Merch Manager**
+(Orders / Catalog & Stock / Quick Sale, the screened bucket + Not spam, the
+homepage Order Merch → Heads-up round trip), then **The Treasurer** (money
+numbers reconcile; Cash / Check / PayPal only — no Venmo on any new-payment
+chip). ~45–60 min of one driver's Chrome; end with the usual summary.
