@@ -15688,7 +15688,11 @@
     },
     { key: 'active', label: 'Active', type: 'number',
       sortValue: function (r) { return r.v.active ? 1 : 0; },
-      render: function (r) { return r.v.active ? '✓' : '<span class="ws-srt-actions-empty">&mdash;</span>'; }
+      // Toggle chip (Erin 2026-08-15): one tap flips the variant on/off in
+      // the member shop + public form. Full-row save with active inverted.
+      render: function (r) {
+        return '<button type="button" class="sc-btn merch-cat-active-toggle' + (r.v.active ? ' sc-save' : '') + '" data-variant-id="' + r.id + '" aria-pressed="' + (r.v.active ? 'true' : 'false') + '" title="' + (r.v.active ? 'Active — tap to hide from the shop' : 'Hidden — tap to make it available') + '">' + (r.v.active ? 'Active' : 'Hidden') + '</button>';
+      }
     },
     // Standard per-row Actions dropdown (same idiom as the Orders tab and
     // the Membership report) — Erin 2026-08-15: no loose buttons, and
@@ -15734,6 +15738,27 @@
       + '<button type="button" class="sc-btn sc-save merch-stock-save" data-variant-id="' + r.id + '">Save</button>'
       + '<button type="button" class="sc-btn merch-stock-cancel">Cancel</button>'
       + '<span class="ws-wv-context">use a negative number to correct a recount</span></span>';
+  }
+
+  // Flip one variant's active flag via a full-row merch-variant-save (the
+  // action is a whole-row write; every other field is resent unchanged).
+  function merchToggleVariantActive(variantId, btn) {
+    var cat = _merchCatalogCache || { variants: [] };
+    var v = (cat.variants || []).filter(function (x) { return x.id === variantId; })[0];
+    if (!v) return;
+    if (btn) btn.disabled = true;
+    var payload = { id: v.id, item_id: v.item_id, label: v.label || '', price_cents: v.price_cents, on_order: v.on_order || 0,
+      restock_threshold: v.restock_threshold || 0, active: !v.active, sort_order: v.sort_order || 0, notes: v.notes || '' };
+    fetch('/api/supply-closet?action=merch-variant-save' + notifViewAsSuffix(), {
+      method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the variant.'); if (btn) btn.disabled = false; return; }
+        v.active = !v.active;
+        renderMerchCatalogBody();
+        if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
+      })
+      .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
   }
 
   function renderMerchCatalogBody() {
@@ -15836,6 +15861,12 @@
           target.querySelectorAll('th.ws-sort').forEach(function (t) {
             var a = t.querySelector('.ws-sort-arrow');
             if (a && a.textContent) _merchCatSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
+          });
+          target.querySelectorAll('.merch-cat-active-toggle').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+              e.stopPropagation();
+              merchToggleVariantActive(parseInt(btn.getAttribute('data-variant-id'), 10), btn);
+            });
           });
           target.querySelectorAll('.merch-cat-action-sel').forEach(function (sel) {
             sel.addEventListener('click', function (e) { e.stopPropagation(); });
