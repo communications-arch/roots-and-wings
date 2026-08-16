@@ -14478,6 +14478,20 @@
       // button doesn't work for Merchandise Inventory" — it died after a
       // sort click). Runs before the expandable wiring; order irrelevant.
       if (typeof opts.onRender === 'function') opts.onRender(containerEl);
+      // Detail panels carry their own controls sometimes (the Catalog's
+      // inline variant editor). onDetailRender(detailEl, row) fires once
+      // per painted detail — here for a full render, and again below when
+      // a caret click inserts a detail surgically (which onRender never
+      // sees — Erin 2026-08-16: "edit an item, click Save, nothing
+      // happens"). Wire detail controls HERE, never in onRender.
+      if (typeof opts.onDetailRender === 'function') {
+        containerEl.querySelectorAll('tr.ws-srt-detail-row').forEach(function (dtr) {
+          var prev = dtr.previousElementSibling;
+          var pidx = prev ? parseInt(prev.getAttribute('data-row-idx'), 10) : NaN;
+          var del = dtr.querySelector('.ws-srt-detail');
+          if (del && !isNaN(pidx) && rows[pidx]) opts.onDetailRender(del, rows[pidx]);
+        });
+      }
 
       // Row click → toggle expansion (expandable mode). Clicks that
       // originate on a button, link, or inside an Actions cell are
@@ -14507,6 +14521,10 @@
                 this.insertAdjacentHTML('afterend',
                   '<tr class="ws-srt-detail-row"><td colspan="' + cc + '"><div class="ws-srt-detail">' +
                   opts.renderDetail(rows[idx]) + '</div></td></tr>');
+                if (typeof opts.onDetailRender === 'function') {
+                  var newDel = this.nextElementSibling && this.nextElementSibling.querySelector('.ws-srt-detail');
+                  if (newDel) opts.onDetailRender(newDel, rows[idx]);
+                }
               }
             } else {
               if (caret) caret.textContent = '▶';
@@ -15574,6 +15592,13 @@
     var hit = ((_merchCatalogCache && _merchCatalogCache.backordered) || []).filter(function (b) { return b.variant_id === variantId; })[0];
     return hit ? hit.backordered : 0;
   }
+  // Units the shelf holds for open pre-orders (allocated lines on orders
+  // not yet handed over) — On hand is FREE stock, so this is the other half
+  // of what's physically there (Erin, 2026-08-16).
+  function merchReservedFor(variantId) {
+    var hit = ((_merchCatalogCache && _merchCatalogCache.reserved) || []).filter(function (b) { return b.variant_id === variantId; })[0];
+    return hit ? hit.reserved : 0;
+  }
 
   // Variants that need a supplier order — the ONE rule behind the tab
   // badge, the catalog's "Needs ordering" chip, and the To Do count
@@ -15673,7 +15698,7 @@
       // First variant inline (Erin 2026-08-15): price / stock / reorder
       // point so a new item is sellable in one save — no second step.
       // A blank label = single-variant item; more variants come later
-      // from the row's Actions → Add a variant.
+      // from the row's inline editor → "+ Add a variant".
       h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-cat-fvprice-new" placeholder="12.00"></label>';
       h += '<label><span>On hand (starting count)</span><input type="number" min="0" max="100000" id="merch-cat-fvonhand-new" value="0"></label>';
       h += '<label><span>Reorder at (restock below)</span><input type="number" min="0" max="100000" id="merch-cat-fvrestock-new" value="0"></label>';
@@ -15771,7 +15796,10 @@
         if (r.v.on_hand === 0) pill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
         else if (r.v.restock_threshold > 0 && r.v.on_hand < r.v.restock_threshold) pill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
         return '<input type="number" min="0" max="100000" class="merch-cat-onhand-input" data-variant-id="' + r.id + '" value="' + (parseInt(r.v.on_hand, 10) || 0) + '" aria-label="On hand for ' + escapeHtmlWs(r.item.name + (r.v.label ? ' — ' + r.v.label : '')) + '" style="width:4.5em;">' + pill
-          + (r.backordered > 0 ? ' <span class="merch-stock-pill merch-stock-low">' + r.backordered + ' backordered</span>' : '');
+          + (r.backordered > 0 ? ' <span class="merch-stock-pill merch-stock-low">' + r.backordered + ' backordered</span>' : '')
+          // Stock the shelf holds for pre-orders (filled when stock came in
+          // or at order time). On hand above is what's FREE to sell.
+          + (r.reserved > 0 ? ' <span class="merch-stock-pill merch-stock-reserved" title="Set aside for open pre-orders — not free to sell">' + r.reserved + ' reserved</span>' : '');
       }
     },
     { key: 'on_order', label: 'On order', type: 'number', mobileHide: true,
@@ -15799,21 +15827,8 @@
         return '<button type="button" class="sc-btn merch-cat-active-toggle' + (r.v.active ? ' sc-save' : '') + '" data-variant-id="' + r.id + '" aria-pressed="' + (r.v.active ? 'true' : 'false') + '" title="' + (r.v.active ? 'Active — tap to hide from the shop' : 'Hidden — tap to make it available') + '">' + (r.v.active ? 'Active' : 'Hidden') + '</button>';
       }
     },
-    // Standard per-row Actions dropdown (same idiom as the Membership
-    // report) — Erin 2026-08-15: no loose buttons, and
-    // item-level editing lives HERE on the row, not in a toolbar above.
-    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
-      render: function (r) {
-        var lbl = r.item.name + (r.v.label ? ' — ' + r.v.label : '');
-        return '<div class="ws-srt-actions">'
-          + '<select class="sc-btn ws-mem-action-sel merch-cat-action-sel" data-variant-id="' + r.id + '" data-item-id="' + r.item.id + '" aria-label="Actions for ' + escapeHtmlWs(lbl) + '">'
-          + '<option value="">Actions&hellip;</option>'
-          + '<option value="edit-item">Edit item (' + escapeHtmlWs(r.item.name) + ')</option>'
-          + '<option value="add-variant">Add a variant to ' + escapeHtmlWs(r.item.name) + '</option>'
-          + '</select>'
-          + '</div>';
-      }
-    }
+    // (No Actions column — Erin 2026-08-16: the expand arrow's inline
+    // editor carries "Add a variant" and "Edit item" itself.)
   ];
 
   function merchCatalogRows() {
@@ -15825,7 +15840,7 @@
       var item = byId[v.item_id];
       if (!item) return;
       var needs = merchVariantNeedsOrdering(v);
-      rows.push({ id: v.id, item: item, v: v, needs: needs, need: needs ? merchSuggestedOrderQty(v) : 0, backordered: merchBackorderedFor(v.id) });
+      rows.push({ id: v.id, item: item, v: v, needs: needs, need: needs ? merchSuggestedOrderQty(v) : 0, backordered: merchBackorderedFor(v.id), reserved: merchReservedFor(v.id) });
     });
     return rows;
   }
@@ -15845,6 +15860,22 @@
       .then(function (res) {
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the count.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } return; }
         v.on_hand = (res.data && res.data.variant && res.data.variant.on_hand != null) ? res.data.variant.on_hand : wanted;
+        var filled = (res.data && res.data.filled) || 0;
+        if (filled > 0) {
+          // Stock that came in went straight to waiting pre-orders (server
+          // fills backorders oldest-first). The Orders cache holds stale
+          // line statuses now; the catalog reload brings fresh
+          // backordered/reserved counts and the honest free count.
+          _merchDeskCache = null;
+          var ids = (res.data.filled_orders || []).map(function (id) { return '#' + id; }).join(', ');
+          if (typeof showSupplyToast === 'function') {
+            showSupplyToast('Set aside ' + filled + ' for pre-order' + (filled === 1 ? '' : 's') + (ids ? ' ' + ids : '')
+              + ' — ' + v.on_hand + ' left free on the shelf.');
+          }
+          merchReloadCatalog();
+          if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
+          return;
+        }
         renderMerchCatalogBody();
         refreshMerchNav();
         if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
@@ -15872,6 +15903,46 @@
       .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
   }
 
+  // The expand arrow's inline editor (Erin 2026-08-15/16): the variant's
+  // own edit form, then the item-level doorways that used to sit on an
+  // Actions column — "Add a variant to <item>" opens a second form right
+  // here; "Edit item" opens the item form above the table.
+  function merchCatalogDetailHtml(r) {
+    var h = merchVariantFormHtml(r.v, r.item.id);
+    h += '<div class="merch-cat-detail-more">'
+      + '<button type="button" class="sc-btn merch-cat-add-variant-btn" data-item-id="' + r.item.id + '"' + (_merchCatAddVariantFor === r.item.id ? ' aria-expanded="true"' : ' aria-expanded="false"') + '>' + (_merchCatAddVariantFor === r.item.id ? 'Hide' : '+ Add a variant to ' + escapeHtmlWs(r.item.name)) + '</button>'
+      + '<button type="button" class="sc-btn merch-cat-edit-item-btn" data-item-id="' + r.item.id + '">Edit item <span class="ws-wv-context">(' + escapeHtmlWs(r.item.name) + ' — name, photo, vendor, pre-order)</span></button>'
+      + '</div>';
+    if (_merchCatAddVariantFor === r.item.id) h += merchVariantFormHtml(null, r.item.id, r.item.name);
+    return h;
+  }
+  function wireMerchCatalogDetail(detailEl, r, renderTable) {
+    // Repaint just this detail (keeps the row open + the scroll put).
+    function repaintDetail() {
+      detailEl.innerHTML = merchCatalogDetailHtml(r);
+      wireMerchCatalogDetail(detailEl, r, renderTable);
+    }
+    wireMerchCatalogForms(detailEl, repaintDetail);
+    var addBtn = detailEl.querySelector('.merch-cat-add-variant-btn');
+    if (addBtn) addBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      _merchCatAddVariantFor = (_merchCatAddVariantFor === r.item.id) ? null : r.item.id;
+      repaintDetail();
+      var f = detailEl.querySelector('.merch-cat-variant-form[data-variant-id^="new-"] input');
+      if (f) f.focus();
+    });
+    var editBtn = detailEl.querySelector('.merch-cat-edit-item-btn');
+    if (editBtn) editBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      // Item-level form renders above the table (whole-tab repaint).
+      _merchCatItemEditId = r.item.id; _merchCatAddVariantFor = null;
+      _merchCatVariantEditId = null; _merchStockAdjustFor = null;
+      renderMerchCatalogBody();
+      var form = document.querySelector('.merch-cat-item-form');
+      if (form && form.scrollIntoView) form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }
+
   function renderMerchCatalogBody() {
     var body = document.getElementById('ws-merch-catalog-body');
     if (!body) return;
@@ -15894,10 +15965,8 @@
       var editItem = (cat.items || []).filter(function (it) { return it.id === _merchCatItemEditId; })[0];
       if (editItem) h += merchItemFormHtml(editItem);
     }
-    if (_merchCatAddVariantFor != null) {
-      var addFor = (cat.items || []).filter(function (it) { return it.id === _merchCatAddVariantFor; })[0];
-      h += merchVariantFormHtml(null, _merchCatAddVariantFor, addFor ? addFor.name : '');
-    }
+    // (Add-a-variant lives INSIDE the row's inline editor now — see
+    // merchCatalogDetailHtml — not above the table.)
 
     if ((cat.items || []).length === 0 && !cat.error) {
       h += '<p class="ws-empty">No catalog yet — add your first item above.</p>';
@@ -15968,7 +16037,10 @@
         // The expand arrow IS the variant editor (Erin 2026-08-15): opening a
         // row shows its edit form (label, price, reorder-at, notes, active).
         expandable: true,
-        renderDetail: function (r) { return merchVariantFormHtml(r.v, r.item.id); },
+        renderDetail: merchCatalogDetailHtml,
+        // Detail controls wire HERE (fires for surgical caret inserts too —
+        // never in onRender, which the caret path doesn't run).
+        onDetailRender: function (detailEl, r) { wireMerchCatalogDetail(detailEl, r, renderTable); },
         onRender: function () {
           // Remember the active sort so edit toggles / filter changes (which
           // re-create the table) don't snap back to catalog order.
@@ -15990,26 +16062,6 @@
               merchToggleVariantActive(parseInt(btn.getAttribute('data-variant-id'), 10), btn);
             });
           });
-          target.querySelectorAll('.merch-cat-action-sel').forEach(function (sel) {
-            sel.addEventListener('click', function (e) { e.stopPropagation(); });
-            sel.addEventListener('change', function (e) {
-              e.stopPropagation();
-              var act = sel.value; sel.value = '';
-              var vid = parseInt(sel.getAttribute('data-variant-id'), 10);
-              var iid = parseInt(sel.getAttribute('data-item-id'), 10);
-              if (act === 'edit-item') {
-                // Item-level form renders above the table (whole-tab repaint).
-                _merchCatItemEditId = iid; _merchCatAddVariantFor = null;
-                _merchCatVariantEditId = null; _merchStockAdjustFor = null;
-                renderMerchCatalogBody();
-              } else if (act === 'add-variant') {
-                _merchCatAddVariantFor = iid; _merchCatItemEditId = null;
-                _merchCatVariantEditId = null; _merchStockAdjustFor = null;
-                renderMerchCatalogBody();
-              }
-            });
-          });
-          wireMerchCatalogForms(target, renderTable);
         }
       });
       if (rows.length === 0) {

@@ -1563,7 +1563,20 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         AND o.screen_reason = ''
       GROUP BY oi.variant_id
     `;
-    return res.status(200).json({ items, variants, backordered: demand });
+    // Units already set aside for open pre-orders (allocated lines on
+    // orders not yet handed over) — the shelf holds them, so the manager
+    // sees "N reserved" instead of wondering where the count went after a
+    // stock receipt filled backorders (Erin, 2026-08-16).
+    const reserved = await sql`
+      SELECT oi.variant_id, SUM(oi.qty)::int AS reserved
+      FROM merch_desk_order_items oi
+      JOIN merch_desk_orders o ON o.id = oi.order_id
+      WHERE oi.stock_status = 'allocated'
+        AND o.status NOT IN ('cancelled', 'delivered')
+        AND o.screen_reason = ''
+      GROUP BY oi.variant_id
+    `;
+    return res.status(200).json({ items, variants, backordered: demand, reserved });
   }
 
   if (action === 'merch-orders') {
@@ -1886,7 +1899,31 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
               updated_at = NOW(), updated_by = ${email}
           WHERE id = ${variantId} RETURNING *`;
     if (!upd.length) return res.status(404).json({ error: 'Variant not found.' });
-    return res.status(200).json({ variant: upd[0] });
+    // Stock came IN → fill this variant's open backorders, oldest order
+    // first (Erin, 2026-08-16: "when I update the On Hand, the backordered
+    // pill doesn't disappear"). Same truthful path as ready/un-screen
+    // (api/_merch.js allocateBackorderedLines): a line flips to allocated
+    // only for units the shelf really gave up. Screened spam orders are
+    // never filled. Returns what was set aside so the client can say so.
+    let filled = 0;
+    const filledOrders = [];
+    if (delta > 0 && upd[0].on_hand > 0) {
+      const back = await sql`
+        SELECT oi.id, oi.order_id, oi.variant_id, oi.qty, oi.price_cents_each
+        FROM merch_desk_order_items oi
+        JOIN merch_desk_orders o ON o.id = oi.order_id
+        WHERE oi.variant_id = ${variantId} AND oi.stock_status = 'backordered'
+          AND o.status NOT IN ('cancelled', 'delivered') AND o.screen_reason = ''
+        ORDER BY o.created_at ASC, oi.id ASC
+      `;
+      for (const l of back) {
+        const got = await allocateBackorderedLines(sql, l.order_id, [l]);
+        if (got > 0) { filled += got; if (filledOrders.indexOf(l.order_id) === -1) filledOrders.push(l.order_id); }
+        else break; // shelf is empty again — the rest stay backordered
+      }
+    }
+    const fresh = filled ? await sql`SELECT * FROM merch_variants WHERE id = ${variantId}` : upd;
+    return res.status(200).json({ variant: fresh[0], filled, filled_orders: filledOrders });
   }
 
   // Needs-ordering report: open backordered demand + below-threshold

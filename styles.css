@@ -12511,6 +12511,10 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
 .merch-qs-charge { border-top: 1px dashed var(--color-border); padding-top: 6px; }
 .merch-qs-record-sub { display: block; font-size: 0.72rem; font-weight: 600; opacity: 0.85; letter-spacing: 0.02em; }
 .merch-qs-note { margin: 0; }
+/* Catalog: units held for open pre-orders (teal, calm) vs the amber
+   "backordered" demand pill; the inline editor's item-level doorways. */
+.merch-stock-reserved { color: var(--color-teal); background: rgba(var(--color-teal-rgb), 0.12); }
+.merch-cat-detail-more { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
 .merch-qs-buyer .ws-merch-add-field input { min-height: 44px; font-size: 1rem; }
 .merch-qs-methods { display: flex; gap: 8px; }
 .merch-qs-methods .merch-qs-chip { flex: 1 1 0; text-align: center; justify-content: center; font-weight: 600; }
