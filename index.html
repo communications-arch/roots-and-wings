@@ -625,6 +625,12 @@
         </p>
       </div>
 
+      <!-- The cards below are the no-JS / catalog-failed FALLBACK. On page
+           load the merch modal script fetches the public catalog
+           (GET /api/tour?merch_catalog=1) and, when it returns at least one
+           sellable item, replaces this grid with one card per catalog item
+           (data-item-id) — so items the Merchandise Manager adds in
+           Catalog & Stock show here without an HTML edit (#351). -->
       <div class="merch-grid">
         <button class="merch-card fade-in" data-merch-item="tshirt" type="button">
           <div class="merch-visual"><img src="img/merch/tshirt.jpg" alt="Roots & Wings t-shirt in purple, olive, lime, and teal" loading="lazy"></div>
@@ -1144,12 +1150,19 @@
           // a small cart (variant + qty lines), and submit creates a
           // merch_desk_orders row (status pending_payment) so the order
           // lands straight in the manager's Desk Orders queue.
+          //
+          // The same catalog also drives the homepage CARDS: the fetch runs
+          // on page load and, on success, `renderMerchGrid` replaces the six
+          // hand-written .merch-card fallbacks with one card per sellable
+          // item (Keychain, Sticker, … appear the moment the manager adds
+          // them). Failure / empty catalog ⇒ the static cards stay.
           var CAT = null;            // { items: [], variants: [] } once loaded
           var cart = [];             // [{ variant_id, qty }]
           var loadPromise = null;
 
-          // Maps the static homepage cards' slugs to catalog item names
-          // so a card click preselects that item when it's for sale.
+          // Maps the static fallback cards' slugs to catalog item names so a
+          // legacy card click still preselects that item when it's for sale.
+          // Catalog-rendered cards carry data-item-id and skip this map.
           var CARD_ITEM_NAMES = {
             tshirt: 'T-Shirt', mug: 'Campfire Coffee Mug', tumbler: 'Stainless Tumbler',
             pin: 'Enamel Pin', patch: 'Woven Patch', tote: 'Block-Printed Tote'
@@ -1169,6 +1182,11 @@
           var variantField = document.getElementById('merch-variant-field');
           var qtyInput   = document.getElementById('merch-qty');
           var cartEl     = document.getElementById('merch-cart');
+          var gridEl     = document.querySelector('.merch-grid');
+          // Same shape the manager's Catalog & Stock accepts (mirrors
+          // merchImageUrlRenderable in script.js): Blob https:// URLs or
+          // repo-relative img/… paths. Anything else ⇒ placeholder box.
+          var IMAGE_URL_OK = /^(https:\/\/|img\/)[^\s"'<>]+$/i;
 
           function money(cents) {
             var n = Math.round(Number(cents) || 0);
@@ -1265,6 +1283,142 @@
             submitBtn.textContent = 'Place Order — ' + money(cartTotal());
           }
 
+          // ── Homepage cards from the catalog ──────────────────────────
+          // "$12" for whole dollars, "$12.50" otherwise.
+          function priceLabel(cents) {
+            var n = Math.round(Number(cents) || 0);
+            return (n % 100 === 0) ? '$' + (n / 100) : money(n);
+          }
+          // One price ⇒ "$12"; a spread ⇒ "From $10" (lowest sellable price).
+          function priceSummary(vs) {
+            var min = null, max = null;
+            vs.forEach(function (v) {
+              var p = Number(v.price_cents) || 0;
+              if (min === null || p < min) min = p;
+              if (max === null || p > max) max = p;
+            });
+            if (min === null) return '';
+            return (min === max) ? priceLabel(min) : 'From ' + priceLabel(min);
+          }
+          // Catalog convention is "Size — Color" labels (em dash). When
+          // EVERY variant splits that way: sizes listed if ≤3 else "N sizes",
+          // then the color if only one else "M colors" (e.g. "Small · Large ·
+          // 3 colors", "14 sizes · 4 colors"). Otherwise the distinct labels,
+          // up to 4 then "+N more". No labels at all ⇒ a blank line so every
+          // card keeps the same price→CTA rhythm.
+          function variantSummary(vs) {
+            var labels = [];
+            vs.forEach(function (v) {
+              var l = String(v.label || '').trim();
+              if (l && labels.indexOf(l) === -1) labels.push(l);
+            });
+            if (labels.length === 0) return String.fromCharCode(160);   // nbsp keeps the row height
+            var sizes = [], colors = [];
+            var twoAxis = labels.length === vs.length && labels.every(function (l) {
+              var parts = l.split(' — ');
+              return parts.length === 2 && parts[0].trim() && parts[1].trim();
+            });
+            if (twoAxis) {
+              labels.forEach(function (l) {
+                var parts = l.split(' — ');
+                var s = parts[0].trim(), c = parts[1].trim();
+                if (sizes.indexOf(s) === -1) sizes.push(s);
+                if (colors.indexOf(c) === -1) colors.push(c);
+              });
+              var sizeText  = sizes.length <= 3 ? sizes.join(' · ') : sizes.length + ' sizes';
+              var colorText = colors.length === 1 ? colors[0] : colors.length + ' colors';
+              return sizeText + ' · ' + colorText;
+            }
+            if (labels.length <= 4) return labels.join(' · ');
+            return labels.slice(0, 4).join(' · ') + ' · +' + (labels.length - 4) + ' more';
+          }
+          // Same anatomy/classes as the static cards so the CSS (and the
+          // phone-width grid) is untouched. Everything is createElement +
+          // textContent — no server text ever reaches innerHTML.
+          function buildMerchCard(item, vs) {
+            var card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'merch-card fade-in';
+            card.setAttribute('data-item-id', String(item.id));
+
+            var visual = document.createElement('div');
+            visual.className = 'merch-visual';
+            var img = document.createElement('img');
+            var url = String(item.image_url || '').trim();
+            if (IMAGE_URL_OK.test(url)) {
+              img.src = url;
+              img.alt = String(item.name || '');
+            } else {
+              // No photo yet: the cream box with a faint brand mark (the
+              // same logo-mark.svg the hero watermark uses).
+              img.src = 'logo-mark.svg?v=20260430g';
+              img.alt = '';
+              img.setAttribute('aria-hidden', 'true');
+              img.style.cssText = 'width:45%;height:45%;opacity:0.35;';
+            }
+            img.loading = 'lazy';
+            visual.appendChild(img);
+            card.appendChild(visual);
+
+            var h3 = document.createElement('h3');
+            h3.textContent = String(item.name || '');
+            card.appendChild(h3);
+
+            var blurb = document.createElement('p');
+            blurb.className = 'merch-blurb';
+            blurb.textContent = String(item.description || '');
+            card.appendChild(blurb);
+
+            var price = document.createElement('div');
+            price.className = 'merch-price';
+            price.textContent = priceSummary(vs);
+            card.appendChild(price);
+
+            var variants = document.createElement('div');
+            variants.className = 'merch-variants';
+            variants.textContent = variantSummary(vs);
+            card.appendChild(variants);
+
+            if (item.preorder_only) {
+              var pre = document.createElement('p');
+              pre.className = 'merch-preorder';
+              pre.style.cssText = 'font-size:0.8rem;font-style:italic;color:var(--color-text-light);margin:-8px 0 14px;';
+              pre.textContent = 'Printed to order — pre-order';
+              card.appendChild(pre);
+            }
+
+            var cta = document.createElement('span');
+            cta.className = 'btn btn-primary btn-sm merch-order-cta';
+            cta.textContent = 'Order';
+            card.appendChild(cta);
+            return card;
+          }
+          function renderMerchGrid() {
+            if (!gridEl || !CAT) return;
+            var cards = [];
+            CAT.items.forEach(function (item) {
+              var vs = CAT.variants.filter(function (v) { return v.item_id === item.id; });
+              if (vs.length === 0) return;   // nothing sellable ⇒ no card
+              cards.push(buildMerchCard(item, vs));
+            });
+            if (cards.length === 0) return;  // keep the static fallback
+            gridEl.textContent = '';
+            cards.forEach(function (c) { gridEl.appendChild(c); });
+            // Re-arm the fade-in observer for the freshly-built cards so
+            // they animate in like the rest of the page (same as the async
+            // board grid at the bottom of this file).
+            if ('IntersectionObserver' in window) {
+              var io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (e) {
+                  if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+                });
+              }, { threshold: 0.1 });
+              gridEl.querySelectorAll('.fade-in').forEach(function (el) { io.observe(el); });
+            } else {
+              gridEl.querySelectorAll('.fade-in').forEach(function (el) { el.classList.add('visible'); });
+            }
+          }
+
           function loadCatalog() {
             if (loadPromise) return loadPromise;
             loadPromise = fetch('/api/tour?merch_catalog=1')
@@ -1281,6 +1435,7 @@
                 statusEl.style.display = 'none';
                 pickerEl.style.display = '';
                 renderItemOptions();
+                renderMerchGrid();
               })
               .catch(function () {
                 loadPromise = null;
@@ -1374,27 +1529,42 @@
 
           document.getElementById('merch-modal-done').addEventListener('click', closeMerchModal);
 
-          // Open from .merch-card click — preselect the clicked item if
-          // it's in the live catalog (it may not be while the manager is
-          // still pricing it, e.g. tees at launch).
-          document.querySelectorAll('.merch-card').forEach(function (card) {
-            card.addEventListener('click', function () {
-              resetMerchModal();
-              prefillFromPortal();
-              modalEl.classList.add('active');
-              document.body.style.overflow = 'hidden';
-              loadCatalog().then(function () {
-                if (!CAT) return;
-                var wanted = CARD_ITEM_NAMES[card.getAttribute('data-merch-item')] || '';
-                CAT.items.forEach(function (item) {
-                  if (item.name.toLowerCase() === wanted.toLowerCase()) {
-                    itemSel.value = String(item.id);
-                    renderVariantOptions();
-                  }
-                });
-              });
+          // Open from a .merch-card click — preselect the clicked item if
+          // it's in the live catalog. Delegated on the grid because the
+          // cards are swapped for catalog-built ones once it loads.
+          // Catalog cards carry data-item-id; the static fallback cards
+          // carry a data-merch-item slug that maps to a name (an item may
+          // be missing while the manager is still pricing it).
+          function openMerchModalFor(card) {
+            resetMerchModal();
+            prefillFromPortal();
+            modalEl.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            loadCatalog().then(function () {
+              if (!CAT) return;
+              var id = parseInt(card.getAttribute('data-item-id'), 10) || 0;
+              if (!itemById(id)) {
+                id = 0;
+                var wanted = (CARD_ITEM_NAMES[card.getAttribute('data-merch-item')] || '').toLowerCase();
+                if (wanted) {
+                  CAT.items.forEach(function (item) {
+                    if (String(item.name || '').toLowerCase() === wanted) id = item.id;
+                  });
+                }
+              }
+              if (id && itemById(id)) {
+                itemSel.value = String(id);
+                renderVariantOptions();
+                refreshSubmitLabel();
+              }
             });
-          });
+          }
+          if (gridEl) {
+            gridEl.addEventListener('click', function (e) {
+              var card = e.target && e.target.closest ? e.target.closest('.merch-card') : null;
+              if (card && gridEl.contains(card)) openMerchModalFor(card);
+            });
+          }
 
           formEl.addEventListener('submit', async function (e) {
             e.preventDefault();
@@ -1461,6 +1631,11 @@
               submitBtn.textContent = 'Place Order — ' + money(cartTotal());
             }
           });
+
+          // Fetch the catalog on page load so the homepage cards reflect it;
+          // the modal reuses the same cached promise (one request per page
+          // load — the endpoint is CDN-cached for 60s, no extra params).
+          loadCatalog();
         })();
       </script>
     </div>
