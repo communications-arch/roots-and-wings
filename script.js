@@ -2443,8 +2443,10 @@
     var bs = document.createElement('div');
     bs.id = 'rwBootScreen';
     bs.innerHTML = '<div class="rw-boot-inner">'
-      + '<img src="logo-combined.svg?v=20260430g" alt="" style="width:96px;height:auto;">'
-      + '<div class="rw-boot-brand">ROOTS &amp; WINGS<span>Indianapolis</span></div>'
+      // #355 (Erin): the boot cover shows the real stacked 2026 logo
+      // (logo-stacked.svg, composed from the brand vectors) instead of a
+      // thumbnail of the horizontal mark with the wordmark typed out.
+      + '<img src="logo-stacked.svg?v=20260816a" alt="Roots &amp; Wings Indianapolis" class="rw-boot-logo">'
       + '<div class="rw-boot-msg">Getting your dashboard ready…</div>'
       + '</div>';
     document.body.appendChild(bs);
@@ -8876,7 +8878,12 @@
     });
   }
   function loadPublishedSchedule(force) {
-    if (publishedSchedule.loading) return;
+    // #353 (Colleen): a forced refetch that lands while one is already in
+    // flight used to be dropped on the floor — place two people in a row
+    // from Schedules and the second write never reached Coordination / My
+    // Family until a manual reload. Queue it; the in-flight load re-runs
+    // itself once when it settles.
+    if (publishedSchedule.loading) { if (force) publishedSchedule.refetchQueued = true; return; }
     if (publishedSchedule.loaded && !force) return;
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -8896,8 +8903,15 @@
         // The My Family Kids' Schedule card reads this cache too
         // (publishedAmForGroup) — repaint it now that data landed.
         if (typeof renderMyFamily === 'function') renderMyFamily();
+        // #353: the liaison's My Grove card reads "Assisting: …" off this
+        // cache as well — repaint it so a VP placement shows up there too.
+        if (typeof renderMyClassCardBody === 'function') { try { renderMyClassCardBody(); } catch (e) { /* best-effort */ } }
+        if (publishedSchedule.refetchQueued) { publishedSchedule.refetchQueued = false; loadPublishedSchedule(true); }
       })
-      .catch(function () { publishedSchedule.loading = false; });
+      .catch(function () {
+        publishedSchedule.loading = false;
+        if (publishedSchedule.refetchQueued) { publishedSchedule.refetchQueued = false; loadPublishedSchedule(true); }
+      });
   }
 
   // #297 (Erin): the Co-op Coordination afternoon electives show the SAME
@@ -9085,7 +9099,11 @@
     return h;
   }
   function loadCoordPmSignups(session) {
-    if (!session || _coordPmSignups.loading) return;
+    if (!session) return;
+    // #353: an invalidate-and-reload (session set to null) that arrives while
+    // a fetch is in flight must not be lost — the in-flight result would
+    // pre-date the write that triggered it. Remember the ask; re-run on land.
+    if (_coordPmSignups.loading) { if (_coordPmSignups.session !== session) _coordPmSignups.refetch = session; return; }
     if (_coordPmSignups.session === session) return; // cached for this session
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -9100,10 +9118,16 @@
             (d.classes[hr] || []).forEach(function (c) { byHour[hr][c.id] = c.signedUpDetailed || []; });
           });
         }
+        var refetch = _coordPmSignups.refetch;
         _coordPmSignups = { session: session, loading: false, byHour: byHour, windowStatus: (d && d.window && d.window.status) || null };
         renderSessionTab();
+        if (refetch) { _coordPmSignups.session = null; loadCoordPmSignups(refetch); }
       })
-      .catch(function () { _coordPmSignups.loading = false; });
+      .catch(function () {
+        var refetch = _coordPmSignups.refetch;
+        _coordPmSignups.loading = false; _coordPmSignups.refetch = null;
+        if (refetch) { _coordPmSignups.session = null; loadCoordPmSignups(refetch); }
+      });
   }
 
   function renderSessionTab() {
@@ -36174,6 +36198,10 @@
     if (typeof fetchSignupTodos === 'function') { try { fetchSignupTodos(); } catch (e) { /* counts refresh is best-effort */ } }
     _schedMatrix = null;
     _schedPools = null;
+    // #353: the Place adults / Place kids To Do lists build their pickers
+    // from a per-session cache of the same matrix/pools — drop it so a spot
+    // taken here isn't still offered there.
+    if (typeof _signupTodoAux !== 'undefined' && _signupTodoAux) { _signupTodoAux.matrix = null; _signupTodoAux.classes = null; }
     // #330 (Colleen): a placement change here must reach Co-op Coordination
     // without a manual reload — the coordination cards (helpers, "needs N
     // more" links) paint from the published-schedule cache, so refetch it;

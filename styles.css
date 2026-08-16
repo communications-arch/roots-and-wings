@@ -2642,23 +2642,17 @@ body.rw-booting #myFamilyGrid { min-height: 72vh; }
   opacity: 1;
   transition: opacity 0.3s ease;
 }
-.rw-boot-inner { text-align: center; }
-.rw-boot-inner img { animation: rwBootPulse 1.6s ease-in-out infinite; }
-.rw-boot-brand {
-  margin-top: 10px;
-  font-family: var(--font-rounded);
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--color-primary-dark);
-}
-.rw-boot-brand span {
+.rw-boot-inner { text-align: center; padding: 0 24px; }
+/* #355: the stacked 2026 logo carries the wordmark itself (no typed brand text). */
+.rw-boot-logo {
   display: block;
-  font-size: 0.72rem;
-  letter-spacing: 0.3em;
-  color: var(--color-primary-light);
+  width: min(260px, 64vw);
+  height: auto;
+  margin: 0 auto;
+  animation: rwBootPulse 1.6s ease-in-out infinite;
 }
 .rw-boot-msg {
-  margin-top: 14px;
+  margin-top: 22px;
   font-size: 0.9rem;
   color: var(--color-text-light);
 }
