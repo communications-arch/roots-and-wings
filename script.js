@@ -7077,7 +7077,7 @@
       var meCommitted = !!(d.mine && d.mine[bk]);
       var assists = helpers;
       if (c.helpers_needed > 0) {
-        var needTxt = 'needs ' + c.helpers_needed + ' more ⚠';
+        var needTxt = 'needs ' + c.helpers_needed + ' more';
         assists += (helpers ? ', ' : '') + (!meCommitted
           ? '<button type="button" class="ra-open-note vgrid-need-btn vgrid-signup" data-vg-kind="assist" data-vg-class="' + c.id + '" data-vg-block="' + bk + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class">' + needTxt + ' — sign up</button>'
           : '<span class="ra-open-note" style="display:inline;">' + needTxt + '</span>');
