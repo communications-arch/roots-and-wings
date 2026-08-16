@@ -12544,6 +12544,11 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 0.86rem;
 }
 .merch-desk-row { flex-wrap: wrap; }
+/* Catalog item form photo row (#351 upload): thumbnail · Upload chip · hint · status. */
+.merch-inv-edit-grid .merch-cat-img-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.82rem; }
+.merch-cat-img-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border); background: var(--color-cream); flex: 0 0 auto; }
+.merch-cat-img-none { display: inline-block; }
+.merch-cat-img-status { min-width: 0; }
 /* Catalog & Stock item toolbar (#351): name · variant count · Edit item · + Add variant, one chip group per item. */
 .merch-cat-item-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 0.82rem; white-space: nowrap; }
 .merch-cat-item-chip.is-open { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.06); }
