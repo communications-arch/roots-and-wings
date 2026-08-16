@@ -15392,7 +15392,7 @@
     // Status select under Status = All; "Confirm spam" cancels them out
     // of the queue.
     if (counts.screened > 0) {
-      h += '<div class="rd-counts" style="margin:0 0 6px;"><span class="ws-wv-pending">' + counts.screened + ' possible spam*</span></div>';
+      h += '<div style="margin:0 0 8px;"><span class="filter-pill" style="border-color:var(--color-accent-dark);color:var(--color-accent-dark);cursor:default;">' + counts.screened + ' possible spam*</span></div>';
     }
     if (!_merchDeskCache && !_merchOrdersCache) h += '<p class="ws-empty">Loading…</p>';
     else h += '<div id="merch-desk-table-target"></div>';
@@ -15675,7 +15675,7 @@
     item = item || { name: '', description: '', image_url: '', active: true, sort_order: 0, vendor_name: '', vendor_url: '', notes: '', preorder_only: false };
     var idAttr = isNew ? 'new' : item.id;
     var h = '<div class="merch-inv-edit merch-cat-item-form" data-item-id="' + idAttr + '">';
-    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add an item' : 'Edit item') + '</strong></div>';
+    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add an item (a product type — sizes/colors are its variants)' : 'Edit item') + '</strong></div>';
     h += '<div class="merch-inv-edit-grid">';
     h += '<label><span>Name</span><input type="text" maxlength="200" id="merch-cat-name-' + idAttr + '" value="' + escapeAttr(item.name) + '"></label>';
     h += '<label><span>Sort</span><input type="number" min="0" max="10000" id="merch-cat-sort-' + idAttr + '" value="' + (item.sort_order || 0) + '"></label>';
@@ -15689,7 +15689,7 @@
       h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-cat-fvprice-new" placeholder="12.00"></label>';
       h += '<label><span>On hand (starting count)</span><input type="number" min="0" max="100000" id="merch-cat-fvonhand-new" value="0"></label>';
       h += '<label><span>Reorder at (restock below)</span><input type="number" min="0" max="100000" id="merch-cat-fvrestock-new" value="0"></label>';
-      h += '<label><span>Variant label (optional)</span><input type="text" maxlength="200" id="merch-cat-fvlabel-new" placeholder="blank = one size / style"></label>';
+      h += '<label><span>Variant (optional)</span><input type="text" maxlength="200" id="merch-cat-fvlabel-new"></label>';
     }
     h += '<label class="merch-inv-edit-notes"><span>Description</span><textarea maxlength="1000" rows="2" id="merch-cat-desc-' + idAttr + '">' + escapeHtml(item.description || '') + '</textarea></label>';
     h += '<label class="merch-inv-edit-notes"><span>Notes (manager only)</span><textarea maxlength="1000" rows="2" id="merch-cat-notes-' + idAttr + '" placeholder="e.g. reorder minimum 24, lead time 3 weeks">' + escapeHtml(item.notes || '') + '</textarea></label>';
@@ -15726,7 +15726,7 @@
     var h = '<div class="merch-inv-edit merch-cat-variant-form" data-variant-id="' + idAttr + '" data-item-id="' + itemId + '">';
     h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add a variant' : 'Edit variant') + '</strong>' + (itemName ? ' ' + escapeHtmlWs(itemName) : '') + ' <span class="ws-wv-context">size/color/style — leave the label blank for single-variant items</span></div>';
     h += '<div class="merch-inv-edit-grid">';
-    h += '<label><span>Label</span><input type="text" maxlength="200" id="merch-var-label-' + idAttr + '" value="' + escapeAttr(variant.label || '') + '" placeholder="Youth M — Purple"></label>';
+    h += '<label><span>Variant</span><input type="text" maxlength="200" id="merch-var-label-' + idAttr + '" value="' + escapeAttr(variant.label || '') + '"></label>';
     h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-var-price-' + idAttr + '" value="' + ((variant.price_cents || 0) / 100).toFixed(2) + '"></label>';
     h += '<label><span>On hand' + (isNew ? ' (starting count)' : ' (recount)') + '</span><input type="number" min="0" max="100000" id="merch-var-onhand-' + idAttr + '" value="' + (variant.on_hand || 0) + '"></label>';
     h += '<label><span>On order (supplier)</span><input type="number" min="0" max="100000" id="merch-var-onorder-' + idAttr + '" value="' + (variant.on_order || 0) + '"></label>';
@@ -15916,12 +15916,18 @@
     } else {
       // Item pills (Erin 2026-08-15): one-tap filter by item type, bound
       // to the same state as the Item funnel in the table header.
-      h += '<div class="rd-counts merch-cat-item-pills">';
-      h += '<button type="button" class="sc-btn merch-cat-item-pill' + (_merchCatItemFilter === 'all' ? ' sc-save' : '') + '" data-item-filter="all">All (' + allRows.length + ')</button>';
+      // Standard filter pills (Erin 2026-08-16: pills, not rectangles). The
+      // Needs-ordering pill is outlined in the accent (red) so it reads as
+      // an alert; it toggles the Need funnel.
+      h += '<div class="filter-pills merch-cat-item-pills" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;">';
+      h += '<button type="button" class="filter-pill merch-cat-item-pill' + (_merchCatItemFilter === 'all' ? ' active' : '') + '" data-item-filter="all">All (' + allRows.length + ')</button>';
       (cat.items || []).forEach(function (item) {
         var n = allRows.filter(function (r) { return r.item.id === item.id; }).length;
-        h += '<button type="button" class="sc-btn merch-cat-item-pill' + (_merchCatItemFilter === String(item.id) ? ' sc-save' : '') + '" data-item-filter="' + item.id + '">' + escapeHtmlWs(item.name) + ' (' + n + ')</button>';
+        h += '<button type="button" class="filter-pill merch-cat-item-pill' + (_merchCatItemFilter === String(item.id) ? ' active' : '') + '" data-item-filter="' + item.id + '">' + escapeHtmlWs(item.name) + ' (' + n + ')</button>';
       });
+      if (needsAll.length > 0) {
+        h += '<button type="button" class="filter-pill merch-cat-needs-pill' + (_merchCatNeedsOnly ? ' active' : '') + '" data-needs-toggle="1" style="border-color:var(--color-accent-dark);' + (_merchCatNeedsOnly ? 'background:var(--color-accent-dark);' : 'color:var(--color-accent-dark);') + '">Needs ordering (' + needsAll.length + ')</button>';
+      }
       h += '</div>';
       h += '<div id="merch-cat-table-target"></div>';
     }
@@ -15959,7 +15965,7 @@
         if (col.key === 'need') col.filter = {
           options: [{ value: 'any', label: 'Any', count: allRows.length }, { value: 'needs', label: 'Needs ordering', count: needsAll.length }],
           current: _merchCatNeedsOnly ? 'needs' : 'any',
-          onChange: function (v) { _merchCatNeedsOnly = (v === 'needs'); renderTable(); }
+          onChange: function (v) { _merchCatNeedsOnly = (v === 'needs'); renderMerchCatalogBody(); }
         };
         if (col.key === 'active') col.filter = {
           options: [{ value: 'any', label: 'Any', count: allRows.length }, { value: 'active', label: 'Active', count: activeCount }, { value: 'inactive', label: 'Inactive', count: allRows.length - activeCount }],
@@ -16030,6 +16036,8 @@
   // Toolbar (above the table): + Add item only — every other action is on
   // the row's Actions dropdown.
   function wireMerchCatalogToolbar(body) {
+    var needsPill = body.querySelector('.merch-cat-needs-pill');
+    if (needsPill) needsPill.addEventListener('click', function () { _merchCatNeedsOnly = !_merchCatNeedsOnly; renderMerchCatalogBody(); });
     body.querySelectorAll('.merch-cat-item-pill').forEach(function (btn) {
       btn.addEventListener('click', function () {
         _merchCatItemFilter = btn.getAttribute('data-item-filter') || 'all';
