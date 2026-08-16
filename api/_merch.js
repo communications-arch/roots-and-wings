@@ -77,6 +77,152 @@ function needsOrderingQty(variant, backorderedDemand) {
   return Math.max(0, demand + shortfall - onOrder);
 }
 
+// Quick Sale cart split (Erin, 2026-08-16): which lines are handed over
+// at the table right now (INSTANT: delivered + paid, stock clamped) and
+// which become a paid PRE-ORDER (not delivered; allocated/backordered
+// truthfully). A line is a pre-order when its item is printed to order
+// (merch_items.preorder_only) OR the shelf shows nothing on hand — an
+// out-of-stock item can't be handed over, so the buyer is ordering it.
+//   lines:    [{ variant_id, qty }]  (normalized)
+//   variants: { [id]: { price_cents, on_hand, item_preorder_only } }
+// → { instant: [...], preorder: [...], reasons: { printed, out } }
+//   each line: { variant_id, qty, price_cents_each, preorder_reason? }
+function splitQuickSaleLines(lines, variants) {
+  const instant = [];
+  const preorder = [];
+  const reasons = { printed: false, out: false };
+  (lines || []).forEach(l => {
+    const v = (variants || {})[l.variant_id];
+    if (!v) return;
+    const line = { variant_id: l.variant_id, qty: l.qty, price_cents_each: Math.max(0, parseInt(v.price_cents, 10) || 0) };
+    if (v.item_preorder_only) {
+      line.preorder_reason = 'printed';
+      reasons.printed = true;
+      preorder.push(line);
+    } else if ((parseInt(v.on_hand, 10) || 0) <= 0) {
+      line.preorder_reason = 'out';
+      reasons.out = true;
+      preorder.push(line);
+    } else {
+      instant.push(line);
+    }
+  });
+  return { instant, preorder, reasons };
+}
+
+// ── Merch Finances (money ledger) — pure math ─────────────────────────
+//
+// The Merch Finances report merges three sources into ONE ledger:
+// paid Desk orders (type 'sale'), the manager's manual entries in
+// merch_ledger_entries ('expense' / 'deposit' / 'adjustment'), and
+// paid legacy web-form orders (a 'sale' with no price on file —
+// amount null, flagged, never summed). Every row carries the same
+// shape: { type, method, amount_cents (SIGNED, or null), voided }.
+//
+// Sign convention (the Amount column shows exactly this):
+//   sale        +amount   money in
+//   expense     −amount   money out
+//   deposit     −amount   handed to the treasurer (leaves the cash box,
+//                         NOT a loss — excluded from Net)
+//   adjustment  ±amount   stored signed (+ found / − short / − refund)
+// Summary (integer cents throughout):
+//   sales      = Σ sale
+//   by_method  = Σ sale per payment method
+//   expenses   = Σ |expense|
+//   deposits   = Σ |deposit|
+//   adjustments= Σ adjustment (signed)
+//   net        = sales − expenses + adjustments   (= Σ signed, deposits excluded)
+//   cash_on_hand = Σ signed over method = 'cash'   (sales − expenses −
+//                  deposits ± adjustments, cash only)
+// Voided entries and unpriced legacy rows are skipped everywhere.
+const LEDGER_TYPES = ['sale', 'expense', 'deposit', 'adjustment'];
+const LEDGER_ENTRY_TYPES = ['expense', 'deposit', 'adjustment'];
+const LEDGER_METHODS = ['cash', 'check', 'paypal', 'other'];
+
+// Signed cents for a stored (type, positive-or-signed amount) pair.
+// Adjustments are stored signed and pass through; a null/NaN amount
+// (unpriced legacy sale) stays null.
+function ledgerSignedCents(type, amountCents) {
+  if (amountCents == null) return null;
+  const n = parseInt(amountCents, 10);
+  if (!Number.isFinite(n)) return null;
+  if (type === 'adjustment') return n;
+  const mag = Math.abs(n);
+  return (type === 'expense' || type === 'deposit') ? -mag : mag;
+}
+
+// Roll a ledger (rows already carrying SIGNED amount_cents) into the
+// summary tiles. Skips voided rows and rows with a null amount, but
+// counts the latter so the report can flag "N older orders had no
+// price on file".
+function financeSummary(rows) {
+  const s = {
+    sales_cents: 0, expenses_cents: 0, deposits_cents: 0, adjustments_cents: 0,
+    net_cents: 0, cash_on_hand_cents: 0,
+    by_method: {}, unpriced_count: 0, rows_counted: 0
+  };
+  (rows || []).forEach(r => {
+    if (!r || r.voided) return;
+    if (r.amount_cents == null) { s.unpriced_count++; return; }
+    const amt = parseInt(r.amount_cents, 10);
+    if (!Number.isFinite(amt)) { s.unpriced_count++; return; }
+    s.rows_counted++;
+    const method = String(r.method || '') || 'other';
+    if (r.type === 'sale') {
+      s.sales_cents += amt;
+      s.by_method[method] = (s.by_method[method] || 0) + amt;
+    } else if (r.type === 'expense') {
+      s.expenses_cents += Math.abs(amt);
+    } else if (r.type === 'deposit') {
+      s.deposits_cents += Math.abs(amt);
+    } else if (r.type === 'adjustment') {
+      s.adjustments_cents += amt;
+    } else {
+      return;
+    }
+    if (r.type !== 'deposit') s.net_cents += amt;
+    if (method === 'cash') s.cash_on_hand_cents += amt;
+  });
+  return s;
+}
+
+// The calendar window a school-year label covers, matching the April-1
+// flip in activeSchoolYear (api/_permissions.js / script.js): a date D
+// belongs to label activeSchoolYear(D), so '2026-2027' = [2026-04-01,
+// 2027-04-01). Returns { start, end } as YYYY-MM-DD (end exclusive) or
+// null for a malformed label.
+function schoolYearBounds(label) {
+  const m = String(label || '').match(/^(\d{4})-(\d{4})$/);
+  if (!m) return null;
+  const fall = parseInt(m[1], 10);
+  if (parseInt(m[2], 10) !== fall + 1) return null;
+  return { start: fall + '-04-01', end: (fall + 1) + '-04-01' };
+}
+
+// Validate + normalize a manual ledger entry from the client. Returns
+// { error } or the cleaned fields. amount_cents arrives as an integer
+// (the client converts dollars); expense/deposit must be > 0,
+// adjustment must be non-zero (either sign). Description is required
+// so the ledger row can be read without expanding it.
+function normalizeLedgerEntry(src) {
+  const b = src || {};
+  const type = String(b.type || '');
+  if (LEDGER_ENTRY_TYPES.indexOf(type) === -1) return { error: 'Type must be expense, deposit, or adjustment.' };
+  const entryDate = String(b.entry_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) return { error: 'Pick a date.' };
+  const d = new Date(entryDate + 'T12:00:00');
+  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== entryDate) return { error: 'That date isn’t valid.' };
+  const amount = parseInt(b.amount_cents, 10);
+  if (!Number.isFinite(amount) || amount === 0 || Math.abs(amount) > 100000000) return { error: 'Enter a non-zero amount (up to $1,000,000).' };
+  if (type !== 'adjustment' && amount < 0) return { error: 'Expenses and deposits are entered as positive amounts — the ledger applies the sign.' };
+  const method = String(b.method || 'cash');
+  if (LEDGER_METHODS.indexOf(method) === -1) return { error: 'Method must be cash, check, paypal, or other.' };
+  const description = String(b.description || '').replace(/<[^>]*>/g, '').trim().slice(0, 200);
+  if (!description) return { error: 'A short description is required.' };
+  const note = String(b.note || '').replace(/<[^>]*>/g, '').trim().slice(0, 1000);
+  return { type, entryDate, amountCents: amount, method, description, note };
+}
+
 // ── Stock-take primitives (DB; `sql` = a Neon tagged-template client) ──
 //
 // The Neon HTTP driver runs each statement as its own transaction, so
@@ -166,5 +312,8 @@ async function allocateBackorderedLines(sql, orderId, back) {
 
 module.exports = {
   normalizeLines, takeOutcome, orderTotalCents, needsOrderingQty,
-  takeStock, allocateOrderLines, allocateBackorderedLines
+  takeStock, allocateOrderLines, allocateBackorderedLines,
+  splitQuickSaleLines,
+  LEDGER_TYPES, LEDGER_ENTRY_TYPES, LEDGER_METHODS,
+  ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry
 };

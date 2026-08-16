@@ -2958,3 +2958,99 @@ WHERE it.id = v.item_id
 -- re-flip — unticking it later sticks.
 UPDATE merch_items SET preorder_only = TRUE
 WHERE LOWER(name) = 't-shirt' AND preorder_only = FALSE AND updated_by = 'migrate.sql';
+
+-- ──────────────────────────────────────────────
+-- Merch Finances (#351, 2026-08-16)
+-- ──────────────────────────────────────────────
+-- The manager's money ledger beside the order queue: sales come from
+-- paid merch_desk_orders (never copied here); this table holds the
+-- entries only the manager knows — expenses (supplier invoices,
+-- table supplies), deposits handed to the treasurer, and adjustments
+-- (cash-box over/short, refunds). Money is integer cents; amount is
+-- stored positive with the sign implied by type (expense −, deposit −
+-- from cash on hand), EXCEPT adjustments, which carry their own sign
+-- (+ found / − short). school_year is stamped from entry_date with the
+-- April-1 flip (activeSchoolYear) so the report reads one season at a
+-- time. Rows are never deleted — Void stamps voided_at and the report
+-- dims + excludes them. API: merch-finances / merch-ledger-save /
+-- merch-ledger-void on api/supply-closet.js; summary math in
+-- api/_merch.js (scripts/test-merch-allocation.js guards it).
+CREATE TABLE IF NOT EXISTS merch_ledger_entries (
+  id               SERIAL PRIMARY KEY,
+  school_year      TEXT NOT NULL,
+  entry_date       DATE NOT NULL,
+  type             TEXT NOT NULL CHECK (type IN ('expense','deposit','adjustment')),
+  amount_cents     INTEGER NOT NULL CHECK (amount_cents <> 0 AND (amount_cents > 0 OR type = 'adjustment')),
+  method           TEXT NOT NULL DEFAULT 'cash' CHECK (method IN ('cash','check','paypal','other')),
+  description      TEXT NOT NULL DEFAULT '',
+  note             TEXT NOT NULL DEFAULT '',
+  created_by_email TEXT NOT NULL DEFAULT '',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  voided_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS merch_ledger_entries_year_idx ON merch_ledger_entries (school_year, entry_date);
+
+-- Greenhouse (0–2) adult assistants via morning sign-ups (2026-08-16, Erin)
+-- ──────────────────────────────────────────────
+-- Replaces the Greenhouse Host card (#350, 2026-08-14). The Greenhouse room
+-- gets adult coverage the SAME WAY every other morning class gets
+-- assistants: a standing whole-morning class_submissions row per session
+-- (class_period 'AM', scheduled_hour 'AM' = AM1 + AM2 assist slots, the
+-- same idiom a grove's one 2-hour morning class uses) so it appears in the
+-- AM1/AM2 volunteer sign-ups and on the Schedule Builder's morning grid,
+-- where the VP edits its assistant count like any other morning class.
+-- It has NO lead and no topic — adults are assistants only; the marker the
+-- API keys on is age_groups = ARRAY['greenhouse'] on an AM row (never the
+-- name). Kids still get no Greenhouse programming (every kid-side
+-- exclusion is untouched).
+--
+-- Seeds the ACTIVE school year (April-1 pivot, mirroring
+-- api/_permissions.js activeSchoolYear()) × sessions 1–5. Idempotent: a
+-- (year, session) that already has a Greenhouse AM row — scheduled there,
+-- or preferring that session after being sent back to the inbox — is
+-- skipped, so re-runs are no-ops and each new school year seeds itself on
+-- the first deploy after April 1. Additive only (INSERT … WHERE NOT EXISTS).
+-- The greenhouse_host_claims table above is RETIRED (kept; nothing reads
+-- or writes it).
+INSERT INTO class_submissions (
+  submitted_by_email, submitted_by_name, school_year, class_period,
+  class_name, description, session_preferences, hour_preference,
+  assistant_count, age_groups, space_request, max_students,
+  status, scheduled_session, scheduled_hour, scheduled_age_range,
+  reviewer_notes, reviewed_by_email, reviewed_at
+)
+SELECT
+  'noreply@rootsandwingsindy.com',
+  'No lead — assistants only',
+  yr.school_year,
+  'AM',
+  'Greenhouse (0–2 room) — assistants',
+  '',
+  ARRAY[gs.session_number::text],
+  ARRAY['both'],
+  ARRAY[1],
+  ARRAY['greenhouse'],
+  ARRAY[]::text[],
+  0,
+  'scheduled',
+  gs.session_number,
+  'AM',
+  'Greenhouse (0–2)',
+  'Standing class: the Greenhouse (0–2) room takes adult ASSISTANTS only — no lead, no topic. Set how many assistants it needs per hour here — adults sign up through the AM1/AM2 morning sign-ups.',
+  'migrate.sql',
+  NOW()
+FROM (
+  SELECT (CASE WHEN EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Indianapolis')) < 4
+               THEN EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'America/Indianapolis'))::int - 1
+               ELSE EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'America/Indianapolis'))::int END) AS fall_year
+) fy
+CROSS JOIN LATERAL (SELECT fy.fall_year || '-' || (fy.fall_year + 1) AS school_year) yr
+CROSS JOIN generate_series(1, 5) AS gs(session_number)
+WHERE NOT EXISTS (
+  SELECT 1 FROM class_submissions c
+  WHERE c.school_year = yr.school_year
+    AND c.class_period = 'AM'
+    AND c.age_groups = ARRAY['greenhouse']
+    AND (c.scheduled_session = gs.session_number
+         OR gs.session_number::text = ANY(c.session_preferences))
+);

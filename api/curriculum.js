@@ -318,10 +318,29 @@ function pickArray(raw, allowed, opts) {
   return out;
 }
 
+// The Greenhouse (0–2) standing "assistants only" morning class (Erin,
+// 2026-08-16 — replaces the Greenhouse Host card, #350). One scheduled AM
+// class_submissions row per session (seeded by scripts/migrate.sql, whole
+// morning = AM1 + AM2 assist slots) so adults cover the toddler room through
+// the normal morning sign-ups and the VP sets its assistant count from the
+// builder like any other morning class. It has NO lead and no topic; the
+// marker is age_groups = ['greenhouse'] on an AM row (never the name).
+// Kids still get no Greenhouse programming — every kid-side exclusion stays.
+function isGreenhouseAssistClass(r) {
+  return !!r && r.class_period === 'AM'
+    && Array.isArray(r.age_groups) && r.age_groups.length === 1
+    && String(r.age_groups[0] || '').toLowerCase() === 'greenhouse';
+}
+
 // Normalize + validate a submission body. Throws Error with a user-facing
 // message on invalid input. Returns the cleaned shape ready to INSERT.
-function normalizeSubmission(body) {
+// opts.allowGreenhouseAM — ONLY the edit path passes this, and only when the
+// row being edited already IS the standing Greenhouse assistants class, so
+// the VP can save its assistant count; new morning submissions for the
+// Greenhouse stay rejected (no programming under 3).
+function normalizeSubmission(body, opts) {
   body = body || {};
+  opts = opts || {};
   // Morning vs afternoon proposal (2026-07-05). Morning classes: exactly
   // ONE age group (no combining), no hour preference (afternoon concept),
   // no space pick (rooms are assigned for the year), and no class size
@@ -365,7 +384,7 @@ function normalizeSubmission(body) {
     if (age_groups.length !== 1 || age_groups[0] === 'all-ages') {
       throw new Error('Morning classes are for exactly one grove.');
     }
-    if (age_groups[0] === 'greenhouse') {
+    if (age_groups[0] === 'greenhouse' && !opts.allowGreenhouseAM) {
       throw new Error('No morning programming is offered for the Greenhouse (0–2) group — toddlers stay with their parents.');
     }
   } else {
@@ -670,6 +689,7 @@ async function countKidsUnpicked(sql, year, sess) {
 
 function prettyAges(a, other) {
   const map = {
+    greenhouse: 'Greenhouse (0–2)',
     saplings: 'Saplings (3–5)', sassafras: 'Sassafras (3–6)',
     oaks: 'Oaks (7–8)', maples: 'Maples (8–9)', birch: 'Birch (9–10)',
     willows: 'Willows (10–12)', cedars: 'Cedars (12–13)', pigeons: 'Pigeons (14+)',
@@ -1165,8 +1185,10 @@ module.exports = async function handler(req, res) {
             class_name: r.class_name,
             description: r.description || '',
             // Real name first (people join), then the submitted name; the
-            // raw email never shows to members (Erin, 2026-07-11).
-            teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
+            // raw email never shows to members (Erin, 2026-07-11). The
+            // Greenhouse assistants class has no lead — blank, never a name.
+            teacher: isGreenhouseAssistClass(r) ? ''
+              : (r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0]),
             co_teachers: r.co_teachers || '',
             helpers: (helpersBySub[r.id] || []).filter(Boolean),
             // Per-hour helper names (Erin 2026-08-12: an AM2-only assist on a
@@ -1421,7 +1443,8 @@ module.exports = async function handler(req, res) {
             groups: ci.age_groups || [], ages: ci.scheduled_age_range || '',
             room: ci.scheduled_room || '', backup_room: ci.scheduled_backup_room || '',
             description: ci.description || '',
-            teacher: ci.person_name || ci.submitted_by_name || String(ci.submitted_by_email || '').split('@')[0],
+            teacher: isGreenhouseAssistClass(ci) ? ''
+              : (ci.person_name || ci.submitted_by_name || String(ci.submitted_by_email || '').split('@')[0]),
             co_teachers: ci.co_teachers || '',
             helpers: ciHelpers.map(h => h.person_name || String(h.person_email || '').split('@')[0]),
             helpers_needed: Math.max(0, ciWants - ciHelpers.length),
@@ -2120,6 +2143,8 @@ module.exports = async function handler(req, res) {
           if (r.class_period !== 'AM' && !pmApproved) return;
           const hs = helpersBySub[r.id] || [];
           const wants = Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
+          // Greenhouse assistants class: no lead position, no lead name.
+          const noLead = isGreenhouseAssistClass(r);
           blocksOf(r).forEach(b => {
             // Per-block view of the class: hour-scoped assists (whole-morning
             // classes, Erin 2026-07-15) only show/count in their own hour.
@@ -2129,8 +2154,8 @@ module.exports = async function handler(req, res) {
               group: r.class_period === 'AM' ? String((r.age_groups || [])[0] || '') : '',
               groups: r.age_groups || [],
               ages: r.scheduled_age_range || '',
-              teacher: r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0],
-              teacher_email: (r.submitted_by_email || '').toLowerCase(),
+              teacher: noLead ? '' : (r.person_name || r.submitted_by_name || String(r.submitted_by_email || '').split('@')[0]),
+              teacher_email: noLead ? '' : (r.submitted_by_email || '').toLowerCase(),
               co_teachers: r.co_teachers || '',
               helpers: hsB.map(h => h.name || h.email),
               helpers_needed: Math.max(0, wants - hsB.length),
@@ -2138,7 +2163,7 @@ module.exports = async function handler(req, res) {
               hour: r.scheduled_hour || ''
             };
             blocks[b].classes.push(entry);
-            keyNeeded[b] += 1
+            keyNeeded[b] += (noLead ? 0 : 1)
               + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
               + Math.max(wants, hsB.length);
             if (entry.teacher_email === actingEmail || (meNameLc && String(entry.teacher).trim().toLowerCase() === meNameLc)) {
@@ -2821,7 +2846,7 @@ module.exports = async function handler(req, res) {
         // beyond the hour's key classroom positions — leads + co-leads +
         // assistant spots (Erin, 2026-07-15).
         const capCls = await sql`
-          SELECT scheduled_hour, class_period, co_teachers, assistant_count
+          SELECT scheduled_hour, class_period, co_teachers, assistant_count, age_groups
           FROM class_submissions
           WHERE school_year = ${vsYear} AND scheduled_session = ${vsSess}
             AND class_period = ${vsPeriod} AND status IN ('scheduled', 'drafted')`;
@@ -2831,7 +2856,9 @@ module.exports = async function handler(req, res) {
             ? (r.scheduled_hour === 'AM1' ? ['AM1'] : r.scheduled_hour === 'AM2' ? ['AM2'] : ['AM1', 'AM2'])
             : r.scheduled_hour === 'both' ? ['PM1', 'PM2'] : r.scheduled_hour === 'PM2' ? ['PM2'] : ['PM1'];
           if (occ.indexOf(vsBlock) === -1) return;
-          keyNeededHour += 1
+          // (Greenhouse assistants class has no lead position — same math
+          // as the volunteer-matrix keyNeeded.)
+          keyNeededHour += (isGreenhouseAssistClass(r) ? 0 : 1)
             + String(r.co_teachers || '').split(/[,;]+/).filter(s => s.trim()).length
             + Math.min.apply(null, (r.assistant_count && r.assistant_count.length) ? r.assistant_count : [1]);
         });
@@ -3797,7 +3824,10 @@ module.exports = async function handler(req, res) {
         const isRowReviewer = !!(edScope && scopeAllowsSub(edScope, row));
         const ownerRevert = isOwner && !isRowReviewer && (row.status === 'drafted' || row.status === 'scheduled');
         let clean;
-        try { clean = normalizeSubmission(req.body || {}); }
+        // The standing Greenhouse assistants class keeps its grove through an
+        // edit (the VP saving a new assistant count) — the only place the
+        // 'greenhouse' AM rejection is lifted, and only for a reviewer.
+        try { clean = normalizeSubmission(req.body || {}, { allowGreenhouseAM: isRowReviewer && isGreenhouseAssistClass(row) }); }
         catch (validationErr) {
           return res.status(400).json({ error: validationErr.message });
         }
@@ -4098,3 +4128,7 @@ module.exports = async function handler(req, res) {
 module.exports.normalizeInspirationIdea = normalizeInspirationIdea;
 module.exports.INSPIRATION_CATEGORIES = INSPIRATION_CATEGORIES;
 module.exports.INSPIRATION_GROUPS = INSPIRATION_GROUPS;
+// scripts/test-greenhouse-assist.js — the Greenhouse standing assistants
+// class marker + the edit-only lift of the AM greenhouse rejection.
+module.exports.normalizeSubmission = normalizeSubmission;
+module.exports.isGreenhouseAssistClass = isGreenhouseAssistClass;

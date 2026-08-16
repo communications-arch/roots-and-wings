@@ -135,6 +135,9 @@ async function notifyKidTeachers(sql, a) {
         AND status = 'scheduled' AND scheduled_session = ${a.sessionNumber}`;
     amCls.forEach(c => {
       const g = String(((c.age_groups || [])[0]) || '').toLowerCase();
+      // The Greenhouse standing "assistants only" class has no teacher
+      // (its submitter is a system address) — nobody to notify.
+      if (g === 'greenhouse') return;
       if (groups.indexOf(g) !== -1 && c.submitted_by_email) teacherEmails.add(String(c.submitted_by_email).toLowerCase());
     });
   }

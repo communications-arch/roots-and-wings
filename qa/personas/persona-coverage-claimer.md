@@ -42,6 +42,12 @@ Use a second family via View-As for the two-party journeys.
 5. **Not occupied.** As the claimer, on the covered day check the volunteer
    sign-up panel. Expected: covering one week does not mark her hour as
    occupied for the session (#291).
+6. **Assist the Greenhouse.** Session schedule (or Everyone's sign-ups) →
+   the Greenhouse (0–2 room) block → "needs N more — sign up" on Hour 1.
+   Expected: it books ONLY Hour 1 (Hour 2 stays open), My Responsibilities
+   gains "Assisting “Greenhouse (0–2 room) — assistants”", the Leader
+   column stays "—" (assistants only, no lead), and the same "you're
+   already with…" clash rules apply as any other morning class.
 
 ## Exploratory charter (~10 min)
 

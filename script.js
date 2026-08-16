@@ -6757,119 +6757,6 @@
       .catch(function () { /* keep the static copy */ });
   }
 
-  // #350 (Erin): Greenhouse Host — a per-SESSION adult sign-up anchoring
-  // the 0-2 room so other toddler parents can float. Renders as a section
-  // of the Ways to Help card (below the jump grid). Server-gated: the API
-  // answers greenhouse_kids:false unless at least one enrolled kid is in
-  // the Greenhouse group this season, and then the section stays hidden
-  // entirely. null = not fetched; 'loading' = fetch in flight.
-  var _greenhouseHost = null;
-  function loadGreenhouseHost(force) {
-    if (!localStorage.getItem('rw_google_credential')) return;
-    if (_greenhouseHost === 'loading') return;
-    if (_greenhouseHost && !force) { paintGreenhouseHost(); return; }
-    var had = _greenhouseHost;
-    _greenhouseHost = 'loading';
-    fetch('/api/coverage?action=greenhouse-host', { headers: rwAuthHeaders() })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) {
-        _greenhouseHost = (d && d.sessions) ? d : had === 'loading' ? null : had;
-        paintGreenhouseHost();
-      })
-      .catch(function () { if (_greenhouseHost === 'loading') _greenhouseHost = had === 'loading' ? null : had; });
-  }
-
-  function ghHostFmtDay(s) {
-    s = String(s || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
-    // Local-day parsing (noon anchor) per the house timezone rule.
-    return new Date(s + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-
-  function paintGreenhouseHost() {
-    var box = document.getElementById('ws-greenhouse-host');
-    if (!box) return;
-    var d = _greenhouseHost;
-    if (!d || d === 'loading' || !d.greenhouse_kids || !(d.sessions || []).length) {
-      box.innerHTML = '';
-      return;
-    }
-    var h = '<h5 class="ws-part-subhead">Greenhouse Host (0–2 room)</h5>';
-    h += '<p class="ws-body-hint">Anchor the Greenhouse for a whole session so other toddler parents can float. '
-      + 'Two spots per session — a host and a co-host — and any adult member can claim one. '
-      + 'Everyone can see who’s hosting, so toddler families know.</p>';
-    h += '<ul class="ws-part-recap" id="ws-gh-host-list">';
-    d.sessions.forEach(function (s) {
-      var label = s.name ? escapeHtml(s.name) : ('Session ' + s.session_number);
-      var range = ghHostFmtDay(s.start_date);
-      var end = ghHostFmtDay(s.end_date);
-      if (range && end) range += ' – ' + end;
-      h += '<li><strong>' + label + '</strong>' + (range ? ' <span style="color:var(--color-text-light);">(' + range + ')</span>' : '') + ' — ';
-      var bits = [];
-      var iHost = false;
-      (s.hosts || []).forEach(function (host) {
-        var bit = escapeHtml(host.name);
-        if (host.mine) {
-          iHost = true;
-          bit += ' (you) <button type="button" class="sc-btn sc-btn-del gh-host-release" data-id="' + host.id + '">Release</button>';
-        } else if (d.can_release_any) {
-          bit += ' <button type="button" class="sc-btn sc-btn-del gh-host-release" data-id="' + host.id + '">Release</button>';
-        }
-        bits.push(bit);
-      });
-      var openSlots = (d.max_hosts || 2) - (s.hosts || []).length;
-      for (var i = 0; i < openSlots; i++) {
-        // One claim button is enough even when both spots are open.
-        bits.push(i === 0 && !iHost
-          ? 'Open <button type="button" class="sc-btn gh-host-claim" data-sess="' + s.session_number + '">Claim</button>'
-          : 'Open');
-      }
-      h += bits.join(' · ') + '</li>';
-    });
-    h += '</ul>';
-    h += '<div class="cls-error" id="ghHostErr" style="display:none;"></div>';
-    box.innerHTML = h;
-
-    function ghErr(msg) {
-      var el = document.getElementById('ghHostErr');
-      if (el) { el.textContent = msg; el.style.display = ''; }
-    }
-    function ghPost(body, btn) {
-      fetch('/api/coverage', {
-        method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(body)
-      })
-        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
-        .then(function (res) {
-          if (!res.ok) {
-            ghErr((res.data && res.data.error) || 'Could not update — try again.');
-            if (btn) btn.disabled = false;
-            return;
-          }
-          loadGreenhouseHost(true);
-        })
-        .catch(function () { ghErr('Network error — try again.'); if (btn) btn.disabled = false; });
-    }
-    box.querySelectorAll('.gh-host-claim').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var sess = parseInt(this.getAttribute('data-sess'), 10);
-        if (!Number.isFinite(sess)) return;
-        this.disabled = true;
-        ghPost({ action: 'greenhouse-host-claim', session_number: sess }, this);
-      });
-    });
-    // Release is destructive-ish → the shared two-step inline confirm.
-    box.querySelectorAll('.gh-host-release').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var id = parseInt(this.getAttribute('data-id'), 10);
-        if (!id) return;
-        rwArmTwoStep(this, 'release', function (b) {
-          b.disabled = true;
-          ghPost({ action: 'greenhouse-host-release', id: id }, b);
-        });
-      });
-    });
-  }
-
   // #133 (Colleen): Cleaning Crew sign-ups from Ways to Help — the same
   // claim/release flow as My Family's cleaning picker, in the house
   // report-modal shell with S1–S5 chips.
@@ -8976,6 +8863,12 @@
     if (!sess || !Array.isArray(sess.am)) return [];
     var g = String(groupName || '').toLowerCase().trim();
     if (!g) return [];
+    // KID-side reads (Kid Schedule rows, the liaison's My Grove card): the
+    // Greenhouse's standing "assistants only" class (Erin 2026-08-16) is
+    // adult coverage, not programming — a Greenhouse kid still has no
+    // morning class, so it never surfaces here. The adult sign-up surfaces
+    // read publishedSchedule.sessions[n].am directly and DO include it.
+    if (g === 'greenhouse') return [];
     return sess.am.filter(function (c) {
       return String((c.age_groups || [])[0] || '').toLowerCase().trim() === g;
     }).sort(function (a, b) {
@@ -9383,9 +9276,14 @@
       // Scheduled + TBD groves interleave in MORNING_GROUP_ORDER (#209).
       var amBlocksHtml = '', amPlaced = 0;
       MORNING_GROUP_ORDER.forEach(function (g) {
-        if (g.name === 'Greenhouse') return;
         var key = g.name.toLowerCase();
         var placed = amByGrove[key];
+        // Greenhouse (0–2) has no kid programming, so it never gets a TBD
+        // "teachers and topics fill in" block — but its standing
+        // "assistants only" morning class (Erin 2026-08-16, replaces the
+        // Greenhouse Host card #350) renders like any other grove's so
+        // adults can sign up to assist AM1/AM2 from here.
+        if (g.name === 'Greenhouse' && !placed) return;
         var ages = groupActualAgesHtml(g.range || '', g.name);
         var liaison = amLiaisonHtml(g.name);
         if (placed) {
@@ -11075,16 +10973,11 @@
           ? jumpTile('org-structure', 'waysToHelp', 'Committee Seats', 'none open — explore roles')
           : jumpTile('open-seats-modal', 'waysToHelp', 'Committee Seats', '<strong>' + open.length + '</strong> open seat' + (open.length === 1 ? '' : 's'));
         h += '</div>';
-        // #350: Greenhouse Host section — painted async by
-        // loadGreenhouseHost(); stays empty (hidden) unless a Greenhouse
-        // kid is enrolled this season (server-gated).
-        h += '<div id="ws-greenhouse-host"></div>';
         return h;
       },
       afterRender: function () {
         if (_eventOpenings === null && typeof loadEventOpenings === 'function') loadEventOpenings();
         if (_cleaningOpenCount === null && typeof loadCleaningOpenCount === 'function') loadCleaningOpenCount();
-        if (typeof loadGreenhouseHost === 'function') loadGreenhouseHost();
       }
     },
     'class-ideas': {
@@ -11617,6 +11510,13 @@
         items.forEach(function (r, i) { if (r.key === 'merch-orders') merchAt = i; });
         if (merchAt !== -1 && !items.some(function (r) { return r.key === 'merch-quick-sale'; })) {
           items.splice(merchAt + 1, 0, { key: 'merch-quick-sale', title: 'Quick Sale' });
+        }
+        // Merch Finances (#351, Erin 2026-08-16): the money ledger —
+        // same doorway rule as Quick Sale, third in the merch trio.
+        if (merchAt !== -1 && !items.some(function (r) { return r.key === 'merch-finances'; })) {
+          var qsAt = -1;
+          items.forEach(function (r, i) { if (r.key === 'merch-quick-sale') qsAt = i; });
+          items.splice((qsAt !== -1 ? qsAt : merchAt) + 1, 0, { key: 'merch-finances', title: 'Merch Finances' });
         }
         var formItems = (ROLE_FORMS[role] || []);
         var h = '<p class="ws-body-hint">Live reports scoped to your role'
@@ -12716,6 +12616,7 @@
         else if (key === 'morning-classes') showMorningClassBuilder();
         else if (key === 'merch-orders') showMerchOrdersModal();
         else if (key === 'merch-quick-sale' && typeof showMerchQuickSaleModal === 'function') showMerchQuickSaleModal();
+        else if (key === 'merch-finances' && typeof showMerchFinancesModal === 'function') showMerchFinancesModal();
         else if (key === 'cleaning-crew') showCleaningManagementModal();
         else if (key === 'schedules') showSchedulesReportModal();
       });
@@ -14967,6 +14868,33 @@
     return sign + '$' + Math.floor(n / 100) + '.' + ('0' + (n % 100)).slice(-2);
   }
 
+  // How the manager sees a member family (Erin, 2026-08-16): by the Main
+  // Learning Coach's "First Last" — that's how adults know each other,
+  // not by family name or email. fam.people is ordered mlc-first and
+  // carries role; falls back to the first parent + family name, then the
+  // family name alone. Identity stays family_email everywhere — this is
+  // display only.
+  function merchFamilyMlcName(fam) {
+    if (!fam) return '';
+    var nm = '';
+    if (Array.isArray(fam.people)) {
+      for (var i = 0; i < fam.people.length; i++) {
+        var pp = fam.people[i];
+        if (pp && pp.role === 'mlc') { nm = (typeof personFullName === 'function') ? personFullName(pp, fam) : ((pp.first_name || '') + ' ' + (pp.last_name || fam.name || '')).trim(); break; }
+      }
+    }
+    if (!nm && fam.parents) nm = (String(fam.parents).split(/[,&]/)[0].trim().split(/\s+/)[0] + ' ' + (fam.name || '')).trim();
+    if (!nm) nm = String(fam.displayName || fam.name || '').trim();
+    return nm;
+  }
+  // family_email → MLC display name (via FAMILIES); '' when unknown.
+  function merchFamilyLabelFor(familyEmail) {
+    var e = String(familyEmail || '').toLowerCase();
+    if (!e || typeof FAMILIES === 'undefined' || !Array.isArray(FAMILIES)) return '';
+    var fam = FAMILIES.filter(function (f) { return f && String(f.email || '').toLowerCase() === e; })[0];
+    return fam ? merchFamilyMlcName(fam) : '';
+  }
+
   // Labels cover every method that can appear on a stored order —
   // including 'venmo' on historical rows. NEW payments only offer
   // MERCH_PAY_METHODS_NEW (Erin, 2026-08-14: the manager's personal
@@ -15212,7 +15140,11 @@
           sub = [o.customer_email, o.customer_phone].filter(Boolean).map(escapeHtmlWs).join(' · ');
           sub = (sub ? sub + ' · ' : '') + 'non-member';
         } else if (o.family_email) {
-          sub = escapeHtmlWs(o.family_email) + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '');
+          // Member family: lead with the MLC's name (how adults know each
+          // other — Erin 2026-08-16) unless the buyer line already is it.
+          var mlc = merchFamilyLabelFor(o.family_email);
+          sub = (mlc && mlc !== merchOrderBuyerName(e) ? escapeHtmlWs(mlc) + ' · ' : '')
+            + escapeHtmlWs(o.family_email) + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '');
         } else if (o.contact_email) {
           sub = escapeHtmlWs(o.contact_email) + (o.contact_phone ? ' · ' + escapeHtmlWs(o.contact_phone) : '') + ' · non-member';
         } else {
@@ -15268,7 +15200,9 @@
     } else {
       field('Order', '#' + escapeHtmlWs(String(o.id)));
       field('Buyer', escapeHtmlWs(o.buyer_name || '(no name)'));
-      field('Family', o.family_email ? escapeHtmlWs(o.family_email) : '<span class="ws-wv-context">non-member</span>');
+      field('Family', o.family_email
+        ? (merchFamilyLabelFor(o.family_email) ? escapeHtmlWs(merchFamilyLabelFor(o.family_email)) + ' <span class="ws-wv-context">' + escapeHtmlWs(o.family_email) + '</span>' : escapeHtmlWs(o.family_email))
+        : '<span class="ws-wv-context">non-member</span>');
       field('Contact', [o.contact_email, o.contact_phone].filter(Boolean).map(escapeHtmlWs).join(' · '));
       field('Ordered', escapeHtmlWs(formatReportDate(o.created_at)));
       field('Source', '<span class="merch-tab-badge">' + merchOrderSourceLabel(entry) + '</span>');
@@ -16319,11 +16253,24 @@
     renderMerchQuickSaleBody();
   }
 
-  // Small stock mark for a variant: "out" when on hand is 0. The sale is
-  // still allowed — physical truth wins (the server clamps stock at 0),
-  // and printed-to-order items back-order against a 0 count anyway.
-  function merchQsOutMark(v) {
-    return (v && v.on_hand === 0) ? ' <span class="merch-qs-out">out</span>' : '';
+  // Small stock mark for a variant with nothing on hand. Tapping it is
+  // still allowed, but (Erin, 2026-08-16) an out-of-stock item can't be
+  // handed over — the server saves that line as a paid PRE-ORDER, so
+  // the mark says so up front ("out — pre-order"). Printed-to-order
+  // items already wear the pre-order badge, so theirs stays a plain
+  // "out" (nothing in the tub either way).
+  function merchQsOutMark(v, item) {
+    if (!v || v.on_hand !== 0) return '';
+    if (item && item.preorder_only) return ' <span class="merch-qs-out">out</span>';
+    return ' <span class="merch-qs-out">out — pre-order</span>';
+  }
+
+  // True when a cart line will be saved as a pre-order rather than
+  // handed over: printed-to-order item, or nothing on hand (mirrors the
+  // server split in api/_merch.js splitQuickSaleLines — the server's
+  // count wins at Record time; this is the phone's preview).
+  function merchQsLineIsPreorder(v, item) {
+    return !!((item && item.preorder_only) || (v && v.on_hand === 0));
   }
 
   function renderMerchQuickSaleBody() {
@@ -16338,11 +16285,21 @@
     if (_merchQsLastSale) {
       var ls = _merchQsLastSale;
       h += '<div class="merch-qs-done" role="status" aria-live="polite"><strong>Recorded — ' + escapeHtmlWs(fmtCents(ls.total_cents)) + ' collected.</strong>'
-        + (ls.ids.length ? ' Order' + (ls.ids.length > 1 ? 's ' : ' ') + escapeHtmlWs(ls.ids.map(function (id) { return '#' + id; }).join(' + ')) + '.' : '')
-        + (ls.preorder ? ' T-shirt lines were saved as a pre-order for pickup (Merchandise → Orders → Pre-orders).' : '')
-        + ' Ready for the next customer.</div>';
+        + (ls.ids.length ? ' Order' + (ls.ids.length > 1 ? 's ' : ' ') + escapeHtmlWs(ls.ids.map(function (id) { return '#' + id; }).join(' + ')) + '.' : '');
+      // Name the lines that were held back as a pre-order (printed to
+      // order / out of stock) so the manager can tell the buyer what
+      // they'll pick up later — the server's split, not the phone's guess.
+      if (ls.preorderLines && ls.preorderLines.length) {
+        h += ' Saved as a <strong>pre-order</strong> for pickup' + (ls.preorderOrderId ? ' (#' + escapeHtmlWs(String(ls.preorderOrderId)) + ')' : '') + ': '
+          + escapeHtmlWs(ls.preorderLines.join(' · ')) + '.'
+          + (ls.reasons && ls.reasons.out ? ' Out-of-stock lines wait on the next shipment.' : '')
+          + ' It shows under Merchandise → Orders → Pre-orders and on the family’s Heads-up card.';
+      } else if (ls.preorder) {
+        h += ' Some lines were saved as a pre-order for pickup (Merchandise → Orders → Pre-orders).';
+      }
+      h += ' Ready for the next customer.</div>';
     }
-    h += '<p class="ws-body-hint">Tap an item to add one. Sizes and colors pick on the next step. Items marked <span class="merch-tab-badge">pre-order</span> (T-shirts — printed to order) are paid here but saved as a <strong>pre-order</strong> for pickup.</p>';
+    h += '<p class="ws-body-hint">Tap an item to add one. Sizes and colors pick on the next step. Items marked <span class="merch-tab-badge">pre-order</span> (T-shirts — printed to order) and anything marked <span class="merch-qs-out">out — pre-order</span> are paid here but saved as a <strong>pre-order</strong> for pickup — nothing is handed over.</p>';
     if (cat.error) h += '<p class="ws-empty ws-wv-err">Could not load the catalog: ' + escapeHtml(cat.error) + '</p>';
     if (!cat.error && activeItems.length === 0) h += '<p class="ws-empty">Nothing is on sale yet — activate items and variants in Merchandise → Catalog.</p>';
 
@@ -16360,7 +16317,7 @@
         + ' data-item-id="' + item.id + '"' + (single ? '' : ' aria-expanded="' + (isOpen ? 'true' : 'false') + '"') + '>'
         + '<span class="merch-qs-item-name">' + escapeHtmlWs(item.name)
         + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '')
-        + (single ? merchQsOutMark(vars[0]) : '') + '</span>'
+        + (single ? merchQsOutMark(vars[0], item) : '') + '</span>'
         + '<span class="merch-qs-item-price">' + escapeHtmlWs(priceTxt)
         + (single ? '' : ' · ' + vars.length + ' options')
         + (inCart > 0 ? ' <span class="merch-qs-count">×' + inCart + '</span>' : '') + '</span>'
@@ -16379,17 +16336,22 @@
         + '<span class="merch-qs-cart-cta">' + (_merchQsCartOpen ? 'Hide cart' : 'Checkout') + ' <span aria-hidden="true">' + (_merchQsCartOpen ? '▾' : '▸') + '</span></span>'
         + '</button>';
       if (_merchQsCartOpen) {
-        var cartHasPreorder = false;
+        var cartHasPrinted = false;
+        var cartHasOut = false;
         h += '<div class="merch-qs-cart-body">';
         lines.forEach(function (vid) {
           var v = cat.variants.filter(function (x) { return x.id === parseInt(vid, 10); })[0];
           if (!v) return;
           var item = cat.items.filter(function (i) { return i.id === v.item_id; })[0] || { name: '' };
-          if (item.preorder_only) cartHasPreorder = true;
+          if (item.preorder_only) cartHasPrinted = true;
+          else if (v.on_hand === 0) cartHasOut = true;
           var qty = _merchQsCart[vid];
+          // Every line that will be held back wears the pre-order badge —
+          // printed-to-order AND out-of-stock alike (same treatment).
           h += '<div class="merch-qs-line">'
             + '<span class="merch-qs-line-name">' + escapeHtmlWs(item.name) + (v.label ? ' <span class="ws-wv-context">' + escapeHtmlWs(v.label) + '</span>' : '')
-            + (item.preorder_only ? ' <span class="merch-tab-badge">pre-order</span>' : '') + merchQsOutMark(v)
+            + (merchQsLineIsPreorder(v, item) ? ' <span class="merch-tab-badge">pre-order</span>' : '')
+            + (item.preorder_only ? merchQsOutMark(v, item) : (v.on_hand === 0 ? ' <span class="merch-qs-out">out</span>' : ''))
             + '<span class="merch-qs-line-price">' + escapeHtmlWs(fmtCents(qty * v.price_cents)) + '</span></span>'
             + '<span class="merch-qs-qty">'
             + '<button type="button" class="sc-btn merch-qs-chip merch-qs-minus" data-variant-id="' + v.id + '" aria-label="One fewer">−</button>'
@@ -16399,18 +16361,28 @@
             + '</span></div>';
         });
         h += '<div class="merch-qs-total"><span>Total</span><strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></div>';
-        if (cartHasPreorder) h += '<p class="ws-body-hint merch-qs-note"><em>T-shirts are printed to order — those lines will be saved as a pre-order (paid now, picked up later) and show under Pre-orders on the Orders tab.</em></p>';
+        if (cartHasPrinted || cartHasOut) {
+          var why = [];
+          if (cartHasPrinted) why.push('T-shirts are printed to order');
+          if (cartHasOut) why.push('items marked out have nothing on hand');
+          h += '<p class="ws-body-hint merch-qs-note"><em>' + escapeHtmlWs(why.join(' and ')) + ' — those <span class="merch-tab-badge">pre-order</span> lines will be saved as a pre-order (paid now, picked up later) and show under Pre-orders on the Orders tab.</em></p>';
+        }
 
         h += '<div class="ws-merch-add-grid merch-qs-buyer">';
-        h += '<label class="ws-merch-add-field"><span>Member family</span><input type="text" id="merch-qs-family" list="merch-qs-fams" placeholder="Start typing a family…" autocomplete="off" autocapitalize="off"></label>';
+        h += '<label class="ws-merch-add-field"><span>Member family (main learning coach)</span><input type="text" id="merch-qs-family" list="merch-qs-fams" placeholder="Start typing a name…" autocomplete="off" autocapitalize="off"></label>';
         h += '<label class="ws-merch-add-field"><span>…or guest name</span><input type="text" id="merch-qs-guest" maxlength="200" placeholder="Walk-up guest" autocomplete="off"></label>';
         h += '</div>';
+        // Family picker lists the MLC's "First Last" (Erin, 2026-08-16 —
+        // how adults know each other), sorted by name; the value stays
+        // the family_email so the order keys to the family.
         h += '<datalist id="merch-qs-fams">';
         var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
-        fams.forEach(function (fam) {
-          if (!fam || !fam.email) return;
-          h += '<option value="' + escapeAttr(fam.email) + '">' + escapeHtmlWs((fam.displayName || fam.name || '') + ' family') + '</option>';
-        });
+        fams.map(function (fam) { return fam && fam.email ? { email: fam.email, label: merchFamilyMlcName(fam) } : null; })
+          .filter(Boolean)
+          .sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : a.label.toLowerCase() > b.label.toLowerCase() ? 1 : 0; })
+          .forEach(function (o) {
+            h += '<option value="' + escapeAttr(o.email) + '">' + escapeHtmlWs(o.label) + '</option>';
+          });
         h += '</datalist>';
 
         h += '<div class="merch-qs-methods" role="group" aria-label="How they paid">';
@@ -16463,14 +16435,14 @@
         var v = pickA ? ax.byPair[pickA + '|' + c] : null;
         if (pickA && !v) return; // this size never came in this color
         h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-axis-b" data-axis-b="' + escapeAttr(c) + '"' + (pickA ? '' : ' disabled') + '>'
-          + escapeHtmlWs(c) + (v ? merchQsOutMark(v) : '') + '</button>';
+          + escapeHtmlWs(c) + (v ? merchQsOutMark(v, item) : '') + '</button>';
       });
       h += '</div></div>';
     } else {
       h += '<div class="merch-qs-axis"><div class="merch-qs-chips">';
       vars.forEach(function (v) {
         h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-variant" data-variant-id="' + v.id + '">'
-          + escapeHtmlWs(v.label || item.name) + ' <span class="merch-qs-chip-sub">' + escapeHtmlWs(fmtCents(v.price_cents)) + '</span>' + merchQsOutMark(v) + '</button>';
+          + escapeHtmlWs(v.label || item.name) + ' <span class="merch-qs-chip-sub">' + escapeHtmlWs(fmtCents(v.price_cents)) + '</span>' + merchQsOutMark(v, item) + '</button>';
       });
       h += '</div></div>';
     }
@@ -16565,15 +16537,22 @@
     });
 
     // Record: member family (must match the list) OR guest name, plus a
-    // payment method. Server splits printed-to-order lines into a paid
-    // pre-order and decrements stock (clamped at 0).
+    // payment method. Server splits printed-to-order and out-of-stock
+    // lines into a paid pre-order (truthful allocation) and decrements
+    // stock for the instant lines (clamped at 0).
     var recordBtn = body.querySelector('#merch-qs-record');
     if (recordBtn) recordBtn.addEventListener('click', function () {
       var status = body.querySelector('#merch-qs-status');
       var famInput = ((body.querySelector('#merch-qs-family') || {}).value || '').trim().toLowerCase();
       var guest = ((body.querySelector('#merch-qs-guest') || {}).value || '').trim();
       var fams = (typeof FAMILIES !== 'undefined' && Array.isArray(FAMILIES)) ? FAMILIES : [];
+      // Picking from the list fills the family_email; a name typed by
+      // hand also resolves when it matches exactly ONE family's MLC.
       var famHit = famInput ? fams.filter(function (f) { return f && String(f.email || '').toLowerCase() === famInput; })[0] : null;
+      if (famInput && !famHit) {
+        var byName = fams.filter(function (f) { return f && f.email && merchFamilyMlcName(f).toLowerCase() === famInput; });
+        if (byName.length === 1) famHit = byName[0];
+      }
       if (famInput && !famHit) {
         status.textContent = 'That doesn’t match a member family — pick from the list, or use the guest field.';
         status.className = 'ws-merch-add-status ws-wv-err';
@@ -16601,7 +16580,9 @@
         body: JSON.stringify({
           lines: lines,
           family_email: famHit ? famHit.email : '',
-          buyer_name: famHit ? (((famHit.displayName || famHit.name) || '') + ' family').trim() : guest,
+          // Buyer shows as the MLC's name (fallback "X family") — the
+          // same rule the picker uses.
+          buyer_name: famHit ? (merchFamilyMlcName(famHit) || (((famHit.displayName || famHit.name) || '') + ' family').trim()) : guest,
           payment_method: _merchQsMethod
         })
       }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
@@ -16612,10 +16593,18 @@
           var made = Array.isArray(res.data.orders) ? res.data.orders : (res.data.order ? [res.data.order] : []);
           if (Array.isArray(_merchDeskCache)) made.slice().reverse().forEach(function (o) { _merchDeskCache.unshift(o); });
           var soldTotal = made.length ? made.reduce(function (s, o) { return s + (o.total_cents || 0); }, 0) : merchQsTotalCents();
+          // The pre-order (if any) is the order the server did NOT mark
+          // delivered — its lines are what the buyer picks up later.
+          var preOrder = made.filter(function (o) { return o && o.status !== 'delivered'; })[0] || null;
           _merchQsLastSale = {
             total_cents: soldTotal,
             ids: made.map(function (o) { return o.id; }).filter(function (id) { return id != null; }),
-            preorder: !!res.data.preorder
+            preorder: !!res.data.preorder,
+            preorderOrderId: preOrder ? preOrder.id : null,
+            preorderLines: preOrder ? (preOrder.lines || []).map(function (l) {
+              return l.qty + ' × ' + l.item_name + (l.variant_label ? ' — ' + l.variant_label : '');
+            }) : [],
+            reasons: res.data.preorder_reasons || null
           };
           _merchQsCart = {};
           _merchQsMethod = '';
@@ -16637,6 +16626,521 @@
           status.className = 'ws-merch-add-status ws-wv-err';
         });
     });
+  }
+
+  // ══════════════════════════════════════════════
+  // Merch Finances (#351, Erin 2026-08-16)
+  // ══════════════════════════════════════════════
+  // "Keep track of $$: sales, expenses, cash, etc." — the money side of
+  // the merch desk, one school year at a time (April-1 flip). Summary
+  // pills up top, then ONE ledger grid: every paid Desk order (a Sale,
+  // dated by when it was paid), paid legacy web orders (no price on
+  // file — listed + flagged, never summed), and the manager's own
+  // entries (Expense / Deposit to treasurer / Adjustment) stored in
+  // merch_ledger_entries. Amounts are SIGNED (sale +, expense −, deposit
+  // −, adjustment ±) so the Amount column and the tiles add up the same
+  // way; the server (api/_merch.js financeSummary) and this client use
+  // the same rules — the client re-rolls the tiles when the date range
+  // narrows the rows. Money is integer cents through fmtCents.
+  var _merchFin = null;             // last merch-finances payload { school_year, years, rows, summary, error? }
+  var _merchFinYear = null;         // selected school year (null → server default = active season)
+  var _merchFinTypeFilter = 'all';  // Type funnel: all | sale | expense | deposit | adjustment
+  var _merchFinMethodFilter = 'any';// Method funnel: any | cash | check | paypal | venmo | other
+  var _merchFinFrom = '';           // date range (YYYY-MM-DD, inclusive) — '' = whole season
+  var _merchFinTo = '';
+  var _merchFinEdit = null;         // 'new' | entry id → entry form open above the grid
+  var _merchFinInline = null;       // row key with the two-step Void confirm open
+  var _merchFinSort = null;         // last header sort, kept across re-renders
+
+  var MERCH_FIN_TYPE_LABELS = { sale: 'Sale', expense: 'Expense', deposit: 'Deposit', adjustment: 'Adjustment' };
+  var MERCH_FIN_TYPE_ORDER = ['sale', 'expense', 'deposit', 'adjustment'];
+  var MERCH_FIN_METHOD_LABELS = { cash: 'Cash', check: 'Check', paypal: 'PayPal', venmo: 'Venmo', other: 'Other' };
+  var MERCH_FIN_ENTRY_TYPES = [['expense', 'Expense'], ['deposit', 'Deposit to treasurer'], ['adjustment', 'Adjustment']];
+  var MERCH_FIN_ENTRY_METHODS = ['cash', 'check', 'paypal', 'other'];
+
+  function showMerchFinancesModal() {
+    var outer = renderReportModal({
+      title: 'Merch Finances',
+      subtitle: '',
+      meta: '',
+      icons: [
+        { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the visible ledger as CSV', action: function () { exportMerchFinancesCSV(); } }
+      ],
+      bodyId: 'ws-merch-fin-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    if (!outer) return;
+    _merchFin = null;
+    _merchFinYear = null;
+    _merchFinTypeFilter = 'all';
+    _merchFinMethodFilter = 'any';
+    _merchFinFrom = '';
+    _merchFinTo = '';
+    _merchFinEdit = null;
+    _merchFinInline = null;
+    _merchFinSort = null;
+    loadMerchFinances();
+  }
+
+  function loadMerchFinances() {
+    var q = _merchFinYear ? '&school_year=' + encodeURIComponent(_merchFinYear) : '';
+    fetch('/api/supply-closet?action=merch-finances' + q + notifViewAsSuffix(), { headers: rwAuthHeaders() })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          _merchFin = { error: (res.data && res.data.error) || 'load failed', rows: [], years: [], summary: null };
+        } else {
+          _merchFin = res.data;
+          _merchFin.rows = Array.isArray(_merchFin.rows) ? _merchFin.rows : [];
+          _merchFin.years = Array.isArray(_merchFin.years) ? _merchFin.years : [];
+          _merchFinYear = _merchFin.school_year || _merchFinYear;
+        }
+        renderMerchFinancesBody();
+      })
+      .catch(function (err) {
+        _merchFin = { error: (err && err.message) || 'network error', rows: [], years: [], summary: null };
+        renderMerchFinancesBody();
+      });
+  }
+
+  // Client mirror of api/_merch.js financeSummary — same sign rules, so
+  // the tiles can be re-rolled for a date range without a round trip.
+  //   sales = Σ sale · expenses = Σ|expense| · deposits = Σ|deposit|
+  //   net = Σ signed (deposits excluded) · cash on hand = Σ signed, cash only
+  function merchFinSummary(rows) {
+    var s = { sales_cents: 0, expenses_cents: 0, deposits_cents: 0, adjustments_cents: 0, net_cents: 0, cash_on_hand_cents: 0, by_method: {}, unpriced_count: 0 };
+    (rows || []).forEach(function (r) {
+      if (!r || r.voided) return;
+      if (r.amount_cents == null) { s.unpriced_count++; return; }
+      var amt = parseInt(r.amount_cents, 10);
+      if (!isFinite(amt)) { s.unpriced_count++; return; }
+      var method = String(r.method || '') || 'other';
+      if (r.type === 'sale') { s.sales_cents += amt; s.by_method[method] = (s.by_method[method] || 0) + amt; }
+      else if (r.type === 'expense') s.expenses_cents += Math.abs(amt);
+      else if (r.type === 'deposit') s.deposits_cents += Math.abs(amt);
+      else if (r.type === 'adjustment') s.adjustments_cents += amt;
+      else return;
+      if (r.type !== 'deposit') s.net_cents += amt;
+      if (method === 'cash') s.cash_on_hand_cents += amt;
+    });
+    return s;
+  }
+
+  // Date range applies to tiles AND grid; Type/Method funnels to the grid
+  // only (a Type = Expense view shouldn't zero the Sales tile).
+  function merchFinInRange(r) {
+    var d = String(r.date || '').slice(0, 10);
+    if (_merchFinFrom && d < _merchFinFrom) return false;
+    if (_merchFinTo && d > _merchFinTo) return false;
+    return true;
+  }
+  function merchFinRangedRows() {
+    return ((_merchFin && _merchFin.rows) || []).filter(merchFinInRange);
+  }
+  function merchFinVisibleRows() {
+    return merchFinRangedRows().filter(function (r) {
+      if (_merchFinTypeFilter !== 'all' && r.type !== _merchFinTypeFilter) return false;
+      if (_merchFinMethodFilter !== 'any' && (String(r.method || '') || 'other') !== _merchFinMethodFilter) return false;
+      return true;
+    });
+  }
+
+  function merchFinTypePill(r) {
+    var label = MERCH_FIN_TYPE_LABELS[r.type] || r.type;
+    var cls = r.type === 'sale' ? 'ws-wv-ok' : r.type === 'expense' ? 'ws-wv-declined' : r.type === 'adjustment' ? 'ws-wv-pending' : 'ws-track-count';
+    return '<span class="' + cls + '">' + escapeHtmlWs(label) + '</span>';
+  }
+
+  // Description text: sales lead with the buyer as the manager knows them
+  // — a member family by its MLC's "First Last" (merchFamilyLabelFor),
+  // else the buyer name on the order — then the items; entries use their
+  // own description. Plain text (callers escape).
+  function merchFinRowDescription(r) {
+    if (r.kind !== 'sale' && r.kind !== 'legacy') return r.description || '';
+    var who = (r.family_email && merchFamilyLabelFor(r.family_email)) || r.buyer || '(no name)';
+    return who + (r.items ? ' — ' + r.items : '');
+  }
+
+  // Signed money cell — "−" rows read as money out. Unpriced legacy sales
+  // show a dash with the reason in the tooltip (and a flag in Description).
+  function merchFinAmountHtml(r) {
+    if (r.amount_cents == null) return '<span class="ws-srt-num ws-srt-actions-empty" title="older web order — no price on file">&mdash;</span>';
+    return '<span class="ws-srt-num">' + escapeHtmlWs(fmtCents(r.amount_cents)) + '</span>';
+  }
+
+  var MERCH_FIN_TABLE_COLS = [
+    { key: 'date', label: 'Date', type: 'string',
+      // Sort by day, then by the underlying timestamp so same-day sales
+      // keep their real order.
+      sortValue: function (r) { return String(r.date || '') + '|' + String(r.at || ''); },
+      render: function (r) {
+        var sub = '';
+        if (r.kind === 'sale') sub = '#' + escapeHtmlWs(String(r.order_id)) + ' · ' + escapeHtmlWs(r.source || '');
+        else if (r.kind === 'legacy') sub = 'older web order';
+        return escapeHtmlWs(formatReportDate(r.date)) + (sub ? '<br><span class="ws-wv-context">' + sub + '</span>' : '');
+      }
+    },
+    { key: 'type', label: 'Type', type: 'number',
+      sortValue: function (r) { var i = MERCH_FIN_TYPE_ORDER.indexOf(r.type); return i === -1 ? 9 : i; },
+      render: merchFinTypePill
+    },
+    { key: 'description', label: 'Description', type: 'string',
+      sortValue: function (r) { return merchFinRowDescription(r); },
+      render: function (r) {
+        var h = escapeHtmlWs(merchFinRowDescription(r));
+        if (r.voided) h += ' <span class="ws-wv-declined">Voided</span>';
+        if (!r.priced) h += ' <span class="ws-wv-pending">no price on file</span>';
+        if (r.family_email) h += '<br><span class="ws-wv-context">' + escapeHtmlWs(r.family_email) + '</span>';
+        return h;
+      }
+    },
+    { key: 'method', label: 'Method', type: 'string',
+      sortValue: function (r) { return MERCH_FIN_METHOD_LABELS[r.method] || r.method || ''; },
+      render: function (r) {
+        return r.method ? escapeHtmlWs(MERCH_FIN_METHOD_LABELS[r.method] || r.method) : '<span class="ws-srt-actions-empty">&mdash;</span>';
+      }
+    },
+    { key: 'amount', label: 'Amount', type: 'number',
+      sortValue: function (r) { return r.amount_cents == null ? -Infinity : Number(r.amount_cents); },
+      render: merchFinAmountHtml
+    },
+    { key: 'note', label: 'Note', type: 'string',
+      sortValue: function (r) { return r.note || ''; },
+      render: function (r) { return r.note ? '<span class="ws-wv-context">' + escapeHtmlWs(r.note) + '</span>' : ''; }
+    },
+    // Standard per-row Actions dropdown — manual entries only (sales are
+    // edited where they live, in Merchandise → Orders). Voided entries
+    // are frozen.
+    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
+      render: function (r) {
+        if (r.kind !== 'entry' || r.voided) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        return '<div class="ws-srt-actions">'
+          + '<select class="sc-btn ws-mem-action-sel merch-fin-action-sel" data-row-key="' + escapeHtmlWs(r.key) + '" aria-label="Actions for ' + escapeHtmlWs(r.description || 'this entry') + '">'
+          + '<option value="">Actions&hellip;</option>'
+          + '<option value="edit">Edit</option>'
+          + '<option value="void">Void&hellip;</option>'
+          + '</select></div>';
+      }
+    }
+  ];
+
+  // Two-step Void confirm beneath the row (the table's editRowKey slot).
+  function merchFinInlineRowHtml(r) {
+    return '<span class="merch-desk-payrow">Void <strong>' + escapeHtmlWs(r.description || 'this entry') + '</strong> (' + escapeHtmlWs(fmtCents(r.amount_cents)) + ')? '
+      + '<span class="ws-wv-context">It stays in the ledger, dimmed and out of every total.</span> '
+      + '<button type="button" class="sc-btn sc-btn-del merch-fin-void-confirm" data-entry-id="' + escapeHtmlWs(String(r.id)) + '">Confirm void</button>'
+      + '<button type="button" class="sc-btn merch-fin-inline-close">Keep</button></span>';
+  }
+
+  // Add / Edit entry form (above the grid, the standard add placement).
+  function merchFinEntryFormHtml(entry) {
+    var isNew = !entry;
+    entry = entry || { type: 'expense', entry_date: (typeof rwTodayIndyStr === 'function' ? rwTodayIndyStr() : new Date().toISOString().slice(0, 10)), amount_cents: 0, method: 'cash', description: '', note: '' };
+    var idAttr = isNew ? 'new' : entry.id;
+    var amt = entry.amount_cents ? (entry.amount_cents / 100).toFixed(2) : '';
+    var h = '<div class="merch-inv-edit merch-fin-entry-form" data-entry-id="' + idAttr + '">';
+    h += '<div class="merch-inv-edit-title"><strong>' + (isNew ? 'Add entry' : 'Edit entry') + '</strong> <span class="ws-wv-context">expenses and deposits are entered as positive amounts; an adjustment can be + (found) or − (short / refund)</span></div>';
+    h += '<div class="ws-merch-add-grid">';
+    h += '<label class="ws-merch-add-field"><span>Type</span><select id="merch-fin-type-' + idAttr + '">';
+    MERCH_FIN_ENTRY_TYPES.forEach(function (t) {
+      h += '<option value="' + t[0] + '"' + (entry.type === t[0] ? ' selected' : '') + '>' + escapeHtmlWs(t[1]) + '</option>';
+    });
+    h += '</select></label>';
+    h += '<label class="ws-merch-add-field"><span>Date</span><input type="date" id="merch-fin-date-' + idAttr + '" value="' + escapeAttr(String(entry.entry_date || '').slice(0, 10)) + '"></label>';
+    h += '<label class="ws-merch-add-field"><span>Amount ($)</span><input type="number" step="0.01" id="merch-fin-amount-' + idAttr + '" value="' + escapeAttr(amt) + '" placeholder="0.00"></label>';
+    h += '<label class="ws-merch-add-field"><span>Method</span><select id="merch-fin-method-' + idAttr + '">';
+    MERCH_FIN_ENTRY_METHODS.forEach(function (m) {
+      h += '<option value="' + m + '"' + (entry.method === m ? ' selected' : '') + '>' + escapeHtmlWs(MERCH_FIN_METHOD_LABELS[m] || m) + '</option>';
+    });
+    h += '</select></label>';
+    h += '<label class="ws-merch-add-field"><span>Description</span><input type="text" maxlength="200" id="merch-fin-desc-' + idAttr + '" value="' + escapeAttr(entry.description || '') + '" placeholder="e.g. PrintCo invoice #1042 · Cash to treasurer after Fall Fest"></label>';
+    h += '<label class="ws-merch-add-field ws-merch-add-notes"><span>Note (optional)</span><textarea maxlength="1000" rows="2" id="merch-fin-note-' + idAttr + '">' + escapeHtml(entry.note || '') + '</textarea></label>';
+    h += '</div>';
+    h += '<div class="merch-inv-edit-actions">';
+    h += '<button type="button" class="btn btn-outline-dark btn-sm merch-fin-entry-cancel">Cancel</button>';
+    h += '<button type="button" class="btn btn-primary btn-sm merch-fin-entry-save" data-entry-id="' + idAttr + '">Save</button>';
+    h += '<span class="merch-inv-status" role="status" aria-live="polite"></span>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function merchFinSummaryHtml(s, rangeLabel) {
+    if (!s) return '';
+    var h = '<div class="rd-counts">';
+    if (rangeLabel) h += '<span class="ws-wv-context">' + escapeHtmlWs(rangeLabel) + '</span>';
+    h += '<span class="ws-wv-ok">Sales ' + escapeHtmlWs(fmtCents(s.sales_cents)) + '</span>';
+    ['cash', 'check', 'paypal', 'venmo', 'other'].forEach(function (m) {
+      var v = (s.by_method && s.by_method[m]) || 0;
+      // Cash / Check / PayPal always show (they're the accepted methods);
+      // Venmo / Other only when historical rows carry them.
+      if (v === 0 && (m === 'venmo' || m === 'other')) return;
+      h += '<span class="ws-track-count">' + escapeHtmlWs(MERCH_FIN_METHOD_LABELS[m]) + ' ' + escapeHtmlWs(fmtCents(v)) + '</span>';
+    });
+    h += '<span class="ws-wv-declined">Expenses ' + escapeHtmlWs(fmtCents(s.expenses_cents)) + '</span>';
+    if (s.adjustments_cents) h += '<span class="ws-wv-pending">Adjustments ' + escapeHtmlWs(fmtCents(s.adjustments_cents)) + '</span>';
+    h += '<span class="ws-track-count">Net ' + escapeHtmlWs(fmtCents(s.net_cents)) + '</span>';
+    h += '<span class="ws-track-count">Deposited ' + escapeHtmlWs(fmtCents(s.deposits_cents)) + '</span>';
+    h += '<span class="ws-wv-pending">Cash on hand ' + escapeHtmlWs(fmtCents(s.cash_on_hand_cents)) + '</span>';
+    if (s.unpriced_count > 0) h += '<span class="ws-wv-pending">' + s.unpriced_count + ' older web order' + (s.unpriced_count === 1 ? '' : 's') + ' — no price on file, not counted</span>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderMerchFinancesBody() {
+    var body = document.getElementById('ws-merch-fin-body');
+    if (!body) return;
+    var fin = _merchFin;
+    if (!fin) { body.innerHTML = '<p class="ws-empty">Loading…</p>'; return; }
+    var allRows = fin.rows || [];
+    var ranged = merchFinRangedRows();
+    var visible = merchFinVisibleRows();
+    var byKey = {};
+    allRows.forEach(function (r) { byKey[r.key] = r; });
+
+    var metaEl = personDetailCard && personDetailCard.querySelector('.rd-title-meta');
+    if (metaEl) metaEl.textContent = (fin.school_year ? 'Season ' + fin.school_year + ' · ' : '') + allRows.length + ' entr' + (allRows.length === 1 ? 'y' : 'ies');
+
+    var h = '';
+    if (fin.error) h += '<p class="ws-empty ws-wv-err">Could not load the ledger: ' + escapeHtml(fin.error) + '</p>';
+
+    // Toolbar: + Add entry · School year · date range.
+    var years = (fin.years && fin.years.length) ? fin.years : (fin.school_year ? [fin.school_year] : []);
+    h += '<div class="coop-cal-toolbar">'
+      + '<button type="button" class="btn btn-outline-dark btn-sm" id="merch-fin-add-btn">+ Add entry</button>'
+      + '<label class="coop-cal-yearpick">School year <select id="merch-fin-year">';
+    years.forEach(function (y) {
+      h += '<option value="' + escapeAttr(y) + '"' + (y === fin.school_year ? ' selected' : '') + '>' + escapeHtmlWs(y) + '</option>';
+    });
+    h += '</select></label>'
+      + '<label class="coop-cal-yearpick" style="margin-right:0;">From <input type="date" id="merch-fin-from" value="' + escapeAttr(_merchFinFrom) + '"></label>'
+      + '<label class="coop-cal-yearpick" style="margin-right:0;">To <input type="date" id="merch-fin-to" value="' + escapeAttr(_merchFinTo) + '"></label>'
+      + (_merchFinFrom || _merchFinTo ? '<button type="button" class="sc-btn" id="merch-fin-range-clear">Clear dates</button>' : '')
+      + '</div>';
+
+    if (_merchFinEdit === 'new') h += merchFinEntryFormHtml(null);
+    else if (_merchFinEdit != null) {
+      var editRow = allRows.filter(function (r) { return r.kind === 'entry' && r.id === _merchFinEdit; })[0];
+      if (editRow && editRow.entry) h += merchFinEntryFormHtml(editRow.entry);
+    }
+
+    // Tiles: the season, or the date range when one is set.
+    var rangeLabel = '';
+    if (_merchFinFrom || _merchFinTo) {
+      rangeLabel = (_merchFinFrom ? formatReportDate(_merchFinFrom) : 'start') + ' – ' + (_merchFinTo ? formatReportDate(_merchFinTo) : 'today');
+    }
+    var summary = (_merchFinFrom || _merchFinTo || !fin.summary) ? merchFinSummary(ranged) : fin.summary;
+    h += merchFinSummaryHtml(summary, rangeLabel);
+
+    if (!fin.error && allRows.length === 0) {
+      h += '<p class="ws-empty">Nothing recorded for this season yet — paid sales appear here automatically; add expenses and deposits above.</p>';
+    } else {
+      h += '<div id="merch-fin-table-target"></div>';
+    }
+    body.innerHTML = h;
+    wireMerchFinancesToolbar(body);
+    wireMerchFinancesForm(body);
+
+    var target = body.querySelector('#merch-fin-table-target');
+    if (!target) return;
+
+    function renderTable() {
+      var cols = MERCH_FIN_TABLE_COLS.map(function (c) {
+        var copy = {}; Object.keys(c).forEach(function (k) { copy[k] = c[k]; }); return copy;
+      });
+      var typeCounts = { all: ranged.length };
+      var methodCounts = { any: ranged.length };
+      ranged.forEach(function (r) {
+        typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+        var m = String(r.method || '') || 'other';
+        methodCounts[m] = (methodCounts[m] || 0) + 1;
+      });
+      cols.forEach(function (col) {
+        if (col.key === 'type') col.filter = {
+          options: [{ value: 'all', label: 'All', count: typeCounts.all }].concat(MERCH_FIN_TYPE_ORDER.map(function (t) {
+            return { value: t, label: MERCH_FIN_TYPE_LABELS[t], count: typeCounts[t] || 0 };
+          })),
+          current: _merchFinTypeFilter,
+          onChange: function (v) { _merchFinTypeFilter = v; _merchFinInline = null; renderMerchFinancesBody(); }
+        };
+        if (col.key === 'method') {
+          var mOpts = [{ value: 'any', label: 'Any', count: methodCounts.any }];
+          ['cash', 'check', 'paypal', 'venmo', 'other'].forEach(function (m) {
+            if ((m === 'venmo' || m === 'other') && !methodCounts[m]) return;
+            mOpts.push({ value: m, label: MERCH_FIN_METHOD_LABELS[m], count: methodCounts[m] || 0 });
+          });
+          col.filter = {
+            options: mOpts, current: _merchFinMethodFilter,
+            onChange: function (v) { _merchFinMethodFilter = v; _merchFinInline = null; renderMerchFinancesBody(); }
+          };
+        }
+      });
+      renderSortableTable(target, cols, visible, {
+        initialSort: _merchFinSort || { key: 'date', dir: 'desc' },
+        rowKey: function (r) { return r.key; },
+        editRowKey: _merchFinInline,
+        renderEditRow: merchFinInlineRowHtml,
+        rowClass: function (r) { return r.voided ? 'ws-srt-row-declined' : ''; },
+        onRender: function () {
+          target.querySelectorAll('th.ws-sort').forEach(function (t) {
+            var a = t.querySelector('.ws-sort-arrow');
+            if (a && a.textContent) _merchFinSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
+          });
+          target.querySelectorAll('.merch-fin-action-sel').forEach(function (sel) {
+            sel.addEventListener('change', function () {
+              var act = sel.value;
+              var row = byKey[sel.getAttribute('data-row-key')];
+              sel.value = '';
+              if (!act || !row) return;
+              if (act === 'edit') {
+                _merchFinEdit = row.id;
+                _merchFinInline = null;
+                renderMerchFinancesBody();
+                var form = document.querySelector('.merch-fin-entry-form');
+                if (form && typeof form.scrollIntoView === 'function') form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              } else if (act === 'void') {
+                _merchFinInline = (_merchFinInline === row.key) ? null : row.key;
+                renderTable();
+              }
+            });
+          });
+          target.querySelectorAll('.merch-fin-void-confirm').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              merchFinVoidEntry(parseInt(btn.getAttribute('data-entry-id'), 10), btn);
+            });
+          });
+          target.querySelectorAll('.merch-fin-inline-close').forEach(function (btn) {
+            btn.addEventListener('click', function () { _merchFinInline = null; renderTable(); });
+          });
+        }
+      });
+      if (visible.length === 0) {
+        target.insertAdjacentHTML('beforeend', '<p class="ws-empty">No entries match these filters.</p>');
+      }
+    }
+    renderTable();
+  }
+
+  function wireMerchFinancesToolbar(body) {
+    var addBtn = body.querySelector('#merch-fin-add-btn');
+    if (addBtn) addBtn.addEventListener('click', function () {
+      _merchFinEdit = (_merchFinEdit === 'new') ? null : 'new';
+      renderMerchFinancesBody();
+      var form = document.querySelector('.merch-fin-entry-form');
+      if (form && typeof form.scrollIntoView === 'function') form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    var yearSel = body.querySelector('#merch-fin-year');
+    if (yearSel) yearSel.addEventListener('change', function () {
+      _merchFinYear = yearSel.value;
+      _merchFinFrom = '';
+      _merchFinTo = '';
+      _merchFinEdit = null;
+      _merchFinInline = null;
+      var target = body.querySelector('#merch-fin-table-target');
+      if (target) target.innerHTML = '<p class="ws-empty">Loading…</p>';
+      loadMerchFinances();
+    });
+    var fromEl = body.querySelector('#merch-fin-from');
+    var toEl = body.querySelector('#merch-fin-to');
+    if (fromEl) fromEl.addEventListener('change', function () { _merchFinFrom = fromEl.value || ''; renderMerchFinancesBody(); });
+    if (toEl) toEl.addEventListener('change', function () { _merchFinTo = toEl.value || ''; renderMerchFinancesBody(); });
+    var clearBtn = body.querySelector('#merch-fin-range-clear');
+    if (clearBtn) clearBtn.addEventListener('click', function () { _merchFinFrom = ''; _merchFinTo = ''; renderMerchFinancesBody(); });
+  }
+
+  function wireMerchFinancesForm(body) {
+    var form = body.querySelector('.merch-fin-entry-form');
+    if (!form) return;
+    var idAttr = form.getAttribute('data-entry-id');
+    var cancel = form.querySelector('.merch-fin-entry-cancel');
+    if (cancel) cancel.addEventListener('click', function () { _merchFinEdit = null; renderMerchFinancesBody(); });
+    var save = form.querySelector('.merch-fin-entry-save');
+    if (save) save.addEventListener('click', function () {
+      var status = form.querySelector('.merch-inv-status');
+      function fail(msg) { if (status) { status.textContent = msg; status.className = 'merch-inv-status ws-wv-err'; } save.disabled = false; }
+      var type = (form.querySelector('#merch-fin-type-' + idAttr) || {}).value || '';
+      var date = (form.querySelector('#merch-fin-date-' + idAttr) || {}).value || '';
+      var amountStr = ((form.querySelector('#merch-fin-amount-' + idAttr) || {}).value || '').trim();
+      var method = (form.querySelector('#merch-fin-method-' + idAttr) || {}).value || 'cash';
+      var description = ((form.querySelector('#merch-fin-desc-' + idAttr) || {}).value || '').trim();
+      var note = ((form.querySelector('#merch-fin-note-' + idAttr) || {}).value || '').trim();
+      var amount = parseFloat(amountStr);
+      if (!date) return fail('Pick a date.');
+      if (!isFinite(amount) || amount === 0) return fail('Enter a non-zero amount.');
+      if (type !== 'adjustment' && amount < 0) return fail('Expenses and deposits are entered as positive amounts — the ledger applies the sign.');
+      if (!description) return fail('A short description is required.');
+      var payload = {
+        type: type, entry_date: date, amount_cents: Math.round(amount * 100),
+        method: method, description: description, note: note
+      };
+      if (idAttr !== 'new') payload.id = parseInt(idAttr, 10);
+      save.disabled = true;
+      if (status) { status.textContent = 'Saving…'; status.className = 'merch-inv-status'; }
+      fetch('/api/supply-closet?action=merch-ledger-save' + notifViewAsSuffix(), {
+        method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify(payload)
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) return fail((res.data && res.data.error) || 'Could not save the entry.');
+          _merchFinEdit = null;
+          _merchFinInline = null;
+          // An edit can move the entry into another season (date change)
+          // — reload rather than patch so the list and tiles stay honest.
+          var target = body.querySelector('#merch-fin-table-target');
+          if (target) target.innerHTML = '<p class="ws-empty">Loading…</p>';
+          loadMerchFinances();
+        })
+        .catch(function () { fail('Network error — try again.'); });
+    });
+  }
+
+  function merchFinVoidEntry(id, btn) {
+    if (btn) btn.disabled = true;
+    fetch('/api/supply-closet?action=merch-ledger-void' + notifViewAsSuffix(), {
+      method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ id: id })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not void the entry.'); if (btn) btn.disabled = false; return; }
+        _merchFinInline = null;
+        if (_merchFinEdit === id) _merchFinEdit = null;
+        loadMerchFinances();
+      })
+      .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
+  }
+
+  // CSV of the VISIBLE ledger (season + date range + funnels), amounts in
+  // dollars with the same sign the grid shows; voided rows flagged.
+  function exportMerchFinancesCSV() {
+    var rows = merchFinVisibleRows();
+    var headers = ['Date', 'Type', 'Description', 'Method', 'Amount', 'Note', 'Status', 'Order #', 'Source', 'Buyer', 'Family email'];
+    function esc(v) {
+      var s = String(v == null ? '' : v);
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    var lines = [headers.join(',')];
+    rows.forEach(function (r) {
+      lines.push([
+        esc(r.date || ''),
+        esc(MERCH_FIN_TYPE_LABELS[r.type] || r.type || ''),
+        esc(merchFinRowDescription(r)),
+        esc(r.method ? (MERCH_FIN_METHOD_LABELS[r.method] || r.method) : ''),
+        esc(r.amount_cents == null ? '' : (r.amount_cents / 100).toFixed(2)),
+        esc(r.note || ''),
+        esc(r.voided ? 'voided' : (!r.priced ? 'no price on file' : '')),
+        esc(r.order_id != null ? r.order_id : ''),
+        esc(r.source || ''),
+        esc(r.buyer || ''),
+        esc(r.family_email || '')
+      ].join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'merch-finances-' + ((_merchFin && _merchFin.school_year) || 'season') + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // ══════════════════════════════════════════════
@@ -28213,7 +28717,11 @@
     html += '<option value="">— pick the grove —</option>';
     AGE_GROUP_VALUES.forEach(function (v) {
       if (v === 'all-ages') return; // afternoon-only
-      if (v === 'greenhouse') return; // no morning programming for 0–2 (2026-07-10)
+      // No morning programming for 0–2 (2026-07-10) — greenhouse is never
+      // offered for a NEW morning class. The one exception is EDITING the
+      // standing Greenhouse "assistants only" row (Erin 2026-08-16): keep
+      // its grove selected so the VP can save an assistant-count change.
+      if (v === 'greenhouse' && amGroupCur !== 'greenhouse') return;
       html += '<option value="' + v + '"' + (amGroupCur === v ? ' selected' : '') + '>' + escClsHtml(AGE_GROUP_LABELS[v] || v) + '</option>';
     });
     html += '</select>';
@@ -39366,6 +39874,14 @@
   // parents. The kid-placement columns above KEEP Greenhouse (it's the
   // nursery roster); only scheduling/teaching views drop it.
   var MORNING_PROGRAM_GROUPS = MORNING_GROUP_ORDER.filter(function (g) { return g.name !== 'Greenhouse'; });
+  // Schedule Builder morning lens (Erin 2026-08-16, replaces the Greenhouse
+  // Host card #350): the Greenhouse room takes ADULT assistants through the
+  // normal AM1/AM2 sign-ups on a standing "assistants only" class row (no
+  // lead, no topic — age_groups ['greenhouse'] marks it; seeded per session
+  // by scripts/migrate.sql). The VP edits its assistant count from the
+  // builder tile like any other morning class, so the grid shows every
+  // grove. Kid-side surfaces keep MORNING_PROGRAM_GROUPS.
+  var MORNING_BUILDER_GROUPS = MORNING_GROUP_ORDER;
 
   // Used to hint which class a pending kid would likely land in.
   var morningBuilderState = { schoolYear: '2026-2027', roster: [], plan: { status: 'draft' }, loaded: false, view: 'kids', teaching: [], members: [], viewerCanTeach: false, viewerCanAct: true };
@@ -40556,8 +41072,14 @@
       // and only one class fits a group per session — 🟢 filled / 🔴 open
       // reads as the session's morning coverage at a glance.
       html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
-      MORNING_PROGRAM_GROUPS.forEach(function (g) {
+      // Every grove incl. Greenhouse (its standing assistants-only class
+      // lives here so the VP can edit its assistant count — see
+      // MORNING_BUILDER_GROUPS).
+      MORNING_BUILDER_GROUPS.forEach(function (g) {
         var list = classesInSession.filter(function (c) { return sbAmGroupOf(c) === g.name; });
+        // No kid programming under 3: a Greenhouse slot only appears once its
+        // standing assistants class is placed (never as an "open" ask).
+        if (g.name === 'Greenhouse' && !list.length) return;
         // Hour 1 (or both-hours) above Hour 2 so the tiles read in day order.
         list.sort(function (a, b) {
           return (a.scheduled_hour === 'AM2' ? 1 : 0) - (b.scheduled_hour === 'AM2' ? 1 : 0);

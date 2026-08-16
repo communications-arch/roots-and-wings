@@ -314,6 +314,129 @@ t('needsOrderingQty: fully covered by on_order → 0, never negative', () => {
   assert.strictEqual(needsOrderingQty({ on_hand: 10, on_order: 50, restock_threshold: 4 }, 1), 0);
 });
 
+// ── splitQuickSaleLines (Erin 2026-08-16: out-of-stock → pre-order) ────
+const {
+  splitQuickSaleLines, ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry
+} = require('../api/_merch.js');
+
+t('splitQuickSaleLines: in-stock lines are instant, printed-to-order lines are pre-orders', () => {
+  const r = splitQuickSaleLines(
+    [{ variant_id: 1, qty: 2 }, { variant_id: 2, qty: 1 }],
+    { 1: { price_cents: 1200, on_hand: 5, item_preorder_only: false }, 2: { price_cents: 1000, on_hand: 9, item_preorder_only: true } }
+  );
+  assert.deepStrictEqual(r.instant, [{ variant_id: 1, qty: 2, price_cents_each: 1200 }]);
+  assert.strictEqual(r.preorder.length, 1);
+  assert.strictEqual(r.preorder[0].variant_id, 2);
+  assert.strictEqual(r.preorder[0].preorder_reason, 'printed');
+  assert.deepStrictEqual(r.reasons, { printed: true, out: false });
+});
+t('splitQuickSaleLines: on_hand 0 → pre-order even for a regular item (no clamp-to-zero delivered sale)', () => {
+  const r = splitQuickSaleLines(
+    [{ variant_id: 7, qty: 1 }],
+    { 7: { price_cents: 700, on_hand: 0, item_preorder_only: false } }
+  );
+  assert.strictEqual(r.instant.length, 0);
+  assert.strictEqual(r.preorder.length, 1);
+  assert.strictEqual(r.preorder[0].preorder_reason, 'out');
+  assert.deepStrictEqual(r.reasons, { printed: false, out: true });
+});
+t('splitQuickSaleLines: mixed cart → both buckets, both reasons', () => {
+  const r = splitQuickSaleLines(
+    [{ variant_id: 1, qty: 1 }, { variant_id: 2, qty: 1 }, { variant_id: 3, qty: 3 }],
+    {
+      1: { price_cents: 1200, on_hand: 1, item_preorder_only: false },
+      2: { price_cents: 1000, on_hand: 0, item_preorder_only: true },
+      3: { price_cents: 3000, on_hand: 0, item_preorder_only: false }
+    }
+  );
+  assert.deepStrictEqual(r.instant.map(l => l.variant_id), [1]);
+  assert.deepStrictEqual(r.preorder.map(l => l.variant_id), [2, 3]);
+  assert.deepStrictEqual(r.reasons, { printed: true, out: true });
+  assert.strictEqual(orderTotalCents(r.preorder), 1000 + 9000);
+});
+t('splitQuickSaleLines: unknown variant is skipped; negative/NaN on_hand reads as out', () => {
+  const r = splitQuickSaleLines(
+    [{ variant_id: 1, qty: 1 }, { variant_id: 99, qty: 1 }],
+    { 1: { price_cents: 500, on_hand: 'x', item_preorder_only: false } }
+  );
+  assert.strictEqual(r.instant.length + r.preorder.length, 1);
+  assert.strictEqual(r.preorder[0].variant_id, 1);
+});
+
+// ── Merch Finances math ────────────────────────────────────────────────
+t('ledgerSignedCents: sale +, expense −, deposit −, adjustment keeps its sign, null stays null', () => {
+  assert.strictEqual(ledgerSignedCents('sale', 1250), 1250);
+  assert.strictEqual(ledgerSignedCents('expense', 1850), -1850);
+  assert.strictEqual(ledgerSignedCents('expense', -1850), -1850);
+  assert.strictEqual(ledgerSignedCents('deposit', 5000), -5000);
+  assert.strictEqual(ledgerSignedCents('adjustment', -200), -200);
+  assert.strictEqual(ledgerSignedCents('adjustment', 500), 500);
+  assert.strictEqual(ledgerSignedCents('sale', null), null);
+  assert.strictEqual(ledgerSignedCents('sale', 'abc'), null);
+});
+t('financeSummary: sales by method, expenses, deposits, net, cash on hand', () => {
+  const rows = [
+    { type: 'sale', method: 'cash', amount_cents: 3000 },
+    { type: 'sale', method: 'cash', amount_cents: 1700 },
+    { type: 'sale', method: 'paypal', amount_cents: 3400 },
+    { type: 'sale', method: 'check', amount_cents: 1000 },
+    { type: 'expense', method: 'cash', amount_cents: -1850 },
+    { type: 'expense', method: 'paypal', amount_cents: -1000 },
+    { type: 'deposit', method: 'cash', amount_cents: -2000 },
+    { type: 'adjustment', method: 'cash', amount_cents: -200 },
+    { type: 'adjustment', method: 'other', amount_cents: 300 }
+  ];
+  const s = financeSummary(rows);
+  assert.strictEqual(s.sales_cents, 9100);
+  assert.deepStrictEqual(s.by_method, { cash: 4700, paypal: 3400, check: 1000 });
+  assert.strictEqual(s.expenses_cents, 2850);
+  assert.strictEqual(s.deposits_cents, 2000);
+  assert.strictEqual(s.adjustments_cents, 100);
+  // net = sales − expenses + adjustments (deposits are a transfer, not a loss)
+  assert.strictEqual(s.net_cents, 9100 - 2850 + 100);
+  // cash on hand = cash sales − cash expenses − cash deposits ± cash adjustments
+  assert.strictEqual(s.cash_on_hand_cents, 4700 - 1850 - 2000 - 200);
+  assert.strictEqual(s.rows_counted, 9);
+});
+t('financeSummary: voided entries and unpriced legacy sales are skipped (unpriced counted)', () => {
+  const s = financeSummary([
+    { type: 'sale', method: 'cash', amount_cents: 1000 },
+    { type: 'sale', method: '', amount_cents: null },
+    { type: 'expense', method: 'cash', amount_cents: -500, voided: true },
+    { type: 'deposit', method: 'cash', amount_cents: -1000, voided: true }
+  ]);
+  assert.strictEqual(s.sales_cents, 1000);
+  assert.strictEqual(s.expenses_cents, 0);
+  assert.strictEqual(s.deposits_cents, 0);
+  assert.strictEqual(s.cash_on_hand_cents, 1000);
+  assert.strictEqual(s.unpriced_count, 1);
+});
+t('financeSummary: empty ledger → all zeros', () => {
+  const s = financeSummary([]);
+  assert.strictEqual(s.sales_cents + s.expenses_cents + s.deposits_cents + s.net_cents + s.cash_on_hand_cents, 0);
+});
+t('schoolYearBounds: April-1 flip window; malformed labels → null', () => {
+  assert.deepStrictEqual(schoolYearBounds('2026-2027'), { start: '2026-04-01', end: '2027-04-01' });
+  assert.strictEqual(schoolYearBounds('2026-2028'), null);
+  assert.strictEqual(schoolYearBounds('26/27'), null);
+  assert.strictEqual(schoolYearBounds(''), null);
+});
+t('normalizeLedgerEntry: expense/deposit must be positive; adjustment may be negative; zero rejected', () => {
+  const ok = normalizeLedgerEntry({ type: 'expense', entry_date: '2026-08-16', amount_cents: 1850, method: 'cash', description: 'Table cloth', note: '' });
+  assert.deepStrictEqual(ok, { type: 'expense', entryDate: '2026-08-16', amountCents: 1850, method: 'cash', description: 'Table cloth', note: '' });
+  assert.ok(normalizeLedgerEntry({ type: 'expense', entry_date: '2026-08-16', amount_cents: -5, method: 'cash', description: 'x' }).error);
+  assert.ok(normalizeLedgerEntry({ type: 'deposit', entry_date: '2026-08-16', amount_cents: 0, method: 'cash', description: 'x' }).error);
+  const adj = normalizeLedgerEntry({ type: 'adjustment', entry_date: '2026-08-16', amount_cents: -200, method: 'cash', description: 'box short' });
+  assert.strictEqual(adj.amountCents, -200);
+  assert.ok(normalizeLedgerEntry({ type: 'sale', entry_date: '2026-08-16', amount_cents: 100, method: 'cash', description: 'x' }).error, 'sales are not manual entries');
+  assert.ok(normalizeLedgerEntry({ type: 'expense', entry_date: '2026-02-30', amount_cents: 100, method: 'cash', description: 'x' }).error, 'invalid date');
+  assert.ok(normalizeLedgerEntry({ type: 'expense', entry_date: '2026-08-16', amount_cents: 100, method: 'venmo', description: 'x' }).error, 'venmo retired');
+  assert.ok(normalizeLedgerEntry({ type: 'expense', entry_date: '2026-08-16', amount_cents: 100, method: 'cash', description: '  ' }).error, 'description required');
+  const stripped = normalizeLedgerEntry({ type: 'expense', entry_date: '2026-08-16', amount_cents: 100, method: 'other', description: '<b>bold</b> invoice', note: '<script>x</script>ok' });
+  assert.strictEqual(stripped.description, 'bold invoice');
+  assert.strictEqual(stripped.note, 'xok');
+});
+
 (async () => {
   for (const run of pending) await run();
   console.log('\nmerch-allocation: ' + passed + ' passed, ' + failed + ' failed');

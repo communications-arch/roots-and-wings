@@ -20,7 +20,8 @@ const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isS
 const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
 const { resolveFamily } = require('./_family');
-const { allocateOrderLines, allocateBackorderedLines, orderTotalCents, needsOrderingQty, normalizeLines } = require('./_merch');
+const { allocateOrderLines, allocateBackorderedLines, orderTotalCents, needsOrderingQty, normalizeLines,
+        splitQuickSaleLines, ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry } = require('./_merch');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1933,17 +1934,18 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (loaded.error) return res.status(409).json({ error: loaded.error });
 
     // Printed-to-order items (merch_items.preorder_only — tees) can't be
-    // handed over at the table (Erin, 2026-08-15): those lines become a
-    // separate PRE-ORDER (paid now, allocated/backordered against stock,
-    // NOT delivered) so the queue still shows a pickup owed. Everything
-    // else is the instant, delivered + paid sale it always was. A mixed
-    // cart yields two orders — both returned.
-    const instant = [];
-    const preorder = [];
-    lines.forEach(l => {
-      const v = loaded.variants[l.variant_id];
-      (v.item_preorder_only ? preorder : instant).push({ variant_id: l.variant_id, qty: l.qty, price_cents_each: v.price_cents });
-    });
+    // handed over at the table (Erin, 2026-08-15), and neither can an
+    // item the shelf shows NONE of (on_hand 0 — Erin, 2026-08-16: the
+    // buyer is ordering it, not walking off with it): those lines become
+    // a separate PRE-ORDER (paid now, allocated/backordered against
+    // stock, NOT delivered) so the queue still shows a pickup owed and
+    // the To Do / Heads-up counts pick it up. Everything else is the
+    // instant, delivered + paid sale it always was. A mixed cart yields
+    // two orders — both returned. The split reads the SERVER's on_hand
+    // (api/_merch.js splitQuickSaleLines), not the count the phone saw.
+    const split = splitQuickSaleLines(lines, loaded.variants);
+    const instant = split.instant;
+    const preorder = split.preorder;
     const orders = [];
 
     if (instant.length) {
@@ -1975,7 +1977,10 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       // Pre-orders are cancellable, so THEY use the truthful path
       // (api/_merch.js allocateOrderLines): allocated only for units the
       // shelf really gave up, backordered for the rest.
-      const preNote = (note ? note + ' — ' : '') + 'Pre-order from the merch table (printed to order).';
+      const why = [];
+      if (split.reasons.printed) why.push('printed to order');
+      if (split.reasons.out) why.push('out of stock at the table');
+      const preNote = (note ? note + ' — ' : '') + 'Pre-order from the merch table (' + why.join('; ') + ').';
       const ins = await sql`
         INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
         VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${orderTotalCents(preorder)}, ${preNote.slice(0, 500)}, ${email}, 'event')
@@ -1989,8 +1994,211 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const linesByOrder = await merchLinesByOrder(sql, orders.map(o => o.id));
     const withLines = orders.map(o => Object.assign({}, o, { lines: linesByOrder[o.id] || [] }));
     // `order` = the first (instant sale when present) for older clients;
-    // `orders` = everything this cart produced.
-    return res.status(201).json({ order: withLines[0], orders: withLines, preorder: preorder.length > 0 });
+    // `orders` = everything this cart produced; `preorder_reasons` says
+    // WHY lines were held back so the confirmation can name it.
+    return res.status(201).json({
+      order: withLines[0], orders: withLines,
+      preorder: preorder.length > 0,
+      preorder_reasons: split.reasons
+    });
+  }
+
+  // ── Merch Finances (Erin, 2026-08-16: "keep track of $$: sales,
+  // expenses, cash, etc.") ──
+  // One school year at a time (April-1 flip, activeSchoolYear — the same
+  // helper the billing card uses; NOT MAX-of-rows). The ledger merges:
+  //   - every PAID Desk order (status not cancelled, unscreened) — a
+  //     'sale' dated by paid_at (Indianapolis day), amount = total_cents;
+  //   - every paid legacy web-form order (merch_orders — no price on
+  //     file) — a 'sale' with amount null: listed + flagged, never summed;
+  //   - the manager's manual entries (merch_ledger_entries: expense /
+  //     deposit / adjustment) — voided rows come back with voided = true
+  //     so the grid can dim them; the summary skips them.
+  // Amounts are SIGNED here (api/_merch.js ledgerSignedCents) so the
+  // client's Amount column and the summary math read the same numbers.
+  if (action === 'merch-finances') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const activeLabel = activeSchoolYear();
+    const wanted = String(req.query.school_year || activeLabel);
+    const bounds = schoolYearBounds(wanted);
+    if (!bounds) return res.status(400).json({ error: 'school_year must look like 2026-2027.' });
+
+    const deskRows = await sql`
+      SELECT o.id, o.buyer_name, o.family_email, o.payment_method, o.paid_at, o.total_cents,
+             o.source, o.status, o.note, o.created_by_email,
+             to_char(o.paid_at AT TIME ZONE 'America/Indianapolis', 'YYYY-MM-DD') AS paid_day
+      FROM merch_desk_orders o
+      WHERE o.paid_at IS NOT NULL
+        AND o.status <> 'cancelled'
+        AND o.screen_reason = ''
+        AND (o.paid_at AT TIME ZONE 'America/Indianapolis')::date >= ${bounds.start}::date
+        AND (o.paid_at AT TIME ZONE 'America/Indianapolis')::date <  ${bounds.end}::date
+      ORDER BY o.paid_at DESC
+    `;
+    const linesByOrder = await merchLinesByOrder(sql, deskRows.map(o => o.id));
+    const rows = deskRows.map(o => {
+      const lines = linesByOrder[o.id] || [];
+      const items = lines.map(l => l.qty + ' × ' + l.item_name + (l.variant_label ? ' — ' + l.variant_label : '')).join(' · ');
+      const src = o.source || (o.created_by_email === 'public-form' ? 'web' : (o.family_email ? 'portal' : 'event'));
+      return {
+        key: 's' + o.id, kind: 'sale', id: o.id, order_id: o.id,
+        date: o.paid_day, at: o.paid_at,
+        type: 'sale',
+        description: (o.buyer_name || '(no name)') + (items ? ' — ' + items : ''),
+        items,
+        buyer: o.buyer_name || '', family_email: o.family_email || '',
+        source: src === 'event' ? 'Event' : 'Web',
+        method: o.payment_method || '',
+        amount_cents: ledgerSignedCents('sale', o.total_cents),
+        note: o.note || '',
+        voided: false, priced: true,
+        order_status: o.status
+      };
+    });
+
+    // Legacy homepage-form orders (2026-05 ledger): paid_at is the money
+    // event; there is no price column, so the amount is unknown.
+    try {
+      const legacy = await sql`
+        SELECT id, customer_name, item, size, color, qty, paid_at, notes,
+               to_char(paid_at AT TIME ZONE 'America/Indianapolis', 'YYYY-MM-DD') AS paid_day
+        FROM merch_orders
+        WHERE paid_at IS NOT NULL AND screen_reason = ''
+          AND (paid_at AT TIME ZONE 'America/Indianapolis')::date >= ${bounds.start}::date
+          AND (paid_at AT TIME ZONE 'America/Indianapolis')::date <  ${bounds.end}::date
+        ORDER BY paid_at DESC
+      `;
+      legacy.forEach(o => {
+        const itemTxt = (o.qty || 1) + ' × ' + (o.item || '') + (o.size ? ' — ' + o.size : '') + (o.color ? (o.size ? ' · ' : ' — ') + o.color : '');
+        rows.push({
+          key: 'w' + o.id, kind: 'legacy', id: o.id, order_id: null,
+          date: o.paid_day, at: o.paid_at,
+          type: 'sale',
+          description: (o.customer_name || '(no name)') + ' — ' + itemTxt,
+          items: itemTxt,
+          buyer: o.customer_name || '', family_email: '',
+          source: 'Web',
+          method: '',
+          amount_cents: null,
+          note: o.notes || '',
+          voided: false, priced: false
+        });
+      });
+    } catch (legacyErr) {
+      console.error('merch-finances legacy read (non-fatal):', legacyErr);
+    }
+
+    const entries = await sql`
+      SELECT id, school_year, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, type, amount_cents, method,
+             description, note, created_by_email, created_at, voided_at
+      FROM merch_ledger_entries
+      WHERE school_year = ${wanted}
+      ORDER BY entry_date DESC, id DESC
+    `;
+    entries.forEach(e => {
+      rows.push({
+        key: 'e' + e.id, kind: 'entry', id: e.id, order_id: null,
+        date: e.entry_date, at: e.created_at,
+        type: e.type,
+        description: e.description || '',
+        buyer: '', family_email: '', source: '',
+        method: e.method || '',
+        amount_cents: ledgerSignedCents(e.type, e.amount_cents),
+        note: e.note || '',
+        voided: !!e.voided_at, priced: true,
+        entry: {
+          id: e.id, entry_date: e.entry_date, type: e.type, amount_cents: e.amount_cents,
+          method: e.method, description: e.description || '', note: e.note || '',
+          created_by_email: e.created_by_email, created_at: e.created_at, voided_at: e.voided_at
+        }
+      });
+    });
+
+    // Season picker: every school year that has money in it, oldest
+    // first, plus the active one.
+    const years = [];
+    try {
+      const firstSale = await sql`SELECT MIN(paid_at) AS m FROM merch_desk_orders WHERE paid_at IS NOT NULL`;
+      const firstEntry = await sql`SELECT MIN(entry_date) AS m FROM merch_ledger_entries`;
+      const firsts = [firstSale[0] && firstSale[0].m, firstEntry[0] && firstEntry[0].m]
+        .filter(Boolean).map(d => new Date(d)).filter(d => !isNaN(d.getTime()));
+      const activeFall = parseInt(activeLabel.slice(0, 4), 10);
+      let fall = activeFall;
+      if (firsts.length) {
+        const earliest = firsts.sort((a, b) => a - b)[0];
+        const ef = parseInt(activeSchoolYear(earliest).slice(0, 4), 10);
+        if (Number.isFinite(ef) && ef < fall) fall = ef;
+      }
+      for (; fall <= activeFall; fall++) years.push(fall + '-' + (fall + 1));
+    } catch (yErr) {
+      console.error('merch-finances years (non-fatal):', yErr);
+    }
+    if (years.indexOf(wanted) === -1) years.push(wanted);
+    if (years.indexOf(activeLabel) === -1) years.push(activeLabel);
+
+    return res.status(200).json({
+      school_year: wanted,
+      active_school_year: activeLabel,
+      bounds,
+      years,
+      rows,
+      summary: financeSummary(rows)
+    });
+  }
+
+  // Manual ledger entry — create or edit (id present). Voided rows are
+  // frozen: edit is refused so the audit trail stays honest (void, then
+  // add a corrected entry).
+  if (action === 'merch-ledger-save') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const f = normalizeLedgerEntry(body);
+    if (f.error) return res.status(400).json({ error: f.error });
+    // Season stamp from the entry's own date (April-1 flip) — an entry
+    // dated in March lands in the season that ends that spring.
+    const schoolYear = activeSchoolYear(new Date(f.entryDate + 'T12:00:00'));
+    const id = body.id != null ? parseInt(body.id, 10) : null;
+    let row;
+    if (Number.isInteger(id) && id > 0) {
+      const cur = await sql`SELECT id, voided_at FROM merch_ledger_entries WHERE id = ${id}`;
+      if (!cur.length) return res.status(404).json({ error: 'Entry not found.' });
+      if (cur[0].voided_at) return res.status(409).json({ error: 'That entry was voided — add a new one instead.' });
+      const upd = await sql`
+        UPDATE merch_ledger_entries
+        SET school_year = ${schoolYear}, entry_date = ${f.entryDate}::date, type = ${f.type},
+            amount_cents = ${f.amountCents}, method = ${f.method},
+            description = ${f.description}, note = ${f.note}
+        WHERE id = ${id}
+        RETURNING id, school_year, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, type, amount_cents, method,
+                  description, note, created_by_email, created_at, voided_at
+      `;
+      row = upd[0];
+    } else {
+      const ins = await sql`
+        INSERT INTO merch_ledger_entries (school_year, entry_date, type, amount_cents, method, description, note, created_by_email)
+        VALUES (${schoolYear}, ${f.entryDate}::date, ${f.type}, ${f.amountCents}, ${f.method}, ${f.description}, ${f.note}, ${email})
+        RETURNING id, school_year, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, type, amount_cents, method,
+                  description, note, created_by_email, created_at, voided_at
+      `;
+      row = ins[0];
+    }
+    return res.status(200).json({ entry: row });
+  }
+
+  // Void (never delete) a manual entry: stamps voided_at; the report dims
+  // the row and drops it from every total. Idempotent.
+  if (action === 'merch-ledger-void') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const id = parseInt(body.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+    const upd = await sql`
+      UPDATE merch_ledger_entries
+      SET voided_at = COALESCE(voided_at, NOW())
+      WHERE id = ${id}
+      RETURNING id, school_year, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, type, amount_cents, method,
+                description, note, created_by_email, created_at, voided_at
+    `;
+    if (!upd.length) return res.status(404).json({ error: 'Entry not found.' });
+    return res.status(200).json({ entry: upd[0] });
   }
 
   return res.status(400).json({ error: 'Unknown merch action' });

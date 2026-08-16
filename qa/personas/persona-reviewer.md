@@ -31,6 +31,13 @@ repeated on phone — reviewers get pinged at the park too.
    says so.)
 5. **Phone spot-check.** Repeat journey 1 on the phone viewport. Expected:
    the grid is scrollable/usable, not clipped under the fixed header.
+6. **Greenhouse assistants (standing class).** Class Builder → Morning lens
+   → the Greenhouse lane holds "Greenhouse (0–2 room) — assistants" (no
+   lead) in every session; open the tile, change "How many assistants" to
+   2, save. Expected: the save sticks (no "No morning programming…" error);
+   Everyone's sign-ups shows the Greenhouse block in Hour 1 AND Hour 2 with
+   "needs 2 more"; Ways to Help has NO "Greenhouse Host" section (retired
+   2026-08-16); kids' schedules/pickers still show nothing for Greenhouse.
 
 ## Exploratory charter (~10 min)
 

@@ -2,8 +2,10 @@
 
 **Run me when:** the Merchandise report (Orders / Catalog), the standalone
 Quick Sale modal (its own Reports & Forms button — one tile per item, then
-size + color), the homepage Order Merch form, the Heads-up card, My Merch Orders,
-merch To Dos, spam screening of public forms, or payment methods change.
+size + color), the Merch Finances report (sales / expenses / deposits /
+cash on hand), the homepage Order Merch form, the Heads-up card, My Merch
+Orders, merch To Dos, spam screening of public forms, or payment methods
+change.
 
 **Who:** The volunteer who sells shirts at a folding table and fills web
 orders from a tub in the closet — one hand free and a phone at events, the
@@ -36,14 +38,20 @@ no one holds it, run as erinb@ (Communications Director passes
    badge on its chip and in Quick Sale.
 4. **Quick Sale on the phone.** Reports & Forms → Quick Sale (its own modal).
    Tap Mug twice, tap T-Shirt → pick a size → pick a color (one tee line),
-   open the pinned cart bar, pick a member family from the list, tap Cash,
-   Record sale. Expected: the running total
+   open the pinned cart bar, pick a member family from the list (it lists
+   each family by its main learning coach's First Last — typing that name
+   also works), tap Cash, Record sale. Expected: the running total
    is right; the note says tees are saved as a pre-order; "Recorded — $X
    collected" names the split; Orders now holds TWO Event orders — mugs
    Fulfilled + Paid · Cash, the tee under Pre-orders, Paid · Cash — and the
    mugs' On hand dropped by 2 in Catalog & Stock. The family's Heads-up
    card (View-As them) shows the tee waiting for pickup. Repeat with a
-   walk-up guest name.
+   walk-up guest name. Then tap an item whose tile reads **out — pre-order**
+   (On hand 0 in Catalog): the cart line wears the pre-order badge, the
+   note explains why, and after Record the confirmation names that line as
+   a pre-order (#id) — it lands under Pre-orders (Paid · Cash, line
+   backordered), the "Outstanding Pre-Orders" To Do count goes up by one,
+   and On hand stays 0 (nothing was handed over).
 5. **The two To Dos.** To Do card: "Merch orders waiting on you" equals the
    Pre-orders count and opens Orders; "Reorder low or back-ordered merch"
    equals the Need funnel's row count and opens Catalog & Stock with the
@@ -53,6 +61,21 @@ no one holds it, run as erinb@ (Communications Director passes
    Pre-order / Unpaid with the total; back in the portal as that family, the
    Heads-up card lists it with a button into My Merch Orders; the confirmation
    email says pay at pickup — cash, check, or PayPal.
+7. **Merch Finances — where did the money go?** Reports & Forms → Merch
+   Finances (desktop). Expected: the summary strip reads Sales (with Cash /
+   Check / PayPal beside it), Expenses, Net, Deposited, Cash on hand; every
+   Quick Sale and every "Mark paid" from journeys 1 and 4 is a Sale row
+   dated the day it was paid, with the order # and Web/Event under the date;
+   the older web order shows "no price on file" and is NOT in Sales.
+   "+ Add entry" → Expense $18.50 cash "Table cloth" → Sales unchanged,
+   Expenses +18.50, Net and Cash on hand −18.50. Add a Deposit to treasurer
+   of the cash total → Cash on hand reads $0.00, Net unchanged. Add an
+   Adjustment of −2.00 cash "box short" → Net and Cash on hand −2.00. Row
+   Actions… → Edit changes the amount and the tiles follow; Void… asks
+   twice, then the row dims and every tile drops it. Type / Method funnels
+   scope the grid only; From/To dates re-roll the tiles too; the School
+   year picker swaps seasons; Export CSV downloads what's on screen with
+   signed amounts.
 
 ## Exploratory charter (~10 min)
 
