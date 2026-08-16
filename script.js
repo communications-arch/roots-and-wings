@@ -6677,10 +6677,12 @@
             // the ✕ on the Hour 2 row lets them swap it afterwards. A
             // mirror that can't apply (hour-specific class, caps, support
             // slots full) just leaves Hour 2 open — no error shown.
-            if (pickedBlock === 'AM1' && !(d.mine && d.mine.AM2)) {
-              var mirrorBody = isAssist
-                ? { class_submission_id: body.class_submission_id, block: 'AM2' }
-                : { school_year: body.school_year, session: d.session, block: 'AM2', role: v };
+            // SUPPORT ROLES ONLY: an assist is a ONE-hour commitment (#339,
+            // Lyndsey; Erin 2026-08-16 re: Greenhouse — "pick one AM hour,
+            // it signs me up for both"), so assisting a whole-morning class
+            // from the Hour 1 dropdown books just that hour.
+            if (!isAssist && pickedBlock === 'AM1' && !(d.mine && d.mine.AM2)) {
+              var mirrorBody = { school_year: body.school_year, session: d.session, block: 'AM2', role: v };
               fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(mirrorBody) })
                 .catch(function () { /* best-effort */ })
                 .then(function () { reload(); });
