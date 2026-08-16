@@ -5913,6 +5913,69 @@ async function handleMerchOrdersList(req, res) {
   }
 }
 
+// Merch catalog photo (#351, Erin 2026-08-15): the Catalog & Stock item
+// form uploads an image here instead of pasting a URL. Same shape as the
+// bug-report screenshot ({ type, data: base64 }) → Vercel Blob under
+// merch/ (this file already holds the Blob client). Manager-gated
+// (merch_manage capability / board / super user). NO sweep — product
+// photos live as long as the item does; the client stores the returned
+// URL in merch_items.image_url via merch-item-save. Unlike bugshots,
+// where a failed upload is swallowed, a failure here is reported so the
+// manager knows the photo didn't take.
+const MERCH_IMAGE_TYPES = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' };
+const MERCH_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
+const MERCH_BLOB_HOST_RE = /^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\//i;
+async function handleMerchImageUpload(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const allowed = isSuperUser(auth.email)
+    || (await canManageMerch(auth.email))
+    || (await isBoardMember(auth.email));
+  if (!allowed) {
+    return res.status(403).json({
+      error: 'Only the Merchandise Manager (or a board member) can upload merch photos.',
+      expected: await getRoleHolderEmail('Merchandise Manager')
+    });
+  }
+  const out = await uploadMerchImage(body.image);
+  if (out.error) return res.status(out.status || 400).json({ error: out.error });
+  return res.status(200).json({ success: true, image_url: out.url });
+}
+// Validate + store one merch photo. Returns { url } or { status, error }.
+// Kept auth-free so the dev-DB harness can exercise the Blob path.
+async function uploadMerchImage(img) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return { status: 500, error: 'Photo uploads not configured. Ask communications@ to add Vercel Blob.' };
+  }
+  if (!img || typeof img !== 'object') return { status: 400, error: 'No image sent.' };
+  const ext = MERCH_IMAGE_TYPES[String(img.type || '')];
+  if (!ext) return { status: 400, error: 'Photo must be a JPEG, PNG, or WebP.' };
+  const b64 = String(img.data || '');
+  if (!b64 || b64.length > 4.2 * 1024 * 1024) return { status: 413, error: 'Image too large (max 3 MB after resizing).' };
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (e) { return { status: 400, error: 'Invalid image data.' }; }
+  if (!buf.length) return { status: 400, error: 'Invalid image data.' };
+  if (buf.length > MERCH_IMAGE_MAX_BYTES) return { status: 413, error: 'Image too large (max 3 MB after resizing).' };
+  try {
+    const name = 'merch/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
+    const blob = await put(name, buf, {
+      access: 'public',
+      contentType: img.type,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: false
+    });
+    const url = String((blob && blob.url) || '');
+    if (!MERCH_BLOB_HOST_RE.test(url)) {
+      console.error('Merch image upload: unexpected blob URL', url);
+      return { status: 500, error: 'Upload returned an unexpected address — not saved.' };
+    }
+    return { url };
+  } catch (err) {
+    console.error('Merch image upload error:', err);
+    return { status: 500, error: 'Could not upload the photo.' };
+  }
+}
+
 // Full-field edit of an existing order (Erin, 2026-07-19) — same
 // validation as the manual add. Item arrives as a catalog KEY; stored as
 // the catalog label like every other write path.
@@ -11461,6 +11524,7 @@ module.exports = async function handler(req, res) {
   if (kind === 'merch-order-rescue') return handleMerchOrderRescue(body, req, res);
     if (kind === 'merch-inventory-add') return handleMerchInventoryAdd(body, req, res);
     if (kind === 'merch-inventory-update') return handleMerchInventoryUpdate(body, req, res);
+    if (kind === 'merch-image-upload') return handleMerchImageUpload(body, req, res);
     if (kind === 'tour-update') return handleTourUpdate(body, req, res);
     if (kind === 'bug-report') return handleBugReport(body, req, res);
     if (kind === 'bug-verify') return handleBugVerify(body, req, res);
@@ -11533,6 +11597,8 @@ module.exports = async function handler(req, res) {
 // Exposed for backfill scripts (scripts/backfill-registration-profiles.js)
 // so the one-time catch-up uses the same merge logic as live registrations.
 module.exports.upsertProfileFromRegistration = upsertProfileFromRegistration;
+// Dev-DB harness hook (inert at runtime — Vercel only calls the handler).
+module.exports._merchImageTest = { uploadMerchImage, MERCH_BLOB_HOST_RE };
 module.exports.deriveFamilyName = deriveFamilyName;
 module.exports.deriveFamilyEmail = deriveFamilyEmail;
 module.exports.resolveFamilyByContactEmail = resolveFamilyByContactEmail;

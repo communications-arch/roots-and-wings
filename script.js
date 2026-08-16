@@ -15056,7 +15056,7 @@
   // Every order from both ledgers as { key, web, o, state }, newest first
   // (both created_at values are full ISO timestamps). `key` is unique
   // across the two ledgers ('d' + Desk id / 'w' + legacy id) — the table's
-  // rowKey and the in-place-row / Actions-select handle.
+  // rowKey and the in-place-row / Status-select / Payment-toggle handle.
   function merchOrderEntries() {
     var entries = (_merchDeskCache || []).map(function (o) { return { key: 'd' + o.id, web: false, o: o }; })
       .concat((_merchOrdersCache || []).map(function (o) { return { key: 'w' + o.id, web: true, o: o }; }));
@@ -15114,60 +15114,87 @@
     }).join(' · ');
   }
 
-  // Status cell: fulfillment pill (screened rows show the Screened pill
-  // here, reason underneath); Paid cell: Paid · method / Unpaid.
+  // Sort order for the Status column (state buckets).
   var MERCH_STATE_ORDER = { open: 0, delivered: 1, cancelled: 2, screened: 3 };
-  function merchOrderStatusCellHtml(entry) {
+
+  // Status cell (far right, Erin 2026-08-15): the fulfillment state as an
+  // EDITABLE select — the old Actions column is gone; its verbs live here
+  // and on the Payment toggle. Options are the transitions that apply to
+  // THIS row, with the current state pre-selected. Each option =
+  // [value, label, selected, disabled]; the value is the verb
+  // merchDeskRowAction() dispatches on.
+  //   Desk, live (pending_payment/paid/ready): Pre-order · Ready for
+  //     pickup · Fulfilled · Cancelled… (two-step confirm)
+  //   Desk, screened: Possible spam (current, disabled) · Not spam ·
+  //     Confirm spam…
+  //   Desk, fulfilled / cancelled: read-only pill — terminal (payment may
+  //     still be recorded on a fulfilled row via the Payment column).
+  //   Legacy web-form rows: Pre-order · Fulfilled (delivered toggle) ·
+  //     Delete… ; screened legacy: Possible spam · Not spam · Confirm
+  //     spam (delete)…
+  function merchOrderStatusOptions(entry) {
     var o = entry.o;
     if (entry.state === 'screened') {
-      return '<span class="ws-wv-declined">Screened</span>'
-        + (o.screen_reason ? '<br><span class="ws-wv-context">' + escapeHtmlWs(o.screen_reason) + '</span>' : '');
+      return [
+        ['screened', 'Possible spam', true, true],
+        ['unscreen', 'Not spam'],
+        entry.web ? ['delete', 'Confirm spam (delete)\u2026'] : ['cancel', 'Confirm spam\u2026']
+      ];
     }
-    if (entry.web) return o.delivered_at ? '<span class="ws-wv-ok">Fulfilled</span>' : '<span class="ws-wv-pending">Pre-order</span>';
-    return merchDeskStatusPill(o);
+    if (entry.web) {
+      return [
+        ['preorder', 'Pre-order', !o.delivered_at],
+        ['delivered', 'Fulfilled', !!o.delivered_at],
+        ['delete', 'Delete\u2026']
+      ];
+    }
+    return [
+      ['preorder', 'Pre-order', o.status !== 'ready'],
+      ['ready', 'Ready for pickup', o.status === 'ready'],
+      ['delivered', 'Fulfilled'],
+      ['cancel', 'Cancelled\u2026']
+    ];
   }
-  function merchOrderPaidCellHtml(entry) {
+  function merchOrderStatusCellHtml(entry) {
     var o = entry.o;
-    if (entry.web) return o.paid_at ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">Unpaid</span>';
-    return merchDeskPaidPill(o);
+    if (!entry.web && (entry.state === 'delivered' || entry.state === 'cancelled')) return merchDeskStatusPill(o);
+    var opts = merchOrderStatusOptions(entry).map(function (p) {
+      return '<option value="' + p[0] + '"' + (p[2] ? ' selected' : '') + (p[3] ? ' disabled' : '') + '>' + p[1] + '</option>';
+    }).join('');
+    var h = '<div class="ws-srt-actions">'
+      + '<select class="sc-btn ws-mem-action-sel merch-status-sel" data-order-key="' + escapeHtmlWs(entry.key) + '" aria-label="Status for ' + escapeHtmlWs(merchOrderBuyerName(entry)) + '">'
+      + opts + '</select></div>';
+    if (entry.state === 'screened' && o.screen_reason) h += '<br><span class="ws-wv-context">' + escapeHtmlWs(o.screen_reason) + '</span>';
+    return h;
   }
 
-  // Per-row Actions dropdown — only the applicable options appear.
-  // Values are the action verbs merchDeskRowAction() dispatches on.
-  function merchOrderActionOptions(entry) {
+  // Payment cell: a toggle. Unpaid live rows get a "Mark paid" chip (Desk
+  // → the inline Cash/Check/PayPal chooser; legacy → flips paid_at); paid
+  // rows show "Paid · Cash" with a small Undo (Desk → set:'unpaid';
+  // legacy → flips paid_at back). Cancelled Desk rows show —; screened
+  // rows show the pill only (no payment on a possible-spam order).
+  function merchOrderPaidCellHtml(entry) {
     var o = entry.o;
-    var opts = [];
-    if (entry.web) {
-      if (entry.state === 'screened') {
-        opts.push(['unscreen', 'Not spam']);
-        opts.push(['delete', 'Confirm spam (delete)…']);
-      } else {
-        opts.push(o.paid_at ? ['unpaid', 'Mark unpaid'] : ['paid', 'Mark paid']);
-        opts.push(entry.state === 'delivered' ? ['undelivered', 'Undo fulfilled'] : ['delivered', 'Mark fulfilled']);
-        opts.push(['delete', 'Delete…']);
-      }
-    } else if (entry.state === 'screened') {
-      opts.push(['unscreen', 'Not spam']);
-      opts.push(['cancel', 'Confirm spam…']);
-    } else if (entry.state !== 'cancelled') {
-      // Payment can be recorded on any live Desk order — open OR already
-      // fulfilled (handed over before the money was noted; the server
-      // keeps the status and just stamps paid_at). Review 2026-08-15 #3.
-      if (!o.paid_at) opts.push(['pay', 'Mark paid…']);
-      if (entry.state === 'open') {
-        if (o.status !== 'ready') opts.push(['ready', 'Mark ready']);
-        opts.push(['delivered', 'Mark fulfilled']);
-        opts.push(['cancel', 'Cancel order…']);
-      }
+    if (!entry.web && o.status === 'cancelled') return '<span class="ws-srt-actions-empty">&mdash;</span>';
+    var pill = entry.web
+      ? (o.paid_at ? '<span class="ws-wv-ok">Paid</span>' : '<span class="ws-wv-pending">Unpaid</span>')
+      : merchDeskPaidPill(o);
+    if (entry.state === 'screened') return pill;
+    var key = escapeHtmlWs(entry.key);
+    var who = escapeHtmlWs(merchOrderBuyerName(entry));
+    if (o.paid_at) {
+      return '<div class="ws-srt-actions">' + pill
+        + '<button type="button" class="sc-btn merch-pay-undo" data-order-key="' + key + '" aria-label="Undo payment for ' + who + '">Undo</button></div>';
     }
-    opts.push(['items', 'View items']);
-    return opts;
+    return '<div class="ws-srt-actions">' + pill
+      + '<button type="button" class="sc-btn merch-pay-mark" data-order-key="' + key + '" aria-label="Mark ' + who + ' paid">Mark paid</button></div>';
   }
 
   // Column definitions for the Orders grid (renderSortableTable). Rows
   // are the merged entries from merchOrderEntries(). Funnels (Status /
-  // Source / Paid) are attached per render in renderMerchDeskBody so
-  // their counts + current values stay live.
+  // Source / Payment) are attached per render in renderMerchDeskBody so
+  // their counts + current values stay live. Order (Erin 2026-08-15):
+  // Date · Buyer · Items · Total · Source · Payment · Status.
   var MERCH_ORDERS_TABLE_COLS = [
     { key: 'created_at', label: 'Date', type: 'date',
       sortValue: function (e) { return e.o.created_at; },
@@ -15213,32 +15240,17 @@
       sortValue: function (e) { return merchOrderSourceLabel(e); },
       render: function (e) { return '<span class="merch-tab-badge">' + merchOrderSourceLabel(e) + '</span>'; }
     },
-    { key: 'status', label: 'Status', type: 'number',
-      sortValue: function (e) { return MERCH_STATE_ORDER[e.state] != null ? MERCH_STATE_ORDER[e.state] : 9; },
-      render: merchOrderStatusCellHtml
-    },
-    { key: 'paid', label: 'Paid', type: 'number',
+    { key: 'paid', label: 'Payment', type: 'number',
       sortValue: function (e) { return e.o.paid_at ? 1 : 0; },
       render: merchOrderPaidCellHtml
     },
-    // Trailing Actions dropdown — the Membership Report's collapsed-select
-    // idiom (.ws-mem-action-sel). Picking an option acts at once, opens
-    // the in-place row (Mark paid → method chooser; Cancel / Delete →
-    // two-step confirm), or toggles the row's items expansion.
-    { key: '_actions', label: 'Actions', type: 'string', sortable: false,
-      render: function (e) {
-        var opts = merchOrderActionOptions(e).map(function (p) {
-          return '<option value="' + p[0] + '">' + p[1] + '</option>';
-        }).join('');
-        return '<div class="ws-srt-actions">'
-          + '<select class="sc-btn ws-mem-action-sel" data-order-key="' + escapeHtmlWs(e.key) + '" aria-label="Actions for ' + escapeHtmlWs(merchOrderBuyerName(e)) + '">'
-          + '<option value="">Actions&hellip;</option>' + opts
-          + '</select></div>';
-      }
+    { key: 'status', label: 'Status', type: 'number', sortable: true,
+      sortValue: function (e) { return MERCH_STATE_ORDER[e.state] != null ? MERCH_STATE_ORDER[e.state] : 9; },
+      render: merchOrderStatusCellHtml
     }
   ];
 
-  // Row expansion (click the row or pick View items): every line with its
+  // Row expansion (click the row / its caret): every line with its
   // allocated/backordered status, contact details, note, screen reason.
   function merchOrderDetailHtml(entry) {
     var o = entry.o;
@@ -15318,18 +15330,24 @@
     return h;
   }
 
-  // Dispatch one Actions-dropdown pick. `sel` is the <select> (disabled
-  // while a request is in flight — the row re-renders on success).
-  function merchDeskRowAction(entry, act, sel, renderTable) {
+  // Dispatch one Status-select pick or Payment-toggle click. `ctl` is the
+  // control that fired (disabled while a request is in flight — the row
+  // re-renders on success; on failure it's re-enabled and the select
+  // snaps back to the current state on the next repaint).
+  // Transition map:
+  //   preorder  → Desk: set 'unready' (ready → paid/pending per paid_at)
+  //             → legacy: delivered_at cleared
+  //   ready     → Desk: set 'ready'
+  //   delivered → Desk: set 'delivered' · legacy: delivered_at stamped
+  //   cancel    → Desk: inline two-step confirm → set 'cancel'
+  //   delete    → legacy: inline two-step confirm → merch-order-delete
+  //   unscreen  → Desk: merch-order-unscreen · legacy: merch-order-rescue
+  //   pay       → Desk: inline Cash/Check/PayPal chooser → set 'paid'
+  //   paid      → legacy: paid_at stamped
+  //   unpaid    → Desk: set 'unpaid' · legacy: paid_at cleared
+  function merchDeskRowAction(entry, act, ctl, renderTable) {
     var o = entry.o;
     var id = o.id;
-    if (act === 'items') {
-      // The helper's own row-click toggles the expansion surgically
-      // (no re-render, scroll untouched) — reuse it.
-      var tr = sel.closest('tr');
-      if (tr) tr.click();
-      return;
-    }
     if (act === 'pay' || act === 'cancel' || act === 'delete') {
       _merchDeskInline = (_merchDeskInline && _merchDeskInline.key === entry.key && _merchDeskInline.kind === act)
         ? null : { key: entry.key, kind: act };
@@ -15337,15 +15355,17 @@
       return;
     }
     if (entry.web) {
-      if (act === 'unscreen') return merchLegacyRescue(id, sel);
-      if (act === 'paid') return merchLegacyToggle(id, 'paid', true, sel);
-      if (act === 'unpaid') return merchLegacyToggle(id, 'paid', false, sel);
-      if (act === 'delivered') return merchLegacyToggle(id, 'delivered', true, sel);
-      if (act === 'undelivered') return merchLegacyToggle(id, 'delivered', false, sel);
+      if (act === 'unscreen') return merchLegacyRescue(id, ctl);
+      if (act === 'paid') return merchLegacyToggle(id, 'paid', true, ctl);
+      if (act === 'unpaid') return merchLegacyToggle(id, 'paid', false, ctl);
+      if (act === 'delivered') return merchLegacyToggle(id, 'delivered', true, ctl);
+      if (act === 'preorder') return merchLegacyToggle(id, 'delivered', false, ctl);
       return;
     }
-    if (act === 'unscreen') return merchDeskUnscreen(id, sel);
-    if (act === 'ready' || act === 'delivered') return merchDeskAct(id, act, null, sel);
+    if (act === 'unscreen') return merchDeskUnscreen(id, ctl);
+    if (act === 'preorder') return merchDeskAct(id, 'unready', null, ctl);
+    if (act === 'unpaid') return merchDeskAct(id, 'unpaid', null, ctl);
+    if (act === 'ready' || act === 'delivered') return merchDeskAct(id, act, null, ctl);
   }
 
   function renderMerchDeskBody() {
@@ -15368,15 +15388,16 @@
 
     // Spam (Erin 2026-08-15): a small pill ABOVE the table ("N possible
     // spam*"), the explanation BELOW it (footnote), plus the site-wide
-    // screened-counts line. Screened rows carry a Screened pill under
-    // Status = All; "Confirm spam" cancels them out of the queue.
+    // screened-counts line. Screened rows show "Possible spam" in the
+    // Status select under Status = All; "Confirm spam" cancels them out
+    // of the queue.
     if (counts.screened > 0) {
       h += '<div class="rd-counts" style="margin:0 0 6px;"><span class="ws-wv-pending">' + counts.screened + ' possible spam*</span></div>';
     }
     if (!_merchDeskCache && !_merchOrdersCache) h += '<p class="ws-empty">Loading…</p>';
     else h += '<div id="merch-desk-table-target"></div>';
     if (counts.screened > 0) {
-      h += '<p class="ws-body-hint" style="margin:10px 0 0;">*Set Status to <strong>All</strong> to see possible spam. “Not spam” puts an order back in the queue (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent. “Confirm spam” hides it from the queue.</p>';
+      h += '<p class="ws-body-hint" style="margin:10px 0 0;">*Set the Status filter to <strong>All</strong> to see possible spam. On the row’s Status dropdown, “Not spam” puts an order back in the queue (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent. “Confirm spam” hides it from the queue.</p>';
     }
     h += '<div id="ws-merch-spam-stats"></div>';
     body.innerHTML = h;
@@ -15441,13 +15462,33 @@
             var a = t.querySelector('.ws-sort-arrow');
             if (a && a.textContent) _merchDeskSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
           });
-          target.querySelectorAll('.ws-mem-action-sel').forEach(function (sel) {
+          // Status select: read the pick, snap the control back to the
+          // row's real state (the row repaints from the cache once the
+          // server answers), then run the transition.
+          target.querySelectorAll('.merch-status-sel').forEach(function (sel) {
             sel.addEventListener('change', function () {
               var act = sel.value;
-              sel.value = '';
               var entry = byKey[sel.getAttribute('data-order-key')];
               if (!act || !entry) return;
+              var cur = merchOrderStatusOptions(entry).filter(function (p) { return p[2]; })[0];
+              sel.value = cur ? cur[0] : '';
               merchDeskRowAction(entry, act, sel, renderTable);
+            });
+          });
+          // Payment toggle: Mark paid (Desk → method chooser row; legacy →
+          // stamp) / Undo (Desk → set 'unpaid'; legacy → clear).
+          target.querySelectorAll('.merch-pay-mark').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var entry = byKey[btn.getAttribute('data-order-key')];
+              if (!entry) return;
+              merchDeskRowAction(entry, entry.web ? 'paid' : 'pay', btn, renderTable);
+            });
+          });
+          target.querySelectorAll('.merch-pay-undo').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var entry = byKey[btn.getAttribute('data-order-key')];
+              if (!entry) return;
+              merchDeskRowAction(entry, 'unpaid', btn, renderTable);
             });
           });
           target.querySelectorAll('.merch-desk-pay-method').forEach(function (btn) {
@@ -15513,7 +15554,8 @@
         _merchDeskInline = null;
         merchAfterOrderChange();
         // Stock moved (ready/delivered consume backorders; cancel restocks).
-        if (set !== 'paid') merchReloadCatalog();
+        // Payment flips and ready→pre-order touch no stock.
+        if (set !== 'paid' && set !== 'unpaid' && set !== 'unready') merchReloadCatalog();
       })
       .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
   }
@@ -15575,6 +15617,59 @@
     return escapeHtmlWs(name || url);
   }
 
+  // Photo helpers for the item form (#351 upload, Erin 2026-08-15).
+  // A URL is renderable as an <img> only when it's a repo path
+  // (img/merch/… from the seed) or https — never javascript:/data:.
+  var MERCH_BLOB_URL_RE = /^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\//i;
+  function merchImageUrlRenderable(url) {
+    return /^(https:\/\/|img\/)[^\s"'<>]+$/i.test(String(url || ''));
+  }
+  function merchItemThumbHtml(url, idAttr) {
+    if (merchImageUrlRenderable(url)) {
+      return '<img class="merch-cat-img-thumb" id="merch-cat-imgthumb-' + idAttr + '" src="' + escapeAttr(url) + '" alt="" loading="lazy">';
+    }
+    return '<span class="merch-cat-img-thumb merch-cat-img-none" id="merch-cat-imgthumb-' + idAttr + '" aria-hidden="true"></span>';
+  }
+  // Read a picked image file to { type, data } (base64, no data: prefix)
+  // for /api/tour kind=merch-image-upload — mirrors the profile-photo
+  // reader: downscale to <=1600px on the long edge and re-encode as JPEG
+  // so a 5 MB phone photo lands well under the 3 MB server cap; small
+  // files go up untouched (PNG transparency survives).
+  function merchReadImageForUpload(file, cb) {
+    if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) return cb(new Error('Photo must be a JPEG, PNG, or WebP.'));
+    if (file.size > 5 * 1024 * 1024) return cb(new Error('That photo is over 5 MB — pick a smaller one.'));
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var src = String(e.target.result || '');
+      function pack(dataUrl) {
+        var comma = dataUrl.indexOf(',');
+        var mime = (dataUrl.slice(5, comma).split(';')[0] || file.type).toLowerCase();
+        return { type: mime === 'image/jpg' ? 'image/jpeg' : mime, data: dataUrl.slice(comma + 1) };
+      }
+      var img = new Image();
+      img.onload = function () {
+        var max = 1600;
+        var w = img.width, h = img.height;
+        // Small enough as-is (dimensions AND bytes) — send the original.
+        if (w <= max && h <= max && src.length <= 2.5 * 1024 * 1024) { cb(null, pack(src)); return; }
+        if (w > max || h > max) {
+          if (w > h) { h = Math.round(h * max / w); w = max; }
+          else { w = Math.round(w * max / h); h = max; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        var out = canvas.toDataURL('image/jpeg', 0.88);
+        if (out.length > 3.5 * 1024 * 1024) out = canvas.toDataURL('image/jpeg', 0.7);
+        cb(null, pack(out));
+      };
+      img.onerror = function () { cb(new Error('Could not read that image.')); };
+      img.src = src;
+    };
+    reader.onerror = function () { cb(new Error('Could not read that file.')); };
+    reader.readAsDataURL(file);
+  }
+
   function merchItemFormHtml(item) {
     var isNew = !item;
     item = item || { name: '', description: '', image_url: '', active: true, sort_order: 0, vendor_name: '', vendor_url: '', notes: '', preorder_only: false };
@@ -15584,14 +15679,34 @@
     h += '<div class="merch-inv-edit-grid">';
     h += '<label><span>Name</span><input type="text" maxlength="200" id="merch-cat-name-' + idAttr + '" value="' + escapeAttr(item.name) + '"></label>';
     h += '<label><span>Sort</span><input type="number" min="0" max="10000" id="merch-cat-sort-' + idAttr + '" value="' + (item.sort_order || 0) + '"></label>';
-    h += '<label><span>Image URL (optional)</span><input type="text" maxlength="500" id="merch-cat-img-' + idAttr + '" value="' + escapeAttr(item.image_url || '') + '" placeholder="https://…"></label>';
     h += '<label><span>Vendor name</span><input type="text" maxlength="200" id="merch-cat-vname-' + idAttr + '" value="' + escapeAttr(item.vendor_name || '') + '" placeholder="e.g. PrintCo"></label>';
     h += '<label><span>Vendor website</span><input type="url" maxlength="500" id="merch-cat-vurl-' + idAttr + '" value="' + escapeAttr(item.vendor_url || '') + '" placeholder="https://printco.com"></label>';
+    if (isNew) {
+      // First variant inline (Erin 2026-08-15): price / stock / reorder
+      // point so a new item is sellable in one save — no second step.
+      // A blank label = single-variant item; more variants come later
+      // from the row's Actions → Add a variant.
+      h += '<label><span>Price ($)</span><input type="number" min="0" step="0.01" id="merch-cat-fvprice-new" placeholder="12.00"></label>';
+      h += '<label><span>On hand (starting count)</span><input type="number" min="0" max="100000" id="merch-cat-fvonhand-new" value="0"></label>';
+      h += '<label><span>Reorder at (restock below)</span><input type="number" min="0" max="100000" id="merch-cat-fvrestock-new" value="0"></label>';
+      h += '<label><span>Variant label (optional)</span><input type="text" maxlength="200" id="merch-cat-fvlabel-new" placeholder="blank = one size / style"></label>';
+    }
     h += '<label class="merch-inv-edit-notes"><span>Description</span><textarea maxlength="1000" rows="2" id="merch-cat-desc-' + idAttr + '">' + escapeHtml(item.description || '') + '</textarea></label>';
     h += '<label class="merch-inv-edit-notes"><span>Notes (manager only)</span><textarea maxlength="1000" rows="2" id="merch-cat-notes-' + idAttr + '" placeholder="e.g. reorder minimum 24, lead time 3 weeks">' + escapeHtml(item.notes || '') + '</textarea></label>';
+    // Photo: upload to Blob (fills the read-only URL below); the current
+    // image shows as a thumbnail. Repo paths (img/merch/…) from the seed
+    // and https URLs both render; anything else shows as text only.
+    h += '<label class="merch-inv-edit-notes"><span>Photo URL (filled by Upload)</span><input type="text" maxlength="500" readonly id="merch-cat-img-' + idAttr + '" value="' + escapeAttr(item.image_url || '') + '" placeholder="no photo yet"></label>';
+    h += '<div class="merch-inv-edit-notes merch-cat-img-row">' + merchItemThumbHtml(item.image_url, idAttr)
+      + '<input type="file" id="merch-cat-imgfile-' + idAttr + '" accept="image/png,image/jpeg,image/webp" hidden>'
+      + '<button type="button" class="sc-btn merch-cat-img-upload" data-item-id="' + idAttr + '">' + (item.image_url ? 'Upload new photo' : 'Upload photo') + '</button>'
+      + '<span class="ws-wv-context">JPEG, PNG, or WebP · up to 5 MB</span>'
+      + '<span class="merch-cat-img-status ws-wv-context" id="merch-cat-imgstatus-' + idAttr + '" role="status" aria-live="polite"></span>'
+      + '</div>';
     h += '</div>';
     h += '<div class="ws-merch-add-toggles">'
       + '<label><input type="checkbox" id="merch-cat-active-' + idAttr + '"' + (item.active !== false ? ' checked' : '') + '> Show in the member shop</label>'
+      + (isNew ? '<label><input type="checkbox" id="merch-cat-fvactive-new" checked> First variant available to order</label>' : '')
       + '<label><input type="checkbox" id="merch-cat-preorder-' + idAttr + '"' + (item.preorder_only ? ' checked' : '') + '> Pre-order only — printed to order (Quick Sale records these as pre-orders)</label>'
       + '</div>';
     h += '<div class="merch-inv-edit-actions">';
@@ -15696,8 +15811,8 @@
         return '<button type="button" class="sc-btn merch-cat-active-toggle' + (r.v.active ? ' sc-save' : '') + '" data-variant-id="' + r.id + '" aria-pressed="' + (r.v.active ? 'true' : 'false') + '" title="' + (r.v.active ? 'Active — tap to hide from the shop' : 'Hidden — tap to make it available') + '">' + (r.v.active ? 'Active' : 'Hidden') + '</button>';
       }
     },
-    // Standard per-row Actions dropdown (same idiom as the Orders tab and
-    // the Membership report) — Erin 2026-08-15: no loose buttons, and
+    // Standard per-row Actions dropdown (same idiom as the Membership
+    // report) — Erin 2026-08-15: no loose buttons, and
     // item-level editing lives HERE on the row, not in a toolbar above.
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (r) {
@@ -15979,6 +16094,29 @@
         if (!isNew) payload.id = parseInt(idAttr, 10);
         var statusEl = btn.parentNode.querySelector('.merch-inv-status');
         if (!payload.name) { if (statusEl) { statusEl.textContent = 'A name is required.'; statusEl.className = 'merch-inv-status ws-wv-err'; } return; }
+        // Guard the URL sink: only what the uploader returned (Blob host)
+        // or the seed's repo paths / https may be stored.
+        if (payload.image_url && !merchImageUrlRenderable(payload.image_url)) {
+          if (statusEl) { statusEl.textContent = 'That photo address isn’t usable — upload the photo instead.'; statusEl.className = 'merch-inv-status ws-wv-err'; }
+          return;
+        }
+        if (isNew) {
+          // First variant rides the same call (server: merch-item-save
+          // first_variant) — validated here so a blank price doesn't
+          // create a $0 item nobody can buy.
+          var fvPrice = parseFloat(g('fvprice'));
+          if (!Number.isFinite(fvPrice) || fvPrice < 0) {
+            if (statusEl) { statusEl.textContent = 'Enter a price for the first variant (0.00 is allowed, but the item won’t show in the shop until it has a price).'; statusEl.className = 'merch-inv-status ws-wv-err'; }
+            return;
+          }
+          payload.first_variant = {
+            label: g('fvlabel').trim(),
+            price_cents: Math.round(fvPrice * 100),
+            on_hand: parseInt(g('fvonhand'), 10) || 0,
+            restock_threshold: parseInt(g('fvrestock'), 10) || 0,
+            active: !!(document.getElementById('merch-cat-fvactive-new') || {}).checked
+          };
+        }
         btn.disabled = true;
         if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'merch-inv-status'; }
         fetch('/api/supply-closet?action=merch-item-save' + notifViewAsSuffix(), {
@@ -15993,6 +16131,60 @@
             btn.disabled = false;
             if (statusEl) { statusEl.textContent = 'Could not save: ' + ((err && err.message) || 'unknown'); statusEl.className = 'merch-inv-status ws-wv-err'; }
           });
+      });
+    });
+
+    // Photo upload (item form): pick → downscale → POST /api/tour
+    // kind=merch-image-upload → the returned Blob URL fills the read-only
+    // URL field + thumbnail; Save stores it. The URL is checked against
+    // the Blob host before it touches the field.
+    scope.querySelectorAll('.merch-cat-img-upload').forEach(function (btn) {
+      var idAttr = btn.getAttribute('data-item-id');
+      var fileInp = document.getElementById('merch-cat-imgfile-' + idAttr);
+      var statusEl = document.getElementById('merch-cat-imgstatus-' + idAttr);
+      if (!fileInp) return;
+      function say(msg, isErr) {
+        if (!statusEl) return;
+        statusEl.textContent = msg;
+        statusEl.className = 'merch-cat-img-status ' + (isErr ? 'ws-wv-err' : 'ws-wv-context');
+      }
+      btn.addEventListener('click', function () { fileInp.value = ''; fileInp.click(); });
+      fileInp.addEventListener('change', function () {
+        var f = fileInp.files && fileInp.files[0];
+        if (!f) return;
+        btn.disabled = true;
+        say('Preparing photo…', false);
+        merchReadImageForUpload(f, function (err, image) {
+          if (err) { btn.disabled = false; say(err.message, true); return; }
+          say('Uploading…', false);
+          fetch('/api/tour', {
+            method: 'POST', headers: rwAuthHeaders(true),
+            body: JSON.stringify({ kind: 'merch-image-upload', image: image })
+          }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+              if (!res.ok) throw new Error((res.data && res.data.error) || 'upload failed');
+              var url = String((res.data && res.data.image_url) || '');
+              if (!MERCH_BLOB_URL_RE.test(url)) throw new Error('unexpected photo address');
+              var urlInp = document.getElementById('merch-cat-img-' + idAttr);
+              if (urlInp) urlInp.value = url;
+              var thumb = document.getElementById('merch-cat-imgthumb-' + idAttr);
+              if (thumb) {
+                var img = document.createElement('img');
+                img.className = 'merch-cat-img-thumb';
+                img.id = 'merch-cat-imgthumb-' + idAttr;
+                img.alt = '';
+                img.src = url;
+                thumb.parentNode.replaceChild(img, thumb);
+              }
+              btn.textContent = 'Upload new photo';
+              btn.disabled = false;
+              say('Photo uploaded — Save to keep it.', false);
+            })
+            .catch(function (e) {
+              btn.disabled = false;
+              say('Could not upload: ' + ((e && e.message) || 'unknown'), true);
+            });
+        });
       });
     });
 

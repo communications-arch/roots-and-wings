@@ -1318,6 +1318,27 @@ function merchCleanText(v, max) {
   return String(v == null ? '' : v).replace(/<[^>]*>/g, '').trim().slice(0, max);
 }
 
+// Variant fields as merch-variant-save validates them (label / price /
+// on_order / restock_threshold / active / sort_order / notes) — shared
+// with the first_variant riding a new item in merch-item-save. Returns
+// { error } or the cleaned fields. on_hand is deliberately not here.
+function merchVariantFields(src) {
+  const label = String(src.label || '').trim().slice(0, 200);
+  const priceCents = parseInt(src.price_cents, 10);
+  if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > 10000000) {
+    return { error: 'Price must be between $0 and $100,000.' };
+  }
+  return {
+    label,
+    priceCents,
+    onOrder: Math.max(0, Math.min(parseInt(src.on_order, 10) || 0, 100000)),
+    restockThreshold: Math.max(0, Math.min(parseInt(src.restock_threshold, 10) || 0, 100000)),
+    active: src.active === undefined ? true : !!src.active,
+    sortOrder: Math.max(0, Math.min(parseInt(src.sort_order, 10) || 0, 10000)),
+    notes: merchCleanText(src.notes, 1000)
+  };
+}
+
 async function canManageMerchDesk(email) {
   if (!email) return false;
   if (isSuperUser(email)) return true;
@@ -1559,7 +1580,8 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     });
   }
 
-  // Order lifecycle: paid (with method) / ready / delivered / cancel.
+  // Order lifecycle: paid (with method) / unpaid / ready / unready /
+  // delivered / cancel.
   if (action === 'merch-order-status') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const id = parseInt(body.id, 10);
@@ -1585,6 +1607,34 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
             status = CASE WHEN status = 'pending_payment' THEN 'paid' ELSE status END
         WHERE id = ${id}
         RETURNING *
+      `;
+      return res.status(200).json({ order: upd[0] });
+    }
+
+    // Undo a payment (Orders grid Payment toggle, Erin 2026-08-15): clear
+    // paid_at + method. Only a 'paid' status steps back to
+    // pending_payment — ready/delivered keep their fulfillment status
+    // (the payment record and the hand-over are independent facts).
+    if (set === 'unpaid') {
+      if (!order.paid_at) return res.status(409).json({ error: 'That order isn’t marked paid.' });
+      const upd = await sql`
+        UPDATE merch_desk_orders
+        SET payment_method = NULL, paid_at = NULL,
+            status = CASE WHEN status = 'paid' THEN 'pending_payment' ELSE status END
+        WHERE id = ${id}
+        RETURNING *
+      `;
+      return res.status(200).json({ order: upd[0] });
+    }
+
+    // Back from "Ready for pickup" to plain Pre-order (Status select). The
+    // status returns to paid / pending_payment per paid_at; stock already
+    // set aside for it stays allocated (nothing physical changed).
+    if (set === 'unready') {
+      if (order.status !== 'ready') return res.status(409).json({ error: 'That order isn’t marked ready.' });
+      const back = order.paid_at ? 'paid' : 'pending_payment';
+      const upd = await sql`
+        UPDATE merch_desk_orders SET status = ${back} WHERE id = ${id} RETURNING *
       `;
       return res.status(200).json({ order: upd[0] });
     }
@@ -1628,7 +1678,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       return res.status(200).json({ order: upd[0], restocked: allocated.length });
     }
 
-    return res.status(400).json({ error: 'set must be paid, ready, delivered, or cancel' });
+    return res.status(400).json({ error: 'set must be paid, unpaid, ready, unready, delivered, or cancel' });
   }
 
   // "Not spam" for a screened public-form order (Orders tab bucket).
@@ -1719,6 +1769,21 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const notes = merchCleanText(body.notes, 1000);
     const preorderOnly = !!body.preorder_only;
     const id = body.id != null ? parseInt(body.id, 10) : null;
+    // Optional first variant riding a NEW item (the "+ Add item" form takes
+    // price / on hand / reorder-at inline so the manager isn't forced into
+    // a second step — Erin 2026-08-15). Validated up front, exactly like
+    // merch-variant-save, so a bad price rejects BEFORE the item row is
+    // written. Ignored on edits (variants edit on their own rows).
+    const fv = (body.first_variant && typeof body.first_variant === 'object' && !Array.isArray(body.first_variant))
+      ? body.first_variant : null;
+    let firstVariant = null;
+    if (fv && !(Number.isInteger(id) && id > 0)) {
+      firstVariant = merchVariantFields(fv);
+      if (firstVariant.error) return res.status(400).json({ error: firstVariant.error });
+      // Starting count for a brand-new variant — the one place on_hand is
+      // set directly (there is no stock history yet to keep truthful).
+      firstVariant.on_hand = Math.max(0, Math.min(parseInt(fv.on_hand, 10) || 0, 100000));
+    }
     let row;
     if (Number.isInteger(id) && id > 0) {
       const upd = await sql`
@@ -1742,7 +1807,17 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       `;
       row = ins[0];
     }
-    return res.status(200).json({ item: row });
+    let variantRow = null;
+    if (firstVariant) {
+      const v = firstVariant;
+      const vins = await sql`
+        INSERT INTO merch_variants (item_id, label, price_cents, on_hand, on_order, restock_threshold, active, sort_order, notes, updated_by)
+        VALUES (${row.id}, ${v.label}, ${v.priceCents}, ${v.on_hand}, ${v.onOrder}, ${v.restockThreshold}, ${v.active}, ${v.sortOrder}, ${v.notes}, ${email})
+        RETURNING *
+      `;
+      variantRow = vins[0];
+    }
+    return res.status(200).json({ item: row, variant: variantRow });
   }
 
   // Variant upsert. on_hand deliberately NOT settable here — stock truth
@@ -1750,16 +1825,10 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
   if (action === 'merch-variant-save') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const itemId = parseInt(body.item_id, 10);
-    const label = String(body.label || '').trim().slice(0, 200);
-    const priceCents = parseInt(body.price_cents, 10);
-    if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > 10000000) {
-      return res.status(400).json({ error: 'Price must be between $0 and $100,000.' });
-    }
-    const onOrder = Math.max(0, Math.min(parseInt(body.on_order, 10) || 0, 100000));
-    const restockThreshold = Math.max(0, Math.min(parseInt(body.restock_threshold, 10) || 0, 100000));
-    const active = body.active === undefined ? true : !!body.active;
-    const sortOrder = Math.max(0, Math.min(parseInt(body.sort_order, 10) || 0, 10000));
-    const notes = merchCleanText(body.notes, 1000);
+    const f = merchVariantFields(body);
+    if (f.error) return res.status(400).json({ error: f.error });
+    const label = f.label, priceCents = f.priceCents, onOrder = f.onOrder,
+      restockThreshold = f.restockThreshold, active = f.active, sortOrder = f.sortOrder, notes = f.notes;
     const id = body.id != null ? parseInt(body.id, 10) : null;
     let row;
     if (Number.isInteger(id) && id > 0) {
