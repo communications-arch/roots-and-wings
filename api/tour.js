@@ -5724,12 +5724,12 @@ async function handleMerchDeskPublicOrder(body, req, res) {
   // so junk can't drain counts — rescuing via Not spam / ready / delivered
   // consumes stock at that point through merchConsumeBackorders.
   //
-  // TODO(#351): Erin to decide public-order stock policy — see 2026-08-15
-  // review finding 2. An unauthenticated order that passes screening
-  // decrements real stock today (bounded only by the per-IP caps above +
-  // normalizeLines' 30 lines × 99 qty). Options on the table: hold
-  // non-member public orders as backordered/pending-confirmation until
-  // the manager accepts, or lower the public qty caps. Nothing lowered yet.
+  // DECIDED (Erin, 2026-08-15, review finding 2): anonymous homepage orders
+  // that pass screening DO reserve real stock, same as a member's order —
+  // a non-member wanting a tote shouldn't see "waiting on stock" while it
+  // sits on the shelf. Abuse is bounded by the per-IP caps above +
+  // normalizeLines' 30 lines × 99 qty, and the manager can Cancel /
+  // Confirm-spam any junk from the Orders grid (stock returns on cancel).
   const priced = lines.map(l => ({
     variant_id: l.variant_id, qty: l.qty,
     price_cents_each: variantById[l.variant_id].price_cents
