@@ -20,7 +20,7 @@ const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isS
 const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
 const { resolveFamily } = require('./_family');
-const { allocateOrder, reallocateBackorders, needsOrderingQty, normalizeLines } = require('./_merch');
+const { allocateOrderLines, allocateBackorderedLines, orderTotalCents, needsOrderingQty, normalizeLines } = require('./_merch');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1400,19 +1400,21 @@ async function merchBuyerNameFor(sql, email, googleName) {
   return googleName || email;
 }
 
-// Convert an order's backordered lines to allocated, decrementing
-// on_hand (clamped at 0) — runs when the manager marks ready/delivered,
-// i.e. the moment the physical items are actually set aside/handed over.
+// Convert an order's backordered lines to allocated for whatever the
+// shelf covers NOW — runs when the manager marks ready/delivered, i.e.
+// the moment the physical items are actually set aside/handed over.
+// Truthful (2026-08-15 review finding 4): units the shelf can't cover
+// stay 'backordered' on the order rather than being recorded as taken —
+// so a later cancel can only restore what really left the shelf, and
+// the shortfall keeps showing on Needs ordering until stock arrives or
+// the manager recounts (merch-stock-adjust). Returns units allocated.
 async function merchConsumeBackorders(sql, orderId) {
   const back = await sql`
-    SELECT id, variant_id, qty FROM merch_desk_order_items
+    SELECT id, variant_id, qty, price_cents_each FROM merch_desk_order_items
     WHERE order_id = ${orderId} AND stock_status = 'backordered'
+    ORDER BY id
   `;
-  for (const l of back) {
-    await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${l.qty}, 0), updated_at = NOW() WHERE id = ${l.variant_id}`;
-    await sql`UPDATE merch_desk_order_items SET stock_status = 'allocated' WHERE id = ${l.id}`;
-  }
-  return back.length;
+  return allocateBackorderedLines(sql, orderId, back);
 }
 
 async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
@@ -1469,31 +1471,25 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const loaded = await merchLoadVariants(sql, lines, true);
     if (loaded.error) return res.status(409).json({ error: loaded.error });
 
-    const onHandByVariant = {};
     const priced = lines.map(l => {
       const v = loaded.variants[l.variant_id];
-      onHandByVariant[l.variant_id] = v.on_hand;
       return { variant_id: l.variant_id, qty: l.qty, price_cents_each: v.price_cents };
     });
-    const alloc = allocateOrder(priced, onHandByVariant);
+    const totalCents = orderTotalCents(priced);
 
     const famEmail = await merchFamilyEmailFor(sql, email);
     const buyerName = await merchBuyerNameFor(sql, email, user.name);
     const ins = await sql`
       INSERT INTO merch_desk_orders (family_email, buyer_name, status, total_cents, note, created_by_email, source)
-      VALUES (${famEmail}, ${buyerName}, 'pending_payment', ${alloc.total_cents}, ${note}, ${email}, 'portal')
+      VALUES (${famEmail}, ${buyerName}, 'pending_payment', ${totalCents}, ${note}, ${email}, 'portal')
       RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
     `;
     const order = ins[0];
-    for (const l of alloc.lines) {
-      await sql`
-        INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
-        VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, ${l.stock_status})
-      `;
-    }
-    for (const vid of Object.keys(alloc.decrements)) {
-      await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${alloc.decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
-    }
+    // Truthful allocation (api/_merch.js): each line takes what the shelf
+    // has RIGHT NOW via an atomic conditional decrement — the on_hand the
+    // catalog showed the member may be stale, and two families can race
+    // for the last one. Units not actually removed land as 'backordered'.
+    const written = await allocateOrderLines(sql, order.id, priced);
 
     // Heads-up for the manager (best-effort, never blocks the order).
     try {
@@ -1501,7 +1497,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       if (mgr) {
         await notifyMember(sql, String(mgr).toLowerCase(),
           'New merch order from ' + buyerName,
-          alloc.lines.reduce((n, l) => n + l.qty, 0) + ' item(s), pay at pickup. Open the Merchandise report to review.',
+          written.reduce((n, l) => n + l.qty, 0) + ' item(s), pay at pickup. Open the Merchandise report to review.',
           'merch_order');
       }
     } catch (nErr) { console.error('merch order notify (non-fatal):', nErr); }
@@ -1531,11 +1527,17 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
              active, sort_order, updated_at, updated_by, notes
       FROM merch_variants ORDER BY item_id, sort_order, label
     `;
+    // Open backordered demand per variant. Screened (spam-flagged) public
+    // orders are saved all-backordered and must NOT count as demand — the
+    // shelf owes them nothing until the manager un-screens (2026-08-15
+    // review finding 1; same filter in merch-todo-counts + merch-needs-ordering).
     const demand = await sql`
       SELECT oi.variant_id, SUM(oi.qty)::int AS backordered
       FROM merch_desk_order_items oi
       JOIN merch_desk_orders o ON o.id = oi.order_id
-      WHERE oi.stock_status = 'backordered' AND o.status NOT IN ('cancelled', 'delivered')
+      WHERE oi.stock_status = 'backordered'
+        AND o.status NOT IN ('cancelled', 'delivered')
+        AND o.screen_reason = ''
       GROUP BY oi.variant_id
     `;
     return res.status(200).json({ items, variants, backordered: demand });
@@ -1573,6 +1575,10 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       if (MERCH_PAYMENT_METHODS.indexOf(method) === -1) {
         return res.status(400).json({ error: 'How did they pay? (cash, check, or paypal)' });
       }
+      // Payment can be recorded at ANY non-cancelled stage — including a
+      // delivered order that was handed over before the money was noted
+      // (2026-08-15 review finding 3). Only pending_payment advances to
+      // 'paid'; ready/delivered keep their status and just gain paid_at.
       const upd = await sql`
         UPDATE merch_desk_orders
         SET payment_method = ${method}, paid_at = NOW(),
@@ -1585,7 +1591,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
 
     if (set === 'ready' || set === 'delivered') {
       if (order.status === 'delivered') return res.status(409).json({ error: 'Already delivered.' });
-      await merchConsumeBackorders(sql, id);
+      const consumed = await merchConsumeBackorders(sql, id);
       const upd = await sql`
         UPDATE merch_desk_orders SET status = ${set} WHERE id = ${id} RETURNING *
       `;
@@ -1596,7 +1602,13 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
           'Your Roots & Wings merch order is ready for pickup at the next event.' + owedNote,
           'merch_ready');
       }
-      return res.status(200).json({ order: upd[0] });
+      // Lines come back so the client shows what REALLY happened to stock
+      // (a shortfall the shelf couldn't cover stays 'backordered').
+      const linesByOrder = await merchLinesByOrder(sql, [id]);
+      return res.status(200).json({
+        order: Object.assign({}, upd[0], { lines: linesByOrder[id] || [] }),
+        consumed
+      });
     }
 
     if (set === 'cancel') {
@@ -1622,11 +1634,12 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
   // "Not spam" for a screened public-form order (Orders tab bucket).
   // Clears screen_reason and — because screened orders were saved
   // all-backordered so junk could never drain the shelf — re-runs
-  // allocation against CURRENT stock (api/_merch.js reallocateBackorders):
-  // each backordered line becomes allocated for what stock covers now,
-  // with any remainder split off as a fresh backordered line. No email
-  // goes out (the buyer's confirmation never sent — the manager follows
-  // up by hand, same as the legacy rescue).
+  // allocation against CURRENT stock (api/_merch.js
+  // allocateBackorderedLines, atomic per line): each backordered line
+  // becomes allocated for what stock covers now, with any remainder split
+  // off as a fresh backordered line. No email goes out (the buyer's
+  // confirmation never sent — the manager follows up by hand, same as
+  // the legacy rescue).
   if (action === 'merch-order-unscreen') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const id = parseInt(body.id, 10);
@@ -1637,35 +1650,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (order.status === 'cancelled') return res.status(409).json({ error: 'That order was cancelled.' });
     if (!order.screen_reason) return res.status(409).json({ error: 'That order isn’t screened.' });
 
-    const back = await sql`
-      SELECT id, variant_id, qty, price_cents_each FROM merch_desk_order_items
-      WHERE order_id = ${id} AND stock_status = 'backordered'
-      ORDER BY id
-    `;
-    let reallocated = 0;
-    if (back.length) {
-      const vids = back.map(l => l.variant_id);
-      const stockRows = await sql`SELECT id, on_hand FROM merch_variants WHERE id = ANY(${vids})`;
-      const onHand = {};
-      stockRows.forEach(r => { onHand[r.id] = r.on_hand; });
-      const re = reallocateBackorders(back, onHand);
-      const priceById = {};
-      back.forEach(l => { priceById[l.id] = l.price_cents_each; });
-      for (const u of re.updates) {
-        if (u.allocated <= 0) continue;
-        reallocated += u.allocated;
-        await sql`UPDATE merch_desk_order_items SET qty = ${u.allocated}, stock_status = 'allocated' WHERE id = ${u.id}`;
-        if (u.backordered > 0) {
-          await sql`
-            INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
-            VALUES (${id}, ${u.variant_id}, ${u.backordered}, ${priceById[u.id] || 0}, 'backordered')
-          `;
-        }
-      }
-      for (const vid of Object.keys(re.decrements)) {
-        await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${re.decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
-      }
-    }
+    const reallocated = await merchConsumeBackorders(sql, id);
     const upd = await sql`
       UPDATE merch_desk_orders SET screen_reason = '' WHERE id = ${id} RETURNING *
     `;
@@ -1689,7 +1674,9 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         SELECT oi.variant_id, SUM(oi.qty)::int AS backordered
         FROM merch_desk_order_items oi
         JOIN merch_desk_orders o ON o.id = oi.order_id
-        WHERE oi.stock_status = 'backordered' AND o.status NOT IN ('cancelled', 'delivered')
+        WHERE oi.stock_status = 'backordered'
+          AND o.status NOT IN ('cancelled', 'delivered')
+          AND o.screen_reason = ''
         GROUP BY oi.variant_id
       ) b ON b.variant_id = v.id
       WHERE v.active = TRUE
@@ -1840,7 +1827,9 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         SELECT oi.variant_id, SUM(oi.qty)::int AS backordered
         FROM merch_desk_order_items oi
         JOIN merch_desk_orders o ON o.id = oi.order_id
-        WHERE oi.stock_status = 'backordered' AND o.status NOT IN ('cancelled', 'delivered')
+        WHERE oi.stock_status = 'backordered'
+          AND o.status NOT IN ('cancelled', 'delivered')
+          AND o.screen_reason = ''
         GROUP BY oi.variant_id
       ) b ON b.variant_id = v.id
       WHERE v.active = TRUE
@@ -1901,31 +1890,30 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
           INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
           VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, 'allocated')
         `;
+        // DELIBERATE exception to the truthful-decrement rule (2026-08-15
+        // review finding 4): the instant sale is the manager's own hands
+        // handing the item across the table — it physically left,
+        // whatever the count said — so the clamp stays and the line is
+        // 'allocated' in full. A delivered order can't be cancelled, so
+        // this can never restore phantom stock; a wrong count is fixed by
+        // a recount (merch-stock-adjust).
         await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${l.qty}, 0), updated_at = NOW() WHERE id = ${l.variant_id}`;
       }
       orders.push(order);
     }
 
     if (preorder.length) {
-      const onHandByVariant = {};
-      preorder.forEach(l => { onHandByVariant[l.variant_id] = loaded.variants[l.variant_id].on_hand; });
-      const alloc = allocateOrder(preorder, onHandByVariant);
+      // Pre-orders are cancellable, so THEY use the truthful path
+      // (api/_merch.js allocateOrderLines): allocated only for units the
+      // shelf really gave up, backordered for the rest.
       const preNote = (note ? note + ' — ' : '') + 'Pre-order from the merch table (printed to order).';
       const ins = await sql`
         INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
-        VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${alloc.total_cents}, ${preNote.slice(0, 500)}, ${email}, 'event')
+        VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${orderTotalCents(preorder)}, ${preNote.slice(0, 500)}, ${email}, 'event')
         RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
       `;
       const order = ins[0];
-      for (const l of alloc.lines) {
-        await sql`
-          INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
-          VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, ${l.stock_status})
-        `;
-      }
-      for (const vid of Object.keys(alloc.decrements)) {
-        await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${alloc.decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
-      }
+      await allocateOrderLines(sql, order.id, preorder);
       orders.push(order);
     }
 

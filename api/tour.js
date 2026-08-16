@@ -18,7 +18,7 @@ const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, ac
 const { hasCapability } = require('./_capabilities');
 const { pushNotifications } = require('./_push');
 const { canActAs, resolveFamily } = require('./_family');
-const { allocateOrder, normalizeLines } = require('./_merch');
+const { allocateOrderLines, orderTotalCents, normalizeLines } = require('./_merch');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -5717,30 +5717,24 @@ async function handleMerchDeskPublicOrder(body, req, res) {
     console.error('merch desk resolveFamily failed (non-fatal):', famErr);
   }
 
-  // Allocation: clean orders reserve stock exactly like the member shop.
+  // Allocation: clean orders reserve stock exactly like the member shop
+  // (api/_merch.js allocateOrderLines — atomic per-line takes, so
+  // 'allocated' is only ever written for units the shelf really gave up).
   // Screened orders take NOTHING from the shelf (every line backordered)
-  // so junk can't drain counts — rescuing via ready/delivered consumes
-  // stock at that point through merchConsumeBackorders.
+  // so junk can't drain counts — rescuing via Not spam / ready / delivered
+  // consumes stock at that point through merchConsumeBackorders.
+  //
+  // TODO(#351): Erin to decide public-order stock policy — see 2026-08-15
+  // review finding 2. An unauthenticated order that passes screening
+  // decrements real stock today (bounded only by the per-IP caps above +
+  // normalizeLines' 30 lines × 99 qty). Options on the table: hold
+  // non-member public orders as backordered/pending-confirmation until
+  // the manager accepts, or lower the public qty caps. Nothing lowered yet.
   const priced = lines.map(l => ({
     variant_id: l.variant_id, qty: l.qty,
     price_cents_each: variantById[l.variant_id].price_cents
   }));
-  let orderLines, decrements, totalCents;
-  if (junkReason) {
-    orderLines = priced.map(l => ({
-      variant_id: l.variant_id, qty: l.qty,
-      price_cents_each: l.price_cents_each, stock_status: 'backordered'
-    }));
-    decrements = {};
-    totalCents = priced.reduce((s, l) => s + l.qty * l.price_cents_each, 0);
-  } else {
-    const onHand = {};
-    priced.forEach(l => { onHand[l.variant_id] = variantById[l.variant_id].on_hand; });
-    const alloc = allocateOrder(priced, onHand);
-    orderLines = alloc.lines;
-    decrements = alloc.decrements;
-    totalCents = alloc.total_cents;
-  }
+  const totalCents = orderTotalCents(priced);
 
   let order = null;
   try {
@@ -5755,14 +5749,15 @@ async function handleMerchDeskPublicOrder(body, req, res) {
       RETURNING id, total_cents
     `;
     order = ins[0];
-    for (const l of orderLines) {
-      await sql`
-        INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
-        VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, ${l.stock_status})
-      `;
-    }
-    for (const vid of Object.keys(decrements)) {
-      await sql`UPDATE merch_variants SET on_hand = GREATEST(on_hand - ${decrements[vid]}, 0), updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
+    if (junkReason) {
+      for (const l of priced) {
+        await sql`
+          INSERT INTO merch_desk_order_items (order_id, variant_id, qty, price_cents_each, stock_status)
+          VALUES (${order.id}, ${l.variant_id}, ${l.qty}, ${l.price_cents_each}, 'backordered')
+        `;
+      }
+    } else {
+      await allocateOrderLines(sql, order.id, priced);
     }
   } catch (dbErr) {
     console.error('Merch desk order insert error:', dbErr);
@@ -5783,7 +5778,9 @@ async function handleMerchDeskPublicOrder(body, req, res) {
   if (!merchCc) merchCc = 'communications@rootsandwingsindy.com';
 
   const totalStr = '$' + (totalCents / 100).toFixed(2);
-  const lineRows = orderLines.map(l => {
+  // One row per requested variant (the stored lines may have split into
+  // allocated + backordered — the buyer sees what they ordered).
+  const lineRows = priced.map(l => {
     const v = variantById[l.variant_id];
     const label = v.item_name + (v.label ? ' — ' + v.label : '');
     return '<tr><td style="padding:6px 16px 6px 0;">' + l.qty + ' × ' + escapeHtml(label) + '</td>'

@@ -15149,11 +15149,16 @@
     } else if (entry.state === 'screened') {
       opts.push(['unscreen', 'Not spam']);
       opts.push(['cancel', 'Cancel order…']);
-    } else if (entry.state === 'open') {
+    } else if (entry.state !== 'cancelled') {
+      // Payment can be recorded on any live Desk order — open OR already
+      // fulfilled (handed over before the money was noted; the server
+      // keeps the status and just stamps paid_at). Review 2026-08-15 #3.
       if (!o.paid_at) opts.push(['pay', 'Mark paid…']);
-      if (o.status !== 'ready') opts.push(['ready', 'Mark ready']);
-      opts.push(['delivered', 'Mark fulfilled']);
-      opts.push(['cancel', 'Cancel order…']);
+      if (entry.state === 'open') {
+        if (o.status !== 'ready') opts.push(['ready', 'Mark ready']);
+        opts.push(['delivered', 'Mark fulfilled']);
+        opts.push(['cancel', 'Cancel order…']);
+      }
     }
     opts.push(['items', 'View items']);
     return opts;
@@ -15495,11 +15500,10 @@
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the order.'); if (btn) btn.disabled = false; return; }
         var idx = (_merchDeskCache || []).findIndex(function (o) { return o.id === id; });
         if (idx !== -1 && res.data.order) {
-          // Keep the joined lines; the status response has none.
-          res.data.order.lines = _merchDeskCache[idx].lines;
-          if (set === 'ready' || set === 'delivered') {
-            (res.data.order.lines || []).forEach(function (l) { l.stock_status = 'allocated'; });
-          }
+          // ready/delivered return the lines as they now stand (what the
+          // shelf really covered — a shortfall stays backordered); the
+          // paid/cancel responses carry none, so keep the joined lines.
+          if (!Array.isArray(res.data.order.lines)) res.data.order.lines = _merchDeskCache[idx].lines;
           _merchDeskCache[idx] = res.data.order;
         }
         _merchDeskInline = null;
