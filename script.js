@@ -15140,7 +15140,7 @@
     if (entry.web) {
       if (entry.state === 'screened') {
         opts.push(['unscreen', 'Not spam']);
-        opts.push(['delete', 'Delete…']);
+        opts.push(['delete', 'Confirm spam (delete)…']);
       } else {
         opts.push(o.paid_at ? ['unpaid', 'Mark unpaid'] : ['paid', 'Mark paid']);
         opts.push(entry.state === 'delivered' ? ['undelivered', 'Undo fulfilled'] : ['delivered', 'Mark fulfilled']);
@@ -15148,7 +15148,7 @@
       }
     } else if (entry.state === 'screened') {
       opts.push(['unscreen', 'Not spam']);
-      opts.push(['cancel', 'Cancel order…']);
+      opts.push(['cancel', 'Confirm spam…']);
     } else if (entry.state !== 'cancelled') {
       // Payment can be recorded on any live Desk order — open OR already
       // fulfilled (handed over before the money was noted; the server
@@ -15301,6 +15301,10 @@
         h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
       });
       h += '<button type="button" class="sc-btn merch-desk-inline-close" aria-label="Close">×</button>';
+    } else if (kind === 'cancel' && o.screen_reason) {
+      h += 'Confirm order #' + escapeHtmlWs(String(o.id)) + ' is spam? <span class="ws-wv-context">It leaves the queue (kept under Cancelled; no stock was ever reserved).</span> '
+        + '<button type="button" class="sc-btn sc-btn-del merch-desk-inline-confirm" data-kind="cancel" data-order-id="' + o.id + '">Confirm spam</button>'
+        + '<button type="button" class="sc-btn merch-desk-inline-close">Keep</button>';
     } else if (kind === 'cancel') {
       h += 'Cancel order #' + escapeHtmlWs(String(o.id)) + ' for ' + who + '? <span class="ws-wv-context">Reserved stock goes back on the shelf.</span> '
         + '<button type="button" class="sc-btn sc-btn-del merch-desk-inline-confirm" data-kind="cancel" data-order-id="' + o.id + '">Confirm cancel</button>'
@@ -15362,19 +15366,19 @@
 
     var h = '';
 
-    // Screened-as-spam summary (#150): above the table whenever the
-    // Status funnel is All (screened rows are in the list) or any
-    // screened rows exist (so the manager knows where they are).
-    if (_merchDeskFilter === 'all' || counts.screened > 0) {
-      if (counts.screened > 0) {
-        h += '<p class="ws-body-hint" style="margin:0 0 6px;"><strong>' + counts.screened + '</strong> screened as likely spam — never emailed anyone, took no stock'
-          + (_merchDeskFilter === 'all' ? '; they carry a Screened pill below.' : '; set Status to <strong>All</strong> to see them.')
-          + ' “Not spam” puts an order back in the queue (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent.</p>';
-      }
-      h += '<div id="ws-merch-spam-stats"></div>';
+    // Spam (Erin 2026-08-15): a small pill ABOVE the table ("N possible
+    // spam*"), the explanation BELOW it (footnote), plus the site-wide
+    // screened-counts line. Screened rows carry a Screened pill under
+    // Status = All; "Confirm spam" cancels them out of the queue.
+    if (counts.screened > 0) {
+      h += '<div class="rd-counts" style="margin:0 0 6px;"><span class="ws-wv-pending">' + counts.screened + ' possible spam*</span></div>';
     }
     if (!_merchDeskCache && !_merchOrdersCache) h += '<p class="ws-empty">Loading…</p>';
     else h += '<div id="merch-desk-table-target"></div>';
+    if (counts.screened > 0) {
+      h += '<p class="ws-body-hint" style="margin:10px 0 0;">*Set Status to <strong>All</strong> to see possible spam. “Not spam” puts an order back in the queue (and reserves stock for it) — follow up with the customer by hand, since their confirmation email never sent. “Confirm spam” hides it from the queue.</p>';
+    }
+    h += '<div id="ws-merch-spam-stats"></div>';
     body.innerHTML = h;
 
     if (typeof rwSpamStatsSummaryHtml === 'function') {
@@ -15762,6 +15766,15 @@
     if ((cat.items || []).length === 0 && !cat.error) {
       h += '<p class="ws-empty">No catalog yet — add your first item above.</p>';
     } else {
+      // Item pills (Erin 2026-08-15): one-tap filter by item type, bound
+      // to the same state as the Item funnel in the table header.
+      h += '<div class="rd-counts merch-cat-item-pills">';
+      h += '<button type="button" class="sc-btn merch-cat-item-pill' + (_merchCatItemFilter === 'all' ? ' sc-save' : '') + '" data-item-filter="all">All (' + allRows.length + ')</button>';
+      (cat.items || []).forEach(function (item) {
+        var n = allRows.filter(function (r) { return r.item.id === item.id; }).length;
+        h += '<button type="button" class="sc-btn merch-cat-item-pill' + (_merchCatItemFilter === String(item.id) ? ' sc-save' : '') + '" data-item-filter="' + item.id + '">' + escapeHtmlWs(item.name) + ' (' + n + ')</button>';
+      });
+      h += '</div>';
       h += '<div id="merch-cat-table-target"></div>';
     }
     body.innerHTML = h;
@@ -15868,6 +15881,12 @@
   // Toolbar (above the table): + Add item only — every other action is on
   // the row's Actions dropdown.
   function wireMerchCatalogToolbar(body) {
+    body.querySelectorAll('.merch-cat-item-pill').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _merchCatItemFilter = btn.getAttribute('data-item-filter') || 'all';
+        renderMerchCatalogBody();
+      });
+    });
     var addItemBtn = body.querySelector('#merch-cat-add-item-btn');
     if (addItemBtn) addItemBtn.addEventListener('click', function () {
       _merchCatItemEditId = (_merchCatItemEditId === 'new') ? null : 'new';
