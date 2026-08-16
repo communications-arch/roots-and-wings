@@ -1483,7 +1483,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260816a"></script>
+  <script src="script.js?v=20260816b"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.
@@ -1552,7 +1552,14 @@
       if (!id) return;
       var target = document.getElementById(id);
       if (!target) return;
-      window.setTimeout(function () { target.scrollIntoView({ block: 'start' }); }, 400);
+      // Only correct if layout actually moved the target after the native
+      // jump (the async board grid above it) — otherwise the extra scroll
+      // reads as a visible double-take.
+      var initialTop = target.getBoundingClientRect().top;
+      window.setTimeout(function () {
+        var nowTop = target.getBoundingClientRect().top;
+        if (Math.abs(nowTop - initialTop) > 8) target.scrollIntoView({ block: 'start' });
+      }, 450);
     })();
   </script>
 </body>

@@ -15858,6 +15858,7 @@
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the count.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } return; }
         v.on_hand = (res.data && res.data.variant && res.data.variant.on_hand != null) ? res.data.variant.on_hand : wanted;
         renderMerchCatalogBody();
+        refreshMerchNav();
         if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
       })
       .catch(function () { alert('Network error — try again.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } });
@@ -15877,6 +15878,7 @@
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the variant.'); if (btn) btn.disabled = false; return; }
         v.active = !v.active;
         renderMerchCatalogBody();
+        refreshMerchNav();
         if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
       })
       .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
