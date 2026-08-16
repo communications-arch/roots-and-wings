@@ -117,7 +117,7 @@
        neither was on-brand and they were costing bytes. -->
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400;1,700&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="preload" href="logo-combined.svg?v=20260430g" as="image">
-  <link rel="stylesheet" href="styles.css?v=20260816b">
+  <link rel="stylesheet" href="styles.css?v=20260816c">
   <link rel="icon" href="favicon-32.png?v=20260430g" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260430g">
   <link rel="manifest" href="manifest-public.json?v=20260430g">
@@ -688,7 +688,8 @@
       </div>
 
       <p class="merch-footnote text-center fade-in">
-        Orders are confirmed by email; pay at pickup — cash, check, or PayPal.
+        Orders are confirmed by email; pay at pickup — cash, check, or PayPal
+        (PayPal adds its 1.99% + 49&cent; processing fee).
         Our Merchandise Manager will follow up with pickup info.
       </p>
     </div>
@@ -1086,7 +1087,7 @@
     <div class="tour-modal">
       <button class="tour-modal-close" aria-label="Close" onclick="document.getElementById('merch-modal').classList.remove('active');document.body.style.overflow='';">&times;</button>
       <h2 class="tour-modal-title">Order Merch</h2>
-      <p class="tour-modal-subtitle">Pick your items and we'll confirm by email. Payment is due at pickup — cash, check, or PayPal.</p>
+      <p class="tour-modal-subtitle">Pick your items and we'll confirm by email. Payment is due at pickup — cash, check, or PayPal (PayPal adds its 1.99% + 49&cent; processing fee).</p>
       <form id="merch-modal-form" class="tour-modal-form">
         <!-- Bot screening: honeypot (never visible; humans leave it empty). -->
         <input type="text" id="merch-website" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;height:0;width:0;border:0;padding:0;">
@@ -1138,7 +1139,7 @@
       </form>
       <div id="merch-modal-success" style="display:none; text-align: center;">
         <h2 class="tour-modal-title">Order received!</h2>
-        <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Payment is due at pickup — cash, check, or PayPal. Our Merchandise Manager will follow up with pickup info.</p>
+        <p class="tour-modal-subtitle">Thanks! You'll get a confirmation email shortly. Payment is due at pickup — cash, check, or PayPal (PayPal adds its 1.99% + 49&cent; processing fee). Our Merchandise Manager will follow up with pickup info.</p>
         <button type="button" id="merch-modal-done" class="btn btn-primary tour-form-submit" style="margin-top: 8px;">Close</button>
       </div>
       <script>
@@ -1667,7 +1668,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260816j"></script>
+  <script src="script.js?v=20260816k"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.

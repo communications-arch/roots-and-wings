@@ -12503,6 +12503,13 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
   font-size: 1.05rem;
 }
 .merch-qs-total strong { font-size: 1.25rem; color: var(--color-primary-dark); }
+/* PayPal pass-through fee rows under the cart total (Erin, 2026-08-16):
+   the fee reads as a quiet sub-line; "Charge via PayPal" is the number
+   the manager quotes, so it keeps the total's weight. */
+.merch-qs-fee { border-top: 0; padding-top: 2px; font-size: 0.9rem; color: var(--color-text-light); }
+.merch-qs-fee strong { font-size: 0.95rem; color: var(--color-text-light); }
+.merch-qs-charge { border-top: 1px dashed var(--color-border); padding-top: 6px; }
+.merch-qs-record-sub { display: block; font-size: 0.72rem; font-weight: 600; opacity: 0.85; letter-spacing: 0.02em; }
 .merch-qs-note { margin: 0; }
 .merch-qs-buyer .ws-merch-add-field input { min-height: 44px; font-size: 1rem; }
 .merch-qs-methods { display: flex; gap: 8px; }

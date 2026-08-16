@@ -21,7 +21,8 @@ const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
 const { resolveFamily } = require('./_family');
 const { allocateOrderLines, allocateBackorderedLines, orderTotalCents, needsOrderingQty, normalizeLines,
-        splitQuickSaleLines, ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry } = require('./_merch');
+        splitQuickSaleLines, ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry,
+        orderFeeCents } = require('./_merch');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -1471,7 +1472,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     // (the family's Heads-up card reads this list, 2026-08-15).
     const orders = await sql`
       SELECT id, family_email, buyer_name, status, payment_method, paid_at,
-             total_cents, note, created_at
+             total_cents, fee_cents, note, created_at
       FROM merch_desk_orders
       WHERE LOWER(family_email) = ${famEmail} AND screen_reason = ''
       ORDER BY created_at DESC
@@ -1569,7 +1570,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const orders = await sql`
       SELECT id, family_email, buyer_name, status, payment_method, paid_at,
-             total_cents, note, created_at, created_by_email,
+             total_cents, fee_cents, note, created_at, created_by_email,
              contact_email, contact_phone, screen_reason, source
       FROM merch_desk_orders
       ORDER BY created_at DESC
@@ -1602,9 +1603,12 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       // delivered order that was handed over before the money was noted
       // (2026-08-15 review finding 3). Only pending_payment advances to
       // 'paid'; ready/delivered keep their status and just gain paid_at.
+      // PayPal payments carry the pass-through processing fee (Erin,
+      // 2026-08-16); cash/check carry none. total_cents stays the price.
+      const fee = orderFeeCents(method, order.total_cents);
       const upd = await sql`
         UPDATE merch_desk_orders
-        SET payment_method = ${method}, paid_at = NOW(),
+        SET payment_method = ${method}, paid_at = NOW(), fee_cents = ${fee},
             status = CASE WHEN status = 'pending_payment' THEN 'paid' ELSE status END
         WHERE id = ${id}
         RETURNING *
@@ -1620,7 +1624,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       if (!order.paid_at) return res.status(409).json({ error: 'That order isn’t marked paid.' });
       const upd = await sql`
         UPDATE merch_desk_orders
-        SET payment_method = NULL, paid_at = NULL,
+        SET payment_method = NULL, paid_at = NULL, fee_cents = 0,
             status = CASE WHEN status = 'paid' THEN 'pending_payment' ELSE status END
         WHERE id = ${id}
         RETURNING *
@@ -1647,7 +1651,9 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         UPDATE merch_desk_orders SET status = ${set} WHERE id = ${id} RETURNING *
       `;
       if (set === 'ready' && order.family_email) {
-        const owedNote = order.paid_at ? '' : ' Payment (' + '$' + (order.total_cents / 100).toFixed(2) + ') is due at pickup — cash, check, or PayPal.';
+        const owedPp = orderFeeCents('paypal', order.total_cents);
+        const owedNote = order.paid_at ? '' : ' Payment (' + '$' + (order.total_cents / 100).toFixed(2) + ') is due at pickup — cash, check, or PayPal'
+          + (owedPp ? ' ($' + ((order.total_cents + owedPp) / 100).toFixed(2) + ' by PayPal, which includes its processing fee)' : '') + '.';
         await notifyMember(sql, String(order.family_email).toLowerCase(),
           'Your merch order is ready',
           'Your Roots & Wings merch order is ready for pickup at the next event.' + owedNote,
@@ -1947,14 +1953,20 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     const instant = split.instant;
     const preorder = split.preorder;
     const orders = [];
+    // One PayPal payment covers the whole cart, so the pass-through fee is
+    // computed ONCE on the cart total and carried by the first order this
+    // cart produces (a mixed cart's second order carries 0) — the two
+    // records still sum to what the buyer was actually charged.
+    let cartFee = orderFeeCents(method, instant.concat(preorder).reduce((s, l) => s + l.qty * l.price_cents_each, 0));
 
     if (instant.length) {
       const total = instant.reduce((s, l) => s + l.qty * l.price_cents_each, 0);
       const ins = await sql`
-        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
-        VALUES (${famEmail}, ${buyerName}, 'delivered', ${method}, NOW(), ${total}, ${note}, ${email}, 'event')
-        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
+        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, fee_cents, note, created_by_email, source)
+        VALUES (${famEmail}, ${buyerName}, 'delivered', ${method}, NOW(), ${total}, ${cartFee}, ${note}, ${email}, 'event')
+        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, fee_cents, note, created_at, source
       `;
+      cartFee = 0;
       const order = ins[0];
       for (const l of instant) {
         await sql`
@@ -1982,10 +1994,11 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       if (split.reasons.out) why.push('out of stock at the table');
       const preNote = (note ? note + ' — ' : '') + 'Pre-order from the merch table (' + why.join('; ') + ').';
       const ins = await sql`
-        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_by_email, source)
-        VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${orderTotalCents(preorder)}, ${preNote.slice(0, 500)}, ${email}, 'event')
-        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, note, created_at, source
+        INSERT INTO merch_desk_orders (family_email, buyer_name, status, payment_method, paid_at, total_cents, fee_cents, note, created_by_email, source)
+        VALUES (${famEmail}, ${buyerName}, 'paid', ${method}, NOW(), ${orderTotalCents(preorder)}, ${cartFee}, ${preNote.slice(0, 500)}, ${email}, 'event')
+        RETURNING id, family_email, buyer_name, status, payment_method, paid_at, total_cents, fee_cents, note, created_at, source
       `;
+      cartFee = 0;
       const order = ins[0];
       await allocateOrderLines(sql, order.id, preorder);
       orders.push(order);
@@ -2024,7 +2037,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (!bounds) return res.status(400).json({ error: 'school_year must look like 2026-2027.' });
 
     const deskRows = await sql`
-      SELECT o.id, o.buyer_name, o.family_email, o.payment_method, o.paid_at, o.total_cents,
+      SELECT o.id, o.buyer_name, o.family_email, o.payment_method, o.paid_at, o.total_cents, o.fee_cents,
              o.source, o.status, o.note, o.created_by_email,
              to_char(o.paid_at AT TIME ZONE 'America/Indianapolis', 'YYYY-MM-DD') AS paid_day
       FROM merch_desk_orders o
@@ -2049,6 +2062,9 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
         buyer: o.buyer_name || '', family_email: o.family_email || '',
         source: src === 'event' ? 'Event' : 'Web',
         method: o.payment_method || '',
+        // Pass-through PayPal fee the buyer paid on top (never reaches the
+        // co-op, so it is NOT in amount_cents) — shown beside the method.
+        fee_cents: o.fee_cents || 0,
         amount_cents: ledgerSignedCents('sale', o.total_cents),
         note: o.note || '',
         voided: false, priced: true,

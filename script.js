@@ -3223,14 +3223,13 @@
       });
     });
 
+    // Only "Out" shows on a directory card. Who is COVERING is a
+    // coordination fact, not a directory one (Erin, 2026-08-16: "the
+    // Covering info does not need to show in the directory") — it stays
+    // on the Coverage board / My Family duty rows. coveringByName is still
+    // built above so a card's popup can mention it if ever wanted.
     function absenceTagFor(fullName) {
       if (outByName[fullName]) return '<div class="yb-absent-badge">Out ' + coopLabel + '</div>';
-      var covs = coveringByName[fullName];
-      if (covs && covs.length > 0) {
-        var first = covs[0];
-        var more = covs.length > 1 ? ' +' + (covs.length - 1) : '';
-        return '<div class="yb-covering-badge">Covering: ' + first + more + '</div>';
-      }
       return '';
     }
 
@@ -8766,6 +8765,7 @@
           if (o.status === 'ready') detail += 'ready for pickup' + (o.paid_at ? '' : ' — pay at pickup');
           else if (backordered) detail += 'back-ordered items waiting on the next shipment' + (o.paid_at ? '' : ' — pay at pickup');
           else detail += (o.paid_at ? 'paid — pickup at the next event' : 'pay at pickup');
+          if (!o.paid_at) detail += ' (' + merchPaypalTotalText(o.total_cents) + ')';
           rows.push({
             title: 'Merch order #' + o.id,
             detail: detail,
@@ -14927,6 +14927,27 @@
   // Venmo is retired). The server enforces the same list.
   var MERCH_PAY_LABELS = { cash: 'Cash', check: 'Check', venmo: 'Venmo', paypal: 'PayPal' };
   var MERCH_PAY_METHODS_NEW = ['cash', 'check', 'paypal'];
+  // PayPal's processing fee is passed through to the buyer (Erin,
+  // 2026-08-16: "add the fee into the cost") — same rate + gross-up as
+  // registration / billing (1.99% + 49¢) so the co-op nets the price.
+  // Mirror of api/_merch.js paypalFeeCents; the SERVER stores fee_cents on
+  // the order when it is marked paid by PayPal — this is display only.
+  var MERCH_PAYPAL_FEE_RATE = 0.0199;
+  var MERCH_PAYPAL_FEE_FIXED_CENTS = 49;
+  var MERCH_PAYPAL_FEE_LABEL = '1.99% + 49¢';
+  function merchPaypalFeeCents(totalCents) {
+    var t = Math.max(0, Math.round(Number(totalCents) || 0));
+    if (!t) return 0;
+    return Math.ceil((t + MERCH_PAYPAL_FEE_FIXED_CENTS) / (1 - MERCH_PAYPAL_FEE_RATE) - t);
+  }
+  // "$10.71 by PayPal" — the fee-inclusive amount for a price.
+  function merchPaypalTotalText(totalCents) {
+    return fmtCents((Number(totalCents) || 0) + merchPaypalFeeCents(totalCents)) + ' by PayPal';
+  }
+  // Total the buyer actually paid on a stored order (price + any fee).
+  function merchOrderChargedCents(o) {
+    return (Number(o.total_cents) || 0) + (Number(o.fee_cents) || 0);
+  }
 
   // Fulfillment pill for the manager's list (Erin, 2026-08-15): Pre-order
   // = ordered, not yet handed over (pending_payment / paid / ready — ready
@@ -15191,7 +15212,9 @@
       sortValue: function (e) { return e.web ? -1 : (Number(e.o.total_cents) || 0); },
       render: function (e) {
         if (e.web) return '<span class="ws-srt-num ws-srt-actions-empty" title="older web order — no price on file">&mdash;</span>';
-        return '<span class="ws-srt-num">' + escapeHtmlWs(fmtCents(e.o.total_cents)) + '</span>';
+        var feeC = Number(e.o.fee_cents) || 0;
+        return '<span class="ws-srt-num">' + escapeHtmlWs(fmtCents(e.o.total_cents)) + '</span>'
+          + (feeC ? '<br><span class="ws-wv-context" title="PayPal processing fee the buyer paid on top">+ ' + escapeHtmlWs(fmtCents(feeC)) + ' PayPal fee</span>' : '');
       }
     },
     { key: 'source', label: 'Source', type: 'string',
@@ -15270,7 +15293,12 @@
     if (kind === 'pay') {
       h += 'How did ' + who + ' pay? ';
       MERCH_PAY_METHODS_NEW.forEach(function (m) {
-        h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + MERCH_PAY_LABELS[m] + '</button>';
+        // PayPal names the fee-inclusive amount (price + 1.99% + 49¢) so
+        // the manager collects the right number and the order records it.
+        var lbl = m === 'paypal' && !entry.web
+          ? 'PayPal · ' + escapeHtmlWs(fmtCents(o.total_cents + merchPaypalFeeCents(o.total_cents))) + ' <span class="ws-wv-context">incl. fee</span>'
+          : MERCH_PAY_LABELS[m];
+        h += '<button type="button" class="sc-btn merch-desk-pay-method" data-order-id="' + o.id + '" data-method="' + m + '">' + lbl + '</button>';
       });
       h += '<button type="button" class="sc-btn merch-desk-inline-close" aria-label="Close">×</button>';
     } else if (kind === 'cancel' && o.screen_reason) {
@@ -16310,7 +16338,8 @@
     // Success banner from the last sale — stays until the next tap.
     if (_merchQsLastSale) {
       var ls = _merchQsLastSale;
-      h += '<div class="merch-qs-done" role="status" aria-live="polite"><strong>Recorded — ' + escapeHtmlWs(fmtCents(ls.total_cents)) + ' collected.</strong>'
+      h += '<div class="merch-qs-done" role="status" aria-live="polite"><strong>Recorded — ' + escapeHtmlWs(fmtCents(ls.total_cents + (ls.fee_cents || 0))) + ' collected'
+        + (ls.fee_cents ? ' (' + escapeHtmlWs(fmtCents(ls.total_cents)) + ' + ' + escapeHtmlWs(fmtCents(ls.fee_cents)) + ' PayPal fee)' : '') + '.</strong>'
         + (ls.ids.length ? ' Order' + (ls.ids.length > 1 ? 's ' : ' ') + escapeHtmlWs(ls.ids.map(function (id) { return '#' + id; }).join(' + ')) + '.' : '');
       // Name the lines that were held back as a pre-order (printed to
       // order / out of stock) so the manager can tell the buyer what
@@ -16387,6 +16416,13 @@
             + '</span></div>';
         });
         h += '<div class="merch-qs-total"><span>Total</span><strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</strong></div>';
+        // PayPal: the pass-through processing fee rides on top (Erin,
+        // 2026-08-16); the server records it on the order.
+        if (_merchQsMethod === 'paypal') {
+          var qsFee = merchPaypalFeeCents(merchQsTotalCents());
+          h += '<div class="merch-qs-total merch-qs-fee"><span>PayPal fee <span class="ws-wv-context">(' + escapeHtmlWs(MERCH_PAYPAL_FEE_LABEL) + ')</span></span><strong>' + escapeHtmlWs(fmtCents(qsFee)) + '</strong></div>';
+          h += '<div class="merch-qs-total merch-qs-charge"><span>Charge via PayPal</span><strong>' + escapeHtmlWs(fmtCents(merchQsTotalCents() + qsFee)) + '</strong></div>';
+        }
         if (cartHasPrinted || cartHasOut) {
           var why = [];
           if (cartHasPrinted) why.push('T-shirts are printed to order');
@@ -16412,11 +16448,14 @@
         h += '</datalist>';
 
         h += '<div class="merch-qs-methods" role="group" aria-label="How they paid">';
+        // The PayPal chip carries the fee-inclusive amount so the manager
+        // can quote it before the buyer opens their app.
         MERCH_PAY_METHODS_NEW.forEach(function (m) {
           h += '<button type="button" class="sc-btn merch-qs-chip merch-qs-method' + (_merchQsMethod === m ? ' merch-qs-chip-on' : '') + '" data-method="' + m + '" aria-pressed="' + (_merchQsMethod === m ? 'true' : 'false') + '">' + escapeHtmlWs(MERCH_PAY_LABELS[m]) + '</button>';
         });
         h += '</div>';
-        h += '<button type="button" class="btn btn-primary merch-qs-record" id="merch-qs-record">Record sale — ' + escapeHtmlWs(fmtCents(merchQsTotalCents())) + '</button>';
+        var qsCharge = merchQsTotalCents() + (_merchQsMethod === 'paypal' ? merchPaypalFeeCents(merchQsTotalCents()) : 0);
+        h += '<button type="button" class="btn btn-primary merch-qs-record" id="merch-qs-record">Record sale — ' + escapeHtmlWs(fmtCents(qsCharge)) + (_merchQsMethod === 'paypal' ? ' <span class="merch-qs-record-sub">incl. PayPal fee</span>' : '') + '</button>';
         h += '<div class="merch-qs-actions"><button type="button" class="btn btn-outline-dark btn-sm" id="merch-qs-clear">Clear cart</button></div>';
         h += '<div class="ws-merch-add-status" id="merch-qs-status" role="status" aria-live="polite"></div>';
         h += '</div>'; // .merch-qs-cart-body
@@ -16619,11 +16658,13 @@
           var made = Array.isArray(res.data.orders) ? res.data.orders : (res.data.order ? [res.data.order] : []);
           if (Array.isArray(_merchDeskCache)) made.slice().reverse().forEach(function (o) { _merchDeskCache.unshift(o); });
           var soldTotal = made.length ? made.reduce(function (s, o) { return s + (o.total_cents || 0); }, 0) : merchQsTotalCents();
+          var soldFee = made.reduce(function (s, o) { return s + (Number(o.fee_cents) || 0); }, 0);
           // The pre-order (if any) is the order the server did NOT mark
           // delivered — its lines are what the buyer picks up later.
           var preOrder = made.filter(function (o) { return o && o.status !== 'delivered'; })[0] || null;
           _merchQsLastSale = {
             total_cents: soldTotal,
+            fee_cents: soldFee,
             ids: made.map(function (o) { return o.id; }).filter(function (id) { return id != null; }),
             preorder: !!res.data.preorder,
             preorderOrderId: preOrder ? preOrder.id : null,
@@ -16823,7 +16864,9 @@
     { key: 'method', label: 'Method', type: 'string',
       sortValue: function (r) { return MERCH_FIN_METHOD_LABELS[r.method] || r.method || ''; },
       render: function (r) {
-        return r.method ? escapeHtmlWs(MERCH_FIN_METHOD_LABELS[r.method] || r.method) : '<span class="ws-srt-actions-empty">&mdash;</span>';
+        if (!r.method) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        return escapeHtmlWs(MERCH_FIN_METHOD_LABELS[r.method] || r.method)
+          + (Number(r.fee_cents) ? ' <span class="ws-wv-context" title="Processing fee the buyer paid on top — never reaches the co-op, not in Amount">+' + escapeHtmlWs(fmtCents(r.fee_cents)) + ' fee</span>' : '');
       }
     },
     { key: 'amount', label: 'Amount', type: 'number',
@@ -17184,7 +17227,7 @@
   function showMemberMerchOrdersModal() {
     var outer = renderReportModal({
       title: 'My Merch Orders',
-      subtitle: 'Orders you’ve placed for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal).',
+      subtitle: 'Orders you’ve placed for pickup at the next event. No online payment — you pay the Merchandise Manager at pickup (cash, check, or PayPal; PayPal adds its ' + MERCH_PAYPAL_FEE_LABEL + ' processing fee).',
       meta: '',
       icons: [],
       bodyId: 'mm-merch-modal-body',
@@ -17244,9 +17287,11 @@
         // nothing owed
       } else if (o.paid_at) {
         h += ' · Paid' + (o.payment_method ? ' by ' + escapeHtmlWs(MERCH_PAY_LABELS[o.payment_method] || o.payment_method) : '')
+          + (Number(o.fee_cents) ? ' (' + escapeHtmlWs(fmtCents(merchOrderChargedCents(o))) + ' incl. processing fee)' : '')
           + (o.paid_at ? ' ' + escapeHtmlWs(formatReportDate(o.paid_at)) : '');
       } else {
-        h += ' · <span class="ws-wv-pending">Owed at pickup: ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</span>';
+        h += ' · <span class="ws-wv-pending">Owed at pickup: ' + escapeHtmlWs(fmtCents(o.total_cents)) + '</span>'
+          + ' <span class="ws-wv-context">(' + escapeHtmlWs(merchPaypalTotalText(o.total_cents)) + ', which includes its processing fee)</span>';
       }
       h += '</p>';
       h += '</div>';

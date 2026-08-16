@@ -437,6 +437,37 @@ t('normalizeLedgerEntry: expense/deposit must be positive; adjustment may be neg
   assert.strictEqual(stripped.note, 'xok');
 });
 
+// ── PayPal pass-through fee (Erin, 2026-08-16: "add the fee into the cost") ──
+// Same 1.99% + 49¢ gross-up as register.html / the billing card: after
+// PayPal takes its cut of (price + fee), the co-op nets at least the price.
+// Cash/check carry no fee; a zero total carries none either.
+t('paypalFeeCents grosses up so the co-op nets the price; cash/check carry 0', () => {
+  const { paypalFeeCents, orderFeeCents, PAYPAL_FEE_RATE, PAYPAL_FEE_FIXED_CENTS } = require('../api/_merch.js');
+  assert.strictEqual(PAYPAL_FEE_RATE, 0.0199);
+  assert.strictEqual(PAYPAL_FEE_FIXED_CENTS, 49);
+  assert.strictEqual(paypalFeeCents(0), 0);
+  assert.strictEqual(paypalFeeCents(1000), 71);   // $10 tee → $10.71
+  assert.strictEqual(paypalFeeCents(200), 55);    // $2 sticker → $2.55
+  for (const c of [100, 200, 700, 1000, 1500, 3000, 4999, 10000]) {
+    const fee = paypalFeeCents(c);
+    const net = (c + fee) * (1 - PAYPAL_FEE_RATE) - PAYPAL_FEE_FIXED_CENTS;
+    assert.ok(net >= c - 0.5, 'net ' + net + ' < price ' + c);
+    assert.ok(Number.isInteger(fee) && fee > 0);
+  }
+  assert.strictEqual(orderFeeCents('paypal', 1000), 71);
+  assert.strictEqual(orderFeeCents('cash', 1000), 0);
+  assert.strictEqual(orderFeeCents('check', 1000), 0);
+  assert.strictEqual(orderFeeCents('', 1000), 0);
+});
+// The client mirror in script.js must agree with the server (display only,
+// but a drifted rate would quote the buyer the wrong number).
+t('script.js merchPaypalFeeCents mirrors api/_merch.js', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'script.js'), 'utf8');
+  assert.ok(/var MERCH_PAYPAL_FEE_RATE = 0\.0199;/.test(src), 'client rate is 0.0199');
+  assert.ok(/var MERCH_PAYPAL_FEE_FIXED_CENTS = 49;/.test(src), 'client fixed part is 49¢');
+  assert.ok(/function merchPaypalFeeCents\(totalCents\)/.test(src), 'client helper exists');
+});
+
 (async () => {
   for (const run of pending) await run();
   console.log('\nmerch-allocation: ' + passed + ' passed, ' + failed + ' failed');

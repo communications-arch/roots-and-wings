@@ -23,6 +23,23 @@
 //     excluded) + anything with on_hand below restock_threshold, minus
 //     what's already on_order from the supplier.
 
+// PayPal processing fee passed through to the buyer (Erin, 2026-08-16:
+// "add the fee into the cost") — the SAME rate + gross-up the registration
+// form and the billing card use (1.99% + 49¢, register.html PAYPAL_FEE),
+// so the co-op nets the catalog price after PayPal takes its cut. Cents in,
+// cents out; 0 for a zero total. Client mirror: script.js merchPaypalFeeCents.
+const PAYPAL_FEE_RATE = 0.0199;
+const PAYPAL_FEE_FIXED_CENTS = 49;
+function paypalFeeCents(totalCents) {
+  const t = Math.max(0, Math.round(Number(totalCents) || 0));
+  if (!t) return 0;
+  return Math.ceil((t + PAYPAL_FEE_FIXED_CENTS) / (1 - PAYPAL_FEE_RATE) - t);
+}
+// The fee an order carries for a given payment method (0 unless PayPal).
+function orderFeeCents(method, totalCents) {
+  return method === 'paypal' ? paypalFeeCents(totalCents) : 0;
+}
+
 // Normalize a client lines payload: ints, qty 1-99, duplicate variants
 // merged, max 30 distinct lines. Returns null when nothing valid.
 // Shared by the member place-order path (api/supply-closet.js) and the
@@ -314,6 +331,7 @@ module.exports = {
   normalizeLines, takeOutcome, orderTotalCents, needsOrderingQty,
   takeStock, allocateOrderLines, allocateBackorderedLines,
   splitQuickSaleLines,
+  PAYPAL_FEE_RATE, PAYPAL_FEE_FIXED_CENTS, paypalFeeCents, orderFeeCents,
   LEDGER_TYPES, LEDGER_ENTRY_TYPES, LEDGER_METHODS,
   ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry
 };

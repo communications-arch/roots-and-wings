@@ -2877,6 +2877,12 @@ ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS vendor_url  TEXT NOT NULL DEFAU
 ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS notes       TEXT NOT NULL DEFAULT '';
 ALTER TABLE merch_items ADD COLUMN IF NOT EXISTS preorder_only BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE merch_variants ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+-- PayPal processing fee passed through to the buyer (Erin, 2026-08-16):
+-- set when an order is marked paid by PayPal (api/_merch.js orderFeeCents,
+-- 1.99% + 49¢ gross-up), 0 for cash/check. total_cents stays the catalog
+-- price (what the co-op nets); total_cents + fee_cents is what the buyer
+-- was charged. Merch Finances sums total_cents — the fee never reaches us.
+ALTER TABLE merch_desk_orders ADD COLUMN IF NOT EXISTS fee_cents INTEGER NOT NULL DEFAULT 0;
 
 -- Vendor name: first non-empty legacy value per item (legacy slug →
 -- catalog name, same mapping as the catalog seed above).

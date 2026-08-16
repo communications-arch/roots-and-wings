@@ -18,7 +18,7 @@ const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, ac
 const { hasCapability } = require('./_capabilities');
 const { pushNotifications } = require('./_push');
 const { canActAs, resolveFamily } = require('./_family');
-const { allocateOrderLines, orderTotalCents, normalizeLines } = require('./_merch');
+const { allocateOrderLines, orderTotalCents, normalizeLines, orderFeeCents } = require('./_merch');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -5778,6 +5778,10 @@ async function handleMerchDeskPublicOrder(body, req, res) {
   if (!merchCc) merchCc = 'communications@rootsandwingsindy.com';
 
   const totalStr = '$' + (totalCents / 100).toFixed(2);
+  // PayPal carries its processing fee (Erin, 2026-08-16) — say the PayPal
+  // amount up front so nobody is surprised at the table.
+  const ppFee = orderFeeCents('paypal', totalCents);
+  const paypalNote = ppFee ? ' ($' + ((totalCents + ppFee) / 100).toFixed(2) + ' by PayPal, which includes its 1.99% + 49&cent; processing fee)' : '';
   // One row per requested variant (the stored lines may have split into
   // allocated + backordered — the buyer sees what they ordered).
   const lineRows = priced.map(l => {
@@ -5797,7 +5801,7 @@ async function handleMerchDeskPublicOrder(body, req, res) {
     html: `
       <h2>Thanks for your order!</h2>
       <p>Hi ${escapeHtml(name)},</p>
-      <p>We've received your merchandise order. Payment (<strong>${escapeHtml(totalStr)}</strong>) is due at pickup — we accept cash, check, or PayPal. Our Merchandise Manager will follow up with pickup timing.</p>
+      <p>We've received your merchandise order. Payment (<strong>${escapeHtml(totalStr)}</strong>) is due at pickup — we accept cash, check, or PayPal${paypalNote}. Our Merchandise Manager will follow up with pickup timing.</p>
       <table style="border-collapse:collapse;font-family:sans-serif;margin:16px 0;">
         ${lineRows}
         <tr><td style="padding:6px 16px 6px 0;font-weight:bold;">Total</td><td style="padding:6px 0;text-align:right;font-weight:bold;">${escapeHtml(totalStr)}</td></tr>
