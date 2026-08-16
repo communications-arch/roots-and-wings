@@ -3287,7 +3287,7 @@
         // 2026-07-17). Bare group name (not groupWithAge, which appends the
         // age range).
         var subtitle = person.type === 'kid'
-          ? escapeHtml(person.group || '')
+          ? kidGroupBadge(person.group || '')
           : (ROLE_LABELS_DIR[person.role] || 'Parent');
         var bgStyle = faceColor(person.name);
 
