@@ -15842,23 +15842,6 @@
     return rows;
   }
 
-  // Receive-stock inline row (rendered beneath the variant row via the
-  // shared table's editRowKey). Same merch-stock-adjust flow as before.
-  function merchStockRowHtml(r) {
-    return '<div class="merch-inv-edit-title"><strong>' + escapeHtmlWs(r.item.name) + '</strong>'
-      + (r.v.label ? ' <span class="ws-wv-context">' + escapeHtmlWs(r.v.label) + '</span>' : '') + '</div>'
-      + '<span class="merch-desk-payrow">Received '
-      + '<input type="number" id="merch-stock-delta-' + r.id + '" value="1" step="1" style="width:70px;"> '
-      + '<label style="font-weight:normal;"><input type="checkbox" id="merch-stock-fromorder-' + r.id + '" checked> from a supplier order (draws down on order' + (r.v.on_order > 0 ? ': ' + r.v.on_order : '') + ')</label> '
-      + '<button type="button" class="sc-btn sc-save merch-stock-save" data-variant-id="' + r.id + '">Save</button>'
-      + '<button type="button" class="sc-btn merch-stock-cancel">Cancel</button>'
-      + '<span class="ws-wv-context">use a negative number to correct a recount</span></span>';
-  }
-
-  // Flip one variant's active flag via a full-row merch-variant-save (the
-  // action is a whole-row write; every other field is resent unchanged).
-  // Inline On-hand edit → recount: send the delta through merch-stock-adjust
-  // (the same path Receive-stock used), then patch the cache and repaint.
   function merchSetOnHand(variantId, wanted, inp) {
     var cat = _merchCatalogCache || { variants: [] };
     var v = (cat.variants || []).filter(function (x) { return x.id === variantId; })[0];
