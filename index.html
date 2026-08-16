@@ -1417,6 +1417,8 @@
             } else {
               gridEl.querySelectorAll('.fade-in').forEach(function (el) { el.classList.add('visible'); });
             }
+                      // Deep link (#merch): the grid just changed height — re-anchor.
+            if (typeof window.__rwReanchorHash === 'function') window.__rwReanchorHash();
           }
 
           function loadCatalog() {
@@ -1665,7 +1667,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260816e"></script>
+  <script src="script.js?v=20260816f"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.
@@ -1710,6 +1712,7 @@
             html += '</div>';
           });
           grid.innerHTML = html;
+          if (typeof window.__rwReanchorHash === 'function') window.__rwReanchorHash();
           // Re-arm the fade-in observer for the freshly-injected cards so
           // they animate in like the rest of the page.
           if ('IntersectionObserver' in window) {
@@ -1737,11 +1740,18 @@
       // Only correct if layout actually moved the target after the native
       // jump (the async board grid above it) — otherwise the extra scroll
       // reads as a visible double-take.
-      var initialTop = target.getBoundingClientRect().top;
-      window.setTimeout(function () {
+      // Two async renders (board grid, catalog merch grid) shift the page
+      // after the native jump. Re-anchor once each has settled — via this
+      // hook, which those renderers call — plus a late safety pass.
+      var lastTop = target.getBoundingClientRect().top;
+      function reanchor() {
         var nowTop = target.getBoundingClientRect().top;
-        if (Math.abs(nowTop - initialTop) > 8) target.scrollIntoView({ block: 'start' });
-      }, 450);
+        if (Math.abs(nowTop - lastTop) > 8 || Math.abs(nowTop) > 8) target.scrollIntoView({ block: 'start' });
+        lastTop = target.getBoundingClientRect().top;
+      }
+      window.__rwReanchorHash = reanchor;
+      window.setTimeout(reanchor, 450);
+      window.setTimeout(reanchor, 1500);
     })();
   </script>
 </body>

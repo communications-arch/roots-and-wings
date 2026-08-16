@@ -16105,7 +16105,7 @@
               }
               btn.textContent = 'Upload new photo';
               btn.disabled = false;
-              say('Photo uploaded — Save to keep it.', false);
+              say('Photo uploaded — Save to keep it. The public merch page picks it up within about a minute.', false);
             })
             .catch(function (e) {
               btn.disabled = false;
