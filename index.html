@@ -1106,7 +1106,7 @@
               <input type="number" id="merch-qty" min="1" max="99" value="1">
             </div>
             <div class="tour-form-field" style="display:flex; align-items:flex-end;">
-              <button type="button" id="merch-add-line" class="btn btn-primary btn-sm" style="width:100%;">Add to order</button>
+              <button type="button" id="merch-add-line" class="btn btn-outline-dark btn-sm" style="width:100%;">+ Add another item</button>
             </div>
           </div>
           <p id="merch-preorder-note" hidden style="margin:-4px 0 10px;font-size:0.85rem;font-style:italic;color:#5c5c5c;">Printed to order — this item is a pre-order. We’ll let you know when it’s ready for pickup.</p>
@@ -1293,10 +1293,13 @@
           }
 
           itemSel.addEventListener('change', renderVariantOptions);
-          document.getElementById('merch-add-line').addEventListener('click', function () {
+          // Fold the current item/variant/qty selection into the cart. Used by
+          // “+ Add another item” AND by Place Order (so a single-item order is
+          // one tap — Erin 2026-08-15: the extra Add step read as pointless).
+          function addCurrentSelection() {
             var vid = parseInt(variantSel.value, 10);
             var qty = parseInt(qtyInput.value, 10);
-            if (!vid || !variantById(vid)) return;
+            if (!vid || !variantById(vid)) return false;
             if (!qty || qty < 1) qty = 1;
             qty = Math.min(qty, 99);
             var existing = null;
@@ -1306,7 +1309,9 @@
             qtyInput.value = 1;
             errEl.style.display = 'none';
             renderCart();
-          });
+            return true;
+          }
+          document.getElementById('merch-add-line').addEventListener('click', function () { addCurrentSelection(); });
 
           function resetMerchModal() {
             formEl.reset();
@@ -1387,8 +1392,10 @@
           formEl.addEventListener('submit', async function (e) {
             e.preventDefault();
             errEl.style.display = 'none';
+            // Whatever is currently selected counts — no separate Add step needed.
+            if (parseInt(variantSel.value, 10) && addCurrentSelection()) { itemSel.value = ''; renderVariantOptions(); }
             if (cart.length === 0) {
-              errEl.textContent = 'Add at least one item to your order first.';
+              errEl.textContent = 'Pick an item to order first.';
               errEl.style.display = 'block';
               return;
             }
@@ -1476,7 +1483,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260815m"></script>
+  <script src="script.js?v=20260815n"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.

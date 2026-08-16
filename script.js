@@ -15661,11 +15661,13 @@
     },
     { key: 'on_hand', label: 'On hand', type: 'number',
       sortValue: function (r) { return r.v.on_hand; },
+      // Inline editable count (Erin 2026-08-15): typing a new number saves a
+      // recount straight away — no separate Receive-stock step.
       render: function (r) {
         var pill = '';
         if (r.v.on_hand === 0) pill = ' <span class="merch-stock-pill merch-stock-out">Out</span>';
         else if (r.v.restock_threshold > 0 && r.v.on_hand < r.v.restock_threshold) pill = ' <span class="merch-stock-pill merch-stock-low">Low</span>';
-        return String(r.v.on_hand) + pill
+        return '<input type="number" min="0" max="100000" class="merch-cat-onhand-input" data-variant-id="' + r.id + '" value="' + (parseInt(r.v.on_hand, 10) || 0) + '" aria-label="On hand for ' + escapeHtmlWs(r.item.name + (r.v.label ? ' — ' + r.v.label : '')) + '" style="width:4.5em;">' + pill
           + (r.backordered > 0 ? ' <span class="merch-stock-pill merch-stock-low">' + r.backordered + ' backordered</span>' : '');
       }
     },
@@ -15703,8 +15705,6 @@
         return '<div class="ws-srt-actions">'
           + '<select class="sc-btn ws-mem-action-sel merch-cat-action-sel" data-variant-id="' + r.id + '" data-item-id="' + r.item.id + '" aria-label="Actions for ' + escapeHtmlWs(lbl) + '">'
           + '<option value="">Actions&hellip;</option>'
-          + '<option value="edit-variant">Edit variant</option>'
-          + '<option value="receive">Receive stock</option>'
           + '<option value="edit-item">Edit item (' + escapeHtmlWs(r.item.name) + ')</option>'
           + '<option value="add-variant">Add a variant to ' + escapeHtmlWs(r.item.name) + '</option>'
           + '</select>'
@@ -15742,6 +15742,29 @@
 
   // Flip one variant's active flag via a full-row merch-variant-save (the
   // action is a whole-row write; every other field is resent unchanged).
+  // Inline On-hand edit → recount: send the delta through merch-stock-adjust
+  // (the same path Receive-stock used), then patch the cache and repaint.
+  function merchSetOnHand(variantId, wanted, inp) {
+    var cat = _merchCatalogCache || { variants: [] };
+    var v = (cat.variants || []).filter(function (x) { return x.id === variantId; })[0];
+    if (!v || !Number.isFinite(wanted)) return;
+    wanted = Math.max(0, Math.min(wanted, 100000));
+    var delta = wanted - (parseInt(v.on_hand, 10) || 0);
+    if (!delta) return;
+    if (inp) inp.disabled = true;
+    fetch('/api/supply-closet?action=merch-stock-adjust' + notifViewAsSuffix(), {
+      method: 'POST', headers: rwAuthHeaders(true),
+      body: JSON.stringify({ variant_id: variantId, delta: delta, from_on_order: false })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the count.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } return; }
+        v.on_hand = (res.data && res.data.variant && res.data.variant.on_hand != null) ? res.data.variant.on_hand : wanted;
+        renderMerchCatalogBody();
+        if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
+      })
+      .catch(function () { alert('Network error — try again.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } });
+  }
+
   function merchToggleVariantActive(variantId, btn) {
     var cat = _merchCatalogCache || { variants: [] };
     var v = (cat.variants || []).filter(function (x) { return x.id === variantId; })[0];
@@ -15848,19 +15871,24 @@
       renderSortableTable(target, cols, rows, {
         initialSort: _merchCatSort || { key: 'item', dir: 'asc' },
         rowKey: function (r) { return r.id; },
-        // ONE in-place row at a time: the variant editor OR the receive-
-        // stock row (opening one closes the other).
-        editRowKey: _merchCatVariantEditId != null ? _merchCatVariantEditId : _merchStockAdjustFor,
-        renderEditRow: function (r) {
-          if (_merchCatVariantEditId === r.id) return merchVariantFormHtml(r.v, r.item.id);
-          return merchStockRowHtml(r);
-        },
+        // The expand arrow IS the variant editor (Erin 2026-08-15): opening a
+        // row shows its edit form (label, price, reorder-at, notes, active).
+        expandable: true,
+        renderDetail: function (r) { return merchVariantFormHtml(r.v, r.item.id); },
         onRender: function () {
           // Remember the active sort so edit toggles / filter changes (which
           // re-create the table) don't snap back to catalog order.
           target.querySelectorAll('th.ws-sort').forEach(function (t) {
             var a = t.querySelector('.ws-sort-arrow');
             if (a && a.textContent) _merchCatSort = { key: t.getAttribute('data-sort-key'), dir: a.textContent === '▲' ? 'asc' : 'desc' };
+          });
+          target.querySelectorAll('.merch-cat-onhand-input').forEach(function (inp) {
+            inp.addEventListener('click', function (e) { e.stopPropagation(); });
+            inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+            inp.addEventListener('change', function (e) {
+              e.stopPropagation();
+              merchSetOnHand(parseInt(inp.getAttribute('data-variant-id'), 10), parseInt(inp.value, 10), inp);
+            });
           });
           target.querySelectorAll('.merch-cat-active-toggle').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
@@ -15875,17 +15903,7 @@
               var act = sel.value; sel.value = '';
               var vid = parseInt(sel.getAttribute('data-variant-id'), 10);
               var iid = parseInt(sel.getAttribute('data-item-id'), 10);
-              if (act === 'edit-variant') {
-                _merchCatVariantEditId = (_merchCatVariantEditId === vid) ? null : vid;
-                _merchStockAdjustFor = null;
-                renderTable();
-              } else if (act === 'receive') {
-                _merchStockAdjustFor = (_merchStockAdjustFor === vid) ? null : vid;
-                _merchCatVariantEditId = null;
-                renderTable();
-                var input = document.getElementById('merch-stock-delta-' + vid);
-                if (input) input.focus();
-              } else if (act === 'edit-item') {
+              if (act === 'edit-item') {
                 // Item-level form renders above the table (whole-tab repaint).
                 _merchCatItemEditId = iid; _merchCatAddVariantFor = null;
                 _merchCatVariantEditId = null; _merchStockAdjustFor = null;
