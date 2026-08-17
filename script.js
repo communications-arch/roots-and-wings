@@ -11381,7 +11381,11 @@
         // Merchandise report (Orders queue / Catalog & Stock "Needs
         // ordering" view).
         var merchTitles = (typeof grantTitlesFor === 'function' && grantTitlesFor('merch_manage')) || ['Merchandise Manager'];
-        var merchTodoRole = merchTitles.some(function (t) { return normalizeWorkspaceTitle(t) === role; });
+        // Erin 2026-08-17: the Communications Director keeps the report
+        // (oversight) but NOT the merch To Dos — those are the Merchandise
+        // Manager's work items, on that tab only.
+        var merchTodoRole = role !== 'Communications Director'
+          && merchTitles.some(function (t) { return normalizeWorkspaceTitle(t) === role; });
         if (merchTodoRole) {
           h += '<li id="ws-todo-merch-restock-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-catalog-needs"><span class="ws-link-count" id="ws-merch-restock-count">0</span><span class="ws-link-icon">' + brandIconImg('supplyCloset', 'ag-icon') + '</span><span id="ws-merch-restock-label">Replenish Stock</span></button></li>';
           h += '<li id="ws-todo-merch-open-item" hidden><button type="button" class="ws-link-btn" data-resource-action="merch-orders-open"><span class="ws-link-count" id="ws-merch-open-count">0</span><span class="ws-link-icon">' + brandIconImg('todo', 'ag-icon') + '</span><span id="ws-merch-open-label">Outstanding Pre-Orders</span></button></li>';
