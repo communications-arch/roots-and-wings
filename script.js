@@ -14843,7 +14843,7 @@
     _merchCatItemFilter = 'all';
     _merchCatActiveFilter = 'any';
     _merchCatSort = null;
-    _merchDeskFilter = 'open';
+    _merchDeskFilter = opts.statusFilter || 'open'; // Finances "Open in Orders" passes 'all'
     _merchDeskSourceFilter = 'any';
     _merchDeskPaidFilter = 'any';
     _merchDeskInline = null;
@@ -17137,23 +17137,54 @@
     // are frozen.
     { key: '_actions', label: 'Actions', type: 'string', sortable: false,
       render: function (r) {
-        if (r.kind !== 'entry' || r.voided) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        // Manual entries: Edit / Void. Sales (Desk + legacy web orders): the
+        // money event IS the order's payment — "Undo payment" takes it out
+        // of the ledger and puts the order back to Unpaid (Erin 2026-08-17:
+        // the manager needs to void/fix a sale from here, not hunt for it
+        // in Orders); "Open in Orders" jumps to the order for anything else.
+        if (r.voided) return '<span class="ws-srt-actions-empty">&mdash;</span>';
+        var opts = '<option value="">Actions&hellip;</option>';
+        if (r.kind === 'entry') opts += '<option value="edit">Edit</option><option value="void">Void&hellip;</option>';
+        else if (r.kind === 'sale' || r.kind === 'legacy') opts += '<option value="unpay">Undo payment&hellip;</option><option value="open">Open in Orders</option>';
+        else return '<span class="ws-srt-actions-empty">&mdash;</span>';
         return '<div class="ws-srt-actions">'
           + '<select class="sc-btn ws-mem-action-sel merch-fin-action-sel" data-row-key="' + escapeHtmlWs(r.key) + '" aria-label="Actions for ' + escapeHtmlWs(r.description || 'this entry') + '">'
-          + '<option value="">Actions&hellip;</option>'
-          + '<option value="edit">Edit</option>'
-          + '<option value="void">Void&hellip;</option>'
-          + '</select></div>';
+          + opts + '</select></div>';
       }
     }
   ];
 
   // Two-step Void confirm beneath the row (the table's editRowKey slot).
   function merchFinInlineRowHtml(r) {
+    if (r.kind === 'sale' || r.kind === 'legacy') {
+      return '<span class="merch-desk-payrow">Undo the payment on <strong>' + escapeHtmlWs(r.description || ('order #' + r.id)) + '</strong>' + (r.amount_cents != null ? ' (' + escapeHtmlWs(fmtCents(r.amount_cents)) + ')' : '') + '? '
+        + '<span class="ws-wv-context">It leaves the ledger and the order goes back to Unpaid' + (r.kind === 'sale' ? ' (mark it paid again from Orders once corrected)' : '') + '.</span> '
+        + '<button type="button" class="sc-btn sc-btn-del merch-fin-unpay-confirm" data-row-key="' + escapeHtmlWs(r.key) + '">Undo payment</button>'
+        + '<button type="button" class="sc-btn merch-fin-inline-close">Keep</button></span>';
+    }
     return '<span class="merch-desk-payrow">Void <strong>' + escapeHtmlWs(r.description || 'this entry') + '</strong> (' + escapeHtmlWs(fmtCents(r.amount_cents)) + ')? '
       + '<span class="ws-wv-context">It stays in the ledger, dimmed and out of every total.</span> '
       + '<button type="button" class="sc-btn sc-btn-del merch-fin-void-confirm" data-entry-id="' + escapeHtmlWs(String(r.id)) + '">Confirm void</button>'
       + '<button type="button" class="sc-btn merch-fin-inline-close">Keep</button></span>';
+  }
+  // Undo a sale's payment from the ledger: Desk order → merch-order-status
+  // set:'unpaid'; legacy web order → merch-update paid=false. Then reload
+  // the ledger (the row disappears) and drop the Orders caches so the
+  // Merchandise & Orders report repaints fresh next open.
+  function merchFinUndoPayment(r, btn) {
+    if (btn) btn.disabled = true;
+    var req = r.kind === 'legacy'
+      ? fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'merch-update', id: r.id, field: 'paid', value: false }) })
+      : fetch('/api/supply-closet?action=merch-order-status' + notifViewAsSuffix(), { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ set: 'unpaid', id: r.id }) });
+    req.then(function (x) { return x.json().then(function (d) { return { ok: x.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert((res.data && res.data.error) || 'Could not undo the payment.'); if (btn) btn.disabled = false; return; }
+        _merchFinInline = null;
+        _merchDeskCache = null; _merchOrdersCache = null;
+        if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
+        loadMerchFinances();
+      })
+      .catch(function () { alert('Network error — try again.'); if (btn) btn.disabled = false; });
   }
 
   // Add / Edit entry form (above the grid, the standard add placement).
@@ -17325,15 +17356,24 @@
                 renderMerchFinancesBody();
                 var form = document.querySelector('.merch-fin-entry-form');
                 if (form && typeof form.scrollIntoView === 'function') form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              } else if (act === 'void') {
+              } else if (act === 'void' || act === 'unpay') {
                 _merchFinInline = (_merchFinInline === row.key) ? null : row.key;
                 renderTable();
+              } else if (act === 'open') {
+                // Jump to the order: Merchandise & Orders, Orders tab, all statuses.
+                if (typeof showMerchOrdersModal === 'function') showMerchOrdersModal({ tab: 'desk', statusFilter: 'all' });
               }
             });
           });
           target.querySelectorAll('.merch-fin-void-confirm').forEach(function (btn) {
             btn.addEventListener('click', function () {
               merchFinVoidEntry(parseInt(btn.getAttribute('data-entry-id'), 10), btn);
+            });
+          });
+          target.querySelectorAll('.merch-fin-unpay-confirm').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var row = byKey[btn.getAttribute('data-row-key')];
+              if (row) merchFinUndoPayment(row, btn);
             });
           });
           target.querySelectorAll('.merch-fin-inline-close').forEach(function (btn) {
