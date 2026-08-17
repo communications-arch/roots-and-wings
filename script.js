@@ -6660,21 +6660,14 @@
         var selHtml = '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
         var hintHtml = '';
         // Hour 2 hint (Erin 2026-08-16): most people keep the same job for
-        // both morning hours — say so, and offer it as ONE tap, only when
-        // that same option is actually open for Hour 2.
-        if (blk.key === 'AM2' && _volSameHourHint && selHtml.indexOf('value="' + _volSameHourHint.value + '"') !== -1) {
-          hintHtml = '<div class="mf-vol-same-hint"><span class="ws-wv-context">Most people keep the same job for both morning hours.</span> '
-            + '<button type="button" class="sc-btn mf-vol-same-btn" data-value="' + escapeAttr(_volSameHourHint.value) + '">Same for Hour 2 — ' + escapeHtml(_volSameHourHint.label) + '</button></div>';
+        // both morning hours — just say so under the Hour 2 picker after an
+        // Hour 1 pick (no auto-fill, no extra button — Erin: "the note is
+        // fine"). They pick it from the dropdown like anything else.
+        if (blk.key === 'AM2' && _volSameHourHint) {
+          hintHtml = '<div class="mf-vol-same-hint"><span class="ws-wv-context">Most people keep the same job for both morning hours — pick '
+            + escapeHtml(_volSameHourHint.label) + ' again here if that’s you.</span></div>';
         }
         injectRow(blk.key, selHtml + hintHtml, { prepend: true, bare: true });
-      });
-      document.querySelectorAll('.mf-vol-same-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var sel = btn.closest('.mf-vol-inline') && btn.closest('.mf-vol-inline').querySelector('.mf-vol-pick');
-          if (!sel) return;
-          sel.value = btn.getAttribute('data-value');
-          if (sel.value) sel.dispatchEvent(new Event('change', { bubbles: true }));
-        });
       });
       // Cleaning Crew section: your spot (with release) or the open areas.
       var famName = String((fam && fam.name) || '').trim().toLowerCase();
