@@ -6400,6 +6400,54 @@
   // "Assisting" rows (Erin 2026-08-16: injecting the ✕ afterwards by
   // finding the row failed for a both-hours Greenhouse assist).
   var _volMineSnap = null; // { email, session, mine, frozen }
+  var _volLastFam = null;  // family the panel last loaded for (reload target)
+  // Step-out / remove ✕ — ONE delegated listener (Erin 2026-08-16: a ✕
+  // painted into a duty row before the panel had re-wired buttons fell
+  // through to the row click and opened the class popup). Handles every
+  // .mf-vol-remove on the page: assist (hour-scoped), support pledge, or
+  // cleaning spot. Stops the row click from firing.
+  var _volRemoveWired = false;
+  function wireVolRemoveDelegate() {
+    if (_volRemoveWired) return;
+    _volRemoveWired = true;
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest && e.target.closest('.mf-vol-remove');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.disabled) return;
+      if (!confirm('Remove this sign-up?')) return;
+      var kind = btn.getAttribute('data-kind');
+      var idAttr = btn.getAttribute('data-id');
+      var blockAttr = btn.getAttribute('data-block') || '';
+      var cred = localStorage.getItem('rw_google_credential');
+      var showErr = function (msg) {
+        var el = document.getElementById('mfVolError');
+        if (el) { el.textContent = msg; el.style.display = ''; }
+        else if (typeof showSupplyToast === 'function') showSupplyToast(msg);
+      };
+      btn.disabled = true;
+      var req = kind === 'clean'
+        ? fetch('/api/cleaning?action=cleaning-signup&id=' + idAttr, { method: 'DELETE', headers: rwAuthHeaders() })
+        : fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr
+            + (kind === 'assist' && blockAttr ? '&block=' + encodeURIComponent(blockAttr) : '') + notifViewAsSuffix(), {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + cred }
+          });
+      req
+        .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+        .then(function (res) {
+          if (!res.ok) { btn.disabled = false; showErr((res.data && res.data.error) || 'Could not remove.'); return; }
+          publishedSchedule.loaded = false;
+          _volSameHourHint = null; // the Hour-2 hint keys off a pick that may just have gone
+          // Fresh matrix → snapshot → duty rows repaint (the removed row
+          // disappears once the published schedule reloads too).
+          if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e2) { /* best-effort */ } }
+          if (typeof loadVolunteerSignupPanel === 'function') loadVolunteerSignupPanel(_volLastFam);
+        })
+        .catch(function () { btn.disabled = false; showErr('Network error — try again.'); });
+    }, true); // capture: runs before the row's own click handler
+  }
   function volMineAssistFor(block, classId) {
     var snap = _volMineSnap;
     if (!snap || snap.frozen || snap.session !== currentSession) return null;
@@ -6428,6 +6476,8 @@
   function loadVolunteerSignupPanel(fam) {
     var wrap = document.getElementById('mfVolSignup');
     if (!wrap) return;
+    _volLastFam = fam;
+    wireVolRemoveDelegate();
     // Summer break = the old year ended and the new calendar isn't
     // posted yet. Last year's Session 5 must not present itself as
     // "current" for sign-ups (Erin, 2026-07-12 prod) — one quiet line
@@ -6781,34 +6831,9 @@
     });
     // Remove buttons live in the panel AND injected inline in the duty
     // sections above — wire document-wide, freshly each render.
-    document.querySelectorAll('.mf-vol-remove').forEach(function (btn) {
-      if (btn._volWired) return;
-      btn._volWired = true;
-      btn.addEventListener('click', function () {
-        if (!confirm('Remove this sign-up?')) return;
-        var kind = this.getAttribute('data-kind');
-        var idAttr = this.getAttribute('data-id');
-        // Hour-scoped assist rows remove just their own hour.
-        var blockAttr = this.getAttribute('data-block') || '';
-        var cred = localStorage.getItem('rw_google_credential');
-        var req = kind === 'clean'
-          ? fetch('/api/cleaning?action=cleaning-signup&id=' + idAttr, { method: 'DELETE', headers: rwAuthHeaders() })
-          : fetch('/api/curriculum?action=' + (kind === 'assist' ? 'volunteer-assist' : 'volunteer-signup') + '&id=' + idAttr
-              + (kind === 'assist' && blockAttr ? '&block=' + encodeURIComponent(blockAttr) : '') + notifViewAsSuffix(), {
-              method: 'DELETE',
-              headers: { 'Authorization': 'Bearer ' + cred }
-            });
-        req
-          .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
-          .then(function (res) {
-            if (!res.ok) { showErr((res.data && res.data.error) || 'Could not remove.'); return; }
-            publishedSchedule.loaded = false;
-            _volSameHourHint = null; // the Hour-2 hint keys off a pick that may just have gone
-            reload();
-          })
-          .catch(function () { showErr('Network error — try again.'); });
-      });
-    });
+    // (Remove ✕ buttons — assist / pledge / cleaning — are handled by ONE
+    // delegated listener, wireVolRemoveDelegate, so a ✕ painted into a duty
+    // row works before this panel has even re-rendered.)
     // Cleaning self-signup: pick an open area → claimed on the spot.
     var cleanSel = document.querySelector('.mf-vol-pick-clean');
     if (cleanSel) cleanSel.addEventListener('change', function () {
@@ -7911,8 +7936,12 @@
       // coverage claims wear the Leading/Assisting marks — same meaning,
       // same icon as the growth badges + Ways-to-Help buttons.
       var dutyIconHtml;
-      if (dutyGroup) dutyIconHtml = ageGroupIconHtml(dutyGroup[1]);
-      else if (roleKind) dutyIconHtml = volRoleIconImg(roleKind);
+      // Role mark FIRST for class rows (Erin 2026-08-16: the Greenhouse
+      // standing class is named "Greenhouse …", so the grove regex won it
+      // and the row wore two Greenhouse marks — the grove tag on line 2
+      // already carries the grove icon; the slot at left says what you DO).
+      if (roleKind) dutyIconHtml = volRoleIconImg(roleKind);
+      else if (dutyGroup) dutyIconHtml = ageGroupIconHtml(dutyGroup[1]);
       else if (d.icon === 'clean') dutyIconHtml = brandIconImg('cleaning', 'ag-icon');
       else if (d.icon === 'board') {
         // Board seats wear their role's own mark (#129 accents); Board
@@ -8463,6 +8492,7 @@
         if (e.target.closest('.mf-manage-btn')) return;
         if (e.target.closest('.mf-duty-cancel-cover')) return;
         if (e.target.closest('.mf-duty-plan')) return;
+        if (e.target.closest('.mf-vol-remove')) return; // step-out ✕ (Erin 2026-08-16)
         var idx = parseInt(this.getAttribute('data-duty-idx'), 10);
         if (duties[idx]) showDutyDetail(duties[idx]);
       });
