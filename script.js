@@ -7229,7 +7229,7 @@
           var helpers = (c.helpers || []).map(escapeHtmlWs).join(', ');
           var gridLead = escapeHtmlWs(c.teacher)
             + (c.co_teachers ? ' &amp; ' + brandIconImg('colead', 'ag-icon') + ' ' + escapeHtmlWs(c.co_teachers) : '');
-          var needTxt = 'needs ' + c.helpers_needed + ' more ⚠';
+          var needTxt = 'needs ' + c.helpers_needed + ' more';
           var needHtml = '';
           if (c.helpers_needed > 0) {
             needHtml = (helpers ? ', ' : ' ') + (!meCommitted
@@ -9398,8 +9398,8 @@
           var amAssistFrozen = _coordPmSignups.session === sessionTabView
             && ['closed', 'locked'].indexOf(String(_coordPmSignups.windowStatus || '')) !== -1;
           assists += (assists ? ', ' : '') + (withBtn && !amIsMine(c) && !amAssistFrozen
-            ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(hourBlk) + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class \u2014 this hour only">' + need + ' \u2014 sign up \u26a0</button>'
-            : '<span class="ra-open-note" style="display:inline;">' + need + ' \u26a0</span>');
+            ? '<button type="button" class="ra-open-note vgrid-need-btn am-assist-signup" data-vg-class="' + c.id + '" data-vg-block="' + escapeHtml(hourBlk) + '" data-vg-label="' + escapeHtml(c.class_name || 'this class') + '" title="Sign yourself up to assist this class \u2014 this hour only">' + need + ' \u2014 sign up</button>'
+            : '<span class="ra-open-note" style="display:inline;">' + need + '</span>');
         }
         return {
           topic: escapeHtml(c.class_name || 'TBD'),
