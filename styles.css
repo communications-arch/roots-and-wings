@@ -12515,6 +12515,10 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
    "backordered" demand pill; the inline editor's item-level doorways. */
 .merch-stock-reserved { color: var(--color-teal); background: rgba(var(--color-teal-rgb), 0.12); }
 .merch-cat-detail-more { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+/* Orders → Edit items (Erin 2026-08-17): one flex row per line. */
+.merch-order-edit { width: 100%; }
+.merch-order-edit-line { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.merch-order-edit-line .merch-oe-variant { flex: 1; min-width: 0; max-width: 520px; }
 /* My Family volunteer picker: Hour 2 "same as Hour 1" hint + one-tap chip
    (Erin 2026-08-16 — replaces the AM1→AM2 auto-mirror). */
 .mf-vol-same-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; font-size: 0.82rem; }

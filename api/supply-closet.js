@@ -1708,6 +1708,58 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     return res.status(400).json({ error: 'set must be paid, unpaid, ready, unready, delivered, or cancel' });
   }
 
+  // Edit an order's LINES (Erin, 2026-08-17: members enter orders wrong;
+  // the manager fixes them here rather than cancel + re-add, which would
+  // lose the order date, the family link and any notification history).
+  // Desk orders only, not delivered / cancelled / screened. Truthful stock:
+  // every allocated unit the order held goes back on the shelf, the old
+  // lines are dropped, and the new lines are allocated fresh through
+  // api/_merch.js allocateOrderLines (takes what the shelf really has —
+  // the just-restored units included — the rest backordered). Unchanged
+  // variants keep the price they were ordered at; new ones take today's.
+  // total_cents is recomputed; a PayPal-paid order's fee_cents follows the
+  // new total (the manager settles the difference by hand — noted in UI).
+  if (action === 'merch-order-edit') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const id = parseInt(body.id, 10);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+    const lines = merchNormalizeLines(body.lines);
+    if (!lines) return res.status(400).json({ error: 'An order needs at least one item.' });
+    const rows = await sql`SELECT * FROM merch_desk_orders WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Order not found.' });
+    const order = rows[0];
+    if (order.status === 'cancelled') return res.status(409).json({ error: 'That order was cancelled.' });
+    if (order.status === 'delivered') return res.status(409).json({ error: 'Delivered orders can’t be edited.' });
+    if (order.screen_reason) return res.status(409).json({ error: 'Rescue this order (Not spam) before editing it.' });
+    // Manager's own hands: inactive/unpriced variants allowed (requireActive false), like Quick Sale.
+    const loaded = await merchLoadVariants(sql, lines, false);
+    if (loaded.error) return res.status(409).json({ error: loaded.error });
+    const oldLines = await sql`SELECT variant_id, qty, price_cents_each, stock_status FROM merch_desk_order_items WHERE order_id = ${id}`;
+    const oldPrice = {};
+    oldLines.forEach(l => { if (oldPrice[l.variant_id] == null) oldPrice[l.variant_id] = l.price_cents_each; });
+    // 1. Give back every allocated unit, drop the old lines.
+    const give = {};
+    oldLines.forEach(l => { if (l.stock_status === 'allocated') give[l.variant_id] = (give[l.variant_id] || 0) + (parseInt(l.qty, 10) || 0); });
+    for (const vid of Object.keys(give)) {
+      if (give[vid] > 0) await sql`UPDATE merch_variants SET on_hand = on_hand + ${give[vid]}, updated_at = NOW() WHERE id = ${parseInt(vid, 10)}`;
+    }
+    await sql`DELETE FROM merch_desk_order_items WHERE order_id = ${id}`;
+    // 2. Allocate the new lines truthfully at the right prices.
+    const priced = lines.map(l => ({
+      variant_id: l.variant_id, qty: l.qty,
+      price_cents_each: oldPrice[l.variant_id] != null ? oldPrice[l.variant_id] : (loaded.variants[l.variant_id].price_cents || 0)
+    }));
+    await allocateOrderLines(sql, id, priced);
+    const total = orderTotalCents(priced);
+    const fee = order.paid_at ? orderFeeCents(order.payment_method, total) : 0;
+    const upd = await sql`
+      UPDATE merch_desk_orders SET total_cents = ${total}, fee_cents = ${fee}
+      WHERE id = ${id} RETURNING *
+    `;
+    const linesByOrder = await merchLinesByOrder(sql, [id]);
+    return res.status(200).json({ order: Object.assign({}, upd[0], { lines: linesByOrder[id] || [] }), previous_total_cents: order.total_cents });
+  }
+
   // "Not spam" for a screened public-form order (Orders tab bucket).
   // Clears screen_reason and — because screened orders were saved
   // all-backordered so junk could never drain the shelf — re-runs
