@@ -332,6 +332,40 @@ function isGreenhouseAssistClass(r) {
     && String(r.age_groups[0] || '').toLowerCase() === 'greenhouse';
 }
 
+// Greenhouse assistant NEED (Erin, 2026-08-16): the room takes TWO adult
+// assistants per hour — but only when there IS a Greenhouse grove this
+// year (0–2s enrolled). Some years there may be no toddlers at all, and a
+// standing class demanding assistants for an empty room would haunt every
+// sign-up picker and To Do. Self-healing sync, called at the top of the
+// read paths that count assistant needs (volunteer-matrix,
+// published-schedule, signup-todos, schedules-report): one EXISTS + a
+// conditional UPDATE that is a no-op when already right. Enrolled =
+// kids.class_group 'greenhouse' (or under 3 with no group yet), season
+// enrollment not withdrawn/not-returning, family not withdrawn.
+const GREENHOUSE_ASSISTANTS_WANTED = 2;
+let _ghSyncAt = { year: '', at: 0 };
+async function syncGreenhouseAssistNeed(sql, year) {
+  const now = Date.now();
+  if (_ghSyncAt.year === year && now - _ghSyncAt.at < 60 * 1000) return; // once a minute per warm function
+  _ghSyncAt = { year, at: now };
+  const kids = await sql`
+    SELECT 1 FROM kids k
+    LEFT JOIN kid_enrollments e ON e.kid_id = k.id AND e.season = ${year}
+    LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)
+    WHERE (LOWER(COALESCE(k.class_group, '')) = 'greenhouse'
+           OR (COALESCE(k.class_group, '') = '' AND k.birth_date IS NOT NULL
+               AND k.birth_date > (NOW() AT TIME ZONE 'America/Indianapolis')::date - INTERVAL '3 years'))
+      AND COALESCE(e.status, 'enrolled') = 'enrolled'
+      AND mp.withdrawn_at IS NULL
+    LIMIT 1`;
+  const want = kids.length ? GREENHOUSE_ASSISTANTS_WANTED : 0;
+  await sql`
+    UPDATE class_submissions SET assistant_count = ${[want]}
+    WHERE school_year = ${year} AND class_period = 'AM'
+      AND age_groups = ARRAY['greenhouse']::text[]
+      AND assistant_count IS DISTINCT FROM ${[want]}::int[]`;
+}
+
 // Normalize + validate a submission body. Throws Error with a user-facing
 // message on invalid input. Returns the cleaned shape ready to INSERT.
 // opts.allowGreenhouseAM — ONLY the edit path passes this, and only when the
@@ -1112,6 +1146,7 @@ module.exports = async function handler(req, res) {
       // approved yet" (null).
       if (action === 'published-schedule') {
         const year = String(req.query.school_year || '2026-2027').slice(0, 20);
+        try { await syncGreenhouseAssistNeed(sql, year); } catch (e) { /* best-effort */ }
         const [approvalRows, classRows, helperRows] = await Promise.all([
           sql`SELECT session_number, approved_at, am_approved_at
               FROM co_op_sessions WHERE school_year = ${year}`,
@@ -1463,6 +1498,7 @@ module.exports = async function handler(req, res) {
       if (action === 'signup-todos') {
         const stReviewer = await isReviewerReq(user, req);
         if (!stReviewer) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can view sign-up to-dos.' });
+        try { await syncGreenhouseAssistNeed(sql, activeSchoolYear(new Date())); } catch (e) { /* best-effort */ }
         const stSess = parseInt(req.query.session, 10) || 1;
         const stYear = activeSchoolYear(new Date());
 
@@ -1744,6 +1780,7 @@ module.exports = async function handler(req, res) {
       // other board members read it read-only (Board at a Glance
       // precedent — same as the tour funnel).
       if (action === 'schedules-report') {
+        try { await syncGreenhouseAssistNeed(sql, activeSchoolYear(new Date())); } catch (e) { /* best-effort */ }
         const srScope = await isReviewerReq(user, req);
         let srReadOnly = false;
         if (!srScope) {
@@ -2079,6 +2116,7 @@ module.exports = async function handler(req, res) {
         const vmYear = String(req.query.school_year || '').trim().slice(0, 20) || activeSchoolYear();
         const vmSess = parseInt(req.query.session, 10);
         if (!Number.isFinite(vmSess) || vmSess < 1 || vmSess > 5) return res.status(400).json({ error: 'session 1-5 required' });
+        try { await syncGreenhouseAssistNeed(sql, vmYear); } catch (e) { /* best-effort */ }
         const actingEmail = actingEmailFor(user, req).toLowerCase();
         const [clsRows, helperRows, signupRows, cleanRows, meRows, apprRows] = await Promise.all([
           sql`SELECT c.id, c.class_name, c.class_period, c.scheduled_hour, c.age_groups, c.scheduled_age_range,

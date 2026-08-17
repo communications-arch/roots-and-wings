@@ -3005,6 +3005,10 @@ CREATE INDEX IF NOT EXISTS merch_ledger_entries_year_idx ON merch_ledger_entries
 -- same idiom a grove's one 2-hour morning class uses) so it appears in the
 -- AM1/AM2 volunteer sign-ups and on the Schedule Builder's morning grid,
 -- where the VP edits its assistant count like any other morning class.
+-- Erin 2026-08-16: TWO assistants per hour — but only when there IS a
+-- Greenhouse grove this year; api/curriculum.js syncGreenhouseAssistNeed
+-- keeps assistant_count at [2] / [0] from live enrollment (0–2s enrolled
+-- or not), so the seed's [2] is just the starting value.
 -- It has NO lead and no topic — adults are assistants only; the marker the
 -- API keys on is age_groups = ARRAY['greenhouse'] on an AM row (never the
 -- name). Kids still get no Greenhouse programming (every kid-side
@@ -3034,7 +3038,7 @@ SELECT
   '',
   ARRAY[gs.session_number::text],
   ARRAY['both'],
-  ARRAY[1],
+  ARRAY[2],
   ARRAY['greenhouse'],
   ARRAY[]::text[],
   0,

@@ -6389,6 +6389,11 @@
   }
 
   var _volPanelSession = null; // defaults to currentSession on first load
+  // Erin 2026-08-16: every pick books exactly the hour picked (the 07-15
+  // AM1→AM2 auto-mirror is gone). Instead, right after an AM Hour 1 pick
+  // the open Hour 2 row shows a hint + one-tap "Same for Hour 2" chip.
+  // { value, label } of the last Hour 1 pick, cleared once Hour 2 is set.
+  var _volSameHourHint = null;
   // Session the My Responsibilities DUTY ROWS display. null = current.
   // Set by the panel's S1–S5 chips (Erin, 2026-07-16: the rows kept
   // showing Session 1 while the chips only previewed the sign-up strip).
@@ -6568,10 +6573,26 @@
       }
     }
     if (isCurrent) {
+      if (_volSameHourHint && ((d.mine || {}).AM2 || !openBlocks.some(function (b) { return b.key === 'AM2'; }))) _volSameHourHint = null;
       openBlocks.forEach(function (blk) {
-        injectRow(blk.key,
-          '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>',
-          { prepend: true, bare: true });
+        var selHtml = '<select class="cl-input mf-vol-pick" data-block="' + blk.key + '" style="max-width:280px;">' + volSlotOptionsHtml(blk.key, d) + '</select>';
+        var hintHtml = '';
+        // Hour 2 hint (Erin 2026-08-16): most people keep the same job for
+        // both morning hours — say so, and offer it as ONE tap, only when
+        // that same option is actually open for Hour 2.
+        if (blk.key === 'AM2' && _volSameHourHint && selHtml.indexOf('value="' + _volSameHourHint.value + '"') !== -1) {
+          hintHtml = '<div class="mf-vol-same-hint"><span class="ws-wv-context">Most people keep the same job for both morning hours.</span> '
+            + '<button type="button" class="sc-btn mf-vol-same-btn" data-value="' + escapeAttr(_volSameHourHint.value) + '">Same for Hour 2 — ' + escapeHtml(_volSameHourHint.label) + '</button></div>';
+        }
+        injectRow(blk.key, selHtml + hintHtml, { prepend: true, bare: true });
+      });
+      document.querySelectorAll('.mf-vol-same-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var sel = btn.closest('.mf-vol-inline') && btn.closest('.mf-vol-inline').querySelector('.mf-vol-pick');
+          if (!sel) return;
+          sel.value = btn.getAttribute('data-value');
+          if (sel.value) sel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
       });
       // Cleaning Crew section: your spot (with release) or the open areas.
       var famName = String((fam && fam.name) || '').trim().toLowerCase();
@@ -6709,21 +6730,17 @@
           .then(function (res) {
             if (!res.ok) { showErr((res.data && res.data.error) || 'Could not sign up.'); sel.value = ''; return; }
             publishedSchedule.loaded = false; // helpers show on the schedule
-            // Picking AM Hour 1 defaults Hour 2 to the SAME thing (Erin,
-            // 2026-07-15) — best-effort, only when Hour 2 is still open;
-            // the ✕ on the Hour 2 row lets them swap it afterwards. A
-            // mirror that can't apply (hour-specific class, caps, support
-            // slots full) just leaves Hour 2 open — no error shown.
-            // SUPPORT ROLES ONLY: an assist is a ONE-hour commitment (#339,
-            // Lyndsey; Erin 2026-08-16 re: Greenhouse — "pick one AM hour,
-            // it signs me up for both"), so assisting a whole-morning class
-            // from the Hour 1 dropdown books just that hour.
-            if (!isAssist && pickedBlock === 'AM1' && !(d.mine && d.mine.AM2)) {
-              var mirrorBody = { school_year: body.school_year, session: d.session, block: 'AM2', role: v };
-              fetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' }, body: JSON.stringify(mirrorBody) })
-                .catch(function () { /* best-effort */ })
-                .then(function () { reload(); });
-              return;
+            // Every pick books exactly the hour picked (Erin 2026-08-16 —
+            // the 07-15 AM1→AM2 auto-mirror booked people into both hours;
+            // #339 made assists one-hour commitments). After an Hour 1
+            // pick, the Hour 2 row shows a hint + one-tap "Same for Hour
+            // 2" chip instead (see the picker injection above).
+            if (pickedBlock === 'AM1' && !(d.mine && d.mine.AM2)) {
+              var optEl = sel.options && sel.options[sel.selectedIndex];
+              var optTxt = optEl ? String(optEl.textContent || '') : '';
+              _volSameHourHint = { value: v, label: optTxt.split(' — ')[0].split(' · ')[0].trim() || v };
+            } else if (pickedBlock === 'AM2') {
+              _volSameHourHint = null;
             }
             reload();
           })
@@ -6754,6 +6771,7 @@
           .then(function (res) {
             if (!res.ok) { showErr((res.data && res.data.error) || 'Could not remove.'); return; }
             publishedSchedule.loaded = false;
+            _volSameHourHint = null; // the Hour-2 hint keys off a pick that may just have gone
             reload();
           })
           .catch(function () { showErr('Network error — try again.'); });
@@ -9279,6 +9297,10 @@
       (dbSess.am || []).forEach(function (c) {
         var key = String((c.age_groups || [])[0] || '').toLowerCase();
         if (!key) return;
+        // Greenhouse standing "assistants" class with NO need this year (no
+        // 0–2s enrolled → server syncs its count to 0, Erin 2026-08-16) and
+        // nobody signed up: there is no room to cover — don't show a block.
+        if (key === 'greenhouse' && !(c.assistants_wanted > 0) && !((c.helpers || []).length)) return;
         if (!amByGrove[key]) amByGrove[key] = { am1: null, am2: null };
         if (c.scheduled_hour === 'AM1') amByGrove[key].am1 = c;
         else if (c.scheduled_hour === 'AM2') amByGrove[key].am2 = c;

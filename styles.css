@@ -12515,6 +12515,9 @@ button.ws-welcome-count.is-active { box-shadow: 0 0 0 2px rgba(var(--color-prima
    "backordered" demand pill; the inline editor's item-level doorways. */
 .merch-stock-reserved { color: var(--color-teal); background: rgba(var(--color-teal-rgb), 0.12); }
 .merch-cat-detail-more { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+/* My Family volunteer picker: Hour 2 "same as Hour 1" hint + one-tap chip
+   (Erin 2026-08-16 — replaces the AM1→AM2 auto-mirror). */
+.mf-vol-same-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; font-size: 0.82rem; }
 .merch-qs-buyer .ws-merch-add-field input { min-height: 44px; font-size: 1rem; }
 .merch-qs-methods { display: flex; gap: 8px; }
 .merch-qs-methods .merch-qs-chip { flex: 1 1 0; text-align: center; justify-content: center; font-weight: 600; }
