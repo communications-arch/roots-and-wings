@@ -6394,6 +6394,19 @@
   // the open Hour 2 row shows a hint + one-tap "Same for Hour 2" chip.
   // { value, label } of the last Hour 1 pick, cleared once Hour 2 is set.
   var _volSameHourHint = null;
+  // Snapshot of the last volunteer-matrix payload's `mine` (per block) for
+  // the CURRENT session, keyed by acting email — renderDutyRow reads it to
+  // paint the assist step-out ✕ straight into the schedule-derived
+  // "Assisting" rows (Erin 2026-08-16: injecting the ✕ afterwards by
+  // finding the row failed for a both-hours Greenhouse assist).
+  var _volMineSnap = null; // { email, session, mine, frozen }
+  function volMineAssistFor(block, classId) {
+    var snap = _volMineSnap;
+    if (!snap || snap.frozen || snap.session !== currentSession) return null;
+    if (typeof getActiveEmail === 'function' && String(snap.email || '').toLowerCase() !== String(getActiveEmail() || '').toLowerCase()) return null;
+    var m = (snap.mine || {})[block];
+    return (m && m.kind === 'assist' && String(m.class_id) === String(classId)) ? m : null;
+  }
   // Session the My Responsibilities DUTY ROWS display. null = current.
   // Set by the panel's S1–S5 chips (Erin, 2026-07-16: the rows kept
   // showing Session 1 while the chips only previewed the sign-up strip).
@@ -6433,7 +6446,20 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d) { wrap.innerHTML = ''; return; }
+        var frozenNow = ['closed', 'locked'].indexOf(String(d.signup_window_status || '')) !== -1;
+        var snap = { email: (typeof getActiveEmail === 'function' ? getActiveEmail() : '') || '', session: d.session, mine: d.mine || {}, frozen: frozenNow };
+        var changed = JSON.stringify(_volMineSnap) !== JSON.stringify(snap);
+        _volMineSnap = snap;
+        window.__rwVolDebug = { session: d.session, currentSession: currentSession, mine: d.mine, dutyBlocks: _mfDutyBlocks, frozen: frozenNow, windowStatus: d.signup_window_status };
         renderVolunteerSignupPanel(wrap, d, fam);
+        // The duty rows paint the assist ✕ from the snapshot (renderDutyRow)
+        // — a changed snapshot means the grid must repaint once so the ✕
+        // appears / disappears. renderMyFamilyNow reloads this panel again
+        // afterwards; the snapshot is then unchanged, so it settles.
+        if (changed && d.session === currentSession && typeof _rwLastMyFamilyHtml !== 'undefined') {
+          _rwLastMyFamilyHtml = null;
+          if (typeof renderMyFamily === 'function') renderMyFamily();
+        }
       })
       .catch(function () { /* panel just stays empty */ });
   }
@@ -7851,8 +7877,18 @@
     var blockLabels = { AM1: 'AM1 (10:00)', AM2: 'AM2 (11:00)', PM1: 'PM1 (1:00)', PM2: 'PM2 (2:00)', Cleaning: 'Clean', covLater: 'Later', annual: 'Annual', twoyear: '2-Yr' };
 
     // Helper to render a single duty row
-    function renderDutyRow(d, globalIdx) {
+    function renderDutyRow(d, globalIdx, sectionBlk) {
       var classKey = getClassKey(d);
+      // Assist step-out ✕ (self-serve while the sign-up window is open):
+      // painted here from the volunteer-matrix snapshot, per SECTION — a
+      // both-hours ('AM') row rendered under AM1 releases AM1, under AM2
+      // releases AM2 (Erin 2026-08-16).
+      var stepOutHtml = '';
+      if (d.icon === 'assist' && !d.isCoverage && d.popup && d.popup.type === 'dbClass' && d.popup.id) {
+        var xBlk = (d.block === 'AM' && (sectionBlk === 'AM1' || sectionBlk === 'AM2')) ? sectionBlk : d.block;
+        var xMine = volMineAssistFor(xBlk, d.popup.id);
+        if (xMine) stepOutHtml = '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + escapeAttr(String(d.popup.id)) + '" data-block="' + escapeAttr(xMine.block || xBlk) + '" title="Step out of this class">✕</button>';
+      }
       var isTeacher = d.icon === 'teach';
       var hasRoleDesc = !!(getRoleKeyForDuty(d.text) && getRoleByKey(getRoleKeyForDuty(d.text)));
       var isClickable = d.popup || hasRoleDesc;
@@ -7945,6 +7981,7 @@
       }
       // Right-aligned actions area
       h += '<div class="mf-duty-actions">';
+      if (stepOutHtml) h += stepOutHtml;
       if (planBtnHtml) h += planBtnHtml;
       if (d.manage) {
         h += '<button class="mf-manage-btn" data-manage="' + d.manage + '">';
@@ -7999,7 +8036,7 @@
       var lblTime = (blockLabels[blk].match(/\(([^)]+)\)/) || [])[1] || '';
       html += '<div class="mf-block-section" data-block="' + blk + '"' + (hideEmpty ? ' style="display:none;"' : '') + '><div class="mf-block-label">' + lblName + (lblTime ? '<span class="mf-block-time">' + lblTime + '</span>' : '') + '</div>';
       blockDuties.forEach(function (d) {
-        html += renderDutyRow(d, duties.indexOf(d));
+        html += renderDutyRow(d, duties.indexOf(d), blk);
       });
       html += '</div>';
     });
