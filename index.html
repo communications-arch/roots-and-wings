@@ -1572,13 +1572,24 @@
           formEl.addEventListener('submit', async function (e) {
             e.preventDefault();
             errEl.style.display = 'none';
-            // Whatever is currently selected counts — no separate Add step needed.
-            if (parseInt(variantSel.value, 10) && addCurrentSelection()) { itemSel.value = ''; renderVariantOptions(); }
-            if (cart.length === 0) {
+            // Whatever is currently selected counts — no separate Add step
+            // needed. Merged into a COPY for the request: the picker and cart
+            // stay as they were until the order actually goes through, so a
+            // failed submit can simply be retried (review 2026-08-16 — folding
+            // the pick into the hidden cart first meant a re-pick doubled it).
+            var sendLines = cart.map(function (l) { return { variant_id: l.variant_id, qty: l.qty }; });
+            var curVid = parseInt(variantSel.value, 10);
+            if (curVid && variantById(curVid)) {
+              var curQty = Math.min(Math.max(parseInt(qtyInput.value, 10) || 1, 1), 99);
+              var hit = null; sendLines.forEach(function (l) { if (l.variant_id === curVid) hit = l; });
+              if (hit) hit.qty = Math.min(hit.qty + curQty, 99); else sendLines.push({ variant_id: curVid, qty: curQty });
+            }
+            if (sendLines.length === 0) {
               errEl.textContent = 'Pick an item to order first.';
               errEl.style.display = 'block';
               return;
             }
+            var sendTotal = sendLines.reduce(function (s, l) { var v = variantById(l.variant_id); return s + (v ? l.qty * v.price_cents : 0); }, 0);
             submitBtn.disabled = true;
             submitBtn.textContent = 'Submitting…';
             try {
@@ -1589,7 +1600,7 @@
                 errEl.textContent = 'Please tap the quick "I\'m human" check above, then try again.';
                 errEl.style.display = 'block';
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Place Order — ' + money(cartTotal());
+                submitBtn.textContent = 'Place Order — ' + money(sendTotal);
                 return;
               }
               var res = await fetch('/api/tour', {
@@ -1600,7 +1611,7 @@
                   name:  document.getElementById('merch-name').value,
                   email: document.getElementById('merch-email').value,
                   phone: document.getElementById('merch-phone').value,
-                  lines: cart,
+                  lines: sendLines,
                   notes: document.getElementById('merch-notes').value,
                   website: document.getElementById('merch-website').value,
                   form_ts: window.__rwPageTs || 0,
@@ -1631,7 +1642,7 @@
                 : 'Something went wrong. Please email communications@rootsandwingsindy.com.';
               errEl.style.display = 'block';
               submitBtn.disabled = false;
-              submitBtn.textContent = 'Place Order — ' + money(cartTotal());
+              submitBtn.textContent = 'Place Order — ' + money(sendTotal);
             }
           });
 
@@ -1668,7 +1679,7 @@
     })();
   </script>
 
-  <script src="script.js?v=20260816u"></script>
+  <script src="script.js?v=20260816v"></script>
 
   <!-- Pull the Board of Directors from the DB so the public site reflects
        role_holders without hand-edits to this HTML when the board rotates.
@@ -1744,10 +1755,24 @@
       // Two async renders (board grid, catalog merch grid) shift the page
       // after the native jump. Re-anchor once each has settled — via this
       // hook, which those renderers call — plus a late safety pass.
+      // The correctly-anchored target sits scroll-padding-top (nav height)
+      // below the viewport top — measure against THAT, not 0 (review
+      // 2026-08-16: `Math.abs(nowTop) > 8` was always true, so every pass
+      // re-scrolled and yanked a scrolling visitor back to #merch).
+      function expectedTop() {
+        var pad = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+        return pad;
+      }
       var lastTop = target.getBoundingClientRect().top;
+      var userScrolled = false;
+      window.addEventListener('wheel', function () { userScrolled = true; }, { passive: true, once: true });
+      window.addEventListener('touchmove', function () { userScrolled = true; }, { passive: true, once: true });
       function reanchor() {
+        if (userScrolled) return; // the visitor took over — leave them be
         var nowTop = target.getBoundingClientRect().top;
-        if (Math.abs(nowTop - lastTop) > 8 || Math.abs(nowTop) > 8) target.scrollIntoView({ block: 'start' });
+        var moved = Math.abs(nowTop - lastTop) > 8;
+        var offAnchor = Math.abs(nowTop - expectedTop()) > 8;
+        if (moved && offAnchor) target.scrollIntoView({ block: 'start' });
         lastTop = target.getBoundingClientRect().top;
       }
       window.__rwReanchorHash = reanchor;

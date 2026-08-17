@@ -3046,7 +3046,7 @@ SELECT
   gs.session_number,
   'AM',
   'Greenhouse (0–2)',
-  'Standing class: the Greenhouse (0–2) room takes adult ASSISTANTS only — no lead, no topic. Set how many assistants it needs per hour here — adults sign up through the AM1/AM2 morning sign-ups.',
+  'Standing class: the Greenhouse (0–2) room takes adult ASSISTANTS only — no lead, no topic. Its assistant count is automatic (2 per hour whenever any Greenhouse-age kid is enrolled, 0 otherwise) — adults sign up through the AM1/AM2 morning sign-ups.',
   'migrate.sql',
   NOW()
 FROM (

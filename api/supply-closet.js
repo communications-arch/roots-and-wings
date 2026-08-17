@@ -1683,6 +1683,16 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
 
     if (set === 'cancel') {
       if (order.status === 'delivered') return res.status(409).json({ error: 'Delivered orders can’t be cancelled.' });
+      // Flip the status FIRST with a conditional UPDATE (review 2026-08-16):
+      // two overlapping cancels (double-tap at the table, two managers) both
+      // passed the JS status check and restored the stock twice. Only the
+      // request that wins the flip restores stock.
+      const upd = await sql`
+        UPDATE merch_desk_orders SET status = 'cancelled'
+        WHERE id = ${id} AND status NOT IN ('cancelled', 'delivered')
+        RETURNING *
+      `;
+      if (!upd.length) return res.status(409).json({ error: 'That order was already cancelled (or delivered).' });
       // Restore stock the order had claimed; backordered lines never took any.
       const allocated = await sql`
         SELECT variant_id, SUM(qty)::int AS qty FROM merch_desk_order_items
@@ -1692,9 +1702,6 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
       for (const l of allocated) {
         await sql`UPDATE merch_variants SET on_hand = on_hand + ${l.qty}, updated_at = NOW() WHERE id = ${l.variant_id}`;
       }
-      const upd = await sql`
-        UPDATE merch_desk_orders SET status = 'cancelled' WHERE id = ${id} RETURNING *
-      `;
       return res.status(200).json({ order: upd[0], restocked: allocated.length });
     }
 
@@ -1881,8 +1888,20 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const variantId = parseInt(body.variant_id, 10);
     if (!Number.isInteger(variantId) || variantId < 1) return res.status(400).json({ error: 'variant_id required' });
-    const delta = parseInt(body.delta, 10);
-    if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 100000) {
+    // Two modes (review 2026-08-16): `set_on_hand` = the ABSOLUTE count the
+    // manager just typed (the Catalog's inline recount — a delta computed
+    // from a stale tab lands on the wrong number), or `delta` = a relative
+    // receipt/correction. Either way the fill-backorders pass below runs
+    // when stock went UP.
+    let delta = parseInt(body.delta, 10);
+    const setOnHand = body.set_on_hand != null ? parseInt(body.set_on_hand, 10) : null;
+    if (setOnHand != null) {
+      if (!Number.isFinite(setOnHand) || setOnHand < 0 || setOnHand > 100000) return res.status(400).json({ error: 'set_on_hand must be 0–100000.' });
+      const cur = await sql`SELECT on_hand FROM merch_variants WHERE id = ${variantId}`;
+      if (!cur.length) return res.status(404).json({ error: 'Variant not found.' });
+      delta = setOnHand - (parseInt(cur[0].on_hand, 10) || 0);
+      if (delta === 0) return res.status(200).json({ variant: (await sql`SELECT * FROM merch_variants WHERE id = ${variantId}`)[0], filled: 0, filled_orders: [] });
+    } else if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 100000) {
       return res.status(400).json({ error: 'delta must be a non-zero adjustment.' });
     }
     const fromOnOrder = !!body.from_on_order && delta > 0;

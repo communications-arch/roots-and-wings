@@ -6498,7 +6498,18 @@
         if (!d) { wrap.innerHTML = ''; return; }
         var frozenNow = ['closed', 'locked'].indexOf(String(d.signup_window_status || '')) !== -1;
         var snap = { email: (typeof getActiveEmail === 'function' ? getActiveEmail() : '') || '', session: d.session, mine: d.mine || {}, frozen: frozenNow };
-        var changed = JSON.stringify(_volMineSnap) !== JSON.stringify(snap);
+        // Repaint the grid ONLY when the set of assist ✕s it would paint
+        // differs (review 2026-08-16: comparing the whole snapshot forced a
+        // full rebuild on every first load / View-As switch — the #116
+        // flicker again, plus every card loader re-firing).
+        var xKeys = function (sn) {
+          if (!sn || sn.frozen) return '';
+          var m = sn.mine || {}; var out = [];
+          Object.keys(m).sort().forEach(function (b) { if (m[b] && m[b].kind === 'assist') out.push(b + ':' + m[b].class_id + ':' + (m[b].block || '')); });
+          return (sn.email || '') + '|' + out.join(',');
+        };
+        var prevKeys = xKeys(_volMineSnap), nextKeys = xKeys(snap);
+        var changed = prevKeys !== nextKeys && (nextKeys.indexOf(',') !== -1 || nextKeys.split('|')[1] !== '' || prevKeys.split('|')[1] !== '');
         _volMineSnap = snap;
         window.__rwVolDebug = { session: d.session, currentSession: currentSession, mine: d.mine, dutyBlocks: _mfDutyBlocks, frozen: frozenNow, windowStatus: d.signup_window_status };
         renderVolunteerSignupPanel(wrap, d, fam);
@@ -6567,28 +6578,9 @@
         // Already listed as a duty row — but an ASSIST must still offer its
         // step-out ✕ there while the window is open (Erin 2026-08-12: the
         // dedup silently removed the only self-serve way to move).
-        if (mine.kind === 'assist' && !assistFrozen && mine.class_id) {
-          var dutySec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
-          if (dutySec) {
-            var dutyRows = Array.prototype.slice.call(dutySec.querySelectorAll('.mf-duty'));
-            var lblMatch = String(mine.label).match(/^Assisting\s+“(.+)”$/);
-            var wantName = lblMatch ? lblMatch[1].toLowerCase() : '';
-            // By class id first (data-db-class, set by renderDutyRow) — the
-            // row text may not carry the class name (Greenhouse standing
-            // class shows just the grove). Text match stays as a fallback
-            // for rows built without a dbClass popup.
-            var target = dutyRows.filter(function (r) {
-              return !r.querySelector('.mf-vol-remove') && r.getAttribute('data-db-class') === String(mine.class_id);
-            })[0] || dutyRows.filter(function (r) {
-              if (r.querySelector('.mf-vol-remove') || r.getAttribute('data-db-class')) return false;
-              var t = (r.textContent || '').toLowerCase();
-              return t.indexOf('assisting') !== -1 && (!wantName || t.indexOf(wantName) !== -1);
-            })[0];
-            var acts = target && target.querySelector('.mf-duty-actions');
-            if (acts) acts.insertAdjacentHTML('afterbegin',
-              '<button type="button" class="sc-btn sc-btn-del mf-vol-remove" data-kind="assist" data-id="' + mine.class_id + '" data-block="' + (mine.block || '') + '" title="Step out of this class">✕</button>');
-          }
-        }
+        // The step-out ✕ on the schedule-derived "Assisting" row is painted
+        // by renderDutyRow from _volMineSnap (2026-08-16); nothing to inject
+        // here (the old text-match fallback could hang a ✕ on a coverage row).
         return;
       }
       var sec = document.querySelector('.mf-block-section[data-block="' + blk.key + '"]');
@@ -9024,7 +9016,10 @@
     }).then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         publishedSchedule.loading = false;
-        if (!d) return;
+        if (!d) {
+          if (publishedSchedule.refetchQueued) { publishedSchedule.refetchQueued = false; loadPublishedSchedule(true); }
+          return;
+        }
         publishedSchedule.sessions = d.sessions || {};
         publishedSchedule.loaded = true;
         publishedSchedule.fetchedAt = Date.now();
@@ -9228,12 +9223,19 @@
     h += '</div>';
     return h;
   }
+  // #353: a write that must be reflected calls THIS (not the plain loader):
+  // if a fetch is in flight, the reload is queued and runs when it lands
+  // (the in-flight result pre-dates the write); otherwise it fetches now.
+  // Plain loadCoordPmSignups calls during an in-flight load are no-ops
+  // (review 2026-08-16: they used to queue a duplicate fetch).
+  function invalidateCoordPmSignups(session) {
+    _coordPmSignups.session = null;
+    if (_coordPmSignups.loading) { _coordPmSignups.refetch = session; return; }
+    loadCoordPmSignups(session);
+  }
   function loadCoordPmSignups(session) {
     if (!session) return;
-    // #353: an invalidate-and-reload (session set to null) that arrives while
-    // a fetch is in flight must not be lost — the in-flight result would
-    // pre-date the write that triggered it. Remember the ask; re-run on land.
-    if (_coordPmSignups.loading) { if (_coordPmSignups.session !== session) _coordPmSignups.refetch = session; return; }
+    if (_coordPmSignups.loading) return;
     if (_coordPmSignups.session === session) return; // cached for this session
     var cred = localStorage.getItem('rw_google_credential');
     if (!cred) return;
@@ -15707,15 +15709,16 @@
           _merchCatalogCache = {
             items: res.data.items || [],
             variants: res.data.variants || [],
-            backordered: res.data.backordered || []
+            backordered: res.data.backordered || [],
+            reserved: res.data.reserved || []
           };
         } else {
-          _merchCatalogCache = { items: [], variants: [], backordered: [], error: (res.data && res.data.error) || 'load failed' };
+          _merchCatalogCache = { items: [], variants: [], backordered: [], reserved: [], error: (res.data && res.data.error) || 'load failed' };
         }
         if (typeof done === 'function') done();
       })
       .catch(function (err) {
-        _merchCatalogCache = { items: [], variants: [], backordered: [], error: (err && err.message) || 'network error' };
+        _merchCatalogCache = { items: [], variants: [], backordered: [], reserved: [], error: (err && err.message) || 'network error' };
         if (typeof done === 'function') done();
       });
   }
@@ -15985,9 +15988,13 @@
     var delta = wanted - (parseInt(v.on_hand, 10) || 0);
     if (!delta) return;
     if (inp) inp.disabled = true;
+    // Send the ABSOLUTE count typed (review 2026-08-16): a delta computed
+    // from a stale cache lands on the wrong number when another device sold
+    // or cancelled since this tab loaded. The server sets on_hand = count
+    // and fills backorders from there.
     fetch('/api/supply-closet?action=merch-stock-adjust' + notifViewAsSuffix(), {
       method: 'POST', headers: rwAuthHeaders(true),
-      body: JSON.stringify({ variant_id: variantId, delta: delta, from_on_order: false })
+      body: JSON.stringify({ variant_id: variantId, set_on_hand: wanted, from_on_order: false })
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the count.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } return; }
@@ -15998,7 +16005,7 @@
           // fills backorders oldest-first). The Orders cache holds stale
           // line statuses now; the catalog reload brings fresh
           // backordered/reserved counts and the honest free count.
-          _merchDeskCache = null;
+          if (typeof loadMerchDeskOrders === 'function') loadMerchDeskOrders();
           var ids = (res.data.filled_orders || []).map(function (id) { return '#' + id; }).join(', ');
           if (typeof showSupplyToast === 'function') {
             showSupplyToast('Set aside ' + filled + ' for pre-order' + (filled === 1 ? '' : 's') + (ids ? ' ' + ids : '')
@@ -16008,11 +16015,19 @@
           if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
           return;
         }
-        renderMerchCatalogBody();
+        merchCatalogRepaintAfterEdit();
         refreshMerchNav();
         if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
       })
       .catch(function () { alert('Network error — try again.'); if (inp) { inp.disabled = false; inp.value = v.on_hand; } });
+  }
+  // A quick row edit (count / active chip) must not wipe an item form the
+  // manager is mid-way through above the table (review 2026-08-16): repaint
+  // just the table when the last render left us its closure.
+  var _merchCatRenderTable = null;
+  function merchCatalogRepaintAfterEdit() {
+    if (typeof _merchCatRenderTable === 'function' && document.getElementById('merch-cat-table-target')) _merchCatRenderTable();
+    else renderMerchCatalogBody();
   }
 
   function merchToggleVariantActive(variantId, btn) {
@@ -16028,7 +16043,7 @@
       .then(function (res) {
         if (!res.ok) { alert((res.data && res.data.error) || 'Could not update the variant.'); if (btn) btn.disabled = false; return; }
         v.active = !v.active;
-        renderMerchCatalogBody();
+        merchCatalogRepaintAfterEdit();
         refreshMerchNav();
         if (typeof merchTodoRefresh === 'function') merchTodoRefresh();
       })
@@ -16042,12 +16057,15 @@
   function merchCatalogDetailHtml(r) {
     var h = merchVariantFormHtml(r.v, r.item.id);
     h += '<div class="merch-cat-detail-more">'
-      + '<button type="button" class="sc-btn merch-cat-add-variant-btn" data-item-id="' + r.item.id + '"' + (_merchCatAddVariantFor === r.item.id ? ' aria-expanded="true"' : ' aria-expanded="false"') + '>' + (_merchCatAddVariantFor === r.item.id ? 'Hide' : '+ Add a variant to ' + escapeHtmlWs(r.item.name)) + '</button>'
+      + '<button type="button" class="sc-btn merch-cat-add-variant-btn" data-item-id="' + r.item.id + '"' + (_merchCatAddVariantFor === r.item.id && _merchCatAddVariantRow === r.id ? ' aria-expanded="true"' : ' aria-expanded="false"') + '>' + (_merchCatAddVariantFor === r.item.id && _merchCatAddVariantRow === r.id ? 'Hide' : '+ Add a variant to ' + escapeHtmlWs(r.item.name)) + '</button>'
       + '<button type="button" class="sc-btn merch-cat-edit-item-btn" data-item-id="' + r.item.id + '">Edit item <span class="ws-wv-context">(' + escapeHtmlWs(r.item.name) + ' — name, photo, vendor, pre-order)</span></button>'
       + '</div>';
-    if (_merchCatAddVariantFor === r.item.id) h += merchVariantFormHtml(null, r.item.id, r.item.name);
+    // Only in the row it was opened from — one item can have many rows
+    // expanded, and the new-variant form's ids are per item (review 2026-08-16).
+    if (_merchCatAddVariantFor === r.item.id && _merchCatAddVariantRow === r.id) h += merchVariantFormHtml(null, r.item.id, r.item.name);
     return h;
   }
+  var _merchCatAddVariantRow = null; // variant row id that hosts the open add-variant form
   function wireMerchCatalogDetail(detailEl, r, renderTable) {
     // Repaint just this detail (keeps the row open + the scroll put).
     function repaintDetail() {
@@ -16058,7 +16076,17 @@
     var addBtn = detailEl.querySelector('.merch-cat-add-variant-btn');
     if (addBtn) addBtn.addEventListener('click', function (e) {
       e.stopPropagation();
-      _merchCatAddVariantFor = (_merchCatAddVariantFor === r.item.id) ? null : r.item.id;
+      var wasHere = (_merchCatAddVariantFor === r.item.id && _merchCatAddVariantRow === r.id);
+      _merchCatAddVariantFor = wasHere ? null : r.item.id;
+      _merchCatAddVariantRow = wasHere ? null : r.id;
+      // Another expanded row of this item may still show the old form — repaint it too.
+      document.querySelectorAll('#merch-cat-table-target tr.ws-srt-detail-row .ws-srt-detail').forEach(function (other) {
+        if (other !== detailEl && other.querySelector('.merch-cat-variant-form[data-variant-id^="new-"]')) {
+          var otherForm = other.querySelector('.merch-cat-variant-form[data-variant-id^="new-"]');
+          if (otherForm && otherForm.parentNode) otherForm.parentNode.removeChild(otherForm);
+          var ob = other.querySelector('.merch-cat-add-variant-btn'); if (ob) { ob.textContent = '+ Add a variant to ' + r.item.name; ob.setAttribute('aria-expanded', 'false'); }
+        }
+      });
       repaintDetail();
       var f = detailEl.querySelector('.merch-cat-variant-form[data-variant-id^="new-"] input');
       if (f) f.focus();
@@ -16202,6 +16230,7 @@
         target.insertAdjacentHTML('beforeend', '<p class="ws-empty">' + msg + '</p>');
       }
     }
+    _merchCatRenderTable = renderTable;
     renderTable();
   }
 
@@ -16232,10 +16261,10 @@
     var repaint = typeof rerender === 'function' ? rerender : renderMerchCatalogBody;
     scope.querySelectorAll('.merch-cat-item-cancel, .merch-cat-variant-cancel, .merch-stock-cancel').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        _merchCatItemEditId = null;
-        _merchCatVariantEditId = null;
-        _merchCatAddVariantFor = null;
-        _merchStockAdjustFor = null;
+        // Each Cancel closes ITS OWN form only (review 2026-08-16: a
+        // variant-row Cancel used to orphan the item form above the table).
+        if (btn.classList.contains('merch-cat-item-cancel')) _merchCatItemEditId = null;
+        else { _merchCatVariantEditId = null; _merchCatAddVariantFor = null; _merchStockAdjustFor = null; }
         repaint();
       });
     });
@@ -16389,7 +16418,15 @@
               method: 'POST', headers: rwAuthHeaders(true),
               body: JSON.stringify({ variant_id: saved.id, delta: delta, from_on_order: false })
             }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-              .then(function (res2) { if (!res2.ok) throw new Error('saved, but the on-hand recount failed: ' + ((res2.data && res2.data.error) || 'unknown')); });
+              .then(function (res2) {
+                if (!res2.ok) throw new Error('saved, but the on-hand recount failed: ' + ((res2.data && res2.data.error) || 'unknown'));
+                var f2 = (res2.data && res2.data.filled) || 0;
+                if (f2 > 0) {
+                  if (typeof loadMerchDeskOrders === 'function') loadMerchDeskOrders();
+                  var ids2 = (res2.data.filled_orders || []).map(function (id) { return '#' + id; }).join(', ');
+                  if (typeof showSupplyToast === 'function') showSupplyToast('Set aside ' + f2 + ' for pre-order' + (f2 === 1 ? '' : 's') + (ids2 ? ' ' + ids2 : '') + '.');
+                }
+              });
           })
           .then(function () {
             _merchCatVariantEditId = null;
@@ -36546,8 +36583,8 @@
     // loadPublishedSchedule repaints the Session tab when it lands.
     if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
     if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
-    if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
-      try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+    if (typeof invalidateCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+      try { invalidateCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
     }
     // #353 round 2 (Colleen: "placing Charlie Swan in PM2 as class prep …
     // still needed to refresh to see it under My Responsibilities"). A
@@ -42446,8 +42483,8 @@
       // read _signup, and the coordination afternoon cards flip to the
       // final roster once their sign-ups snapshot refetches.
       if (typeof loadClassSignupCard === 'function') { try { _signup = null; loadClassSignupCard(); } catch (e) { /* best-effort */ } }
-      if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
-        try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+      if (typeof invalidateCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+        try { invalidateCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
       }
       if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
       // #333: refetch eagerly (repaints the Session tab on land) instead of

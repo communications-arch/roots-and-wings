@@ -583,7 +583,7 @@ const SPAM_W_AGES        = 2;    // tour "ages" field with no plausible age in i
 
 const SPAM_RE_PITCH = /\b(?:seo|backlinks?|search engine (?:ranking|optimi[sz]ation|marketing)|rank(?:ing|ed)? (?:higher )?on google|(?:first|1st|top) page of google|(?:increase|boost|grow|double|drive|generate) (?:your |more |the )?(?:web(?:site)? )?(?:traffic|sales|leads|revenue|conversions|rankings?|visibility|online presence)|web(?:site)? (?:design|development|redesign|traffic|audit|speed)|digital marketing|lead generation|link ?building|guest post(?:ing|s)?|sponsored post|domain authority|google (?:ads|reviews|ranking|my business)|social media (?:marketing|management|growth)|content (?:writing|marketing)|(?:app|software) development|ppc|email marketing|outsourc(?:e|ing)|virtual assistants?|explainer videos?|logo design|graphic design services|ai (?:agents?|automation|chatbots?)|business (?:listing|loans?)|(?:local|business) citations)\b/i;
 const SPAM_RE_SHADY = /\b(?:crypto(?:currency)?|bitcoin|forex|binary options|investment (?:opportunit(?:y|ies)|plans?)|loan (?:offer|approval)|payday|casino|betting|slots online|viagra|cialis|pharmacy|escorts?|xxx|porn|adult (?:site|content|dating)|weight[- ]loss|cbd|vape|earn (?:money|\$?\d+) (?:online|daily|per day))\b/i;
-const SPAM_RE_SALESY = /\b(?:free (?:trial|quote|consultation|audit|demo|sample|estimate)|no obligation|limited[- ]time|act now|special offer|discount code|money[- ]back|guaranteed results|affordable (?:price|rate|package)s?|best prices?|we (?:offer|provide|specialize|are a|are an|help businesses)|our (?:services|team|agency|company|clients|portfolio)|let me know if you(?:'re| are) interested|would you be interested|are you interested in|schedule a (?:call|demo|quick call)|book a call|reply (?:to this email|back) (?:with|and)|price list|quotation|our pricing)\b/i;
+const SPAM_RE_SALESY = /\b(?:free (?:trial|quote|consultation|audit|demo|sample|estimate)|no obligation|limited[- ]time|act now|special offer|discount code|money[- ]back|guaranteed results|affordable (?:price|rate|package)s?|best prices?|we (?:offer|provide|specialize|help businesses)|our (?:services|team|agency|company|clients|portfolio)|let me know if you(?:'re| are) interested|would you be interested|are you interested in|schedule a (?:call|demo|quick call)|book a call|reply (?:to this email|back) (?:with|and)|price list|quotation|our pricing)\b/i;
 const SPAM_RE_OPENER = /\b(?:(?:came|come|stumbled|ran) across|(?:was|were) (?:browsing|going through|looking at|checking(?: out)?|reviewing)|(?:visited|checked|reviewed|analy[sz]ed|audited|noticed)) (?:your|the) (?:web ?site|site|page|home ?page|business|company|listing)\b|\bhope (?:this|my) (?:email|message|note) finds you\b|\bdear (?:sir|madam|sir\/madam|owner|webmaster|business owner)\b/i;
 const SPAM_RE_BULK = /\b(?:unsubscribe|opt[- ]?out|to stop receiving|remove me from|this is not spam|not a spam)\b|\breply (?:with )?["“]?(?:stop|remove)["”]?\b/i;
 const SPAM_RE_HTML = /<\s*(?:a|br|p|div|span|img|b|strong|em|table|font|u|h[1-6])\b[^>]*>|&nbsp;|\[(?:url|link)=/i;
@@ -776,6 +776,15 @@ const INQUIRY_RATE = {
   shortWindowMin: 10, shortMax: 3,
   dayMax: 10, dayHardCap: 25
 };
+// The merch order form is where MEMBERS shop now (portal Shop retired,
+// 2026-08-15) — at co-op / the ice cream social a dozen families order from
+// the building's Wi-Fi within minutes, all one NAT'd IP. Roomier caps than
+// the tour/contact inquiry (review 2026-08-16); the hard cap still stops a
+// flood from ballooning the orders table.
+const MERCH_RATE = {
+  shortWindowMin: 10, shortMax: 15,
+  dayMax: 60, dayHardCap: 120
+};
 
 async function handleTour(body, res, req) {
   const { name, email, phone, numKids, ages } = body;
@@ -829,12 +838,19 @@ async function handleTour(body, res, req) {
       try {
         const sql = getSql();
         const jKids = parseInt(numKids, 10);
+        // Keep the date/time they asked for (review 2026-08-16): a real
+        // family that trips the screen gets rescued by 'Not spam' — without
+        // these the rescue lost their requested tour slot.
+        const jDate = body.preferred_date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.preferred_date).trim()) ? String(body.preferred_date).trim() : null;
+        const jTime = body.preferred_time && /^\d{2}:\d{2}(:\d{2})?$/.test(String(body.preferred_time).trim()) ? String(body.preferred_time).trim() : null;
         await sql`
           INSERT INTO tours (family_name, family_email, phone, num_kids, ages,
+                             preferred_date, preferred_time,
                              status, source, message, screen_reason, status_history)
           VALUES (${jName}, ${jEmail.toLowerCase()}, ${String(phone || '').slice(0, 50)},
                   ${Number.isFinite(jKids) ? jKids : null}, ${String(ages || '').slice(0, 200)},
-                  'junk', 'tour-request', '', ${junkReason},
+                  ${jDate}, ${jTime},
+                  'junk', 'tour-request', ${String(body.message || '').slice(0, 2000)}, ${junkReason},
                   ${JSON.stringify([{ at: new Date().toISOString(), by: 'spam-screen', from: null, to: 'junk', note: junkReason }])}::jsonb)
         `;
       } catch (junkErr) {
@@ -5475,9 +5491,9 @@ async function handleMerchOrder(body, req, res) {
     `;
     const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
     const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
-    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
-    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
-    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    if (dayN >= MERCH_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= MERCH_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= MERCH_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
     await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'merch', ${formTs})`;
     await sql`DELETE FROM public_form_hits WHERE created_at < NOW() - INTERVAL '2 days'`;
   } catch (rlErr) {
@@ -5659,9 +5675,9 @@ async function handleMerchDeskPublicOrder(body, req, res) {
     `;
     const shortN = parseInt(cnt[0] && cnt[0].short_n, 10) || 0;
     const dayN = parseInt(cnt[0] && cnt[0].day_n, 10) || 0;
-    if (dayN >= INQUIRY_RATE.dayHardCap) hardDrop = true;
-    else if (!junkReason && shortN >= INQUIRY_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
-    else if (!junkReason && dayN >= INQUIRY_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
+    if (dayN >= MERCH_RATE.dayHardCap) hardDrop = true;
+    else if (!junkReason && shortN >= MERCH_RATE.shortMax) junkReason = 'rate limited (' + (shortN + 1) + ' in 10 min from this IP)';
+    else if (!junkReason && dayN >= MERCH_RATE.dayMax) junkReason = 'rate limited (' + (dayN + 1) + ' in 24 h from this IP)';
     await sql`INSERT INTO public_form_hits (ip, form, form_ts) VALUES (${ip}, 'merch', ${formTs})`;
     await sql`DELETE FROM public_form_hits WHERE created_at < NOW() - INTERVAL '2 days'`;
   } catch (rlErr) {
