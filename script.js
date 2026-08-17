@@ -16821,6 +16821,7 @@
       subtitle: '',
       meta: '',
       icons: [
+        { label: 'Print', icon: ICON_SVG.print, aria: 'Print the ledger for the selected date range', action: function () { printMerchFinances(); } },
         { label: 'Export CSV', icon: ICON_SVG.download, aria: 'Download the visible ledger as CSV', action: function () { exportMerchFinancesCSV(); } }
       ],
       bodyId: 'ws-merch-fin-body',
@@ -17304,6 +17305,72 @@
 
   // CSV of the VISIBLE ledger (season + date range + funnels), amounts in
   // dollars with the same sign the grid shows; voided rows flagged.
+  // Print (Erin, 2026-08-16): the FULL table for the selected date range
+  // (Type/Method funnels ignored — a printed statement shows everything),
+  // oldest first so the running Balance reads down the page like a bank
+  // statement, with the range's summary line on top. Standard print
+  // pattern: openPrintIframe(docHtml), no popups.
+  function printMerchFinances() {
+    var fin = _merchFin;
+    if (!fin || !Array.isArray(fin.rows)) { alert('Ledger still loading — try again in a moment.'); return; }
+    merchFinAssignBalances(fin.rows);
+    var rows = merchFinRangedRows().slice().sort(function (a, b) {
+      var ka = String(a.date || '') + '|' + String(a.at || '') + '|' + String(a.key || '');
+      var kb = String(b.date || '') + '|' + String(b.at || '') + '|' + String(b.key || '');
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+    var ranged = (_merchFinFrom || _merchFinTo);
+    var rangeLabel = ranged
+      ? (_merchFinFrom ? formatReportDate(_merchFinFrom) : 'season start') + ' – ' + (_merchFinTo ? formatReportDate(_merchFinTo) : 'today')
+      : 'whole season';
+    var sum = merchFinSummary(rows);
+    var title = 'Merch Finances' + (fin.school_year ? ' — ' + fin.school_year : '');
+    var sub = rangeLabel + ' · ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies') + ' · printed ' + new Date().toLocaleDateString();
+    var css = 'table{width:100%;border-collapse:collapse;margin-top:10px;}'
+      + 'th,td{border:1px solid #bbb;padding:3px 6px;text-align:left;vertical-align:top;}'
+      + 'th{background:#eee;font-size:11px;text-transform:uppercase;letter-spacing:.03em;}'
+      + 'td.num,th.num{text-align:right;white-space:nowrap;}'
+      + 'tr.void td{color:#999;text-decoration:line-through;}'
+      + '.neg{color:#b3401f;}.dim{color:#777;font-size:11px;}'
+      + '.sum{display:flex;flex-wrap:wrap;gap:6px 18px;margin:8px 0 4px;font-size:12px;}'
+      + '.sum b{font-weight:bold;}'
+      + 'tfoot td{font-weight:bold;background:#f5f5f5;}';
+    var body = '<div class="sum">'
+      + '<span>Sales <b>' + escapeHtml(fmtCents(sum.sales_cents)) + '</b></span>'
+      + '<span>Expenses <b>' + escapeHtml(fmtCents(sum.expenses_cents)) + '</b></span>'
+      + (sum.adjustments_cents ? '<span>Adjustments <b>' + escapeHtml(fmtCents(sum.adjustments_cents)) + '</b></span>' : '')
+      + '<span>Net <b>' + escapeHtml(fmtCents(sum.net_cents)) + '</b></span>'
+      + '<span>Deposited <b>' + escapeHtml(fmtCents(sum.deposits_cents)) + '</b></span>'
+      + '<span>Cash on hand <b>' + escapeHtml(fmtCents(sum.cash_on_hand_cents)) + '</b></span>'
+      + (rows.length ? '<span>Balance at end <b>' + escapeHtml(fmtCents(rows[rows.length - 1].balance_cents || 0)) + '</b></span>' : '')
+      + (sum.unpriced_count ? '<span class="dim">' + sum.unpriced_count + ' older web order' + (sum.unpriced_count === 1 ? '' : 's') + ' — no price on file, not counted</span>' : '')
+      + '</div>';
+    body += '<table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Method</th><th class="num">Amount</th><th class="num">Balance</th><th>Note</th></tr></thead><tbody>';
+    if (!rows.length) body += '<tr><td colspan="7" class="dim">Nothing recorded in this range.</td></tr>';
+    rows.forEach(function (r) {
+      var amt = r.amount_cents == null ? '<span class="dim">no price</span>' : ((r.amount_cents < 0 ? '<span class="neg">' : '') + escapeHtml(fmtCents(r.amount_cents)) + (r.amount_cents < 0 ? '</span>' : ''));
+      var bal = r.balance_cents == null ? '' : ((r.balance_cents < 0 ? '<span class="neg">' : '') + escapeHtml(fmtCents(r.balance_cents)) + (r.balance_cents < 0 ? '</span>' : ''));
+      var desc = escapeHtml(merchFinRowDescription(r))
+        + (r.kind === 'sale' ? ' <span class="dim">#' + escapeHtml(String(r.order_id)) + (r.source ? ' · ' + escapeHtml(r.source) : '') + '</span>' : '')
+        + (r.kind === 'legacy' ? ' <span class="dim">older web order</span>' : '')
+        + (r.voided ? ' <span class="dim">(voided)</span>' : '');
+      var method = r.method ? escapeHtml(MERCH_FIN_METHOD_LABELS[r.method] || r.method) + (Number(r.fee_cents) ? ' <span class="dim">+' + escapeHtml(fmtCents(r.fee_cents)) + ' fee</span>' : '') : '';
+      body += '<tr' + (r.voided ? ' class="void"' : '') + '><td>' + escapeHtml(formatReportDate(r.date)) + '</td>'
+        + '<td>' + escapeHtml(MERCH_FIN_TYPE_LABELS[r.type] || r.type || '') + '</td>'
+        + '<td>' + desc + '</td><td>' + method + '</td>'
+        + '<td class="num">' + amt + '</td><td class="num">' + bal + '</td>'
+        + '<td>' + escapeHtml(r.note || '') + '</td></tr>';
+    });
+    body += '</tbody>';
+    if (rows.length) body += '<tfoot><tr><td colspan="4">Net for this range</td><td class="num">' + escapeHtml(fmtCents(sum.net_cents)) + '</td><td class="num">' + escapeHtml(fmtCents(rows[rows.length - 1].balance_cents || 0)) + '</td><td></td></tr></tfoot>';
+    body += '</table>';
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title><style>'
+      + 'body{font-family:Arial,sans-serif;font-size:12px;margin:24px;}'
+      + 'h1{font-size:18px;margin:0 0 4px;}p.sub{color:#555;margin:0 0 8px;}'
+      + css + '</style></head><body><h1>' + escapeHtml(title) + '</h1><p class="sub">' + escapeHtml(sub) + '</p>' + body + '</body></html>';
+    openPrintIframe(doc);
+  }
+
   function exportMerchFinancesCSV() {
     var rows = merchFinVisibleRows();
     merchFinAssignBalances((_merchFin && _merchFin.rows) || []);
