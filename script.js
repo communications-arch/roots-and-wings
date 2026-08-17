@@ -16883,6 +16883,33 @@
     return s;
   }
 
+  // Running balance (Erin, 2026-08-16): checkbook-style — the season's
+  // rows in chronological order, each carrying the total of every signed
+  // Amount up to and including itself (sales in; expenses, deposits out;
+  // adjustments signed). Voided / unpriced rows carry the balance forward
+  // unchanged. Season-wide by design: a filtered or date-ranged view still
+  // shows each row's TRUE balance, like a bank statement. The last row's
+  // balance = what is held (cash + check + PayPal) and not yet deposited.
+  function merchFinAssignBalances(rows) {
+    var ordered = (rows || []).slice().sort(function (a, b) {
+      var ka = String(a.date || '') + '|' + String(a.at || '') + '|' + String(a.key || '');
+      var kb = String(b.date || '') + '|' + String(b.at || '') + '|' + String(b.key || '');
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+    var bal = 0;
+    ordered.forEach(function (r) {
+      var amt = (r.voided || r.amount_cents == null) ? NaN : parseInt(r.amount_cents, 10);
+      if (isFinite(amt)) bal += amt;
+      r.balance_cents = bal;
+    });
+    return bal;
+  }
+  function merchFinBalanceHtml(r) {
+    if (r.balance_cents == null) return '';
+    var neg = r.balance_cents < 0;
+    return '<span class="ws-srt-num' + (neg ? ' ws-wv-declined' : '') + '">' + escapeHtmlWs(fmtCents(r.balance_cents)) + '</span>';
+  }
+
   // Date range applies to tiles AND grid; Type/Method funnels to the grid
   // only (a Type = Expense view shouldn't zero the Sales tile).
   function merchFinInRange(r) {
@@ -16963,6 +16990,12 @@
       sortValue: function (r) { return r.amount_cents == null ? -Infinity : Number(r.amount_cents); },
       render: merchFinAmountHtml
     },
+    // Running balance (Erin 2026-08-16) — assigned season-wide by
+    // merchFinAssignBalances before each render, chronological.
+    { key: 'balance', label: 'Balance', type: 'number',
+      sortValue: function (r) { return r.balance_cents == null ? -Infinity : Number(r.balance_cents); },
+      render: merchFinBalanceHtml
+    },
     { key: 'note', label: 'Note', type: 'string',
       sortValue: function (r) { return r.note || ''; },
       render: function (r) { return r.note ? '<span class="ws-wv-context">' + escapeHtmlWs(r.note) + '</span>' : ''; }
@@ -17023,9 +17056,12 @@
     return h;
   }
 
-  function merchFinSummaryHtml(s, rangeLabel) {
+  function merchFinSummaryHtml(s, rangeLabel, seasonBalance) {
     if (!s) return '';
     var h = '<div class="rd-counts">';
+    // Season-wide running balance (never range-filtered): what's held
+    // across cash / check / PayPal and not yet deposited.
+    if (typeof seasonBalance === 'number') h += '<span class="ws-track-count" title="Running balance: sales in, expenses and deposits out — held and not yet deposited"><strong>Balance ' + escapeHtmlWs(fmtCents(seasonBalance)) + '</strong></span>';
     if (rangeLabel) h += '<span class="ws-wv-context">' + escapeHtmlWs(rangeLabel) + '</span>';
     h += '<span class="ws-wv-ok">Sales ' + escapeHtmlWs(fmtCents(s.sales_cents)) + '</span>';
     ['cash', 'check', 'paypal', 'venmo', 'other'].forEach(function (m) {
@@ -17051,6 +17087,7 @@
     var fin = _merchFin;
     if (!fin) { body.innerHTML = '<p class="ws-empty">Loading…</p>'; return; }
     var allRows = fin.rows || [];
+    var seasonBalance = merchFinAssignBalances(allRows);
     var ranged = merchFinRangedRows();
     var visible = merchFinVisibleRows();
     var byKey = {};
@@ -17088,7 +17125,7 @@
       rangeLabel = (_merchFinFrom ? formatReportDate(_merchFinFrom) : 'start') + ' – ' + (_merchFinTo ? formatReportDate(_merchFinTo) : 'today');
     }
     var summary = (_merchFinFrom || _merchFinTo || !fin.summary) ? merchFinSummary(ranged) : fin.summary;
-    h += merchFinSummaryHtml(summary, rangeLabel);
+    h += merchFinSummaryHtml(summary, rangeLabel, seasonBalance);
 
     if (!fin.error && allRows.length === 0) {
       h += '<p class="ws-empty">Nothing recorded for this season yet — paid sales appear here automatically; add expenses and deposits above.</p>';
@@ -17269,7 +17306,8 @@
   // dollars with the same sign the grid shows; voided rows flagged.
   function exportMerchFinancesCSV() {
     var rows = merchFinVisibleRows();
-    var headers = ['Date', 'Type', 'Description', 'Method', 'Amount', 'Note', 'Status', 'Order #', 'Source', 'Buyer', 'Family email'];
+    merchFinAssignBalances((_merchFin && _merchFin.rows) || []);
+    var headers = ['Date', 'Type', 'Description', 'Method', 'Amount', 'Balance', 'Note', 'Status', 'Order #', 'Source', 'Buyer', 'Family email'];
     function esc(v) {
       var s = String(v == null ? '' : v);
       if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
@@ -17283,6 +17321,7 @@
         esc(merchFinRowDescription(r)),
         esc(r.method ? (MERCH_FIN_METHOD_LABELS[r.method] || r.method) : ''),
         esc(r.amount_cents == null ? '' : (r.amount_cents / 100).toFixed(2)),
+        esc(r.balance_cents == null ? '' : (r.balance_cents / 100).toFixed(2)),
         esc(r.note || ''),
         esc(r.voided ? 'voided' : (!r.priced ? 'no price on file' : '')),
         esc(r.order_id != null ? r.order_id : ''),
