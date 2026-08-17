@@ -6323,12 +6323,29 @@
     var floaterOpen = blockKey.indexOf('AM') === 0
       ? ((fl < 2 && !supportFull) || !assistsOpen)
       : (!supportFull || !assistsOpen);
-    if (vpAssign || floaterOpen) {
+    // #358 (Colleen) vs #18 (VP, July): the VP/ACL surfaces still offer
+    // EVERY support role (the server exempts reviewer placements), but a
+    // role the member rules would close is now listed under an
+    // "Override" group that names WHY it's closed, and the pickers ask
+    // before saving one — a barrier, not a wall.
+    var overrides = [];
+    function whyFloaterClosed() {
+      var why = [];
+      var needing = sorted.filter(function (c) { return (c.helpers_needed || 0) > 0; }).length;
+      if (assistsOpen) why.push(needing + (needing === 1 ? ' class still needs' : ' classes still need') + ' assistants');
+      if (blockKey.indexOf('AM') === 0 && fl >= 2) why.push('2-floater morning cap reached');
+      if (supportFull) why.push('support capacity used up');
+      return why.join('; ') || 'closed by the sign-up rules';
+    }
+    if (floaterOpen) {
       h += '<option value="floater">Floater — covers absences' + flTag + '</option>';
+    } else if (vpAssign) {
+      overrides.push({ value: 'floater', label: 'Floater' + flTag, why: whyFloaterClosed() });
     }
     // Board Duties (bug #16): board members can take it any hour, even
     // several hours a day — no cap, no capacity gate. Still hidden from
-    // non-board members in self-serve; VP assign lists it for anyone.
+    // non-board members in self-serve; VP assign lists it for anyone
+    // (the target may well be a board member — no reason to gate).
     var showBoard = !(d.me && d.me.is_board === false);
     if (vpAssign || showBoard) {
       h += '<option value="board">Board Duties' + (b.board.length > 0 ? ' · ' + b.board.length + ' signed up' : '') + '</option>';
@@ -6344,10 +6361,31 @@
       });
     }
     var prepOpen = !havePrep && (b.prep.length < 4 || (!assistsOpen && fl > 0));
-    if (vpAssign || prepOpen) {
-      h += '<option value="prep">Prep Period' + (b.prep.length > 0 ? ' · ' + b.prep.length + ' signed up' : '') + '</option>';
+    var prepTag = b.prep.length > 0 ? ' · ' + b.prep.length + ' signed up' : '';
+    if (prepOpen) {
+      h += '<option value="prep">Prep Period' + prepTag + '</option>';
+    } else if (vpAssign) {
+      overrides.push({ value: 'prep', label: 'Prep Period' + prepTag, why: b.prep.length >= 4 ? 'all 4 prep slots taken' + (assistsOpen ? '; classes still need assistants' : '') : 'closed by the sign-up rules' });
+    }
+    if (overrides.length) {
+      h += '<optgroup label="Override — normally closed this hour">';
+      overrides.forEach(function (o) {
+        h += '<option value="' + o.value + '" data-override="' + escapeAttr(o.why) + '">' + escapeHtml(o.label) + ' — ' + escapeHtml(o.why) + '</option>';
+      });
+      h += '</optgroup>';
     }
     return h;
+  }
+  // #358: a VP picker choice from the Override group confirms first.
+  // Returns true to proceed; resets the select and returns false otherwise.
+  function volPickConfirmOverride(sel) {
+    var opt = sel && sel.options && sel.options[sel.selectedIndex];
+    var why = opt && opt.getAttribute('data-override');
+    if (!why) return true;
+    var lbl = (opt.textContent || '').split(' — ')[0];
+    if (window.confirm(lbl + ' is normally closed this hour: ' + why + '.\n\nAssign anyway?')) return true;
+    sel.value = '';
+    return false;
   }
 
   var _volPanelSession = null; // defaults to currentSession on first load
@@ -35363,6 +35401,7 @@
       sel.addEventListener('change', function () {
         var v = this.value;
         if (!v) return;
+        if (!volPickConfirmOverride(this)) return; // #358
         var email = this.getAttribute('data-email');
         var block = this.getAttribute('data-block');
         var isAssist = v.indexOf('assist:') === 0;
@@ -36310,6 +36349,15 @@
     if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
       try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
     }
+    // #353 round 2 (Colleen: "placing Charlie Swan in PM2 as class prep …
+    // still needed to refresh to see it under My Responsibilities"). A
+    // support-role placement (floater / board / prep) or a kid pick does
+    // NOT change the My Family grid markup, so renderMyFamilyNow's
+    // anti-flicker guard (#116) skipped the rebuild — and with it the
+    // volunteer panel + class-signup card reloads that paint those rows.
+    // Force one full My Family rebuild after a placement.
+    if (typeof _rwLastMyFamilyHtml !== 'undefined') _rwLastMyFamilyHtml = null;
+    if (typeof renderMyFamily === 'function') { try { renderMyFamily(); } catch (e) { /* best-effort */ } }
     schedFetchReport(function () {
       if (_schedEditKey) {
         // Keep the panel open while the row exists — a fully-placed row
@@ -36438,6 +36486,7 @@
       sel.addEventListener('change', function () {
         var v = this.value;
         if (!v) return;
+        if (!volPickConfirmOverride(this)) return; // #358
         var email = this.getAttribute('data-email');
         var block = this.getAttribute('data-block');
         // Reassign flow (bug #20): a filled block carries its current

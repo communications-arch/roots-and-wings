@@ -1583,7 +1583,8 @@ module.exports = async function handler(req, res) {
                  p.first_name, mp.family_name
           FROM people p
           LEFT JOIN member_profiles mp ON mp.family_email = p.family_email
-          WHERE p.role = 'mlc'`;
+          WHERE p.role = 'mlc'
+            AND mp.withdrawn_at IS NULL`;
         const stExpected = stPmApproved ? ['AM1', 'AM2', 'PM1', 'PM2'] : ['AM1', 'AM2'];
         const adultsUnplaced = [];
         stMlcs.forEach(m => {
@@ -1778,12 +1779,18 @@ module.exports = async function handler(req, res) {
                      p.first_name, mp.family_name
               FROM people p
               LEFT JOIN member_profiles mp ON mp.family_email = p.family_email
-              WHERE p.role = 'mlc'`,
+              WHERE p.role = 'mlc'
+                AND mp.withdrawn_at IS NULL`,
+          // #357 (Colleen): a family that LEFT co-op (Membership → withdrawn,
+          // #44) drops off the Directory at once — Schedules (and the
+          // signup-todos counts above) must follow the same rule, or the
+          // report keeps asking the VP to place people who are gone.
           sql`SELECT k.first_name, k.class_group, k.birth_date, k.schedule, LOWER(k.family_email) AS fam,
                      COALESCE(NULLIF(k.nickname, ''), k.first_name) AS display_first,
                      COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
               FROM kids k
-              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)`,
+              LEFT JOIN member_profiles mp ON LOWER(mp.family_email) = LOWER(k.family_email)
+              WHERE mp.withdrawn_at IS NULL`,
           sql`SELECT LOWER(family_email) AS fam, LOWER(kid_first_name) AS kid, class_group, finalized
               FROM morning_class_assignments WHERE school_year = ${srYear}`,
           sql`SELECT LOWER(p.family_email) AS fam, LOWER(p.kid_first_name) AS kid, p.hour,
