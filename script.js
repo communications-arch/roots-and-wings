@@ -6497,8 +6497,14 @@
             var dutyRows = Array.prototype.slice.call(dutySec.querySelectorAll('.mf-duty'));
             var lblMatch = String(mine.label).match(/^Assisting\s+“(.+)”$/);
             var wantName = lblMatch ? lblMatch[1].toLowerCase() : '';
+            // By class id first (data-db-class, set by renderDutyRow) — the
+            // row text may not carry the class name (Greenhouse standing
+            // class shows just the grove). Text match stays as a fallback
+            // for rows built without a dbClass popup.
             var target = dutyRows.filter(function (r) {
-              if (r.querySelector('.mf-vol-remove')) return false;
+              return !r.querySelector('.mf-vol-remove') && r.getAttribute('data-db-class') === String(mine.class_id);
+            })[0] || dutyRows.filter(function (r) {
+              if (r.querySelector('.mf-vol-remove') || r.getAttribute('data-db-class')) return false;
               var t = (r.textContent || '').toLowerCase();
               return t.indexOf('assisting') !== -1 && (!wantName || t.indexOf(wantName) !== -1);
             })[0];
@@ -7850,7 +7856,13 @@
       var isTeacher = d.icon === 'teach';
       var hasRoleDesc = !!(getRoleKeyForDuty(d.text) && getRoleByKey(getRoleKeyForDuty(d.text)));
       var isClickable = d.popup || hasRoleDesc;
-      var h = '<div class="mf-duty' + (isClickable ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + (isClickable ? ' style="cursor:pointer;"' : '') + '>';
+      // Class-linked rows carry the class id so the volunteer panel can find
+      // the row to hang its step-out ✕ on by ID, not by matching the class
+      // name in the row text (Erin 2026-08-16: the Greenhouse standing
+      // class renders as "Assisting · Greenhouse" — no class name — so the
+      // text match never hit and the row had no ✕).
+      var dbClassAttr = (d.popup && d.popup.type === 'dbClass' && d.popup.id) ? ' data-db-class="' + escapeAttr(String(d.popup.id)) + '"' : '';
+      var h = '<div class="mf-duty' + (isClickable ? ' mf-duty-clickable' : '') + '" data-duty-idx="' + globalIdx + '"' + dbClassAttr + (isClickable ? ' style="cursor:pointer;"' : '') + '>';
       // Group-tied duties wear their group's brand mark in the icon slot
       // (Erin, 2026-07-11); everything else keeps its duty-type icon.
       var dutyGroup = String(d.text || '').match(/^(Greenhouse|Saplings|Sassafras|Oaks|Maples|Birch|Willows|Cedars|Pigeons|Teens)\b/);
