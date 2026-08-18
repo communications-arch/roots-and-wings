@@ -6735,7 +6735,7 @@
     // "Opens later" notes only for a half-day this family attends — a
     // PM-only family must not be told morning sign-ups are coming.
     if (famHasAM && !blockAvailable('AM1') && !blockAvailable('AM2')) unavailNotes.push('Morning sign-ups open once morning classes are posted.');
-    if (famHasPM && !d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the schedule is approved.');
+    if (famHasPM && !d.pm_approved) unavailNotes.push('Afternoon sign-ups open when the VP posts the session’s classes.');
     if (isCurrent && openBlocks.length > 0) {
       // #170 (Colleen): the ⚠ nag only inside the 2 weeks before the
       // session starts — further out it reads as a soft note instead.
@@ -9512,7 +9512,7 @@
       // LAST YEAR'S data (Erin's prod bug, 2026-07-11) \u2014 so the sheet
       // list is retired from this surface; the afternoon appears when
       // the VP approves the session in the Class Builder.
-      html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>Afternoon electives will be posted here once the session\u2019s schedule is approved.</em></p>';
+      html += '<p style="color:var(--color-text-light);margin-top:20px;"><em>Afternoon electives will be posted here when the session\u2019s class sign-ups open.</em></p>';
     }
 
     container.innerHTML = html;
@@ -11330,7 +11330,7 @@
           // #340 (Lyndsey): a leader edited a PLACED class — it stays on
           // the schedule; this To Do asks a reviewer to look the changes
           // over (opening the class's Edit form and saving clears it).
-          h += '<li id="ws-todo-editedcls-item" hidden><button type="button" class="ws-link-btn" data-resource-action="schedule-builder"><span class="ws-link-count" id="ws-editedcls-count">0</span><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span id="ws-editedcls-label">Review edits to scheduled classes</span></button></li>';
+          h += '<li id="ws-todo-editedcls-item" hidden><button type="button" class="ws-link-btn" data-resource-action="edited-classes"><span class="ws-link-count" id="ws-editedcls-count">0</span><span class="ws-link-icon">' + brandIconImg('builder', 'ag-icon') + '</span><span id="ws-editedcls-label">Review edits to scheduled classes</span></button></li>';
           // Kids without afternoon picks — the Afternoon Class Liaison
           // shares this one with the VP.
           h += '<li id="ws-todo-kids-unpicked-item" hidden><button type="button" class="ws-link-btn" data-resource-action="signup-todo-kids"><span class="ws-link-count" id="ws-kids-unpicked-count">0</span><span class="ws-link-icon">' + brandIconImg('classes', 'ag-icon') + '</span><span id="ws-kids-unpicked-label">Place kids in afternoon classes</span></button></li>';
@@ -25941,6 +25941,8 @@
     else if (action === 'signup-todo-adults' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults', session: _signupTodoState && _signupTodoState.session });
     else if (action === 'signup-todo-kids' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'kids', session: _signupTodoState && _signupTodoState.session });
     else if (action === 'signup-todo-assist' && typeof showSchedulesReportModal === 'function') showSchedulesReportModal({ tab: 'adults', session: _signupTodoState && _signupTodoState.session });
+    // #361: leader edits to placed classes — list + Mark read / Open in Builder.
+    else if (action === 'edited-classes' && typeof showEditedClassesModal === 'function') showEditedClassesModal();
     else if (action === 'acl-overmax' && typeof showOvermaxModal === 'function') showOvermaxModal();
     else if (action === 'acl-lottery-moves' && typeof showLotteryMovesModal === 'function') showLotteryMovesModal();
     else if (action === 'acl-confirm' && typeof showClassConfirmModal === 'function') showClassConfirmModal();
@@ -29793,7 +29795,8 @@
     if (!a) return null;
     return a.approved_at ? { approved_at: a.approved_at, approved_by: a.approved_by || '' } : null;
   }
-  function sbIsSessionApproved(sess, period) { return !!sbApprovalFor(sess, period); }
+  // #361: sessions no longer LOCK — sbApprovalFor now only answers "is the
+  // afternoon published to members?" (stamped when sign-ups first open).
   function sbSignupWindowFor(sess) {
     return scheduleBuilderState.signupWindows[scheduleBuilderState.schoolYear + '|' + sess] || null;
   }
@@ -35717,7 +35720,7 @@
       assist: 'Fill assistant spots — Session ' + d.session
     };
     var subtitles = {
-      adults: 'Main Learning Coaches with an uncovered hour' + (d.pm_approved ? '' : ' (morning only — the afternoon schedule isn’t approved yet)') + (d.can_place ? '. Pick a spot to place them on the spot.' : '.'),
+      adults: 'Main Learning Coaches with an uncovered hour' + (d.pm_approved ? '' : ' (morning only — the afternoon classes aren’t published yet; opening sign-ups publishes them)') + (d.can_place ? '. Pick a spot to place them on the spot.' : '.'),
       kids: 'Kids with no afternoon picks yet.' + (d.can_place ? ' Pick classes for them right here — their family can refine the ranking later.' : ' Nudge their families while sign-ups are open.'),
       assist: 'Classes still short of the assistants their teacher asked for. Place adults from the “Place adults” list.'
     };
@@ -36397,7 +36400,7 @@
       var gapTotal = 0;
       (d.blocks_expected || []).forEach(function (b) { gapTotal += (d.open_assist && d.open_assist[b]) || 0; });
       pills += '<span class="ws-wv-pending">' + gapTotal + ' open assistant spot' + (gapTotal === 1 ? '' : 's') + '</span>';
-      if (!d.pm_approved) pills += '<span class="ws-wv-context">Afternoon hours appear once the session’s PM schedule is approved.</span>';
+      if (!d.pm_approved) pills += '<span class="ws-wv-context">Afternoon hours appear once the session’s sign-ups have been opened (that publishes the PM classes).</span>';
     } else {
       // Kids: a colored selection-completeness strip (the "did everyone pick
       // their afternoon classes?" bar) — each pill filters the table on click,
@@ -37076,6 +37079,73 @@
   // family hasn't been told yet. Each row shows which class's lottery it
   // was and where the kid landed (their promoted 2nd choice, live — a
   // re-pick shows the current placement). "Mark told" clears the row.
+  // #361 (Colleen): "Review edits to scheduled classes" — a leader changed
+  // a class that's already placed. The class STAYS on the schedule (#340);
+  // this list says what changed, opens the class in the Builder, and
+  // "Mark read" dismisses the item without re-saving the class.
+  function showEditedClassesModal() {
+    var d = _signupTodoState;
+    if (!d) return;
+    renderReportModal({
+      title: 'Review edits to scheduled classes',
+      subtitle: 'A class leader edited a class that is already on the schedule. Nothing was taken off — look the change over, then mark it read (or open the class in the Builder to adjust it).',
+      bodyId: 'ws-editedcls-body',
+      bodyPlaceholder: '<p class="ws-empty">Loading…</p>'
+    });
+    renderEditedClassesBody();
+  }
+
+  function renderEditedClassesBody() {
+    var body = document.getElementById('ws-editedcls-body');
+    var d = _signupTodoState;
+    if (!body || !d) return;
+    var list = d.edited_classes || [];
+    if (!list.length) {
+      body.innerHTML = '<p class="ws-empty">Nothing waiting — every edit has been looked over.</p>';
+      return;
+    }
+    body.innerHTML = list.map(function (c) {
+      var when = '';
+      try { when = new Date(c.edited_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch (e) { /* ignore */ }
+      var hourWord = c.hour === 'both' ? 'both hours' : c.hour === 'PM1' ? 'Hour 1' : c.hour === 'PM2' ? 'Hour 2' : c.hour === 'AM1' ? 'Hour 1' : c.hour === 'AM2' ? 'Hour 2' : (c.class_period === 'AM' ? 'morning' : '');
+      var place = (c.session ? 'Session ' + c.session : 'unplaced') + (hourWord ? ' · ' + hourWord : '') + (c.class_period === 'AM' ? ' · morning' : ' · afternoon');
+      var h = '<div class="st-place-row" data-sub-id="' + c.id + '" data-sess="' + (c.session || '') + '" data-period="' + escapeAttr(c.class_period || 'PM') + '">';
+      h += '<strong>' + escapeHtml(c.class_name) + '</strong>';
+      h += '<span class="ws-wv-context">' + escapeHtml(place) + (c.teacher ? ' · ' + escapeHtml(c.teacher) : '') + (when ? ' · edited ' + escapeHtml(when) : '') + '</span>';
+      h += '<span class="signup-class-count">' + (c.summary ? 'Changed: ' + escapeHtml(c.summary) : 'Details were edited') + '</span>';
+      h += '<span class="ws-lending-actions"><button type="button" class="sc-btn ec-open">Open in Builder</button> <button type="button" class="btn btn-primary btn-sm ec-ack">Mark read</button></span>';
+      h += '</div>';
+      return h;
+    }).join('');
+    body.querySelectorAll('.ec-open').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = this.closest('.st-place-row');
+        var sess = parseInt(row.getAttribute('data-sess'), 10);
+        if (sess >= 1 && sess <= 5) scheduleBuilderState.session = sess;
+        scheduleBuilderState.period = row.getAttribute('data-period') === 'AM' ? 'AM' : 'PM';
+        if (typeof showScheduleBuilder === 'function') showScheduleBuilder();
+      });
+    });
+    body.querySelectorAll('.ec-ack').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = this.closest('.st-place-row');
+        var id = parseInt(row.getAttribute('data-sub-id'), 10);
+        var self = this;
+        self.disabled = true;
+        fetch('/api/curriculum?action=class-edit-ack' + notifViewAsSuffix(), {
+          method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ id: id })
+        }).then(function (r) { return r.json().then(function (x) { return { ok: r.ok, data: x }; }); })
+          .then(function (res) {
+            if (!res.ok) { self.disabled = false; alert((res.data && res.data.error) || 'Could not mark it read.'); return; }
+            if (_signupTodoState) _signupTodoState.edited_classes = (_signupTodoState.edited_classes || []).filter(function (c) { return c.id !== id; });
+            paintSignupTodoCounts();
+            renderEditedClassesBody();
+          })
+          .catch(function () { self.disabled = false; alert('Network error.'); });
+      });
+    });
+  }
+
   function showLotteryMovesModal() {
     var d = _signupTodoState;
     if (!d) return;
@@ -41390,40 +41460,33 @@
           && periodOf(s) === period;
     });
 
-    // Session workflow bar — AFTERNOON only. "Approve Session" locks the
-    // grid so accidental drag/drop, +Add, and class edits can't change a
-    // finalized schedule (and approval is what publishes the PM side +
-    // allows sign-ups). The MORNING side has no approval flow at all
-    // (Erin, 2026-07-10): liaisons place their group's class and it's
-    // simply live.
-    var placedCount = classesInSession.length;
+    // #361 (Colleen, 2026-08-18): the afternoon "Approve Session" lock is
+    // GONE. Nothing is approved any more — the grid stays editable at every
+    // stage, and OPENING SIGN-UPS is what publishes a session's afternoon
+    // classes to members (it stamps the same co_op_sessions.approved_at the
+    // rest of the portal already reads as "PM published"). Edits after that
+    // show up in sign-ups and Coordination immediately; leader edits raise a
+    // "Review edits" To Do for the VP / Afternoon Class Liaison instead of
+    // needing re-approval. The MORNING side never had an approval flow
+    // (Erin, 2026-07-10): liaisons place their group's class and it's live.
     var approval = period === 'PM' ? sbApprovalFor(sess, 'PM') : null;
-    var isApproved = !!approval;
-    // Group liaisons build their slots but don't flip session approval or
-    // sign-up windows — those stay VP / Afternoon Class Liaison.
-    if (period === 'PM') {
+    var isPublished = !!approval;
+    if (period === 'PM' && isPublished) {
+      var when = '';
+      try {
+        var d = new Date(approval.approved_at);
+        when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      } catch (e) { /* ignore */ }
       html += '<div class="sb-workflow sb-workflow-action-only">';
-      if (!sbScopeAll()) {
-        if (isApproved) html += '<span class="sb-approved-badge">✓ Session ' + sess + ' Afternoon Approved</span>';
-      } else if (isApproved) {
-        var when = '';
-        try {
-          var d = new Date(approval.approved_at);
-          when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        } catch (e) { /* ignore */ }
-        html += '<span class="sb-approved-badge" title="Approved' + (approval.approved_by ? ' by ' + escClsAttr(approval.approved_by) : '') + (when ? ' on ' + when : '') + '">✓ Session ' + sess + ' Afternoon Approved' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
-        html += '<button type="button" class="sc-btn" id="sbApproveSession" title="Re-enable afternoon editing for Session ' + sess + '.">Reopen Session ' + sess + ' Afternoon</button>';
-      } else {
-        html += '<button type="button" class="btn btn-primary btn-sm" id="sbApproveSession"' + (placedCount === 0 ? ' disabled' : '') + ' title="Lock the afternoon side of Session ' + sess + ' so no one accidentally modifies the placed classes.">Approve Session ' + sess + ' — Afternoon</button>';
-      }
+      html += '<span class="sb-approved-badge" title="Members see Session ' + sess + '’s afternoon classes (published when sign-ups first opened' + (when ? ' on ' + when : '') + '). Edits you make here show up right away.">✓ Session ' + sess + ' Afternoon published to members' + (when ? ' · ' + escClsHtml(when) : '') + '</span>';
       html += '</div>';
     }
 
-    // Sign-ups panel — only meaningful once the session is approved. Lets the
-    // VP / Afternoon Liaison set the window dates that drive when the parent
-    // My Family widget appears. While the window is open, shows the dates +
-    // a Close button; before that, shows two date inputs + Open.
-    if (period === 'PM' && isApproved && sbScopeAll()) {
+    // Sign-ups panel — VP / Afternoon Liaison set the window dates that
+    // drive when the parent My Family widget appears. While the window is
+    // open, shows the dates + a Close button; before that, shows two date
+    // inputs + Open. #361: no approval gate — opening publishes.
+    if (period === 'PM' && sbScopeAll()) {
       var win = sbSignupWindowFor(sess);
       var winStatus = win && win.status;
       // Sliced to YYYY-MM-DD: the API serializes these DATE columns as full
@@ -41468,7 +41531,7 @@
         html += '<button type="button" class="btn btn-primary btn-sm" id="sbSignupSave">Reopen sign-ups</button>';
         html += '</div>';
       } else {
-        html += '<div class="sb-signup-panel-state">Sign-ups not yet open. Pick a start and end date so parents can rank classes during that window.</div>';
+        html += '<div class="sb-signup-panel-state">Sign-ups not yet open. Pick a start and end date so parents can rank classes during that window.' + (isPublished ? '' : ' <strong>Opening sign-ups is what publishes Session ' + sess + '’s afternoon classes to members</strong> — until then only the builder sees them.') + '</div>';
         html += '<div class="sb-signup-edit-row">';
         html += '<label>Start <input type="date" id="sbSignupStart" value="' + escClsAttr(winStart) + '"></label>';
         html += '<label>End <input type="date" id="sbSignupEnd" value="' + escClsAttr(winEnd) + '"></label>';
@@ -41569,12 +41632,24 @@
         : ageGroupsColoredHtml(c.age_groups, c.age_groups_other);
       // Off-preference placements get a coral outline + tint, not just
       // the small ⚠ (Erin, 2026-07-10: make it more visible).
-      var s = '<div class="sb-cell-class' + (isApproved ? ' sb-cell-class-locked' : '') + ((sessOff || hourOff) ? ' sb-offpref' : '') + '"' + (isApproved ? '' : ' draggable="true"') + ' data-sub-id="' + c.id + '">';
+      var s = '<div class="sb-cell-class' + ((sessOff || hourOff) ? ' sb-offpref' : '') + '" draggable="true" data-sub-id="' + c.id + '">';
       var topBadge = c.scheduled_hour === 'both' ? 'Both'
         : c.scheduled_hour === 'AM1' ? 'Hour 1 · 10:00'
         : c.scheduled_hour === 'AM2' ? 'Hour 2 · 11:00'
         : (c.class_period === 'AM' ? 'Both hours' : '');
-      if (topBadge) s += '<div class="sb-class-top"><span class="sb-both-badge">' + topBadge + '</span></div>';
+      // #362 (Colleen): an explicit Edit pencil on every placed class the
+      // viewer can touch — opens the class form right here (no unlock,
+      // no re-approval; changes land in sign-ups immediately). Scheduled
+      // classes also get a Roster button (the class-info popup with the
+      // kid roster + counts, which used to be the locked-tile click).
+      var tileActs = '';
+      if (sbCanTouchSub(c)) {
+        tileActs += '<button type="button" class="evs-ico-btn sb-tile-edit" data-sub-id="' + c.id + '" aria-label="Edit class" title="Edit this class — name, description, ages, max, helpers, placement">' + ICON_SVG.pencil + '</button>';
+      }
+      if (c.status === 'scheduled' && typeof showDbClassPopup === 'function') {
+        tileActs += '<button type="button" class="sb-tile-roster" data-sub-id="' + c.id + '" title="Class info + who’s signed up">Roster</button>';
+      }
+      if (topBadge || tileActs) s += '<div class="sb-class-top">' + (topBadge ? '<span class="sb-both-badge">' + topBadge + '</span>' : '') + (tileActs ? '<span class="sb-tile-acts">' + tileActs + '</span>' : '') + '</div>';
       if (agesWords) s += '<div class="sb-class-ages-words">' + agesWords + '</div>';
       s += '<div class="sb-class-name">' + escClsHtml(c.class_name) + '</div>';
       s += '<div class="sb-cell-class-teacher">' + escClsHtml(c.submitted_by_name || c.submitted_by_email) + '</div>';
@@ -41622,7 +41697,7 @@
       s += '</div>';
       // Scoped liaisons only get "+ Add" on their own group's morning slot.
       var scopeOk = isAmBlock ? sbScopeAllowsGroup(String(hour).split(':')[1] || '') : sbScopeAll();
-      if (!isApproved && !(isAmBlock && amFull) && scopeOk) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
+      if (!(isAmBlock && amFull) && scopeOk) s += '<button class="sb-cell-add" data-hour="' + hour + '">+ Add</button>';
       if (isAmBlock) {
         list.forEach(function (c) { s += sbTileHtml(c, false); });
         s += '</div>';
@@ -41652,7 +41727,7 @@
         } else if (backupOcc) {
           s += '<div class="sb-room-empty">' + brandIconImg('outdoorRain', 'ag-icon') + ' Reserved — rain backup for “' + escClsHtml(backupOcc.class_name) + '” (' + escClsHtml(backupOcc.scheduled_room || '') + ')</div>';
         } else {
-          s += '<div class="sb-room-empty">' + (isApproved ? '—' : (r.is_outdoor ? 'Available — drop a class seated in an indoor room' : 'Available — drag a class here')) + '</div>';
+          s += '<div class="sb-room-empty">' + (r.is_outdoor ? 'Available — drop a class seated in an indoor room' : 'Available — drag a class here') + '</div>';
         }
         s += '</div>';
       });
@@ -41664,7 +41739,7 @@
       // Morning: one SLOT per age group (like PM has Hour 1 / Hour 2),
       // and only one class fits a group per session — 🟢 filled / 🔴 open
       // reads as the session's morning coverage at a glance.
-      html += '<div class="sb-grid sb-grid-open sb-grid-am' + (isApproved ? ' sb-grid-locked' : '') + '">';
+      html += '<div class="sb-grid sb-grid-open sb-grid-am">';
       // Every grove incl. Greenhouse (its standing assistants-only class
       // lives here so the VP can edit its assistant count — see
       // MORNING_BUILDER_GROUPS).
@@ -41681,7 +41756,7 @@
       });
       html += '</div>';
     } else {
-      html += '<div class="sb-grid sb-grid-open' + (isApproved ? ' sb-grid-locked' : '') + '">';
+      html += '<div class="sb-grid sb-grid-open">';
       html += renderBlock('PM1', 'Hour 1 · 1:00–1:55', pm1List);
       html += renderBlock('PM2', 'Hour 2 · 2:00–2:55', pm2List);
       html += '</div>';
@@ -41902,16 +41977,24 @@
       });
     });
 
-    // Wire session workflow: Approve toggles the lock — sets approved_at +
-    // approved_by on the co_op_sessions row (or clears them when already
-    // approved). The grid re-renders read-only / editable based on the new
-    // state.
-    var approveBtn = document.getElementById('sbApproveSession');
-    if (approveBtn) approveBtn.addEventListener('click', function () {
-      toggleSessionApproval(sess, !isApproved, period);
+    // #362: tile action buttons — pencil opens the class form, Roster the
+    // class-info popup. stopPropagation keeps the tile's own click (which
+    // also opens the form for editors) from double-firing.
+    body.querySelectorAll('.sb-tile-edit').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var esub = scheduleBuilderState.submissions.filter(function (s) { return s.id === parseInt(b.getAttribute('data-sub-id'), 10); })[0];
+        if (esub && sbCanTouchSub(esub)) sbOpenPlacedClassForm(esub);
+      });
+    });
+    body.querySelectorAll('.sb-tile-roster').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (typeof showDbClassPopup === 'function') showDbClassPopup(parseInt(b.getAttribute('data-sub-id'), 10));
+      });
     });
 
-    // Wire sign-ups panel buttons (rendered only when session is approved).
+    // Wire sign-ups panel buttons (PM, full-scope reviewers).
     var openBtn = document.getElementById('sbSignupOpen');
     if (openBtn) openBtn.addEventListener('click', function () { saveSignupWindow(sess, 'open'); });
     var closeBtn = document.getElementById('sbSignupClose');
@@ -41977,8 +42060,8 @@
       el.addEventListener('click', function () {
         var subId = parseInt(el.getAttribute('data-sub-id'), 10);
         var tsub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
-        var tLocked = !tsub || !sbCanTouchSub(tsub)
-          || (tsub.scheduled_session && sbIsSessionApproved(tsub.scheduled_session, tsub.class_period === 'AM' ? 'AM' : 'PM'));
+        // #361: no session lock any more — only scope decides.
+        var tLocked = !tsub || !sbCanTouchSub(tsub);
         if (!tLocked) { sbOpenPlacedClassForm(tsub); return; }
         // Locked / out-of-scope: scheduled classes open the class-info
         // popup, which carries the kid roster + counts in every window
@@ -42428,10 +42511,6 @@
     if (!sub) return;
     if (!sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
     var sess = scheduleBuilderState.session;
-    if (sbIsSessionApproved(sess, 'AM')) {
-      alert('Session ' + sess + '’s morning side is approved. Reopen it for editing first.');
-      return;
-    }
     var grp = sbAmGroupOf(sub);
     var hour = sbAmHourFor(sub);
     var occ = sbAmSlotConflict(grp, sess, hour, subId);
@@ -42507,10 +42586,6 @@
     if (!sub) return;
     if (!sbCanTouchSub(sub)) { alert(SB_SCOPE_MSG); return; }
     var subPeriod = sub.class_period === 'AM' ? 'AM' : 'PM';
-    if (sbIsSessionApproved(scheduleBuilderState.session, subPeriod)) {
-      alert('Session ' + scheduleBuilderState.session + '\'s ' + (subPeriod === 'AM' ? 'morning' : 'afternoon') + ' side is approved. Reopen it for editing first.');
-      return;
-    }
     // Morning drops route to the submission's OWN group slot no matter
     // which morning cell caught the drop (each class targets exactly one
     // group), landing on the hour the teacher submitted (1st/2nd/both) —
@@ -42675,54 +42750,14 @@
     });
   }
 
-  // Approve / Reopen toggle. Approving locks the session (Schedule Builder
-  // goes read-only for that session). Reopening clears the lock so the VP
-  // can drag/drop and edit again. Backed by approved_at / approved_by on
-  // the co_op_sessions row.
-  function toggleSessionApproval(sess, approved, period) {
-    var year = scheduleBuilderState.schoolYear;
-    var lensWord = period === 'AM' ? 'morning' : 'afternoon';
-    if (approved) {
-      if (!confirm('Approve the ' + lensWord + ' side of Session ' + sess + '?\nIts placed classes become read-only so they can\'t be modified accidentally. You can reopen for editing any time.' + (period === 'AM' ? '' : '\n(Afternoon approval is also what allows opening class sign-ups.)'))) return;
-    } else {
-      if (!confirm('Reopen the ' + lensWord + ' side of Session ' + sess + ' for editing?\nThe lock comes off — drag/drop and edits will work again.')) return;
-    }
-    var btn = document.getElementById('sbApproveSession');
-    if (btn) { btn.disabled = true; btn.textContent = approved ? 'Approving…' : 'Reopening…'; }
-    var cred = localStorage.getItem('rw_google_credential');
-    fetch('/api/curriculum?action=session-approval' + notifViewAsSuffix(), {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + cred, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_year: year, session: sess, approved: !!approved, period: period === 'AM' ? 'AM' : 'PM' })
-    }).then(function (r) {
-      return r.json().then(function (d) { return { ok: r.ok, data: d }; });
-    }).then(function (res) {
-      if (!res.ok) throw new Error((res.data && res.data.error) || 'Could not update approval.');
-      publishedSchedule.loaded = false; // approval publishes/unpublishes the PM side
-      loadScheduleBuilder();
-      // #333 (Colleen): approving the afternoon side publishes it — Co-op
-      // Coordination must show the classes without a page refresh, same
-      // live-repaint treatment as the sign-up window changes (#332).
-      if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
-      if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
-        try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
-      }
-    }).catch(function (err) {
-      alert(err.message || 'Could not update approval.');
-      loadScheduleBuilder();
-    });
-  }
+  // #361: the Approve / Reopen toggle (toggleSessionApproval → session-approval)
+  // is retired — sessions no longer lock; opening sign-ups publishes.
 
   // Drop a placed class back on the palette → unschedule (back to the inbox).
   function unscheduleDroppedSub(subId) {
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (sub.status === 'submitted' && !sub.scheduled_session) return; // already in the inbox
-    var subPeriod = sub.class_period === 'AM' ? 'AM' : 'PM';
-    if (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, subPeriod)) {
-      alert('Session ' + sub.scheduled_session + '\'s ' + (subPeriod === 'AM' ? 'morning' : 'afternoon') + ' side is approved. Reopen it for editing first.');
-      return;
-    }
     patchReviewAction(subId, {
       status: 'submitted',
       scheduled_session: null, scheduled_hour: null, scheduled_age_range: null,
@@ -42853,10 +42888,6 @@
       }
 
       if (placeNow) {
-        if (sbIsSessionApproved(sessSel, isAM ? 'AM' : 'PM')) {
-          errEl.textContent = 'Session ' + sessSel + '’s ' + (isAM ? 'morning' : 'afternoon') + ' side is approved — reopen it for editing first, or uncheck “Place now”.';
-          errEl.style.display = ''; return;
-        }
         if (isAM) {
           var grpName = ageGroups[0].charAt(0).toUpperCase() + ageGroups[0].slice(1);
           var conflict = sbAmSlotConflict(grpName, sessSel, hourSel, -1);
@@ -43132,7 +43163,17 @@
   // the same modal: helpers, Send back to Inbox, Delete Class. Placement
   // itself (session/hour/room) is drag-driven in the grid.
   function sbOpenPlacedClassForm(sub) {
-    showClassSubmissionModal(sub, { onSaved: loadScheduleBuilder });
+    // #362: a reviewer's edit is live for members at once — drop the
+    // published-schedule cache and repaint Coordination / sign-ups too
+    // (same live-repaint treatment #333 gave approval).
+    showClassSubmissionModal(sub, { onSaved: function () {
+      if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
+      loadScheduleBuilder();
+      if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
+      if (typeof loadCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+        try { _coordPmSignups.session = null; loadCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+      }
+    } });
     var modal = document.querySelector('#classSubOverlay .cls-modal');
     if (!modal) return;
     var bar = document.createElement('div');
@@ -43214,10 +43255,8 @@
     var sub = scheduleBuilderState.submissions.filter(function (s) { return s.id === subId; })[0];
     if (!sub) return;
     if (document.getElementById('sbEditOverlay')) return;
-    // Read-only when this class's session is approved for ITS period —
-    // editing requires reopening that side from the Class Builder header.
-    var locked = (sub.scheduled_session && sbIsSessionApproved(sub.scheduled_session, sub.class_period === 'AM' ? 'AM' : 'PM'))
-      || !sbCanTouchSub(sub); // out-of-scope liaison → read-only view
+    // Read-only for an out-of-scope liaison (#361: sessions no longer lock).
+    var locked = !sbCanTouchSub(sub);
 
     // Preference values come straight from the submission (what the teacher
     // asked for). The "Scheduled" values are what the VP placed and may
@@ -43270,7 +43309,7 @@
     if (sub.description) html += '<p class="sb-subdetail-desc" style="margin:0 0 0.75rem;">' + escClsHtml(sub.description) + '</p>';
 
     if (locked) {
-      html += '<div class="sb-locked-callout">' + ICON_SVG.lock + ' Session ' + sub.scheduled_session + ' is approved. Reopen it from the Class Builder header to make changes.</div>';
+      html += '<div class="sb-locked-callout">' + ICON_SVG.lock + ' ' + SB_SCOPE_MSG + '</div>';
     }
 
     // Reviewers can edit ANY field (name, description, ages, max, hour pref,

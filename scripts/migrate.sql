@@ -3064,3 +3064,23 @@ WHERE NOT EXISTS (
     AND (c.scheduled_session = gs.session_number
          OR gs.session_number::text = ANY(c.session_preferences))
 );
+
+-- 2026-08-18 (#361, Colleen): a leader's edit to a placed class records
+-- WHAT changed (one line, e.g. "description, max students 12 → 15") so the
+-- VP / Afternoon Class Liaison "Review edits" To Do and bell can say it.
+-- Cleared by any reviewer save or the Mark-read (class-edit-ack) action.
+ALTER TABLE class_submissions ADD COLUMN IF NOT EXISTS owner_edit_summary TEXT NOT NULL DEFAULT '';
+
+-- 2026-08-18 (#361): "Approve Session" is retired — opening sign-ups is the
+-- publish moment and stamps co_op_sessions.approved_at. Backfill: any session
+-- whose sign-up window was ever opened counts as published (a VP who had
+-- re-opened the old lock after opening sign-ups left approved_at NULL, which
+-- would now hide that session's afternoon classes from members). Idempotent.
+UPDATE co_op_sessions s
+SET approved_at = COALESCE(s.approved_at, w.opened_at, w.updated_at, NOW()),
+    approved_by = COALESCE(s.approved_by, NULLIF(w.opened_by, ''), 'sign-ups opened')
+FROM class_signup_windows w
+WHERE w.school_year = s.school_year AND w.session_number = s.session_number
+  AND w.status IN ('open', 'closed', 'locked')
+  AND s.approved_at IS NULL;
+

@@ -462,6 +462,31 @@ function normalizeSubmission(body, opts) {
   };
 }
 
+// #361: one-line "what changed" for a leader's edit to a placed class —
+// feeds the VP / Afternoon Class Liaison "Review edits" To Do and the bell.
+// Short scalar fields show old → new; long text / lists just name the field.
+function summarizeSubmissionEdit(before, after) {
+  const bits = [];
+  const same = (a, b) => JSON.stringify(a == null ? '' : a) === JSON.stringify(b == null ? '' : b);
+  const arrEq = (a, b) => JSON.stringify(Array.isArray(a) ? a.slice().sort() : []) === JSON.stringify(Array.isArray(b) ? b.slice().sort() : []);
+  const txt = v => String(v == null ? '' : v).trim();
+  if (txt(before.class_name) !== txt(after.class_name)) bits.push('name “' + txt(before.class_name).slice(0, 40) + '” → “' + txt(after.class_name).slice(0, 40) + '”');
+  if (txt(before.description) !== txt(after.description)) bits.push('description');
+  const maxOf = r => (r.max_students === 'other' || r.max_students === 0) ? txt(r.max_students_other) || txt(r.max_students) : txt(r.max_students);
+  if (maxOf(before) !== maxOf(after)) bits.push('max students ' + (maxOf(before) || '—') + ' → ' + (maxOf(after) || '—'));
+  if (!arrEq(before.age_groups, after.age_groups) || txt(before.age_groups_other) !== txt(after.age_groups_other)) bits.push('age groups');
+  if (!arrEq(before.hour_preference, after.hour_preference)) bits.push('hour preference');
+  if (!arrEq(before.session_preferences, after.session_preferences)) bits.push('session preference');
+  if (!arrEq(before.assistant_count, after.assistant_count)) bits.push('assistants wanted');
+  if (txt(before.co_teachers) !== txt(after.co_teachers)) bits.push('co-teachers');
+  if (!arrEq(before.space_request, after.space_request) || txt(before.space_request_other) !== txt(after.space_request_other)) bits.push('space request');
+  if (txt(before.prerequisites) !== txt(after.prerequisites)) bits.push('prerequisites / supplies');
+  if (txt(before.pre_enroll_kids) !== txt(after.pre_enroll_kids)) bits.push('pre-enrolled kids');
+  if (txt(before.other_info) !== txt(after.other_info)) bits.push('other info');
+  if (!same(!!before.open_to_teen_assistant, !!after.open_to_teen_assistant)) bits.push('teen-assistant preference');
+  return bits.join(', ').slice(0, 500);
+}
+
 // Valid status values for a reviewer PATCH. `withdrawn` is intentionally
 // excluded — only the submitter can withdraw (via DELETE).
 const REVIEWER_STATUS_VALUES = ['submitted', 'drafted', 'scheduled', 'declined'];
@@ -902,6 +927,7 @@ function serializeSubmission(r, helpers) {
     other_info: r.other_info || '',
     status: r.status,
     owner_edited_at: r.owner_edited_at || null, // #340: pending reviewer look-over
+    owner_edit_summary: r.owner_edit_summary || '', // #361: what the leader changed
     scheduled_session: r.scheduled_session,
     scheduled_hour: r.scheduled_hour,
     scheduled_age_range: r.scheduled_age_range,
@@ -1639,14 +1665,27 @@ module.exports = async function handler(req, res) {
 
         // #340 (Lyndsey): classes whose OWNER edited after placement —
         // the class stays on the schedule; reviewers get this To Do to
-        // look the changes over (opening + saving the class clears it).
-        const editedClasses = stCls
-          .filter(r => r.owner_edited_at)
-          .map(r => ({
-            id: r.id, class_name: r.class_name, class_period: r.class_period,
-            teacher: r.teacher_name || '', edited_at: r.owner_edited_at
-          }))
-          .sort((a, b) => a.class_name.localeCompare(b.class_name));
+        // look the changes over. #361 (Colleen): ANY session of the year
+        // (a Session-4 class edited while Session 2 runs still needs eyes),
+        // with the placement + a "what changed" line, and a Mark-read
+        // (class-edit-ack) that dismisses it without re-saving the class.
+        const editedRows = await sql`
+          SELECT c.id, c.class_name, c.class_period, c.scheduled_session, c.scheduled_hour,
+                 c.owner_edited_at, c.owner_edited_by, c.owner_edit_summary,
+                 (SELECT NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), '') FROM people p
+                   WHERE LOWER(p.email) = LOWER(c.submitted_by_email)
+                      OR LOWER(p.personal_email) = LOWER(c.submitted_by_email) LIMIT 1) AS teacher_name,
+                 c.submitted_by_name
+          FROM class_submissions c
+          WHERE c.school_year = ${stYear} AND c.owner_edited_at IS NOT NULL
+            AND c.status IN ('scheduled', 'drafted')
+          ORDER BY c.owner_edited_at DESC`;
+        const editedClasses = editedRows.map(r => ({
+          id: r.id, class_name: r.class_name, class_period: r.class_period,
+          session: r.scheduled_session, hour: r.scheduled_hour || '',
+          teacher: r.teacher_name || r.submitted_by_name || '', edited_at: r.owner_edited_at,
+          edited_by: r.owner_edited_by || '', summary: r.owner_edit_summary || ''
+        }));
 
         // 3. Classes short on assistants (per hour for whole-morning classes,
         // once per class otherwise).
@@ -3158,6 +3197,24 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, id: updated[0].id, room: updated[0].scheduled_room, backup_room: updated[0].scheduled_backup_room });
       }
 
+      // #361 (Colleen): "Mark read" on the Review-edits To Do — a reviewer
+      // has looked a leader's edit over; clear the stamp WITHOUT re-saving
+      // the class. Reviewer scope must cover the class.
+      if (action === 'class-edit-ack') {
+        const ackId = parseInt((req.body || {}).id, 10);
+        if (!ackId) return res.status(400).json({ error: 'id required' });
+        const ackScope = await reviewerScopeReq(user, req);
+        if (!ackScope) return res.status(403).json({ error: 'Reviewer access only.', youAre: user.email });
+        const ackRows = await sql`SELECT id, class_period, age_groups, submitted_by_email FROM class_submissions WHERE id = ${ackId}`;
+        if (!ackRows.length) return res.status(404).json({ error: 'Not found' });
+        if (!scopeAllowsSub(ackScope, ackRows[0])) return res.status(403).json({ error: 'This class is outside your liaison scope.' });
+        await sql`
+          UPDATE class_submissions
+          SET owner_edited_at = NULL, owner_edited_by = '', owner_edit_summary = '', updated_at = NOW()
+          WHERE id = ${ackId}`;
+        return res.status(200).json({ ok: true, id: ackId });
+      }
+
       // VP / Afternoon Class Liaison toggle a Schedule Builder session's
       // "Approved" lock. Sets approved_at/approved_by on the matching
       // co_op_sessions row when body.approved is true; clears them when
@@ -3514,16 +3571,24 @@ module.exports = async function handler(req, res) {
         if (rawStart && rawEnd && rawEnd < rawStart) {
           return res.status(400).json({ error: 'signup_end_date must be on or after signup_start_date' });
         }
-        // Gate: opening requires the Schedule Builder session to be Approved.
+        // #361 (Colleen, 2026-08-18): there is no "Approve Session" step any
+        // more. OPENING sign-ups is what publishes the session's afternoon
+        // classes to members — it stamps co_op_sessions.approved_at (kept as
+        // the column name; every downstream read — published-schedule,
+        // schedules-report, volunteer matrix, class-signup — already treats
+        // it as "PM published"). Idempotent: a re-open keeps the first stamp.
         if (status === 'open') {
           if (!rawStart || !rawEnd) return res.status(400).json({ error: 'Pick a start and end date for sign-ups.' });
-          const approvedRows = await sql`
-            SELECT approved_at FROM co_op_sessions
-            WHERE school_year = ${sy} AND session_number = ${session} AND approved_at IS NOT NULL
-            LIMIT 1
+          const published = await sql`
+            UPDATE co_op_sessions
+            SET approved_at = COALESCE(approved_at, NOW()),
+                approved_by = COALESCE(approved_by, ${user.email}),
+                updated_at = NOW(), updated_by = ${user.email}
+            WHERE school_year = ${sy} AND session_number = ${session}
+            RETURNING session_number
           `;
-          if (approvedRows.length === 0) {
-            return res.status(400).json({ error: 'Approve Session ' + session + ' in the Afternoon Class Builder before opening sign-ups.' });
+          if (published.length === 0) {
+            return res.status(400).json({ error: 'No session row for ' + sy + ' / Session ' + session + ' — add the session dates (Board Calendar) before opening sign-ups.' });
           }
         }
         const startDate = rawStart || null;
@@ -3819,6 +3884,7 @@ module.exports = async function handler(req, res) {
             -- owner's edit over — the review To Do clears.
             owner_edited_at = NULL,
             owner_edited_by = '',
+            owner_edit_summary = '',
             updated_at = NOW()
           WHERE id = ${id}
           RETURNING *
@@ -3908,6 +3974,9 @@ module.exports = async function handler(req, res) {
           editHelpers = await mergeHelperRoster(sql, id, req.body.helpers, user.email);
         }
         let finalRow = updated[0];
+        // #361: say WHAT changed, not just that something did — the VP /
+        // ACL To Do and the bell body both carry it.
+        const editSummary = ownerRevert ? summarizeSubmissionEdit(row, clean) : '';
         if (ownerRevert) {
           // #340 (Lyndsey): an owner's edit NO LONGER knocks the class off
           // the schedule (the old behavior reverted to 'submitted' and
@@ -3920,6 +3989,7 @@ module.exports = async function handler(req, res) {
             UPDATE class_submissions SET
               owner_edited_at = NOW(),
               owner_edited_by = ${user.realEmail || user.email},
+              owner_edit_summary = ${editSummary},
               updated_at = NOW()
             WHERE id = ${id}
             RETURNING *
@@ -3936,7 +4006,8 @@ module.exports = async function handler(req, res) {
             const editorLabel = row.submitted_by_name || row.submitted_by_email;
             const notifTitle = 'Class edited: ' + clean.class_name;
             const notifBody = editorLabel + ' edited "' + clean.class_name + '" (' + placeBit
-              + ') — it STAYS on the schedule; please look the changes over (Class Builder To Do).';
+              + ') — it STAYS on the schedule.' + (editSummary ? ' Changed: ' + editSummary + '.' : '')
+              + ' Mark it read from your To Do card once you’ve looked it over.';
             const recipients = ['vicepresident@rootsandwingsindy.com'];
             const pmEmail = await getPmAssistantEmail();
             if (pmEmail && recipients.indexOf(pmEmail.toLowerCase()) === -1) recipients.push(pmEmail.toLowerCase());
@@ -3959,7 +4030,7 @@ module.exports = async function handler(req, res) {
           // #340: a reviewer saving the edit form IS the review — clear
           // any pending owner-edit stamp.
           const cleared = await sql`
-            UPDATE class_submissions SET owner_edited_at = NULL, owner_edited_by = ''
+            UPDATE class_submissions SET owner_edited_at = NULL, owner_edited_by = '', owner_edit_summary = ''
             WHERE id = ${id} AND owner_edited_at IS NOT NULL
             RETURNING *`;
           if (cleared.length) finalRow = cleared[0];
@@ -4177,3 +4248,4 @@ module.exports.INSPIRATION_GROUPS = INSPIRATION_GROUPS;
 // class marker + the edit-only lift of the AM greenhouse rejection.
 module.exports.normalizeSubmission = normalizeSubmission;
 module.exports.isGreenhouseAssistClass = isGreenhouseAssistClass;
+module.exports.summarizeSubmissionEdit = summarizeSubmissionEdit;

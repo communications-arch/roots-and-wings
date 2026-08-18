@@ -9503,6 +9503,16 @@ body:has(.sb-overlay) .person-detail-overlay { z-index: 10000; }
 .sb-workflow-counts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 /* Card top row: ages pill (lead) + status chip + "Both" badge, all inline. */
 .sb-class-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+/* #362: per-tile actions (Edit pencil + Roster chip) ride the top row,
+   pushed right; the tile itself stays draggable/clickable. */
+.sb-tile-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.sb-tile-acts .evs-ico-btn { padding: 2px 4px; }
+.sb-tile-roster {
+  appearance: none; background: transparent; border: 1px solid var(--color-border);
+  border-radius: 4px; padding: 1px 6px; font-size: 0.65rem; font-family: inherit;
+  color: var(--color-primary); cursor: pointer; line-height: 1.4;
+}
+.sb-tile-roster:hover { border-color: var(--color-primary-light); background: #faf7ff; }
 .sb-class-ages {
   display: inline-block;
   background: var(--color-primary);
