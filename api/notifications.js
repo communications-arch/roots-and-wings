@@ -66,7 +66,12 @@ module.exports = async function handler(req, res) {
     // #363: a member reaches the portal under more than one address (own
     // login, family alias, role mailbox) and notifications get addressed to
     // whichever the sender knew — read/mark/delete across the whole set.
+    // Broadcasts already write one row per address, so twins (same type/
+    // title/body/link within the hour) collapse to one bell entry — the
+    // unread one first, then the copy addressed to this login — and
+    // mark-read / delete act on all twins together.
     const ids = await notificationIdentities(sql, recipient);
+    const loginLc = String(recipient || '').toLowerCase();
 
     if (req.method === 'GET') {
       const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
@@ -74,24 +79,35 @@ module.exports = async function handler(req, res) {
       let rows;
       if (unreadOnly) {
         rows = await sql`
-          SELECT id, type, title, body, link_url, related_absence_id, is_read, created_at
-          FROM notifications
-          WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
-          ORDER BY created_at DESC
+          SELECT * FROM (
+            SELECT DISTINCT ON (type, title, body, link_url, date_trunc('hour', created_at))
+                   id, type, title, body, link_url, related_absence_id, is_read, created_at
+            FROM notifications
+            WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
+            ORDER BY type, title, body, link_url, date_trunc('hour', created_at),
+                     (LOWER(recipient_email) = ${loginLc}) DESC, created_at
+          ) d ORDER BY created_at DESC
           LIMIT ${limit}
         `;
       } else {
         rows = await sql`
-          SELECT id, type, title, body, link_url, related_absence_id, is_read, created_at
-          FROM notifications
-          WHERE LOWER(recipient_email) = ANY(${ids}::text[])
-          ORDER BY created_at DESC
+          SELECT * FROM (
+            SELECT DISTINCT ON (type, title, body, link_url, date_trunc('hour', created_at))
+                   id, type, title, body, link_url, related_absence_id, is_read, created_at
+            FROM notifications
+            WHERE LOWER(recipient_email) = ANY(${ids}::text[])
+            ORDER BY type, title, body, link_url, date_trunc('hour', created_at),
+                     is_read ASC, (LOWER(recipient_email) = ${loginLc}) DESC, created_at
+          ) d ORDER BY created_at DESC
           LIMIT ${limit}
         `;
       }
       const unreadCount = await sql`
-        SELECT COUNT(*)::int AS count FROM notifications
-        WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
+        SELECT COUNT(*)::int AS count FROM (
+          SELECT DISTINCT type, title, body, link_url, date_trunc('hour', created_at)
+          FROM notifications
+          WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
+        ) d
       `;
       return res.status(200).json({ notifications: rows, unread_count: unreadCount[0].count });
     }
@@ -107,8 +123,13 @@ module.exports = async function handler(req, res) {
       const id = parseInt(req.query.id, 10);
       if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'id required' });
       await sql`
-        UPDATE notifications SET is_read = TRUE
-        WHERE id = ${id} AND LOWER(recipient_email) = ANY(${ids}::text[])
+        UPDATE notifications n SET is_read = TRUE
+        FROM notifications t
+        WHERE t.id = ${id} AND LOWER(t.recipient_email) = ANY(${ids}::text[])
+          AND LOWER(n.recipient_email) = ANY(${ids}::text[])
+          AND n.type IS NOT DISTINCT FROM t.type AND n.title IS NOT DISTINCT FROM t.title
+          AND n.body IS NOT DISTINCT FROM t.body AND n.link_url IS NOT DISTINCT FROM t.link_url
+          AND date_trunc('hour', n.created_at) = date_trunc('hour', t.created_at)
       `;
       return res.status(200).json({ ok: true });
     }
@@ -126,8 +147,13 @@ module.exports = async function handler(req, res) {
       const delId = parseInt(req.query.id, 10);
       if (!delId || Number.isNaN(delId)) return res.status(400).json({ error: 'id required' });
       await sql`
-        DELETE FROM notifications
-        WHERE id = ${delId} AND LOWER(recipient_email) = ANY(${ids}::text[])
+        DELETE FROM notifications n
+        USING notifications t
+        WHERE t.id = ${delId} AND LOWER(t.recipient_email) = ANY(${ids}::text[])
+          AND LOWER(n.recipient_email) = ANY(${ids}::text[])
+          AND n.type IS NOT DISTINCT FROM t.type AND n.title IS NOT DISTINCT FROM t.title
+          AND n.body IS NOT DISTINCT FROM t.body AND n.link_url IS NOT DISTINCT FROM t.link_url
+          AND date_trunc('hour', n.created_at) = date_trunc('hour', t.created_at)
       `;
       return res.status(200).json({ ok: true });
     }

@@ -230,6 +230,8 @@ const idRes = perms._identityResolverFromRows({
     { email: 'colleenr@rootsandwingsindy.com', family_email: 'raymont@rootsandwingsindy.com' },
     { email: 'jane@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com' },
     { email: 'bob@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com' },
+    { email: 'smith@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com', role: 'mlc' },
+    { email: 'grandma@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com', role: 'blc' },
     { email: 'solo@rootsandwingsindy.com', family_email: 'solo@rootsandwingsindy.com' }
   ],
   holders: [
@@ -258,14 +260,28 @@ t('roles.role_email counts as a mailbox alias', () => {
   assert.ok(has(ids, 'jane@rootsandwingsindy.com'));
   assert.ok(has(idRes.identitiesFor('jane@rootsandwingsindy.com'), 'afternoon@rootsandwingsindy.com'));
 });
-t('family alias login → every adult login in the household', () => {
+t('family alias login (= the MLC) does NOT read the other adults’ personal rows', () => {
   const ids = idRes.identitiesFor('smith@rootsandwingsindy.com');
-  assert.ok(has(ids, 'jane@rootsandwingsindy.com') && has(ids, 'bob@rootsandwingsindy.com'));
+  assert.deepStrictEqual(ids, ['smith@rootsandwingsindy.com']);
 });
 t('a person does NOT see a co-parent’s personal notifications', () => {
   const ids = idRes.identitiesFor('bob@rootsandwingsindy.com');
   assert.ok(!has(ids, 'jane@rootsandwingsindy.com'));
   assert.ok(has(ids, 'smith@rootsandwingsindy.com'));
+});
+t('a backup coach (BLC) login is its own address only', () => {
+  assert.deepStrictEqual(idRes.identitiesFor('grandma@rootsandwingsindy.com'), ['grandma@rootsandwingsindy.com']);
+  assert.ok(!has(idRes.pushIdentitiesFor('smith@rootsandwingsindy.com'), 'grandma@rootsandwingsindy.com'));
+});
+t('push: a family-addressed row is delivered to every adult login; a personal row stays personal', () => {
+  const fam = idRes.pushIdentitiesFor('smith@rootsandwingsindy.com');
+  assert.ok(has(fam, 'jane@rootsandwingsindy.com') && has(fam, 'bob@rootsandwingsindy.com') && has(fam, 'smith@rootsandwingsindy.com'));
+  const bob = idRes.pushIdentitiesFor('bob@rootsandwingsindy.com');
+  assert.deepStrictEqual(bob, ['bob@rootsandwingsindy.com']);
+});
+t('push: role mailbox row reaches the holder’s devices and vice versa', () => {
+  assert.ok(has(idRes.pushIdentitiesFor('vicepresident@rootsandwingsindy.com'), 'colleenr@rootsandwingsindy.com'));
+  assert.ok(has(idRes.pushIdentitiesFor('colleenr@rootsandwingsindy.com'), 'vp@rootsandwingsindy.com'));
 });
 t('single-address member and unknown emails map to themselves only', () => {
   assert.deepStrictEqual(idRes.identitiesFor('solo@rootsandwingsindy.com'), ['solo@rootsandwingsindy.com']);

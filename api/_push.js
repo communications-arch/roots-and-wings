@@ -49,7 +49,7 @@ async function trySend(sql, sub, payload) {
 // login) than the one this notification is addressed to — fan out to the
 // devices of every identity that means the same person.
 async function subsForIdentities(sql, resolver, email) {
-  const ids = resolver ? resolver.identitiesFor(email) : [String(email || '').toLowerCase()];
+  const ids = resolver ? resolver.pushIdentitiesFor(email) : [String(email || '').toLowerCase()];
   if (!ids.length) return [];
   const rows = await sql`
     SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE LOWER(user_email) = ANY(${ids}::text[])
@@ -80,6 +80,10 @@ async function pushNotifications(sql, rows) {
   if (!init()) return;
   const subsByEmail = {};
   const resolver = await buildIdentityResolver(sql);
+  // A broadcast writes one row per adult login AND the family-alias row
+  // now also delivers to the adults' devices — send each device one copy
+  // of the same message per batch.
+  const sentKeys = new Set();
   for (const r of rows) {
     const email = String(r.recipient_email || '').toLowerCase();
     if (!email) continue;
@@ -88,7 +92,12 @@ async function pushNotifications(sql, rows) {
     }
     const url = (r.link_url && /^\//.test(r.link_url)) ? r.link_url : '/members.html';
     const payload = { title: r.title, body: r.body, tag: 'notif-' + (r.id || email), url };
-    for (const sub of subsByEmail[email]) await trySend(sql, sub, payload);
+    for (const sub of subsByEmail[email]) {
+      const k = sub.endpoint + '|' + r.title + '|' + r.body;
+      if (sentKeys.has(k)) continue;
+      sentKeys.add(k);
+      await trySend(sql, sub, payload);
+    }
   }
 }
 

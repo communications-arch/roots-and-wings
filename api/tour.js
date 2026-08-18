@@ -14,7 +14,7 @@ const { google } = require('googleapis');
 const { put } = require('@vercel/blob');
 const { waitUntil } = require('@vercel/functions');
 const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
-const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember } = require('./_permissions');
+const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember, notificationIdentities } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { pushNotifications } = require('./_push');
 const { canActAs, resolveFamily } = require('./_family');
@@ -7175,11 +7175,32 @@ function pollRecipientsOf(cfg) {
 
 // Can this viewer see / vote on a poll section? Recipients narrow it; an
 // unaddressed poll follows the card's normal visibility (is_public / priv).
-function pollVisibleTo(section, viewerEmail, priv) {
+// viewer = one email OR the member's whole identity set (#363: the poll's
+// bell/push fan out across it, so a co-parent addressed via the family
+// alias must find the poll under their own login too).
+function pollVisibleTo(section, viewer, priv) {
   if (priv) return true;
   const rcpts = pollRecipientsOf(section.config);
-  if (rcpts.length) return rcpts.indexOf(String(viewerEmail || '').toLowerCase()) !== -1;
+  if (rcpts.length) {
+    const ids = (Array.isArray(viewer) ? viewer : [viewer]).map(e => String(e || '').toLowerCase());
+    return ids.some(e => e && rcpts.indexOf(e) !== -1);
+  }
   return section.is_public !== false;
+}
+
+// Privileged reader of an event space: editors (committee + SEL/VP) plus
+// the Sustaining Director. Shared by the space GET and the poll vote gate
+// so nobody sees a vote form the server would then refuse.
+async function eventSpacePriv(sql, auth, eventId) {
+  const canEdit = await canEditEventSpace(sql, auth, eventId);
+  let priv = canEdit;
+  if (!priv) {
+    try {
+      const sd = await getRoleHolderEmail('Sustaining Director');
+      priv = !!sd && String(sd).toLowerCase() === String(auth.email || '').toLowerCase();
+    } catch (e) { /* role unresolved — stay non-privileged */ }
+  }
+  return { canEdit, priv };
 }
 
 // Tallies for one poll. single/multi: votes per option. rank: Borda points
@@ -7250,7 +7271,9 @@ function eventPollShape(shape, section, votes, viewerEmail, canEdit) {
     closed: cfg.closed === true,
     voters: votes.length,
     my_vote: mine ? { choices: Array.isArray(mine.choices) ? mine.choices : [], feedback: mine.feedback || '', updated_at: mine.updated_at || null } : null,
-    results: (canEdit || cfg.show_results === true || cfg.closed === true) ? pollResults(section, votes) : null,
+    // Voters see tallies only AFTER they vote (when the owner allows it) or
+    // once the poll is closed — never a live scoreboard before choosing.
+    results: (canEdit || cfg.closed === true || (cfg.show_results === true && mine)) ? pollResults(section, votes) : null,
     votes: canEdit ? votes.map(v => ({
       email: String(v.person_email || '').toLowerCase(), name: v.person_name || v.person_email || '',
       choices: Array.isArray(v.choices) ? v.choices : [], feedback: v.feedback || '', updated_at: v.updated_at || null
@@ -7347,21 +7370,17 @@ async function handleEventSpaceGet(req, res) {
       FROM event_section_signups WHERE section_id = ANY(${sectionIds})
       ORDER BY created_at, id
     ` : [];
-    const canEdit = await canEditEventSpace(sql, auth, eventId);
     // Card visibility (Erin, 2026-07-25): is_public=false cards show only
     // to the event committee (canEditEventSpace covers them + SEL/VP),
     // plus the Sustaining Director.
-    let priv = canEdit;
-    if (!priv) {
-      try {
-        const sd = await getRoleHolderEmail('Sustaining Director');
-        priv = !!sd && String(sd).toLowerCase() === String(auth.email || '').toLowerCase();
-      } catch (e) { /* role unresolved — stay non-privileged */ }
-    }
-    if (!priv) sections = sections.filter(x => x.is_public !== false || (x.type === 'poll' && pollVisibleTo(x, auth.email, false)));
+    const spacePriv = await eventSpacePriv(sql, auth, eventId);
+    const canEdit = spacePriv.canEdit;
+    const priv = spacePriv.priv;
+    const viewerIds = priv ? [] : await notificationIdentities(sql, auth.email);
+    if (!priv) sections = sections.filter(x => x.is_public !== false || (x.type === 'poll' && pollVisibleTo(x, viewerIds, false)));
     // #360: an ADDRESSED poll (recipients set) shows only to those members
     // + the committee, whatever the binoculars say.
-    if (!priv) sections = sections.filter(x => x.type !== 'poll' || pollVisibleTo(x, auth.email, false));
+    if (!priv) sections = sections.filter(x => x.type !== 'poll' || pollVisibleTo(x, viewerIds, false));
     const pollIds = sections.filter(x => x.type === 'poll').map(x => x.id);
     const pollVotes = pollIds.length ? await sql`
       SELECT section_id, person_email, person_name, choices, feedback, updated_at
@@ -7470,10 +7489,12 @@ async function handleMyEventTasksGet(req, res) {
         FROM event_sections s
         JOIN special_events se ON se.id = s.special_event_id
         WHERE s.type = 'poll' AND COALESCE((s.config->>'closed')::boolean, FALSE) = FALSE
+          AND (se.event_date IS NULL OR se.event_date >= (${today}::date - INTERVAL '1 day'))
         ORDER BY s.updated_at DESC
         LIMIT 200
       `;
-      polls = pRows.filter(r => !r.voted && pollVisibleTo(r, me, r.on_committee)).map(r => ({
+      const meIds = await notificationIdentities(sql, me);
+      polls = pRows.filter(r => !r.voted && pollVisibleTo(r, meIds, r.on_committee)).map(r => ({
         section_id: r.id, title: r.title || 'Poll', event_id: r.special_event_id,
         event_name: r.event_name, event_date: specialEventDateStr(r.event_date)
       }));
@@ -7927,8 +7948,9 @@ async function handleEventPollVote(body, req, res) {
     if (!rows.length || rows[0].type !== 'poll') return res.status(404).json({ error: 'Poll not found.' });
     const sec = rows[0];
     const cfg = sec.config || {};
-    const canEdit = await canEditEventSpace(sql, auth, sec.special_event_id);
-    if (!pollVisibleTo(sec, auth.email, canEdit)) return res.status(403).json({ error: 'This poll wasn’t sent to you.' });
+    const votePriv = await eventSpacePriv(sql, auth, sec.special_event_id);
+    const voterIds = votePriv.priv ? [] : await notificationIdentities(sql, auth.email);
+    if (!pollVisibleTo(sec, voterIds, votePriv.priv)) return res.status(403).json({ error: 'This poll wasn’t sent to you.' });
     if (cfg.closed === true) return res.status(409).json({ error: 'This poll is closed.' });
     const opts = (Array.isArray(sec.content) ? sec.content : []).map(o => String((o && o.text) || ''));
     const mode = POLL_MODES.indexOf(cfg.mode) !== -1 ? cfg.mode : 'single';

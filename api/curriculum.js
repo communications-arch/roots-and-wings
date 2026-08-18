@@ -3559,7 +3559,11 @@ module.exports = async function handler(req, res) {
         if (['open', 'closed', 'locked'].indexOf(status) === -1) {
           return res.status(400).json({ error: 'status must be open, closed, or locked' });
         }
-        const sy = activeSchoolYear(new Date());
+        // The Builder can be viewing next year — honor an explicit school_year
+        // (YYYY-YYYY) so the window (and the publish stamp) land on the year
+        // the reviewer is looking at; default = the active year.
+        const bodySy = String(body.school_year || '').trim();
+        const sy = /^\d{4}-\d{4}$/.test(bodySy) ? bodySy : activeSchoolYear(new Date());
         // Date range. Strict YYYY-MM-DD; end >= start. Required when opening
         // (so parents see a deterministic window); optional when closing /
         // locking (preserves whatever range the VP last set).
@@ -3579,15 +3583,11 @@ module.exports = async function handler(req, res) {
         // it as "PM published"). Idempotent: a re-open keeps the first stamp.
         if (status === 'open') {
           if (!rawStart || !rawEnd) return res.status(400).json({ error: 'Pick a start and end date for sign-ups.' });
-          const published = await sql`
-            UPDATE co_op_sessions
-            SET approved_at = COALESCE(approved_at, NOW()),
-                approved_by = COALESCE(approved_by, ${user.email}),
-                updated_at = NOW(), updated_by = ${user.email}
-            WHERE school_year = ${sy} AND session_number = ${session}
-            RETURNING session_number
+          const sessRow = await sql`
+            SELECT session_number FROM co_op_sessions
+            WHERE school_year = ${sy} AND session_number = ${session} LIMIT 1
           `;
-          if (published.length === 0) {
+          if (sessRow.length === 0) {
             return res.status(400).json({ error: 'No session row for ' + sy + ' / Session ' + session + ' — add the session dates (Board Calendar) before opening sign-ups.' });
           }
         }
@@ -3615,6 +3615,17 @@ module.exports = async function handler(req, res) {
             updated_by        = EXCLUDED.updated_by,
             updated_at        = EXCLUDED.updated_at
         `;
+        // #361: publish AFTER the window row exists (a failed upsert must not
+        // leave a published session with no sign-up window).
+        if (status === 'open') {
+          await sql`
+            UPDATE co_op_sessions
+            SET approved_at = COALESCE(approved_at, NOW()),
+                approved_by = COALESCE(approved_by, ${user.email}),
+                updated_at = NOW(), updated_by = ${user.email}
+            WHERE school_year = ${sy} AND session_number = ${session}
+          `;
+        }
         return res.status(200).json({ ok: true, status });
       }
 

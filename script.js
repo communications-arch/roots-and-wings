@@ -28203,7 +28203,9 @@
         } else if (typeof openWorkspaceLendingCard === 'function') {
           openWorkspaceLendingCard();
         }
-      } else if ((nType === 'event_signups_open' || nType === 'discussion_post') && /^evspace:\d+$/.test(nLink)) {
+      } else if (/^evspace:\d+$/.test(nLink)) {
+        // Any Collaboration-space link (sign-ups open, discussion post,
+        // #360 poll "your vote is needed", …) opens the space.
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(nLink.slice(8), 10));
       } else if (nType === 'merch_ready') {
         // "Your merch order is ready" → the family's My Merch Orders detail
@@ -31524,7 +31526,7 @@
       if (s.type === 'poll') {
         var pl = s.poll || {};
         headIcons += raCountPill(pl.closed ? 'ws-wv-pending' : 'ws-wv-ok', pl.closed ? 'closed' : (pl.my_vote ? 'you voted' : 'vote open'));
-        if ((pl.voters || 0) > 0) headIcons += raCountPill('ws-wv-context', pl.voters + ' voted');
+        if ((pl.voters || 0) > 0) headIcons += raCountPill('', pl.voters + ' voted');
       }
       if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
       if (d.can_edit) {
@@ -42964,7 +42966,9 @@
     var endEl = document.getElementById('sbSignupEnd');
     var errEl = document.getElementById('sbSignupError');
     if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    var body = { session: sess, status: status };
+    // #361: send the year the Builder is viewing so the window + publish
+    // stamp land on that year, not silently on the active one.
+    var body = { session: sess, status: status, school_year: scheduleBuilderState.schoolYear };
     if (status === 'open') {
       var start = startEl ? startEl.value : '';
       var end = endEl ? endEl.value : '';

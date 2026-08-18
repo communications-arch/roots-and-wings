@@ -274,17 +274,28 @@ async function getRoleHolderEmails(roleTitles, schoolYear) {
 //                                alias is the household's shared inbox)
 //   • a role mailbox login   → + the mailbox's sibling aliases
 //                              + the current holders' logins
+// Two scopes (review 2026-08-18): in prod the family alias IS the MLC's
+// everyday login (people.email defaults to family_email for the MLC), so
+// the alias must NOT reach into the other adults' personal bells:
+//   identitiesFor(login)      — READ/mark/delete scope: own login + (non-BLC
+//                               adults) the family alias + role hops.
+//   pushIdentitiesFor(addr)   — DELIVERY scope for a row addressed to addr:
+//                               addr + (family alias) every non-BLC adult
+//                               login of the household + role hops. A family
+//                               notice buzzes every parent's phone; a
+//                               personal notice buzzes only that person.
 // Built from three small table reads so broadcasts stay O(1) queries; the
 // pure core is exported for tests. Everything is lower-cased.
 function identityResolverFromRows(data) {
   const people = Array.isArray(data && data.people) ? data.people : [];
   const holders = Array.isArray(data && data.holders) ? data.holders : [];
   const lc = e => String(e || '').trim().toLowerCase();
-  const familyOfLogin = {};   // login → family alias
-  const loginsOfFamily = {};  // family alias → [logins]
+  const familyOfLogin = {};   // adult login → family alias
+  const loginsOfFamily = {};  // family alias → [adult logins]
   people.forEach(p => {
     const em = lc(p.email), fam = lc(p.family_email);
     if (!em || !fam) return;
+    if (String(p.role || '') === 'blc') return; // backup coaches: own address only
     familyOfLogin[em] = fam;
     (loginsOfFamily[fam] || (loginsOfFamily[fam] = [])).push(em);
   });
@@ -317,15 +328,7 @@ function identityResolverFromRows(data) {
     (holdersOfTitle[canon] || (holdersOfTitle[canon] = [])).push(em);
     (titlesOfLogin[em] || (titlesOfLogin[em] = [])).push(canon);
   });
-  function identitiesFor(email) {
-    const e = lc(email);
-    const out = [];
-    const add = x => { if (x && out.indexOf(x) === -1) out.push(x); };
-    if (!e) return out;
-    add(e);
-    // Person → family alias. Family alias → the household's logins.
-    if (familyOfLogin[e]) add(familyOfLogin[e]);
-    (loginsOfFamily[e] || []).forEach(add);
+  function roleHops(e, add) {
     // Role mailbox login → its sibling aliases + current holders.
     const mailboxTitle = titleOfAlias[e];
     if (mailboxTitle) {
@@ -334,25 +337,56 @@ function identityResolverFromRows(data) {
     }
     // Role holder login → the role's mailbox aliases.
     (titlesOfLogin[e] || []).forEach(t => (aliasesOfTitle[t] || []).forEach(add));
+  }
+  function identitiesFor(email) {
+    const e = lc(email);
+    const out = [];
+    const add = x => { if (x && out.indexOf(x) === -1) out.push(x); };
+    if (!e) return out;
+    add(e);
+    // Adult login → the family alias (family-level notices are theirs to
+    // read). Never the reverse: the alias login doesn't see the other
+    // adults' personal rows.
+    if (familyOfLogin[e]) add(familyOfLogin[e]);
+    roleHops(e, add);
     return out;
   }
-  return { identitiesFor };
+  function pushIdentitiesFor(email) {
+    const e = lc(email);
+    const out = [];
+    const add = x => { if (x && out.indexOf(x) === -1) out.push(x); };
+    if (!e) return out;
+    add(e);
+    // A row addressed to the family alias is delivered to every adult's
+    // devices; a row addressed to one adult stays with that adult.
+    (loginsOfFamily[e] || []).forEach(add);
+    roleHops(e, add);
+    return out;
+  }
+  return { identitiesFor, pushIdentitiesFor };
 }
+
+// Resolver memo (60s): the tables it reads change rarely, and callers like
+// sendToUser run once per recipient inside loops.
+let _identityMemo = { at: 0, resolver: null };
 
 // Loads the rows identityResolverFromRows needs. Fails soft: on any DB
 // error the resolver maps every email to just itself (today's behavior).
 async function buildIdentityResolver(sql) {
+  if (_identityMemo.resolver && Date.now() - _identityMemo.at < 60000) return _identityMemo.resolver;
   try {
     const db = sql || getDb();
     const yr = await effectiveSchoolYear(db);
     const [people, holders] = await Promise.all([
-      db`SELECT LOWER(email) AS email, LOWER(family_email) AS family_email
+      db`SELECT LOWER(email) AS email, LOWER(family_email) AS family_email, role
          FROM people WHERE COALESCE(email, '') <> ''`,
       db`SELECT LOWER(rhv.person_email) AS person_email, r.title, r.role_email
          FROM role_holders_v2 rhv JOIN roles r ON r.id = rhv.role_id
          WHERE rhv.school_year = ${yr} AND rhv.ended_at IS NULL`
     ]);
-    return identityResolverFromRows({ people, holders });
+    const resolver = identityResolverFromRows({ people, holders });
+    _identityMemo = { at: Date.now(), resolver };
+    return resolver;
   } catch (err) {
     console.error('[perms] buildIdentityResolver failed (falling back to login only):', err.message || err);
     return identityResolverFromRows({ people: [], holders: [] });
