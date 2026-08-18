@@ -7157,7 +7157,60 @@ function eventTaskShape(t) {
 // tick items off. Its items live in the section's own `content` JSONB as
 // [{text, done, done_by, done_at}]. #238: every event auto-gets a built-in
 // Set-Up + Clean-Up checklist pair (config.builtin='setup'|'cleanup').
-const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board', 'checklist'];
+// #360 (Colleen, 2026-08-18): 'poll' — a poll or vote. Options live in
+// content as [{text}]; config = {mode:'single'|'multi'|'rank', hint
+// (instructions), feedback (ask voters for comments), show_results (voters
+// see tallies), closed, recipients:[emails] (empty = everyone who can see
+// the card; set = ONLY those members + the committee see it, and they get
+// a bell/push), notified:[emails] (server-managed)}. Votes live in
+// event_section_votes — one row per member, choices = option TEXTS (rank
+// mode: in rank order) so rewording/reordering options never mis-tallies.
+const EVENT_SECTION_TYPES = ['timeline', 'signup', 'info', 'notes', 'board', 'checklist', 'poll'];
+const POLL_MODES = ['single', 'multi', 'rank'];
+
+function pollRecipientsOf(cfg) {
+  const list = Array.isArray(cfg && cfg.recipients) ? cfg.recipients : [];
+  return list.map(e => String(e || '').trim().toLowerCase()).filter(Boolean);
+}
+
+// Can this viewer see / vote on a poll section? Recipients narrow it; an
+// unaddressed poll follows the card's normal visibility (is_public / priv).
+function pollVisibleTo(section, viewerEmail, priv) {
+  if (priv) return true;
+  const rcpts = pollRecipientsOf(section.config);
+  if (rcpts.length) return rcpts.indexOf(String(viewerEmail || '').toLowerCase()) !== -1;
+  return section.is_public !== false;
+}
+
+// Tallies for one poll. single/multi: votes per option. rank: Borda points
+// (N − position) + average rank; sorted best-first. Options are matched by
+// TEXT; a vote for a since-removed option simply doesn't count.
+function pollResults(section, votes) {
+  const opts = (Array.isArray(section.content) ? section.content : []).map(o => String((o && o.text) || '')).filter(Boolean);
+  const cfg = section.config || {};
+  const mode = POLL_MODES.indexOf(cfg.mode) !== -1 ? cfg.mode : 'single';
+  const n = opts.length;
+  const per = opts.map(t => ({ text: t, votes: 0, points: 0, rank_sum: 0, first: 0 }));
+  const idx = {};
+  opts.forEach((t, i) => { idx[t] = i; });
+  votes.forEach(v => {
+    const ch = Array.isArray(v.choices) ? v.choices.map(String) : [];
+    ch.forEach((t, pos) => {
+      const i = idx[t];
+      if (i == null) return;
+      per[i].votes++;
+      if (mode === 'rank') {
+        per[i].points += Math.max(0, n - pos);
+        per[i].rank_sum += pos + 1;
+        if (pos === 0) per[i].first++;
+      }
+    });
+  });
+  per.forEach(p => { p.avg_rank = p.votes ? Math.round((p.rank_sum / p.votes) * 10) / 10 : null; delete p.rank_sum; });
+  const sorted = per.slice().sort((a, b) => mode === 'rank' ? (b.points - a.points) || (b.first - a.first) : (b.votes - a.votes));
+  return { mode: mode, voters: votes.length, options: sorted };
+}
+
 
 function eventSectionShape(s, signups) {
   return {
@@ -7183,6 +7236,34 @@ function eventSectionShape(s, signups) {
       created_at: x.created_at || null
     }))
   };
+}
+
+// #360: poll payload for one viewer. Editors get every vote (who / what /
+// feedback); everyone else gets their own vote, the voter count, and the
+// tallies only when the poll owner turned show_results on (or closed it).
+function eventPollShape(shape, section, votes, viewerEmail, canEdit) {
+  const cfg = section.config || {};
+  const me = String(viewerEmail || '').toLowerCase();
+  const mine = votes.filter(v => String(v.person_email || '').toLowerCase() === me)[0] || null;
+  shape.poll = {
+    mode: POLL_MODES.indexOf(cfg.mode) !== -1 ? cfg.mode : 'single',
+    closed: cfg.closed === true,
+    voters: votes.length,
+    my_vote: mine ? { choices: Array.isArray(mine.choices) ? mine.choices : [], feedback: mine.feedback || '', updated_at: mine.updated_at || null } : null,
+    results: (canEdit || cfg.show_results === true || cfg.closed === true) ? pollResults(section, votes) : null,
+    votes: canEdit ? votes.map(v => ({
+      email: String(v.person_email || '').toLowerCase(), name: v.person_name || v.person_email || '',
+      choices: Array.isArray(v.choices) ? v.choices : [], feedback: v.feedback || '', updated_at: v.updated_at || null
+    })) : undefined
+  };
+  // Recipients are the editors' business (and a long list of emails).
+  if (!canEdit && shape.config && shape.config.recipients) {
+    shape.config = Object.assign({}, shape.config, { recipients: shape.config.recipients.length ? ['…'] : [], notified: undefined });
+    shape.config.recipient_count = pollRecipientsOf(cfg).length;
+  } else if (canEdit) {
+    shape.config = Object.assign({}, shape.config, { recipient_count: pollRecipientsOf(cfg).length });
+  }
+  return shape;
 }
 
 // Display name for the signed-in member (sign-ups, seat interest).
@@ -7277,7 +7358,16 @@ async function handleEventSpaceGet(req, res) {
         priv = !!sd && String(sd).toLowerCase() === String(auth.email || '').toLowerCase();
       } catch (e) { /* role unresolved — stay non-privileged */ }
     }
-    if (!priv) sections = sections.filter(x => x.is_public !== false);
+    if (!priv) sections = sections.filter(x => x.is_public !== false || (x.type === 'poll' && pollVisibleTo(x, auth.email, false)));
+    // #360: an ADDRESSED poll (recipients set) shows only to those members
+    // + the committee, whatever the binoculars say.
+    if (!priv) sections = sections.filter(x => x.type !== 'poll' || pollVisibleTo(x, auth.email, false));
+    const pollIds = sections.filter(x => x.type === 'poll').map(x => x.id);
+    const pollVotes = pollIds.length ? await sql`
+      SELECT section_id, person_email, person_name, choices, feedback, updated_at
+      FROM event_section_votes WHERE section_id = ANY(${pollIds})
+      ORDER BY updated_at, id
+    ` : [];
     // #131: a committee-only checklist vanishes for regular members the
     // same way private section cards do.
     const tasksHidden = ev.tasks_public === false && !priv;
@@ -7295,7 +7385,11 @@ async function handleEventSpaceGet(req, res) {
       tasks_public: ev.tasks_public !== false,
       checklist_hidden: ev.checklist_hidden === true,
       tasks_hidden: tasksHidden,
-      sections: sections.map(s => eventSectionShape(s, sectionSignups)),
+      sections: sections.map(s => {
+        const shape = eventSectionShape(s, sectionSignups);
+        if (s.type === 'poll') eventPollShape(shape, s, pollVotes.filter(v => v.section_id === s.id), auth.email, canEdit);
+        return shape;
+      }),
       people: people.map(p => ({ role: p.role, email: p.person_email || '', name: p.person_name || '' })),
       template_count: tplCount[0].n,
       template_section_count: tplSecCount[0].n,
@@ -7362,7 +7456,30 @@ async function handleMyEventTasksGet(req, res) {
         AND se.event_date <= (${today}::date + INTERVAL '30 days')
       ORDER BY se.event_date, se.id
     `;
+    // #360: open polls this member can see and hasn't voted on yet —
+    // addressed to them, OR everyone-visible (public card), OR committee-
+    // only cards on events they sit on. Feeds a "Vote:" To Do row.
+    let polls = [];
+    try {
+      const me = String(auth.email || '').toLowerCase();
+      const pRows = await sql`
+        SELECT s.id, s.title, s.config, s.is_public, s.special_event_id,
+               se.name AS event_name, se.event_date,
+               EXISTS (SELECT 1 FROM special_event_people p WHERE p.event_id = se.id AND LOWER(p.person_email) = ${me}) AS on_committee,
+               EXISTS (SELECT 1 FROM event_section_votes v WHERE v.section_id = s.id AND LOWER(v.person_email) = ${me}) AS voted
+        FROM event_sections s
+        JOIN special_events se ON se.id = s.special_event_id
+        WHERE s.type = 'poll' AND COALESCE((s.config->>'closed')::boolean, FALSE) = FALSE
+        ORDER BY s.updated_at DESC
+        LIMIT 200
+      `;
+      polls = pRows.filter(r => !r.voted && pollVisibleTo(r, me, r.on_committee)).map(r => ({
+        section_id: r.id, title: r.title || 'Poll', event_id: r.special_event_id,
+        event_name: r.event_name, event_date: specialEventDateStr(r.event_date)
+      }));
+    } catch (pe) { console.error('my open polls (non-fatal):', pe); }
     return res.status(200).json({
+      polls: polls,
       tasks: rows.map(r => ({
         id: r.id,
         title: r.title,
@@ -7653,6 +7770,54 @@ async function handleEventSectionSave(body, req, res) {
       return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can edit this space.', youAre: auth.realEmail });
     }
     const id = body.id != null ? parseInt(body.id, 10) : null;
+    // #360: polls — whitelist the config, normalize the options, and work
+    // out who is NEW on the recipients list (they get a bell + push below).
+    let pollNewRecipients = [];
+    let isPoll = String(body.type || '').trim() === 'poll';
+    let pollExisting = null;
+    if (Number.isInteger(id) && id > 0) {
+      const ex = await sql`SELECT type, config FROM event_sections WHERE id = ${id} AND special_event_id = ${eventId}`;
+      if (ex.length && ex[0].type === 'poll') { isPoll = true; pollExisting = ex[0]; }
+    }
+    if (isPoll) {
+      const opts = (Array.isArray(content) ? content : []).map(o => String((o && typeof o === 'object') ? o.text : o).trim().slice(0, 200)).filter(Boolean);
+      const seenOpt = new Set();
+      const uniqOpts = opts.filter(t => { const k = t.toLowerCase(); if (seenOpt.has(k)) return false; seenOpt.add(k); return true; });
+      if (uniqOpts.length < 2) return res.status(400).json({ error: 'A poll needs at least two choices.' });
+      if (uniqOpts.length > 40) return res.status(400).json({ error: 'That’s more than 40 choices — trim the list.' });
+      const rcpts = pollRecipientsOf(config).filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 400);
+      const prevCfg = (pollExisting && pollExisting.config) || {};
+      const notified = Array.isArray(prevCfg.notified) ? prevCfg.notified.map(e => String(e).toLowerCase()) : [];
+      pollNewRecipients = rcpts.filter(e => notified.indexOf(e) === -1);
+      const cleanCfg = {
+        mode: POLL_MODES.indexOf(config.mode) !== -1 ? config.mode : 'single',
+        hint: String(config.hint || '').slice(0, 2000),
+        feedback: config.feedback === true,
+        show_results: config.show_results === true,
+        closed: pollExisting ? (config.closed === true || prevCfg.closed === true) && config.closed !== false : false,
+        recipients: rcpts,
+        notified: notified.concat(pollNewRecipients)
+      };
+      cfgStr = JSON.stringify(cleanCfg);
+      cntStr = JSON.stringify(uniqOpts.map(t => ({ text: t })));
+    }
+    // #360: bell + push the newly-addressed poll recipients (best-effort,
+    // after the row exists — see the two save paths below).
+    const notifyPollRecipients = async (secId, secTitle) => {
+      if (!pollNewRecipients.length) return;
+      try {
+        const evRow = await sql`SELECT name FROM special_events WHERE id = ${eventId}`;
+        const evName = (evRow[0] && evRow[0].name) || 'Special event';
+        const t = secTitle || 'Poll';
+        const ins = await sql`
+          INSERT INTO notifications (recipient_email, type, title, body, link_url)
+          SELECT r, 'event_poll', ${'🗳 Your vote is needed: ' + t}, ${evName + ' — open the Collaboration space to cast your vote.'}, ${'evspace:' + eventId}
+          FROM unnest(${pollNewRecipients}::text[]) AS r
+          RETURNING id, recipient_email, title, body, link_url
+        `;
+        try { await pushNotifications(sql, ins); } catch (pushErr) { console.error('event-poll push (non-fatal):', pushErr); }
+      } catch (nErr) { console.error('event-poll notify (non-fatal):', nErr); }
+    };
     if (Number.isInteger(id) && id > 0) {
       // #238: a built-in Set-Up/Clean-Up card keeps its builtin marker even
       // when an editor rewrites its items — never let a config swap strip it
@@ -7673,7 +7838,8 @@ async function handleEventSectionSave(body, req, res) {
         RETURNING id
       `;
       if (upd.length === 0) return res.status(404).json({ error: 'Section not found.' });
-      return res.status(200).json({ ok: true, id: upd[0].id });
+      if (isPoll) await notifyPollRecipients(upd[0].id, title);
+      return res.status(200).json({ ok: true, id: upd[0].id, notified: pollNewRecipients.length });
     }
     const type = String(body.type || '').trim();
     if (EVENT_SECTION_TYPES.indexOf(type) === -1) return res.status(400).json({ error: 'Unknown section type.' });
@@ -7684,7 +7850,8 @@ async function handleEventSectionSave(body, req, res) {
               ${auth.realEmail})
       RETURNING id
     `;
-    return res.status(200).json({ ok: true, id: ins[0].id });
+    if (isPoll) await notifyPollRecipients(ins[0].id, title);
+    return res.status(200).json({ ok: true, id: ins[0].id, notified: pollNewRecipients.length });
   } catch (err) {
     console.error('event-section-save error:', err);
     return res.status(500).json({ error: 'Server error' });
@@ -7742,6 +7909,88 @@ async function handleEventSectionDelete(body, req, res) {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('event-section-delete error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// #360 kind=event-poll-vote — a member casts (or changes) their vote.
+// Body: {section_id, choices:[option texts — rank order for rank mode],
+// feedback}. Visibility rules decide who may vote; closed polls refuse.
+async function handleEventPollVote(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const sectionId = parseInt(body.section_id, 10);
+  if (!Number.isInteger(sectionId) || sectionId < 1) return res.status(400).json({ error: 'section_id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT id, type, title, config, content, is_public, special_event_id FROM event_sections WHERE id = ${sectionId}`;
+    if (!rows.length || rows[0].type !== 'poll') return res.status(404).json({ error: 'Poll not found.' });
+    const sec = rows[0];
+    const cfg = sec.config || {};
+    const canEdit = await canEditEventSpace(sql, auth, sec.special_event_id);
+    if (!pollVisibleTo(sec, auth.email, canEdit)) return res.status(403).json({ error: 'This poll wasn’t sent to you.' });
+    if (cfg.closed === true) return res.status(409).json({ error: 'This poll is closed.' });
+    const opts = (Array.isArray(sec.content) ? sec.content : []).map(o => String((o && o.text) || ''));
+    const mode = POLL_MODES.indexOf(cfg.mode) !== -1 ? cfg.mode : 'single';
+    const raw = Array.isArray(body.choices) ? body.choices.map(c => String(c || '').trim()) : [];
+    const choices = [];
+    raw.forEach(c => { if (opts.indexOf(c) !== -1 && choices.indexOf(c) === -1) choices.push(c); });
+    if (!choices.length) return res.status(400).json({ error: 'Pick at least one choice.' });
+    if (mode === 'single' && choices.length !== 1) return res.status(400).json({ error: 'Pick exactly one choice.' });
+    const feedback = cfg.feedback === true ? String(body.feedback || '').trim().slice(0, 2000) : '';
+    const email = String(auth.email || '').toLowerCase();
+    const who = await eventPersonName(sql, email);
+    await sql`
+      INSERT INTO event_section_votes (section_id, person_email, person_name, choices, feedback, updated_at)
+      VALUES (${sectionId}, ${email}, ${who.name}, ${JSON.stringify(choices)}::jsonb, ${feedback}, NOW())
+      ON CONFLICT (section_id, LOWER(person_email)) DO UPDATE SET
+        person_name = EXCLUDED.person_name, choices = EXCLUDED.choices,
+        feedback = EXCLUDED.feedback, updated_at = NOW()
+    `;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-poll-vote error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// #360 kind=event-poll-retract — a member withdraws their own vote.
+async function handleEventPollRetract(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const sectionId = parseInt(body.section_id, 10);
+  if (!Number.isInteger(sectionId) || sectionId < 1) return res.status(400).json({ error: 'section_id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT config FROM event_sections WHERE id = ${sectionId} AND type = 'poll'`;
+    if (!rows.length) return res.status(404).json({ error: 'Poll not found.' });
+    if ((rows[0].config || {}).closed === true) return res.status(409).json({ error: 'This poll is closed.' });
+    await sql`DELETE FROM event_section_votes WHERE section_id = ${sectionId} AND LOWER(person_email) = ${String(auth.email || '').toLowerCase()}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('event-poll-retract error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
+// #360 kind=event-poll-close — editors close / reopen a poll. Body {id, closed}.
+async function handleEventPollClose(body, req, res) {
+  const auth = await verifyWorkspaceAuthWithViewAs(req);
+  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+  const id = parseInt(body.id, 10);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'id required' });
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT special_event_id, config FROM event_sections WHERE id = ${id} AND type = 'poll'`;
+    if (!rows.length) return res.status(404).json({ error: 'Poll not found.' });
+    if (!(await canEditEventSpace(sql, auth, rows[0].special_event_id))) {
+      return res.status(403).json({ error: 'Only the event’s people (or SEL/VP) can close a poll.' });
+    }
+    const cfg = Object.assign({}, rows[0].config || {}, { closed: body.closed === true });
+    await sql`UPDATE event_sections SET config = ${JSON.stringify(cfg)}::jsonb, updated_by = ${auth.realEmail}, updated_at = NOW() WHERE id = ${id}`;
+    return res.status(200).json({ ok: true, closed: cfg.closed });
+  } catch (err) {
+    console.error('event-poll-close error:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 }
@@ -8138,6 +8387,11 @@ async function handleEventTemplateSectionsSave(body, req, res) {
     `;
     await sql`DELETE FROM event_template_sections WHERE event_name = ${eventName}`;
     for (const s of sections) {
+      // #360: a poll template keeps the question + choices, never who it was
+      // sent to, who was notified, or whether last year's copy was closed.
+      const tplConfig = s.type === 'poll'
+        ? Object.assign({}, s.config || {}, { recipients: [], notified: [], closed: false })
+        : (s.config || {});
       const content = s.type === 'notes'
         ? { text: '' }
         : s.type === 'checklist'
@@ -8146,7 +8400,7 @@ async function handleEventTemplateSectionsSave(body, req, res) {
           : (s.content == null ? [] : s.content);
       await sql`
         INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
-        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
+        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(tplConfig)}::jsonb,
                 ${JSON.stringify(content)}::jsonb, ${s.sort_order}, ${auth.realEmail})
       `;
     }
@@ -8200,6 +8454,11 @@ async function handleEventTemplateSnapshot(body, req, res) {
       `);
     });
     for (const s of sections) {
+      // #360: a poll template keeps the question + choices, never who it was
+      // sent to, who was notified, or whether last year's copy was closed.
+      const tplConfig = s.type === 'poll'
+        ? Object.assign({}, s.config || {}, { recipients: [], notified: [], closed: false })
+        : (s.config || {});
       const content = s.type === 'notes'
         ? { text: '' }
         : s.type === 'checklist'
@@ -8208,7 +8467,7 @@ async function handleEventTemplateSnapshot(body, req, res) {
           : (s.content == null ? [] : s.content);
       stmts.push(sql`
         INSERT INTO event_template_sections (event_name, type, title, config, content, sort_order, updated_by)
-        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(s.config || {})}::jsonb,
+        VALUES (${eventName}, ${s.type}, ${s.title || ''}, ${JSON.stringify(tplConfig)}::jsonb,
                 ${JSON.stringify(content)}::jsonb, ${s.sort_order}, ${auth.realEmail})
       `);
     }
@@ -11597,6 +11856,9 @@ module.exports = async function handler(req, res) {
     if (kind === 'event-signup-claim') return handleEventSignupClaim(body, req, res);
     if (kind === 'event-signup-unclaim') return handleEventSignupUnclaim(body, req, res);
     if (kind === 'event-signup-update') return handleEventSignupUpdate(body, req, res);
+    if (kind === 'event-poll-vote') return handleEventPollVote(body, req, res);
+    if (kind === 'event-poll-retract') return handleEventPollRetract(body, req, res);
+    if (kind === 'event-poll-close') return handleEventPollClose(body, req, res);
     if (kind === 'event-checklist-toggle') return handleEventChecklistToggle(body, req, res);
     if (kind === 'event-checklist-toggle-item') return handleEventChecklistToggleItem(body, req, res);
     if (kind === 'event-checklist-add-item') return handleEventChecklistAddItem(body, req, res);
@@ -11626,6 +11888,7 @@ module.exports.DEFAULT_SEASON = DEFAULT_SEASON;
 module.exports.morningKidDisplayName = morningKidDisplayName;
 module.exports.validateBoardCalendarEvent = validateBoardCalendarEvent;
 module.exports.computeDerivedCalendarEvents = computeDerivedCalendarEvents;
+module.exports._pollTest = { pollResults, pollVisibleTo, pollRecipientsOf, eventPollShape };
 module.exports.fieldDayForYear = fieldDayForYear;
 module.exports.iceCreamSocialForYear = iceCreamSocialForYear;
 module.exports.calAddDays = calAddDays;

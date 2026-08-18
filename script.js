@@ -25973,6 +25973,12 @@
     else if (action === 'event-bring-add' && typeof toggleEventBringForm === 'function') toggleEventBringForm(btn);
     else if (action === 'event-checklist-toggle' && typeof toggleChecklistItem === 'function') toggleChecklistItem(btn);
     else if (action === 'event-checklist-additem' && typeof toggleChecklistAddForm === 'function') toggleChecklistAddForm(btn);
+    // #360 polls
+    else if (action === 'event-poll-vote' && typeof submitPollVote === 'function') submitPollVote(btn);
+    else if (action === 'event-poll-retract' && typeof retractPollVote === 'function') retractPollVote(btn);
+    else if (action === 'event-poll-close' && typeof togglePollClosed === 'function') togglePollClosed(btn);
+    else if (action === 'event-poll-change') { _pollEditing[parseInt(btn.getAttribute('data-section-id'), 10)] = true; if (typeof renderEventSpaceBody === 'function') renderEventSpaceBody(); }
+    else if (action === 'event-poll-cancel-edit') { delete _pollEditing[parseInt(btn.getAttribute('data-section-id'), 10)]; if (typeof renderEventSpaceBody === 'function') renderEventSpaceBody(); }
     else if (action === 'event-rsvp-open' && typeof toggleEventRsvpForm === 'function') toggleEventRsvpForm(btn);
     else if (action === 'event-seat-review' && typeof showEventSeatReviewModal === 'function') showEventSeatReviewModal();
     else if (action === 'event-jump-in' && typeof showEventJumpInModal === 'function') showEventJumpInModal();
@@ -30977,7 +30983,7 @@
   // member's Ways to Help card once the lead hits "Request volunteers".
   function evsSectionTitle(s) {
     if (s.title) return s.title;
-    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Discussion', checklist: 'Checklist' }[s.type] || 'Section';
+    return { timeline: 'Day-of schedule', signup: 'Sign-ups', info: 'Good to know', notes: 'Notes for next year', board: 'Discussion', checklist: 'Checklist', poll: 'Poll' }[s.type] || 'Section';
   }
 
   // #227 (Mock A): the slots grammar, shared by save and live preview.
@@ -31037,6 +31043,164 @@
     h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-checklist-additem" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '">➕ Add an item</button></p>';
     h += '<div class="evs-chk-addform" data-chk-form="' + FORM_KEY + '" hidden></div>';
     return h;
+  }
+
+  // #360 (Colleen): a poll / vote card. Members pick one, several, or rank
+  // the choices (1st, 2nd, …), optionally leave feedback, and can change or
+  // retract their vote while the poll is open. Editors see every vote +
+  // the tallies; voters see tallies only when the owner turned that on
+  // (or the poll is closed). Choices are matched by TEXT (see server).
+  function renderPollSectionBody(s, viewerEmail, canEdit) {
+    var cfg = s.config || {};
+    var poll = s.poll || { mode: cfg.mode || 'single', closed: !!cfg.closed, voters: 0, my_vote: null, results: null };
+    var mode = poll.mode || 'single';
+    var opts = (Array.isArray(s.content) ? s.content : []).map(function (o) { return String((o && o.text) || ''); }).filter(Boolean);
+    var FORM_KEY = 'poll' + s.id;
+    var h = '';
+    if (cfg.hint) h += '<p class="ws-body-hint evs-poll-hint" style="white-space:pre-wrap;">' + escapeHtmlWs(cfg.hint) + '</p>';
+    var howTo = mode === 'rank' ? 'Rank the choices — 1 = your first choice. You don’t have to rank them all.'
+      : mode === 'multi' ? 'Pick as many as you like.' : 'Pick one.';
+    var recipientNote = '';
+    if (canEdit) {
+      var rc = cfg.recipient_count || 0;
+      recipientNote = rc ? 'Sent to ' + rc + ' member' + (rc === 1 ? '' : 's') : 'Open to everyone who can see this card';
+    }
+    var mine = poll.my_vote;
+    var showForm = !poll.closed && (!mine || _pollEditing[s.id]);
+    if (poll.closed) h += '<p class="ws-body-hint"><strong>This poll is closed.</strong>' + (mine ? ' You voted.' : '') + '</p>';
+    if (showForm) {
+      h += '<div class="evs-poll-form" data-poll-form="' + FORM_KEY + '" data-mode="' + escapeAttr(mode) + '">';
+      h += '<p class="ws-body-hint">' + howTo + '</p>';
+      h += '<ul class="evs-poll-opts">';
+      opts.forEach(function (t, i) {
+        var checked = mine && (mine.choices || []).indexOf(t) !== -1;
+        if (mode === 'rank') {
+          var pos = mine ? (mine.choices || []).indexOf(t) : -1;
+          var sel = '<select class="cl-input evs-poll-rank" data-opt="' + escapeAttr(t) + '" aria-label="Rank for ' + escapeAttr(t) + '"><option value="">—</option>';
+          for (var r = 1; r <= opts.length; r++) sel += '<option value="' + r + '"' + (pos === r - 1 ? ' selected' : '') + '>' + r + (r === 1 ? 'st' : r === 2 ? 'nd' : r === 3 ? 'rd' : 'th') + '</option>';
+          sel += '</select>';
+          h += '<li class="evs-poll-opt evs-poll-opt-rank">' + sel + '<span class="evs-poll-opt-text">' + escapeHtmlWs(t) + '</span></li>';
+        } else {
+          h += '<li class="evs-poll-opt"><label><input type="' + (mode === 'multi' ? 'checkbox' : 'radio') + '" name="' + FORM_KEY + '" class="evs-poll-pick" value="' + escapeAttr(t) + '"' + (checked ? ' checked' : '') + '> <span class="evs-poll-opt-text">' + escapeHtmlWs(t) + '</span></label></li>';
+        }
+      });
+      h += '</ul>';
+      if (cfg.feedback) {
+        h += '<div class="cls-field"><label class="cls-label">Anything else you’d like to add? (optional)</label><textarea class="cl-input cls-textarea evs-poll-feedback" rows="2" maxlength="2000">' + escapeHtmlWs((mine && mine.feedback) || '') + '</textarea></div>';
+      }
+      h += '<div class="perm-chips"><button type="button" class="btn btn-primary btn-sm" data-resource-action="event-poll-vote" data-section-id="' + s.id + '" data-form-key="' + FORM_KEY + '">' + (mine ? 'Save my vote' : 'Cast my vote') + '</button>'
+        + (mine ? ' <button type="button" class="sc-btn" data-resource-action="event-poll-cancel-edit" data-section-id="' + s.id + '">Cancel</button>' : '')
+        + '<span class="perm-status evs-poll-status" aria-live="polite"></span></div>';
+      h += '</div>';
+    } else if (mine) {
+      var mineList = (mine.choices || []).map(function (t, i) { return (mode === 'rank' ? '<strong>' + (i + 1) + '.</strong> ' : '') + escapeHtmlWs(t); });
+      h += '<p class="evs-poll-mine">' + (mode === 'rank' ? 'Your ranking: ' : 'You picked: ') + (mineList.length ? mineList.join(mode === 'rank' ? ' · ' : ', ') : '—')
+        + (mine.feedback ? '<br><span class="ws-wv-context">Your note: ' + escapeHtmlWs(mine.feedback) + '</span>' : '') + '</p>';
+      if (!poll.closed) {
+        h += '<p class="ws-part-submit-line"><button type="button" class="ws-part-submit-link" data-resource-action="event-poll-change" data-section-id="' + s.id + '">Change my vote</button> · <button type="button" class="ws-part-submit-link" data-resource-action="event-poll-retract" data-section-id="' + s.id + '">Take my vote back</button></p>';
+      }
+    } else if (poll.closed) {
+      h += '<p class="ws-empty">You didn’t vote in this one.</p>';
+    }
+    // Results
+    var res = poll.results;
+    var voters = poll.voters || 0;
+    if (res && (canEdit || voters)) {
+      h += '<div class="evs-poll-results">';
+      h += '<p class="evs-poll-results-head"><strong>' + voters + '</strong> vote' + (voters === 1 ? '' : 's') + (recipientNote ? ' · ' + escapeHtmlWs(recipientNote) : '') + (canEdit && !cfg.show_results && !poll.closed ? ' · <span class="ws-wv-context">only you and the committee see these tallies</span>' : '') + '</p>';
+      var maxV = 0;
+      (res.options || []).forEach(function (o) { maxV = Math.max(maxV, mode === 'rank' ? o.points : o.votes); });
+      h += '<ul class="evs-poll-bars">';
+      (res.options || []).forEach(function (o, i) {
+        var val = mode === 'rank' ? o.points : o.votes;
+        var pct = maxV ? Math.round(val / maxV * 100) : 0;
+        var label = mode === 'rank'
+          ? o.points + ' pt' + (o.points === 1 ? '' : 's') + (o.first ? ' · ' + o.first + ' first-choice' : '') + (o.avg_rank ? ' · avg rank ' + o.avg_rank : '')
+          : o.votes + ' vote' + (o.votes === 1 ? '' : 's');
+        h += '<li class="evs-poll-bar' + (i === 0 && val ? ' is-top' : '') + '"><span class="evs-poll-bar-text">' + escapeHtmlWs(o.text) + '</span><span class="evs-poll-bar-track"><span class="evs-poll-bar-fill" style="width:' + pct + '%"></span></span><span class="evs-poll-bar-n">' + label + '</span></li>';
+      });
+      h += '</ul>';
+      if (canEdit && Array.isArray(poll.votes) && poll.votes.length) {
+        h += '<details class="evs-poll-detail"><summary>Who voted how (' + poll.votes.length + ')</summary><ul class="ws-part-recap">';
+        poll.votes.forEach(function (v) {
+          h += '<li><strong>' + escapeHtmlWs(v.name || v.email) + '</strong> — ' + (v.choices || []).map(function (t, i) { return (mode === 'rank' ? (i + 1) + '. ' : '') + escapeHtmlWs(t); }).join(mode === 'rank' ? ' · ' : ', ')
+            + (v.feedback ? '<br><span class="ws-wv-context">“' + escapeHtmlWs(v.feedback) + '”</span>' : '') + '</li>';
+        });
+        h += '</ul></details>';
+      }
+      h += '</div>';
+    } else if (canEdit && recipientNote) {
+      h += '<p class="ws-body-hint">' + escapeHtmlWs(recipientNote) + ' · no votes yet</p>';
+    }
+    if (canEdit) {
+      h += '<p class="ws-part-submit-line"><button type="button" class="sc-btn' + (poll.closed ? '' : ' sc-btn-del') + '" data-resource-action="event-poll-close" data-section-id="' + s.id + '" data-closed="' + (poll.closed ? '0' : '1') + '">' + (poll.closed ? 'Reopen poll' : 'Close poll') + '</button></p>';
+    }
+    return h;
+  }
+  var _pollEditing = {};
+
+  // #360 poll actions (document-level delegation, like the checklist).
+  function submitPollVote(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var form = document.querySelector('[data-poll-form="' + btn.getAttribute('data-form-key') + '"]');
+    if (!form) return;
+    var st = form.querySelector('.evs-poll-status');
+    var mode = form.getAttribute('data-mode');
+    var choices = [];
+    if (mode === 'rank') {
+      var ranked = [];
+      form.querySelectorAll('.evs-poll-rank').forEach(function (sel) {
+        var r = parseInt(sel.value, 10);
+        if (r) ranked.push({ r: r, t: sel.getAttribute('data-opt') });
+      });
+      var seen = {};
+      for (var i = 0; i < ranked.length; i++) {
+        if (seen[ranked[i].r]) { if (st) { st.className = 'perm-status evs-poll-status ws-wv-err'; st.textContent = 'Two choices share the same rank — give each its own number.'; } return; }
+        seen[ranked[i].r] = true;
+      }
+      ranked.sort(function (a, b) { return a.r - b.r; });
+      choices = ranked.map(function (x) { return x.t; });
+    } else {
+      form.querySelectorAll('.evs-poll-pick:checked').forEach(function (inp) { choices.push(inp.value); });
+    }
+    if (!choices.length) { if (st) { st.className = 'perm-status evs-poll-status ws-wv-err'; st.textContent = mode === 'rank' ? 'Rank at least your first choice.' : 'Pick a choice first.'; } return; }
+    var fb = form.querySelector('.evs-poll-feedback');
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-poll-vote', section_id: sid, choices: choices, feedback: fb ? fb.value.trim() : '' }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; if (st) { st.className = 'perm-status evs-poll-status ws-wv-err'; st.textContent = (res.data && res.data.error) || 'Could not save your vote.'; } return; }
+        delete _pollEditing[sid];
+        evsMaybeRefreshSpace();
+        if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
+      })
+      .catch(function () { btn.disabled = false; if (st) { st.className = 'perm-status evs-poll-status ws-wv-err'; st.textContent = 'Network error — try again.'; } });
+  }
+  function retractPollVote(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    if (!confirm('Take back your vote? You can vote again while the poll is open.')) return;
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-poll-retract', section_id: sid }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not take the vote back.'); return; }
+        evsMaybeRefreshSpace();
+        if (typeof loadMyEventTasks === 'function') loadMyEventTasks();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
+  }
+  function togglePollClosed(btn) {
+    var sid = parseInt(btn.getAttribute('data-section-id'), 10);
+    var closing = btn.getAttribute('data-closed') === '1';
+    if (closing && !confirm('Close this poll? Members can no longer vote or change their vote (you can reopen it later).')) return;
+    btn.disabled = true;
+    fetch('/api/tour', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ kind: 'event-poll-close', id: sid, closed: closing }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { btn.disabled = false; alert((res.data && res.data.error) || 'Could not update the poll.'); return; }
+        evsMaybeRefreshSpace();
+      })
+      .catch(function () { btn.disabled = false; alert('Network error — try again.'); });
   }
 
   // Shared signup-section body — same markup in the Event Space, on
@@ -31357,6 +31521,11 @@
       // header card explains the hearts.
       var headIcons = '';
       if (s.type === 'signup') headIcons += raCountPill(s.is_open ? 'ws-wv-ok' : 'ws-wv-pending', s.is_open ? 'sign-ups open' : 'not open yet');
+      if (s.type === 'poll') {
+        var pl = s.poll || {};
+        headIcons += raCountPill(pl.closed ? 'ws-wv-pending' : 'ws-wv-ok', pl.closed ? 'closed' : (pl.my_vote ? 'you voted' : 'vote open'));
+        if ((pl.voters || 0) > 0) headIcons += raCountPill('ws-wv-context', pl.voters + ' voted');
+      }
       if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
       if (d.can_edit) {
         var pub = s.is_public !== false;
@@ -31423,10 +31592,20 @@
         h += renderSignupSectionBody(s, d.viewer_email, d.can_edit);
       } else if (s.type === 'checklist') {
         h += renderChecklistSectionBody(s, d.viewer_email, d.can_edit);
+      } else if (s.type === 'poll') {
+        h += renderPollSectionBody(s, d.viewer_email, d.can_edit);
       }
       h += '</div></div>'; // /body, /card
     });
     return h;
+  }
+
+  // #360: one recipient chip (name when the space's member list knows the
+  // email, else the address) with a remove ×.
+  function pollRecipientChip(email, d) {
+    var em = String(email || '').toLowerCase();
+    var hit = ((d && d.members) || []).filter(function (m) { return m.email === em; })[0];
+    return '<span class="evs-sd-rcpt" data-email="' + escapeAttr(em) + '" title="' + escapeAttr(em) + '">' + escapeHtmlWs(hit ? hit.name : em) + '<button type="button" class="evs-sd-rcpt-x" aria-label="Remove">×</button></span>';
   }
 
   // Add/Edit a section — textarea-first drawer (same spirit as the task
@@ -31441,7 +31620,7 @@
     if (!el) return;
     function fieldsFor(t, s) {
       var cfg = (s && s.config) || {};
-      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year', board: 'Discussion' }[t] || '') + '"></div>';
+      var fh = '<div class="cls-field"><label class="cls-label">Title</label><input class="cl-input evs-sd-title" type="text" maxlength="200" value="' + escapeAttr(s ? (s.title || '') : '') + '" placeholder="' + escapeAttr({ timeline: 'Day-of schedule', signup: 'Bring a topping', info: 'Roots & Wings will provide', notes: 'Notes for next year', board: 'Discussion', poll: 'Which theme for the party?' }[t] || '') + '"></div>';
       if (t === 'info') {
         var lines = Array.isArray(s && s.content) ? s.content.join('\n') : '';
         fh += '<div class="cls-field"><label class="cls-label">Items — one per line</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="8" placeholder="Dairy ice cream — chocolate and vanilla\nNon-dairy vegan ice cream\nAll paper goods">' + escapeHtmlWs(lines) + '</textarea></div>';
@@ -31515,7 +31694,29 @@
         fh += '<div class="cls-field"><label class="cls-label">Hint shown to members (optional)</label><input class="cl-input evs-sd-hint" type="text" maxlength="300" value="' + escapeAttr(bHint) + '" placeholder="Talk through plans here — everyone on the team sees it."></div>';
         fh += '<div class="cls-field"><label class="cls-label">Chat-space link (optional) — pins at the top of the Discussion</label><input class="cl-input evs-sd-chaturl" type="url" maxlength="500" value="' + escapeAttr(cfg.chat_url || '') + '" placeholder="https://chat.google.com/room/…"></div>';
         fh += '<div class="cls-field"><label class="cls-label">Chat-space note (optional)</label><input class="cl-input evs-sd-chatnote" type="text" maxlength="200" value="' + escapeAttr(cfg.chat_note || '') + '" placeholder="Day-of quick messages happen in our Google Chat space"></div>';
-      } else if (t === 'checklist') {
+      } else if (t === 'poll') {
+        // #360 (Colleen): a poll / vote — editable choices, single / multi /
+        // ranked, instructions, optional voter feedback, and an optional
+        // send-to list of specific members (chip picker over the space's
+        // member list; empty = everyone who can see the card).
+        var pmode = ['single', 'multi', 'rank'].indexOf(cfg.mode) !== -1 ? cfg.mode : 'single';
+        fh += '<div class="cls-field"><label class="cls-label">Poll style</label><select class="cl-input evs-sd-pollmode">'
+          + '<option value="single"' + (pmode === 'single' ? ' selected' : '') + '>Pick one</option>'
+          + '<option value="multi"' + (pmode === 'multi' ? ' selected' : '') + '>Pick any that apply</option>'
+          + '<option value="rank"' + (pmode === 'rank' ? ' selected' : '') + '>Rank the choices (1st, 2nd, 3rd…)</option>'
+          + '</select></div>';
+        var pollLines = (Array.isArray(s && s.content) ? s.content : []).map(function (o) { return String((o && o.text) || ''); }).filter(Boolean).join('\n');
+        fh += '<div class="cls-field"><label class="cls-label">Choices — one per line (add, remove, or reword any time)</label><textarea class="cl-input cls-textarea evs-sd-lines" rows="6" placeholder="Luau\nWestern\nUnder the sea">' + escapeHtmlWs(pollLines) + '</textarea></div>';
+        fh += '<div class="cls-field"><label class="cls-label">Instructions / notes for voters (optional)</label><textarea class="cl-input cls-textarea evs-sd-hint" rows="3" maxlength="2000" placeholder="We’ll pick the theme with the most votes by Friday. Second choices count too!">' + escapeHtmlWs(cfg.hint || '') + '</textarea></div>';
+        fh += '<div class="cls-field"><label class="cls-cb-label"><input type="checkbox" class="evs-sd-pollfb"' + (cfg.feedback ? ' checked' : '') + '> Ask voters for extra feedback (a free-text box under the choices)</label></div>';
+        fh += '<div class="cls-field"><label class="cls-cb-label"><input type="checkbox" class="evs-sd-pollres"' + (cfg.show_results ? ' checked' : '') + '> Show the running results to voters after they vote (you and the committee always see them)</label></div>';
+        var rcptList = Array.isArray(cfg.recipients) ? cfg.recipients.filter(function (e) { return e && e !== '…'; }) : [];
+        var memberOpts = (d.members || []).map(function (m) { return '<option value="' + escapeAttr(m.name + (m.email ? ' <' + m.email + '>' : '')) + '">'; }).join('');
+        fh += '<div class="cls-field"><label class="cls-label">Send to specific members (optional)</label>'
+          + '<input class="cl-input evs-sd-rcpt-input" type="text" list="evsPollMemberList" placeholder="Start typing a name, then pick from the list…">'
+          + '<datalist id="evsPollMemberList">' + memberOpts + '</datalist>'
+          + '<div class="evs-sd-rcpts">' + rcptList.map(function (e) { return pollRecipientChip(e, d); }).join('') + '</div>'
+          + '<p class="ws-body-hint" style="margin:4px 0 0;">Leave this empty to ask everyone who can see the card (use the binoculars on the card to open it to all members). Add names to send it ONLY to those members — they get a notification, and nobody else sees the poll.</p></div>';      } else if (t === 'checklist') {
         // #223 (Erin): a generic checklist — a custom title + a plain list of
         // items, one per line. Members tick items off; editors edit the text
         // here. Existing checked-off state is preserved on save by matching
@@ -31534,6 +31735,7 @@
         + '<option value="timeline">Timeline — the day-of schedule</option>'
         + '<option value="notes">Notes for next year</option>'
         + '<option value="board">Discussion — team messages & links</option>'
+        + '<option value="poll">Poll or vote — members pick or rank choices</option>'
         + '</select></div>';
     }
     h += '<div id="evs-sd-fields">' + fieldsFor(type, section) + '</div>';
@@ -31616,13 +31818,42 @@
         if (st2) { st2.className = 'perm-status ws-wv-ok'; st2.textContent = 'Shifts added below — adjust any line by hand.'; }
       });
     }
+    // #360: recipient chip picker — pick from the datalist (name <email>),
+    // Enter or blur adds a chip; × removes it.
+    function wirePollRecipients() {
+      var inp = el.querySelector('.evs-sd-rcpt-input');
+      var box = el.querySelector('.evs-sd-rcpts');
+      if (!inp || !box) return;
+      function addFromInput() {
+        var raw = inp.value.trim();
+        if (!raw) return;
+        var m = raw.match(/<([^>]+)>\s*$/);
+        var email = (m ? m[1] : raw).trim().toLowerCase();
+        if (!m) {
+          var hit = (d.members || []).filter(function (mm) { return mm.name.toLowerCase() === raw.toLowerCase() || mm.email === raw.toLowerCase(); })[0];
+          if (hit && hit.email) email = hit.email;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+        if (box.querySelector('[data-email="' + email.replace(/"/g, '') + '"]')) { inp.value = ''; return; }
+        box.insertAdjacentHTML('beforeend', pollRecipientChip(email, d));
+        inp.value = '';
+      }
+      inp.addEventListener('change', addFromInput);
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addFromInput(); } });
+      box.addEventListener('click', function (e) {
+        var x = e.target.closest('.evs-sd-rcpt-x');
+        if (x) x.parentNode.remove();
+      });
+    }
     var typeSel = el.querySelector('.evs-sd-type');
     if (typeSel) typeSel.addEventListener('change', function () {
       type = this.value;
       document.getElementById('evs-sd-fields').innerHTML = fieldsFor(type, null);
       wireModeSel();
+      wirePollRecipients();
     });
     wireModeSel();
+    wirePollRecipients();
     el.querySelector('.evs-sd-save').addEventListener('click', function () {
       var st = el.querySelector('.evs-sd-status');
       var title = el.querySelector('.evs-sd-title').value.trim();
@@ -31670,7 +31901,21 @@
           var badShift = content.filter(function (r) { return Array.isArray(r.shifts) && r.shifts.some(function (sh) { return !sh.time; }); })[0];
           if (badShift) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Every shift line under “' + badShift.label + '” needs a time.'; return; }
         }
-      } else if (type === 'board') {
+      } else if (type === 'poll') {
+        // #360: options → [{text}]; config whitelisted again server-side.
+        content = lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (t) { return { text: t }; });
+        if (content.length < 2) { st.className = 'perm-status evs-sd-status ws-wv-err'; st.textContent = 'Give the poll at least two choices'; return; }
+        var pmSel = el.querySelector('.evs-sd-pollmode');
+        config.mode = pmSel && ['single', 'multi', 'rank'].indexOf(pmSel.value) !== -1 ? pmSel.value : 'single';
+        var phEl = el.querySelector('.evs-sd-hint');
+        if (phEl && phEl.value.trim()) config.hint = phEl.value.trim();
+        var pfb = el.querySelector('.evs-sd-pollfb');
+        config.feedback = !!(pfb && pfb.checked);
+        var pres = el.querySelector('.evs-sd-pollres');
+        config.show_results = !!(pres && pres.checked);
+        config.recipients = [];
+        el.querySelectorAll('.evs-sd-rcpts [data-email]').forEach(function (chip) { config.recipients.push(chip.getAttribute('data-email')); });
+        if (isEdit && section.config && section.config.closed) config.closed = true;      } else if (type === 'board') {
         // #123: board entries live in signups; content stays [] — hint
         // and (#226) the pinned chat-space link ride config.
         var bHintEl = el.querySelector('.evs-sd-hint');
@@ -32381,6 +32626,7 @@
   // My open event tasks — feeds My Responsibilities (one duty per event).
   var _myEventTasks = null;
   var _myEventPlanning = null;
+  var _myOpenPolls = null; // #360: polls awaiting this member's vote
   var _myEventTasksSig = '';
   function loadMyEventTasks() {
     var cred = localStorage.getItem('rw_google_credential');
@@ -32391,7 +32637,8 @@
         if (!data) return;
         var tasks = Array.isArray(data.tasks) ? data.tasks : [];
         var planning = Array.isArray(data.planning) ? data.planning : [];
-        var sig = JSON.stringify([tasks, planning]);
+        _myOpenPolls = Array.isArray(data.polls) ? data.polls : [];
+        var sig = JSON.stringify([tasks, planning, _myOpenPolls]);
         var changed = sig !== _myEventTasksSig;
         _myEventTasksSig = sig;
         _myEventTasks = tasks;
@@ -32455,6 +32702,19 @@
         + (p.event_date ? ' — ' + boardCalFmtDate(p.event_date) : '') + '</span></button>';
       li.querySelector('button').addEventListener('click', function () {
         if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(eid, 10));
+      });
+      list.appendChild(li);
+      rows++;
+    });
+    // #360: polls waiting on this member's vote — one row per poll.
+    (Array.isArray(_myOpenPolls) ? _myOpenPolls : []).forEach(function (p) {
+      var li = document.createElement('li');
+      li.className = 'ws-todo-evt';
+      li.id = 'ws-todo-evtpoll-' + p.section_id + '-item';
+      li.innerHTML = '<button type="button" class="ws-link-btn"><span class="ws-link-icon">' + brandIconImg('specialEvents', 'ag-icon') + '</span>'
+        + '<span>Vote: ' + escapeHtml(p.title) + ' — ' + escapeHtml(p.event_name) + '</span></button>';
+      li.querySelector('button').addEventListener('click', function () {
+        if (typeof showEventSpaceModal === 'function') showEventSpaceModal(parseInt(p.event_id, 10));
       });
       list.appendChild(li);
       rows++;

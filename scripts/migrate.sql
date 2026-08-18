@@ -3084,3 +3084,24 @@ WHERE w.school_year = s.school_year AND w.session_number = s.session_number
   AND w.status IN ('open', 'closed', 'locked')
   AND s.approved_at IS NULL;
 
+-- 2026-08-18 (#360, Colleen): Collaboration "Poll or vote" section type.
+-- Options in event_sections.content [{text}]; config = {mode single|multi|
+-- rank, hint, feedback, show_results, closed, recipients[], notified[]}.
+-- One vote row per member per poll; choices = option TEXTS (rank order for
+-- rank mode) so rewording options never mis-tallies; feedback = voter's note.
+ALTER TABLE event_sections DROP CONSTRAINT IF EXISTS event_sections_type_check;
+ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist','poll'));
+ALTER TABLE event_template_sections DROP CONSTRAINT IF EXISTS event_template_sections_type_check;
+ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist','poll'));
+CREATE TABLE IF NOT EXISTS event_section_votes (
+  id           SERIAL PRIMARY KEY,
+  section_id   INTEGER NOT NULL REFERENCES event_sections(id) ON DELETE CASCADE,
+  person_email TEXT NOT NULL,
+  person_name  TEXT NOT NULL DEFAULT '',
+  choices      JSONB NOT NULL DEFAULT '[]',
+  feedback     TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_section_votes_uniq ON event_section_votes (section_id, LOWER(person_email));
+
