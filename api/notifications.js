@@ -11,7 +11,7 @@
 const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
-const { isSuperUser } = require('./_permissions');
+const { isSuperUser, notificationIdentities } = require('./_permissions');
 const { sendToUser } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
@@ -63,6 +63,10 @@ module.exports = async function handler(req, res) {
   try {
     const sql = getSql();
     const recipient = resolveRecipient(user, req.query.view_as);
+    // #363: a member reaches the portal under more than one address (own
+    // login, family alias, role mailbox) and notifications get addressed to
+    // whichever the sender knew — read/mark/delete across the whole set.
+    const ids = await notificationIdentities(sql, recipient);
 
     if (req.method === 'GET') {
       const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
@@ -72,7 +76,7 @@ module.exports = async function handler(req, res) {
         rows = await sql`
           SELECT id, type, title, body, link_url, related_absence_id, is_read, created_at
           FROM notifications
-          WHERE recipient_email = ${recipient} AND is_read = FALSE
+          WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
           ORDER BY created_at DESC
           LIMIT ${limit}
         `;
@@ -80,14 +84,14 @@ module.exports = async function handler(req, res) {
         rows = await sql`
           SELECT id, type, title, body, link_url, related_absence_id, is_read, created_at
           FROM notifications
-          WHERE recipient_email = ${recipient}
+          WHERE LOWER(recipient_email) = ANY(${ids}::text[])
           ORDER BY created_at DESC
           LIMIT ${limit}
         `;
       }
       const unreadCount = await sql`
         SELECT COUNT(*)::int AS count FROM notifications
-        WHERE recipient_email = ${recipient} AND is_read = FALSE
+        WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
       `;
       return res.status(200).json({ notifications: rows, unread_count: unreadCount[0].count });
     }
@@ -96,7 +100,7 @@ module.exports = async function handler(req, res) {
       if (req.query.mark_all_read === 'true') {
         await sql`
           UPDATE notifications SET is_read = TRUE
-          WHERE recipient_email = ${recipient} AND is_read = FALSE
+          WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = FALSE
         `;
         return res.status(200).json({ ok: true });
       }
@@ -104,7 +108,7 @@ module.exports = async function handler(req, res) {
       if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'id required' });
       await sql`
         UPDATE notifications SET is_read = TRUE
-        WHERE id = ${id} AND recipient_email = ${recipient}
+        WHERE id = ${id} AND LOWER(recipient_email) = ANY(${ids}::text[])
       `;
       return res.status(200).json({ ok: true });
     }
@@ -115,7 +119,7 @@ module.exports = async function handler(req, res) {
       if (req.query.clear_read === 'true') {
         await sql`
           DELETE FROM notifications
-          WHERE recipient_email = ${recipient} AND is_read = TRUE
+          WHERE LOWER(recipient_email) = ANY(${ids}::text[]) AND is_read = TRUE
         `;
         return res.status(200).json({ ok: true });
       }
@@ -123,7 +127,7 @@ module.exports = async function handler(req, res) {
       if (!delId || Number.isNaN(delId)) return res.status(400).json({ error: 'id required' });
       await sql`
         DELETE FROM notifications
-        WHERE id = ${delId} AND recipient_email = ${recipient}
+        WHERE id = ${delId} AND LOWER(recipient_email) = ANY(${ids}::text[])
       `;
       return res.status(200).json({ ok: true });
     }

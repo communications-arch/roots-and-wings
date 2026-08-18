@@ -260,6 +260,111 @@ async function getRoleHolderEmails(roleTitles, schoolYear) {
   return out;
 }
 
+// ── Notification identities (#363, Erin 2026-08-18) ────────────────────
+// A member can reach the portal under more than one @rootsandwingsindy.com
+// address: their own login (people.email), the family alias
+// (member_profiles.family_email), and — for board members — the role
+// mailbox(es) (vicepresident@ / vp@ …). Notifications get ADDRESSED to
+// whichever of those the sender happened to know, so the bell and push
+// must resolve a login to its whole identity set:
+//   • a person's login       → + their family alias
+//                              + role mailboxes / roles.role_email for the
+//                                roles they hold this year
+//   • the family alias login → + every adult login in that family (the
+//                                alias is the household's shared inbox)
+//   • a role mailbox login   → + the mailbox's sibling aliases
+//                              + the current holders' logins
+// Built from three small table reads so broadcasts stay O(1) queries; the
+// pure core is exported for tests. Everything is lower-cased.
+function identityResolverFromRows(data) {
+  const people = Array.isArray(data && data.people) ? data.people : [];
+  const holders = Array.isArray(data && data.holders) ? data.holders : [];
+  const lc = e => String(e || '').trim().toLowerCase();
+  const familyOfLogin = {};   // login → family alias
+  const loginsOfFamily = {};  // family alias → [logins]
+  people.forEach(p => {
+    const em = lc(p.email), fam = lc(p.family_email);
+    if (!em || !fam) return;
+    familyOfLogin[em] = fam;
+    (loginsOfFamily[fam] || (loginsOfFamily[fam] = [])).push(em);
+  });
+  // Role mailboxes: canonical title (lower) → aliases; alias → title.
+  const aliasesOfTitle = {};
+  const titleOfAlias = {};
+  Object.keys(BOARD_ROLE_EMAILS).forEach(t => {
+    const canon = canonicalTitle(t).toLowerCase();
+    const list = aliasesOfTitle[canon] || (aliasesOfTitle[canon] = []);
+    BOARD_ROLE_EMAILS[t].forEach(a => {
+      const al = lc(a);
+      if (list.indexOf(al) === -1) list.push(al);
+      titleOfAlias[al] = canon;
+    });
+  });
+  // roles.role_email counts as a mailbox alias for that title too.
+  const holdersOfTitle = {};  // canonical title → [person logins]
+  const titlesOfLogin = {};   // login → [canonical titles]
+  holders.forEach(h => {
+    const canon = canonicalTitle(h.title).toLowerCase();
+    const em = lc(h.person_email);
+    if (!canon) return;
+    const re = lc(h.role_email);
+    if (re) {
+      const list = aliasesOfTitle[canon] || (aliasesOfTitle[canon] = []);
+      if (list.indexOf(re) === -1) list.push(re);
+      if (!titleOfAlias[re]) titleOfAlias[re] = canon;
+    }
+    if (!em) return;
+    (holdersOfTitle[canon] || (holdersOfTitle[canon] = [])).push(em);
+    (titlesOfLogin[em] || (titlesOfLogin[em] = [])).push(canon);
+  });
+  function identitiesFor(email) {
+    const e = lc(email);
+    const out = [];
+    const add = x => { if (x && out.indexOf(x) === -1) out.push(x); };
+    if (!e) return out;
+    add(e);
+    // Person → family alias. Family alias → the household's logins.
+    if (familyOfLogin[e]) add(familyOfLogin[e]);
+    (loginsOfFamily[e] || []).forEach(add);
+    // Role mailbox login → its sibling aliases + current holders.
+    const mailboxTitle = titleOfAlias[e];
+    if (mailboxTitle) {
+      (aliasesOfTitle[mailboxTitle] || []).forEach(add);
+      (holdersOfTitle[mailboxTitle] || []).forEach(add);
+    }
+    // Role holder login → the role's mailbox aliases.
+    (titlesOfLogin[e] || []).forEach(t => (aliasesOfTitle[t] || []).forEach(add));
+    return out;
+  }
+  return { identitiesFor };
+}
+
+// Loads the rows identityResolverFromRows needs. Fails soft: on any DB
+// error the resolver maps every email to just itself (today's behavior).
+async function buildIdentityResolver(sql) {
+  try {
+    const db = sql || getDb();
+    const yr = await effectiveSchoolYear(db);
+    const [people, holders] = await Promise.all([
+      db`SELECT LOWER(email) AS email, LOWER(family_email) AS family_email
+         FROM people WHERE COALESCE(email, '') <> ''`,
+      db`SELECT LOWER(rhv.person_email) AS person_email, r.title, r.role_email
+         FROM role_holders_v2 rhv JOIN roles r ON r.id = rhv.role_id
+         WHERE rhv.school_year = ${yr} AND rhv.ended_at IS NULL`
+    ]);
+    return identityResolverFromRows({ people, holders });
+  } catch (err) {
+    console.error('[perms] buildIdentityResolver failed (falling back to login only):', err.message || err);
+    return identityResolverFromRows({ people: [], holders: [] });
+  }
+}
+
+// One-shot convenience: every address that means "this login".
+async function notificationIdentities(sql, email) {
+  const r = await buildIdentityResolver(sql);
+  return r.identitiesFor(email);
+}
+
 module.exports = {
   SUPER_USER_EMAIL,
   SUPER_USER_EMAILS,
@@ -271,6 +376,9 @@ module.exports = {
   getRoleHolderEmail,
   getRoleHolderEmails,
   activeSchoolYear,
+  buildIdentityResolver,
+  notificationIdentities,
   // Exported for tests:
-  _canonicalTitle: canonicalTitle
+  _canonicalTitle: canonicalTitle,
+  _identityResolverFromRows: identityResolverFromRows
 };

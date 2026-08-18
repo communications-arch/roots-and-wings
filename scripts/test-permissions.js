@@ -222,6 +222,64 @@ await t('returns null for unknown role with no DB', async () => {
   assert.strictEqual(email, null);
 });
 
+// ── 9. notification identities (#363) ─────────────────────────────────
+console.log('\nidentityResolverFromRows (#363 — two R&W emails)');
+
+const idRes = perms._identityResolverFromRows({
+  people: [
+    { email: 'colleenr@rootsandwingsindy.com', family_email: 'raymont@rootsandwingsindy.com' },
+    { email: 'jane@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com' },
+    { email: 'bob@rootsandwingsindy.com', family_email: 'smith@rootsandwingsindy.com' },
+    { email: 'solo@rootsandwingsindy.com', family_email: 'solo@rootsandwingsindy.com' }
+  ],
+  holders: [
+    { person_email: 'colleenr@rootsandwingsindy.com', title: 'Vice-President', role_email: 'vicepresident@rootsandwingsindy.com' },
+    { person_email: 'jane@rootsandwingsindy.com', title: 'Afternoon Class Liaison', role_email: 'afternoon@rootsandwingsindy.com' }
+  ]
+});
+const has = (arr, x) => arr.indexOf(x) !== -1;
+
+t('person login → own + family alias + role mailboxes', () => {
+  const ids = idRes.identitiesFor('ColleenR@rootsandwingsindy.com');
+  assert.ok(has(ids, 'colleenr@rootsandwingsindy.com'));
+  assert.ok(has(ids, 'raymont@rootsandwingsindy.com'));
+  assert.ok(has(ids, 'vicepresident@rootsandwingsindy.com'));
+  assert.ok(has(ids, 'vp@rootsandwingsindy.com'));
+  assert.ok(!has(ids, 'smith@rootsandwingsindy.com'));
+});
+t('role mailbox login → sibling aliases + current holder', () => {
+  const ids = idRes.identitiesFor('vp@rootsandwingsindy.com');
+  assert.ok(has(ids, 'vicepresident@rootsandwingsindy.com'));
+  assert.ok(has(ids, 'colleenr@rootsandwingsindy.com'));
+  assert.ok(!has(ids, 'raymont@rootsandwingsindy.com'), 'mailbox does not reach into the holder family alias');
+});
+t('roles.role_email counts as a mailbox alias', () => {
+  const ids = idRes.identitiesFor('afternoon@rootsandwingsindy.com');
+  assert.ok(has(ids, 'jane@rootsandwingsindy.com'));
+  assert.ok(has(idRes.identitiesFor('jane@rootsandwingsindy.com'), 'afternoon@rootsandwingsindy.com'));
+});
+t('family alias login → every adult login in the household', () => {
+  const ids = idRes.identitiesFor('smith@rootsandwingsindy.com');
+  assert.ok(has(ids, 'jane@rootsandwingsindy.com') && has(ids, 'bob@rootsandwingsindy.com'));
+});
+t('a person does NOT see a co-parent’s personal notifications', () => {
+  const ids = idRes.identitiesFor('bob@rootsandwingsindy.com');
+  assert.ok(!has(ids, 'jane@rootsandwingsindy.com'));
+  assert.ok(has(ids, 'smith@rootsandwingsindy.com'));
+});
+t('single-address member and unknown emails map to themselves only', () => {
+  assert.deepStrictEqual(idRes.identitiesFor('solo@rootsandwingsindy.com'), ['solo@rootsandwingsindy.com']);
+  assert.deepStrictEqual(idRes.identitiesFor('nobody@example.com'), ['nobody@example.com']);
+  assert.deepStrictEqual(idRes.identitiesFor(''), []);
+});
+await t('buildIdentityResolver fails soft without a DB (login only)', async () => {
+  const prev = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  const r = await perms.buildIdentityResolver(null);
+  if (prev !== undefined) process.env.DATABASE_URL = prev;
+  assert.deepStrictEqual(r.identitiesFor('x@rootsandwingsindy.com'), ['x@rootsandwingsindy.com']);
+});
+
 // ── Wrap-up ────────────────────────────────────────────────────────────
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

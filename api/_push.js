@@ -1,6 +1,7 @@
 // Shared web-push helper (underscore prefix = not a Vercel route)
 
 const webpush = require('web-push');
+const { buildIdentityResolver } = require('./_permissions');
 
 function init() {
   const pub = process.env.VAPID_PUBLIC_KEY;
@@ -43,13 +44,25 @@ async function trySend(sql, sub, payload) {
   }
 }
 
+// #363: the recipient may have enabled push while signed in under a
+// different one of their addresses (family alias / role mailbox / own
+// login) than the one this notification is addressed to — fan out to the
+// devices of every identity that means the same person.
+async function subsForIdentities(sql, resolver, email) {
+  const ids = resolver ? resolver.identitiesFor(email) : [String(email || '').toLowerCase()];
+  if (!ids.length) return [];
+  const rows = await sql`
+    SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE LOWER(user_email) = ANY(${ids}::text[])
+  `;
+  const seen = new Set();
+  return rows.filter(r => { if (seen.has(r.endpoint)) return false; seen.add(r.endpoint); return true; });
+}
+
 async function sendToUser(sql, email, payload) {
   if (!init()) return;
   // Case-insensitive: subscription rows store whatever case the JWT
   // carried, while some callers pass lowercased emails.
-  const subs = await sql`
-    SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE LOWER(user_email) = LOWER(${email})
-  `;
+  const subs = await subsForIdentities(sql, await buildIdentityResolver(sql), email);
   const results = [];
   for (const sub of subs) results.push(await trySend(sql, sub, payload));
   return results;
@@ -66,11 +79,12 @@ async function pushNotifications(sql, rows) {
   if (!Array.isArray(rows) || !rows.length) return;
   if (!init()) return;
   const subsByEmail = {};
+  const resolver = await buildIdentityResolver(sql);
   for (const r of rows) {
     const email = String(r.recipient_email || '').toLowerCase();
     if (!email) continue;
     if (!subsByEmail[email]) {
-      subsByEmail[email] = await sql`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE LOWER(user_email) = ${email}`;
+      subsByEmail[email] = await subsForIdentities(sql, resolver, email);
     }
     const url = (r.link_url && /^\//.test(r.link_url)) ? r.link_url : '/members.html';
     const payload = { title: r.title, body: r.body, tag: 'notif-' + (r.id || email), url };
