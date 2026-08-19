@@ -29101,7 +29101,10 @@
     // class scheduled; reviewers get a To Do + bell to look it over.
     if (isEdit && (cur.status === 'drafted' || cur.status === 'scheduled')) {
       html += '<p style="background:#FFF3E0;color:#7A4E00;font-size:0.85rem;border-radius:8px;padding:8px 12px;margin:0 0 1rem;">';
-      html += 'This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + ' — it stays there when you save. The VP / Afternoon Class Liaison will be alerted to review your changes.';
+      // #361: reviewers editing from the Builder don't alert themselves —
+      // their save is the review; members see it land right away.
+      html += 'This class is ' + (cur.status === 'scheduled' ? 'on the schedule' : 'being drafted') + ' — it stays there when you save. '
+        + (classSubmissionReviewer ? 'Your changes show up for members right away.' : 'The VP / Afternoon Class Liaison will be alerted to review your changes.');
       html += '</p>';
     }
     // Placeholder for the "Need inspiration?" strip — filled asynchronously
@@ -31528,7 +31531,9 @@
         headIcons += raCountPill(pl.closed ? 'ws-wv-pending' : 'ws-wv-ok', pl.closed ? 'closed' : (pl.my_vote ? 'you voted' : 'vote open'));
         if ((pl.voters || 0) > 0) headIcons += raCountPill('', pl.voters + ' voted');
       }
-      if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', 'committee only');
+      // #360: an addressed poll reaches its recipients whatever the
+      // binoculars say — tell them it was sent to them, not "committee only".
+      if (!d.can_edit && s.is_public === false) headIcons += raCountPill('ws-wv-pending', (s.type === 'poll' && (s.config || {}).recipient_count) ? 'sent to you' : 'committee only');
       if (d.can_edit) {
         var pub = s.is_public !== false;
         headIcons += '<button type="button" class="evs-ico-btn evs-sec-pub' + (pub ? '' : ' evs-vis-off') + '" data-section-id="' + s.id + '" data-pub="' + (pub ? '1' : '0') + '" aria-label="' + (pub ? 'Visible to all members' : 'Committee only') + '" title="' + (pub ? 'Every member can see this card. Tap to limit it to the event committee, SEL, and Sustaining Director.' : 'Greyed binoculars: only the event committee, SEL, and Sustaining Director see this card. Tap to show every member.') + '">'

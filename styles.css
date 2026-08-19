@@ -16713,8 +16713,10 @@ button.sched-status-pill:hover { filter: brightness(0.97); }
 .evs-poll-mine { margin: 0 0 8px; font-size: .92rem; }
 .evs-poll-results { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--color-border); }
 .evs-poll-results-head { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-light); }
-.evs-poll-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
-.evs-poll-bar { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr auto; gap: 8px; align-items: center; font-size: .85rem; }
+/* One shared grid for every row so the bar tracks line up (each row as
+   its own grid sized its columns independently — click-test 08-18). */
+.evs-poll-bars { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(90px, 1fr) 2fr auto; gap: 5px 8px; align-items: center; font-size: .85rem; }
+.evs-poll-bar { display: contents; }
 .evs-poll-bar-track { height: 10px; background: #f0ece6; border-radius: 5px; overflow: hidden; }
 .evs-poll-bar-fill { display: block; height: 100%; background: var(--color-primary-light); border-radius: 5px; }
 .evs-poll-bar.is-top .evs-poll-bar-fill { background: var(--color-primary); }
@@ -16732,7 +16734,7 @@ button.sched-status-pill:hover { filter: brightness(0.97); }
   font-size: 1rem; line-height: 1; padding: 0 2px; font-family: inherit;
 }
 @media (max-width: 520px) {
-  .evs-poll-bar { grid-template-columns: 1fr; gap: 3px; }
+  .evs-poll-bars { grid-template-columns: minmax(80px, 1fr) 1.4fr auto; }
 }
 
 /* #234 (Erin): RSVP sign-up mode — headcount total + who's coming. */
