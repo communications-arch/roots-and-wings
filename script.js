@@ -2699,6 +2699,13 @@
   // loadCoopSessions() and applied via applyCoopSessionsData() — but
   // these values keep the dashboard functional on first render before
   // the API responds and as a backstop if the API ever fails.
+  // Co-op meets Wednesdays. Declared HERE, not down by getCoopDatesInSession:
+  // renderDirectory() runs at IIFE top level (~line 4450) and, since
+  // 2026-08-19, reaches getCoopDatesInSession() via getNextCoopCalendarDate().
+  // With the var still hoisted-undefined, its day-of-week walk never
+  // terminated and the whole portal hung on the boot logo (prod incident
+  // 2026-08-19). Keep this above every top-level render.
+  var COOP_DAY_OF_WEEK = 3; // 0=Sun, 3=Wed
   var SESSION_DATES = {
     1: { name: 'Fall Session 1', start: '2025-09-03', end: '2025-10-01' },
     2: { name: 'Fall Session 2', start: '2025-10-15', end: '2025-11-12' },
@@ -26697,7 +26704,7 @@
   // Returns an array of YYYY-MM-DD strings for every co-op day (Wednesday)
   // within the session window. Named generically so a future day-of-week
   // change is a single-constant edit.
-  var COOP_DAY_OF_WEEK = 3; // 0=Sun, 3=Wed
+  // COOP_DAY_OF_WEEK is declared up by SESSION_DATES (load-order: see there).
   function getCoopDatesInSession(sessionNumber) {
     var sess = SESSION_DATES[sessionNumber];
     if (!sess) return [];
@@ -26708,7 +26715,11 @@
     // walk forever (Invalid Date's getDay() is NaN) and hang the whole
     // portal — treat it as having no dates instead.
     if (isNaN(d.getTime()) || isNaN(end.getTime())) return [];
-    while (d.getDay() !== COOP_DAY_OF_WEEK) d.setDate(d.getDate() + 1);
+    // Bounded walk: at most 7 steps to the next co-op weekday. An unbounded
+    // while() here hung the portal when COOP_DAY_OF_WEEK was read before
+    // its declaration (2026-08-19) — never let a bad constant spin this.
+    var dow = (typeof COOP_DAY_OF_WEEK === 'number' && COOP_DAY_OF_WEEK >= 0 && COOP_DAY_OF_WEEK <= 6) ? COOP_DAY_OF_WEEK : 3;
+    for (var step = 0; step < 7 && d.getDay() !== dow; step++) d.setDate(d.getDate() + 1);
     while (d <= end && dates.length < 60) {
       dates.push(d.toISOString().slice(0, 10));
       d.setDate(d.getDate() + 7);
