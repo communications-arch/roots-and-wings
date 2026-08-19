@@ -489,6 +489,14 @@ function summarizeSubmissionEdit(before, after) {
 
 // Valid status values for a reviewer PATCH. `withdrawn` is intentionally
 // excluded — only the submitter can withdraw (via DELETE).
+// Today as YYYY-MM-DD in the co-op's timezone (server "today" is Indy —
+// see CLAUDE.md dates rule). Mirrors indySignDate in api/tour.js.
+function indyToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Indianapolis', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
 const REVIEWER_STATUS_VALUES = ['submitted', 'drafted', 'scheduled', 'declined'];
 // Morning placements: 'AM' = both morning hours, 'AM1'/'AM2' = a 1-hour
 // morning class (a group's morning can split in two, 2026-07-06).
@@ -808,9 +816,9 @@ async function sendSubmissionConfirmation(sub) {
       subject: emailSubject(`${periodWord} Class Submission Received — ${sub.class_name}`),
       html: `
         <h2>Thanks for submitting a ${periodWord.toLowerCase()} class!</h2>
-        <p>Your submission has been logged. ${isAM
-          ? 'The VP has been copied on this email, and the class review team will reach out when they’re planning the next session.'
-          : 'The VP and Afternoon Class Liaison have been copied on this email and will reach out when they’re planning the next session.'}</p>
+        <p>Your submission has been logged and is awaiting placement. ${isAM
+          ? 'The VP has been copied on this email and will reach out when they’re planning the next session.'
+          : 'The VP and Afternoon Class Liaison have been copied on this email and will place it when they’re planning the next session.'}</p>
         <table style="border-collapse:collapse;font-family:sans-serif;">${rowsHtml}</table>
         <h3 style="margin-top:18px;">Description</h3>
         <p style="white-space:pre-wrap;">${escapeHtml(sub.description)}</p>
@@ -2461,11 +2469,25 @@ module.exports = async function handler(req, res) {
         // keeps the sign-up card open-only.
         let session = parseInt(req.query.session, 10) || null;
         if (!session) {
-          const openWin = await sql`
-            SELECT session_number FROM class_signup_windows
+          // #364 (Colleen): two windows can be open at once (next session's
+          // opened early with FUTURE dates while this one still runs). Prefer
+          // the window that is LIVE today; then an open one whose dates have
+          // started (most recent); only then a future-dated one (soonest).
+          // Picking "highest session" handed families next session's (empty)
+          // class list while their saved picks were this session's.
+          const openWins = await sql`
+            SELECT session_number, signup_start_date, signup_end_date FROM class_signup_windows
             WHERE school_year = ${sy} AND status = 'open'
-            ORDER BY session_number DESC LIMIT 1`;
-          if (openWin[0]) session = openWin[0].session_number;
+            ORDER BY session_number DESC`;
+          if (openWins.length) {
+            const today = indyToday();
+            const d = v => v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : '';
+            const live = openWins.filter(w => (!d(w.signup_start_date) || d(w.signup_start_date) <= today) && (!d(w.signup_end_date) || d(w.signup_end_date) >= today));
+            const started = openWins.filter(w => d(w.signup_start_date) && d(w.signup_start_date) <= today);
+            const future = openWins.filter(w => d(w.signup_start_date) && d(w.signup_start_date) > today).sort((a, b) => a.session_number - b.session_number);
+            const pick = live[0] || started[0] || future[0] || openWins[0];
+            session = pick.session_number;
+          }
         }
         if (!session) {
           const dflt = parseInt(req.query.default_session, 10) || null;

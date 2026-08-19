@@ -28636,9 +28636,11 @@
 
   function statusBadge(status) {
     var map = {
-      submitted:  { label:'Awaiting review', bg:'#FFF3E0', fg:'#7A4E00' },
-      drafted:    { label:'Drafted — planning',  bg:'#E1F0FF', fg:'#0A4A85' },
-      scheduled:  { label:'Scheduled',      bg:'#DEF3DE', fg:'#2E6B2E' },
+      // #361 (Colleen): nothing gets "reviewed" any more — a class waits to be
+      // placed, then it's Placed on the Builder's schedule.
+      submitted:  { label:'Awaiting placement', bg:'#FFF3E0', fg:'#7A4E00' },
+      drafted:    { label:'Being placed',  bg:'#E1F0FF', fg:'#0A4A85' },
+      scheduled:  { label:'Placed',      bg:'#DEF3DE', fg:'#2E6B2E' },
       declined:   { label:'Declined',       bg:'#F7E0E0', fg:'#8A2222' },
       withdrawn:  { label:'Withdrawn',      bg:'#EEE',     fg:'#555'    }
     };
