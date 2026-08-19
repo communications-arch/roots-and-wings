@@ -2281,9 +2281,10 @@ ALTER TABLE member_profiles ADD COLUMN IF NOT EXISTS account_removed_by TEXT NOT
 -- items live in content JSONB as [{text, done, done_by, done_at}]. #238's
 -- built-in Set-Up/Clean-Up cards are checklist sections (config.builtin).
 ALTER TABLE event_sections DROP CONSTRAINT IF EXISTS event_sections_type_check;
-ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist'));
+-- (2026-08-18: 'poll' added here too — the replay must not re-add the narrower list once poll rows exist)
+ALTER TABLE event_sections ADD CONSTRAINT event_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist','poll'));
 ALTER TABLE event_template_sections DROP CONSTRAINT IF EXISTS event_template_sections_type_check;
-ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist'));
+ALTER TABLE event_template_sections ADD CONSTRAINT event_template_sections_type_check CHECK (type IN ('timeline','signup','info','notes','board','checklist','poll'));
 
 -- 2026-08-10 (#234, Erin): RSVP sign-up mode — config {mode:'rsvp'}. Each
 -- member's RSVP carries a headcount (how many people they're bringing).
