@@ -3065,14 +3065,20 @@
 
   // Nearest upcoming co-op day — returns today's date if today is co-op day,
   // else the next one. Formatted YYYY-MM-DD.
+  // Local-day ISO (YYYY-MM-DD). Never toISOString() for "today" — that's
+  // UTC and rolls to tomorrow at 8pm Indy time (CLAUDE.md dates rule).
+  function localIsoDate(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  // Naive "next Wednesday" — only a FALLBACK for getNextCoopCalendarDate
+  // below (Erin 2026-08-19: the header said "Next co-op day: Aug 19" on a
+  // Wednesday co-op doesn't meet).
   function getNextCoopDate() {
     var d = new Date();
     var daysUntil = (3 - d.getDay() + 7) % 7; // 0 if today IS Wednesday
     d.setDate(d.getDate() + daysUntil);
-    var y = d.getFullYear();
-    var m = String(d.getMonth() + 1).padStart(2, '0');
-    var day = String(d.getDate()).padStart(2, '0');
-    return y + '-' + m + '-' + day;
+    return localIsoDate(d);
   }
 
   // The next day co-op actually MEETS per the session calendar — unlike
@@ -3080,7 +3086,7 @@
   // the summer gap. Falls back to next-Wednesday when SESSION_DATES has
   // nothing upcoming (#199 — scopes the My Responsibilities coverage rows).
   function getNextCoopCalendarDate() {
-    var today = new Date().toISOString().slice(0, 10);
+    var today = localIsoDate();
     try {
       var sessions = Object.keys(SESSION_DATES).map(Number).sort(function (a, b) { return a - b; });
       for (var i = 0; i < sessions.length; i++) {
@@ -3208,8 +3214,8 @@
 
     // Build the absence/coverage picture for the next co-op day so directory
     // cards can surface who's out and who's covering for that day.
-    var coopDateIso = getNextCoopDate();
-    var todayIso = new Date().toISOString().slice(0, 10);
+    var coopDateIso = getNextCoopCalendarDate();
+    var todayIso = localIsoDate();
     var coopLabel = coopDateIso === todayIso ? 'today' : formatDateLabel(coopDateIso).replace(/^\w+,\s*/, '');
     var outByName = {};      // "Amber Furnish" -> true
     var coveringByName = {}; // "Bobby Furnish" -> ["AM: Saplings Assistant", ...]
@@ -7836,7 +7842,7 @@
         return;
       }
       var sessionDuties = duties.filter(function (d) { return d.block !== 'annual'; });
-      var nextDate = typeof getNextCoopDate === 'function' ? getNextCoopDate() : '';
+      var nextDate = typeof getNextCoopCalendarDate === 'function' ? getNextCoopCalendarDate() : '';
       var dateLabel = '';
       if (nextDate && typeof formatDateLabel === 'function') {
         dateLabel = formatDateLabel(nextDate).replace(/^\w+,\s*/, '');
