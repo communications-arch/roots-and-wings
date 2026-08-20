@@ -25,13 +25,12 @@ const { touchTodos } = require('./_todos');
 const TODO_TRIGGERS = {
   'tour': ['tours'],
   'contact': ['inquiry'],
-  'registration': ['pending', 'waivers', 'welcome-towelcome'],
+  'registration': ['pending', 'waivers'],
   'profile-update': ['waivers'],
   'merch-order': ['merch-open', 'merch-restock'],
   'merch-desk-order': ['merch-open', 'merch-restock'],
   'membership-adjust-enrollment': ['gaccounts'],
-  'welcome-mark': ['welcome-orientation'],
-  'welcome-unmark': ['welcome-towelcome']
+  'welcome-mark': ['welcome-orientation']
 };
 function afterTodo(kind, handled) {
   const kinds = TODO_TRIGGERS[kind];
@@ -9747,6 +9746,11 @@ async function handleWelcomeListGet(req, res) {
       FROM registrations r
       LEFT JOIN welcome_outreach w ON w.registration_id = r.id
       WHERE r.season = ${season} AND r.declined_at IS NULL
+        -- Erin 2026-08-20: a family reaches the Welcome List once the
+        -- Communications Director has ONBOARDED them (welcome email sent),
+        -- not at registration - before that they may still be unpaid or
+        -- unconfirmed, and the coordinator has nobody to greet yet.
+        AND r.welcome_email_sent_at IS NOT NULL
       ORDER BY r.created_at DESC
     `;
     // Keep only NEW families — same canonical rule as the Membership

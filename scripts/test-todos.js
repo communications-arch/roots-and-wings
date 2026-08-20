@@ -64,7 +64,7 @@ const holders = [{ title: 'membership director', email: 'mem@x.org' }];
     });
   });
   await t('sources that already notify are NOT registered (no double-buzz)', () => {
-    ['restock', 'blc-signin', 'evseats', 'enroll-req', 'editedcls'].forEach(k => eq(!!todos.TODO_KINDS[k], false, k));
+    ['restock', 'blc-signin', 'evseats', 'enroll-req', 'editedcls', 'welcome-towelcome'].forEach(k => eq(!!todos.TODO_KINDS[k], false, k));
   });
   await t('every kind named by touchTodos()/TODO_TRIGGERS in api/ is registered', () => {
     const named = new Set();

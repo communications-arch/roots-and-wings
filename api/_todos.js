@@ -28,7 +28,8 @@
 //   • kinds whose source already sends a targeted notification — adding a
 //     generic one would double-buzz: restock (supply_low), blc-signin
 //     (blc_signin_request), evseats (event_seat_interest), enroll-req
-//     (enrollment_request), editedcls (class_resubmitted).
+//     (enrollment_request), editedcls (class_resubmitted), welcome-towelcome
+//     (member_onboarded).
 //   • purely date-gated nags (handbook, drbinder, coop-cal, role-holders,
 //     welcome-outreach, pmplan) and the remaining compound ones (onboard,
 //     reginv-*, morning) — candidates for the daily cron later.
@@ -77,14 +78,18 @@ const signupPicture = (sql, c) => c.once('signup', async () => {
 });
 const signupCount = (c, pick) => d => d ? pick(d, d.window_status === 'closed') : 0;
 
-// The Welcome Coordinator's list: this season's NEW families (same rule
-// as the Welcome List endpoint in api/tour.js — firstSeasonByEmail), by
-// stage: 0 = not yet welcomed, 1 = welcomed but orientation not met.
+// The Welcome Coordinator's list: this season's NEW families that the
+// Comms Director has ONBOARDED (same rule as the Welcome List endpoint in
+// api/tour.js — welcome email sent + firstSeasonByEmail), by stage:
+// 0 = not yet welcomed, 1 = welcomed but orientation not met. Stage 0's
+// rise is announced by the targeted 'member_onboarded' notice in
+// handleSendWelcomeEmail, so only the orientation stage is registered.
 const welcomeStages = (sql, c) => c.once('welcome', async () => {
   const { firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
   const rows = await sql`SELECT LOWER(r.email) AS email, w.welcomed_at, w.met_at
     FROM registrations r LEFT JOIN welcome_outreach w ON w.registration_id = r.id
-    WHERE r.season = ${c.season} AND r.declined_at IS NULL`;
+    WHERE r.season = ${c.season} AND r.declined_at IS NULL
+      AND r.welcome_email_sent_at IS NOT NULL`;
   let fam = rows;
   try {
     const first = await firstSeasonByEmail(sql);
@@ -193,11 +198,6 @@ const TODO_KINDS = {
     roles: ['Afternoon Class Liaison'],
     count: (sql, c) => signupPicture(sql, c).then(signupCount(c, (d, closed) =>
       (closed && !d.overmax.length) ? d.confirm_pending.filter(x => !x.sent).length : 0))
-  },
-  'welcome-towelcome': {
-    label: 'New families to welcome',
-    roles: ['Welcome Coordinator'],
-    count: (sql, c) => welcomeStages(sql, c).then(w => w.toWelcome)
   },
   'welcome-orientation': {
     label: 'Orientation — new families to meet',
