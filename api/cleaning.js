@@ -449,9 +449,11 @@ module.exports = async function handler(req, res) {
         if (!rows.length) return res.status(404).json({ error: 'Assignment not found.' });
         const rowOwner = String(rows[0].created_by_email || '').trim().toLowerCase();
         const nm = String(rows[0].family_name || '').trim().toLowerCase();
-        const mineRow = rowOwner
-          ? rowOwner === csEmail
-          : nm === csName.toLowerCase();
+        // #367: a row an admin placed via Schedules carries the ADMIN's
+        // email, so the placed person must be able to release by exact
+        // name too (mirrors volunteer-matrix's "mine" flag).
+        const mineRow = (rowOwner && rowOwner === csEmail)
+          || (!!nm && !!csName && nm === csName.toLowerCase());
         if (!mineRow) return res.status(403).json({ error: 'That cleaning spot isn’t yours to release.' });
         await sql`DELETE FROM cleaning_assignments WHERE id = ${rowId}`;
         return res.status(200).json({ ok: true });

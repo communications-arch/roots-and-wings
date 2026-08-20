@@ -2309,8 +2309,10 @@ module.exports = async function handler(req, res) {
         // #367 (Colleen, prod 2026-08-19): the client used to decide "mine"
         // by SUBSTRING of family name, so a one-letter surname ("R") lit up
         // every row containing an r — each with a release ✕. Decide here
-        // with the same rule the DELETE gate uses: created_by_email first,
-        // EXACT full-name match only for legacy rows without it.
+        // by EXACT full name (same people first+last the signup writes);
+        // created_by_email is only the fallback when a name is missing on
+        // either side — a VP placing someone via Schedules stamps the VP's
+        // email on the row, so email alone would hand the spot to the VP.
         const vmMeName = meRows.length
           ? ((meRows[0].first_name || '') + ' ' + (meRows[0].last_name || '')).trim().toLowerCase() : '';
         const cleaning = cleanRows.map(c => {
@@ -2321,7 +2323,7 @@ module.exports = async function handler(req, res) {
             area: c.area_name,
             floor: FLOOR_LABELS[c.floor_key] || '',
             family: c.family_name,
-            mine: owner ? owner === actingEmail : (!!vmMeName && nm === vmMeName)
+            mine: (vmMeName && nm) ? nm === vmMeName : (!!owner && owner === actingEmail)
           };
         });
         // Open cleaning spots for self-serve sign-up (2026-07-11): every
