@@ -3014,6 +3014,23 @@ async function handleSendWelcomeEmail(body, req, res) {
     }
 
     await sql`UPDATE registrations SET welcome_email_sent_at = NOW(), updated_at = NOW() WHERE id = ${id}`;
+    // Erin 2026-08-20 (#368): the Welcome Coordinator hears the moment a
+    // family is ONBOARDED (they were already cc'd on the email) — the
+    // "to welcome" To Do itself lists every new registration, so this
+    // event is what actually means "go say hello". Bell + push, best-effort.
+    if (welcomeCc.length) {
+      try {
+        const famLabel = reg.main_learning_coach || reg.existing_family_name || reg.email;
+        const wcRows = await sql`
+          INSERT INTO notifications (recipient_email, type, title, body, link_url)
+          VALUES (${welcomeCc[0].toLowerCase()}, 'member_onboarded',
+                  ${'New member onboarded — ' + famLabel},
+                  ${famLabel + ' just got their welcome email from the Communications Director. They’re on your To Welcome list.'},
+                  '/members.html')
+          RETURNING id, recipient_email, title, body, link_url`;
+        await pushNotifications(sql, wcRows);
+      } catch (wcErr) { console.error('welcome-coordinator onboarded notice (non-fatal):', wcErr.message); }
+    }
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('Welcome email handler error:', err);
