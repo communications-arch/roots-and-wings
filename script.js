@@ -6675,12 +6675,10 @@
         injectRow(blk.key, selHtml + hintHtml, { prepend: true, bare: true });
       });
       // Cleaning Crew section: your spot (with release) or the open areas.
-      var famName = String((fam && fam.name) || '').trim().toLowerCase();
-      var meName = String((d.me && d.me.name) || '').trim().toLowerCase();
-      var myClean = (d.cleaning || []).filter(function (c) {
-        var f = String(c.family || '').toLowerCase();
-        return (famName && f.indexOf(famName) !== -1) || (meName && f === meName);
-      });
+      // #367: the server says which rows are ours (created_by_email, exact
+      // name fallback) — the old family-name SUBSTRING test made "Shan R"
+      // own every area whose family contained an r, release ✕ and all.
+      var myClean = (d.cleaning || []).filter(function (c) { return !!c.mine; });
       // Erin 2026-08-02 (prod, "shows up twice"): the duty scanner also
       // lists this same assignment as a "Cleaning: <area>" row — the
       // picker's row (with its release ✕) is the interactive one, so
@@ -18622,6 +18620,42 @@
   // the next render — so the list appears in its last-known shape instantly,
   // then the loaders refresh it (cache-then-revalidate). Merges by id so a
   // super-user's View-As across roles keeps each role's items remembered.
+  // #368: "new To Do → Notification". The baseline is the snapshot this
+  // page load STARTED from (restoreTodoSnapshot paints it before any loader
+  // runs), so an item that goes hidden → visible, or whose count grows,
+  // against that baseline is genuinely new since the last settled state.
+  // Each id alerts once per page load; the server dedupes per title for 3
+  // days and ignores View-As. First-ever load has no baseline → no flood.
+  var _todoAlertBaseline = null;
+  var _todoAlertSent = {};
+  function reportNewTodos(snapNow) {
+    if (!_todoAlertBaseline) return;
+    if (sessionStorage.getItem(VIEW_AS_KEY)) return;
+    var items = [];
+    Object.keys(snapNow).forEach(function (id) {
+      if (_todoAlertSent[id]) return;
+      var was = _todoAlertBaseline[id], now = snapNow[id];
+      if (!was || !now || now.hidden) return;
+      var nWas = parseInt(was.count, 10), nNow = parseInt(now.count, 10);
+      var grew = Number.isFinite(nNow) && Number.isFinite(nWas) && nNow > nWas;
+      if (!was.hidden && !grew) return;
+      var li = document.getElementById(id);
+      if (!li) return;
+      var clone = li.cloneNode(true);
+      clone.querySelectorAll('.ws-link-count, .ws-link-icon, .ws-link-sub').forEach(function (x) { x.remove(); });
+      var label = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!label) return;
+      _todoAlertSent[id] = true;
+      items.push({ label: label, count: Number.isFinite(nNow) ? nNow : null });
+    });
+    if (!items.length) return;
+    try {
+      fetch('/api/notifications?todo_alert=1', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ items: items }) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.created && typeof loadNotifications === 'function') { try { loadNotifications(); } catch (e) { /* bell refresh is best-effort */ } } })
+        .catch(function () { /* best-effort */ });
+    } catch (e) { /* best-effort */ }
+  }
   function snapshotTodoState() {
     // All To Do cards (one per role section), not just the first.
     var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
@@ -18629,6 +18663,11 @@
     var snap;
     try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || '{}'); } catch (e) { snap = {}; }
     if (!snap || typeof snap !== 'object') snap = {};
+    if (!_todoAlertBaseline) {
+      // Only a PRIOR settled state counts as a baseline (first-ever load
+      // would otherwise announce every To Do the person already had).
+      _todoAlertBaseline = Object.keys(snap).length ? JSON.parse(JSON.stringify(snap)) : { __empty: true };
+    }
     lists.forEach(function (list) {
       list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
         var pre = li.querySelector('.ws-link-count');
@@ -18636,6 +18675,7 @@
       });
     });
     try { localStorage.setItem('rw_todo_state', JSON.stringify(snap)); } catch (e) { /* quota */ }
+    if (!_todoAlertBaseline.__empty) reportNewTodos(snap);
   }
 
   function restoreTodoSnapshot() {
@@ -37038,6 +37078,14 @@
 
   // Re-pull the grid (and the workspace To Do counts) after a placement.
   // The picker sources reload lazily so fullness/needs stay accurate.
+  // #365 (Colleen): a SUCCESSFUL save closes the picker panel on its own —
+  // the Close button stays for backing out. Errors leave it open so the
+  // row can be re-placed without hunting for it again.
+  function schedCloseEditAndRefresh() {
+    _schedEditKey = null;
+    _schedEditHour = null;
+    schedRefresh();
+  }
   function schedRefresh() {
     if (typeof fetchSignupTodos === 'function') { try { fetchSignupTodos(); } catch (e) { /* counts refresh is best-effort */ } }
     _schedMatrix = null;
@@ -37214,7 +37262,7 @@
         };
         removeCurrent().then(function (rr) {
           if (!rr.ok) { alert((rr.data && rr.data.error) || 'Could not remove the current assignment.'); selEl.disabled = false; selEl.value = ''; return; }
-          if (v === 'remove') { schedRefresh(); return; }
+          if (v === 'remove') { schedCloseEditAndRefresh(); return; }
           var isAssist = v.indexOf('assist:') === 0;
           var url = '/api/curriculum?action=' + (isAssist ? 'volunteer-assist' : 'volunteer-signup') + '&view_as=' + encodeURIComponent(email);
           var payload = isAssist
@@ -37229,7 +37277,7 @@
                 schedRefresh();
                 return;
               }
-              schedRefresh();
+              schedCloseEditAndRefresh(); // #365
             })
             .catch(function () { alert('Network error — try again.'); schedRefresh(); });
         }).catch(function () { alert('Network error — try again.'); selEl.disabled = false; });
@@ -37278,7 +37326,7 @@
           }).then(function (r) { return r.json().then(function (x) { if (!r.ok) throw new Error((x && x.error) || 'Save failed'); }); });
         }
         postHour('PM1').then(function () { return postHour('PM2'); })
-          .then(function () { schedRefresh(); })
+          .then(function () { schedCloseEditAndRefresh(); }) // #365
           .catch(function (e2) { alert(e2.message || 'Could not save picks.'); btn.disabled = false; btn.textContent = 'Save'; });
       });
     });
@@ -42858,7 +42906,7 @@
     }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) alert((res.data && res.data.error) || 'Could not assign the room.');
-        publishedSchedule.loaded = false;
+        sbLiveRepaintAfterScheduleChange(); // #366
         loadScheduleBuilder();
       })
       .catch(function () { alert('Network error assigning the room.'); loadScheduleBuilder(); });
@@ -43781,6 +43829,13 @@
     });
   }
 
+  function sbLiveRepaintAfterScheduleChange() {
+    if (typeof publishedSchedule !== 'undefined') publishedSchedule.loaded = false;
+    if (typeof loadPublishedSchedule === 'function') { try { loadPublishedSchedule(true); } catch (e) { /* best-effort */ } }
+    if (typeof invalidateCoordPmSignups === 'function' && typeof sessionTabView !== 'undefined') {
+      try { invalidateCoordPmSignups(sessionTabView); } catch (e) { /* best-effort */ }
+    }
+  }
   function patchReviewAction(subId, payload) {
     var cred = localStorage.getItem('rw_google_credential');
     return fetch('/api/curriculum?action=class-submission&review=1&id=' + subId + notifViewAsSuffix(), {
@@ -43791,8 +43846,12 @@
       return r.json().then(function (d) {
         if (!r.ok) throw new Error(d.error || 'Request failed (' + r.status + ')');
         // Any schedule change makes Co-op Coordination's published
-        // snapshot stale — next Session-tab render refetches.
-        publishedSchedule.loaded = false;
+        // snapshot stale. #366 (Colleen: "Dance prep" placed during open
+        // sign-ups needed a refresh to show on Coordination): refetch
+        // EAGERLY — same treatment #333/#362 gave approval + tile edits —
+        // and drop the per-session sign-ups snapshot that draws the
+        // afternoon "needs N more" cards, which never saw the new class.
+        sbLiveRepaintAfterScheduleChange();
         return d;
       });
     });

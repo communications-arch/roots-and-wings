@@ -2184,7 +2184,7 @@ module.exports = async function handler(req, res) {
               FROM volunteer_signups
               WHERE school_year = ${vmYear} AND session_number = ${vmSess}
               ORDER BY role, created_at`,
-          sql`SELECT ca.id, ca.family_name, a.area_name, a.floor_key
+          sql`SELECT ca.id, ca.family_name, ca.created_by_email, a.area_name, a.floor_key
               FROM cleaning_assignments ca
               JOIN cleaning_areas a ON a.id = ca.cleaning_area_id
               WHERE ca.session_number = ${vmSess} AND ca.school_year = ${vmYear}
@@ -2306,12 +2306,24 @@ module.exports = async function handler(req, res) {
         // #85: carry the floor/category so "Bathrooms" reads as
         // "Main Floor · Bathrooms" on Everyone's sign-ups.
         const FLOOR_LABELS = { mainFloor: 'Main Floor', upstairs: 'Upstairs', outside: 'Outside', floater: 'Floater' };
-        const cleaning = cleanRows.map(c => ({
-          id: c.id,
-          area: c.area_name,
-          floor: FLOOR_LABELS[c.floor_key] || '',
-          family: c.family_name
-        }));
+        // #367 (Colleen, prod 2026-08-19): the client used to decide "mine"
+        // by SUBSTRING of family name, so a one-letter surname ("R") lit up
+        // every row containing an r — each with a release ✕. Decide here
+        // with the same rule the DELETE gate uses: created_by_email first,
+        // EXACT full-name match only for legacy rows without it.
+        const vmMeName = meRows.length
+          ? ((meRows[0].first_name || '') + ' ' + (meRows[0].last_name || '')).trim().toLowerCase() : '';
+        const cleaning = cleanRows.map(c => {
+          const owner = String(c.created_by_email || '').trim().toLowerCase();
+          const nm = String(c.family_name || '').trim().toLowerCase();
+          return {
+            id: c.id,
+            area: c.area_name,
+            floor: FLOOR_LABELS[c.floor_key] || '',
+            family: c.family_name,
+            mine: owner ? owner === actingEmail : (!!vmMeName && nm === vmMeName)
+          };
+        });
         // Open cleaning spots for self-serve sign-up (2026-07-11): every
         // non-floater area takes ONE family per session; the Floater area
         // always accepts more hands.

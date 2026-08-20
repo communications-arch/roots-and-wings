@@ -12,7 +12,7 @@ const { neon } = require('@neondatabase/serverless');
 const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { isSuperUser, notificationIdentities } = require('./_permissions');
-const { sendToUser } = require('./_push');
+const { sendToUser, pushNotifications } = require('./_push');
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -164,6 +164,37 @@ module.exports = async function handler(req, res) {
     // helping one) can see exactly why nothing arrives. Non-prod deploys
     // have no VAPID keys (Production-scoped env), so name that state
     // instead of returning a silent no-op.
+    // #368 (Erin): "when someone gets a new To Do task, send them a
+    // Notification". To Dos are derived client-side (34 items, each with
+    // its own loader), so the PORTAL reports the ones that just appeared
+    // (hidden → visible, or a count that grew) and this drops a bell row +
+    // device push for the REAL caller — never a View-As target. Dedupe:
+    // one row per title per 3 days so re-renders don't nag.
+    if (req.method === 'POST' && req.query.todo_alert === '1') {
+      if (req.headers['x-view-as']) return res.status(200).json({ ok: true, skipped: 'view_as' });
+      const items = Array.isArray((req.body || {}).items) ? req.body.items.slice(0, 12) : [];
+      const me = String(user.email || '').toLowerCase();
+      const inserted = [];
+      for (const it of items) {
+        const label = String((it && it.label) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        if (!label) continue;
+        const n = parseInt(it && it.count, 10);
+        const title = 'New To Do: ' + label;
+        const body = (Number.isFinite(n) && n > 0 ? n + ' waiting — ' : '') + 'open My Workspace to take care of it.';
+        const dup = await sql`SELECT 1 FROM notifications
+          WHERE LOWER(recipient_email) = ${me} AND type = 'todo' AND title = ${title}
+            AND created_at > NOW() - INTERVAL '3 days' LIMIT 1`;
+        if (dup.length) continue;
+        const rows = await sql`
+          INSERT INTO notifications (recipient_email, type, title, body, link_url)
+          VALUES (${me}, 'todo', ${title}, ${body}, '/members.html')
+          RETURNING id, recipient_email, title, body, link_url`;
+        inserted.push(...rows);
+      }
+      try { await pushNotifications(sql, inserted); } catch (pe) { console.error('todo-alert push (non-fatal):', pe.message); }
+      return res.status(200).json({ ok: true, created: inserted.length });
+    }
+
     if (req.method === 'POST' && req.query.test_push === '1') {
       if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
         return res.status(200).json({ ok: false, reason: 'no_vapid', message: 'Push is not configured on this deployment (dev/preview has no VAPID keys).' });
