@@ -17,6 +17,25 @@ const { ALLOWED_ORIGINS, emailSubject, WAIVER_VERSION } = require('./_config');
 const { getRoleHolderEmail, getRoleHolderEmails, isSuperUser, canImpersonate, activeSchoolYear, isBoardMember, notificationIdentities } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { pushNotifications } = require('./_push');
+const { touchTodos } = require('./_todos');
+
+// #368: POST kinds that can RAISE a To Do → the registry kinds to re-sweep
+// after the response (api/_todos.js decides who gets told, and only on a
+// rise). Add a line here when a new mutation feeds an existing To Do.
+const TODO_TRIGGERS = {
+  'tour': ['tours'],
+  'contact': ['inquiry'],
+  'registration': ['pending', 'waivers'],
+  'profile-update': ['waivers'],
+  'merch-order': ['merch-open', 'merch-restock'],
+  'merch-desk-order': ['merch-open', 'merch-restock'],
+  'membership-adjust-enrollment': ['gaccounts']
+};
+function afterTodo(kind, handled) {
+  const kinds = TODO_TRIGGERS[kind];
+  if (!kinds) return handled;
+  return Promise.resolve(handled).then(r => { touchTodos(getSql(), kinds); return r; });
+}
 const { canActAs, resolveFamily } = require('./_family');
 const { allocateOrderLines, orderTotalCents, normalizeLines, orderFeeCents } = require('./_merch');
 const { fetchSheet, getAuth, parseBillingSheet, firstSeasonByEmail, seasonToYearLabel, registeredSeasonByEmail } = require('./sheets');
@@ -11814,10 +11833,10 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const body = req.body || {};
     const kind = String(body.kind || 'tour').toLowerCase();
-    if (kind === 'tour') return handleTour(body, res, req);
-    if (kind === 'contact') return handleContact(body, req, res);
-    if (kind === 'merch-order') return handleMerchOrder(body, req, res);
-    if (kind === 'merch-desk-order') return handleMerchDeskPublicOrder(body, req, res);
+    if (kind === 'tour') return afterTodo(kind, handleTour(body, res, req));
+    if (kind === 'contact') return afterTodo(kind, handleContact(body, req, res));
+    if (kind === 'merch-order') return afterTodo(kind, handleMerchOrder(body, req, res));
+    if (kind === 'merch-desk-order') return afterTodo(kind, handleMerchDeskPublicOrder(body, req, res));
     if (kind === 'merch-manual-order') return handleMerchManualOrder(body, req, res);
     if (kind === 'merch-update') return handleMerchUpdate(body, req, res);
     if (kind === 'merch-order-edit') return handleMerchOrderEdit(body, req, res);
@@ -11831,10 +11850,10 @@ module.exports = async function handler(req, res) {
     if (kind === 'bug-verify') return handleBugVerify(body, req, res);
     if (kind === 'bug-reopen') return handleBugReopen(body, req, res);
     if (kind === 'enrollment-request-decide') return handleEnrollmentRequestDecide(body, req, res);
-    if (kind === 'membership-adjust-enrollment') return handleMembershipAdjustEnrollment(body, req, res);
+    if (kind === 'membership-adjust-enrollment') return afterTodo(kind, handleMembershipAdjustEnrollment(body, req, res));
     if (kind === 'offboarding-notify') return handleOffboardingNotify(body, req, res);
     if (kind === 'withdrawn-account-removed') return handleWithdrawnAccountRemoved(body, req, res);
-    if (kind === 'registration') return handleRegistration(body, req, res);
+    if (kind === 'registration') return afterTodo(kind, handleRegistration(body, req, res));
     if (kind === 'paypal-error') return handlePaypalError(body, req, res);
     if (kind === 'board-note') return handleBoardNoteAdd(body, req, res);
     if (kind === 'board-note-delete') return handleBoardNoteDelete(body, req, res);
@@ -11851,7 +11870,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'registration-invite-dismiss' ||
         kind === 'registration-invite-restore') return handleRegistrationInviteDismiss(body, req, res);
     if (kind === 'registration-invite-mark') return handleRegistrationInviteMark(body, req, res);
-    if (kind === 'profile-update') return handleProfileUpdate(body, req, res);
+    if (kind === 'profile-update') return afterTodo(kind, handleProfileUpdate(body, req, res));
     if (kind === 'profile-photo') return handleProfilePhoto(body, req, res);
     if (kind === 'morning-assign') return handleMorningAssign(body, req, res);
     if (kind === 'morning-reorder') return handleMorningReorder(body, req, res);

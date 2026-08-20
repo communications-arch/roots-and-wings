@@ -25,6 +25,7 @@ const { OAuth2Client } = require('google-auth-library');
 const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, isSuperUser, canImpersonate, activeSchoolYear } = require('./_permissions');
 const { pushNotifications } = require('./_push');
+const { touchTodos } = require('./_todos'); // #368
 const {
   CAPABILITIES, LOCKED_RULES, NONE_SENTINEL,
   capabilityRoles, hasCapability, invalidateGrantsCache
@@ -1634,6 +1635,7 @@ module.exports = async function handler(req, res) {
         if (!id) return res.status(400).json({ error: 'id required' });
         const deleted = await sql`DELETE FROM cleaning_assignments WHERE id = ${id} RETURNING id`;
         if (deleted.length === 0) return res.status(404).json({ error: 'Not found' });
+        touchTodos(sql, ['cleaning']); // #368
         return res.status(200).json({ ok: true });
       }
     }

@@ -410,6 +410,7 @@ module.exports = {
   getRoleHolderEmail,
   getRoleHolderEmails,
   activeSchoolYear,
+  effectiveSchoolYear,
   buildIdentityResolver,
   notificationIdentities,
   // Exported for tests:

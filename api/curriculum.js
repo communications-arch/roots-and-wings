@@ -19,6 +19,7 @@ const { canEditAsRole, getRoleHolderEmail, isSuperUser, activeSchoolYear, canImp
 const { hasCapability } = require('./_capabilities');
 const { resolveFamily, canActAs } = require('./_family');
 const { sendToUser } = require('./_push');
+const { touchTodos } = require('./_todos'); // #368
 
 const GOOGLE_CLIENT_ID = '915526936965-ibd6qsd075dabjvuouon38n7ceq4p01i.apps.googleusercontent.com';
 const ALLOWED_DOMAIN = 'rootsandwingsindy.com';
@@ -2863,6 +2864,7 @@ module.exports = async function handler(req, res) {
         // about her own entry; a real member still gets their confirmation.
         const nameOnlyBehalf = !!behalfName && (!behalfEmail || (behalfEmail.split('@')[1] || '') !== ALLOWED_DOMAIN);
         if (!nameOnlyBehalf) await sendSubmissionConfirmation(sub);
+        touchTodos(sql, ['classreview', 'classreview-pm']); // #368
         return res.status(201).json({ submission: serializeSubmission(sub, subHelpers) });
       }
 
@@ -3365,6 +3367,7 @@ module.exports = async function handler(req, res) {
              ${dc.scheduled_session}, ${dc.scheduled_hour}, ${dc.scheduled_age_range}, ${''},
              ${'Second section spun up from over-full sign-ups (' + user.email + ')'}, ${user.email}, NOW())
           RETURNING id, class_name`;
+        touchTodos(sql, ['classreview', 'classreview-pm']); // #368
         return res.status(201).json({ ok: true, id: ins[0].id, class_name: ins[0].class_name });
       }
 
@@ -3471,6 +3474,7 @@ module.exports = async function handler(req, res) {
           }
         }
         await sql`UPDATE class_submissions SET lottery_run_at = NOW(), updated_at = NOW() WHERE id = ${ltId}`;
+        touchTodos(sql, ['acl-lotmoves']); // #368
         return res.status(200).json({
           ok: true, id: ltId,
           kept: safe.concat(winners).map(nameOf).sort(),
@@ -4082,6 +4086,7 @@ module.exports = async function handler(req, res) {
             RETURNING *`;
           if (cleared.length) finalRow = cleared[0];
         }
+        touchTodos(sql, ['classreview', 'classreview-pm']); // #368 (a resubmit re-enters the queue)
         return res.status(200).json({ submission: serializeSubmission(finalRow, editHelpers) });
       }
 

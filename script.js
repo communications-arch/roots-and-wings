@@ -18620,42 +18620,6 @@
   // the next render — so the list appears in its last-known shape instantly,
   // then the loaders refresh it (cache-then-revalidate). Merges by id so a
   // super-user's View-As across roles keeps each role's items remembered.
-  // #368: "new To Do → Notification". The baseline is the snapshot this
-  // page load STARTED from (restoreTodoSnapshot paints it before any loader
-  // runs), so an item that goes hidden → visible, or whose count grows,
-  // against that baseline is genuinely new since the last settled state.
-  // Each id alerts once per page load; the server dedupes per title for 3
-  // days and ignores View-As. First-ever load has no baseline → no flood.
-  var _todoAlertBaseline = null;
-  var _todoAlertSent = {};
-  function reportNewTodos(snapNow) {
-    if (!_todoAlertBaseline) return;
-    if (sessionStorage.getItem(VIEW_AS_KEY)) return;
-    var items = [];
-    Object.keys(snapNow).forEach(function (id) {
-      if (_todoAlertSent[id]) return;
-      var was = _todoAlertBaseline[id], now = snapNow[id];
-      if (!was || !now || now.hidden) return;
-      var nWas = parseInt(was.count, 10), nNow = parseInt(now.count, 10);
-      var grew = Number.isFinite(nNow) && Number.isFinite(nWas) && nNow > nWas;
-      if (!was.hidden && !grew) return;
-      var li = document.getElementById(id);
-      if (!li) return;
-      var clone = li.cloneNode(true);
-      clone.querySelectorAll('.ws-link-count, .ws-link-icon, .ws-link-sub').forEach(function (x) { x.remove(); });
-      var label = (clone.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!label) return;
-      _todoAlertSent[id] = true;
-      items.push({ label: label, count: Number.isFinite(nNow) ? nNow : null });
-    });
-    if (!items.length) return;
-    try {
-      fetch('/api/notifications?todo_alert=1', { method: 'POST', headers: rwAuthHeaders(true), body: JSON.stringify({ items: items }) })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) { if (d && d.created && typeof loadNotifications === 'function') { try { loadNotifications(); } catch (e) { /* bell refresh is best-effort */ } } })
-        .catch(function () { /* best-effort */ });
-    } catch (e) { /* best-effort */ }
-  }
   function snapshotTodoState() {
     // All To Do cards (one per role section), not just the first.
     var lists = document.querySelectorAll('ul[id="ws-todo-list"]');
@@ -18663,11 +18627,6 @@
     var snap;
     try { snap = JSON.parse(localStorage.getItem('rw_todo_state') || '{}'); } catch (e) { snap = {}; }
     if (!snap || typeof snap !== 'object') snap = {};
-    if (!_todoAlertBaseline) {
-      // Only a PRIOR settled state counts as a baseline (first-ever load
-      // would otherwise announce every To Do the person already had).
-      _todoAlertBaseline = Object.keys(snap).length ? JSON.parse(JSON.stringify(snap)) : { __empty: true };
-    }
     lists.forEach(function (list) {
       list.querySelectorAll('li[id$="-item"]').forEach(function (li) {
         var pre = li.querySelector('.ws-link-count');
@@ -18675,7 +18634,6 @@
       });
     });
     try { localStorage.setItem('rw_todo_state', JSON.stringify(snap)); } catch (e) { /* quota */ }
-    if (!_todoAlertBaseline.__empty) reportNewTodos(snap);
   }
 
   function restoreTodoSnapshot() {

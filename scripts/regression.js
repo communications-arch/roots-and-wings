@@ -283,6 +283,7 @@ const unitTests = [
   'scripts/test-dr-backup.js',
   'scripts/test-merch-allocation.js',
   'scripts/test-greenhouse-assist.js',
+  'scripts/test-todos.js',
 ];
 
 for (const rel of unitTests) {

@@ -3106,3 +3106,18 @@ CREATE TABLE IF NOT EXISTS event_section_votes (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS event_section_votes_uniq ON event_section_votes (section_id, LOWER(person_email));
 
+
+-- ══ To Do notifications (#368, 2026-08-20) ══
+-- api/_todos.js is the single registry of To Do kinds. The sweep computes
+-- each kind's count per recipient and compares it with the last count
+-- recorded here; a rise means a NEW To Do arrived -> bell row + push. No
+-- prior row = baseline (record silently) so a fresh deploy never floods.
+CREATE TABLE IF NOT EXISTS todo_notify_state (
+  kind              TEXT NOT NULL,
+  recipient_email   TEXT NOT NULL,
+  school_year       TEXT NOT NULL,
+  last_count        INTEGER NOT NULL DEFAULT 0,
+  last_notified_at  TIMESTAMPTZ,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (kind, recipient_email, school_year)
+);

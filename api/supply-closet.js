@@ -19,6 +19,7 @@ const { ALLOWED_ORIGINS } = require('./_config');
 const { canEditAsRole, getRoleHolderEmail, canImpersonate, activeSchoolYear, isSuperUser, isBoardMember } = require('./_permissions');
 const { hasCapability } = require('./_capabilities');
 const { sendToUser, broadcastAll } = require('./_push');
+const { touchTodos } = require('./_todos'); // #368
 const { resolveFamily } = require('./_family');
 const { allocateOrderLines, allocateBackorderedLines, orderTotalCents, needsOrderingQty, normalizeLines,
         splitQuickSaleLines, ledgerSignedCents, financeSummary, schoolYearBounds, normalizeLedgerEntry,
@@ -1526,6 +1527,7 @@ async function handleMerchDeskActions(req, res, sql, user, actingEmail) {
     } catch (nErr) { console.error('merch order notify (non-fatal):', nErr); }
 
     const linesByOrder = await merchLinesByOrder(sql, [order.id]);
+    touchTodos(sql, ['merch-open', 'merch-restock']); // #368
     return res.status(201).json({ order: Object.assign({}, order, { lines: linesByOrder[order.id] || [] }) });
   }
 
