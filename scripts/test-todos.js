@@ -127,7 +127,13 @@ const holders = [{ title: 'membership director', email: 'mem@x.org' }];
     const src = apiSrc['tour.js'];
     const trig = src.match(/const TODO_TRIGGERS = \{([\s\S]*?)\n\};/);
     const kinds = Array.from(trig[1].matchAll(/'([a-z-]+)':/g)).map(m => m[1]);
-    kinds.forEach(k => eq(new RegExp("if \\(kind === '" + k + "'\\) return afterTodo\\(kind,").test(src), true, k));
+    // A kind may share a dispatch line with siblings (welcome-mark ||
+    // welcome-unmark || …) — require that the statement routing it is
+    // wrapped in afterTodo.
+    kinds.forEach(k => {
+      const re = new RegExp("kind === '" + k + "'[^;]*?\\) return afterTodo\\(kind,");
+      eq(re.test(src), true, k);
+    });
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

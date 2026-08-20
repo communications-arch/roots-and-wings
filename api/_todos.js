@@ -29,17 +29,17 @@
 //     generic one would double-buzz: restock (supply_low), blc-signin
 //     (blc_signin_request), evseats (event_seat_interest), enroll-req
 //     (enrollment_request), editedcls (class_resubmitted).
-//   • the session-state kinds inside api/curriculum.js signup-todos
-//     (vp-adults, vp-assist, kids-unpicked, acl-overmax, acl-confirm) —
-//     register them once that block is pulled out into a reusable
-//     computeSignupTodos(sql, year, session).
 //   • purely date-gated nags (handbook, drbinder, coop-cal, role-holders,
-//     welcome-outreach, pmplan) and compound ones (onboard, reginv-*,
-//     welcome-*, morning) — candidates for the daily cron later.
+//     welcome-outreach, pmplan) and the remaining compound ones (onboard,
+//     reginv-*, morning) — candidates for the daily cron later.
+//
+// Expensive reads shared by several kinds (the session sign-up picture,
+// the Welcome List) run ONCE per sweep via ctx.once(key, fn).
 
 const { waitUntil } = require('@vercel/functions');
-const { BOARD_ROLE_EMAILS, effectiveSchoolYear } = require('./_permissions');
+const { BOARD_ROLE_EMAILS, effectiveSchoolYear, activeSchoolYear } = require('./_permissions');
 const { pushNotifications } = require('./_push');
+const { computeSignupTodos } = require('./_signup_todos');
 
 const DEFAULT_SEASON = '2026-2027';
 const LINK = '/members.html';
@@ -64,6 +64,38 @@ async function currentSession(sql, year) {
 }
 
 const n = rows => (rows[0] && rows[0].n) || 0;
+
+// The VP / Afternoon Class Liaison sign-up picture for the current session
+// — the exact object the portal's To Do card paints from (same gates:
+// adult + assistant rows only once the window is CLOSED, kids once closed,
+// confirmations once closed AND nothing is over-full).
+const signupPicture = (sql, c) => c.once('signup', async () => {
+  if (!c.session) return null;
+  // The endpoint keys the year on activeSchoolYear (April pivot), so
+  // mirror that rather than the role-holder year.
+  return computeSignupTodos(sql, c.activeYear, c.session);
+});
+const signupCount = (c, pick) => d => d ? pick(d, d.window_status === 'closed') : 0;
+
+// The Welcome Coordinator's list: this season's NEW families (same rule
+// as the Welcome List endpoint in api/tour.js — firstSeasonByEmail), by
+// stage: 0 = not yet welcomed, 1 = welcomed but orientation not met.
+const welcomeStages = (sql, c) => c.once('welcome', async () => {
+  const { firstSeasonByEmail, seasonToYearLabel } = require('./sheets');
+  const rows = await sql`SELECT LOWER(r.email) AS email, w.welcomed_at, w.met_at
+    FROM registrations r LEFT JOIN welcome_outreach w ON w.registration_id = r.id
+    WHERE r.season = ${c.season} AND r.declined_at IS NULL`;
+  let fam = rows;
+  try {
+    const first = await firstSeasonByEmail(sql);
+    const label = seasonToYearLabel(c.season);
+    fam = rows.filter(r => { const fs = first[String(r.email || '').trim()] || ''; return !!(fs && label && fs >= label); });
+  } catch (e) { console.error('[todos] welcome new-family filter (non-fatal):', e.message); }
+  return {
+    toWelcome: fam.filter(r => !r.welcomed_at && !r.met_at).length,
+    orientation: fam.filter(r => r.welcomed_at && !r.met_at).length
+  };
+});
 
 // ── the registry ───────────────────────────────────────────────────────
 // count(sql, ctx) → integer. ctx = { year, season, session }.
@@ -136,6 +168,42 @@ const TODO_KINDS = {
     roles: ['Membership Director'],
     count: sql => sql`SELECT COUNT(*)::int AS n FROM tours WHERE status = 'requested'`.then(n)
   },
+  'vp-adults': {
+    label: 'Place adults',
+    roles: ['Vice President'],
+    count: (sql, c) => signupPicture(sql, c).then(signupCount(c, d => d.adults_unplaced.length))
+  },
+  'vp-assist': {
+    label: 'Fill assistant spots',
+    roles: ['Vice President'],
+    count: (sql, c) => signupPicture(sql, c).then(signupCount(c, d => d.assistant_gaps.length))
+  },
+  'kids-unpicked': {
+    label: 'Place kids in afternoon classes',
+    roles: ['Vice President', 'Afternoon Class Liaison'],
+    count: (sql, c) => signupPicture(sql, c).then(signupCount(c, (d, closed) => closed ? d.kids_unpicked.length : 0))
+  },
+  'acl-overmax': {
+    label: 'Resolve over-full classes',
+    roles: ['Afternoon Class Liaison'],
+    count: (sql, c) => signupPicture(sql, c).then(signupCount(c, (d, closed) => closed ? d.overmax.length : 0))
+  },
+  'acl-confirm': {
+    label: 'Send class confirmations',
+    roles: ['Afternoon Class Liaison'],
+    count: (sql, c) => signupPicture(sql, c).then(signupCount(c, (d, closed) =>
+      (closed && !d.overmax.length) ? d.confirm_pending.filter(x => !x.sent).length : 0))
+  },
+  'welcome-towelcome': {
+    label: 'New families to welcome',
+    roles: ['Welcome Coordinator'],
+    count: (sql, c) => welcomeStages(sql, c).then(w => w.toWelcome)
+  },
+  'welcome-orientation': {
+    label: 'Orientation — new families to meet',
+    roles: ['Welcome Coordinator'],
+    count: (sql, c) => welcomeStages(sql, c).then(w => w.orientation)
+  },
   'pending': {
     label: 'Pending-payment registrations',
     roles: ['Treasurer'],
@@ -172,7 +240,12 @@ async function sweepTodos(sql, kinds) {
     .filter(k => TODO_KINDS[k]);
   if (!keys.length) return { checked: 0, notified: 0 };
   const year = await effectiveSchoolYear(sql);
-  const ctx = { year, season: DEFAULT_SEASON, session: await currentSession(sql, year) };
+  const memo = {};
+  const ctx = {
+    year, activeYear: activeSchoolYear(), season: DEFAULT_SEASON,
+    session: await currentSession(sql, year),
+    once: (key, fn) => (memo[key] || (memo[key] = Promise.resolve().then(fn)))
+  };
   const stateRows = await sql`SELECT kind, recipient_email, last_count FROM todo_notify_state
     WHERE school_year = ${year} AND kind = ANY(${keys}::text[])`;
   const state = {};

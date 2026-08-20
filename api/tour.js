@@ -25,11 +25,13 @@ const { touchTodos } = require('./_todos');
 const TODO_TRIGGERS = {
   'tour': ['tours'],
   'contact': ['inquiry'],
-  'registration': ['pending', 'waivers'],
+  'registration': ['pending', 'waivers', 'welcome-towelcome'],
   'profile-update': ['waivers'],
   'merch-order': ['merch-open', 'merch-restock'],
   'merch-desk-order': ['merch-open', 'merch-restock'],
-  'membership-adjust-enrollment': ['gaccounts']
+  'membership-adjust-enrollment': ['gaccounts'],
+  'welcome-mark': ['welcome-orientation'],
+  'welcome-unmark': ['welcome-towelcome']
 };
 function afterTodo(kind, handled) {
   const kinds = TODO_TRIGGERS[kind];
@@ -11910,7 +11912,7 @@ module.exports = async function handler(req, res) {
     if (kind === 'calendar-save') return handleBoardCalendarSave(body, req, res);
     if (kind === 'calendar-delete') return handleBoardCalendarDelete(body, req, res);
     if (kind === 'welcome-mark' || kind === 'welcome-unmark' ||
-        kind === 'welcome-meet-mark' || kind === 'welcome-meet-unmark') return handleWelcomeMark(body, req, res);
+        kind === 'welcome-meet-mark' || kind === 'welcome-meet-unmark') return afterTodo(kind, handleWelcomeMark(body, req, res));
     return res.status(400).json({ error: 'Unknown kind.' });
   }
 
