@@ -36,7 +36,7 @@ device, scripted journeys, an exploratory charter, and reporting rules.
 
 | Persona | Login | Family |
 |---|---|---|
-| The Newcomer | newbiel@ | Cuthbert |
+| The Newcomer | mollyw@ (reset: `scripts/seed-dev-newcomer.js`) | Weasley — recast 2026-08-21; newbiel@ now leads a class |
 | The Half-Day | morning@ (verify a morning-only kid; else recast) | Joy Anderson |
 | The Age-Edge Family | erinb@ (Padme Amidala — kids in Willows + Maples) | Amidala/Skywalker |
 | The Reviewer | vp@ (or the ACL login afternoon@) | Swan (Park) |

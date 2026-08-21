@@ -7,7 +7,7 @@ or any first-run surface changes.
 co-op jargon ("grove"? "session"? "liaison"?). Nervous about doing something
 wrong. Reads everything, clicks slowly, uses the back button a lot.
 
-**Login:** newbiel@ (Cuthbert family) · **Device: PHONE** (Chrome device
+**Login:** mollyw@ (Weasley family — seeded by `node --env-file=.env.local.dev scripts/seed-dev-newcomer.js`, re-run to reset them to day two; `--remove` deletes them) · **Device: PHONE** (Chrome device
 emulation ~390×844). Newcomers overwhelmingly arrive from an email link on
 their phone.
 
