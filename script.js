@@ -37672,7 +37672,11 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || data.error) return;
-        var items = Array.isArray(data.items) ? data.items : [];
+        // #376 (persona sweep): GET /api/supply-closet returns items GROUPED
+        // by category ({permanent: [], classroom_cabinet: [], …}); treating
+        // that as an array made this To Do permanently invisible.
+        var items = Array.isArray(data.items) ? data.items
+          : Object.keys(data.items || {}).reduce(function (acc, k) { return acc.concat(Array.isArray(data.items[k]) ? data.items[k] : []); }, []);
         var flagged = items.filter(function (it) { return it.needs_restock; });
         var n = flagged.length;
         var pill = document.getElementById('ws-restock-count');

@@ -2359,7 +2359,11 @@ module.exports = async function handler(req, res) {
           // Only the OPTIONAL kind ranks each hour independently; the required
           // kind reserves its choice number in the other hour (see the picker).
           bothOptional: isOptionalBoth(r),
-          signedUp: detFor(r, hourCtx).length,
+          // #374 (persona sweep): the pickers print signedUp/max as fullness,
+          // so it must be SEATS TAKEN = 1st-choice kids (student assistants
+          // don't occupy a seat) — the same rule #343 gave the cards. Backups
+          // still ride in signedUpDetailed for the request lists.
+          signedUp: detFor(r, hourCtx).filter(d => d.rank === 1 && !d.assistant).length,
           signedUpNames: detFor(r, hourCtx).map(d => d.name + (d.assistant ? ' (assistant)' : '')),
           signedUpDetailed: detFor(r, hourCtx)
         });
