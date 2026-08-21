@@ -56,8 +56,36 @@ personas — `persona-president.md`, `persona-board-desk.md`,
 `persona-operations-crew.md`, `persona-coordinator.md`,
 `persona-welcomer.md`, `persona-coverage-claimer.md`,
 `persona-merch-manager.md`. Templates say which seat to run as; note the
-seat and any recast in the sweep summary. Phase 2 (planned): one-command
-sweeps.
+seat and any recast in the sweep summary.
+
+## Phase 2 (2026-08-21): one command
+
+```
+/persona-sweep reviewer half-day          # named personas, in this order
+/persona-sweep --since v20260820b         # pick the 3–4 personas the range touches
+/persona-sweep --list                     # casting table + every "Run me when"
+/persona-sweep merch-manager --dry-run    # walk + log, file nothing
+```
+
+The skill lives in `.claude/skills/persona-sweep/SKILL.md` and enforces this
+README: preflight (dev build matches the repo's `?v=`, Chrome connected,
+labels exist, open-issue list pulled for duplicate checks), one persona at a
+time (journeys → charter ≤10 min → UX notes), filing through the dev
+portal's own bug form (`/bugs.html`, screenshot included) then labelling
+with `gh`, the 5-defects-per-persona cap, and ONE end-of-sweep issue.
+
+- `qa/personas/pick.js` — `node qa/personas/pick.js --since <ref>` (or
+  free-text keywords) ranks personas by their "Run me when" lines + an alias
+  table; the skill's `--since` uses it. Heuristic, not a gate.
+- `qa/personas/sweeps/` — one log per sweep from `SWEEP-TEMPLATE.md`;
+  the only file a sweep may commit (to `dev`, no `?v=` bump).
+- Labels: `qa-persona` (defect) · `ux-suggestion` (one batched issue per
+  persona) · `sweep-summary` (the end-of-sweep report). A sweep never
+  applies `fixed-on-dev` / `verified` / `shipped-prod` — those are the
+  fixer's.
+- Still needs Erin's Chrome (the extension is the driver). Phase 3 adds
+  "run affected personas" to the major-feature ship checklist and looks at a
+  headless driver so sweeps stop borrowing her machine.
 
 ## Sweep after major merch/spam changes (2026-08-15)
 
