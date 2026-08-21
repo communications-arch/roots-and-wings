@@ -18,3 +18,8 @@ node_modules
 dr-binder/
 
 Untitled spreadsheet - Sheet1.pdf
+
+# Repo-shared Claude Code skills (the rest of .claude/ stays local)
+!.claude/
+.claude/*
+!.claude/skills/
