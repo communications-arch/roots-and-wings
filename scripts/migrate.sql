@@ -3121,3 +3121,9 @@ CREATE TABLE IF NOT EXISTS todo_notify_state (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (kind, recipient_email, school_year)
 );
+
+-- #370 (Colleen, 2026-08-21): a lottery run can be UNDONE until a family has
+-- been told. Each bump remembers the 1st-choice rows it removed and the
+-- 2nd-choice rows it promoted so class-lottery-undo can put them back.
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS lost_picks JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE class_lottery_bumps ADD COLUMN IF NOT EXISTS promoted_pick_ids INTEGER[] NOT NULL DEFAULT '{}';

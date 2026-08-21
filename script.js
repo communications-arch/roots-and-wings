@@ -4283,11 +4283,16 @@
           // Afternoon: who has ranked this class so far — 1st choices lead,
           // 2nd choices below, assistants tagged; all pending the lottery.
           var su = Array.isArray(d.signups) ? d.signups : [];
-          html += '<h4 style="margin:14px 0 4px;">Requests' + (su.length ? ' (' + su.length + ')' : '') + '</h4>';
-          if (su.length) {
-            html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">These are requests so far — placements are decided by the class lottery, not by who signs up first.</p>';
-            var suFirst = su.filter(function (s2) { return s2.rank === 1; });
-            var suRest = su.filter(function (s2) { return s2.rank !== 1; });
+          // #372 (Lyndsey): after Lock-Finalize the 1st choices ARE the
+          // class — show "Class roster (N)", no lottery note, no backups
+          // (a leftover backup just means that kid wasn't bumped).
+          var suFinal = d.window_status === 'locked';
+          var suFirst = su.filter(function (s2) { return s2.rank === 1; });
+          var suRest = suFinal ? [] : su.filter(function (s2) { return s2.rank !== 1; });
+          var suShown = suFinal ? suFirst : su;
+          html += '<h4 style="margin:14px 0 4px;">' + (suFinal ? 'Class roster' : 'Requests') + (suShown.length ? ' (' + suShown.length + ')' : '') + '</h4>';
+          if (suShown.length) {
+            if (!suFinal) html += '<p class="signup-detail-pendingnote" style="margin:0 0 4px;">These are requests so far — placements are decided by the class lottery, not by who signs up first.</p>';
             var suLi = function (s2) {
               // #239: afternoon leads (and assistants) see the allergy /
               // medical line per signed-up kid once sign-ups close.
@@ -4296,7 +4301,7 @@
                 + '</li>';
             };
             if (suFirst.length) {
-              html += '<div class="signup-detail-rankhead">First choice</div>';
+              if (!suFinal) html += '<div class="signup-detail-rankhead">First choice</div>';
               html += '<ul class="absence-slot-list signup-detail-list">' + suFirst.map(suLi).join('') + '</ul>';
             }
             if (suRest.length) {
@@ -4304,7 +4309,7 @@
               html += '<ul class="absence-slot-list signup-detail-list signup-detail-list-2nd">' + suRest.map(suLi).join('') + '</ul>';
             }
           } else {
-            html += '<p style="margin:0;color:var(--color-text-light);">No requests yet.</p>';
+            html += '<p style="margin:0;color:var(--color-text-light);">' + (suFinal ? 'No kids placed in this class.' : 'No requests yet.') + '</p>';
           }
           if (c.pre_enroll_kids) {
             html += '<h4 style="margin:14px 0 4px;">Pre-enrolled</h4><p style="margin:0;color:var(--color-text-light);">' + escapeHtml(c.pre_enroll_kids) + '</p>';
@@ -37359,10 +37364,19 @@
       });
       row.querySelector('.om-lottery').addEventListener('click', function () {
         if (!confirm('Run the lottery for this class?\nThe lead’s own kids and anyone who already lost a lottery this school year keep their spots. Bumped kids move to their 2nd choice automatically.')) return;
-        post('class-lottery', { id: cid }, this, function (data) {
-          alert('Lottery done.\n\nKept (' + (data.kept || []).length + '): ' + (data.kept || []).join(', ') +
-            '\n\nBumped (' + (data.bumped || []).length + '): ' + ((data.bumped || []).join(', ') || '—'));
-        });
+        var lotBtn = this;
+        // #370 (Colleen): the result dialog offers Accept / Undo & run again.
+        // Undo puts every bumped kid's 1st choice back (and demotes the
+        // promoted 2nd) and re-runs; allowed until a family has been told.
+        var showResult = function (data) {
+          var summary = 'Lottery done.\n\nKept (' + (data.kept || []).length + '): ' + (data.kept || []).join(', ') +
+            '\n\nBumped (' + (data.bumped || []).length + '): ' + ((data.bumped || []).join(', ') || '—');
+          if (confirm(summary + '\n\nOK = Accept these results\nCancel = Undo and run the lottery again')) return;
+          post('class-lottery-undo', { id: cid }, lotBtn, function () {
+            post('class-lottery', { id: cid }, lotBtn, showResult);
+          });
+        };
+        post('class-lottery', { id: cid }, lotBtn, showResult);
       });
     });
   }
@@ -44342,8 +44356,21 @@
     // Re-check notifications when the tab becomes visible again so users
     // returning after a break see the current state instead of waiting up
     // to a full polling interval.
+    // #371 (Colleen): the Kids' Schedule flips from "pending lottery" to
+    // real electives when the liaison LOCKS the session — in the liaison's
+    // own tab #332 repaints at once, but every other family's open tab
+    // only learned on a manual refresh. Re-pull the sign-up card (which
+    // repaints those blocks) whenever the tab comes back, at most once a
+    // minute, so coming back to the portal is enough.
+    var _signupRevalidatedAt = 0;
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible') loadNotifications();
+      if (document.visibilityState !== 'visible') return;
+      loadNotifications();
+      if (Date.now() - _signupRevalidatedAt < 60000) return;
+      _signupRevalidatedAt = Date.now();
+      if (document.getElementById('myFamilyGrid') && typeof loadClassSignupCard === 'function') {
+        try { _signup = null; loadClassSignupCard(); } catch (e) { /* best-effort */ }
+      }
     });
     initPushSubscription();
   }

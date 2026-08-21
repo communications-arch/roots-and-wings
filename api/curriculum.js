@@ -1445,7 +1445,14 @@ module.exports = async function handler(req, res) {
         // with no kid_enrollments row. Matches the over-max / lottery /
         // volunteer-matrix counts.
         let ciSignups = [];
+        let ciWindowStatus = null;
         if (ci.class_period === 'PM' && ci.scheduled_session) {
+          // #372 (Lyndsey): once the session is LOCKED the picks are the
+          // final roster, not requests — tell the popup so it stops
+          // framing them as "pending the lottery" and drops the backups.
+          const ciWin = await sql`SELECT status FROM class_signup_windows
+            WHERE school_year = ${ci.school_year} AND session_number = ${ci.scheduled_session} LIMIT 1`;
+          ciWindowStatus = ciWin.length ? ciWin[0].status : null;
           const suRows = await sql`
             SELECT MIN(p.rank) AS pick_rank, BOOL_OR(p.as_assistant) AS as_assistant,
                    COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
@@ -1495,6 +1502,7 @@ module.exports = async function handler(req, res) {
           kids: ciKids,
           kids_pending: ciKidsPending,
           signups: ciSignups,
+          window_status: ciWindowStatus,
           can_see_sensitive: ciCanSeeSensitive
         });
       }
@@ -3103,7 +3111,7 @@ module.exports = async function handler(req, res) {
         // count in signup-todos (the strict EXISTS form made the To Do say
         // "over max" while the lottery said "not over max").
         const signedRows = await sql`
-          SELECT p.id AS pick_id, p.hour, LOWER(p.family_email) AS fam, p.kid_first_name,
+          SELECT p.id AS pick_id, p.hour, p.as_assistant, p.note, LOWER(p.family_email) AS fam, p.kid_first_name,
                  k.id AS kid_id,
                  COALESCE(NULLIF(k.nickname, ''), p.kid_first_name) AS display_first,
                  COALESCE(NULLIF(k.last_name, ''), mp.family_name, '') AS display_last
@@ -3126,10 +3134,10 @@ module.exports = async function handler(req, res) {
         signedRows.forEach(r => {
           const key = r.fam + '|' + String(r.kid_first_name).toLowerCase();
           const cur = signedByKid.get(key);
-          if (cur) cur.picks.push({ id: r.pick_id, hour: r.hour });
+          const pk = { id: r.pick_id, hour: r.hour, as_assistant: !!r.as_assistant, note: r.note || '' };
+          if (cur) cur.picks.push(pk);
           else signedByKid.set(key, { fam: r.fam, kid_first_name: r.kid_first_name, kid_id: r.kid_id,
-            display_first: r.display_first, display_last: r.display_last,
-            picks: [{ id: r.pick_id, hour: r.hour }] });
+            display_first: r.display_first, display_last: r.display_last, picks: [pk] });
         });
         const signed = Array.from(signedByKid.values());
         if (signed.length <= max) return res.status(409).json({ error: 'This class is not over its max — no lottery needed.' });
@@ -3161,24 +3169,30 @@ module.exports = async function handler(req, res) {
         const losers = pool.slice(keepFromPool);
         const nameOf = s2 => (s2.display_first + ' ' + (s2.display_last || '')).trim();
         for (const l of losers) {
-          // Dual-keyed (enrollment re-key phase): kid_id alongside the name
-          // columns so the year-wide exemption survives a kid rename.
-          await sql`INSERT INTO class_lottery_bumps
-            (school_year, session_number, class_submission_id, family_email, kid_first_name, kid_id, created_by)
-            VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${l.kid_id || null}, ${user.email})`;
           // Drop the lost 1st choice(s); their 2nd choice becomes their 1st
           // in each hour a pick was removed from, so the family keeps a
           // placement without re-picking (never an hour they still hold a
           // different 1st choice in). kid_id match first, name match for
-          // unmapped legacy rows.
+          // unmapped legacy rows. #370: remember both sides so the run can
+          // be undone (class-lottery-undo) until a family has been told.
           await sql`DELETE FROM class_signup_picks WHERE id = ANY(${l.picks.map(p => p.id)})`;
+          const promotedIds = [];
           for (const lostHour of Array.from(new Set(l.picks.map(p => p.hour)))) {
-            await sql`UPDATE class_signup_picks SET rank = 1
+            const promoted = await sql`UPDATE class_signup_picks SET rank = 1
               WHERE school_year = ${lt.school_year} AND session_number = ${lt.scheduled_session}
                 AND (kid_id = ${l.kid_id || null}
                   OR (LOWER(family_email) = ${l.fam} AND LOWER(kid_first_name) = LOWER(${l.kid_first_name})))
-                AND hour = ${lostHour} AND rank = 2`;
+                AND hour = ${lostHour} AND rank = 2
+              RETURNING id`;
+            promoted.forEach(p => promotedIds.push(p.id));
           }
+          // Dual-keyed (enrollment re-key phase): kid_id alongside the name
+          // columns so the year-wide exemption survives a kid rename.
+          const lostPicks = l.picks.map(p => ({ hour: p.hour, as_assistant: p.as_assistant, note: p.note }));
+          await sql`INSERT INTO class_lottery_bumps
+            (school_year, session_number, class_submission_id, family_email, kid_first_name, kid_id, created_by, lost_picks, promoted_pick_ids)
+            VALUES (${lt.school_year}, ${lt.scheduled_session}, ${ltId}, ${l.fam}, ${l.kid_first_name}, ${l.kid_id || null}, ${user.email},
+                    ${JSON.stringify(lostPicks)}::jsonb, ${promotedIds}::int[])`;
         }
         await sql`UPDATE class_submissions SET lottery_run_at = NOW(), updated_at = NOW() WHERE id = ${ltId}`;
         touchTodos(sql, ['acl-lotmoves']); // #368
@@ -3188,6 +3202,53 @@ module.exports = async function handler(req, res) {
           bumped: losers.map(nameOf).sort(),
           exempt: safe.map(nameOf).sort()
         });
+      }
+
+      // ── #370 (Colleen): undo the LATEST lottery run for a class so it can
+      // be run again. Allowed only while NO family from that run has been
+      // told (lottery-move-notified) — after that the results stand. Puts
+      // every bumped kid's removed 1st choice back and demotes the 2nd
+      // choice that was promoted in its place; a pick the reviewer has
+      // since moved by hand is left alone (ON CONFLICT DO NOTHING).
+      if (action === 'class-lottery-undo') {
+        const luId = parseInt((req.body || {}).id, 10);
+        if (!Number.isFinite(luId)) return res.status(400).json({ error: 'id required' });
+        const luScope = await reviewerScopeReq(user, req);
+        const luRows = await sql`SELECT id, school_year, scheduled_session, class_period, lottery_run_at FROM class_submissions WHERE id = ${luId}`;
+        if (!luRows.length) return res.status(404).json({ error: 'Class not found.' });
+        const lu = luRows[0];
+        if (!luScope || !scopeAllowsSub(luScope, lu)) return res.status(403).json({ error: 'Only the VP or Afternoon Class Liaison can undo a lottery.' });
+        if (!lu.lottery_run_at) return res.status(409).json({ error: 'No lottery has been run for this class.' });
+        // This run's bumps = rows stamped at/after the run (1-minute slack
+        // for clock skew between the two writes).
+        const bumps = await sql`SELECT id, family_email, kid_first_name, kid_id, notified_at, lost_picks, promoted_pick_ids
+          FROM class_lottery_bumps
+          WHERE class_submission_id = ${luId} AND school_year = ${lu.school_year}
+            AND session_number = ${lu.scheduled_session}
+            AND created_at >= ${lu.lottery_run_at}::timestamptz - INTERVAL '1 minute'`;
+        if (bumps.some(b => b.notified_at)) {
+          return res.status(409).json({ error: 'A family from this lottery has already been told — the results stand. Move kids by hand from Schedules instead.' });
+        }
+        let restored = 0;
+        for (const b of bumps) {
+          const promoted = Array.isArray(b.promoted_pick_ids) ? b.promoted_pick_ids : [];
+          if (promoted.length) {
+            await sql`UPDATE class_signup_picks SET rank = 2, updated_at = NOW() WHERE id = ANY(${promoted}::int[]) AND rank = 1`;
+          }
+          const lost = Array.isArray(b.lost_picks) ? b.lost_picks : [];
+          for (const p of lost) {
+            const ins = await sql`INSERT INTO class_signup_picks
+              (school_year, session_number, family_email, kid_first_name, kid_id, hour, rank, class_submission_id, as_assistant, note, created_by_email)
+              VALUES (${lu.school_year}, ${lu.scheduled_session}, ${b.family_email}, ${b.kid_first_name}, ${b.kid_id || null},
+                      ${p.hour}, 1, ${luId}, ${!!p.as_assistant}, ${p.note || ''}, ${user.email})
+              ON CONFLICT DO NOTHING RETURNING id`;
+            if (ins.length) restored++;
+          }
+        }
+        await sql`DELETE FROM class_lottery_bumps WHERE id = ANY(${bumps.map(b => b.id)}::int[])`;
+        await sql`UPDATE class_submissions SET lottery_run_at = NULL, updated_at = NOW() WHERE id = ${luId}`;
+        touchTodos(sql, ['acl-lotmoves', 'acl-overmax']); // #368
+        return res.status(200).json({ ok: true, id: luId, undone: bumps.length, restored });
       }
 
       // ── Mark a lottery move as "family told" (Erin, 2026-07-16) ──
