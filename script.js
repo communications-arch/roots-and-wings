@@ -36283,9 +36283,13 @@
       return ((_schedRep && _schedRep.blocks_expected) || []).filter(function (b) { return !row.cells[b]; });
     }
     if (!row.pm_eligible) return [];
+    // #373: a session with no afternoon classes yet has nothing to place
+    // anyone into — don't count PM1/PM2 as missing when that hour has zero
+    // scheduled classes (matches the "na" bucket schedKidStatusKey uses).
+    var counts = schedPmClassCounts();
     var missing = [];
-    if (!row.pm1) missing.push('PM1');
-    if (!row.pm2 && !(row.pm1 && row.pm1.both)) missing.push('PM2');
+    if (counts.PM1 > 0 && !row.pm1) missing.push('PM1');
+    if (counts.PM2 > 0 && !row.pm2 && !(row.pm1 && row.pm1.both)) missing.push('PM2');
     return missing;
   }
   function schedMissingFor(row) { return schedMissingBlocks(_schedTab, row); }
@@ -36893,6 +36897,9 @@
       return escapeHtml(pick.class_name) + (pick.both ? ' <span class="ws-wv-context">2-hour</span>' : '') + schedKidPmAgesHtml(pick) + schedPickMarksHtml(pick, row)
         + (_schedRep.can_place ? ' ' + schedCaretBtn(row, 'Change or remove this class', hour) : '');
     }
+    // #373: no classes scheduled for this hour yet — a Fill button would
+    // just open an empty picker with nothing to save.
+    if (!schedPmClassCounts()[hour]) return '<span class="sb-subdetail-dim" title="No classes scheduled yet">—</span>';
     if (_schedRep.can_place) return schedCellFillBtn(row, hour);
     return '<span class="st-flag-coral">open</span>';
   }
